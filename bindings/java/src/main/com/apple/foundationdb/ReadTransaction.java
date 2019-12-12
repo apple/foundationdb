@@ -184,7 +184,9 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -205,7 +207,9 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 * @param mode provide a hint about how the results are to be used. This
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
@@ -263,7 +267,9 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -284,7 +290,9 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 * @param mode provide a hint about how the results are to be used. This
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
@@ -351,7 +359,9 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -375,7 +385,9 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 * @param mode provide a hint about how the results are to be used. This
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
