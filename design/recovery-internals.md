@@ -70,7 +70,7 @@ The transaction system state before the recovery is the starting point for the c
 This phase locks the coordinated state (cstate) to make sure there is only one master who can change the cstate. Otherwise, we may end up with more than one master accepting commits after the recovery. To achieve that, the master needs to get currently alive tLogs’ interfaces and sends commands to tLogs to lock their states, preventing them from accepting any further writes. 
 
 Recall that `ServerDBInfo` has master's interface and is propogated by CC to every process in a cluster. The current running tLogs can use the master interface in its `ServerDBInfo` to send itself's interface to master.
-Master simply waits on receiving the TLogRejoinRequest streams: for each tLog’s interface received, the master compares the interface id with the tLog id read from cstate. Once the master collects enough old tLog interfaces, it will use the interfaces to lock those tLogs.
+Master simply waits on receiving the `TLogRejoinRequest` streams: for each tLog’s interface received, the master compares the interface ID with the tLog ID read from cstate. Once the master collects enough old tLog interfaces, it will use the interfaces to lock those tLogs.
 The logic of collecting tLogs’ interfaces is implemented in `trackRejoins()` function.
 The logic of locking the tLogs is implemented in `epochEnd()` function in TagPartitionedLogSystems.actor.cpp.
 
@@ -97,7 +97,7 @@ Master interface is stored in `serverDBInfo`. Once the CC recruits the master, i
 Once the master locks the cstate, it will recruit the still-alive tLogs from the previous generation for the benefit of faster recovery. The master gets the old tLogs’ interfaces from the READING_CSTATE phase and uses those interfaces to track which old tLog are still alive, the implementation of which is in `trackRejoins()`. 
 
 
-Once the master gets enough tLogs, it calculates the knownCommittedVersion, which is the maximum durable version from the still-alive tLogs in the previous generation. The master will use the recruited tLogs to create a new TagPartitionedLogSystem for the new generation.
+Once the master gets enough tLogs, it calculates the knownCommittedVersion, which is the maximum durable version from the still-alive tLogs in the previous generation. The master will use the recruited tLogs to create a new `TagPartitionedLogSystem` for the new generation.
 
 
 Two situations may invalidate the calculated knownCommittedVersion:
@@ -124,14 +124,14 @@ Recovery can get stuck at the following two steps:
 Recovery typically won’t get stuck at reading the txnStateStore step because once the master can lock tLogs, it should always be able to read the txnStateStore for the tLogs.
 
 
-However, reading the txnStateStore can be slow because it needs to read from disk (through openDiskQueueAdapter() function) and the txnStateStore size increases as the cluster size increases. Recovery can take a long time if reading the txnStateStore is slow. To achieve faster recovery, we have improved the speed of reading the txnStateStore in FDB 6.2 by parallelly reading the txnStateStore on multiple tLogs based on tags. 
+However, reading the txnStateStore can be slow because it needs to read from disk (through `openDiskQueueAdapter()` function) and the txnStateStore size increases as the cluster size increases. Recovery can take a long time if reading the txnStateStore is slow. To achieve faster recovery, we have improved the speed of reading the txnStateStore in FDB 6.2 by parallelly reading the txnStateStore on multiple tLogs based on tags. 
 
 
 **Recruiting roles step.**
 There are cases where the recovery can get stuck at recruiting enough roles for the txn system configuration. For example, if a cluster with replica factor equal to three has only three tLogs and one of them dies during the recovery, the cluster will not succeed in recruiting 3 tLogs and the recovery will get stuck. Another example is when a new database is created and the cluster does not have a valid txnStateStore. To get out of this situation, the master will use an emergency transaction to forcibly change the configuration such that the recruitment can succeed. This configuration change may temporarily violate the contract of the desired configuration, but it is only temporary.
 
 
-We can use the trace event “MasterRecoveredConfig”, which dumps the information of the new transaction system’s configuration, to diagnose why the recovery is blocked in this phase. 
+We can use the trace event `MasterRecoveredConfig`, which dumps the information of the new transaction system’s configuration, to diagnose why the recovery is blocked in this phase. 
 
 
 ## Phase 4: RECOVERY_TRANSACTION
@@ -145,7 +145,7 @@ Storage servers (SSes) are not involved in the recovery phase 1 - 3. To notify S
 Proxies haven’t recovered the transaction system state and cannot accept transactions yet. The master recovers proxies’ states by sending the txnStateStore to proxies through proxies’ (`txnState `) interfaces in `sendIntialCommitToResolvers()` function. Once proxies have recovered their states, they can start processing transactions. The recovery transaction that was waiting on proxies will be processed.
 
 
-The resolvers haven’t known the recovery version either. The master needs to send the lastEpochEnd version (i.e., last commit of the previous generation) to resolvers via resolvers’ (resolve) interface.
+The resolvers haven’t known the recovery version either. The master needs to send the lastEpochEnd version (i.e., last commit of the previous generation) to resolvers via resolvers’ (`resolve`) interface.
 
 
 At the end of this phase, every role should be aware of the recovery and start recovering their states.
@@ -168,7 +168,7 @@ ALL_LOGS_RECRUITED, STORAGE_RECOVERED, and FULLY_RECOVERED.
 For example, when the old tLogs are no longer needed, the master will write the coordinators’ state again.
 
 
-Now the main steps in recovery have finished. The master keeps waiting for all tLogs to join the system and for all storage servers to roll back their prefetched data before claiming the system is fully recovered. 
+Now the main steps in recovery have finished. The master keeps waiting for all tLogs to join the system and for all storage servers to roll back their prefetched data, which has not been made durable on tLog, before claiming the system is fully recovered. 
 
 
 ## Phase 6: ACCEPTING_COMMITS
