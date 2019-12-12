@@ -104,12 +104,41 @@ Field Name                        Description                                   
 ``Name for the snapshot file``    Recommended name for the disk snapshot                     cluster-name:ip-addr:port:UID
 ================================  ========================================================   ========================================================
 
-``snapshot create binary`` will not be invoked on processes which does not have any persistent data (for example, Cluster Controller or Master or MasterProxy). Since these processes are stateless, there is no need for a snapshot. If there are specialized configuration knobs used for one of these stateless processes then they need to be copied and restored externally.
+``snapshot create binary`` will not be invoked on processes which does not have any persistent data (for example, Cluster Controller or Master or MasterProxy). Since these processes are stateless, there is no need for a snapshot. Any specialized configuration knobs used for one of these stateless processes need to be copied and restored externally.
 
 Management of disk snapshots
 ----------------------------
 
 Unused disk snapshots or disk snapshots that are part of failed backups have to deleted by the operator externally.
+
+Error codes
+-----------
+
+Errors codes returned by ``snapshot`` command
+
+======================================= ============ ============================= =============================================================
+Name                                    Code         Description                    Comments
+======================================= ============ ============================= =============================================================
+snap_path_not_whitelisted               2505         Snapshot create binary path   Whitelist the ``snap create binary`` path and retry the
+                                                     not whitelisted               operation.
+snap_not_fully_recovered_unsupported    2506         Unsupported when the cluster  Wait for the cluster to finish recovery and then retry the
+                                                     is not fully recovered        operation
+snap_log_anti_quorum_unsupported        2507         Unsupported when log anti     Feature is not supported when log anti quorum is configured
+                                                     quorum is configured
+snap_with_recovery_unsupported          2508         Cluster recovery during       Recovery happened while snapshot operation was in progress,
+                                                     snapshot operation not        retry the operation.
+                                                     supported
+snap_storage_failed                     2501         Failed to snapshot storage    Verify that the ``snap create binary`` is installed and
+                                                     nodes                         can be executed by the user running ``fdbserver``
+snap_tlog_failed                        2502         Failed to snapshot TLog            ,,
+                                                     nodes
+snap_coord_failed                       2503         Failed to snapshot                 ,,
+                                                     coordinator nodes
+unknown_error                           4000         An unknown error occurred          ,,
+snap_disable_tlog_pop_failed            2500         Disk Snapshot error           No operator action is needed, retry the operation
+snap_enable_tlog_pop_failed             2504         Disk Snapshot error                ,,
+======================================= ============ ============================= =============================================================
+
 
 Disk snapshot restore steps
 ===========================
@@ -126,6 +155,7 @@ Restore is the process of building up the cluster from the snapshotted disk imag
 * NOTE: Process can have multiple roles with persistent data which share the same ``datadir``. ``snapshot create binary`` will create multiple snapshots, one per role. In such case, snapshot disk images needs to go through additional processing before restore, if a snapshot image of a role has files that belongs to other roles then they need to be deleted.
 
 Cluster will start and get to healthy state indicating the completion of restore. Applications can optionally do any additional validations and use the cluster.
+
 
 Example backup and restore steps 
 ================================
@@ -185,15 +215,36 @@ Here are the backup and restore steps on a over simplified setup with a single n
 
 * Write a ``snap create binary`` which copies the ``datadir`` to a user passed destination directory location::
 
-   #!/bin/sh
-   UID=""
-   PATH=""
-   ROLE=""
-   DESTDIR=""
-   PARSE_ARGS $@ // not detailed here
+    #!/bin/sh
 
-   mkdir -p $DESTDIR/$UID/$ROLE || exit "snapshot failed for $@"
-   cp $PATH/ $DESTDIR/$UID/$ROLE/* || exit "snapshot failed for $@"
+    while (( "$#" )); do
+        case "$1" in
+            --uid)
+                SNAPUID=$2
+                shift 2
+                ;;
+            --path)
+                DATADIR=$2
+                shift 2
+                ;;
+            --role)
+                ROLE=$2
+                shift 2
+                ;;
+            --destdir)
+                DESTDIR=$2
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    mkdir -p "$DESTDIR/$SNAPUID/$ROLE" || exit 1
+    cp "$DATADIR/"* "$DESTDIR/$SNAPUID/$ROLE/" || exit 1
+
+    exit 0
 
 * Install the ``snap create binary`` as ``/bin/snap_create.sh``, add the entry for ``whitelist_binpath`` in :ref:`foundationdb-conf-fdbserver`, stop and start the foundationdb service for the configuration change to take effect
 * Issue ``snapshot`` command as follows::
@@ -224,7 +275,7 @@ Here are the backup and restore steps on a over simplified setup with a single n
     znC1NC5b:iYHJLq7z@10.2.80.40:4500 -> znC1NC5b:iYHJLq7z@10.2.80.41:4500
 * ``foundationdb.conf`` can be exact same copy as the source cluster for this example
 * Once all the backup images are restored, start a new fdbserver with the ``datadir`` pointing to ``/mnt/restore/datadir`` and the new ``fdb.cluster``.
-* Verify the cluster is healthy and check the sample keys that we added are still there::
+* Verify the cluster is healthy and check the sample keys that we added are there::
 
     fdb> status
 
