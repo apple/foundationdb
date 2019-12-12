@@ -617,6 +617,8 @@ To upgrade a FoundationDB cluster, you must install the updated version of Found
 
 .. warning:: |development-use-only-warning|
 
+.. note:: For information about upgrading client application code to newer API versions, see the :doc:`api-version-upgrade-guide`.
+
 Install updated client binaries
 -------------------------------
 
