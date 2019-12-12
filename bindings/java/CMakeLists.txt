@@ -215,10 +215,13 @@ if(NOT OPEN_FOR_IDE)
   else()
     set(lib_destination "linux/amd64")
   endif()
-  set(lib_destination "${unpack_dir}/lib/${lib_destination}")
+	set(lib_destination "${unpack_dir}/lib/${lib_destination}")
+	set(jni_package "${CMAKE_BINARY_DIR}/packages/lib")
   file(MAKE_DIRECTORY ${lib_destination})
+	file(MAKE_DIRECTORY ${jni_package})
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_java> ${lib_destination} &&
+    ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_java> ${jni_package} &&
     ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
     COMMENT "Copy jni library for fat jar")
   add_custom_target(copy_lib DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied)
