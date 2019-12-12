@@ -228,7 +228,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
                                                    RestoreRequest request) {
 	state std::vector<RestoreFileFR> files;
 	state std::vector<RestoreFileFR> allFiles;
-	state std::map<Version, VersionBatch>::iterator versionBatch = self->versionBatches.end();
+	state std::map<Version, VersionBatch>::iterator versionBatch = self->versionBatches.begin();
 
 	self->initBackupContainer(request.url);
 
