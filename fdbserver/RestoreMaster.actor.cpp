@@ -257,8 +257,6 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		files = &versionBatch.rangeFiles;
 	} else {
 		files = &versionBatch.logFiles;
-		// Reference<RestoreConfigFR> restoreConfig(new RestoreConfigFR(request.randomUid));
-		// mutationLogPrefix = restoreConfig->mutationLogPrefix();
 	}
 
 	// sort files in increasing order of beginVersion

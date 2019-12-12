@@ -533,7 +533,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				}
 
 				TraceEvent("FastRestore").detail("BackupAndParallelRestore", "RestoreFinished");
-				// wait(checkDB(cx, "FinishRestore", self));
 
 				for (auto& restore : restores) {
 					ASSERT(!restore.isError());

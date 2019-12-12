@@ -237,11 +237,6 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 		kvOps[endVersion] = MutationsVec(); // Empty mutation vector will be handled by applier
 	}
 
-	// applierMutationsBuffer is the mutation vector to be sent to each applier
-	// applierMutationsSize is buffered mutation vector size for each applier
-	// state std::map<UID, MutationsVec> applierMutationsBuffer;
-	// state std::map<UID, double> applierMutationsSize;
-
 	splitMutationIndex = 0;
 	kvCount = 0;
 	kvOp = kvOps.begin();
@@ -251,8 +246,6 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 		// applierMutationsSize is buffered mutation vector size for each applier
 		std::map<UID, MutationsVec> applierMutationsBuffer;
 		std::map<UID, double> applierMutationsSize;
-		// applierMutationsBuffer.clear();
-		// applierMutationsSize.clear();
 		for (auto& applierID : applierIDs) {
 			applierMutationsBuffer[applierID] = MutationsVec();
 			applierMutationsSize[applierID] = 0.0;
@@ -267,8 +260,6 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 				Standalone<VectorRef<UID>> nodeIDs;
 				// Because using a vector of mutations causes overhead, and the range mutation should happen rarely;
 				// We handle the range mutation and key mutation differently for the benefit of avoiding memory copy
-				// mvector.pop_front(mvector.size());
-				// nodeIDs.pop_front(nodeIDs.size());
 				// WARNING: The splitMutation() may have bugs
 				splitMutation(self, kvm, mvector.arena(), mvector.contents(), nodeIDs.arena(), nodeIDs.contents());
 				ASSERT(mvector.size() == nodeIDs.size());
@@ -303,8 +294,6 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 			requests.push_back(std::make_pair(
 			    applierID, RestoreSendVersionedMutationsRequest(fileIndex, prevVersion, commitVersion, isRangeFile,
 			                                                    applierMutationsBuffer[applierID])));
-			// applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
-			// applierMutationsSize[applierID] = 0;
 		}
 		TraceEvent(SevDebug, "FastRestore_Debug")
 		    .detail("Loader", self->id())
@@ -314,12 +303,7 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 		ASSERT(prevVersion < commitVersion);
 		prevVersion = commitVersion;
 		wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, self->appliersInterf, requests));
-		// Clear buffers
-		// for (auto& applierID : applierIDs) {
-		// 	applierMutationsBuffer[applierID] = MutationsVec();
-		// 	applierMutationsSize[applierID] = 0;
-		// }
-
+		
 		requests.clear();
 		
 	} // all versions of mutations in the same file
@@ -384,10 +368,8 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 	std::map<Standalone<StringRef>, uint32_t>& mutationPartMap = *pMutationPartMap;
 	std::string prefix = "||\t";
 	std::stringstream ss;
-	//StringRef val = val_input.contents();
 	const int key_prefix_len = sizeof(uint8_t) + sizeof(Version) + sizeof(uint32_t);
 
-	//StringRefReaderMX reader(val, restore_corrupted_data());
 	StringRefReaderMX readerKey(key_input, restore_corrupted_data()); // read key_input!
 	int logRangeMutationFirstLength = key_input.size() - key_prefix_len;
 	bool concatenated = false;
