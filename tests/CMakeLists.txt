@@ -200,7 +200,7 @@ add_fdb_test(TEST_FILES slow/VersionStampSwitchover.txt)
 add_fdb_test(TEST_FILES slow/WriteDuringReadAtomicRestore.txt)
 add_fdb_test(TEST_FILES slow/WriteDuringReadSwitchover.txt)
 add_fdb_test(TEST_FILES slow/ddbalance.txt)
-add_fdb_test(TEST_FILES ParallelRestoreCorrectnessAtomicOpTinyData.txt)
+add_fdb_test(TEST_FILES slow/ParallelRestoreCorrectnessAtomicOpTinyData.txt)
 add_fdb_test(TEST_FILES ParallelRestoreCorrectnessCycle.txt)
 # Note that status tests are not deterministic.
 add_fdb_test(TEST_FILES status/invalid_proc_addresses.txt)
