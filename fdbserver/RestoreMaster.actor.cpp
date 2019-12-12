@@ -199,9 +199,12 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 		}
 	} catch (Error& e) {
 		if (restoreIndex < restoreRequests.size()) {
-			TraceEvent(SevError, "FastRestoreFailed").detail("RestoreRequest", restoreRequests[restoreIndex].toString());
+			TraceEvent(SevError, "FastRestoreFailed")
+			    .detail("RestoreRequest", restoreRequests[restoreIndex].toString());
 		} else {
-			TraceEvent(SevError, "FastRestoreFailed").detail("RestoreRequests", restoreRequests.size()).detail("RestoreIndex", restoreIndex);
+			TraceEvent(SevError, "FastRestoreFailed")
+			    .detail("RestoreRequests", restoreRequests.size())
+			    .detail("RestoreIndex", restoreIndex);
 		}
 	}
 
@@ -251,8 +254,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 	    .detail("BeginVersion", versionBatch.beginVersion)
 	    .detail("EndVersion", versionBatch.endVersion);
 
-	// Key mutationLogPrefix;
-	std::vector<RestoreFileFR>* files = NULL;
+	std::vector<RestoreFileFR>* files = nullptr;
 	if (isRangeFile) {
 		files = &versionBatch.rangeFiles;
 	} else {

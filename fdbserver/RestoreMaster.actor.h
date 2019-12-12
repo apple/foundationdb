@@ -162,9 +162,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		for (auto& versionBatch : *versionBatches) {
 			Version prevVersion = 0;
 			for (auto& logFile : versionBatch.second.logFiles) {
-				TraceEvent("FastRestore")
-				    .detail("PrevVersion", prevVersion)
-				    .detail("LogFile", logFile.toString());
+				TraceEvent("FastRestore").detail("PrevVersion", prevVersion).detail("LogFile", logFile.toString());
 				ASSERT(logFile.beginVersion >= versionBatch.second.beginVersion);
 				ASSERT(logFile.endVersion <= versionBatch.second.endVersion);
 				ASSERT(prevVersion <= logFile.beginVersion);
@@ -174,9 +172,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			}
 			prevVersion = 0;
 			for (auto& rangeFile : versionBatch.second.rangeFiles) {
-				TraceEvent("FastRestore")
-				    .detail("PrevVersion", prevVersion)
-				    .detail("RangeFile", rangeFile.toString());
+				TraceEvent("FastRestore").detail("PrevVersion", prevVersion).detail("RangeFile", rangeFile.toString());
 				ASSERT(rangeFile.beginVersion == rangeFile.endVersion);
 				ASSERT(rangeFile.beginVersion >= versionBatch.second.beginVersion);
 				ASSERT(rangeFile.endVersion < versionBatch.second.endVersion);
@@ -193,15 +189,19 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		bool ret = true;
 		// An applier should only appear once in rangeToApplier
 		std::map<UID, Key> applierToRange;
-		 for (auto& applier : rangeToApplier) {
-			 if (applierToRange.find(applier.second) == applierToRange.end()) {
-				 applierToRange[applier.second] = applier.first;
-			 } else {
-				 TraceEvent(SevError, "FastRestore").detail("SanityCheckApplierKeyRange", applierToRange.size()).detail("ApplierID", applier.second).detail("Key1",  applierToRange[applier.second]).detail("Key2", applier.first);
-				 ret = false;
-			 }
-		 }
-		 return ret;
+		for (auto& applier : rangeToApplier) {
+			if (applierToRange.find(applier.second) == applierToRange.end()) {
+				applierToRange[applier.second] = applier.first;
+			} else {
+				TraceEvent(SevError, "FastRestore")
+				    .detail("SanityCheckApplierKeyRange", applierToRange.size())
+				    .detail("ApplierID", applier.second)
+				    .detail("Key1", applierToRange[applier.second])
+				    .detail("Key2", applier.first);
+				ret = false;
+			}
+		}
+		return ret;
 	}
 
 	void logApplierKeyRange() {
