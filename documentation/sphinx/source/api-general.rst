@@ -112,12 +112,14 @@ Client network thread
 
 FoundationDB clients start a thread that is used to serialize operations and communicate with the cluster. This thread is commonly referred to as the network thread, and most operations performed by a client (such as reads, writes, and commits) will take place on this thread. It is important that a client application does not block on this thread, such as by issuing a blocking call in a callback from a FoundationDB operation. Some client language bindings (e.g. Java) will protect you from this risk by notifying the application that an operation has completed from a different thread automatically.
 
+A client process can have *only one* network thread for the entire lifetime of that process. While it's possible to stop the network thread, it is not possible to restart it.
+
 .. _client-network-thread-performance:
 
 Performance
 -----------
 
-A client process will only ever have one network thread running, and as a result that process may be limited in the its throughput by the amount of work that can be performed on the network thread. If a client application needs to support higher throughput than a single network thread can provide, then more network threads can be started by running additional client processes.
+Because it can have only a single network thread, a client process may become limited in its throughput by the amount of work that can be performed on that thread. A client with a saturated network thread may begin to experience increased latencies while it struggles to keep up. If a client application needs to support higher throughput than a single network thread can provide, then more network threads can be started by running additional client processes.
 
 If you suspect that a client process's workload may be saturating the network thread, this can be confirmed by checking whether the network thread is running with high CPU usage. In the :ref:`client trace logs <client-trace-logging>`, the ``ProcessMetrics`` trace event has a field for ``MainThreadCPUSeconds`` that indicates the number of seconds out of ``Elapsed`` that the network thread was busy. You can also attempt to identify a busy thread from any tool that reports the CPU activity of threads in your process.
 
