@@ -54,7 +54,7 @@ Before using the ``snapshot`` command the following setup needs to be done
   - UID - 32 byte alpha-numeric unique identifier, the same identifier will be passed to all the nodes in the cluster, can be used to identify the set of disk snapshots associated with this backup
   - Version - version string of the FoundationDB binary
   - Path - path of the FoundationDB ``datadir`` to be snapshotted, ``datadir`` specified in :ref:`foundationdb-conf-fdbserver`
-  - Role - tlog/storage/coordinator, identifies the role of the node on which the snapshot is being invoked
+  - Role - ``tlog``/``storage``/``coordinator``, identifies the role of the node on which the snapshot is being invoked
 
 * Install ``snapshot create binary`` on the FoundationDB instance in a secure path that can be invoked by the ``fdbserver``
 * Set a new config parameter ``whitelist_binpath`` in :ref:`foundationdb-conf-fdbserver`, whose value is the ``snapshot create binary`` absolute path. Running any ``snapshot`` command will validate that it is in the ``whitelist_binpath``. This is a security mechanism to stop running a random/insecure command on the cluster by a client using the ``snapshot`` command. Example configuration entry will look like::
@@ -72,7 +72,7 @@ Example ``snapshot`` command usage::
     fdbcli> snapshot /bin/snap_create.sh --key1 value1 --key2 value2
     Snapshot command succeeded with UID c50263df28be44ebb596f5c2a849adbb
 
-will invoke the ``snapshot create binary`` on all the roles with the following arguments::
+will invoke the ``snapshot create binary`` on ``tlog`` role with the following arguments::
 
     --key1 value1 --key2 value2 --path /mnt/circus/data/4502 --version 6.2.6 --role tlog --uid c50263df28be44ebb596f5c2a849adbb
 
@@ -150,7 +150,7 @@ Restore is the process of building up the cluster from the snapshotted disk imag
 * Bring up a new cluster similar to the source cluster with FoundationDB services stopped and either attach the snapshot disk images or copy the snapshot disk images to the cluster in the following manner:
 
   * Map the old IP address to new IP address in a one to one fashion and use that mapping to guide the restoration of disk images
-* Compute the new fdb.cluster file based on where the new coordinators disk stores are placed and push it to the all the instances in the new cluster
+* Compute the new fdb.cluster file based on where the new ``coordinators`` disk stores are placed and push it to the all the instances in the new cluster
 * Start the FoundationDB service on all the instances
 * NOTE: Process can have multiple roles with persistent data which share the same ``datadir``. ``snapshot create binary`` will create multiple snapshots, one per role. In such case, snapshot disk images needs to go through additional processing before restore, if a snapshot image of a role has files that belongs to other roles then they need to be deleted.
 
@@ -252,7 +252,7 @@ Here are the backup and restore steps on an over simplified setup with a single 
     fdbcli> snapshot /bin/snap_create.sh --destdir /mnt/backup
     Snapshot command succeeded with UID 69a5e0576621892f85f55b4ebfeb4312
 
-* ``snapshot create binary`` gets invoked once for each role namely tlog, storage and coordinator in this process with the following arguments::
+* ``snapshot create binary`` gets invoked once for each role namely ``tlog``, ``storage`` and ``coordinator`` in this process with the following arguments::
 
     --path /mnt/source/datadir --version 6.2.6 --role storage --uid 69a5e0576621892f85f55b4ebfeb4312 --destdir /mnt/backup
     --path /mnt/source/datadir --version 6.2.6 --role tlog --uid 69a5e0576621892f85f55b4ebfeb4312 --destdir /mnt/backup
@@ -265,12 +265,12 @@ Here are the backup and restore steps on an over simplified setup with a single 
     coordination-1.fdq                                     logqueue-V_3_LS_2-b9990ae9bc00672f07264ad43d9d0792-0.fdq   storage-f0e72cdfed12a233e0e58291150ca597.sqlite
     log2-V_3_LS_2-b9990ae9bc00672f07264ad43d9d0792.sqlite  logqueue-V_3_LS_2-b9990ae9bc00672f07264ad43d9d0792-1.fdq   storage-f0e72cdfed12a233e0e58291150ca597.sqlite-wal
 
-* To restore the coordinator backup image, setup a restore ``datadir`` and copy all the coordinator related files to it::
+* To restore the ``coordinator`` backup image, setup a restore ``datadir`` and copy all the ``coordinator`` related files to it::
 
     $ cp /mnt/backup/69a5e0576621892f85f55b4ebfeb4312/coord/coord* /mnt/restore/datadir/
 
-* Repeat the above steps to restore storage and tlog backup images
-* Prepare the ``fdb.cluster`` for the restore with new coordinator IP address, example::
+* Repeat the above steps to restore ``storage`` and ``tlog`` backup images
+* Prepare the ``fdb.cluster`` for the restore with new ``coordinator`` IP address, example::
 
     znC1NC5b:iYHJLq7z@10.2.80.40:4500 -> znC1NC5b:iYHJLq7z@10.2.80.41:4500
 * ``foundationdb.conf`` can be exact same copy as the source cluster for this example
