@@ -430,7 +430,7 @@ By default, FoundationDB supports read-your-writes, meaning that reads reflect t
 
 Another approach to programming with futures in FoundationDB is to set a callback function to be invoked asynchronously when the future is ready.
 
-.. note:: Be very careful when mixing callbacks with explicit or implicit blocking. Blocking in a callback on a non-ready future will cause a deadlock. Blocking on anything else or performing CPU intensive tasks will block the FoundationDB client thread and therefore all database access from that client.
+.. note:: Be very careful when mixing callbacks with explicit or implicit blocking. Blocking in a callback on a non-ready future will cause a deadlock. Blocking on anything else or performing CPU intensive tasks will block the FoundationDB :ref:`client thread <client-network-thread>` and therefore all database access from that client.
 
 For further details, see the :doc:`API reference <api-reference>` documentation for your language.
 
