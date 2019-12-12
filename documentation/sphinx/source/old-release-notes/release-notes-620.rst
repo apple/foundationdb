@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.2.12
+======
+
+Fixes
+-----
+
+* Clients could throw an internal error during ``commit`` if client buggification was enabled. `(PR #2427) <https://github.com/apple/foundationdb/pull/2427>`_.
+
 6.2.11
 ======
 

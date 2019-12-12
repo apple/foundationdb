@@ -9,6 +9,7 @@ set(FLOW_SRCS
   CompressedInt.h
   Deque.cpp
   Deque.h
+  DeterministicRandom.cpp
   DeterministicRandom.h
   Error.cpp
   Error.h

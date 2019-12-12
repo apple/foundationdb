@@ -292,9 +292,14 @@ public class FDB {
 	}
 
 	/**
-	 * Initializes networking, connects with the
-	 *  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
-	 *  and opens the database.
+	 * Initializes networking if required and connects to the cluster specified by the
+	 *  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.<br>
+	 *  <br>
+	 *  A single client can use this function multiple times to connect to different
+	 *  clusters simultaneously, with each invocation requiring its own cluster file.
+	 *  To connect to multiple clusters running at different, incompatible versions,
+	 *  the <a href="/foundationdb/api-general.html#multi-version-client-api" target="_blank">multi-version client API</a>
+	 *  must be used.
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
 	 */
@@ -303,8 +308,13 @@ public class FDB {
 	}
 
 	/**
-	 * Initializes networking, connects to the cluster specified by {@code clusterFilePath}
-	 *  and opens the database.
+	 * Initializes networking if required and connects to the cluster specified by {@code clusterFilePath}.<br>
+	 *  <br>
+	 *  A single client can use this function multiple times to connect to different
+	 *  clusters simultaneously, with each invocation requiring its own cluster file.
+	 *  To connect to multiple clusters running at different, incompatible versions,
+	 *  the <a href="/foundationdb/api-general.html#multi-version-client-api" target="_blank">multi-version client API</a>
+	 *  must be used.
 	 *
 	 * @param clusterFilePath the
 	 *  <a href="/foundationdb/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
@@ -319,8 +329,13 @@ public class FDB {
 	}
 
 	/**
-	 * Initializes networking, connects to the cluster specified by {@code clusterFilePath}
-	 *  and opens the database.
+	 * Initializes networking if required and connects to the cluster specified by {@code clusterFilePath}.<br>
+	 *  <br>
+	 *  A single client can use this function multiple times to connect to different
+	 *  clusters simultaneously, with each invocation requiring its own cluster file.
+	 *  To connect to multiple clusters running at different, incompatible versions,
+	 *  the <a href="/foundationdb/api-general.html#multi-version-client-api" target="_blank">multi-version client API</a>
+	 *  must be used.
 	 *
 	 * @param clusterFilePath the
 	 *  <a href="/foundationdb/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>

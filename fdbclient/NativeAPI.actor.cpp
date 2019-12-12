@@ -2602,19 +2602,19 @@ void Transaction::setupWatches() {
 
 ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> trLogInfo, CommitTransactionRequest req, Future<Version> readVersion, TransactionInfo info, Version* pCommittedVersion, Transaction* tr, TransactionOptions options) {
 	state TraceInterval interval( "TransactionCommit" );
-	state double startTime;
+	state double startTime = now();
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
 
-	if(CLIENT_BUGGIFY) {
-		throw deterministicRandom()->randomChoice(std::vector<Error>{
-				not_committed(),
-				transaction_too_old(),
-				proxy_memory_limit_exceeded(),
-				commit_unknown_result()});
-	}
-
 	try {
+		if(CLIENT_BUGGIFY) {
+			throw deterministicRandom()->randomChoice(std::vector<Error>{
+					not_committed(),
+					transaction_too_old(),
+					proxy_memory_limit_exceeded(),
+					commit_unknown_result()});
+		}
+
 		Version v = wait( readVersion );
 		req.transaction.read_snapshot = v;
 
@@ -2643,6 +2643,9 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			when (CommitID ci = wait( reply )) {
 				Version v = ci.version;
 				if (v != invalidVersion) {
+					if (CLIENT_BUGGIFY) {
+						throw commit_unknown_result();
+					}
 					if (info.debugID.present())
 						TraceEvent(interval.end()).detail("CommittedVersion", v);
 					*pCommittedVersion = v;
@@ -2668,9 +2671,6 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->latencies.addSample(now() - tr->startTime);
 					if (trLogInfo)
 						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), req));
-					if (CLIENT_BUGGIFY) {
-						throw commit_unknown_result();
-					}
 					return Void();
 				} else {
 					if (info.debugID.present())
