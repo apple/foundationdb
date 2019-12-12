@@ -24,7 +24,7 @@ Backup vs Disk snapshot backup
 ==============================
 Backup feature already exists in FoundationDB and is detailed here :ref:`backups`, any use of fdbbackup will refer to this feature.
 
-Both fdbbackup and Disk snapshot backup tools provide a point-in-time consistent backup of FoundationDB database, but, they operate at different levels and there are differences in terms of performance, features and external dependency.
+Both fdbbackup and Disk snapshot backup tools provide a point-in-time consistent backup of FoundationDB database, but they operate at different levels and there are differences in terms of performance, features and external dependency.
 
 fdbbackup operates at the key-value level. Backup involves copying of all the key-value pairs from the source cluster and restore involves applying all the key-value pairs to the destination database. Performance depends on the amount of data and the throughput with which the data can be read and written. This approach has no external dependency, there is no requirement for any snapshotting feature from the disk system. Additionally, it has an option for continuous backup with the flexibility to pick a restore point.
 
@@ -114,7 +114,7 @@ Unused disk snapshots or disk snapshots that are part of failed backups have to 
 Error codes
 -----------
 
-Errors codes returned by ``snapshot`` command
+Error codes returned by ``snapshot`` command
 
 ======================================= ============ ============================= =============================================================
 Name                                    Code         Description                    Comments
@@ -160,12 +160,12 @@ Cluster will start and get to healthy state indicating the completion of restore
 Example backup and restore steps 
 ================================
 
-Here are the backup and restore steps on a over simplified setup with a single node cluster and ``cp`` command to create snapshots and restore. This is purely for illustration, real world backup and restore scripts needs to follow all the steps detailed above.
+Here are the backup and restore steps on an over simplified setup with a single node cluster and ``cp`` command to create snapshots and restore. This is purely for illustration, real world backup and restore scripts needs to follow all the steps detailed above.
 
 
 * Create a single node cluster by following the steps here :ref:`building-cluster`
 
-* Check the status of the cluster and write few sample keys::
+* Check the status of the cluster and write a few sample keys::
   
     fdbcli> status
 
