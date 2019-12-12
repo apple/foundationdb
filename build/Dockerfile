@@ -1,6 +1,6 @@
 FROM centos:6
-LABEL version=0.1.8
-ENV DOCKER_IMAGEVER=0.1.8
+LABEL version=0.1.9
+ENV DOCKER_IMAGEVER=0.1.9
 
 # Install dependencies for developer tools, bindings,\
 # documentation, actorcompiler, and packaging tools\
