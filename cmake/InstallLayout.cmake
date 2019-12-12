@@ -268,8 +268,8 @@ configure_file(${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_BINARY_DIR}/License.txt COPYO
 if(NOT FDB_RELEASE)
   set(prerelease_string ".PRERELEASE")
 endif()
-set(clients-filename "foundationdb-clients-${PROJECT_VERSION}.${CURRENT_GIT_VERSION}${prerelease_string}")
-set(server-filename "foundationdb-server-${PROJECT_VERSION}.${CURRENT_GIT_VERSION}${prerelease_string}")
+set(clients-filename "foundationdb-clients_${PROJECT_VERSION}.${CURRENT_GIT_VERSION}${prerelease_string}")
+set(server-filename "foundationdb-server_${PROJECT_VERSION}.${CURRENT_GIT_VERSION}${prerelease_string}")
 
 ################################################################################
 # Configuration for RPM
