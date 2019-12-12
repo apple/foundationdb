@@ -1154,7 +1154,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			merge( result.arena, result.data, atStorageVersion, vStart, vEnd, vCount, limit, more, *pLimitBytes );
 			limit -= result.data.size() - prevSize;
 
-			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++)
+			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++) {
 				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
 			}
 
@@ -1243,7 +1243,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			merge( result.arena, result.data, atStorageVersion, vStart, vEnd, vCount, limit, false, *pLimitBytes );
 			limit += result.data.size() - prevSize;
 
-			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++)
+			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++) {
 				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
 			}
 
