@@ -340,9 +340,8 @@ func (t Transaction) Clear(key KeyConvertible) {
 // Range clears are efficient with FoundationDB -- clearing large amounts of data
 // will be fast. However, this will not immediately free up disk -
 // data for the deleted range is cleaned up in the background.
-// This will not affect the database until commit is called.
-// Actual amount of stored data for the specified range does not count against
-// the write transaction size limit.
+// For purposes of computing the transaction size, only the begin and end keys of a clear range are counted.
+// The size of the data stored in the range does not count against the transaction size limit.
 func (t Transaction) ClearRange(er ExactRange) {
 	begin, end := er.FDBRangeKeys()
 	bkb := begin.FDBKey()

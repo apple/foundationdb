@@ -601,9 +601,7 @@ Applications must provide error handling and an appropriate retry loop around th
 
    |sets-and-clears2|
 
-   Range clears are efficient with FoundationDB -- clearing large amounts of data will be fast.
-   However, this will not immediately free up disk - data for the deleted range is cleaned up in the background.
-   Actual amount of stored data for the specified range does not count against the write transaction size limit.
+   |transaction-clear-range-blurb|
 
    ``begin_key_name``
       A pointer to the name of the key specifying the beginning of the range to clear. |no-null|

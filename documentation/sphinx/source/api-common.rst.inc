@@ -192,6 +192,10 @@
 
     By default, each database connection can have no more than 10,000 watches that have not yet reported a change. When this number is exceeded, an attempt to create a watch will |error-raise-type| a :ref:`too_many_watches <developer-guide-error-codes>` |error-type|. This limit can be changed using |max-watches-database-option|. Because a watch outlives the transaction that creates it, any watch that is no longer needed should be cancelled by calling |future-cancel| on its returned future.
 
+.. |transaction-clear-range-blurb| replace::
+
+    Range clears are efficient with FoundationDB -- clearing large amounts of data will be fast. However, this will not immediately free up disk - data for the deleted range is cleaned up in the background. For purposes of computing the transaction size, only the begin and end keys of a clear range are counted. The size of the data stored in the range does not count against the transaction size limit.
+
 .. |conflict-range-note| replace::
 
     Most applications will use the strictly serializable isolation that transactions provide by default and will not need to manipulate conflict ranges.
