@@ -600,7 +600,7 @@ Writing data
 
 .. method:: Transaction.clear_range_startswith(prefix)
 
-    Removes all keys ``k`` such that ``begin <= k < end``, and their associated values. |immediate-return|
+    Removes all the keys ``k`` such that ``k.startswith(prefix)``, and their associated values. |immediate-return|
 
     |transaction-clear-range-blurb|
 
