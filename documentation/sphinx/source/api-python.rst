@@ -598,7 +598,11 @@ Writing data
 
 .. method:: Transaction.clear_range_startswith(prefix)
 
-    Removes all the keys ``k`` such that ``k.startswith(prefix)``, and their associated values. |immediate-return|
+    Removes all keys ``k`` such that ``begin <= k < end``, and their associated values. |immediate-return|
+    Range clears are efficient with FoundationDB -- clearing large amounts of data will be fast.
+    However, this will not immediately free up disk - data for the deleted range is cleaned up in the background.
+    This will not affect the database until commit is called.
+    Actual amount of stored data for the specified range does not count against the write transaction size limit.
 
 .. _api-python-transaction-atomic-operations:
 
