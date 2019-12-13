@@ -586,7 +586,7 @@
          "system_kv_size_bytes":0, // estimated
          "partitions_count":2,
          "moving_data":{
-            "total_written_bytes":0,
+            "total_written_bytes":0, // reset whenever data distributor is re-recruited
             "in_flight_bytes":0,
             "in_queue_bytes":0,
             "highest_priority":0
