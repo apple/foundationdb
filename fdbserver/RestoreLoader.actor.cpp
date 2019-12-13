@@ -127,18 +127,6 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 }
 
 ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoaderData> self) {
-	// Q: How to record the  param's fields inside LoadingParam Refer to storageMetrics
-	TraceEvent("FastRestore").detail("Loader", self->id()).detail("StartProcessLoadParam", param.toString());
-	ASSERT(param.blockSize > 0);
-	ASSERT(param.offset % param.blockSize == 0); // Parse file must be at block bondary.
-	ASSERT(self->kvOpsPerLP.find(param) == self->kvOpsPerLP.end());
-	// NOTE: map's iterator is guaranteed to be stable, but pointer may not.
-	// state VersionedMutationsMap* kvOps = &self->kvOpsPerLP[param];
-	self->kvOpsPerLP.emplace(param, VersionedMutationsMap());
-	self->sampleMutations.emplace(param, MutationsVec());
-	state std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsPerLPIter = self->kvOpsPerLP.find(param);
-	state std::map<LoadingParam, MutationsVec>::iterator samplesIter = self->sampleMutations.find(param);
-
 	// Temporary data structure for parsing log files into (version, <K, V, mutationType>)
 	// Must use StandAlone to save mutations, otherwise, the mutationref memory will be corrupted
 	// mutationMap: Key is the unique identifier for a batch of mutation logs at the same version
@@ -146,6 +134,21 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 	state std::map<Standalone<StringRef>, uint32_t> mutationPartMap; // Sanity check the data parsing is correct
 	state NotifiedVersion processedFileOffset(0);
 	state std::vector<Future<Void>> fileParserFutures;
+	state std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsPerLPIter = self->kvOpsPerLP.end();
+	state std::map<LoadingParam, MutationsVec>::iterator samplesIter = self->sampleMutations.end();
+
+	// Q: How to record the  param's fields inside LoadingParam Refer to storageMetrics
+	TraceEvent("FastRestore").detail("Loader", self->id()).detail("StartProcessLoadParam", param.toString());
+	ASSERT(param.blockSize > 0);
+	ASSERT(param.offset % param.blockSize == 0); // Parse file must be at block bondary.
+	ASSERT(self->kvOpsPerLP.find(param) == self->kvOpsPerLP.end());
+
+	// NOTE: map's iterator is guaranteed to be stable, but pointer may not.
+	// state VersionedMutationsMap* kvOps = &self->kvOpsPerLP[param];
+	self->kvOpsPerLP.emplace(param, VersionedMutationsMap());
+	self->sampleMutations.emplace(param, MutationsVec());
+	kvOpsPerLPIter = self->kvOpsPerLP.find(param);
+	samplesIter = self->sampleMutations.find(param);
 
 	int64_t j;
 	int64_t readOffset;
@@ -188,7 +191,6 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	ASSERT(self->processedFileParams.find(req.param) != self->processedFileParams.end());
 	wait(self->processedFileParams[req.param]); // wait on the processing of the req.param.
 
-	// TODO: Send sampled mutations back to master
 	req.reply.send(RestoreLoadFileReply(req.param, self->sampleMutations[req.param]));
 	// TODO: clear self->sampleMutations[req.param] memory to save memory on loader
 	return Void();
@@ -196,9 +198,9 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 
 ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequest req,
                                               Reference<RestoreLoaderData> self) {
-	self->rangeToApplier = req.rangeToApplier;
-
 	state std::map<LoadingParam, VersionedMutationsMap>::iterator item = self->kvOpsPerLP.begin();
+
+	self->rangeToApplier = req.rangeToApplier;
 	for (; item != self->kvOpsPerLP.end(); item++) {
 		if (item->first.isRangeFile == req.useRangeFile) {
 			// Send the parsed mutation to applier who will apply the mutation to DB
@@ -216,6 +218,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, VersionedMutationsMap* pkvOps,
                                           bool isRangeFile, Version startVersion, Version endVersion, int fileIndex) {
 	state VersionedMutationsMap& kvOps = *pkvOps;
+	state VersionedMutationsMap::iterator kvOp = kvOps.begin();
 	state int kvCount = 0;
 	state int splitMutationIndex = 0;
 	state std::vector<UID> applierIDs = self->getWorkingApplierIDs();
@@ -231,37 +234,31 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 
 	// Ensure there is a mutation request sent at endVersion, so that applier can advance its notifiedVersion
 	if (kvOps.find(endVersion) == kvOps.end()) {
-		kvOps[endVersion] = VectorRef<MutationRef>(); // Empty mutation vector will be handled by applier
+		kvOps[endVersion] = MutationsVec(); // Empty mutation vector will be handled by applier
 	}
-
-	// applierMutationsBuffer is the mutation vector to be sent to each applier
-	// applierMutationsSize is buffered mutation vector size for each applier
-	state std::map<UID, MutationsVec> applierMutationsBuffer;
-	state std::map<UID, double> applierMutationsSize;
-	state MutationsVec mvector;
-	state Standalone<VectorRef<UID>> nodeIDs;
 
 	splitMutationIndex = 0;
 	kvCount = 0;
-	state VersionedMutationsMap::iterator kvOp = kvOps.begin();
 
 	for (kvOp = kvOps.begin(); kvOp != kvOps.end(); kvOp++) {
-		applierMutationsBuffer.clear();
-		applierMutationsSize.clear();
+		// applierMutationsBuffer is the mutation vector to be sent to each applier
+		// applierMutationsSize is buffered mutation vector size for each applier
+		std::map<UID, MutationsVec> applierMutationsBuffer;
+		std::map<UID, double> applierMutationsSize;
 		for (auto& applierID : applierIDs) {
-			applierMutationsBuffer[applierID] = MutationsVec(VectorRef<MutationRef>());
+			applierMutationsBuffer[applierID] = MutationsVec();
 			applierMutationsSize[applierID] = 0.0;
 		}
-		state Version commitVersion = kvOp->first;
+		Version commitVersion = kvOp->first;
 
 		for (int mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
 			MutationRef kvm = kvOp->second[mIndex];
 			// Send the mutation to applier
 			if (isRangeMutation(kvm)) {
+				MutationsVec mvector;
+				Standalone<VectorRef<UID>> nodeIDs;
 				// Because using a vector of mutations causes overhead, and the range mutation should happen rarely;
 				// We handle the range mutation and key mutation differently for the benefit of avoiding memory copy
-				mvector.pop_front(mvector.size());
-				nodeIDs.pop_front(nodeIDs.size());
 				// WARNING: The splitMutation() may have bugs
 				splitMutation(self, kvm, mvector.arena(), mvector.contents(), nodeIDs.arena(), nodeIDs.contents());
 				ASSERT(mvector.size() == nodeIDs.size());
@@ -296,8 +293,6 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 			requests.push_back(std::make_pair(
 			    applierID, RestoreSendVersionedMutationsRequest(fileIndex, prevVersion, commitVersion, isRangeFile,
 			                                                    applierMutationsBuffer[applierID])));
-			applierMutationsBuffer[applierID].pop_front(applierMutationsBuffer[applierID].size());
-			applierMutationsSize[applierID] = 0;
 		}
 		TraceEvent(SevDebug, "FastRestore_Debug")
 		    .detail("Loader", self->id())
@@ -305,10 +300,11 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 		    .detail("CommitVersion", commitVersion)
 		    .detail("FileIndex", fileIndex);
 		ASSERT(prevVersion < commitVersion);
-		wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, self->appliersInterf, requests));
-		requests.clear();
-		ASSERT(prevVersion < commitVersion);
 		prevVersion = commitVersion;
+		wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, self->appliersInterf, requests));
+
+		requests.clear();
+
 	} // all versions of mutations in the same file
 
 	TraceEvent("FastRestore").detail("LoaderSendMutationOnAppliers", kvCount);
@@ -371,10 +367,8 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 	std::map<Standalone<StringRef>, uint32_t>& mutationPartMap = *pMutationPartMap;
 	std::string prefix = "||\t";
 	std::stringstream ss;
-	StringRef val = val_input.contents();
 	const int key_prefix_len = sizeof(uint8_t) + sizeof(Version) + sizeof(uint32_t);
 
-	StringRefReaderMX reader(val, restore_corrupted_data());
 	StringRefReaderMX readerKey(key_input, restore_corrupted_data()); // read key_input!
 	int logRangeMutationFirstLength = key_input.size() - key_prefix_len;
 	bool concatenated = false;
@@ -451,7 +445,7 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 
 		StringRefReaderMX kReader(k, restore_corrupted_data());
 		uint64_t commitVersion = kReader.consume<uint64_t>(); // Consume little Endian data
-		kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
+		kvOps.insert(std::make_pair(commitVersion, MutationsVec()));
 
 		StringRefReaderMX vReader(val, restore_corrupted_data());
 		vReader.consume<uint64_t>(); // Consume the includeVersion
@@ -540,7 +534,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 		              data[i].value); // ASSUME: all operation in range file is set.
 
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
-		kvOps.insert(std::make_pair(version, VectorRef<MutationRef>()));
+		kvOps.insert(std::make_pair(version, MutationsVec()));
 		TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
 		    .detail("CommitVersion", version)
 		    .detail("ParsedMutationKV", m.toString());
