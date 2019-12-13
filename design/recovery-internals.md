@@ -75,7 +75,7 @@ The logic of collecting tLogs’ interfaces is implemented in `trackRejoins()` f
 The logic of locking the tLogs is implemented in `epochEnd()` function in TagPartitionedLogSystems.actor.cpp.
 
 
-Once we lock the cstate, we bump the recoveryCount and write the cstate to signal to the other recovery attempts that they should not recruit more tLogs. If we do not do this, there could be many recovery attempts that recruit tLogs and cause the system to run out of memory. This operation is the reason why every recovery bumps the recoveryCount (epoch) by 2 instead of 1.
+Once we lock the cstate, we bump the `recoveryCount` by 1 and write the `recoveryCount` to the cstate. Each tLog in a recovery attempt records the `recoveryCount` and monitors the change of the variable. If the `recoveryCount` increases, becoming larger than the recorded value, the tLog will terminate itself. This mechanism makes sure that when multiple recovery attempts happen concurrently, only tLogs in the most recent recovery will be running. tLogs in other recovery attempts can release their memory earlier, reducing the memory pressure during recovery. This is an important memory optimization before shared tLogs, which allows tLogs in different generations to share the same memory, is introduced. 
 
 
 *How does each tLog know the current master’s interface?*
@@ -97,7 +97,9 @@ Master interface is stored in `serverDBInfo`. Once the CC recruits the master, i
 Once the master locks the cstate, it will recruit the still-alive tLogs from the previous generation for the benefit of faster recovery. The master gets the old tLogs’ interfaces from the READING_CSTATE phase and uses those interfaces to track which old tLog are still alive, the implementation of which is in `trackRejoins()`. 
 
 
-Once the master gets enough tLogs, it calculates the knownCommittedVersion, which is the maximum durable version from the still-alive tLogs in the previous generation. The master will use the recruited tLogs to create a new `TagPartitionedLogSystem` for the new generation.
+Once the master gets enough tLogs, it calculates the known committed version (i.e., `knownCommittedVersion` in code). `knownCommittedVersion` is the highest version that a proxy tells a given tLog that it had durably committed on *all* tLogs. The master's is the maximum of all of that. `knownCommittedVersion` is  important, because it defines the lower bound of what version range of mutations need to be copied to the new generation.
+
+Later, the master will use the recruited tLogs to create a new `TagPartitionedLogSystem` for the new generation.
 
 
 Two situations may invalidate the calculated knownCommittedVersion:
@@ -168,18 +170,19 @@ ALL_LOGS_RECRUITED, STORAGE_RECOVERED, and FULLY_RECOVERED.
 For example, when the old tLogs are no longer needed, the master will write the coordinators’ state again.
 
 
-Now the main steps in recovery have finished. The master keeps waiting for all tLogs to join the system and for all storage servers to roll back their prefetched data, which has not been made durable on tLog, before claiming the system is fully recovered. 
+Now the main steps in recovery have finished. The master keeps waiting for all tLogs to join the system and for all storage servers to roll back their prefetched *uncommitted* data before claiming the system is fully recovered. 
 
 
 ## Phase 6: ACCEPTING_COMMITS
 
-The transaction system starts to accept new transactions.
+The transaction system starts to accept new transactions. This doesn't mean that this committed data will be available for reading by clients, because storage servers are not guaranteed to be alive in the recovery process. In case storage servers have not been alive, write-only transactions can be committed and will be buffered in tLogs. If storage servers are unavailable for long enough, pushing tLogs' memory usage above a configurable threshold, rakekeepr will throttle all transactions.
 
 
 ## Phase 7: ALL_LOGS_RECRUITED
 
 The master sets the recovery phase to ALL_LOGS_RECRUITED when the number of new tLogs it receives is equal to the expected tLogs based on the cluster configuration. This is done in the `trackTlogRecovery()` actor.
 
+The difference between this phase and getting to Phase 3 is that the master is waiting for *older generations* of tLogs to be cleaned up at this phase.
 
 ## Phase 8: STORAGE_RECOVERED
 
