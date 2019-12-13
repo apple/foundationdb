@@ -17,6 +17,7 @@ Status
 
 Bindings
 --------
+* Java: Introduced ``keyAfter`` utility API, that can be used to create immediate next key for a given byte array. `(PR #2458) <https://github.com/apple/foundationdb/pull/2458>`_
 
 Other Changes
 -------------
