@@ -582,8 +582,8 @@
          "partitions_count":2,
          "moving_data":{
             "total_written_bytes":0, // reset whenever data distributor is re-recruited
-            "in_flight_bytes":0,
-            "in_queue_bytes":0,
+            "in_flight_bytes":0, // number of bytes currently being moved between storage servers
+            "in_queue_bytes":0, // number of bytes in the data distributor queue that should be moved (but are not yet being transferred between storage servers)
             "highest_priority":0
          },
          "team_trackers":[
