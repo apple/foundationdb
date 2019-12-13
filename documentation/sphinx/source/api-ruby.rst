@@ -548,11 +548,15 @@ Writing data
 
     Removes all keys ``k`` such that ``begin <= k < end``, and their associated values. |immediate-return|
 
+    |transaction-clear-range-blurb|
+
     .. note:: Unlike in the case of :meth:`Transaction.get_range`, ``begin`` and ``end`` must be keys (:class:`String` or :class:`Key`), not :class:`KeySelector`\ s.  (Resolving arbitrary key selectors would prevent this method from returning immediately, introducing concurrency issues.)
 
 .. method:: Transaction.clear_range_start_with(prefix) -> nil
 
     Removes all the keys ``k`` such that ``k.start_with? prefix``, and their associated values. |immediate-return|
+
+    |transaction-clear-range-blurb|
 
 .. _api-ruby-transaction-atomic-operations:
 
