@@ -269,6 +269,22 @@ Using the table name as the subspace, we could implement the common row-oriented
             cols[c] = v
         return cols
 
+
+Versionstamps
+-------------
+
+A common data model is to index your data with a sequencing prefix to allow log scans or tails of recent data. This index requires a unique, monotonically increasing value. Rather than implementing this feature yourself at the client level, which would require reading the value for conflict checks before every increment, the versionstamp provides unique, in-order id generation with a single conflict-free write.
+
+The version is used by FoundationDB to provide MVCC guarantees and transactional integrity. Versionstamps write the transaction's commit version as a value to an arbitrary key as part of the same transaction, allowing the client to leverage the version's unique and serial properties.
+
+The versionstamp guarantees uniqueness and monotonically increasing values for the entire lifetime of a single FDB cluster. This is even true if the cluster is restored from a backup, as a restored cluster will begin at a higher version than when the backup was taken.
+
+If data is migrated from one FDB cluster to another, for example if a specialized backup/restore feature is implemented in the application layer, the versionstamp uniqueness and monotonic properties can still be preserved by one of two ways:
+* The new FDB cluster can restore at a higher version than the backup was taken, by setting the ``\xff/minRequiredCommitVersion`` metadata key.
+* The 2 byte user version provided by the client can be used to preserve generations across restores.  This method will only provide uniqueness, not sequential serialization, across restores.
+
+The versionstamp consists of 12 bytes. The first 10 bytes are the transaction's commit version and transaction batch order. The final 2 bytes are an optional user version provided by the client.  The tuple layer provides a useful api for getting and setting the 10 byte system version and the 2 byte user version. For examples on how to use the version stamp in the python binding, see the :doc:`api-python` documentation.
+
 .. _data-modeling-entity-relationship:
 
 Entity-relationship models
