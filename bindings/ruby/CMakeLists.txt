@@ -4,7 +4,11 @@ vexillographer_compile(TARGET ruby_options LANG ruby
   OUT ${CMAKE_CURRENT_SOURCE_DIR}/lib/fdboptions.rb ALL)
 configure_file(fdb.gemspec.cmake fdb.gemspec)
 
-set(gem_file fdb-${FDB_VERSION}.gem)
+if(NOT FDB_RELEASE)
+  set(prerelease_string "PRERELEASE")
+endif()
+
+set(gem_file fdb-${FDB_VERSION}${prerelease_string}.gem)
 set(gem_target ${CMAKE_BINARY_DIR}/packages/${gem_file})
 add_custom_command(OUTPUT ${gem_target}
   COMMAND ${GEM_COMMAND} build fdb.gemspec &&

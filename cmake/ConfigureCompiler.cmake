@@ -39,7 +39,8 @@ if(NDEBUG)
 endif()
 
 if(FDB_RELEASE)
-  add_compile_options(-DFDB_RELEASE)
+	add_compile_options(-DFDB_RELEASE)
+	add_compile_options(-DFDB_CLEAN_BUILD)
 endif()
 
 include_directories(${CMAKE_SOURCE_DIR})
@@ -83,10 +84,12 @@ set(CMAKE_CXX_STANDARD 17)
 
 if(WIN32)
   # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
-  # this sets the windows target version to Windows 7
-  set(WINDOWS_TARGET 0x0601)
-  add_compile_options(/W3 /EHsc /bigobj $<$<CONFIG:Release>:/Zi> /MP)
-  add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} BOOST_ALL_NO_LIB)
+  # this sets the windows target version to Windows Server 2003
+  set(WINDOWS_TARGET 0x0502)
+  add_compile_options(/W3 /EHsc /bigobj $<$<CONFIG:Release>:/Zi> /MP /FC)
+  add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} WINVER=${WINDOWS_TARGET} NTDDI_VERSION=0x05020000 BOOST_ALL_NO_LIB)
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
+  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
 else()
   set(GCC NO)
   set(CLANG NO)
