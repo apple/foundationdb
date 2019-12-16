@@ -97,7 +97,15 @@ Master interface is stored in `serverDBInfo`. Once the CC recruits the master, i
 Once the master locks the cstate, it will recruit the still-alive tLogs from the previous generation for the benefit of faster recovery. The master gets the old tLogs’ interfaces from the READING_CSTATE phase and uses those interfaces to track which old tLog are still alive, the implementation of which is in `trackRejoins()`. 
 
 
-Once the master gets enough tLogs, it calculates the known committed version (i.e., `knownCommittedVersion` in code). `knownCommittedVersion` is the highest version that a proxy tells a given tLog that it had durably committed on *all* tLogs. The master's is the maximum of all of that. `knownCommittedVersion` is  important, because it defines the lower bound of what version range of mutations need to be copied to the new generation.
+Once the master gets enough tLogs, it calculates the known committed version (i.e., `knownCommittedVersion` in code). `knownCommittedVersion` is the highest version that a proxy tells a given tLog that it had durably committed on *all* tLogs. The master's is the maximum of all of that. `knownCommittedVersion` is  important, because it defines the lower bound of what version range of mutations need to be copied to the new generation. That is, any versions larger than the master's `knownCommittedVersion` is not guaranteed to persist on all replicas. The master chooses a *recovery version*, which is the minimum of durable versions on all tLogs of the old generation, and recruits a new set of tLogs that copy all data between `knownCommittedVersion + 1` and `recoveryVersion` from old tLogs. This copy makes sure data within the range has enough replicas to satisfy the replication policy.
+
+For instance, consider an old generation with three TLogs: `A, B, C`. Their durable versions are `100, 110, 120`, respectively, and their `knownCommittedVersion` are at `80, 90, 95`, respectively.
+
+* If all of them are alive during recovery, master will choose `max(80, 90, 95) = 95` as the last epoch's end version and `min(100, 110, 120)=100` as the recovery version. Versions between `96` and `100` will be copied to new generation's tLogs. Note some of them `101` to `120` are actually durable on one or two tLogs, but the master chooses to discard them. If a storage server has peeked versions in the range of `[101, 120]`, these versions are in memory of the storage server and will be rolled back (i.e., discarded).
+
+* Another scenario is `C` is down during recovery. In this case, the master chooses `max(80, 90) = 90` as the last epoch's end version and `min(100, 110) = 100` as the recovery version. In this case, versions between `[91, 100]` will be copied to new generation's tLogs.
+
+* If all `A, B, and C` are down. The operator can manually force recovery to any version, e.g., `98`. Then `99` to `120` are discarded, even though `99` to `100` are durable on the whole set.
 
 Later, the master will use the recruited tLogs to create a new `TagPartitionedLogSystem` for the new generation.
 
