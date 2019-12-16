@@ -5,7 +5,7 @@
 Disk snapshot backup and Restore
 #################################
 
-This document covers disk snapshot based backup and restoration of a FoundationDB database. This tool leverages disk level snapshots and gets a point-in-time consistent copy of the database. The disk snapshot backup can be used to provide an additional level of protection in case of hardware or software failures, test and development purposes or for compliance reasons.
+This document covers disk snapshot based backup and restoration of a FoundationDB database. This tool leverages disk level snapshots and gets a point-in-time consistent copy of the database. The disk snapshot backup can be used for test and development purposes, for compliance reasons or to provide an additional level of protection in case of hardware or software failures.
 
 .. _disk-snapshot-backup-introduction:
 
@@ -37,7 +37,7 @@ Limitations
 * Feature is not supported on Windows operating system
 * Data encryption is dependent on the disk system
 * Backup and restore involves tooling which are deployment and environment specific to be developed by operators
-* ``snapshot`` command is a hidden command in the current release and will be unhidden in a future patch release.
+* ``snapshot`` command is a hidden fdbcli command in the current release and will be unhidden in a future patch release.
 
 Disk snapshot backup steps
 ==========================
@@ -61,7 +61,7 @@ Before using the ``snapshot`` command the following setup needs to be done
 
     whitelist_binpath = "/bin/snap_create.sh"
 
-* ``snapshot create program`` should capture any additional data needed to restore the cluster. Additional data can be stored as tags in cloud environments or it can be stored in an additional file/directory in the ``datadir`` and then snapshotted. The section :ref:`disk-snapshot-backup-specification` describes the recommended specification of the list of things that can be gathered by the binary.
+* ``snapshot create binary`` should capture any additional data needed to restore the cluster. Additional data can be stored as tags in cloud environments or it can be stored in an additional file/directory in the ``datadir`` and then snapshotted. The section :ref:`disk-snapshot-backup-specification` describes the recommended specification of the list of things that can be gathered by the binary.
 * Program should return a non-zero status for any failures and zero for success
 * If the ``snapshot create binary`` process takes longer than 5 minutes to return a status then it will be killed and ``snapshot`` command will fail. Timeout of 5 minutes is configurable and can be set with ``SNAP_CREATE_MAX_TIMEOUT`` config parameter in :ref:`foundationdb-conf-fdbserver`. Since the default value is large enough, there should not be a need to modify this configuration.
 
@@ -69,12 +69,12 @@ Before using the ``snapshot`` command the following setup needs to be done
 
 Example ``snapshot`` command usage::
 
-    fdbcli> snapshot /bin/snap_create.sh --key1 value1 --key2 value2
+    fdb> snapshot /bin/snap_create.sh --param1 param1-value --param2 param2-value
     Snapshot command succeeded with UID c50263df28be44ebb596f5c2a849adbb
 
 will invoke the ``snapshot create binary`` on ``tlog`` role with the following arguments::
 
-    --key1 value1 --key2 value2 --path /mnt/circus/data/4502 --version 6.2.6 --role tlog --uid c50263df28be44ebb596f5c2a849adbb
+    --param1 param1-value --param2 param2-value --path /mnt/circus/data/4502 --version 6.2.6 --role tlog --uid c50263df28be44ebb596f5c2a849adbb
 
 
 .. _disk-snapshot-backup-specification:
@@ -93,15 +93,15 @@ Field Name                        Description                                   
 ``FoundationDB Server Version``   software version of the ``fdbserver``                      command line argument to snap create binary
 ``CreationTime``                  current system date and time                               time obtained by calling the system time
 ``FoundationDB Cluster File``     cluster file which has cluster-name, magic and             read from the location of the cluster file location
-                                  the list of coordinators.                                  mentioned in the command line arguments. Command
-                                                                                             line arguments of ``fdbserver`` can be accessed from
+                                  the list of coordinators, cluster file is detailed         mentioned in the command line arguments. Command
+                                  here :ref:`foundationdb-cluster-file`                      line arguments of ``fdbserver`` can be accessed from
                                                                                              /proc/$PPID/cmdline
 ``Config Knobs``                  command line arguments passed to ``fdbserver``             available from command line arguments of ``fdbserver``
                                                                                              or from foundationdb.conf
 ``IP Address + Port``             host address and port information of the ``fdbserver``     available from command line arguments of ``fdbserver``
                                   that is invoking the snapshot
 ``LocalityData``                  machine id, zone id or any other locality information      available from command line arguments of ``fdbserver``
-``Name for the snapshot file``    Recommended name for the disk snapshot                     cluster-name:ip-addr:port:UID
+``Name for the snapshot file``    recommended name for the disk snapshot                     cluster-name:ip-addr:port:UID
 ================================  ========================================================   ========================================================
 
 ``snapshot create binary`` will not be invoked on processes which does not have any persistent data (for example, Cluster Controller or Master or MasterProxy). Since these processes are stateless, there is no need for a snapshot. Any specialized configuration knobs used for one of these stateless processes need to be copied and restored externally.
@@ -167,7 +167,7 @@ Here are the backup and restore steps on an over simplified setup with a single 
 
 * Check the status of the cluster and write a few sample keys::
   
-    fdbcli> status
+    fdb> status
 
     Using cluster file `/mnt/source/fdb.cluster'.
 
@@ -207,10 +207,10 @@ Here are the backup and restore steps on an over simplified setup with a single 
 
     Client time: 12/11/19 04:02:57
 
-    fdbcli> writemode on
-    fdbcli> set key1 value1
+    fdb> writemode on
+    fdb> set key1 value1
     Committed (76339236)
-    fdbcli> set key2 value2
+    fdb> set key2 value2
     Committed (80235963)
 
 * Write a ``snap create binary`` which copies the ``datadir`` to a user passed destination directory location::
@@ -249,7 +249,7 @@ Here are the backup and restore steps on an over simplified setup with a single 
 * Install the ``snap create binary`` as ``/bin/snap_create.sh``, add the entry for ``whitelist_binpath`` in :ref:`foundationdb-conf-fdbserver`, stop and start the foundationdb service for the configuration change to take effect
 * Issue ``snapshot`` command as follows::
 
-    fdbcli> snapshot /bin/snap_create.sh --destdir /mnt/backup
+    fdb> snapshot /bin/snap_create.sh --destdir /mnt/backup
     Snapshot command succeeded with UID 69a5e0576621892f85f55b4ebfeb4312
 
 * ``snapshot create binary`` gets invoked once for each role namely ``tlog``, ``storage`` and ``coordinator`` in this process with the following arguments::
@@ -258,7 +258,7 @@ Here are the backup and restore steps on an over simplified setup with a single 
     --path /mnt/source/datadir --version 6.2.6 --role tlog --uid 69a5e0576621892f85f55b4ebfeb4312 --destdir /mnt/backup
     --path /mnt/source/datadir --version 6.2.6 --role coord --uid 69a5e0576621892f85f55b4ebfeb4312 --destdir /mnt/backup
 
-* Snapshot is successful and all the snapshot images are in ``destdir`` specified by the user in the command line argument to ``snaphsot`` command, here is a sample directory listing of one of the coordinator backup directory::
+* Snapshot is successful and all the snapshot images are in ``destdir`` specified by the user in the command line argument to ``snapshot`` command, here is a sample directory listing of one of the coordinator backup directory::
 
     $ ls /mnt/backup/69a5e0576621892f85f55b4ebfeb4312/coord/
     coordination-0.fdq                                     log2-V_3_LS_2-b9990ae9bc00672f07264ad43d9d0792.sqlite-wal  processId
