@@ -633,7 +633,7 @@
             },
             "memory":{
                "free_bytes":0, // an estimate of how many bytes are free to allocate to fdbservers without swapping
-               "committed_bytes":0, // an estimate of the number of bytes of memory on the machine that are not available
+               "committed_bytes":0, // an estimate of the number of bytes of memory on the machine that are not free for allocation
                "total_bytes":0 // an estimate of total physical RAM
             },
             "contributing_workers":4,
