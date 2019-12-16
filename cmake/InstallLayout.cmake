@@ -284,10 +284,11 @@ set(deb-server-filename "foundationdb-server_${PROJECT_VERSION}-0.${CURRENT_GIT_
 set(CPACK_RPM_PACKAGE_LICENSE "Apache 2.0")
 
 set(CPACK_RPM_PACKAGE_NAME "foundationdb")
-set(CPACK_RPM_CLIENTS-EL6_PACKAGE_NAME "foundationdb-clients")
-set(CPACK_RPM_CLIENTS-EL7_PACKAGE_NAME "foundationdb-clients")
-set(CPACK_RPM_SERVER-EL6_PACKAGE_NAME "foundationdb-server")
-set(CPACK_RPM_SERVER-EL7_PACKAGE_NAME "foundationdb-server")
+set(CPACK_RPM_CLIENTS-EL6_PACKAGE_NAME "foundationdb-clients-el6")
+set(CPACK_RPM_CLIENTS-EL7_PACKAGE_NAME "foundationdb-clients-el7")
+set(CPACK_RPM_SERVER-EL6_PACKAGE_NAME "foundationdb-server-el6")
+set(CPACK_RPM_SERVER-EL7_PACKAGE_NAME "foundationdb-server-el7")
+
 
 set(CPACK_RPM_CLIENTS-EL6_FILE_NAME "${rpm-clients-filename}.el6.x86_64.rpm")
 set(CPACK_RPM_CLIENTS-EL7_FILE_NAME "${rpm-clients-filename}.el7.x86_64.rpm")
