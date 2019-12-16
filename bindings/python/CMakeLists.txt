@@ -62,11 +62,11 @@ endif()
 if(NOT FDB_RELEASE)
   set(prerelease_string "a1")
 endif()
-set(package_file_name foundationdb-${FDB_VERSION}${prerelease_string}.tar.gz)
-set(package_file ${CMAKE_BINARY_DIR}/packages/${package_file_name})
+set(setup_file_name foundationdb-${FDB_VERSION}.tar.gz)
+set(package_file ${CMAKE_BINARY_DIR}/packages/foundationdb-${FDB_VERSION}${prerelease_string}.tar.gz)
 add_custom_command(OUTPUT ${package_file}
   COMMAND $<TARGET_FILE:Python::Interpreter> setup.py sdist --formats=gztar &&
-          ${CMAKE_COMMAND} -E copy dist/${package_file_name} ${package_file}
+          ${CMAKE_COMMAND} -E copy dist/${setup_file_name} ${package_file}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   COMMENT "Create Python sdist package")
 add_custom_target(python_package DEPENDS ${package_file})
