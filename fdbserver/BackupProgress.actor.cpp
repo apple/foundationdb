@@ -28,21 +28,21 @@ std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> BackupProgress::g
 			for (const auto& [tag, savedVersion] : progressIt->second) {
 				tags.erase(tag);
 				if (savedVersion < info.epochEnd - 1) {
-					tagVersions.insert({ tag, savedVersion });
+					tagVersions.insert({ tag, savedVersion + 1 });
 					TraceEvent("BW", dbgid)
 					    .detail("OldEpoch", epoch)
 					    .detail("Tag", tag.toString())
-					    .detail("BeginVersion", savedVersion)
+					    .detail("BeginVersion", savedVersion + 1)
 					    .detail("EndVersion", info.epochEnd);
 				}
 			}
 		}
 		for (const Tag tag : tags) { // tags without progress data
-			tagVersions.insert({ tag, info.epochBegin - 1 });
+			tagVersions.insert({ tag, info.epochBegin });
 			TraceEvent("BW", dbgid)
 			    .detail("OldEpoch", epoch)
 			    .detail("Tag", tag.toString())
-			    .detail("BeginVersion", info.epochBegin - 1)
+			    .detail("BeginVersion", info.epochBegin)
 			    .detail("EndVersion", info.epochEnd);
 		}
 		if (!tagVersions.empty()) {
@@ -52,7 +52,7 @@ std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> BackupProgress::g
 	return toRecruit;
 }
 
-// Returns each tag's savedVersion for all epochs.
+// Save each tag's savedVersion for all epochs into "bStatus".
 ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus) {
 	state Transaction tr(cx);
 
@@ -93,17 +93,17 @@ TEST_CASE("/BackupProgress/Unfinished") {
 	ASSERT(unfinished.size() == 1);
 	for (const auto [epochVersion, tagVersion] : unfinished) {
 		ASSERT(epochVersion.first == epoch1 && epochVersion.second == end1);
-		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == begin1 - 1);
+		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == begin1);
 	}
 
 	const int saved1 = 50;
-	WorkerBackupStatus status1(epoch1, 50, tag1);
+	WorkerBackupStatus status1(epoch1, saved1, tag1);
 	progress.addBackupStatus(status1);
 	unfinished = progress.getUnfinishedBackup();
 	ASSERT(unfinished.size() == 1);
 	for (const auto [epochVersion, tagVersion] : unfinished) {
 		ASSERT(epochVersion.first == epoch1 && epochVersion.second == end1);
-		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == saved1);
+		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == saved1 + 1);
 	}
 
 	return Void();

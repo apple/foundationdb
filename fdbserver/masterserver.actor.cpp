@@ -1287,7 +1287,8 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 			    .detail("BKID", req.reqId)
 			    .detail("Epoch", epoch)
 			    .detail("BackupEpoch", req.backupEpoch)
-			    .detail("StartVersion", req.startVersion);
+			    .detail("StartVersion", req.startVersion)
+			    .detail("EndVersion", req.endVersion.get());
 			initializationReplies.push_back(transformErrors(
 			    throwErrorOr(worker.backup.getReplyUnlessFailedFor(req, SERVER_KNOBS->BACKUP_TIMEOUT,
 			                                                       SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
