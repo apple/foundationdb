@@ -658,10 +658,6 @@ Applications must provide error handling and an appropriate retry loop around th
 
     |atomic-and|
 
-    ``FDB_MUTATION_TYPE_COMPARE_AND_CLEAR``
-
-    |atomic-compare-and-clear|
-
     ``FDB_MUTATION_TYPE_OR``
 
     |atomic-or|
@@ -669,6 +665,10 @@ Applications must provide error handling and an appropriate retry loop around th
     ``FDB_MUTATION_TYPE_XOR``
 
     |atomic-xor|
+
+    ``FDB_MUTATION_TYPE_COMPARE_AND_CLEAR``
+
+    |atomic-compare-and-clear|
 
     ``FDB_MUTATION_TYPE_MAX``
 
