@@ -488,6 +488,19 @@ If a process has had more than 10 TCP segments retransmitted in the last 5 secon
 
       10.0.4.1:4500       ( 3% cpu;  2% machine; 0.004 Gbps;  0% disk; REXMIT! 2.5 GB / 4.1 GB RAM  )
 
+Machine-readable status
+--------------------------------
+
+The status command can provide a complete summary of statistics about the cluster and the database with the ``json`` argument. Full documentation for ``status json`` output can be found :doc:`here <mr-status>`.
+From the output of ``status json``, operators can find useful health metrics to determine whether or not their cluster is hitting performance limits.
+
+====================== =========================================================== ===================================================
+Ratekeeper limit        ``cluster.qos.transactions_per_second_limit``               The number of read versions per second that the cluster can give out. A low ratekeeper limit indicates that the cluster performance is limited in some way. The reason for a low ratekeeper limit can be found at ``cluster.qos.performance_limited_by``.
+Storage queue size      ``cluster.qos.limiting_data_lag_storage_server``            The maximum size in bytes of a storage queue. Each storage server has mutations that have not yet been durable, stored in the storage queue. If this queue gets too large for any storage server, the storage server can run out of memory.
+Durable version lag     ``cluster.qos.limiting_durability_lag_storage_server``      The maximum number of versions in a storage queue. Ideally, this should be near 5 million. If a storage server is overwhelmed, this number could rise, causing performance issues.
+Transaction log queue   ``cluster.qos.worst_queue_bytes_log_server``                The maximum size in bytes of the mutations stored on a transaction log, that have not yet been popped by storage servers.
+====================== =========================================================== ===================================================
+
 .. _administration_fdbmonitor:
 
 ``fdbmonitor`` and ``fdbserver``
