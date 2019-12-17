@@ -149,16 +149,15 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 
 			for (int i = 0; i < NetworkMetrics::PRIORITY_BINS && g_network->networkMetrics.priorityBins[i] != TaskPriority::Zero; i++) {
 				if(g_network->networkMetrics.priorityBlocked[i]) {
-					double lastSegment = std::min(currentStats.elapsed, now() - g_network->networkMetrics.priorityTimer[i]);
-					g_network->networkMetrics.priorityBlockedDuration[i] += lastSegment;
-					g_network->networkMetrics.secSquaredPriorityBlocked[i] += lastSegment * lastSegment;
-					g_network->networkMetrics.priorityTimer[i] = now();
+					g_network->networkMetrics.priorityBlockedDuration[i] += std::min(currentStats.elapsed, now() - g_network->networkMetrics.windowedPriorityTimer[i]);
+					g_network->networkMetrics.priorityMaxBlockedDuration[i] = std::max(g_network->networkMetrics.priorityMaxBlockedDuration[i], now() - g_network->networkMetrics.priorityTimer[i]);
+					g_network->networkMetrics.windowedPriorityTimer[i] = now();
 				}
 
-				double blocked = g_network->networkMetrics.priorityBlockedDuration[i] - statState->networkMetricsState.priorityBlockedDuration[i];
-				double s2Blocked = g_network->networkMetrics.secSquaredPriorityBlocked[i] - statState->networkMetricsState.secSquaredPriorityBlocked[i];
-				n.detail(format("PriorityBusy%d", g_network->networkMetrics.priorityBins[i]).c_str(), blocked);
-				n.detail(format("SumOfSquaredPriorityBusy%d", g_network->networkMetrics.priorityBins[i]).c_str(), s2Blocked);
+				n.detail(format("PriorityBusy%d", g_network->networkMetrics.priorityBins[i]).c_str(), g_network->networkMetrics.priorityBlockedDuration[i] - statState->networkMetricsState.priorityBlockedDuration[i]);
+				n.detail(format("PriorityMaxBusy%d", g_network->networkMetrics.priorityBins[i]).c_str(), g_network->networkMetrics.priorityMaxBlockedDuration[i]);
+
+				g_network->networkMetrics.priorityMaxBlockedDuration[i] = 0;
 			}
 
 			n.trackLatest("NetworkMetrics");

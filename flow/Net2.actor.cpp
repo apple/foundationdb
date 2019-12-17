@@ -167,7 +167,6 @@ public:
 
 	uint64_t numYields;
 
-	double lastPriorityTrackTime;
 	TaskPriority lastMinTaskID;
 
 	std::priority_queue<OrderedTask, std::vector<OrderedTask>> ready;
@@ -730,20 +729,19 @@ void Net2::trackMinPriority( TaskPriority minTaskID, double now ) {
 		for(int c=0; c<NetworkMetrics::PRIORITY_BINS; c++) {
 			TaskPriority pri = networkMetrics.priorityBins[c];
 			if (pri > minTaskID && pri <= lastMinTaskID) {  // busy -> idle
-				double busyFor = lastPriorityTrackTime - networkMetrics.priorityTimer[c];
 				networkMetrics.priorityBlocked[c] = false;
-				networkMetrics.priorityBlockedDuration[c] += busyFor;
-				networkMetrics.secSquaredPriorityBlocked[c] += busyFor * busyFor;
+				networkMetrics.priorityBlockedDuration[c] += now - networkMetrics.windowedPriorityTimer[c];
+				networkMetrics.priorityMaxBlockedDuration[c] = std::max(networkMetrics.priorityMaxBlockedDuration[c], now - networkMetrics.priorityTimer[c]);
 			}
 			if (pri <= minTaskID && pri > lastMinTaskID) {  // idle -> busy
 				networkMetrics.priorityBlocked[c] = true;
 				networkMetrics.priorityTimer[c] = now;
+				networkMetrics.windowedPriorityTimer[c] = now;
 			}
 		}
 	}
 
 	lastMinTaskID = minTaskID;
-	lastPriorityTrackTime = now;
 }
 
 void Net2::processThreadReady() {
