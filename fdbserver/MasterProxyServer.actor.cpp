@@ -1018,6 +1018,8 @@ ACTOR Future<Void> commitBatch(
 	// Send replies to clients
 	double endTime = timer();
 	for (int t = 0; t < trs.size(); t++) {
+		if (deterministicRandom()->random01() < 0.01)
+			TraceEvent("ResolverUsage").detail("Total", transactionResolverMap[t].size()).detail("Used", resolution.size());
 		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			ASSERT_WE_THINK(commitVersion != invalidVersion);
 			trs[t].reply.send(CommitID(commitVersion, t, metadataVersionAfter));
