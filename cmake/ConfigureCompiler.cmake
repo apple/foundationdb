@@ -187,6 +187,12 @@ else()
   #   -mavx
   #   -msse4.2)
 
+  if ((NOT USE_VALGRIND) AND (NOT "$ENV{USE_VALGRIND}" STREQUAL ""))
+    if (("$ENV{USE_VALGRIND}" STREQUAL "ON") OR ("$ENV{USE_VALGRIND}" STREQUAL "1") OR ("$ENV{USE_VALGRIND}" STREQUAL "YES"))
+      set(USE_VALGRIND ON)
+    endif()
+  endif()
+
   if (USE_VALGRIND)
     add_compile_options(-DVALGRIND -DUSE_VALGRIND)
   endif()
