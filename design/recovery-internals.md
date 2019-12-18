@@ -87,7 +87,7 @@ Master interface is stored in `serverDBInfo`. Once the CC recruits the master, i
 
 * tLog monitors `serverDBInfo` change and sends its interface to the new master;
 
-* Data distributor (DD) and Ratekeeper rejoin themselves to CC because they are no longer a part of the recovery process (they are moved out of the master process since 6.2 release);
+* Data distributor (DD) and Ratekeeper rejoin themselves to CC because they are no longer a part of the recovery process (they have been moved out of the master process since 6.2 release, before which they are part of the master process recovery in the FDB recovery procedure);
 
 * Storage server (SS) does not rejoin. It waits for the tLogs to be ready and commit their interfaces into database with a special transaction.
 
