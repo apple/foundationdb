@@ -508,7 +508,7 @@ If ``kill_on_configuration_change`` parameter is unset or set to ``true`` in fou
 Managing trace files
 ====================
 
- By default, trace files are output to:
+By default, trace files are output to:
 
 * ``/var/log/foundationdb/`` on Linux
 * ``/usr/local/foundationdb/logs/`` on macOS
