@@ -148,7 +148,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
 
 	// Configuration
-	init( DEFAULT_AUTO_PROXIES,                      16 );
+	init( DEFAULT_AUTO_PROXIES,                      24 );
 	init( DEFAULT_AUTO_RESOLVERS,                    2 );
 	init( DEFAULT_AUTO_LOGS,                         3 );
 
