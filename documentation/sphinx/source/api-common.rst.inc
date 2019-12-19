@@ -111,6 +111,9 @@
 .. |atomic-xor| replace::
     Performs a bitwise "xor" operation. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes. If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
 
+.. |atomic-compare-and-clear| replace::
+   Performs an atomic ``compare and clear`` operation. If the existing value in the database is equal to the given value, then given key is cleared.
+
 .. |atomic-max1| replace::
     Sets the value in the database to the larger of the existing value and ``param``. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes. If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
 
