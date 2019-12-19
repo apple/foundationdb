@@ -369,7 +369,7 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 	std::stringstream ss;
 	const int key_prefix_len = sizeof(uint8_t) + sizeof(Version) + sizeof(uint32_t);
 
-	StringRefReaderMX readerKey(key_input, restore_corrupted_data()); // read key_input!
+	BackupStringRefReader readerKey(key_input, restore_corrupted_data()); // read key_input!
 	int logRangeMutationFirstLength = key_input.size() - key_prefix_len;
 	bool concatenated = false;
 
@@ -443,11 +443,11 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 		StringRef k = m.first.contents();
 		StringRef val = m.second.contents();
 
-		StringRefReaderMX kReader(k, restore_corrupted_data());
+		BackupStringRefReader kReader(k, restore_corrupted_data());
 		uint64_t commitVersion = kReader.consume<uint64_t>(); // Consume little Endian data
 		kvOps.insert(std::make_pair(commitVersion, MutationsVec()));
 
-		StringRefReaderMX vReader(val, restore_corrupted_data());
+		BackupStringRefReader vReader(val, restore_corrupted_data());
 		vReader.consume<uint64_t>(); // Consume the includeVersion
 		// TODO(xumengpanda): verify the protocol version is compatible and raise error if needed
 
