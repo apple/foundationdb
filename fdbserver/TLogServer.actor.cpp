@@ -366,21 +366,21 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		bool poppedRecently;					// `popped` has changed since last updatePersistentData
 		Version popped;				// see popped version tracking contract below
 		Version persistentPopped;  // The popped version recorded in the btree.
-		Version poppedLocationForVersion;  // `poppedLocation` was calculated at this popped version
+		Version versionForPoppedLocation;  // `poppedLocation` was calculated at this popped version
 		IDiskQueue::location poppedLocation;  // The location of the earliest commit with data for this tag.
 		bool unpoppedRecovered;
 		Tag tag;
 
-		TagData( Tag tag, Version popped, IDiskQueue::location poppedLocation, bool nothingPersistent, bool poppedRecently, bool unpoppedRecovered ) : tag(tag), nothingPersistent(nothingPersistent), poppedRecently(poppedRecently), popped(popped), persistentPopped(0), poppedLocationForVersion(0), poppedLocation(poppedLocation), unpoppedRecovered(unpoppedRecovered) {}
+		TagData( Tag tag, Version popped, IDiskQueue::location poppedLocation, bool nothingPersistent, bool poppedRecently, bool unpoppedRecovered ) : tag(tag), nothingPersistent(nothingPersistent), poppedRecently(poppedRecently), popped(popped), persistentPopped(0), versionForPoppedLocation(0), poppedLocation(poppedLocation), unpoppedRecovered(unpoppedRecovered) {}
 
-		TagData(TagData&& r) BOOST_NOEXCEPT : versionMessages(std::move(r.versionMessages)), nothingPersistent(r.nothingPersistent), poppedRecently(r.poppedRecently), popped(r.popped), persistentPopped(r.persistentPopped), poppedLocationForVersion(r.poppedLocationForVersion), poppedLocation(r.poppedLocation), tag(r.tag), unpoppedRecovered(r.unpoppedRecovered) {}
+		TagData(TagData&& r) BOOST_NOEXCEPT : versionMessages(std::move(r.versionMessages)), nothingPersistent(r.nothingPersistent), poppedRecently(r.poppedRecently), popped(r.popped), persistentPopped(r.persistentPopped), versionForPoppedLocation(r.versionForPoppedLocation), poppedLocation(r.poppedLocation), tag(r.tag), unpoppedRecovered(r.unpoppedRecovered) {}
 		void operator= (TagData&& r) BOOST_NOEXCEPT {
 			versionMessages = std::move(r.versionMessages);
 			nothingPersistent = r.nothingPersistent;
 			poppedRecently = r.poppedRecently;
 			popped = r.popped;
 			persistentPopped = r.persistentPopped;
-			poppedLocationForVersion = r.poppedLocationForVersion;
+			versionForPoppedLocation = r.versionForPoppedLocation;
 			poppedLocation = r.poppedLocation;
 			tag = r.tag;
 			unpoppedRecovered = r.unpoppedRecovered;
@@ -707,8 +707,8 @@ ACTOR Future<Void> updatePoppedLocation( TLogData* self, Reference<LogData> logD
 		return Void();
 	}
 
-	if (data->poppedLocationForVersion >= data->persistentPopped) return Void();
-	data->poppedLocationForVersion = data->persistentPopped;
+	if (data->versionForPoppedLocation >= data->persistentPopped) return Void();
+	data->versionForPoppedLocation = data->persistentPopped;
 
 	// Use persistentPopped and not popped, so that a pop update received after spilling doesn't cause
 	// us to remove data that still is pointed to by SpilledData in the btree.
@@ -730,7 +730,7 @@ ACTOR Future<Void> updatePoppedLocation( TLogData* self, Reference<LogData> logD
 			for (const SpilledData& sd : spilledData) {
 				if (sd.version >= data->persistentPopped) {
 					data->poppedLocation = sd.start;
-					data->poppedLocationForVersion = sd.version;
+					data->versionForPoppedLocation = sd.version;
 					break;
 				}
 			}
@@ -742,7 +742,7 @@ ACTOR Future<Void> updatePoppedLocation( TLogData* self, Reference<LogData> logD
 		auto locationIter = logData->versionLocation.lower_bound(data->persistentPopped);
 		if (locationIter != logData->versionLocation.end()) {
 			data->poppedLocation = locationIter->value.first;
-			data->poppedLocationForVersion = locationIter->key;
+			data->versionForPoppedLocation = locationIter->key;
 		} else {
 			// No data on disk and no data in RAM.
 			// This TLog instance will be removed soon anyway, so we temporarily freeze our poppedLocation
