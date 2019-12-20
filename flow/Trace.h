@@ -460,6 +460,10 @@ public:
 
 	TraceEvent& GetLastError();
 
+	bool isEnabled() const {
+		return enabled;
+	}
+
 	~TraceEvent();  // Actually logs the event
 
 	// Return the number of invocations of TraceEvent() at the specified logging level.

@@ -185,6 +185,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	state Future<Void> secondDelay = Never();
 
 	state Promise<Void> requestFinished;
+	state double startTime = now();
 	
 	setReplyPriority(request, taskID);
 	if (!alternatives)
@@ -278,6 +279,21 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	state double backoff = 0;
 	state bool triedAllOptions = false;
 	loop {
+		if(now() - startTime > g_network->isSimulated() ? 30.0 : 600.0) {
+			TraceEvent ev(g_network->isSimulated() ? SevWarn : SevWarnAlways, "LoadBalanceTooLong");
+			ev.suppressFor(1.0);
+			ev.detail("Duration", now() - startTime);
+			ev.detail("NumAttempts", numAttempts);
+			ev.detail("Backoff", backoff);
+			ev.detail("TriedAllOptions", triedAllOptions);
+			if(ev.isEnabled()) {
+				for(int alternativeNum=0; alternativeNum<alternatives->size(); alternativeNum++) {
+					RequestStream<Request> const* thisStream = &alternatives->get( alternativeNum, channel );
+					TraceEvent(g_network->isSimulated() ? SevWarn : SevWarnAlways, "LoadBalanceTooLongEndpoint").detail("Addr", thisStream->getEndpoint().getPrimaryAddress()).detail("Token", thisStream->getEndpoint().token).detail("Failed", IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed);
+				}
+			}
+		}
+
 		// Find an alternative, if any, that is not failed, starting with nextAlt
 		state RequestStream<Request> const* stream = NULL;
 		for(int alternativeNum=0; alternativeNum<alternatives->size(); alternativeNum++) {
