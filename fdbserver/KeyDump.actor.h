@@ -26,10 +26,9 @@
 #define FDBSERVER_KEYDUMP_ACTOR_H
 
 #include "flow/flow.h"
-#include <string>
-#include "flow/actorcompiler.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
-Future<Void> keyDump(std::string const& destCluster, std::string const& dataFolder);
+ACTOR Future<Void> keyDump(std::string destCluster, std::string dataFolder);
 
 #include "flow/unactorcompiler.h"
 #endif

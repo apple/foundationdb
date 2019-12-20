@@ -25,8 +25,6 @@
 #include "fdbserver/KeyDump.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-static constexpr int keyDumpBatchLimit = 1000;
-
 ACTOR Future<Void> traceDumpKeysProgress(int* keysCopied, int* bytesCopied, UID debugID) {
 	loop {
 		wait(delay(5.0));
@@ -40,10 +38,10 @@ ACTOR Future<Void> dumpKeysToRemoteCluster(IKeyValueStore* kvStore, std::string 
 	try {
 		state Database cx = Database::createDatabase(destCluster, Database::API_VERSION_LATEST);
 		TraceEvent("DumpKeysGotCluster").detail("Cluster", destCluster);
-		state KeyRef begin = normalKeys.begin;
+		state Key begin = normalKeys.begin;
 		loop {
 			state Standalone<VectorRef<KeyValueRef>> kvs = wait(kvStore->readRange(
-			    KeyRangeRef(begin, normalKeys.end), keyDumpBatchLimit, CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 2));
+			    KeyRangeRef(begin, normalKeys.end), CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 2));
 			TraceEvent(SevDebug, "DumpKeysGotKeys", debugID).detail("Size", kvs.size());
 			if (kvs.size() == 0) {
 				break;
