@@ -6,7 +6,7 @@ Data distribution manages the lifetime of storage servers, decides which storage
 
 ## Components
 
-**Storage server (`struct TCServerInfo`):** DD creates a TCServerInfo object for each storage server (SS). The TCServerInfo includes: (i) the SS’ locality, which includes the processID that is unique to ip:port, the zoneId that specifies which rack the SS is on, and the dcId that specifies which DC the SS is in; (ii) the server’s teams, which will be discussed in the following paragraph; (iii) the tracker that monitor the status of the server; and (iv) extra information related to the server’s interface and preference. A server is healthy if its storage engine on the process is the same with the configured storage engine, and it is marked as desired by DD.
+**Storage server (`struct TCServerInfo`):** DD creates a TCServerInfo object for each storage server (SS). The TCServerInfo includes: (1) the SS’ locality, which includes the processID that is unique to ip:port, the zoneId that specifies which rack the SS is on, and the dcId that specifies which DC the SS is in; (2) the server’s teams, which will be discussed in the following paragraph; (3) the tracker that monitor the status of the server; and (4) extra information related to the server’s interface and preference. A server is healthy if its storage engine on the process is the same with the configured storage engine, and it is marked as desired by DD.
 
 **Machine (`struct TCMachineInfo`)**: A machine in FDB is considered as a rack, because a typical FDB cluster will only use one physical host from each rack in the datacenter to reduce the impact of regular rack-maintenance events on the cluster. All servers on the same rack belong to the same machine. A machine is healthy if there exists a healthy server on the machine.
 
@@ -69,24 +69,16 @@ When a data distribution role is created, it recovers the states of the previous
 ### When to move keys?
 
 Keys can be moved from a server to another for several reasons:
-
-* DD moves keys from overutilized servers to underutilized servers, where a server’s utilization is defined as the server’s disk usage;
-
-* DD splits or merges shards in order to rebalance the disk usage of servers;
-
-* DD removes redundant teams when the team number is larger than the desired number;
-
-* DD repairs the replication factor by duplicate shards from a server to another when servers in a team fail.
+(1) DD moves keys from overutilized servers to underutilized servers, where a server’s utilization is defined as the server’s disk usage;
+(2) DD splits or merges shards in order to rebalance the disk usage of servers;
+(3) DD removes redundant teams when the team number is larger than the desired number;
+(4) DD repairs the replication factor by duplicate shards from a server to another when servers in a team fail.
 
 Actors are created to monitor the reasons of key movement:
-
-* `MountainChopper` and `ValleyFiller` actors periodically measure a random server team’s utilization and rebalance the server’s keys among other servers;
-
-* `shardMerger` and `shardSplitter` actors take a shard as input and respectively evaluates if the input shard can be merged with its neighboring shards without creating a too big shard and if the shard should be split. Once new shards are created, the actors create the shard’s tracker and send `RelocateShard` requests to DD’s queue;
-
-* `serverTeamRemover` and `machineTeamRemover` actors periodically evaluate if the number of server teams and machine teams is larger than the desired number. If so, they respectively pick a server team or a machine team to remove based on predefined criteria;
-
-* `teamTracker` actor monitors a team’s healthiness. When a server in the team becomes unhealthy, it issues the `RelocateShard` request to repair the replication factor. The less servers a team has, the higher priority the `RelocateShard` request will be.
+(1) `MountainChopper` and `ValleyFiller` actors periodically measure a random server team’s utilization and rebalance the server’s keys among other servers;
+(2) `shardMerger` and `shardSplitter` actors take a shard as input and respectively evaluates if the input shard can be merged with its neighboring shards without creating a too big shard and if the shard should be split. Once new shards are created, the actors create the shard’s tracker and send `RelocateShard` requests to DD’s queue;
+(3) `serverTeamRemover` and `machineTeamRemover` actors periodically evaluate if the number of server teams and machine teams is larger than the desired number. If so, they respectively pick a server team or a machine team to remove based on predefined criteria;
+(4) `teamTracker` actor monitors a team’s healthiness. When a server in the team becomes unhealthy, it issues the `RelocateShard` request to repair the replication factor. The less servers a team has, the higher priority the `RelocateShard` request will be.
 
 ### How to move keys?
 
@@ -97,11 +89,7 @@ A shard’s ownership is used in transaction systems (proxy and tLogs) to route 
 A shard’s ownership must be consistent across transaction systems and SSes, so that mutations can be correctly routed to SSes. Moving keys from a SS to another requires changing the shard’s ownership under ACID property. The ACID property is achieved by using FDB transactions to change the *serverKeys *(`\xff/serverKeys/`) and *keyServers* (`\xff/keyServers/`). The mutation on the *serverKeys *and* keyServers *will be categorized as private mutations in transaction system. Compared to normal mutation, the private mutations will change the transaction state store (txnStateStore) that maintains the *serverKeys* and *keyServers* for transaction systems (proxy and tLog) when it arrives on each transaction component (e.g., tLog). Because mutations are processed in total order with the ACID guarantees, the change to the txnStateStore will be executed in total order on each node and the change on the shard’s ownership will also be consistent.
 
 The data movement from one server (called source server) to another (called destination server) has four steps:
-
-1. DD adds the destination server as the shard’s new owner;
-
-1. The destination server will issue transactions to read the shard range and write the key-value pairs back. The key-value will be routed to the destination server and saved in the server’s storage engine;
-
-1. DD removes the source server from the shard’s ownership by modifying the system keyspace;
-
-1. DD removes the shard’s information owned by the source server from the server’s team information (i.e., *shardsAffectedByTeamFailure*).
+(1) DD adds the destination server as the shard’s new owner;
+(2) The destination server will issue transactions to read the shard range and write the key-value pairs back. The key-value will be routed to the destination server and saved in the server’s storage engine;
+(3) DD removes the source server from the shard’s ownership by modifying the system keyspace;
+(4) DD removes the shard’s information owned by the source server from the server’s team information (i.e., *shardsAffectedByTeamFailure*).
