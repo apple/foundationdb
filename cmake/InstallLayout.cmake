@@ -270,7 +270,7 @@ if(NOT FDB_RELEASE)
 endif()
 
 if(CURRENT_GIT_VERSION)
-  set(git_string ".CURRENT_GIT_VERSION")
+  set(git_string ".${CURRENT_GIT_VERSION}")
 endif()
 
 # RPM filenames
