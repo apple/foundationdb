@@ -282,23 +282,31 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 
 		param.prevVersion = 0; // Each file's NotifiedVersion starts from 0
 		param.endVersion = file.isRange ? file.version : file.endVersion;
-		param.fileIndex = file.fileIndex;
-
 		param.url = request.url;
 		param.isRangeFile = file.isRange;
-		param.filename = file.fileName;
-		param.offset = 0;
-		param.length = file.fileSize; // We load file by file, instead of data block by data block for now
 		param.blockSize = file.blockSize;
-		param.restoreRange = request.range;
+
+		param.asset.filename = file.fileName;
+		param.asset.fileIndex = file.fileIndex;
+		param.asset.offset = 0;
+		param.asset.len = file.fileSize;
+		param.asset.range = request.range;
+		param.asset.beginVersion = versionBatch.beginVersion;
+		param.asset.endVersion = versionBatch.endVersion;
+
+		// //param.fileIndex = file.fileIndex;
+		// param.filename = file.fileName;
+		// param.offset = 0;
+		// param.length = file.fileSize; // We load file by file, instead of data block by data block for now
+		// param.restoreRange = request.range;
 
 		prevVersion = param.endVersion;
 
 		// Log file to be loaded
 		TraceEvent("FastRestore").detail("LoadParam", param.toString()).detail("LoaderID", loader->first.toString());
-		ASSERT_WE_THINK(param.length >= 0); // we may load an empty file
-		ASSERT_WE_THINK(param.offset >= 0);
-		ASSERT_WE_THINK(param.offset <= file.fileSize);
+		ASSERT_WE_THINK(param.asset.len >= 0); // we may load an empty file
+		ASSERT_WE_THINK(param.asset.offset >= 0);
+		ASSERT_WE_THINK(param.asset.offset <= file.fileSize);
 		ASSERT_WE_THINK(param.prevVersion <= param.endVersion);
 
 		requests.emplace_back(loader->first, RestoreLoadFileRequest(param));
