@@ -270,16 +270,16 @@ if(NOT FDB_RELEASE)
 endif()
 
 if(CURRENT_GIT_VERSION)
-  set(git_string ".CURRENT_GIT_VERSION")
+  set(git_string ".${CURRENT_GIT_VERSION}")
 endif()
 
 # RPM filenames
-set(rpm-clients-filename "foundationdb-clients-${PROJECT_VERSION}-0${git_string}${prerelease_string}")
-set(rpm-server-filename "foundationdb-server-${PROJECT_VERSION}-0${git_string}${prerelease_string}")
+set(rpm-clients-filename "foundationdb-clients-$(PROJECT_VERSION)-0${git_string}${prerelease_string}")
+set(rpm-server-filename "foundationdb-server-$(PROJECT_VERSION)-0${git_string}${prerelease_string}")
 
 # Deb filenames
-set(deb-clients-filename "foundationdb-clients_${PROJECT_VERSION}-0${git_string}${prerelease_string}")
-set(deb-server-filename "foundationdb-server_${PROJECT_VERSION}-0${git_string}${prerelease_string}")
+set(deb-clients-filename "foundationdb-clients_$(PROJECT_VERSION)-0${git_string}${prerelease_string}")
+set(deb-server-filename "foundationdb-server_$(PROJECT_VERSION)-0${git_string}${prerelease_string}")
 
 ################################################################################
 # Configuration for RPM
