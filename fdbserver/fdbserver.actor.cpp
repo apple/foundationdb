@@ -42,6 +42,7 @@
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/KeyDump.actor.h"
 #include <algorithm>
 #include <stdarg.h>
 #include <stdio.h>
@@ -900,6 +901,7 @@ enum Role {
 	SkipListTest,
 	Test,
 	VersionedMapTest,
+	KeyDump,
 };
 struct CLIOptions {
 	std::string commandLine;
@@ -1076,6 +1078,8 @@ private:
 					role = KVFileGenerateIOLogChecksums;
 				else if (!strcmp(sRole, "consistencycheck"))
 					role = ConsistencyCheck;
+				else if (!strcmp(sRole, "keydump"))
+					role = KeyDump;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -1890,6 +1894,9 @@ int main(int argc, char* argv[]) {
 			}
 
 			f = result;
+		} else if (role == KeyDump) {
+			f = stopAfter(keyDump(opts.connFile, opts.dataFolder));
+			g_network->run();
 		}
 
 		int rc = FDB_EXIT_SUCCESS;

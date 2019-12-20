@@ -390,6 +390,18 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	return result;
 }
 
+std::vector<IKeyValueStore*> getStorageKeyValueStores(std::string folder) {
+	auto diskStores = getDiskStores(folder);
+	std::vector<IKeyValueStore*> result;
+	for (const auto& diskStore : diskStores) {
+		if (diskStore.storedComponent == DiskStore::Storage) {
+			result.push_back(
+			    openKVStore(diskStore.storeType, diskStore.filename, diskStore.storeID, /*memoryLimit*/ 1LL << 30));
+		}
+	}
+	return result;
+}
+
 ACTOR Future<Void> registrationClient(
 		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
 		WorkerInterface interf,
