@@ -3500,6 +3500,9 @@ ACTOR Future<Void> metricsCore( StorageServer* self, StorageServerInterface ssi 
 				StorageBytes sb = self->storage.getStorageBytes();
 				self->metrics.getStorageMetrics( req, sb, self->counters.bytesInput.getRate() );
 			}
+			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
+				self->metrics.getReadHotRanges(req);
+			}
 			when (wait(doPollMetrics) ) {
 				self->metrics.poll();
 				doPollMetrics = delay(SERVER_KNOBS->STORAGE_SERVER_POLL_METRICS_DELAY);

@@ -64,6 +64,7 @@ struct StorageServerInterface {
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
 	RequestStream<struct SplitMetricsRequest> splitMetrics;
+	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct GetStorageMetricsRequest> getStorageMetrics;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct StorageQueuingMetricsRequest> getQueuingMetrics;
@@ -384,6 +385,30 @@ struct SplitMetricsRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, limits, used, estimated, isLastShard, reply, arena);
+	}
+};
+
+struct ReadHotSubRangeReply {
+	constexpr static FileIdentifier file_identifier = 10424537;
+	Standalone<VectorRef<KeyRangeRef>> readHotRange;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, readHotRange);
+	}
+};
+struct ReadHotSubRangeRequest {
+	constexpr static FileIdentifier file_identifier = 10259266;
+	Arena arena;
+	KeyRangeRef keys;
+	ReplyPromise<ReadHotSubRangeReply> reply;
+
+	ReadHotSubRangeRequest() {}
+	ReadHotSubRangeRequest(KeyRangeRef const& keys) : keys(arena, keys) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, reply, arena);
 	}
 };
 
