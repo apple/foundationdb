@@ -294,12 +294,6 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		param.asset.beginVersion = versionBatch.beginVersion;
 		param.asset.endVersion = versionBatch.endVersion;
 
-		// //param.fileIndex = file.fileIndex;
-		// param.filename = file.fileName;
-		// param.offset = 0;
-		// param.length = file.fileSize; // We load file by file, instead of data block by data block for now
-		// param.restoreRange = request.range;
-
 		prevVersion = param.endVersion;
 
 		// Log file to be loaded

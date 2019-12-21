@@ -238,7 +238,7 @@ struct RestoreAsset {
 };
 
 // TODO: It is probably better to specify the (beginVersion, endVersion] for each loadingParam.
-// begin}Version (endVersion) is the version the applier is before (after) it receives the request.
+// beginVersion (endVersion) is the version the applier is before (after) it receives the request.
 struct LoadingParam {
 	constexpr static FileIdentifier file_identifier = 17023837;
 
@@ -248,13 +248,6 @@ struct LoadingParam {
 	Version endVersion; // range file's mutations are all at the endVersion
 
 	int64_t blockSize;
-
-	// int fileIndex;
-	// std::string filename;
-	// int64_t offset;
-	// int64_t length;
-	// KeyRange restoreRange;
-
 	RestoreAsset asset;
 
 	LoadingParam() = default;
@@ -268,8 +261,6 @@ struct LoadingParam {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		// serializer(ar, isRangeFile, url, prevVersion, endVersion, fileIndex, filename, offset, length, blockSize,
-		//            restoreRange);
 		serializer(ar, isRangeFile, url, prevVersion, endVersion, blockSize, asset);
 	}
 
@@ -391,7 +382,7 @@ struct RestoreLoadFileRequest : TimedRequest {
 	ReplyPromise<RestoreLoadFileReply> reply;
 
 	RestoreLoadFileRequest() = default;
-	RestoreLoadFileRequest(LoadingParam& param) : param(param){};
+	explicit RestoreLoadFileRequest(LoadingParam& param) : param(param){};
 
 	template <class Ar>
 	void serialize(Ar& ar) {

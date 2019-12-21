@@ -150,16 +150,11 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 	samplesIter = self->sampleMutations.find(param);
 
 	int64_t j;
-	int64_t readOffset;
-	int64_t readLen;
 	for (j = param.asset.offset; j < param.asset.len; j += param.blockSize) {
-		readOffset = j;
-		readLen = std::min<int64_t>(param.blockSize, param.asset.len - j);
 		RestoreAsset subAsset = param.asset;
-		subAsset.offset = readOffset;
-		subAsset.len = readLen;
+		subAsset.offset = j;
+		subAsset.len = std::min<int64_t>(param.blockSize, param.asset.len - j);
 		if (param.isRangeFile) {
-			// TODO: Sanity check the range file is within the restored version range
 			fileParserFutures.push_back(
 			    _parseRangeFileToMutationsOnLoader(kvOpsPerLPIter, samplesIter, self->bc, param.endVersion, subAsset));
 		} else {
@@ -368,8 +363,6 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
                                          RestoreAsset asset) {
 	SerializedMutationListMap& mutationMap = *pMutationMap;
 	std::map<Standalone<StringRef>, uint32_t>& mutationPartMap = *pMutationPartMap;
-	// std::string prefix = "||\t";
-	// std::stringstream ss;
 	const int key_prefix_len = sizeof(uint8_t) + sizeof(Version) + sizeof(uint32_t);
 
 	BackupStringRefReader readerKey(key_input, restore_corrupted_data()); // read key_input!
@@ -499,6 +492,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	    .detail("Version", version)
 	    .detail("BeginVersion", asset.beginVersion)
 	    .detail("EndVersion", asset.endVersion);
+	// Sanity check the range file is within the restored version range
 	ASSERT_WE_THINK(version >= asset.beginVersion && version < asset.endVersion);
 
 	// The set of key value version is rangeFile.version. the key-value set in the same range file has the same version
