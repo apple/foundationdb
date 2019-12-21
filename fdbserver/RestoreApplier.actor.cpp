@@ -112,7 +112,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 		// Sanity check: mutations in range file is in [beginVersion, endVersion);
 		// mutations in log file is in [beginVersion, endVersion], both inclusive.
 		ASSERT_WE_THINK(commitVersion >= req.asset.beginVersion);
-		ASSERT_WE_THINK((req.isRangeFile && commitVersion < req.asset.endVersion) || (!req.isRangeFile && commitVersion <= req.asset.endVersion));
+		ASSERT_WE_THINK((req.isRangeFile && commitVersion < req.asset.endVersion) ||
+		                (!req.isRangeFile && commitVersion <= req.asset.endVersion));
 
 		if (self->kvOps.find(commitVersion) == self->kvOps.end()) {
 			self->kvOps.insert(std::make_pair(commitVersion, MutationsVec()));

@@ -391,7 +391,7 @@ struct RestoreLoadFileRequest : TimedRequest {
 	ReplyPromise<RestoreLoadFileReply> reply;
 
 	RestoreLoadFileRequest() = default;
-	RestoreLoadFileRequest(LoadingParam& param): param(param) {};
+	RestoreLoadFileRequest(LoadingParam& param) : param(param){};
 
 	template <class Ar>
 	void serialize(Ar& ar) {

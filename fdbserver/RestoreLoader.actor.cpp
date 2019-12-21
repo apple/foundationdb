@@ -45,7 +45,8 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequest req,
                                               Reference<RestoreLoaderData> self);
 ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, VersionedMutationsMap* kvOps,
-                                          bool isRangeFile, Version startVersion, Version endVersion, RestoreAsset asset);
+                                          bool isRangeFile, Version startVersion, Version endVersion,
+                                          RestoreAsset asset);
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
                                                            SerializedMutationListMap* mutationMap,
                                                            SerializedMutationPartMap* mutationPartMap,
@@ -159,8 +160,8 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 		subAsset.len = readLen;
 		if (param.isRangeFile) {
 			// TODO: Sanity check the range file is within the restored version range
-			fileParserFutures.push_back(_parseRangeFileToMutationsOnLoader(kvOpsPerLPIter, samplesIter, self->bc,
-			                                                               param.endVersion, subAsset));
+			fileParserFutures.push_back(
+			    _parseRangeFileToMutationsOnLoader(kvOpsPerLPIter, samplesIter, self->bc, param.endVersion, subAsset));
 		} else {
 			// TODO: Sanity check the log file's range is overlapped with the restored version range
 			fileParserFutures.push_back(_parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap,
@@ -496,8 +497,8 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	TraceEvent("FastRestoreDecodedRangeFile")
 	    .detail("Filename", asset.filename)
 	    .detail("Version", version)
-		.detail("BeginVersion", asset.beginVersion)
-		.detail("EndVersion", asset.endVersion);
+	    .detail("BeginVersion", asset.beginVersion)
+	    .detail("EndVersion", asset.endVersion);
 	ASSERT_WE_THINK(version >= asset.beginVersion && version < asset.endVersion);
 
 	// The set of key value version is rangeFile.version. the key-value set in the same range file has the same version
