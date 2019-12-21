@@ -78,7 +78,7 @@ ACTOR Future<Void> dumpKeysToRemoteCluster(IKeyValueStore* kvStore, std::string 
 	return Void();
 }
 
-ACTOR Future<Void> keyDump(std::string destCluster, std::string dataDir) {
+ACTOR Future<Void> keyDump(Optional<std::string> destCluster, std::string dataDir) {
 	state UID debugID = deterministicRandom()->randomUniqueID();
 	state std::vector<IKeyValueStore*> kvStores = getStorageKeyValueStores(dataDir);
 	state ActorCollection errors(true);
@@ -86,10 +86,21 @@ ACTOR Future<Void> keyDump(std::string destCluster, std::string dataDir) {
 	state int keysCopied = 0;
 	state int bytesCopied = 0;
 	state Future<Void> tracer = traceDumpKeysProgress(&keysCopied, &bytesCopied, debugID);
-	for (const auto kv : kvStores) {
+	state std::vector<IKeyValueStore*>::iterator iter;
+	for (iter = kvStores.begin(); iter != kvStores.end(); ++iter) {
+		state IKeyValueStore* kv = *iter;
+		state Optional<Value> idVal = wait(kv->readValue(LiteralStringRef("\xff\xffID")));
+		state Optional<Value> versionVal = wait(kv->readValue(LiteralStringRef("\xff\xffVersion")));
 		errors.add(kv->getError());
 		futures.push_back(kv->onClosed());
-		futures.push_back(dumpKeysToRemoteCluster(kv, destCluster, &keysCopied, &bytesCopied, debugID));
+		TraceEvent("FoundStorage", debugID)
+			.detail("ID", BinaryReader::fromStringRef<UID>(idVal.get(), Unversioned()).toString())
+		    .detail("Version", BinaryReader::fromStringRef<Version>(versionVal.get(), Unversioned()));
+		if (destCluster.present()) {
+			futures.push_back(dumpKeysToRemoteCluster(kv, destCluster.get(), &keysCopied, &bytesCopied, debugID));
+		} else {
+			kv->close();
+		}
 	}
 	choose {
 		when(wait(waitForAll(futures))) { return Void(); }

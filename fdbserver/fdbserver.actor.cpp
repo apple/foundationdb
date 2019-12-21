@@ -1895,7 +1895,7 @@ int main(int argc, char* argv[]) {
 
 			f = result;
 		} else if (role == KeyDump) {
-			f = stopAfter(keyDump(opts.connFile, opts.dataFolder));
+			f = stopAfter(keyDump(opts.connFile.empty() ? opts.connFile : Optional<std::string>{}, opts.dataFolder));
 			g_network->run();
 		}
 

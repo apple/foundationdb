@@ -28,7 +28,7 @@
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Void> keyDump(std::string destCluster, std::string dataFolder);
+ACTOR Future<Void> keyDump(Optional<std::string> destCluster, std::string dataFolder);
 
 #include "flow/unactorcompiler.h"
 #endif
