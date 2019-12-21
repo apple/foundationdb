@@ -154,14 +154,17 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 	for (j = param.asset.offset; j < param.asset.len; j += param.blockSize) {
 		readOffset = j;
 		readLen = std::min<int64_t>(param.blockSize, param.asset.len - j);
+		RestoreAsset subAsset = param.asset;
+		subAsset.offset = readOffset;
+		subAsset.len = readLen;
 		if (param.isRangeFile) {
 			// TODO: Sanity check the range file is within the restored version range
 			fileParserFutures.push_back(_parseRangeFileToMutationsOnLoader(kvOpsPerLPIter, samplesIter, self->bc,
-			                                                               param.endVersion, param.asset));
+			                                                               param.endVersion, subAsset));
 		} else {
 			// TODO: Sanity check the log file's range is overlapped with the restored version range
 			fileParserFutures.push_back(_parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap,
-			                                                             &mutationPartMap, self->bc, param.asset));
+			                                                             &mutationPartMap, self->bc, subAsset));
 		}
 	}
 	wait(waitForAll(fileParserFutures));
