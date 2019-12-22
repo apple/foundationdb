@@ -87,7 +87,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, 
 	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, 
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, 
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_STORAGE_UID
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -166,6 +166,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_IO_TRUST_WARN_ONLY,    "--io_trust_warn_only",        SO_NONE },
 	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
+	{ OPT_STORAGE_UID,           "--storage_uid",               SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -947,6 +948,7 @@ struct CLIOptions {
 	double fileIoTimeout = 0.0;
 	bool fileIoWarnOnly = false;
 	uint64_t rsssize = -1;
+	UID storageUID;
 
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;
@@ -1351,6 +1353,9 @@ private:
 			case OPT_WHITELIST_BINPATH:
 				whitelistBinPaths = args.OptionArg();
 				break;
+			case OPT_STORAGE_UID:
+				storageUID = UID::fromString(std::string(args.OptionArg()));
+				break;
 #ifndef TLS_DISABLED
 			case TLSOptions::OPT_TLS_PLUGIN:
 				args.OptionArg();
@@ -1471,6 +1476,11 @@ private:
 		if (role == NetworkTestClient && !testServersStr.size()) {
 			fprintf(stderr, "ERROR: please specify --testservers\n");
 			printHelpTeaser(argv[0]);
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
+		if (role == KeyDump && storageUID == UID{}) {
+			fprintf(stderr, "ERROR: please specify --storage_uid.\n");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
@@ -1895,7 +1905,8 @@ int main(int argc, char* argv[]) {
 
 			f = result;
 		} else if (role == KeyDump) {
-			f = stopAfter(keyDump(opts.connFile.empty() ? opts.connFile : Optional<std::string>{}, opts.dataFolder));
+			f = stopAfter(keyDump(opts.connFile.empty() ? opts.connFile : Optional<std::string>{}, opts.dataFolder,
+			                      opts.storageUID));
 			g_network->run();
 		}
 
