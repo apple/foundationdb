@@ -33,12 +33,11 @@ typedef std::map<Standalone<StringRef>, Standalone<StringRef>> SerializedMutatio
 // Key has the same semantics as SerializedMutationListMap; Value is the part number of the splitted mutation list
 typedef std::map<Standalone<StringRef>, uint32_t> SerializedMutationPartMap;
 
-// bool isRangeMutation(MutationRef m);
 void splitMutation(Reference<RestoreLoaderData> self, MutationRef m, Arena& mvector_arena,
                    VectorRef<MutationRef>& mvector, Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs);
 void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
                               SerializedMutationListMap* mutationMap,
-                              std::map<LoadingParam, MutationsVec>::iterator samplesIter, RestoreAsset asset);
+                              std::map<LoadingParam, MutationsVec>::iterator samplesIter, const RestoreAsset& asset);
 
 void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self);
@@ -149,8 +148,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 	kvOpsPerLPIter = self->kvOpsPerLP.find(param);
 	samplesIter = self->sampleMutations.find(param);
 
-	int64_t j;
-	for (j = param.asset.offset; j < param.asset.len; j += param.blockSize) {
+	for (int64_t j = param.asset.offset; j < param.asset.len; j += param.blockSize) {
 		RestoreAsset subAsset = param.asset;
 		subAsset.offset = j;
 		subAsset.len = std::min<int64_t>(param.blockSize, param.asset.len - j);
@@ -295,7 +293,7 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 		    .detail("Loader", self->id())
 		    .detail("PrevVersion", prevVersion)
 		    .detail("CommitVersion", commitVersion)
-		    .detail("FileIndex", asset.filename);
+		    .detail("Filename", asset.filename);
 		ASSERT(prevVersion < commitVersion);
 		prevVersion = commitVersion;
 		wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, self->appliersInterf, requests));
@@ -360,7 +358,7 @@ void splitMutation(Reference<RestoreLoaderData> self, MutationRef m, Arena& mvec
 bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standalone<StringRef>>* pMutationMap,
                                          std::map<Standalone<StringRef>, uint32_t>* pMutationPartMap,
                                          Standalone<StringRef> key_input, Standalone<StringRef> val_input,
-                                         RestoreAsset asset) {
+                                         const RestoreAsset& asset) {
 	SerializedMutationListMap& mutationMap = *pMutationMap;
 	std::map<Standalone<StringRef>, uint32_t>& mutationPartMap = *pMutationPartMap;
 	const int key_prefix_len = sizeof(uint8_t) + sizeof(Version) + sizeof(uint32_t);
@@ -425,7 +423,7 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 //	a mutation is encoded as [type:uint32_t][keyLength:uint32_t][valueLength:uint32_t][keyContent][valueContent]
 void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
                               SerializedMutationListMap* pmutationMap,
-                              std::map<LoadingParam, MutationsVec>::iterator samplesIter, RestoreAsset asset) {
+                              std::map<LoadingParam, MutationsVec>::iterator samplesIter, const RestoreAsset& asset) {
 	VersionedMutationsMap& kvOps = kvOpsIter->second;
 	MutationsVec& samples = samplesIter->second;
 	SerializedMutationListMap& mutationMap = *pmutationMap;
@@ -437,7 +435,7 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 		BackupStringRefReader kReader(k, restore_corrupted_data());
 		uint64_t commitVersion = kReader.consume<uint64_t>(); // Consume little Endian data
 		// We have already filter the commit not in [beginVersion, endVersion) when we concatenate kv pair in log file
-		ASSERT_WE_THINK(commitVersion >= asset.beginVersion && commitVersion < asset.endVersion);
+		ASSERT_WE_THINK(asset.isInVersionRange(commitVersion));
 		kvOps.insert(std::make_pair(commitVersion, MutationsVec()));
 
 		BackupStringRefReader vReader(val, restore_corrupted_data());
@@ -461,10 +459,18 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 			const uint8_t* v = vReader.consume(vLen);
 
 			MutationRef mutation((MutationRef::Type)type, KeyRef(k, kLen), KeyRef(v, vLen));
+			// Should this mutation be skipped?
+			if (mutation.param1 >= asset.range.end ||
+			    (isRangeMutation(mutation) && mutation.param2 < asset.range.begin) ||
+			    (!isRangeMutation(mutation) && mutation.param1 < asset.range.begin)) {
+				continue;
+			}
+			// Only apply mutation within the asset.range
 			if (isRangeMutation(mutation)) {
 				mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
 				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
 			}
+
 			TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
 			    .detail("CommitVersion", commitVersion)
 			    .detail("ParsedMutation", mutation.toString());

@@ -204,24 +204,25 @@ struct RestoreAsset {
 	Version beginVersion, endVersion; // Only use mutation in [begin, end) versions;
 	KeyRange range; // Only use mutations in range
 
-	std::string filename;
 	int fileIndex;
+	std::string filename;
 	int64_t offset;
 	int64_t len;
 
 	RestoreAsset() = default;
 
 	bool operator==(const RestoreAsset& r) const {
-		return filename == r.filename && offset == r.offset && len == r.len && beginVersion == r.beginVersion &&
-		       endVersion == r.endVersion && range == r.range;
+		return fileIndex == r.fileIndex && filename == r.filename && offset == r.offset && len == r.len &&
+		       beginVersion == r.beginVersion && endVersion == r.endVersion && range == r.range;
 	}
 	bool operator!=(const RestoreAsset& r) const {
-		return filename != r.filename || offset != r.offset || len != r.len || beginVersion != r.beginVersion ||
-		       endVersion != r.endVersion || range != r.range;
+		return fileIndex != r.fileIndex || filename != r.filename || offset != r.offset || len != r.len ||
+		       beginVersion != r.beginVersion || endVersion != r.endVersion || range != r.range;
 	}
 	bool operator<(const RestoreAsset& r) const {
-		return std::make_tuple(filename, offset, len, beginVersion, endVersion, range.begin, range.end) <
-		       std::make_tuple(r.filename, r.offset, r.len, r.beginVersion, r.endVersion, r.range.begin, r.range.end);
+		return std::make_tuple(fileIndex, filename, offset, len, beginVersion, endVersion, range.begin, range.end) <
+		       std::make_tuple(r.fileIndex, r.filename, r.offset, r.len, r.beginVersion, r.endVersion, r.range.begin,
+		                       r.range.end);
 	}
 
 	template <class Ar>
@@ -234,6 +235,10 @@ struct RestoreAsset {
 		ss << "begin:" << beginVersion << " end:" << endVersion << " range:" << range.toString()
 		   << " filename:" << filename << " fileIndex:" << fileIndex << " offset:" << offset << " len:" << len;
 		return ss.str();
+	}
+
+	bool isInVersionRange(Version commitVersion) const {
+		return commitVersion >= beginVersion && commitVersion < endVersion;
 	}
 };
 
@@ -433,7 +438,7 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendVersionedMutationsRequest() = default;
-	explicit RestoreSendVersionedMutationsRequest(RestoreAsset asset, Version prevVersion, Version version,
+	explicit RestoreSendVersionedMutationsRequest(const RestoreAsset& asset, Version prevVersion, Version version,
 	                                              bool isRangeFile, MutationsVec mutations)
 	  : asset(asset), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile), mutations(mutations) {}
 
