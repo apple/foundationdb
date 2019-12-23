@@ -377,7 +377,7 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 	readerKey.consume<uint8_t>(); // uint8_t hashValue = readerKey.consume<uint8_t>()
 	Version commitVersion = readerKey.consumeNetworkUInt64();
 	// Skip mutations not in [asset.beginVersion, asset.endVersion), which is what we are only processing right now
-	if (commitVersion < asset.beginVersion || commitVersion >= asset.endVersion) {
+	if (!asset.isInVersionRange(commitVersion))  {
 		return false;
 	}
 
@@ -499,7 +499,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	    .detail("BeginVersion", asset.beginVersion)
 	    .detail("EndVersion", asset.endVersion);
 	// Sanity check the range file is within the restored version range
-	ASSERT_WE_THINK(version >= asset.beginVersion && version < asset.endVersion);
+	ASSERT_WE_THINK(asset.isInVersionRange(version));
 
 	// The set of key value version is rangeFile.version. the key-value set in the same range file has the same version
 	Reference<IAsyncFile> inFile = wait(bc->readFile(asset.filename));
