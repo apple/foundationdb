@@ -30,6 +30,8 @@ if(WIX_FOUND)
   add_dependencies(wixobj fdbserver fdbcli fdbmonitor fdb_c fdbbackup python_binding)
 	if(NOT FDB_RELEASE)
     set(prerelease_string "-PRERELEASE")
+  else()
+    set(prerelease_string "")
   endif()
 	# 64 bits
   if(CMAKE_SIZEOF_VOID_P EQUAL 8)

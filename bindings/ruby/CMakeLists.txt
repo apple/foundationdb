@@ -6,6 +6,8 @@ configure_file(fdb.gemspec.cmake fdb.gemspec)
 
 if(NOT FDB_RELEASE)
   set(prerelease_string "PRERELEASE")
+else()
+  set(prerelease_string "")
 endif()
 
 set(setup_file fdb-${FDB_VERSION}.gem)
