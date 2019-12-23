@@ -31,6 +31,8 @@ if(NOT OPEN_FOR_IDE)
 
   if(NOT FDB_RELEASE)
     set(prerelease_string "-PRERELEASE")
+  else()
+    set(prerelease_string "")
   endif()
 
   file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/packages)
