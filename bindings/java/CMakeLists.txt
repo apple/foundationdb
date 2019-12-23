@@ -228,6 +228,8 @@ if(NOT OPEN_FOR_IDE)
   add_dependencies(copy_lib unpack_jar)
   if(NOT FDB_RELEASE)
     set(prerelease_string "-PRERELEASE")
+  else()
+    set(prerelease_string "")
   endif()
   set(target_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}${prerelease_string}.jar)
   add_custom_command(OUTPUT ${target_jar}
