@@ -94,13 +94,13 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 // Only one actor can process mutations from the same file
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self) {
-	// Assume: self->processedFileState[req.fileIndex] will not be erased while the actor is active.
+	// Assume: self->processedFileState[req.asset] will not be erased while the actor is active.
 	// Note: Insert new items into processedFileState will not invalidate the reference.
-	state NotifiedVersion& curFilePos = self->processedFileState[req.fileIndex];
+	state NotifiedVersion& curFilePos = self->processedFileState[req.asset];
 
 	TraceEvent("FastRestore")
 	    .detail("ApplierNode", self->id())
-	    .detail("FileIndex", req.fileIndex)
+	    .detail("RestoreAsset", req.asset.toString())
 	    .detail("ProcessedFileVersion", curFilePos.get())
 	    .detail("Request", req.toString());
 
@@ -109,6 +109,12 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	if (curFilePos.get() == req.prevVersion) {
 		Version commitVersion = req.version;
 		MutationsVec mutations(req.mutations);
+		// Sanity check: mutations in range file is in [beginVersion, endVersion);
+		// mutations in log file is in [beginVersion, endVersion], both inclusive.
+		ASSERT_WE_THINK(commitVersion >= req.asset.beginVersion);
+		ASSERT_WE_THINK((req.isRangeFile && commitVersion < req.asset.endVersion) ||
+		                (!req.isRangeFile && commitVersion <= req.asset.endVersion));
+
 		if (self->kvOps.find(commitVersion) == self->kvOps.end()) {
 			self->kvOps.insert(std::make_pair(commitVersion, MutationsVec()));
 		}
@@ -116,10 +122,19 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			MutationRef mutation = mutations[mIndex];
 			TraceEvent(SevFRMutationInfo, "FastRestore")
 			    .detail("ApplierNode", self->id())
-			    .detail("FileUID", req.fileIndex)
+			    .detail("RestoreAsset", req.asset.toString())
 			    .detail("Version", commitVersion)
 			    .detail("Index", mIndex)
 			    .detail("MutationReceived", mutation.toString());
+			// Sanity check
+			if (g_network->isSimulated()) {
+				if (isRangeMutation(mutation)) {
+					ASSERT(mutation.param1 >= req.asset.range.begin &&
+					       mutation.param2 <= req.asset.range.end); // Range mutation's right side is exclusive
+				} else {
+					ASSERT(mutation.param1 >= req.asset.range.begin && mutation.param1 < req.asset.range.end);
+				}
+			}
 			self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
 			// TODO: What if log file's mutations are delivered out-of-order (behind) the range file's mutations?!
 		}

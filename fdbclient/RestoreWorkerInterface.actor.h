@@ -196,6 +196,52 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 	std::string toString() { return nodeID.toString(); }
 };
 
+// RestoreAsset uniquely identifies the work unit done by restore roles;
+// It is used to ensure exact-once processing on restore loader and applier;
+// By combining all RestoreAssets across all verstion batches, restore should process all mutations in
+// backup range and log files up to the target restore version.
+struct RestoreAsset {
+	Version beginVersion, endVersion; // Only use mutation in [begin, end) versions;
+	KeyRange range; // Only use mutations in range
+
+	int fileIndex;
+	std::string filename;
+	int64_t offset;
+	int64_t len;
+
+	RestoreAsset() = default;
+
+	bool operator==(const RestoreAsset& r) const {
+		return fileIndex == r.fileIndex && filename == r.filename && offset == r.offset && len == r.len &&
+		       beginVersion == r.beginVersion && endVersion == r.endVersion && range == r.range;
+	}
+	bool operator!=(const RestoreAsset& r) const {
+		return fileIndex != r.fileIndex || filename != r.filename || offset != r.offset || len != r.len ||
+		       beginVersion != r.beginVersion || endVersion != r.endVersion || range != r.range;
+	}
+	bool operator<(const RestoreAsset& r) const {
+		return std::make_tuple(fileIndex, filename, offset, len, beginVersion, endVersion, range.begin, range.end) <
+		       std::make_tuple(r.fileIndex, r.filename, r.offset, r.len, r.beginVersion, r.endVersion, r.range.begin,
+		                       r.range.end);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, beginVersion, endVersion, range, filename, fileIndex, offset, len);
+	}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "begin:" << beginVersion << " end:" << endVersion << " range:" << range.toString()
+		   << " filename:" << filename << " fileIndex:" << fileIndex << " offset:" << offset << " len:" << len;
+		return ss.str();
+	}
+
+	bool isInVersionRange(Version commitVersion) const {
+		return commitVersion >= beginVersion && commitVersion < endVersion;
+	}
+};
+
 // TODO: It is probably better to specify the (beginVersion, endVersion] for each loadingParam.
 // beginVersion (endVersion) is the version the applier is before (after) it receives the request.
 struct LoadingParam {
@@ -205,34 +251,28 @@ struct LoadingParam {
 	Key url;
 	Version prevVersion;
 	Version endVersion; // range file's mutations are all at the endVersion
-	int fileIndex;
-	std::string filename;
-	int64_t offset;
-	int64_t length;
+
 	int64_t blockSize;
-	KeyRange restoreRange;
+	RestoreAsset asset;
 
 	LoadingParam() = default;
 
 	// TODO: Compare all fields for loadingParam
-	bool operator==(const LoadingParam& r) const { return isRangeFile == r.isRangeFile && filename == r.filename; }
-	bool operator!=(const LoadingParam& r) const { return isRangeFile != r.isRangeFile || filename != r.filename; }
+	bool operator==(const LoadingParam& r) const { return isRangeFile == r.isRangeFile && asset == r.asset; }
+	bool operator!=(const LoadingParam& r) const { return isRangeFile != r.isRangeFile || asset != r.asset; }
 	bool operator<(const LoadingParam& r) const {
-		return (isRangeFile < r.isRangeFile) || (isRangeFile == r.isRangeFile && filename < r.filename);
+		return (isRangeFile < r.isRangeFile) || (isRangeFile == r.isRangeFile && asset < r.asset);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, isRangeFile, url, prevVersion, endVersion, fileIndex, filename, offset, length, blockSize,
-		           restoreRange);
+		serializer(ar, isRangeFile, url, prevVersion, endVersion, blockSize, asset);
 	}
 
 	std::string toString() {
 		std::stringstream str;
 		str << "isRangeFile:" << isRangeFile << " url:" << url.toString() << " prevVersion:" << prevVersion
-		    << " endVersion:" << endVersion << " fileIndex:" << fileIndex << " filename:" << filename
-		    << " offset:" << offset << " length:" << length << " blockSize:" << blockSize
-		    << " restoreRange:" << restoreRange.toString();
+		    << " endVersion:" << endVersion << " blockSize:" << blockSize << " RestoreAsset:" << asset.toString();
 		return str.str();
 	}
 };
@@ -347,7 +387,7 @@ struct RestoreLoadFileRequest : TimedRequest {
 	ReplyPromise<RestoreLoadFileReply> reply;
 
 	RestoreLoadFileRequest() = default;
-	explicit RestoreLoadFileRequest(LoadingParam param) : param(param) {}
+	explicit RestoreLoadFileRequest(LoadingParam& param) : param(param){};
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -389,29 +429,29 @@ struct RestoreSendMutationsToAppliersRequest : TimedRequest {
 struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 69764565;
 
+	RestoreAsset asset; // Unique identifier for the current restore asset
+
 	Version prevVersion, version; // version is the commitVersion of the mutation vector.
-	int fileIndex; // Unique index for a backup file
 	bool isRangeFile;
 	MutationsVec mutations; // All mutations at the same version parsed by one loader
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendVersionedMutationsRequest() = default;
-	explicit RestoreSendVersionedMutationsRequest(int fileIndex, Version prevVersion, Version version, bool isRangeFile,
-	                                              MutationsVec mutations)
-	  : fileIndex(fileIndex), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile),
-	    mutations(mutations) {}
+	explicit RestoreSendVersionedMutationsRequest(const RestoreAsset& asset, Version prevVersion, Version version,
+	                                              bool isRangeFile, MutationsVec mutations)
+	  : asset(asset), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile), mutations(mutations) {}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "fileIndex:" << fileIndex << " prevVersion:" << prevVersion << " version:" << version
+		ss << "RestoreAsset:" << asset.toString() << " prevVersion:" << prevVersion << " version:" << version
 		   << " isRangeFile:" << isRangeFile << " mutations.size:" << mutations.size();
 		return ss.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, fileIndex, prevVersion, version, isRangeFile, mutations, reply);
+		serializer(ar, asset, prevVersion, version, isRangeFile, mutations, reply);
 	}
 };
 

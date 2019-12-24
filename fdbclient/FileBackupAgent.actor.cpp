@@ -284,7 +284,7 @@ public:
 
 	void clearApplyMutationsKeys(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
-		
+
 		// Clear add/remove prefix keys
 		tr->clear(uidPrefixKey(applyMutationsAddPrefixRange.begin, uid));
 		tr->clear(uidPrefixKey(applyMutationsRemovePrefixRange.begin, uid));
