@@ -149,12 +149,12 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 
 			for (int i = 0; i < NetworkMetrics::PRIORITY_BINS && g_network->networkMetrics.priorityBins[i] != TaskPriority::Zero; i++) {
 				if(g_network->networkMetrics.priorityBlocked[i]) {
-					g_network->networkMetrics.priorityBlockedDuration[i] += std::min(currentStats.elapsed, now() - g_network->networkMetrics.windowedPriorityTimer[i]);
+					g_network->networkMetrics.priorityBlockedDuration[i] += now() - g_network->networkMetrics.windowedPriorityTimer[i];
 					g_network->networkMetrics.priorityMaxBlockedDuration[i] = std::max(g_network->networkMetrics.priorityMaxBlockedDuration[i], now() - g_network->networkMetrics.priorityTimer[i]);
 					g_network->networkMetrics.windowedPriorityTimer[i] = now();
 				}
 
-				n.detail(format("PriorityBusy%d", g_network->networkMetrics.priorityBins[i]).c_str(), g_network->networkMetrics.priorityBlockedDuration[i] - statState->networkMetricsState.priorityBlockedDuration[i]);
+				n.detail(format("PriorityBusy%d", g_network->networkMetrics.priorityBins[i]).c_str(), std::min(currentStats.elapsed, g_network->networkMetrics.priorityBlockedDuration[i] - statState->networkMetricsState.priorityBlockedDuration[i]));
 				n.detail(format("PriorityMaxBusy%d", g_network->networkMetrics.priorityBins[i]).c_str(), g_network->networkMetrics.priorityMaxBlockedDuration[i]);
 
 				g_network->networkMetrics.priorityMaxBlockedDuration[i] = 0;
