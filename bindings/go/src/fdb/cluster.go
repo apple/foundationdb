@@ -26,7 +26,7 @@ package fdb
 // #include <foundationdb/fdb_c.h>
 import "C"
 
-// Deprecated: Use OpenDatabase or OpenDefault to obtain a database handle directly
+// Deprecated: Use OpenDatabase or OpenDefault to obtain a database handle directly.
 // Cluster is a handle to a FoundationDB cluster. Cluster is a lightweight
 // object that may be efficiently copied, and is safe for concurrent use by
 // multiple goroutines.
@@ -34,7 +34,7 @@ type Cluster struct {
 	clusterFileName string
 }
 
-// Deprecated: Use OpenDatabase or OpenDefault to obtain a database handle directly
+// Deprecated: Use OpenDatabase or OpenDefault to obtain a database handle directly.
 // OpenDatabase returns a database handle from the FoundationDB cluster.
 //
 // The database name must be []byte("DB").
