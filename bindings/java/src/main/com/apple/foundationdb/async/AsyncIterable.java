@@ -31,8 +31,6 @@ import java.util.concurrent.CompletableFuture;
  */
 public interface AsyncIterable<T> extends Iterable<T> {
 	/**
-	 * Gets a non-blocking iterator to be used to enumerate all values. You can find a
-	 *  comparision between this and {@link #asList()} in the doc of {@link #asList()}.
 	 *
 	 * @return a handle to be used for non-blocking iteration
 	 */
@@ -43,20 +41,6 @@ public interface AsyncIterable<T> extends Iterable<T> {
 	 * Asynchronously return the results of this operation as a {@code List}. This is
 	 *  added as a convenience to users and an opportunity for providers
 	 *  of this interface to optimize large operations.
-	 *
-	 * <p>
-	 *     Comparision between {@link #asList()} and {@link #iterator()}:
-	 *         The way that range queries work is that they request results in batches from the cluster
-	 *         using a byte limit determined by your streaming mode. The default streaming mode for the
-	 *         {@link #iterator()} is one that starts at a low byte limit and gradually increases (called `ITERATOR`),
-	 *         while calling {@link #asList()} uses `WANT_ALL` or `EXACT`, depending on whether you specify a row limit.
-	 *         If it has to do enough requests, the iterator mode would eventually reach the same byte limit
-	 *         as `WANT_ALL`, so a sufficiently large range should hopefully take a similar amount of time between
-	 *         the two queries in relative terms.
-	 *         And thus, in theory, one should get better performance if one needs to, for example,
-	 *         pipeline asynchronous tasks (one per result back from the get range query) if one uses the
-	 *         {@link #iterator()} than if one uses asList, since the first byte will be returned earlier.
-	 * </p>
 	 *
 	 * @see AsyncUtil#collect(AsyncIterable)
 	 *

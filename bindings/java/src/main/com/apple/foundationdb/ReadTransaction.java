@@ -210,6 +210,20 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
 	 *
+	 * <p>
+	 *     Different streaming modes:
+	 *         The way that range queries work is that they request results in batches from the cluster
+	 *         using a byte limit determined by your streaming mode.
+	 *            - `ITERATOR`
+	 *              This is the default streaming mode which starts at a low byte limit and gradually increases. If it
+	 *              has to do enough requests, the `ITERATOR` mode would eventually reach the same byte limit. Additionally,
+	 *              since the first byte will be retruned earlier, in theory, one should get better performance when
+	 *              using this mode if one needs to pipeline asynchronous tasks (one per result back from the query).
+	 *            - `EXACT`
+	 *              The client has passed a specific row limit and wants that many rows delivered in a single batch.
+	 *            - `WANT_ALL`
+	 *              The client intends to consume the entire range and would like it all transferred as early as possible.
+	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
@@ -289,6 +303,20 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
 	 *
+	 * <p>
+	 *     Different streaming modes:
+	 *         The way that range queries work is that they request results in batches from the cluster
+	 *         using a byte limit determined by your streaming mode.
+	 *            - `ITERATOR`
+	 *              This is the default streaming mode which starts at a low byte limit and gradually increases. If it
+	 *              has to do enough requests, the `ITERATOR` mode would eventually reach the same byte limit. Additionally,
+	 *              since the first byte will be retruned earlier, in theory, one should get better performance when
+	 *              using this mode if one needs to pipeline asynchronous tasks (one per result back from the query).
+	 *            - `EXACT`
+	 *              The client has passed a specific row limit and wants that many rows delivered in a single batch.
+	 *            - `WANT_ALL`
+	 *              The client intends to consume the entire range and would like it all transferred as early as possible.
+	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
@@ -380,6 +408,20 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
 	 *
+	 * <p>
+	 *     Different streaming modes:
+	 *         The way that range queries work is that they request results in batches from the cluster
+	 *         using a byte limit determined by your streaming mode.
+	 *            - `ITERATOR`
+	 *              This is the default streaming mode which starts at a low byte limit and gradually increases. If it
+	 *              has to do enough requests, the `ITERATOR` mode would eventually reach the same byte limit. Additionally,
+	 *              since the first byte will be retruned earlier, in theory, one should get better performance when
+	 *              using this mode if one needs to pipeline asynchronous tasks (one per result back from the query).
+	 *            - `EXACT`
+	 *              The client has passed a specific row limit and wants that many rows delivered in a single batch.
+	 *            - `WANT_ALL`
+	 *              The client intends to consume the entire range and would like it all transferred as early as possible.
+	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<KeyValue> getRange(Range range,
