@@ -31,7 +31,8 @@ import java.util.concurrent.CompletableFuture;
  */
 public interface AsyncIterable<T> extends Iterable<T> {
 	/**
-	 *
+	 * Gets a non-blocking iterator to be used to enumerate all values.
+	 * 
 	 * @return a handle to be used for non-blocking iteration
 	 */
 	@Override
