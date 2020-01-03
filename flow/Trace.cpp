@@ -948,7 +948,6 @@ TraceEvent& TraceEvent::backtrace(const std::string& prefix) {
 
 void TraceEvent::log() {
 	if(!logged) {
-		logged = true;
 		init();
 		try {
 			if (enabled) {
@@ -982,6 +981,7 @@ void TraceEvent::log() {
 		}
 		delete tmpEventMetric;
 		g_trace_depth--;
+		logged = true;
 	}
 }
 
