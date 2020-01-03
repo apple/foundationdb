@@ -653,13 +653,13 @@ void removeTraceRole(std::string role) {
 	g_traceLog.removeRole(role);
 }
 
-TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true) {
+TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true), logged(false) {
 	g_trace_depth++;
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
 TraceEvent::TraceEvent( Severity severity, const char* type, UID id )
-	: id(id), type(type), severity(severity), initialized(false),
+	: id(id), type(type), severity(severity), initialized(false), logged(false),
 	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
 	g_trace_depth++;
 	setMaxFieldLength(0);
@@ -668,7 +668,7 @@ TraceEvent::TraceEvent( Severity severity, const char* type, UID id )
 TraceEvent::TraceEvent( TraceInterval& interval, UID id )
 	: id(id), type(interval.type),
 	  severity(interval.severity),
-	  initialized(false),
+	  initialized(false), logged(false),
 	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= interval.severity) {
 
 	g_trace_depth++;
@@ -680,7 +680,7 @@ TraceEvent::TraceEvent( TraceInterval& interval, UID id )
 TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id )
 	: id(id), type(interval.type),
 	  severity(severity),
-	  initialized(false),
+	  initialized(false), logged(false),
 	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
 
 	g_trace_depth++;
@@ -938,40 +938,47 @@ TraceEvent& TraceEvent::backtrace(const std::string& prefix) {
 	return detail(prefix + "Backtrace", platform::get_backtrace());
 }
 
-TraceEvent::~TraceEvent() {
-	init();
-	try {
-		if (enabled) {
-			if (this->severity == SevError) {
-				severity = SevInfo;
-				backtrace();
-				severity = SevError;
-			}
+void TraceEvent::log() {
+	if(!logged) {
+		logged = true;
+		init();
+		try {
+			if (enabled) {
+				if (this->severity == SevError) {
+					severity = SevInfo;
+					backtrace();
+					severity = SevError;
+				}
 
-			if(isNetworkThread()) {
-				TraceEvent::eventCounts[severity/10]++;
-			}
+				if(isNetworkThread()) {
+					TraceEvent::eventCounts[severity/10]++;
+				}
 
-			g_traceLog.writeEvent( fields, trackingKey, severity > SevWarnAlways );
+				g_traceLog.writeEvent( fields, trackingKey, severity > SevWarnAlways );
 
-			if (g_traceLog.isOpen()) {
-				// Log Metrics
-				if(g_traceLog.logTraceEventMetrics && isNetworkThread()) {
-					// Get the persistent Event Metric representing this trace event and push the fields (details) accumulated in *this to it and then log() it.
-					// Note that if the event metric is disabled it won't actually be logged BUT any new fields added to it will be registered.
-					// If the event IS logged, a timestamp will be returned, if not then 0.  Either way, pass it through to be used if possible
-					// in the Sev* event metrics.
+				if (g_traceLog.isOpen()) {
+					// Log Metrics
+					if(g_traceLog.logTraceEventMetrics && isNetworkThread()) {
+						// Get the persistent Event Metric representing this trace event and push the fields (details) accumulated in *this to it and then log() it.
+						// Note that if the event metric is disabled it won't actually be logged BUT any new fields added to it will be registered.
+						// If the event IS logged, a timestamp will be returned, if not then 0.  Either way, pass it through to be used if possible
+						// in the Sev* event metrics.
 
-					uint64_t event_ts = DynamicEventMetric::getOrCreateInstance(format("TraceEvent.%s", type), StringRef(), true)->setFieldsAndLogFrom(tmpEventMetric);
-					g_traceLog.log(severity, type, id, event_ts);
+						uint64_t event_ts = DynamicEventMetric::getOrCreateInstance(format("TraceEvent.%s", type), StringRef(), true)->setFieldsAndLogFrom(tmpEventMetric);
+						g_traceLog.log(severity, type, id, event_ts);
+					}
 				}
 			}
+		} catch( Error &e ) {
+			TraceEvent(SevError, "TraceEventDestructorError").error(e,true);
 		}
-	} catch( Error &e ) {
-		TraceEvent(SevError, "TraceEventDestructorError").error(e,true);
+		delete tmpEventMetric;
+		g_trace_depth--;
 	}
-	delete tmpEventMetric;
-	g_trace_depth--;
+}
+
+TraceEvent::~TraceEvent() {
+	log();
 }
 
 thread_local bool TraceEvent::networkThread = false;

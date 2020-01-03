@@ -464,6 +464,8 @@ public:
 		return enabled;
 	}
 
+	void log();
+
 	~TraceEvent();  // Actually logs the event
 
 	// Return the number of invocations of TraceEvent() at the specified logging level.
@@ -474,6 +476,7 @@ public:
 private:
 	bool initialized;
 	bool enabled;
+	bool logged;
 	std::string trackingKey;
 	TraceEventFields fields;
 	Severity severity;

@@ -287,9 +287,10 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			ev.detail("Backoff", backoff);
 			ev.detail("TriedAllOptions", triedAllOptions);
 			if(ev.isEnabled()) {
+				ev.log();
 				for(int alternativeNum=0; alternativeNum<alternatives->size(); alternativeNum++) {
 					RequestStream<Request> const* thisStream = &alternatives->get( alternativeNum, channel );
-					TraceEvent(g_network->isSimulated() ? SevWarn : SevWarnAlways, "LoadBalanceTooLongEndpoint").detail("Addr", thisStream->getEndpoint().getPrimaryAddress()).detail("Token", thisStream->getEndpoint().token).detail("Failed", IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed);
+					TraceEvent(SevWarn, "LoadBalanceTooLongEndpoint").detail("Addr", thisStream->getEndpoint().getPrimaryAddress()).detail("Token", thisStream->getEndpoint().token).detail("Failed", IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed);
 				}
 			}
 		}
