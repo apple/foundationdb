@@ -2408,7 +2408,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if(configuration.usableRegions > 1) {
 			logSystem->hasRemoteServers = true;
 			logSystem->remoteRecovery = TagPartitionedLogSystem::newRemoteEpoch(logSystem.getPtr(), oldLogSystem, fRemoteWorkers, configuration, recoveryCount, remoteLocality, allTags);
-			if(oldLogSystem->logRouterTags == 0) {
+			if (oldLogSystem->tLogs.size() > 0 && oldLogSystem->tLogs[0]->locality == tagLocalitySpecial) {
 				//The wait is required so that we know both primary logs and remote logs have copied the data between the known committed version and the recovery version.
 				//FIXME: we can remove this wait once we are able to have log routers which can ship data to the remote logs without using log router tags.
 				wait(logSystem->remoteRecovery);
