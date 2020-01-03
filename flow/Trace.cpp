@@ -701,6 +701,7 @@ bool TraceEvent::init( TraceInterval& interval ) {
 }
 
 bool TraceEvent::init() {
+	ASSERT(!logged);
 	if(initialized) {
 		return enabled;
 	}
@@ -765,6 +766,7 @@ bool TraceEvent::init() {
 }
 
 TraceEvent& TraceEvent::errorImpl(class Error const& error, bool includeCancelled) {
+	ASSERT(!logged);
 	if (error.code() != error_code_actor_cancelled || includeCancelled) {
 		err = error;
 		if (initialized) {
@@ -847,12 +849,14 @@ TraceEvent& TraceEvent::detailfNoMetric( std::string&& key, const char* valueFor
 }
 
 TraceEvent& TraceEvent::trackLatest( const char *trackingKey ){
+	ASSERT(!logged);
 	this->trackingKey = trackingKey;
 	ASSERT( this->trackingKey.size() != 0 && this->trackingKey[0] != '/' && this->trackingKey[0] != '\\');
 	return *this;
 }
 
 TraceEvent& TraceEvent::sample( double sampleRate, bool logSampleRate ) {
+	ASSERT(!logged);
 	if(enabled) {
 		if(initialized) {
 			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str()).suppressFor(5);
@@ -870,6 +874,7 @@ TraceEvent& TraceEvent::sample( double sampleRate, bool logSampleRate ) {
 }
 
 TraceEvent& TraceEvent::suppressFor( double duration, bool logSuppressedEventCount ) {
+	ASSERT(!logged);
 	if(enabled) {
 		if(initialized) {
 			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str()).suppressFor(5);
@@ -896,6 +901,7 @@ TraceEvent& TraceEvent::suppressFor( double duration, bool logSuppressedEventCou
 }
 
 TraceEvent& TraceEvent::setMaxFieldLength(int maxFieldLength) {
+	ASSERT(!logged);
 	if(maxFieldLength == 0) {
 		this->maxFieldLength = FLOW_KNOBS ? FLOW_KNOBS->MAX_TRACE_FIELD_LENGTH : 495;
 	} 
@@ -907,6 +913,7 @@ TraceEvent& TraceEvent::setMaxFieldLength(int maxFieldLength) {
 }
 
 TraceEvent& TraceEvent::setMaxEventLength(int maxEventLength) {
+	ASSERT(!logged);
 	if(maxEventLength == 0) {
 		this->maxEventLength = FLOW_KNOBS ? FLOW_KNOBS->MAX_TRACE_EVENT_LENGTH : 4000;
 	} 
@@ -934,6 +941,7 @@ unsigned long TraceEvent::CountEventsLoggedAt(Severity sev) {
 }
 
 TraceEvent& TraceEvent::backtrace(const std::string& prefix) {
+	ASSERT(!logged);
 	if (this->severity == SevError || !enabled) return *this; // We'll backtrace this later in ~TraceEvent
 	return detail(prefix + "Backtrace", platform::get_backtrace());
 }
