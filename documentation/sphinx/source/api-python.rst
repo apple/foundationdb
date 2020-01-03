@@ -111,7 +111,9 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
 
 .. function:: open( cluster_file=None, event_model=None )
 
-    |fdb-open-blurb|
+    |fdb-open-blurb1|
+
+    |fdb-open-blurb2|
 
     .. param event_model:: Can be used to select alternate :ref:`api-python-event-models`
 
@@ -589,6 +591,8 @@ Writing data
 
     Removes all keys ``k`` such that ``begin <= k < end``, and their associated values. |immediate-return|
 
+    |transaction-clear-range-blurb|
+
     .. note :: Unlike in the case of :meth:`get_range`, ``begin`` and ``end`` must be keys (byte strings), not :class:`KeySelector`\ s.  (Resolving arbitrary key selectors would prevent this method from returning immediately, introducing concurrency issues.)
 
 ``del tr[begin:end]``
@@ -597,6 +601,8 @@ Writing data
 .. method:: Transaction.clear_range_startswith(prefix)
 
     Removes all the keys ``k`` such that ``k.startswith(prefix)``, and their associated values. |immediate-return|
+
+    |transaction-clear-range-blurb|
 
 .. _api-python-transaction-atomic-operations:
 
@@ -637,6 +643,10 @@ In each of the methods below, ``param`` should be a string appropriately packed 
 .. method:: Transaction.bit_xor(key, param)
 
     |atomic-xor|
+
+.. method:: Transaction.compare_and_clear(key, param)
+
+    |atomic-compare-and-clear|
 
 .. method:: Transaction.max(key, param)
 
@@ -881,6 +891,14 @@ Transaction options
 
     |option-set-transaction-logging-max-field-length-blurb|
 
+.. method:: Transaction.options.set_debug_transaction_identifier(id_string)
+
+    |option-set-debug-transaction-identifier|
+
+.. method:: Transaction.options.set_log_transaction()
+
+    |option-set-log-transaction|
+
 .. _api-python-future:
 
 Future objects
@@ -911,6 +929,8 @@ All future objects are a subclass of the :class:`Future` type.
 .. method:: Future.on_ready(callback)
 
     Calls the specified callback function, passing itself as a single argument, when the future object is ready. If the future object is ready at the time :meth:`on_ready()` is called, the call may occur immediately in the current thread (although this behavior is not guaranteed). Otherwise, the call may be delayed and take place on the thread with which the client was initialized. Therefore, the callback is responsible for any needed thread synchronization (and/or for posting work to your application's event loop, thread pool, etc., as may be required by your application's architecture).
+
+    .. note:: This function guarantees the callback will be executed **at most once**.
 
 .. warning:: |fdb-careful-with-callbacks-blurb|
 

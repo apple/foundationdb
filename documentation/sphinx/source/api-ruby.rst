@@ -100,7 +100,9 @@ After requiring the ``FDB`` gem and selecting an API version, you probably want 
 
 .. function:: open( cluster_file=nil ) -> Database
 
-    |fdb-open-blurb|
+    |fdb-open-blurb1|
+
+    |fdb-open-blurb2|
 
 .. global:: FDB.options
 
@@ -546,11 +548,15 @@ Writing data
 
     Removes all keys ``k`` such that ``begin <= k < end``, and their associated values. |immediate-return|
 
+    |transaction-clear-range-blurb|
+
     .. note:: Unlike in the case of :meth:`Transaction.get_range`, ``begin`` and ``end`` must be keys (:class:`String` or :class:`Key`), not :class:`KeySelector`\ s.  (Resolving arbitrary key selectors would prevent this method from returning immediately, introducing concurrency issues.)
 
 .. method:: Transaction.clear_range_start_with(prefix) -> nil
 
     Removes all the keys ``k`` such that ``k.start_with? prefix``, and their associated values. |immediate-return|
+
+    |transaction-clear-range-blurb|
 
 .. _api-ruby-transaction-atomic-operations:
 
@@ -590,6 +596,10 @@ In each of the methods below, ``param`` should be a string appropriately packed 
 .. method:: Transaction.bit_xor(key, param) -> nil
 
     |atomic-xor|
+
+.. method:: Transaction.compare_and_clear(key, param) -> nil
+
+    |atomic-compare-and-clear|
 
 .. method:: Transaction.max(key, param) -> nil
 
@@ -823,6 +833,14 @@ Transaction options
 
     |option-set-transaction-logging-max-field-length-blurb|
 
+.. method:: Transaction.options.set_debug_transaction_identifier(id_string) -> nil
+
+    |option-set-debug-transaction-identifier|
+
+.. method:: Transaction.options.set_log_transaction() -> nil
+
+    |option-set-log-transaction|
+
 .. _transact:
 
 The transact method
@@ -911,6 +929,8 @@ All future objects are a subclass of the :class:`Future` type.
         .. method:: Future.on_ready() {|future| block } -> nil
 
             Yields ``self`` to the given block when the future object is ready. If the future object is ready at the time :meth:`on_ready` is called, the block may be called immediately in the current thread (although this behavior is not guaranteed). Otherwise, the call may be delayed and take place on the thread with which the client was initialized. Therefore, the block is responsible for any needed thread synchronization (and/or for posting work to your application's event loop, thread pool, etc., as may be required by your application's architecture).
+
+            .. note:: This function guarantees the callback will be executed **at most once**.
 
             .. warning:: |fdb-careful-with-callbacks-blurb|
 

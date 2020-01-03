@@ -128,6 +128,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		useSystemKeys = deterministicRandom()->coinflip();
 		initialKeyDensity = deterministicRandom()->random01(); // This fraction of keys are present before the first transaction (and after an unknown result)
 
+		// See https://github.com/apple/foundationdb/issues/2424
+		if (BUGGIFY) {
+			enableBuggify(true, BuggifyType::Client);
+		}
+
 		if( adjacentKeys ) {
 			nodes = std::min<int64_t>( deterministicRandom()->randomInt(1, 4 << deterministicRandom()->randomInt(0,14)), CLIENT_KNOBS->KEY_SIZE_LIMIT * 1.2 );
 		}
