@@ -1262,6 +1262,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 		req.startVersion = startVersion;
 		TraceEvent("BackupRecruitment", self->dbgid)
 		    .detail("BKID", req.reqId)
+		    .detail("Tag", req.routerTag.toString())
 		    .detail("Epoch", epoch)
 		    .detail("BackupEpoch", epoch)
 		    .detail("StartVersion", req.startVersion);
@@ -1285,6 +1286,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 			req.endVersion = epochVersion.second - 1;
 			TraceEvent("BackupRecruitment", self->dbgid)
 			    .detail("BKID", req.reqId)
+			    .detail("Tag", req.routerTag.toString())
 			    .detail("Epoch", epoch)
 			    .detail("BackupEpoch", req.backupEpoch)
 			    .detail("StartVersion", req.startVersion)
