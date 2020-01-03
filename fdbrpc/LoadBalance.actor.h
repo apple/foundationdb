@@ -279,7 +279,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	state double backoff = 0;
 	state bool triedAllOptions = false;
 	loop {
-		if(now() - startTime > g_network->isSimulated() ? 30.0 : 600.0) {
+		if(now() - startTime > (g_network->isSimulated() ? 30.0 : 600.0)) {
 			TraceEvent ev(g_network->isSimulated() ? SevWarn : SevWarnAlways, "LoadBalanceTooLong");
 			ev.suppressFor(1.0);
 			ev.detail("Duration", now() - startTime);
