@@ -977,7 +977,7 @@ void TraceEvent::log() {
 				}
 			}
 		} catch( Error &e ) {
-			TraceEvent(SevError, "TraceEventDestructorError").error(e,true);
+			TraceEvent(SevError, "TraceEventLoggingError").error(e,true);
 		}
 		delete tmpEventMetric;
 		g_trace_depth--;
