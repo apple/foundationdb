@@ -277,7 +277,19 @@ struct KeyRangeRef {
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
-		serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
+		if (!ar.isDeserializing && equalsKeyAfter(begin, end)) {
+			KeyRef hold = begin;
+			const_cast<KeyRef&>(begin) = KeyRef();
+			serializer(ar, const_cast<KeyRef&>(end), const_cast<KeyRef&>(begin));
+			const_cast<KeyRef&>(begin) = hold;
+		} else {
+			serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
+		}
+		if (ar.isDeserializing && end == StringRef() && begin[begin.size()-1] == '\x00') {
+			const_cast<KeyRef&>(end) = begin;
+			const_cast<KeyRef&>(begin) = end.substr(0, end.size()-1);
+		}
+
 		if( begin > end ) {
 			throw inverted_range();
 		};
