@@ -51,6 +51,11 @@ public:
 	//        backup [savedVersion + 1, endVersion)
 	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> getUnfinishedBackup();
 
+	// Set the value for "backupStartedKey"
+	void setBackupStartedValue(Optional<Value> value) {
+		backupStartedValue = value;
+	}
+
 	void addref() { ReferenceCounted<BackupProgress>::addref(); }
 
 	void delref() { ReferenceCounted<BackupProgress>::delref(); }
@@ -73,6 +78,9 @@ private:
 	// progress status for a tag in an epoch due to later epoch trying to fill
 	// the gap. "progress" MUST be iterated in ascending order.
 	std::map<LogEpoch, std::map<Tag, Version>> progress;
+
+	// Value of the "backupStartedKey".
+	Optional<Value> backupStartedValue;
 };
 
 ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus);

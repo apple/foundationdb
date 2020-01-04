@@ -182,6 +182,9 @@ const Value backupProgressValue(const WorkerBackupStatus& status);
 UID decodeBackupProgressKey(const KeyRef& key);
 WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value);
 
+//    "\xff/backupStarted"
+extern const KeyRef backupStartedKey;
+
 extern const KeyRef coordinatorsKey;
 extern const KeyRef logsKey;
 extern const KeyRef minRequiredCommitVersionKey;

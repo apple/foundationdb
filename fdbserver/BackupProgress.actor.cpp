@@ -20,6 +20,8 @@ void BackupProgress::addBackupStatus(const WorkerBackupStatus& status) {
 std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> BackupProgress::getUnfinishedBackup() {
 	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> toRecruit;
 
+	if (!backupStartedValue.present()) return toRecruit; // No active backups
+
 	for (const auto& [epoch, info] : epochInfos) {
 		std::set<Tag> tags = enumerateLogRouterTags(info.logRouterTags);
 		std::map<Tag, Version> tagVersions;
@@ -60,9 +62,11 @@ ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupPro
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state Optional<Value> value = wait(tr.get(backupStartedKey));
 			Standalone<RangeResultRef> results = wait(tr.getRange(backupProgressKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
 
+			bStatus->setBackupStartedValue(value);
 			for (auto& it : results) {
 				const UID workerID = decodeBackupProgressKey(it.key);
 				const WorkerBackupStatus status = decodeBackupProgressValue(it.value);
@@ -87,6 +91,7 @@ TEST_CASE("/BackupProgress/Unfinished") {
 	const Tag tag1(tagLocalityLogRouter, 0);
 	epochInfos.insert({ epoch1, ILogSystem::EpochTagsVersionsInfo(1, begin1, end1) });
 	BackupProgress progress(UID(0, 0), epochInfos);
+	progress.setBackupStartedValue(Optional<Value>(LiteralStringRef("1")));
 
 	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> unfinished = progress.getUnfinishedBackup();
 
