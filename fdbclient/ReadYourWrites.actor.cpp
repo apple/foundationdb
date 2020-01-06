@@ -1189,43 +1189,6 @@ ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces (Reference<ClusterC
 	}
 }
 
-ACTOR Future<Standalone<RangeResultRef>> getConflictingKeys(
-	VectorRef<KeyValueRef> conflictingKeys,
-	ReadYourWritesTransaction* ryw,
-	KeySelector begin, 
-	KeySelector end, 
-	GetRangeLimits limits,
-	bool snapshot,
-	bool reverse
-	) {
-		// In general, if we want to use getRange to expose conflicting keys, we need to support all the parameters it provides.
-		// It is kind of difficult to take care of each corner cases of what getRange does
-		// Thus, we use a hack way here to achieve it.
-		// We create an empty RYWTransaction and write all conflicting key/values to it.
-		// Since it is RYWTr, we can call getRange on it with same parameters given to the original getRange
-		state ReadYourWritesTransaction hackTr(ryw->getDatabase());
-		// One issue here is that, although the write itself is local. getRange will look through the database.
-		// To make sure there is no keys other than conflictings keys are read,
-		// We write it under system key prefix "\xff/conflicting_keys/", which should always be empty in the database.
-		// Thus, only the local written keys are under this prefix and will be looked through.
-		// One pain point is that it adds latency overhead here
-		state const KeyRef conflictingKeysPrefix = LiteralStringRef("\xff/conflicting_keys/");
-		hackTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		for (const KeyValueRef kv : conflictingKeys) {
-			hackTr.set(kv.key.withPrefix(conflictingKeysPrefix), kv.value);
-		}
-		state KeySelector conflictingKeysBegin = KeySelectorRef(begin.getKey().withPrefix(conflictingKeysPrefix), begin.orEqual, begin.offset);
-		state KeySelector conflictingKeysEnd = KeySelectorRef(end.getKey().withPrefix(conflictingKeysPrefix), end.orEqual, end.offset);
-		Standalone<RangeResultRef> resultWithKeyPrefix = wait(hackTr.getRange(conflictingKeysBegin, conflictingKeysEnd, limits, snapshot, reverse));
-		// Remove the prefix we added before and then return the result
-		Standalone<RangeResultRef> result;
-		for (const KeyValueRef kv : resultWithKeyPrefix) {
-			result.push_back_deep(result.arena(), KeyValueRef(kv.key.removePrefix(conflictingKeysPrefix), kv.value));
-		}
-		hackTr.reset();
-		return result;
-	}
-
 Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool snapshot ) {
 	TEST(true);
 	
@@ -1337,7 +1300,29 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		begin.setKey(beginConflictingKey);
 		end.setKey(endConflictingKey);
 		if (tr.info.conflictingKeyRanges.present()) {
-			return getConflictingKeys(tr.info.conflictingKeyRanges.get(), this, begin, end, limits, snapshot, reverse);
+			// In general, if we want to use getRange to expose conflicting keys, we need to support all the parameters getRange provides.
+			// It is difficult to take care of all corner cases of what getRange does.
+			// Consequently, we use a hack way here to achieve it.
+			// We create an empty RYWTransaction and write all conflicting key/values to it.
+			// Since it is RYWTr, we can call getRange on it with same parameters given to the original getRange.
+			ReadYourWritesTransaction hackTr(getDatabase());
+			// To make the getRange call local, we need to explicitly set the read version here.
+			// This version number 100 set here does nothing but prevent getting read version from the proxy
+			hackTr.setVersion(100);
+			// Clear the whole key space, thus, RYWTr knows to only read keys locally 
+			hackTr.clear(normalKeys);
+			// in case system keys are conflicting
+			hackTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			hackTr.clear(systemKeys);
+			for (const KeyValueRef kv : tr.info.conflictingKeyRanges.get()) {
+				hackTr.set(kv.key, kv.value);
+			}
+			Future<Standalone<RangeResultRef>> resultWithKeyPrefixFuture = hackTr.getRange(begin, end, limits, snapshot, reverse);
+			// Make sure it happens locally
+			ASSERT(resultWithKeyPrefixFuture.isReady());
+			// Clear this RYWTr
+			hackTr.reset();
+			return resultWithKeyPrefixFuture.get();
 		} else {
 			return Standalone<RangeResultRef>();
 		}
