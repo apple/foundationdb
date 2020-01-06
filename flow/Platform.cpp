@@ -133,12 +133,12 @@ std::string removeWhitespace(const std::string &t)
 	if (found != std::string::npos)
 		str.erase(found + 1);
 	else
-		str.clear();			// str is all whitespace
+		str.clear(); // str is all whitespace
 	found = str.find_first_not_of(ws);
 	if (found != std::string::npos)
 		str.erase(0, found);
 	else
-		str.clear();			// str is all whitespace
+		str.clear(); // str is all whitespace
 
 	return str;
 }
