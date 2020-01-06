@@ -285,7 +285,8 @@ struct KeyRangeRef {
 		} else {
 			serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
 		}
-		if (ar.isDeserializing && end == StringRef() && begin[begin.size()-1] == '\x00') {
+		if (ar.isDeserializing && end == StringRef() && begin != StringRef()) {
+			ASSERT(begin[begin.size()-1] == '\x00');
 			const_cast<KeyRef&>(end) = begin;
 			const_cast<KeyRef&>(begin) = end.substr(0, end.size()-1);
 		}
