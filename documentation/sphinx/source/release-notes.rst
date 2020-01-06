@@ -9,6 +9,7 @@ Fixes
 -----
 
 * Clients could throw an internal error during ``commit`` if client buggification was enabled. `(PR #2427) <https://github.com/apple/foundationdb/pull/2427>`_.
+* Backup and DR agent transactions which update and clean up status had an unnecessarily high conflict rate. `(PR #2483) <https://github.com/apple/foundationdb/pull/2483>`_.
 
 6.2.11
 ======
