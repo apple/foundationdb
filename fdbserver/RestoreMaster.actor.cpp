@@ -36,8 +36,9 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR static Future<Void> clearDB(Database cx);
-ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* files,
-                                              Database cx, RestoreRequest request);
+ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* rangeFiles,
+                                               std::vector<RestoreFileFR>* logFiles, Database cx,
+                                               RestoreRequest request);
 
 ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> self, Database cx, RestoreRequest request);
 ACTOR static Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self, Database cx);
@@ -226,15 +227,21 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 
 ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> self, Database cx,
                                                    RestoreRequest request) {
-	state std::vector<RestoreFileFR> files;
+	state std::vector<RestoreFileFR> rangeFiles;
+	state std::vector<RestoreFileFR> logFiles;
 	state std::vector<RestoreFileFR> allFiles;
 	state std::map<Version, VersionBatch>::iterator versionBatch = self->versionBatches.begin();
 
 	self->initBackupContainer(request.url);
 
 	// Get all backup files' description and save them to files
-	wait(collectBackupFiles(self->bc, &files, cx, request));
-	self->buildVersionBatches(files, &self->versionBatches); // Divide files into version batches
+	wait(collectBackupFiles(self->bc, &rangeFiles, &logFiles, cx, request));
+
+	std::sort(rangeFiles.begin(), rangeFiles.end());
+	std::sort(logFiles.begin(), logFiles.end());
+
+	self->buildVersionBatches(rangeFiles, logFiles, &self->versionBatches); // Divide files into version batches
+	self->dumpVersionBatches(self->versionBatches);
 
 	ASSERT(self->batchIndex == 1); // versionBatchIndex starts at 1 because NotifiedVersion starts at 0
 	for (versionBatch = self->versionBatches.begin(); versionBatch != self->versionBatches.end(); versionBatch++) {
@@ -444,16 +451,18 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 }
 
 // Collect the backup files' description into output_files by reading the backupContainer bc.
-ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* files,
-                                              Database cx, RestoreRequest request) {
+ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* rangeFiles,
+                                               std::vector<RestoreFileFR>* logFiles, Database cx,
+                                               RestoreRequest request) {
 	state BackupDescription desc = wait(bc->describeBackup());
 
 	// Convert version to real time for operators to read the BackupDescription desc.
 	wait(desc.resolveVersionTimes(cx));
 	TraceEvent("FastRestore").detail("BackupDesc", desc.toString());
 
-	if (request.targetVersion == invalidVersion && desc.maxRestorableVersion.present())
+	if (request.targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
 		request.targetVersion = desc.maxRestorableVersion.get();
+	}
 
 	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(request.targetVersion));
 
@@ -462,22 +471,32 @@ ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std
 		throw restore_missing_data();
 	}
 
-	if (!files->empty()) {
-		TraceEvent(SevError, "FastRestore").detail("ClearOldFiles", files->size());
-		files->clear();
+	if (!rangeFiles->empty()) {
+		TraceEvent(SevError, "FastRestore").detail("ClearOldRangeFiles", rangeFiles->size());
+		rangeFiles->clear();
+	}
+	if (!logFiles->empty()) {
+		TraceEvent(SevError, "FastRestore").detail("ClearOldRangeFiles", logFiles->size());
+		logFiles->clear();
 	}
 
 	for (const RangeFile& f : restorable.get().ranges) {
 		TraceEvent("FastRestore").detail("RangeFile", f.toString());
+		if (f.fileSize <= 0) {
+			continue;
+		}
 		RestoreFileFR file(f.version, f.fileName, true, f.blockSize, f.fileSize, f.version, f.version);
 		TraceEvent("FastRestore").detail("RangeFileFR", file.toString());
-		files->push_back(file);
+		rangeFiles->push_back(file);
 	}
 	for (const LogFile& f : restorable.get().logs) {
 		TraceEvent("FastRestore").detail("LogFile", f.toString());
+		if (f.fileSize <= 0) {
+			continue;
+		}
 		RestoreFileFR file(f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.beginVersion);
 		TraceEvent("FastRestore").detail("LogFileFR", file.toString());
-		files->push_back(file);
+		logFiles->push_back(file);
 	}
 
 	return Void();

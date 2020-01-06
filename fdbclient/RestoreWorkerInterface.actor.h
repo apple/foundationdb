@@ -209,7 +209,11 @@ struct RestoreAsset {
 	int64_t offset;
 	int64_t len;
 
-	RestoreAsset() = default;
+	UID uid;
+
+	RestoreAsset() {
+		uid = deterministicRandom()->randomUniqueID();
+	}
 
 	bool operator==(const RestoreAsset& r) const {
 		return fileIndex == r.fileIndex && filename == r.filename && offset == r.offset && len == r.len &&
@@ -227,16 +231,17 @@ struct RestoreAsset {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, beginVersion, endVersion, range, filename, fileIndex, offset, len);
+		serializer(ar, beginVersion, endVersion, range, filename, fileIndex, offset, len, uid);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "begin:" << beginVersion << " end:" << endVersion << " range:" << range.toString()
+		ss << "UID" << uid.toString() << "begin:" << beginVersion << " end:" << endVersion << " range:" << range.toString()
 		   << " filename:" << filename << " fileIndex:" << fileIndex << " offset:" << offset << " len:" << len;
 		return ss.str();
 	}
 
+	// RestoreAsset and VersionBatch both use endVersion as exclusive in version range
 	bool isInVersionRange(Version commitVersion) const {
 		return commitVersion >= beginVersion && commitVersion < endVersion;
 	}

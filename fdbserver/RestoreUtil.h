@@ -55,6 +55,8 @@ struct FastRestoreOpConfig {
 	int num_appliers = 40;
 	// transactionBatchSizeThreshold is used when applier applies multiple mutations in a transaction to DB
 	double transactionBatchSizeThreshold = 512; // 512 in Bytes
+	// batchSizeThreshold is the maximum data size in each version batch
+	double batchSizeThreshold = 1 * 1024 * 1024 * 1024; // 1 GB
 };
 extern FastRestoreOpConfig opConfig;
 

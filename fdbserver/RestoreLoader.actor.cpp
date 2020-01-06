@@ -225,7 +225,7 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 	    .detail("IsRangeFile", isRangeFile)
 	    .detail("StartVersion", startVersion)
 	    .detail("EndVersion", endVersion)
-	    .detail("FileIndex", asset.filename);
+	    .detail("RestoreAsset", asset.toString());
 
 	// Ensure there is a mutation request sent at endVersion, so that applier can advance its notifiedVersion
 	if (kvOps.find(endVersion) == kvOps.end()) {
@@ -245,6 +245,11 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 			applierMutationsSize[applierID] = 0.0;
 		}
 		Version commitVersion = kvOp->first;
+		if (!(commitVersion >= asset.beginVersion && commitVersion < asset.endVersion)) { // Debug purpose
+			TraceEvent(SevError, "FastRestore_SendMutationsToApplier").detail("CommitVersion", commitVersion).detail("RestoreAsset", asset.toString());
+		}
+		ASSERT(commitVersion >= asset.beginVersion);
+		ASSERT(commitVersion < asset.endVersion);
 
 		for (int mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
 			MutationRef kvm = kvOp->second[mIndex];
@@ -289,11 +294,11 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 			    applierID, RestoreSendVersionedMutationsRequest(asset, prevVersion, commitVersion, isRangeFile,
 			                                                    applierMutationsBuffer[applierID])));
 		}
-		TraceEvent(SevDebug, "FastRestore_Debug")
+		TraceEvent(SevDebug, "FastRestore_SendMutationToApplier")
 		    .detail("Loader", self->id())
 		    .detail("PrevVersion", prevVersion)
 		    .detail("CommitVersion", commitVersion)
-		    .detail("Filename", asset.filename);
+		    .detail("RestoreAsset", asset.toString());
 		ASSERT(prevVersion < commitVersion);
 		prevVersion = commitVersion;
 		wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, self->appliersInterf, requests));
