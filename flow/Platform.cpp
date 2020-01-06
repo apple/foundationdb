@@ -2804,10 +2804,10 @@ extern volatile size_t net2backtraces_max;
 extern volatile bool net2backtraces_overflow;
 extern volatile int net2backtraces_count;
 extern std::atomic<int64_t> net2liveness;
-extern std::atomic<double> checkThreadTime;
 extern volatile thread_local int profilingEnabled;
 extern void initProfiling();
 
+std::atomic<double> checkThreadTime;
 volatile thread_local bool profileThread = false;
 #endif
 
