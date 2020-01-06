@@ -54,6 +54,7 @@ using namespace boost::asio::ip;
 #include <execinfo.h>
 
 std::atomic<int64_t> net2liveness(0);
+std::atomic<double> checkThreadTime(0);
 
 volatile size_t net2backtraces_max = 10000;
 volatile void** volatile net2backtraces = NULL;

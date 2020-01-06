@@ -2804,6 +2804,7 @@ extern volatile size_t net2backtraces_max;
 extern volatile bool net2backtraces_overflow;
 extern volatile int net2backtraces_count;
 extern std::atomic<int64_t> net2liveness;
+extern std::atomic<double> checkThreadTime;
 extern volatile thread_local int profilingEnabled;
 extern void initProfiling();
 
@@ -2831,7 +2832,9 @@ void profileHandler(int sig) {
 	// We are casting away the volatile-ness of the backtrace array, but we believe that should be reasonably safe in the signal handler
 	ProfilingSample* ps = const_cast<ProfilingSample*>((volatile ProfilingSample*)(net2backtraces + net2backtraces_offset));
 
-	ps->timestamp = timer();
+	// We can only read the check thread time in a signal handler if the atomic is lock free.
+	// We can't get the time from a timer() call because it's not signal safe.
+	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
 
 	// SOMEDAY: should we limit the maximum number of frames from
 	// backtrace beyond just available space?
@@ -2864,6 +2867,7 @@ void* checkThread(void *arg) {
 				}
 
 				lastSignal = t;
+				checkThreadTime.store(lastSignal);
 				pthread_kill(mainThread, SIGPROF);
 			}
 		}
