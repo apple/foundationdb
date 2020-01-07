@@ -145,7 +145,9 @@ struct TransactionInfo {
 	Optional<UID> debugID;
 	TaskPriority taskID;
 	bool useProvisionalProxies;
-	std::shared_ptr<ReadYourWritesTransaction> conflictingKeysRYW; // Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
+	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
+	// shared_ptr used here since TransactionInfo is sometimes copied as function parameters.
+	std::shared_ptr<ReadYourWritesTransaction> conflictingKeysRYW;
 
 	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false), conflictingKeysRYW(nullptr) {}
 };
