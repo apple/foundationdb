@@ -114,7 +114,6 @@ struct Peer : public ReferenceCounted<Peer> {
 	AsyncTrigger dataToSend;  // Triggered when unsent.empty() becomes false
 	Future<Void> connect;
 	AsyncTrigger resetPing;
-	AsyncTrigger resetConnect;
 	bool compatible;
 	bool outgoingConnectionIdle;  // We don't actually have a connection open and aren't trying to open one because we don't have anything to send
 	double lastConnectTime;

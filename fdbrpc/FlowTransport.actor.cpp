@@ -403,28 +403,18 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 		.detail("PeerAddr", self->destination)
 		.detail("ConnSet", (bool)conn);
 
-	// This is used only at client side and is used to override waiting for unsent data to update failure monitoring
-	// status. At client, if an existing connection fails, we retry making a connection and if that fails, then only
-	// we report that address as failed.
-	state bool clientReconnectDelay = false;
 	loop {
 		try {
 			if (!conn) {  // Always, except for the first loop with an incoming connection
 				self->outgoingConnectionIdle = true;
 				// Wait until there is something to send.
 				while (self->unsent.empty()) {
-					if (self->destination.isPublic() && clientReconnectDelay) {
+					if (self->destination.isPublic() &&
+					    IFailureMonitor::failureMonitor().getState(self->destination).isFailed()) {
 						break;
 					}
 
-					choose {
-						when(wait(self->dataToSend.onTrigger())) {}
-						when(wait(self->resetConnect.onTrigger())) {
-							if (IFailureMonitor::failureMonitor().getState(self->destination).isFailed()) {
-								break;
-							}
-						}
-					}
+					wait (self->dataToSend.onTrigger());
 				}
 
 				ASSERT( self->destination.isPublic() );
@@ -443,7 +433,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 							IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 							if (self->unsent.empty()) {
 								_conn->close();
-								clientReconnectDelay = false;
 								continue;
 							} else {
 								conn = _conn;
@@ -464,12 +453,10 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 					}
 					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID())
 					    .suppressFor(1.0)
-					    .detail("PeerAddr", self->destination)
-					    .detail("ClientReconnectDelay", clientReconnectDelay);
+					    .detail("PeerAddr", self->destination);
 
 					IFailureMonitor::failureMonitor().setStatus(
 					    self->destination, FailureStatus(e.code() == error_code_connection_failed));
-					clientReconnectDelay = false;
 					throw;
 				}
 			} else {
@@ -488,7 +475,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				else
 					self->transport->countConnClosedWithError++;
 
-				clientReconnectDelay = e.code() != error_code_connection_idle;
 				throw e;
 			}
 
@@ -1111,7 +1097,6 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 		peer->peerReferences = 1;
 	} else {
-		peer->resetConnect.trigger();
 		peer->peerReferences++;
 	}
 }
