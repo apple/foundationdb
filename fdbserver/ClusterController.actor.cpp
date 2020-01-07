@@ -106,8 +106,8 @@ public:
 		Database db;
 		int unfinishedRecoveries;
 		int logGenerations;
-		//std::map<uint16_t, std::pair<Optional<StorageServerInterface>, Optional<Key>>> cacheInterfaces;
-		//bool cachePopulated;
+		std::map<uint16_t, std::pair<Optional<StorageServerInterface>, Optional<Key>>> cacheInterfaces;
+		bool cachePopulated;
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 
 		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0), logGenerations(0), cachePopulated(false),
@@ -133,25 +133,25 @@ public:
 			serverInfo->set( newInfoCache );
 		}
 
-		void setStorageCache(uint16_t id, const StorageServerInterface& interf) {
+		void setStorageCache(uint16_t id, StorageServerInterface& interf) {
 			CachedSerialization<ServerDBInfo> newInfoCache = serverInfo->get();
 			auto& newInfo = newInfoCache.mutate();
 			bool found = false;
-			for(auto& it : newInfo.client.storageCaches) {
+			for(auto& it : newInfo.storageCaches) {
 				if(it.first == id) {
 					if(it.second != interf) {
 						newInfo.id = deterministicRandom()->randomUniqueID();
 						it.second = interf;
 					}
-					TraceEvent(SevDebug,"SetStorageCacheFound").detail("Id", id);
 					found = true;
 					break;
 				}
 			}
 			if(!found) {
+			    TraceEvent(SevDebug,"SetStorageCache").detail("UID", interf.uniqueID).detail("IsCacheServer", interf.isCacheServer);
 				newInfo.id = deterministicRandom()->randomUniqueID();
-				newInfo.client.storageCaches.push_back(std::make_pair(id, interf));
-				TraceEvent(SevDebug,"SetStorageCacheAdded").detail("Id", id);
+				interf.isCacheServer = true;
+				newInfo.storageCaches.push_back(std::make_pair(id, interf));
 			}
 			serverInfo->set( newInfoCache );
 		}
@@ -171,10 +171,10 @@ public:
 		void clearStorageCache(uint16_t id) {
 			CachedSerialization<ServerDBInfo> newInfoCache = serverInfo->get();
 			auto& newInfo = newInfoCache.mutate();
-			for(auto it = newInfo.client.storageCaches.begin(); it != newInfo.client.storageCaches.end(); ++it) {
+			for(auto it = newInfo.storageCaches.begin(); it != newInfo.storageCaches.end(); ++it) {
 				if(it->first == id) {
 					newInfo.id = deterministicRandom()->randomUniqueID();
-					newInfo.client.storageCaches.erase(it);
+					newInfo.storageCaches.erase(it);
 					break;
 				}
 			}
@@ -282,16 +282,6 @@ public:
 				return bestInfo.get();
 			}
 		}
-
-		throw no_more_servers();
-	}
-
-	WorkerDetails getCacheWorker( RecruitCacheRequest const& req ) {
-		for( auto& it : id_worker )
-			if( workerAvailable( it.second, false ) &&
-					it.second.details.processClass.machineClassFitness( ProcessClass::StorageCacheClass) <= ProcessClass::UnsetFit ) {
-				return it.second.details;
-			}
 
 		throw no_more_servers();
 	}
@@ -1384,7 +1374,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				dbInfo.clusterInterface = db->serverInfo->get().read().clusterInterface;
 				dbInfo.distributor = db->serverInfo->get().read().distributor;
 				dbInfo.ratekeeper = db->serverInfo->get().read().ratekeeper;
-				dbInfo.client.storageCaches = db->clientInfo->get().storageCaches;
+				dbInfo.storageCaches = db->serverInfo->get().read().storageCaches;
 
 				TraceEvent("CCWDB", cluster->id).detail("Lifetime", dbInfo.masterLifetime.toString()).detail("ChangeID", dbInfo.id);
 				db->serverInfo->set( cachedInfo );
@@ -1637,7 +1627,7 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 			}
 			when( wait( failed ) ) {  // remove workers that have failed
 				WorkerInfo& failedWorkerInfo = cluster->id_worker[ worker.locality.processId() ];
-				if(false && failedWorkerInfo.storageCacheInfo.present()) {
+				if(failedWorkerInfo.storageCacheInfo.present()) {
 					bool found = false;
 					for(auto& it : cluster->id_worker) {
 						if(!it.second.storageCacheInfo.present() && it.second.details.processClass == ProcessClass::StorageCacheClass) {
@@ -1844,26 +1834,6 @@ void clusterRecruitStorage( ClusterControllerData* self, RecruitStorageRequest r
 			    .error(e);
 		} else {
 			TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
-			throw;  // Any other error will bring down the cluster controller
-		}
-	}
-}
-
-void clusterRecruitCache( ClusterControllerData* self, RecruitCacheRequest req ) {
-	try {
-		if(!self->gotProcessClasses)
-			throw no_more_servers();
-		auto worker = self->getCacheWorker(req);
-		RecruitStorageReply rep;
-		rep.worker = worker.interf;
-		rep.processClass = worker.processClass;
-		req.reply.send( rep );
-	} catch ( Error& e ) {
-		if (e.code() == error_code_no_more_servers) {
-			//self->outstandingCachedRequests.push_back( std::make_pair(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT) );
-			TraceEvent(SevWarn, "RecruitCacheNotAvailable", self->id).error(e);
-		} else {
-			TraceEvent(SevError, "RecruitCacheError", self->id).error(e);
 			throw;  // Any other error will bring down the cluster controller
 		}
 	}
@@ -2112,10 +2082,8 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			}
 		}
 	}
-
 	Optional<uint16_t> newStorageCache = req.storageCacheInterf.present() ? req.storageCacheInterf.get().first : Optional<uint16_t>();
 	auto& cacheInfo = self->id_worker[w.locality.processId()].storageCacheInfo;
-	TraceEvent(SevDebug,"CacheInfo").detail("Id", cacheInfo);
 	if (req.storageCacheInterf.present()) {
 		auto it = self->db.cacheInterfaces.find(req.storageCacheInterf.get().first);
 		if(it == self->db.cacheInterfaces.end()) {
@@ -2126,14 +2094,12 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 				newStorageCache = Optional<uint16_t>();
 				cacheInfo = Optional<uint16_t>();
 			} else {
-				TraceEvent(SevDebug,"CallingSetStorageCache").detail("Id", req.storageCacheInterf.get().first);
 				self->db.setStorageCache(req.storageCacheInterf.get().first, req.storageCacheInterf.get().second);
 				self->db.cacheInterfaces[req.storageCacheInterf.get().first] = std::make_pair(req.storageCacheInterf.get().second, w.locality.processId());
 				cacheInfo = req.storageCacheInterf.get().first;
 			}
 		} else {
 			if(!it->second.second.present() || (cacheInfo.present() && cacheInfo.get() == it->first) ) {
-				TraceEvent(SevDebug,"CallingSetStorageCache").detail("Id", req.storageCacheInterf.get().first);
 				self->db.setStorageCache(req.storageCacheInterf.get().first, req.storageCacheInterf.get().second);
 				it->second = std::make_pair(req.storageCacheInterf.get().second, w.locality.processId());
 				cacheInfo = req.storageCacheInterf.get().first;
@@ -2156,7 +2122,6 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 				it.second.second = w.locality.processId();
 				self->id_worker[w.locality.processId()].storageCacheInfo = it.first;
 				newStorageCache = it.first;
-				TraceEvent(SevDebug,"NewStorageCache").detail("Id", newStorageCache);
 				break;
 			}
 		}
@@ -2824,7 +2789,7 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData *self) {
 			self->recruitingDistributor = true;
 			DataDistributorInterface distributorInterf = wait( startDataDistributor(self) );
 			self->recruitingDistributor = false;
-			self->dbc:set .setDistributor(distributorInterf);
+			self->db.setDistributor(distributorInterf);
 		}
 	}
 }
@@ -2952,9 +2917,6 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 		}
 		when( RecruitStorageRequest req = waitNext( interf.recruitStorage.getFuture() ) ) {
 			clusterRecruitStorage( &self, req );
-		}
-		when( RecruitCacheRequest req = waitNext( interf.recruitCache.getFuture() ) ) {
-			clusterRecruitCache( &self, req );
 		}
 		when( RegisterWorkerRequest req = waitNext( interf.registerWorker.getFuture() ) ) {
 			++self.registerWorkerRequests;

@@ -424,6 +424,7 @@ ACTOR Future<Void> registrationClient(
 					StorageServerInterface recruited;
 					recruited.locality = locality;
 					recruited.initEndpoints();
+					recruited.isCacheServer = true;
 					
 					std::map<std::string, std::string> details;
 					startRole( Role::STORAGE_CACHE, recruited.id(), interf.id(), details );

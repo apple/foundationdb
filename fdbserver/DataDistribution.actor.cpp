@@ -3908,99 +3908,6 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self, RecruitStorageReply
 	return Void();
 }
 
-
-// The cacheList system keyspace keeps the StorageServerInterface for each serverID.
-ACTOR Future<Void> waitCacheListChange( DDTeamCollection* self, FutureStream<Void> serverRemoved ) {
-	state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
-	state Future<vector<std::pair<StorageServerInterface, ProcessClass>>> cacheListAndProcessClasses = Never();
-	state bool isFetchingResults = false;
-	state Transaction tr(self->cx);
-	loop {
-		try {
-			choose {
-				when( wait( checkSignal ) ) {
-					checkSignal = Never();
-					isFetchingResults = true;
-					cacheListAndProcessClasses = getCacheListAndProcessClasses(&tr);
-				}
-				when( vector<std::pair<StorageServerInterface, ProcessClass>> results = wait( cacheListAndProcessClasses ) ) {
-					cacheListAndProcessClasses = Never();
-					isFetchingResults = false;
-
-					for( int i = 0; i < results.size(); i++ ) {
-						UID serverId = results[i].first.id();
-						StorageServerInterface const& ssi = results[i].first;
-						ProcessClass const& processClass = results[i].second;
-						if (!self->shouldHandleServer(ssi)) {
-							continue;
-						}
-						else if( self->server_info.count( serverId ) ) {
-							auto& serverInfo = self->server_info[ serverId ];
-							if (ssi.getValue.getEndpoint() != serverInfo->lastKnownInterface.getValue.getEndpoint() || processClass != serverInfo->lastKnownClass.classType()) {
-								Promise<std::pair<StorageServerInterface, ProcessClass>> currentInterfaceChanged = serverInfo->interfaceChanged;
-								serverInfo->interfaceChanged = Promise<std::pair<StorageServerInterface, ProcessClass>>();
-								serverInfo->onInterfaceChanged = Future<std::pair<StorageServerInterface, ProcessClass>>( serverInfo->interfaceChanged.getFuture() );
-								currentInterfaceChanged.send( std::make_pair(ssi,processClass) );
-							}
-						} else if( !self->recruitingIds.count(ssi.id()) ) {
-							self->addServer( ssi, processClass, self->serverTrackerErrorOut, tr.getReadVersion().get() );
-							self->doBuildTeams = true;
-						}
-					}
-
-					tr = Transaction(self->cx);
-					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
-				}
-				when( waitNext( serverRemoved ) ) {
-					if( isFetchingResults ) {
-						tr = Transaction(self->cx);
-						serverListAndProcessClasses = getServerListAndProcessClasses(&tr);
-					}
-				}
-			}
-		} catch(Error& e) {
-			wait( tr.onError(e) );
-			serverListAndProcessClasses = Never();
-			isFetchingResults = false;
-			checkSignal = Void();
-		}
-	}
-}
-// Recruit a worker as a storageCache server
-ACTOR Future<Void> storageCacheRecruiter( DDTeamCollection* self, Reference<AsyncVar<struct ServerDBInfo>> db ) {
-	state Future<RecruitCacheReply> fCandidateWorker;
-
-	loop {
-		try {
-			choose {
-				when( RecruitCacheReply candidateWorker = wait( fCandidateWorker ) ) {
-					self->addActor.send(initializeStorage(self, candidateWorker));
-				}
-				when( wait( db->onChange() ) ) {
-					fCandidateWorker = Future<RecruitCacheReply>();
-				}
-			}
-			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskPriority::DataDistribution) );
-		} catch( Error &e ) {
-			if(e.code() != error_code_timed_out) {
-				throw;
-			}
-			TEST(true); //StorageCache recruitment timed out
-		}
-	}
-}
-
-ACTOR Future<Void> dataDistributionStorageCache(
-	Reference<DDTeamCollection> teamCollection,
-	Reference<InitialDataDistribution> initData,
-	TeamCollectionInterface tci,
-	Reference<AsyncVar<struct ServerDBInfo>> db)
-{
-		self->addActor.send(storageCacheRecruiter( self, db ));
-		self->addActor.send(monitorStorageCacheServerRecruitment( self ));
-		self->addActor.send(waitCacheServerListChange( self, serverRemoved.getFuture() ));
-}
-
 // Recruit a worker as a storage server
 ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Future<RecruitStorageReply> fCandidateWorker;
@@ -4601,10 +4508,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 			primaryTeamCollection->teamCollections = teamCollectionsPtrs;
 			self->teamCollection = primaryTeamCollection.getPtr();
 			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( primaryTeamCollection, initData, tcis[0], self->dbInfo ), "DDTeamCollectionPrimary", self->ddId, &normalDDQueueErrors() ) );
-
-			// Add actor to recruit and monitor storageCaches
-			actors.push_back( reportErrorsExcept( dataDistributionStorageCache( primaryTeamCollection, initData, tcis[0], self->dbInfo ), "DDTeamCollectionPrimary", self->ddId, &normalDDQueueErrors() ) );
-
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 
 			wait( waitForAll( actors ) );

@@ -385,7 +385,7 @@ StorageServerInterface decodeServerListValue( ValueRef const& value ) {
 const KeyRangeRef cacheListKeys(
 	LiteralStringRef("\xff/cacheList/"),
 	LiteralStringRef("\xff/cacheList0") );
-const KeyRef cacheListPrefix = cacheListKeys.begin;
+//const KeyRef cacheListPrefix = cacheListKeys.begin;
 
 const Key cacheListKeyFor( UID serverID ) {
 	BinaryWriter wr(Unversioned());

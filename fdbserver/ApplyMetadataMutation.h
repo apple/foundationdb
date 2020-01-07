@@ -46,7 +46,6 @@ Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<StorageInf
  
 void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRef> const& mutations, IKeyValueStore* txnStateStore, LogPushData* toCommit, bool *confChange, Reference<ILogSystem> logSystem = Reference<ILogSystem>(), Version popVersion = 0,
 	KeyRangeMap<std::set<Key> >* vecBackupKeys = nullptr, KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr, KeyRangeMap<bool>* cacheInfo = nullptr, std::map<Key, applyMutationsData>* uid_applyMutationsData = nullptr, RequestStream<CommitTransactionRequest> commit = RequestStream<CommitTransactionRequest>(),
-							Database cx = Database(), NotifiedVersion* commitVersion = nullptr, std::map<UID, Reference<StorageInfo>>* storageCache = nullptr, std::map<Tag, Version>* tag_popped = nullptr,
-							std::vector<std::pair<uint16_t,StorageServerInterface>>* cacheServers = nullptr, bool initialCommit = false);
+	Database cx = Database(), NotifiedVersion* commitVersion = nullptr, std::map<UID, Reference<StorageInfo>>* storageCache = nullptr, std::map<Tag, Version>* tag_popped = nullptr, bool initialCommit = false );
 
 #endif

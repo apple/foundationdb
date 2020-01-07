@@ -539,7 +539,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		try
 		{
 			//Check the size of the shard on each storage server
-			for(int i = 0; i < storageServers.size(); i++)
+			for(int i = 0; i < storageServers.size() - 1; i++)
 			{
 				resetReply(req);
 				metricFutures.push_back(storageServers[i].waitMetrics.getReplyUnlessFailedFor(req, 2, 0));
@@ -551,7 +551,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			int firstValidStorageServer = -1;
 
 			//Retrieve the size from the storage server responses
-			for(int i = 0; i < storageServers.size(); i++)
+			for(int i = 0; i < storageServers.size() - 1; i++)
 			{
 				ErrorOr<StorageMetrics> reply = metricFutures[i].get();
 
@@ -607,6 +607,18 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 	}
 
+	// comparator function to check if a cache server wioth given index exists
+class storageCachesComparator {
+        uint16_t serverIndex;
+
+public:
+        storageCachesComparator(uint16_t index): serverIndex(index) {}
+
+        bool operator()(const std::pair<uint16_t, StorageServerInterface>& value)
+        {
+                return (value.first == serverIndex);
+        }
+};
 	//Checks that the data in each shard is the same on each storage server that it resides on.  Also performs some sanity checks on the sizes of shards and storage servers.
 	//Returns false if there is a failure
 	ACTOR Future<bool> checkDataConsistency(Database cx, VectorRef<KeyValueRef> keyLocations, DatabaseConfiguration configuration, ConsistencyCheckWorkload *self)
@@ -653,6 +665,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 			DeterministicRandom sharedRandom( seed == 0 ? 1 : seed );
 			sharedRandom.randomShuffle(shardOrder);
 		}
+
+		// for cacheServer reads
+		state ServerDBInfo system = self->dbInfo->get();
+		state MasterProxyInterface proxy = deterministicRandom()->randomChoice( system.client.proxies );
+		//auto storageCaches = system.storageCaches;
+		int id = 0;
+		state std::vector<std::pair<uint16_t,StorageServerInterface>>::iterator scit = find_if(system.storageCaches.begin(), system.storageCaches.end(), storageCachesComparator(id));
 
 		for(; i < ranges.size(); i += increment)
 		{
@@ -715,6 +734,15 @@ struct ConsistencyCheckWorkload : TestWorkload
 						else if (self->performQuiescentChecks)
 							self->testFailure("/FF/serverList changing in a quiescent database");
 					}
+
+					// Try to read from the cache server as well
+					if (scit != system.storageCaches.end()) {
+						TraceEvent("ConsistencyCheck_FoundSSIForCacheServer").detail("UID", scit->second.id()).detail("IsCacheServer", scit->second.isCacheServer);
+						//auto sz = storageServerInterfaces.size();
+						storageServerInterfaces.push_back(scit->second);
+						//TraceEvent("ConsistencyCheck_VerifySSIForCacheServer").detail("Size", sz).detail("UID", storageServerInterfaces[sz].id()).detail("IsCacheServer", storageServerInterfaces[sz].isCacheServer);
+						//TraceEvent("ConsistencyCheck_UpdatedSize").detail("Size", storageServerInterfaces.size());
+					}
 					break;
 				}
 				catch(Error &e) {
@@ -759,6 +787,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				state KeySelector begin = firstGreaterOrEqual(range.begin);
 				state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 
+				TraceEvent("ConsistencyCheck_InsideLoop").detail("Size", storageServerInterfaces.size());
 				//Read a limited number of entries at a time, repeating until all keys in the shard have been read
 				loop
 				{
@@ -782,8 +811,23 @@ struct ConsistencyCheckWorkload : TestWorkload
 						for(j = 0; j < storageServerInterfaces.size(); j++)
 						{
 							resetReply(req);
+							//if (storageServerInterfaces[j].isCacheServer)
+							//if (j == storageServerInterfaces.size()-1)
+							TraceEvent("ConsistencyCheck_CacheServerInterface").detail("J", j).detail("UID", storageServerInterfaces[j].uniqueID).detail("IsCacheServer", storageServerInterfaces[j].isCacheServer);
 							keyValueFutures.push_back(storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 						}
+
+						// Try to read from the cache server as well
+						//state ServerDBInfo system = self->dbInfo->get();
+						//state MasterProxyInterface proxy = deterministicRandom()->randomChoice( system.client.proxies );
+						//auto storageCaches = system.storageCaches;
+						//int id = 0;
+						//auto it = find_if(storageCaches.begin(), storageCaches.end(), storageCachesComparator(id));
+						//if (it != storageCaches.end()) {
+							//TraceEvent(SevDebug, "FoundUIDForServerIdx", commitData.dbgid).detail("Key", kv.key.toString()).detail("serverIdx", id);
+						//	resetReply(req);
+						//	keyValueFutures.push_back(it->second.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+						//}
 
 						wait(waitForAll(keyValueFutures));
 
@@ -911,7 +955,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 							else if(!isRelocating)
 							{
 								TraceEvent("ConsistencyCheck_StorageServerUnavailable").suppressFor(1.0).detail("StorageServer", storageServers[j]).detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end))
-									.detail("Address", storageServerInterfaces[j].address()).detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token);
+									.detail("Address", storageServerInterfaces[j].address()).detail("UID", storageServerInterfaces[j].id()).detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token);
 
 								//All shards should be available in quiscence
 								if(self->performQuiescentChecks)
