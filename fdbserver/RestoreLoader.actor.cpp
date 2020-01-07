@@ -153,8 +153,8 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 		subAsset.offset = j;
 		subAsset.len = std::min<int64_t>(param.blockSize, param.asset.len - j);
 		if (param.isRangeFile) {
-			fileParserFutures.push_back(
-			    _parseRangeFileToMutationsOnLoader(kvOpsPerLPIter, samplesIter, self->bc, param.rangeVersion, subAsset));
+			fileParserFutures.push_back(_parseRangeFileToMutationsOnLoader(kvOpsPerLPIter, samplesIter, self->bc,
+			                                                               param.rangeVersion, subAsset));
 		} else {
 			// TODO: Sanity check the log file's range is overlapped with the restored version range
 			fileParserFutures.push_back(_parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap,
@@ -246,7 +246,9 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 		}
 		Version commitVersion = kvOp->first;
 		if (!(commitVersion >= asset.beginVersion && commitVersion <= asset.endVersion)) { // Debug purpose
-			TraceEvent(SevError, "FastRestore_SendMutationsToApplier").detail("CommitVersion", commitVersion).detail("RestoreAsset", asset.toString());
+			TraceEvent(SevError, "FastRestore_SendMutationsToApplier")
+			    .detail("CommitVersion", commitVersion)
+			    .detail("RestoreAsset", asset.toString());
 		}
 		ASSERT(commitVersion >= asset.beginVersion);
 		ASSERT(commitVersion <= asset.endVersion); // endVersion is an empty commit to ensure progress

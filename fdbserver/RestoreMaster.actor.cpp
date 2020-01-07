@@ -37,8 +37,7 @@
 
 ACTOR static Future<Void> clearDB(Database cx);
 ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* rangeFiles,
-                                               std::vector<RestoreFileFR>* logFiles, Database cx,
-                                               RestoreRequest request);
+                                             std::vector<RestoreFileFR>* logFiles, Database cx, RestoreRequest request);
 
 ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> self, Database cx, RestoreRequest request);
 ACTOR static Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self, Database cx);
@@ -288,7 +287,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		LoadingParam param;
 
 		param.prevVersion = 0; // Each file's NotifiedVersion starts from 0
-		//param.endVersion = file.isRange ? file.version : file.endVersion;
+		// param.endVersion = file.isRange ? file.version : file.endVersion;
 		param.url = request.url;
 		param.isRangeFile = file.isRange;
 		param.rangeVersion = file.isRange ? file.version : -1;
@@ -453,8 +452,8 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 
 // Collect the backup files' description into output_files by reading the backupContainer bc.
 ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* rangeFiles,
-                                               std::vector<RestoreFileFR>* logFiles, Database cx,
-                                               RestoreRequest request) {
+                                             std::vector<RestoreFileFR>* logFiles, Database cx,
+                                             RestoreRequest request) {
 	state BackupDescription desc = wait(bc->describeBackup());
 
 	// Convert version to real time for operators to read the BackupDescription desc.

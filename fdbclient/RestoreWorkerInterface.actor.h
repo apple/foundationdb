@@ -211,9 +211,7 @@ struct RestoreAsset {
 
 	UID uid;
 
-	RestoreAsset() {
-		uid = deterministicRandom()->randomUniqueID();
-	}
+	RestoreAsset() { uid = deterministicRandom()->randomUniqueID(); }
 
 	bool operator==(const RestoreAsset& r) const {
 		return fileIndex == r.fileIndex && filename == r.filename && offset == r.offset && len == r.len &&
@@ -236,8 +234,9 @@ struct RestoreAsset {
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "UID:" << uid.toString() << " begin:" << beginVersion << " end:" << endVersion << " range:" << range.toString()
-		   << " filename:" << filename << " fileIndex:" << fileIndex << " offset:" << offset << " len:" << len;
+		ss << "UID:" << uid.toString() << " begin:" << beginVersion << " end:" << endVersion
+		   << " range:" << range.toString() << " filename:" << filename << " fileIndex:" << fileIndex
+		   << " offset:" << offset << " len:" << len;
 		return ss.str();
 	}
 
@@ -256,7 +255,7 @@ struct LoadingParam {
 	Key url;
 	Version prevVersion;
 	Version rangeVersion; // range file's version
-	//Version endVersion; // range file's mutations are all at the endVersion
+	// Version endVersion; // range file's mutations are all at the endVersion
 
 	int64_t blockSize;
 	RestoreAsset asset;
@@ -272,7 +271,7 @@ struct LoadingParam {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		//serializer(ar, isRangeFile, url, prevVersion, endVersion, blockSize, asset);
+		// serializer(ar, isRangeFile, url, prevVersion, endVersion, blockSize, asset);
 		serializer(ar, isRangeFile, url, prevVersion, rangeVersion, blockSize, asset);
 	}
 
@@ -281,7 +280,7 @@ struct LoadingParam {
 		// str << "isRangeFile:" << isRangeFile << " url:" << url.toString() << " prevVersion:" << prevVersion
 		//     << " endVersion:" << endVersion << " blockSize:" << blockSize << " RestoreAsset:" << asset.toString();
 		str << "isRangeFile:" << isRangeFile << " url:" << url.toString() << " prevVersion:" << prevVersion
-			<< " rangeVersion:" << rangeVersion << " blockSize:" << blockSize << " RestoreAsset:" << asset.toString();
+		    << " rangeVersion:" << rangeVersion << " blockSize:" << blockSize << " RestoreAsset:" << asset.toString();
 		return str.str();
 	}
 };

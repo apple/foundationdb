@@ -58,9 +58,7 @@ struct VersionBatch {
 	}
 
 	// RestoreAsset and VersionBatch both use endVersion as exclusive in version range
-	bool isInVersionRange(Version version) const {
-		return version >= beginVersion && version < endVersion;
-	}
+	bool isInVersionRange(Version version) const { return version >= beginVersion && version < endVersion; }
 };
 
 struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
@@ -106,17 +104,22 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		int i = 0;
 		for (auto& vb : versionBatches) {
 			TraceEvent("FastRestoreVersionBatches")
-				.detail("BatchIndex", i)
+			    .detail("BatchIndex", i)
 			    .detail("BeginVersion", vb.second.beginVersion)
 			    .detail("EndVersion", vb.second.endVersion)
 			    .detail("Size", vb.second.size);
 			for (auto& f : vb.second.rangeFiles) {
-				bool invalidVersion = (f.beginVersion != f.endVersion) || (f.beginVersion >= vb.second.endVersion || f.beginVersion < vb.second.beginVersion);
-				TraceEvent(invalidVersion ? SevError : SevInfo, "FastRestoreVersionBatches").detail("BatchIndex", i).detail("RangeFile", f.toString());
+				bool invalidVersion = (f.beginVersion != f.endVersion) || (f.beginVersion >= vb.second.endVersion ||
+				                                                           f.beginVersion < vb.second.beginVersion);
+				TraceEvent(invalidVersion ? SevError : SevInfo, "FastRestoreVersionBatches")
+				    .detail("BatchIndex", i)
+				    .detail("RangeFile", f.toString());
 			}
 			for (auto& f : vb.second.logFiles) {
 				bool outOfRange = (f.beginVersion >= vb.second.endVersion || f.endVersion <= vb.second.beginVersion);
-				TraceEvent(outOfRange ? SevError : SevInfo, "FastRestoreVersionBatches").detail("BatchIndex", i).detail("LogFile", f.toString());
+				TraceEvent(outOfRange ? SevError : SevInfo, "FastRestoreVersionBatches")
+				    .detail("BatchIndex", i)
+				    .detail("LogFile", f.toString());
 			}
 			++i;
 		}
@@ -171,7 +174,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	// Assumption 1: input files has no empty files
 	// Assumption 2: range files at one version > batchSizeThreshold
 	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles, const std::vector<RestoreFileFR>& logFiles,
-	                           std::map<Version, VersionBatch>* versionBatches) {
+	                         std::map<Version, VersionBatch>* versionBatches) {
 		// Version batch range [beginVersion, endVersion)
 		Version beginVersion = 0;
 		Version endVersion = 0;
@@ -217,8 +220,8 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			    getVersionSize(prevEndVersion, nextVersion, rangeFiles, rangeIdx, logFiles);
 
 			TraceEvent("FastRestoreBuildVersionBatch")
-				.detail("VersionBatchBeginVersion", vb.beginVersion)
-				.detail("PrevEndVersion", prevEndVersion)
+			    .detail("VersionBatchBeginVersion", vb.beginVersion)
+			    .detail("PrevEndVersion", prevEndVersion)
 			    .detail("NextVersion", nextVersion)
 			    .detail("RangeIndex", rangeIdx)
 			    .detail("RangeFiles", rangeFiles.size())
@@ -228,7 +231,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			    .detail("BatchSize", batchSize)
 			    .detail("NextVersionSize", nextVersionSize)
 			    .detail("NextRangeIndex", nextRangeIdx)
-				.detail("UsedLogFiles", curLogFiles.size());
+			    .detail("UsedLogFiles", curLogFiles.size());
 
 			if (batchSize + nextVersionSize <= opConfig.batchSizeThreshold) {
 				// nextVersion should be included in this batch
@@ -270,7 +273,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					continue;
 				}
 				// Finalize the current version batch
-				//vb.endVersion = nextVersion;
+				// vb.endVersion = nextVersion;
 				vb.size = batchSize;
 				versionBatches->emplace(vb.beginVersion, vb); // copy vb to versionBatch
 				// start finding the next version batch
