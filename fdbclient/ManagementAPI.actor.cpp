@@ -19,7 +19,11 @@
  */
 
 #include <cinttypes>
+#include <vector>
 
+#include "Arena.h"
+#include "FDBOptions.g.h"
+#include "ReadYourWrites.h"
 #include "fdbclient/ManagementAPI.actor.h"
 
 #include "fdbclient/SystemData.h"
@@ -1775,6 +1779,24 @@ ACTOR Future<Void> waitForPrimaryDC( Database cx, StringRef dcId ) {
 			tr.reset();
 		} catch (Error& e) {
 			wait( tr.onError(e) );
+		}
+	}
+}
+
+ACTOR Future<Void> addCachedRange(Database cx, KeyRangeRef range) {
+	state ReadYourWritesTransaction tr(cx);
+	loop {
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.clear(range);
+		tr.set(storageCacheKey(range.begin), storageCacheValue(std::vector<uint16_t>{1}));
+		tr.set(storageCacheKey(range.end), storageCacheValue(std::vector<uint16_t>{}));
+		tr.addReadConflictRange(range);
+		try {
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
 		}
 	}
 }

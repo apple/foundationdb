@@ -21,7 +21,15 @@
 #include "fdbclient/NativeAPI.actor.h"
 
 #include <iterator>
+#include <utility>
+#include <vector>
 
+#include "Arena.h"
+#include "Error.h"
+#include "FDBTypes.h"
+#include "FailureMonitor.h"
+#include "MultiInterface.h"
+#include "Trace.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/CoordinationInterface.h"
@@ -45,6 +53,8 @@
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
 #include "flow/UnitTest.h"
+#include "genericactors.actor.h"
+#include "serialize.h"
 
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
@@ -471,6 +481,33 @@ ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDB
 	}
 }
 
+ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
+	state Database db(self);
+	state Transaction tr(db);
+	try {
+		loop {
+			tr.reset();
+			try {
+				Standalone<RangeResultRef> cacheList =
+				    wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!cacheList.more);
+				Standalone<VectorRef<StorageServerInterface>> caches;
+				for (auto kv : cacheList) {
+					caches.push_back(caches.arena(),
+					                 BinaryReader::fromStringRef<StorageServerInterface>(kv.value, IncludeVersion()));
+				}
+				self->cacheServers = caches;
+				wait(delay(5.0));
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent(SevError, "MonitorCacheListFailed").error(e);
+		throw;
+	}
+}
+
 ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bool detailed) {
 	if (now() - cx->healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
 		if (detailed) {
@@ -541,6 +578,7 @@ DatabaseContext::DatabaseContext(
 
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
+	cacheListMonitor = monitorCacheList(this);
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"),
@@ -558,6 +596,7 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, F
 }
 
 DatabaseContext::~DatabaseContext() {
+	cacheListMonitor.cancel();
 	monitorMasterProxiesInfoChange.cancel();
 	for(auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
@@ -624,10 +663,22 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& k
 }
 
 void DatabaseContext::invalidateCache( const KeyRef& key, bool isBackward ) {
-	if( isBackward )
+	CoalescedKeyRangeMap<bool>::Iterator cacheIter;
+	if (isBackward) {
+		cacheIter = cachedRanges.rangeContainingKeyBefore(key);
+	} else {
+		cacheIter = cachedRanges.rangeContaining(key);
+	}
+	if (cacheIter->value()) {
+		// We had this cached, so we can now retry without the cache
+		cacheIter->value() = false;
+		return;
+	}
+	if( isBackward ) {
 		locationCache.rangeContainingKeyBefore(key)->value() = Reference<LocationInfo>();
-	else
+	} else {
 		locationCache.rangeContaining(key)->value() = Reference<LocationInfo>();
+	}
 }
 
 void DatabaseContext::invalidateCache( const KeyRangeRef& keys ) {
@@ -1184,6 +1235,22 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( 
 
 template <class F>
 Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation( Database const& cx, Key const& key, F StorageServerInterface::*member, TransactionInfo const& info, bool isBackward = false ) {
+	// we first check whether this range is cached
+	auto cacheIter = isBackward ? cx->cachedRanges.rangeContainingKeyBefore(key) : cx->cachedRanges.rangeContaining(key);
+	if (cacheIter->value()) {
+		// this key is cached
+		auto range = cacheIter->range();
+		// we need to check whether we know about caches that are up
+		std::vector<Reference<ReferencedInterface<StorageServerInterface>>> alternatives;
+		for (auto& csi : cx->cacheServers) {
+			if (!IFailureMonitor::failureMonitor().onlyEndpointFailed((csi.*member).getEndpoint())) {
+				alternatives.push_back(Reference<ReferencedInterface<StorageServerInterface>>(new ReferencedInterface<StorageServerInterface>(csi)));
+			}
+		}
+		if (!alternatives.empty()) {
+			return std::make_pair(KeyRange{range}, Reference<LocationInfo>(new LocationInfo(alternatives)));
+		}
+	}
 	auto ssi = cx->getCachedLocation( key, isBackward );
 	if (!ssi.second) {
 		return getKeyLocation_internal( cx, key, info, isBackward );
