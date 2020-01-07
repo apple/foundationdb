@@ -273,9 +273,6 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 	std::vector<std::pair<UID, RestoreLoadFileRequest>> requests;
 	std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
 
-	// TODO: Remove files that are empty before proceed
-	// ASSERT(files->size() > 0); // files should not be empty
-
 	Version prevVersion = 0;
 	for (auto& file : *files) {
 		// NOTE: Cannot skip empty files because empty files, e.g., log file, still need to generate dummy mutation to
@@ -285,9 +282,6 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		}
 		// Prepare loading
 		LoadingParam param;
-
-		//param.prevVersion = 0; // Each file's NotifiedVersion starts from 0
-		// param.endVersion = file.isRange ? file.version : file.endVersion;
 		param.url = request.url;
 		param.isRangeFile = file.isRange;
 		param.rangeVersion = file.isRange ? file.version : -1;
@@ -304,9 +298,8 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 
 		prevVersion = param.asset.endVersion;
 
-		// Log file to be loaded
 		TraceEvent("FastRestore").detail("LoadParam", param.toString()).detail("LoaderID", loader->first.toString());
-		ASSERT_WE_THINK(param.asset.len >= 0); // we may load an empty file
+		ASSERT_WE_THINK(param.asset.len > 0); // TODO: ensure empty files are not included here
 		ASSERT_WE_THINK(param.asset.offset >= 0);
 		ASSERT_WE_THINK(param.asset.offset <= file.fileSize);
 		ASSERT_WE_THINK(param.asset.beginVersion <= param.asset.endVersion);

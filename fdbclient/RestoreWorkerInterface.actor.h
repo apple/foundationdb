@@ -246,16 +246,12 @@ struct RestoreAsset {
 	}
 };
 
-// TODO: It is probably better to specify the (beginVersion, endVersion] for each loadingParam.
-// beginVersion (endVersion) is the version the applier is before (after) it receives the request.
 struct LoadingParam {
 	constexpr static FileIdentifier file_identifier = 17023837;
 
 	bool isRangeFile;
 	Key url;
-	//Version prevVersion;
 	Version rangeVersion; // range file's version
-	// Version endVersion; // range file's mutations are all at the endVersion
 
 	int64_t blockSize;
 	RestoreAsset asset;
@@ -271,14 +267,11 @@ struct LoadingParam {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		// serializer(ar, isRangeFile, url, prevVersion, endVersion, blockSize, asset);
 		serializer(ar, isRangeFile, url, rangeVersion, blockSize, asset);
 	}
 
 	std::string toString() {
 		std::stringstream str;
-		// str << "isRangeFile:" << isRangeFile << " url:" << url.toString() << " prevVersion:" << prevVersion
-		//     << " endVersion:" << endVersion << " blockSize:" << blockSize << " RestoreAsset:" << asset.toString();
 		str << "isRangeFile:" << isRangeFile << " url:" << url.toString()
 		    << " rangeVersion:" << rangeVersion << " blockSize:" << blockSize << " RestoreAsset:" << asset.toString();
 		return str.str();

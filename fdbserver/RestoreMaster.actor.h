@@ -127,7 +127,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	// Input: Get the size of data in backup files in version range [prevVersion, nextVersion)
 	// Return: param1: the size of data at nextVersion, param2: the minimum range file index whose version >
-	// nextVersion, param3: log files with data in [prevVersion, nextVersion]
+	// nextVersion, param3: log files with data in [prevVersion, nextVersion)
 	std::tuple<double, int, std::vector<RestoreFileFR>> getVersionSize(Version prevVersion, Version nextVersion,
 	                                                                   const std::vector<RestoreFileFR>& rangeFiles,
 	                                                                   int rangeIdx,
@@ -170,9 +170,9 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	// Split backup files into version batches, each of which has similar data size
 	// Input: sorted range files, sorted log files;
 	// Output: a set of version batches whose size is less than opConfig.batchSizeThreshold
-	//    and each mutation data in backup files is included in the version batches exactly once
-	// Assumption 1: input files has no empty files
-	// Assumption 2: range files at one version > batchSizeThreshold
+	//    	   and each mutation data in backup files is included in the version batches exactly once.
+	// Assumption 1: input files has no empty files;
+	// Assumption 2: range files at one version > batchSizeThreshold.
 	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles, const std::vector<RestoreFileFR>& logFiles,
 	                         std::map<Version, VersionBatch>* versionBatches) {
 		// Version batch range [beginVersion, endVersion)
@@ -204,9 +204,9 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					}
 				} else {
 					TraceEvent(SevError, "FastRestoreBuildVersionBatch")
-					    .detail("RangeIdx", rangeIdx)
+					    .detail("RangeIndex", rangeIdx)
 					    .detail("RangeFiles", rangeFiles.size())
-					    .detail("LogIdx", logIdx)
+					    .detail("LogIndex", logIdx)
 					    .detail("LogFiles", logFiles.size());
 				}
 			} else {
@@ -257,8 +257,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				if (batchSize < 1) {
 					// [vb.endVersion, nextVersion) > opConfig.batchSizeThreshold. We should split the version range
 					if (prevEndVersion >= nextVersion) {
-						// If range files at one version > batchSizeThreshold, DBA should increase the
-						// batchSizeThreshold
+						// If range files at one version > batchSizeThreshold, DBA should increase batchSizeThreshold
 						TraceEvent(SevError, "FastRestoreBuildVersionBatch")
 						    .detail("NextVersion", nextVersion)
 						    .detail("PrevEndVersion", prevEndVersion)
@@ -273,7 +272,6 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					continue;
 				}
 				// Finalize the current version batch
-				// vb.endVersion = nextVersion;
 				vb.size = batchSize;
 				versionBatches->emplace(vb.beginVersion, vb); // copy vb to versionBatch
 				// start finding the next version batch
