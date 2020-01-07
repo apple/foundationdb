@@ -1299,29 +1299,10 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		
 		begin.setKey(beginConflictingKey);
 		end.setKey(endConflictingKey);
-		if (tr.info.conflictingKeyRanges.present()) {
-			// In general, if we want to use getRange to expose conflicting keys, we need to support all the parameters getRange provides.
-			// It is difficult to take care of all corner cases of what getRange does.
-			// Consequently, we use a hack way here to achieve it.
-			// We create an empty RYWTransaction and write all conflicting key/values to it.
-			// Since it is RYWTr, we can call getRange on it with same parameters given to the original getRange.
-			ReadYourWritesTransaction hackTr(getDatabase());
-			// To make the getRange call local, we need to explicitly set the read version here.
-			// This version number 100 set here does nothing but prevent getting read version from the proxy
-			hackTr.setVersion(100);
-			// Clear the whole key space, thus, RYWTr knows to only read keys locally 
-			hackTr.clear(normalKeys);
-			// in case system keys are conflicting
-			hackTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			hackTr.clear(systemKeys);
-			for (const KeyValueRef kv : tr.info.conflictingKeyRanges.get()) {
-				hackTr.set(kv.key, kv.value);
-			}
-			Future<Standalone<RangeResultRef>> resultWithKeyPrefixFuture = hackTr.getRange(begin, end, limits, snapshot, reverse);
+		if (tr.info.conflictingKeysRYW) {
+			Future<Standalone<RangeResultRef>> resultWithKeyPrefixFuture = tr.info.conflictingKeysRYW.get()->getRange(begin, end, limits, snapshot, reverse);
 			// Make sure it happens locally
 			ASSERT(resultWithKeyPrefixFuture.isReady());
-			// Clear this RYWTr
-			hackTr.reset();
 			return resultWithKeyPrefixFuture.get();
 		} else {
 			return Standalone<RangeResultRef>();

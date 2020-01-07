@@ -33,6 +33,7 @@
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/LoadBalance.h"
@@ -2673,15 +2674,27 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					}
 					return Void();
 				} else {
-					// clear previous conflicting KeyRanges
-					tr->info.conflictingKeyRanges.reset();
+					// clear the RYW transaction which contains previous conflicting keys
+					tr->info.conflictingKeysRYW.reset();
 					if (ci.conflictingKeyRanges.present()){
-						Standalone<VectorRef<KeyValueRef>> conflictingKeyRanges;
+						// In general, if we want to use getRange to expose conflicting keys, we need to support all the parameters getRange provides.
+						// It is difficult to take care of all corner cases of what getRange does.
+						// Consequently, we use a hack way here to achieve it.
+						// We create an empty RYWTransaction and write all conflicting key/values to it.
+						// Since it is RYWTr, we can call getRange on it with same parameters given to the original getRange.
+						tr->info.conflictingKeysRYW = std::make_shared<ReadYourWritesTransaction>(tr->getDatabase());
+						// To make the getRange call local, we need to explicitly set the read version here.
+						// This version number 100 set here does nothing but prevent getting read version from the proxy
+						tr->info.conflictingKeysRYW.get()->setVersion(100);
+						// Clear the whole key space, thus, RYWTr knows to only read keys locally
+						tr->info.conflictingKeysRYW.get()->clear(normalKeys);
+						// in case system keys are conflicting
+						tr->info.conflictingKeysRYW.get()->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr->info.conflictingKeysRYW.get()->clear(systemKeys);
 						for (auto const & kr : ci.conflictingKeyRanges.get()) {
-							conflictingKeyRanges.push_back_deep(conflictingKeyRanges.arena(), KeyValueRef(kr.begin, conflictingKeysTrue));
-							conflictingKeyRanges.push_back_deep(conflictingKeyRanges.arena(), KeyValueRef(kr.end, conflictingKeysFalse));
+							tr->info.conflictingKeysRYW.get()->set(kr.begin, conflictingKeysTrue);
+							tr->info.conflictingKeysRYW.get()->set(kr.end, conflictingKeysFalse);
 						}
-						tr->info.conflictingKeyRanges = conflictingKeyRanges;
 					}
 
 					if (info.debugID.present())

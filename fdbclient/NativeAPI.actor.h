@@ -140,13 +140,14 @@ struct TransactionOptions {
 	void reset(Database const& cx);
 };
 
+class ReadYourWritesTransaction; // workaround cyclic dependency
 struct TransactionInfo {
 	Optional<UID> debugID;
 	TaskPriority taskID;
 	bool useProvisionalProxies;
-	Optional<Standalone<VectorRef<KeyValueRef>>> conflictingKeyRanges;
+	std::shared_ptr<ReadYourWritesTransaction> conflictingKeysRYW; // Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
 
-	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
+	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false), conflictingKeysRYW(nullptr) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
