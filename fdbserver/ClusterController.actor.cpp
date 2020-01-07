@@ -1732,6 +1732,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData* 
 
 	loop choose {
 		when ( FailureMonitoringRequest req = waitNext( requests ) ) {
+			// TODO: Handling this request should no longer be necessary.
 			++self->failureMonitoringRequests;
 			if ( req.senderStatus.present() ) {
 				// Update the status of requester, if necessary
