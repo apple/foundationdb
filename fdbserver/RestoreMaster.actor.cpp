@@ -286,13 +286,14 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		// Prepare loading
 		LoadingParam param;
 
-		param.prevVersion = 0; // Each file's NotifiedVersion starts from 0
+		//param.prevVersion = 0; // Each file's NotifiedVersion starts from 0
 		// param.endVersion = file.isRange ? file.version : file.endVersion;
 		param.url = request.url;
 		param.isRangeFile = file.isRange;
 		param.rangeVersion = file.isRange ? file.version : -1;
 		param.blockSize = file.blockSize;
 
+		param.asset.uid = deterministicRandom()->randomUniqueID();
 		param.asset.filename = file.fileName;
 		param.asset.fileIndex = file.fileIndex;
 		param.asset.offset = 0;
@@ -308,7 +309,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		ASSERT_WE_THINK(param.asset.len >= 0); // we may load an empty file
 		ASSERT_WE_THINK(param.asset.offset >= 0);
 		ASSERT_WE_THINK(param.asset.offset <= file.fileSize);
-		ASSERT_WE_THINK(param.prevVersion <= param.asset.endVersion);
+		ASSERT_WE_THINK(param.asset.beginVersion <= param.asset.endVersion);
 
 		requests.emplace_back(loader->first, RestoreLoadFileRequest(param));
 		loader++;

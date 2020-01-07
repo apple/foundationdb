@@ -211,7 +211,7 @@ struct RestoreAsset {
 
 	UID uid;
 
-	RestoreAsset() { uid = deterministicRandom()->randomUniqueID(); }
+	RestoreAsset() = default;
 
 	bool operator==(const RestoreAsset& r) const {
 		return fileIndex == r.fileIndex && filename == r.filename && offset == r.offset && len == r.len &&
@@ -253,7 +253,7 @@ struct LoadingParam {
 
 	bool isRangeFile;
 	Key url;
-	Version prevVersion;
+	//Version prevVersion;
 	Version rangeVersion; // range file's version
 	// Version endVersion; // range file's mutations are all at the endVersion
 
@@ -272,14 +272,14 @@ struct LoadingParam {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		// serializer(ar, isRangeFile, url, prevVersion, endVersion, blockSize, asset);
-		serializer(ar, isRangeFile, url, prevVersion, rangeVersion, blockSize, asset);
+		serializer(ar, isRangeFile, url, rangeVersion, blockSize, asset);
 	}
 
 	std::string toString() {
 		std::stringstream str;
 		// str << "isRangeFile:" << isRangeFile << " url:" << url.toString() << " prevVersion:" << prevVersion
 		//     << " endVersion:" << endVersion << " blockSize:" << blockSize << " RestoreAsset:" << asset.toString();
-		str << "isRangeFile:" << isRangeFile << " url:" << url.toString() << " prevVersion:" << prevVersion
+		str << "isRangeFile:" << isRangeFile << " url:" << url.toString()
 		    << " rangeVersion:" << rangeVersion << " blockSize:" << blockSize << " RestoreAsset:" << asset.toString();
 		return str.str();
 	}
