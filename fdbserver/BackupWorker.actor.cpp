@@ -206,7 +206,7 @@ static Value makePadding(int size) {
 // Saves messages in the range of [0, numMsg) to a file and then remove these
 // messages. The file format is a sequence of (Version, sub#, msgSize, message),
 ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
-	state int blockSize = 1 << 20; // TODO: make this a knob.
+	state int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
 	state Reference<IBackupFile> logFile =
 	    wait(self->container->writeTaggedLogFile(self->messages[0].getVersion(), popVersion, blockSize, self->tag.id));
 	TraceEvent("OpenMutationFile", self->myId)
@@ -357,37 +357,31 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	}
 }
 
-// Get a recently committed version from proxies, which is actually a read version.
-ACTOR Future<Version> getCommittedVersion(Database cx) {
-	state Transaction tr(cx);
-
-	loop {
-		try {
-			Version v = wait(tr.getReadVersion());
-			return v;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self) {
-	state Future<Void> started = monitorBackupStarted(self);
+	loop {
+		state Future<Void> started = monitorBackupStarted(self);
 
-	loop choose {
-		when(wait(started)) { break; }
-		when(Version version = wait(getCommittedVersion(self->cx))) {
-			// Get a committed version and pop it so that TLog can remove the data.
-			self->savedVersion = std::max(version - 5000000, self->savedVersion);
-			self->minKnownCommittedVersion = std::max(version - 5000000, self->minKnownCommittedVersion);
-			wait(delay(2.0, self->cx->taskID)); // TODO: make delay a knob
-			self->pop(); // Pop while the worker is in this NOOP state.
+		loop {
+			GetReadVersionRequest request(1, GetReadVersionRequest::PRIORITY_DEFAULT |
+			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
+
+			choose {
+				when(wait(started)) { break; }
+				when(wait(self->cx->onMasterProxiesChanged())) {}
+				when(GetReadVersionReply reply = wait(loadBalance(self->cx->getMasterProxies(false),
+				                                                  &MasterProxyInterface::getConsistentReadVersion,
+				                                                  request, self->cx->taskID))) {
+					self->savedVersion = std::max(reply.version, self->savedVersion);
+					self->minKnownCommittedVersion = std::max(reply.version, self->minKnownCommittedVersion);
+					self->pop(); // Pop while the worker is in this NOOP state.
+					wait(delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID));
+				}
+			}
 		}
-	}
 
-	TraceEvent("BackupWorkerStartPullData", self->myId);
-	wait(pullAsyncData(self));
-	return Void();
+		TraceEvent("BackupWorkerStartPullData", self->myId);
+		wait(pullAsyncData(self));
+	}
 }
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, LogEpoch recoveryCount,

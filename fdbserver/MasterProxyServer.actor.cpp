@@ -1174,14 +1174,23 @@ struct TransactionRateInfo {
 	}
 };
 
-ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests, ProxyStats *stats) {
+ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests,
+                                  ProxyStats* stats, Version minKnownCommittedVersion) {
 	GetReadVersionReply reply = wait(replyFuture);
+
+	GetReadVersionReply minKCVReply = reply;
+	minKCVReply.version = minKnownCommittedVersion;
+
 	double end = timer();
 	for(GetReadVersionRequest const& request : requests) {
 		if(request.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
 			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
 		}
-		request.reply.send(reply);
+		if (request.flags & GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION) {
+			request.reply.send(minKCVReply);
+		} else {
+			request.reply.send(reply);
+		}
 	}
 
 	return Void();
@@ -1299,7 +1308,8 @@ ACTOR static Future<Void> transactionStarter(
 		for (int i = 0; i < start.size(); i++) {
 			if (start[i].size()) {
 				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(commitData, i, &otherProxies, debugID, transactionsStarted[i], systemTransactionsStarted[i], defaultPriTransactionsStarted[i], batchPriTransactionsStarted[i]);
-				addActor.send(sendGrvReplies(readVersionReply, start[i], &commitData->stats));
+				addActor.send(sendGrvReplies(readVersionReply, start[i], &commitData->stats,
+				                             commitData->minKnownCommittedVersion));
 
 				// for now, base dynamic batching on the time for normal requests (not read_risky)
 				if (i == 0) { 
