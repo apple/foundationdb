@@ -236,7 +236,7 @@ struct RestoreAsset {
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "UID" << uid.toString() << "begin:" << beginVersion << " end:" << endVersion << " range:" << range.toString()
+		ss << "UID:" << uid.toString() << " begin:" << beginVersion << " end:" << endVersion << " range:" << range.toString()
 		   << " filename:" << filename << " fileIndex:" << fileIndex << " offset:" << offset << " len:" << len;
 		return ss.str();
 	}
@@ -255,7 +255,8 @@ struct LoadingParam {
 	bool isRangeFile;
 	Key url;
 	Version prevVersion;
-	Version endVersion; // range file's mutations are all at the endVersion
+	Version rangeVersion; // range file's version
+	//Version endVersion; // range file's mutations are all at the endVersion
 
 	int64_t blockSize;
 	RestoreAsset asset;
@@ -271,13 +272,16 @@ struct LoadingParam {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, isRangeFile, url, prevVersion, endVersion, blockSize, asset);
+		//serializer(ar, isRangeFile, url, prevVersion, endVersion, blockSize, asset);
+		serializer(ar, isRangeFile, url, prevVersion, rangeVersion, blockSize, asset);
 	}
 
 	std::string toString() {
 		std::stringstream str;
+		// str << "isRangeFile:" << isRangeFile << " url:" << url.toString() << " prevVersion:" << prevVersion
+		//     << " endVersion:" << endVersion << " blockSize:" << blockSize << " RestoreAsset:" << asset.toString();
 		str << "isRangeFile:" << isRangeFile << " url:" << url.toString() << " prevVersion:" << prevVersion
-		    << " endVersion:" << endVersion << " blockSize:" << blockSize << " RestoreAsset:" << asset.toString();
+			<< " rangeVersion:" << rangeVersion << " blockSize:" << blockSize << " RestoreAsset:" << asset.toString();
 		return str.str();
 	}
 };

@@ -122,7 +122,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		}
 	}
 
-	// Input: Get the size of data at nextVersion in rangeFiles from rangeIdx and logFiles from logIdx
+	// Input: Get the size of data in backup files in version range [prevVersion, nextVersion)
 	// Return: param1: the size of data at nextVersion, param2: the minimum range file index whose version >
 	// nextVersion, param3: log files with data in [prevVersion, nextVersion]
 	std::tuple<double, int, std::vector<RestoreFileFR>> getVersionSize(Version prevVersion, Version nextVersion,
@@ -139,12 +139,10 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		ASSERT(prevVersion <= nextVersion);
 		while (rangeIdx < rangeFiles.size()) {
 			TraceEvent(SevDebug, "FastRestoreGetVersionSize").detail("RangeFile", rangeFiles[rangeIdx].toString());
-			if (rangeFiles[rangeIdx].version <= nextVersion) {
+			if (rangeFiles[rangeIdx].version < nextVersion) {
 				ASSERT(rangeFiles[rangeIdx].version >= prevVersion);
 				size += rangeFiles[rangeIdx].fileSize;
 			} else {
-				//TraceEvent("FastRestoreGetVersionSize").detail("RangeIdx", rangeIdx).detail("FileVersion", rangeFiles[rangeIdx].version).detail("NextVersion", nextVersion);
-				// ASSERT(rangeFiles[rangeIdx].version > nextVersion);
 				break;
 			}
 			++rangeIdx;
@@ -155,8 +153,8 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		// For example, we do not assume each version range only exists in one log file
 		while (logIdx < logFiles.size()) {
 			Version begin = std::max(prevVersion, logFiles[logIdx].beginVersion);
-			Version end = std::min(nextVersion + 1, logFiles[logIdx].endVersion);
-			if (begin < end) { // logIdx file overlap in [prevVersion, nextVersion]
+			Version end = std::min(nextVersion, logFiles[logIdx].endVersion);
+			if (begin < end) { // logIdx file overlap in [prevVersion, nextVersion)
 				double ratio = (end - begin) / (logFiles[logIdx].endVersion - logFiles[logIdx].beginVersion);
 				size += logFiles[logIdx].fileSize * ratio;
 				retLogs.push_back(logFiles[logIdx]);
@@ -170,26 +168,28 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	// Input: sorted range files, sorted log files;
 	// Output: a set of version batches whose size is less than opConfig.batchSizeThreshold
 	//    and each mutation data in backup files is included in the version batches exactly once
-	// Assume: input files has no empty files
+	// Assumption 1: input files has no empty files
+	// Assumption 2: range files at one version > batchSizeThreshold
 	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles, const std::vector<RestoreFileFR>& logFiles,
 	                           std::map<Version, VersionBatch>* versionBatches) {
 		// Version batch range [beginVersion, endVersion)
 		Version beginVersion = 0;
 		Version endVersion = 0;
 		Version prevEndVersion = 0;
-		double batchSize = 0;
+		double batchSize = 0; // TODO: Can be deleted
 		int rangeIdx = 0;
 		int logIdx = 0;
-		Version nextVersion = 0;
+		Version nextVersion = 0; // Used to calculate the batch's endVersion
 		VersionBatch vb;
 		vb.beginVersion = beginVersion;
 		bool rewriteNextVersion = false;
 		while (rangeIdx < rangeFiles.size() || logIdx < logFiles.size()) {
 			if (!rewriteNextVersion) {
 				if (rangeIdx < rangeFiles.size() && logIdx < logFiles.size()) {
-					nextVersion = std::max(rangeFiles[rangeIdx].version, nextVersion);
+					// nextVersion as endVersion is exclusive in the version range
+					nextVersion = std::max(rangeFiles[rangeIdx].version + 1, nextVersion);
 				} else if (rangeIdx < rangeFiles.size()) { // i.e., logIdx >= logFiles.size()
-					nextVersion = rangeFiles[rangeIdx].version;
+					nextVersion = rangeFiles[rangeIdx].version + 1;
 				} else if (logIdx < logFiles.size()) {
 					while (logIdx < logFiles.size() && logFiles[logIdx].endVersion <= nextVersion) {
 						logIdx++;
@@ -241,14 +241,14 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				}
 
 				for (auto& log : curLogFiles) {
-					ASSERT(log.beginVersion <= nextVersion);
+					ASSERT(log.beginVersion < nextVersion);
 					ASSERT(log.endVersion > prevEndVersion);
 					vb.logFiles.push_back(log);
 					advanced = true;
 				}
 
 				ASSERT(advanced == true || nextVersionSize > 0); // Ensure progress
-				vb.endVersion = nextVersion + 1;
+				vb.endVersion = nextVersion;
 				prevEndVersion = vb.endVersion;
 			} else {
 				if (batchSize < 1) {
@@ -270,18 +270,19 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					continue;
 				}
 				// Finalize the current version batch
-				vb.endVersion = nextVersion;
+				//vb.endVersion = nextVersion;
 				vb.size = batchSize;
 				versionBatches->emplace(vb.beginVersion, vb); // copy vb to versionBatch
+				// start finding the next version batch
 				vb.reset();
 				batchSize = 0;
-				vb.beginVersion = nextVersion;
-				prevEndVersion = nextVersion; //ensure prevEndVersion is in the batch's version range
+				vb.beginVersion = prevEndVersion;
+				nextVersion = prevEndVersion + 1;
 			}
 		}
 		// The last wip version batch has some files
 		if (batchSize > 0) {
-			vb.endVersion = nextVersion + 1;
+			vb.endVersion = nextVersion;
 			vb.size = batchSize;
 			versionBatches->emplace(vb.beginVersion, vb);
 		}
