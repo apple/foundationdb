@@ -19,6 +19,8 @@
  */
 
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/LogProtocolMessage.h"
@@ -109,6 +111,27 @@ struct BackupData {
 	}
 };
 
+ACTOR Future<Void> monitorBackupStarted(BackupData* self) {
+	loop {
+		state ReadYourWritesTransaction tr(self->cx);
+
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Optional<Standalone<StringRef>> value = wait(tr.get(backupStartedKey));
+				if (value.present()) return Void();
+
+				state Future<Void> watchFuture = tr.watch(backupStartedKey);
+				wait(tr.commit());
+				wait(watchFuture);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 	state Transaction tr(self->cx);
 	state Key key = backupProgressKeyFor(self->myId);
@@ -147,8 +170,6 @@ static std::string tagsToString(const VectorRef<Tag>& tags) {
 // Returns true if the message is a mutation that should be backuped, i.e.,
 // either key is not in system key space or is not a metadataVersionKey.
 bool isBackupMessage(const VersionedMessage& msg) {
-	// std::cout << "BK: " << msg.version.toString() << " " << msg.message.printable() << " " << tagsToString(msg.tags) << std::endl;
-
 	for (Tag tag : msg.tags) {
 		if (tag.locality == tagLocalitySpecial || tag.locality == tagLocalityTxs) {
 			return false; // skip Txs mutations
@@ -165,11 +186,9 @@ bool isBackupMessage(const VersionedMessage& msg) {
 
 	// check for metadataVersionKey and special metadata mutations
 	if (!normalKeys.contains(m.param1) && m.param1 != metadataVersionKey) {
-		// std::cout << "BKSkip: " << msg.version.toString() << " " << m.toString() << std::endl;
 		return false;
 	}
 
-	// std::cout << "BK: " << msg.version.version << " " << m.toString() << std::endl;
 	return true;
 }
 
@@ -225,7 +244,6 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		   << bigEndian32(self->messages[idx].version.sub)
 		   << bigEndian32(msgSize);
 		Standalone<StringRef> buf = wr.toValue();
-		assert(buf.size() == 16);
 		wait(logFile->append((void*)buf.begin(), buf.size()));
 		wait(logFile->append(self->messages[idx].message.begin(), msgSize));
 	}
@@ -339,6 +357,39 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	}
 }
 
+// Get a recently committed version from proxies, which is actually a read version.
+ACTOR Future<Version> getCommittedVersion(Database cx) {
+	state Transaction tr(cx);
+
+	loop {
+		try {
+			Version v = wait(tr.getReadVersion());
+			return v;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self) {
+	state Future<Void> started = monitorBackupStarted(self);
+
+	loop choose {
+		when(wait(started)) { break; }
+		when(Version version = wait(getCommittedVersion(self->cx))) {
+			// Get a committed version and pop it so that TLog can remove the data.
+			self->savedVersion = std::max(version - 5000000, self->savedVersion);
+			self->minKnownCommittedVersion = std::max(version - 5000000, self->minKnownCommittedVersion);
+			wait(delay(2.0, self->cx->taskID)); // TODO: make delay a knob
+			self->pop(); // Pop while the worker is in this NOOP state.
+		}
+	}
+
+	TraceEvent("BackupWorkerStartPullData", self->myId);
+	wait(pullAsyncData(self));
+	return Void();
+}
+
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, LogEpoch recoveryCount,
                                 BackupData* self) {
 	loop {
@@ -371,7 +422,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 	    .detail("LogEpoch", req.recruitedEpoch)
 	    .detail("BackupEpoch", req.backupEpoch);
 	try {
-		addActor.send(pullAsyncData(&self));
+		addActor.send(monitorBackupKeyOrPullData(&self));
 		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
 		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
 
