@@ -325,8 +325,8 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 				// TODO: What about when peerReference == -1?
 				throw connection_unreferenced();
 			} else if (FlowTransport::transport().isClient() && peer->compatible && peer->destination.isPublic() &&
-									(peer->lastConnectTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT) &&
-									(peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT)) {
+			           (peer->lastConnectTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT) &&
+			           (peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT)) {
 				// First condition is necessary because we may get here if we are server.
 				throw connection_idle();
 			}
@@ -413,11 +413,18 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				self->outgoingConnectionIdle = true;
 				// Wait until there is something to send.
 				while (self->unsent.empty()) {
-					if (FlowTransport::transport().isClient() && self->destination.isPublic() &&
-							clientReconnectDelay) {
+					if (self->destination.isPublic() && clientReconnectDelay) {
 						break;
 					}
-					wait(self->dataToSend.onTrigger());
+
+					choose {
+						when(wait(self->dataToSend.onTrigger())) {}
+						when(wait(self->resetConnect.onTrigger())) {
+							if (IFailureMonitor::failureMonitor().getState(self->destination).isFailed()) {
+								break;
+							}
+						}
+					}
 				}
 
 				ASSERT( self->destination.isPublic() );
@@ -431,10 +438,9 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 				try {
 					choose {
-						when( Reference<IConnection> _conn = wait( INetworkConnections::net()->connect(self->destination) ) ) { 
-							if (FlowTransport::transport().isClient()) {
-								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
-							}
+						when(Reference<IConnection> _conn =
+						         wait(INetworkConnections::net()->connect(self->destination))) {
+							IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 							if (self->unsent.empty()) {
 								_conn->close();
 								clientReconnectDelay = false;
@@ -456,14 +462,18 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 					if(e.code() != error_code_connection_failed) {
 						throw;
 					}
-					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
-					if (FlowTransport::transport().isClient()) {
-						IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
-						clientReconnectDelay = true;
-					}
+					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID())
+					    .suppressFor(1.0)
+					    .detail("PeerAddr", self->destination)
+					    .detail("ClientReconnectDelay", clientReconnectDelay);
+
+					IFailureMonitor::failureMonitor().setStatus(
+					    self->destination, FailureStatus(e.code() == error_code_connection_failed));
+					clientReconnectDelay = false;
 					throw;
 				}
 			} else {
+				IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 				self->outgoingConnectionIdle = false;
 			}
 
@@ -477,6 +487,8 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 					self->transport->countConnClosedWithoutError++;
 				else
 					self->transport->countConnClosedWithError++;
+
+				clientReconnectDelay = e.code() != error_code_connection_idle;
 				throw e;
 			}
 
@@ -524,7 +536,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 			}
 
 			if (conn) {
-				clientReconnectDelay = FlowTransport::transport().isClient() && e.code() != error_code_connection_idle;
 				conn->close();
 				conn = Reference<IConnection>();
 			}
@@ -1094,13 +1105,13 @@ Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
 void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 	if (!isStream || !endpoint.getPrimaryAddress().isValid())
 		return;
-	else if (FlowTransport::transport().isClient())
-		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 
 	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
 	if(peer->peerReferences == -1) {
+		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 		peer->peerReferences = 1;
 	} else {
+		peer->resetConnect.trigger();
 		peer->peerReferences++;
 	}
 }

@@ -168,19 +168,14 @@ ACTOR Future<Void> failureMonitorClientLoop(
 
 ACTOR Future<Void> failureMonitorClient( Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, bool trackMyStatus ) {
 	TraceEvent("FailureMonitorStart").detail("IsClient", FlowTransport::transport().isClient());
-	if (FlowTransport::transport().isClient()) {
-		wait(Never());
-	}
 
-	state SimpleFailureMonitor* monitor = static_cast<SimpleFailureMonitor*>( &IFailureMonitor::failureMonitor() );
+	state SimpleFailureMonitor* monitor = static_cast<SimpleFailureMonitor*>(&IFailureMonitor::failureMonitor());
 	state Reference<FailureMonitorClientState> fmState = Reference<FailureMonitorClientState>(new FailureMonitorClientState());
 	auto localAddr = g_network->getLocalAddresses();
 	monitor->setStatus(localAddr.address, FailureStatus(false));
 	if(localAddr.secondaryAddress.present()) {
 		monitor->setStatus(localAddr.secondaryAddress.get(), FailureStatus(false));
 	}
-	loop {
-		state Future<Void> client = ci->get().present() ? failureMonitorClientLoop(monitor, ci->get().get(), fmState, trackMyStatus) : Void();
-		wait( ci->onChange() );
-	}
+
+	return Never();
 }
