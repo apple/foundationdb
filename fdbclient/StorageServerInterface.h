@@ -70,9 +70,9 @@ struct StorageServerInterface {
 
 	RequestStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType;
 	RequestStream<struct WatchValueRequest> watchValue;
-
-	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
-	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
+    bool isCacheServer;
+	explicit StorageServerInterface(UID uid) : uniqueID( uid ), isCacheServer(false) {}
+	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ), isCacheServer(false) {}
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
@@ -85,10 +85,11 @@ struct StorageServerInterface {
 			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
+			if (ar.protocolVersion().hasCacheRole()) serializer(ar, isCacheServer);
 		} else {
 			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
-			           watchValue);
+			           watchValue, isCacheServer);
 		}
 	}
 	bool operator == (StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }

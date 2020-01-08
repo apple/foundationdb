@@ -229,7 +229,7 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 		return joinPath(folder, sample_filename);
 	else if( storeType == KeyValueStoreType::MEMORY )
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
-	
+
 	else if ( storeType == KeyValueStoreType::SSD_REDWOOD_V1 )
 		return joinPath(folder, sample_filename);
 	UNREACHABLE();
@@ -413,7 +413,7 @@ ACTOR Future<Void> registrationClient(
 		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply(request) ) : Never();
 		choose {
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
-				processClass = reply.processClass;	
+				processClass = reply.processClass;
 				asyncPriorityInfo->set( reply.priorityInfo );
 			}
 			when ( wait( ccInterface->onChange() )) {}
@@ -751,7 +751,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 				TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
 				.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
 				.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
-				
+
 				localInfo.myLocality = locality;
 				dbInfo->set(localInfo);
 			}
@@ -1236,7 +1236,7 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN( recruited.getQueuingMetrics );
 				DUMPTOKEN( recruited.confirmRunning );
 
-				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(), 
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(),
 						logRouter( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
@@ -1492,7 +1492,7 @@ ACTOR Future<Void> fdbd(
 		// Endpoints should be registered first before any process trying to connect to it. So coordinationServer actor should be the first one executed before any other.
 		if ( coordFolder.size() )
 			actors.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
-		
+
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards

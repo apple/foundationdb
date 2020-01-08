@@ -322,7 +322,7 @@ public:
 						logServerMap->add(worker.interf.locality, &worker);
 					}
 				}
-				
+
 				if (logServerSet->size() < (addingDegraded == 0 ? desired : required)) {
 				}
 				else if (logServerSet->size() == required || logServerSet->size() <= desired) {
@@ -1408,7 +1408,7 @@ ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDa
 	if(db->clientStatus.size() > 10000) {
 		TraceEvent(SevWarnAlways, "TooManyClientStatusEntries").suppressFor(1.0);
 	}
-	
+
 	while (db->clientInfo->get().id == req.knownClientInfoID) {
 		choose {
 			when (wait( db->clientInfo->onChange() )) {}
@@ -1519,7 +1519,7 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 
 	Optional<Standalone<StringRef>> currentRKProcessId;
 	Optional<Standalone<StringRef>> currentDDProcessId;
-	
+
 	auto& db = self->db.serverInfo->get().read();
 	bool ratekeeperHealthy = false;
 	if (db.ratekeeper.present() && self->id_worker.count(db.ratekeeper.get().locality.processId()) &&
@@ -2350,7 +2350,7 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 				break;
 			}
 			catch (Error &e) {
-				wait(tr.onError(e));		
+				wait(tr.onError(e));
 			}
 		}
 	}
@@ -2624,7 +2624,7 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 			if (self->onMasterIsBetter(worker, ProcessClass::DataDistributor)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
-			
+
 			InitializeDataDistributorRequest req(deterministicRandom()->randomUniqueID());
 			TraceEvent("CCDataDistributorRecruit", self->id).detail("Addr", worker.interf.address());
 
