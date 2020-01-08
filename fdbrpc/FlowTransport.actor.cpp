@@ -403,6 +403,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 		.detail("PeerAddr", self->destination)
 		.detail("ConnSet", (bool)conn);
 
+	state Optional<double> firstConnFailedTime = Optional<double>();
 	loop {
 		try {
 			if (!conn) {  // Always, except for the first loop with an incoming connection
@@ -464,6 +465,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				self->outgoingConnectionIdle = false;
 			}
 
+			firstConnFailedTime.reset();
 			try {
 				self->transport->countConnEstablished++;
 				wait( connectionWriter( self, conn ) || reader || connectionMonitor(self) );
@@ -485,6 +487,17 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 			} else {
 				self->reconnectionDelay = std::min(FLOW_KNOBS->MAX_RECONNECTION_TIME, self->reconnectionDelay * FLOW_KNOBS->RECONNECTION_TIME_GROWTH_RATE);
 			}
+
+			if (firstConnFailedTime.present()) {
+				if (now() - firstConnFailedTime.get() > FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT) {
+					TraceEvent(SevWarnAlways, "PeerUnavailableForLongTime", conn ? conn->getDebugID() : UID())
+					    .detail("PeerAddr", self->destination);
+					firstConnFailedTime = now() - FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT/2.0;
+				}
+			} else {
+				firstConnFailedTime = now();
+			}
+
 			self->discardUnreliablePackets();
 			reader = Future<Void>();
 			bool ok = e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled ||

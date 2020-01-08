@@ -72,6 +72,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( USE_OBJECT_SERIALIZER,                                 1 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
+	init( PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT,           3600.0 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 
