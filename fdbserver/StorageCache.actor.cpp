@@ -1524,7 +1524,7 @@ public:
 	StorageCacheUpdater(Version currentVersion) : fromVersion(currentVersion), currentVersion(currentVersion), processedCacheStartKey(false) {}
 
 	void applyMutation(StorageCacheData* data, MutationRef const& m , Version ver) {
-		TraceEvent("SCNewVersion", data->thisServerID).detail("VerWas", data->mutableData().latestVersion).detail("ChVer", ver);
+		//TraceEvent("SCNewVersion", data->thisServerID).detail("VerWas", data->mutableData().latestVersion).detail("ChVer", ver);
 
 		if(currentVersion != ver) {
 			fromVersion = currentVersion;
@@ -1662,12 +1662,10 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 				}
 				when( wait( dbInfoChange ) ) {
 					if( data->logSystem )
-						//cursor = data->logSystem->get()->peek( data->thisServerID, tagAt, Optional<Version>(), cacheTag, true );
 						cursor = data->logSystem->peekSingle( data->thisServerID, data->version.get() + 1, cacheTag, std::vector<std::pair<Version,Tag>>()) ;
 					else
 						cursor = Reference<ILogSystem::IPeekCursor>();
 					dbInfoChange = data->db->onChange();
-					//dbInfoChange = data->logSystem->onChange();
 				}
 			}
 		}
@@ -1688,7 +1686,6 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 			cloneCursor2 = cursor->cloneNoMore();
 
 			// TODO:
-			//cloneCursor1->setProtocolVersion(data->logProtocol);
 		    cloneCursor1->setProtocolVersion(currentProtocolVersion);
 
 			for (; cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
@@ -1750,16 +1747,13 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 
 		//FIXME: ensure this can only read data from the current version
 		cloneCursor2->setProtocolVersion(currentProtocolVersion);
+		ver = invalidVersion;
 
-		if (!cloneCursor2->hasMessage())
-		{
-			TraceEvent("CloneCursor2NoMsg", data->thisServerID).detail("CursorVersion", cloneCursor2->version().version);
-		}
 		// Now process the mutations
 		for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
 			ArenaReader& reader = *cloneCursor2->reader();
 
-			TraceEvent("Versions", data->thisServerID).detail("CursorVersion", cloneCursor2->version().version).detail("Ver", ver).detail("DataVersion", data->version.get()).detail("TLogVersion", data->lastTLogVersion);
+			//TraceEvent("Versions", data->thisServerID).detail("CursorVersion", cloneCursor2->version().version).detail("Ver", ver).detail("DataVersion", data->version.get()).detail("TLogVersion", data->lastTLogVersion);
 			if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
 				++data->counters.updateVersions;
 				ver = cloneCursor2->version().version;
@@ -1816,9 +1810,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 		if(ver != invalidVersion) {
 			data->lastVersionWithData = ver;
 		} else {
-			// TODO double check
 			ver = cloneCursor2->version().version - 1;
-			//ver = cursor->version().version - 1;
 		}
 		if(injectedChanges) data->lastVersionWithData = ver;
 

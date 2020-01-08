@@ -1349,12 +1349,11 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
 	tr.set(recoveryCommitRequest.arena, primaryDatacenterKey, self->myInterface.locality.dcId().present() ? self->myInterface.locality.dcId().get() : StringRef());
 	
-	//FIXME: remove this code, caching the entire normal keyspace as a test of functionality
-	//TODO: caching disabled for this merge
+	//FIXME: remove this code, caching the entire keyspace as a test of functionality
 	tr.set(recoveryCommitRequest.arena, storageCacheKey(normalKeys.begin), storageCacheValue({0}));
-	tr.set(recoveryCommitRequest.arena, storageCacheKey(normalKeys.end), storageCacheValue({}));
+	tr.set(recoveryCommitRequest.arena, storageCacheKey(systemKeys.end), storageCacheValue({}));
 	tr.set(recoveryCommitRequest.arena, cacheKeysKey(0, normalKeys.begin), serverKeysTrue);
-	tr.set(recoveryCommitRequest.arena, cacheKeysKey(0, normalKeys.end), serverKeysFalse);
+	tr.set(recoveryCommitRequest.arena, cacheKeysKey(0, systemKeys.end), serverKeysFalse);
 	tr.set(recoveryCommitRequest.arena, cacheChangeKeyFor(0), BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned()));
 	tr.set(recoveryCommitRequest.arena, cacheChangeKey, BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned()));
 
