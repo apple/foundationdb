@@ -299,7 +299,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		prevVersion = param.asset.endVersion;
 
 		TraceEvent("FastRestore").detail("LoadParam", param.toString()).detail("LoaderID", loader->first.toString());
-		ASSERT_WE_THINK(param.asset.len > 0); // TODO: ensure empty files are not included here
+		ASSERT_WE_THINK(param.asset.len > 0);
 		ASSERT_WE_THINK(param.asset.offset >= 0);
 		ASSERT_WE_THINK(param.asset.offset <= file.fileSize);
 		ASSERT_WE_THINK(param.asset.beginVersion <= param.asset.endVersion);
@@ -465,14 +465,8 @@ ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std
 		throw restore_missing_data();
 	}
 
-	if (!rangeFiles->empty()) {
-		TraceEvent(SevError, "FastRestore").detail("ClearOldRangeFiles", rangeFiles->size());
-		rangeFiles->clear();
-	}
-	if (!logFiles->empty()) {
-		TraceEvent(SevError, "FastRestore").detail("ClearOldRangeFiles", logFiles->size());
-		logFiles->clear();
-	}
+	ASSERT(rangeFiles->empty());
+	ASSERT(logFiles->empty());
 
 	for (const RangeFile& f : restorable.get().ranges) {
 		TraceEvent("FastRestore").detail("RangeFile", f.toString());
