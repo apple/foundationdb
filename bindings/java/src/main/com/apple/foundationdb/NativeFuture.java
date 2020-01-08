@@ -44,6 +44,9 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements AutoClose
 	//
 	// Since this must be called from a constructor, we assume that close
 	// cannot be called concurrently.
+	//
+	// Note: This function guarantees the callback will be executed **at most once**.
+	//
 	protected void registerMarshalCallback(Executor executor) {
 		if(cPtr != 0) {
 			Future_registerCallback(cPtr, () -> executor.execute(this::marshalWhenDone));

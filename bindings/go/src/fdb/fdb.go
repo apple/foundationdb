@@ -236,8 +236,12 @@ func StartNetwork() error {
 const DefaultClusterFile string = ""
 
 // OpenDefault returns a database handle to the FoundationDB cluster identified
-// by the DefaultClusterFile on the current machine. The FoundationDB client
-// networking engine will be initialized first, if necessary.
+// by the DefaultClusterFile on the current machine.
+//
+// A single client can use this function multiple times to connect to different
+// clusters simultaneously, with each invocation requiring its own cluster file.
+// To connect to multiple clusters running at different, incompatible versions,
+// the multi-version client API must be used.
 func OpenDefault() (Database, error) {
 	return OpenDatabase(DefaultClusterFile)
 }
@@ -254,6 +258,11 @@ func MustOpenDefault() Database {
 
 // Open returns a database handle to the FoundationDB cluster identified
 // by the provided cluster file and database name.
+//
+// A single client can use this function multiple times to connect to different
+// clusters simultaneously, with each invocation requiring its own cluster file.
+// To connect to multiple clusters running at different, incompatible versions,
+// the multi-version client API must be used.
 func OpenDatabase(clusterFile string) (Database, error) {
 	networkMutex.Lock()
 	defer networkMutex.Unlock()
@@ -283,6 +292,8 @@ func OpenDatabase(clusterFile string) (Database, error) {
 	return db, nil
 }
 
+// MustOpenDatabase is like OpenDatabase but panics if the default database cannot
+// be opened.
 func MustOpenDatabase(clusterFile string) Database {
 	db, err := OpenDatabase(clusterFile)
 	if err != nil {
@@ -291,7 +302,7 @@ func MustOpenDatabase(clusterFile string) Database {
 	return db
 }
 
-// Deprecated: Use OpenDatabase instead
+// Deprecated: Use OpenDatabase instead.
 // The database name must be []byte("DB").
 func Open(clusterFile string, dbName []byte) (Database, error) {
 	if bytes.Compare(dbName, []byte("DB")) != 0 {
@@ -300,7 +311,7 @@ func Open(clusterFile string, dbName []byte) (Database, error) {
 	return OpenDatabase(clusterFile)
 }
 
-// Deprecated: Use MustOpenDatabase instead
+// Deprecated: Use MustOpenDatabase instead.
 // MustOpen is like Open but panics if the database cannot be opened.
 func MustOpen(clusterFile string, dbName []byte) Database {
 	db, err := Open(clusterFile, dbName)

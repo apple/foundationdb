@@ -96,4 +96,6 @@ struct RestoreSimpleRequest : TimedRequest {
 	}
 };
 
+bool isRangeMutation(MutationRef m);
+
 #endif // FDBSERVER_RESTOREUTIL_ACTOR_H

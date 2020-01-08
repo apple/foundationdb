@@ -193,10 +193,13 @@ public:
 	// Get bucket contents via a stream, since listing large buckets will take many serial blob requests
 	// If a delimiter is passed then common prefixes will be read in parallel, recursively, depending on recurseFilter.
 	// Recursefilter is a must be a function that takes a string and returns true if it passes.  The default behavior is to assume true.
-	Future<Void> listBucketStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0, std::function<bool(std::string const &)> recurseFilter = nullptr);
+	Future<Void> listObjectsStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0, std::function<bool(std::string const &)> recurseFilter = nullptr);
 
-	// Get a list of the files in a bucket, see listBucketStream for more argument detail.
-	Future<ListResult> listBucket(std::string const &bucket, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0, std::function<bool(std::string const &)> recurseFilter = nullptr);
+	// Get a list of the files in a bucket, see listObjectsStream for more argument detail.
+	Future<ListResult> listObjects(std::string const &bucket, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0, std::function<bool(std::string const &)> recurseFilter = nullptr);
+
+	// Get a list of all buckets
+	Future<std::vector<std::string>> listBuckets();
 
 	// Check if a bucket exists
 	Future<bool> bucketExists(std::string const &bucket);
@@ -216,9 +219,9 @@ public:
 	// Delete all objects in a bucket under a prefix.  Note this is not atomic as blob store does not
 	// support this operation directly. This method is just a convenience method that lists and deletes
 	// all of the objects in the bucket under the given prefix.
-	// Since it can take a while, if a pNumDeleted is provided then it will be incremented every time
+	// Since it can take a while, if a pNumDeleted and/or pBytesDeleted are provided they will be incremented every time
 	// a deletion of an object completes.
-	Future<Void> deleteRecursively(std::string const &bucket, std::string prefix = "", int *pNumDeleted = NULL);
+	Future<Void> deleteRecursively(std::string const &bucket, std::string prefix = "", int *pNumDeleted = nullptr, int64_t *pBytesDeleted = nullptr);
 
 	// Create a bucket if it does not already exists.
 	Future<Void> createBucket(std::string const &bucket);

@@ -7,6 +7,7 @@
 #include <stack>
 #include <memory>
 #include <sstream>
+#include <algorithm>
 
 namespace {
 

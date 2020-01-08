@@ -277,6 +277,8 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    Causes the :type:`FDBCallback` function to be invoked as ``callback(future, callback_parameter)`` when the given Future is ready. If the Future is already ready, the call may occur in the current thread before this function returns (but this behavior is not guaranteed). Alternatively, the call may be delayed indefinitely and take place on the thread on which :func:`fdb_run_network()` was invoked, and the callback is responsible for any necessary thread synchronization (and/or for posting work back to your application event loop, thread pool, etc. if your application's architecture calls for that).
 
+   .. note:: This function guarantees the callback will be executed **at most once**.
+
    .. warning:: Never call :func:`fdb_future_block_until_ready()` from a callback passed to this function. This may block the thread on which :func:`fdb_run_network()` was invoked, resulting in a deadlock.
 
 .. type:: FDBCallback
@@ -392,6 +394,8 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 .. function:: fdb_error_t fdb_create_database(const char* cluster_file_path, FDBDatabase** out_database)
 
    Creates a new database connected the specified cluster. The caller assumes ownership of the :type:`FDBDatabase` object and must destroy it with :func:`fdb_database_destroy()`.
+
+   |fdb-open-blurb2|
 
    ``cluster_file_path``
       A NULL-terminated string giving a local path of a :ref:`cluster file <foundationdb-cluster-file>` (often called 'fdb.cluster') which contains connection information for the FoundationDB cluster. If cluster_file_path is NULL or an empty string, then a :ref:`default cluster file <default-cluster-file>` will be used.
@@ -597,6 +601,8 @@ Applications must provide error handling and an appropriate retry loop around th
 
    |sets-and-clears2|
 
+   |transaction-clear-range-blurb|
+
    ``begin_key_name``
       A pointer to the name of the key specifying the beginning of the range to clear. |no-null|
 
@@ -659,6 +665,10 @@ Applications must provide error handling and an appropriate retry loop around th
     ``FDB_MUTATION_TYPE_XOR``
 
     |atomic-xor|
+
+    ``FDB_MUTATION_TYPE_COMPARE_AND_CLEAR``
+
+    |atomic-compare-and-clear|
 
     ``FDB_MUTATION_TYPE_MAX``
 

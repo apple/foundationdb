@@ -324,9 +324,11 @@ public:
 		serializeBytes(bytes.begin(), bytes.size());
 	}
 	void serializeBytes(const void* data, int bytes) {
-		valgrindCheck( data, bytes, "serializeBytes" );
-		void* p = writeBytes(bytes);
-		memcpy(p, data, bytes);
+		if (bytes > 0) {
+			valgrindCheck(data, bytes, "serializeBytes");
+			void* p = writeBytes(bytes);
+			memcpy(p, data, bytes);
+		}
 	}
 	template <class T>
 	void serializeBinaryItem( const T& t ) {
@@ -456,7 +458,9 @@ private:
 			}
 			Arena newArena;
 			uint8_t* newData = new ( newArena ) uint8_t[ allocated ];
-			memcpy(newData, data, p);
+			if (p > 0) {
+				memcpy(newData, data, p);
+			}
 			arena = newArena;
 			data = newData;
 		}
