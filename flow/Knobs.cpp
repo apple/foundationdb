@@ -184,6 +184,10 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( FUTURE_VERSION_BACKOFF_GROWTH,                       2.0 );
 	init( LOAD_BALANCE_MAX_BAD_OPTIONS,                          1 ); //should be the same as MAX_MACHINES_FALLING_BEHIND
 	init( LOAD_BALANCE_PENALTY_IS_BAD,                        true );
+	init( BASIC_LOAD_BALANCE_UPDATE_RATE,                      2.0 );
+	init( BASIC_LOAD_BALANCE_MAX_CHANGE,                      0.05 );
+	init( BASIC_LOAD_BALANCE_MAX_PROB,                         2.0 );
+	init( BASIC_LOAD_BALANCE_BUCKETS,                           40 );
 }
 // clang-format on
 

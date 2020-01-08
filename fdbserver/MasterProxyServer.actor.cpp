@@ -68,8 +68,33 @@ struct ProxyStats {
 
 	Future<Void> logger;
 
+	int recentRequests;
+	Deque<int> requestBuckets;
+	double lastBucketBegin;
+	double bucketInterval;
+
+	void updateRequestBuckets() {
+		while(now() - lastBucketBegin > bucketInterval) {
+			lastBucketBegin += bucketInterval;
+			recentRequests -= requestBuckets.front();
+			requestBuckets.pop_front();
+			requestBuckets.push_back(0);
+		}
+	}
+
+	void addRequest() {
+		updateRequestBuckets();
+		++recentRequests;
+		++requestBuckets.back();
+	}
+
+	int getRecentRequests() {
+		updateRequestBuckets();
+		return recentRequests*FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE-(lastBucketBegin+bucketInterval-now()));
+	}
+
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion, int64_t *commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()),
+	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()), bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
 		txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc), txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc), txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc), txnBatchPriorityStartOut("TxnBatchPriorityStartOut", cc),
 		txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc), txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc), txnCommitIn("TxnCommitIn", cc),	txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc), txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
 		txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc), keyServerLocationRequests("KeyServerLocationRequests", cc), 
@@ -80,6 +105,9 @@ struct ProxyStats {
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
 		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
+		for(int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
+			requestBuckets.push_back(0);
+		}
 	}
 };
 
@@ -154,6 +182,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				stats->txnDefaultPriorityStartIn += req.transactionCount;
 			else
 				stats->txnBatchPriorityStartIn += req.transactionCount;
+			stats->addRequest();
 
 			if (transactionQueue->empty()) {
 				forwardPromise(GRVTimer, delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)), TaskPriority::ProxyGRVTimer));
@@ -426,6 +455,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 						    .detail("Client", req.reply.getEndpoint().getPrimaryAddress());
 					}
 					++commitData->stats.txnCommitIn;
+					commitData->stats.addRequest();
 
 					if(req.debugID.present()) {
 						g_traceBatch.addEvent("CommitDebug", req.debugID.get().first(), "MasterProxyServer.batcher");
@@ -1144,6 +1174,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	rep.version = commitData->committedVersion.get();
 	rep.locked = commitData->locked;
 	rep.metadataVersion = commitData->metadataVersion;
+	rep.recentRequests = commitData->stats.getRecentRequests();
 
 	for (auto v : versions) {
 		if(v.version > rep.version) {
@@ -1336,6 +1367,7 @@ ACTOR static Future<Void> readRequestServer( MasterProxyInterface proxy, ProxyCo
 
 	loop {
 		GetKeyServerLocationsRequest req = waitNext(proxy.getKeyServersLocations.getFuture());
+		commitData->stats.addRequest();
 		++commitData->stats.keyServerLocationRequests;
 		GetKeyServerLocationsReply rep;
 		if(!req.end.present()) {

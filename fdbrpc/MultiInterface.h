@@ -58,50 +58,111 @@ struct ReferencedInterface : public ReferenceCounted<ReferencedInterface<T>> {
 };
 
 template <class T>
-class MultiInterface : public ReferenceCounted<MultiInterface<T>> {
+struct AlternativeInfo {
+	T interf;
+	double probability;
+	double cumulativeProbability;
+	int recentRequests;
+	double lastUpdate;
+
+	AlternativeInfo(T const& interf, double probability, double cumulativeProbability) : interf(interf), probability(probability), cumulativeProbability(cumulativeProbability), recentRequests(-1), lastUpdate(0) {}
+
+	bool operator < (double const& r) const {
+		return cumulativeProbability < r;
+	}
+	bool operator <= (double const& r) const {
+		return cumulativeProbability <= r;
+	}
+	bool operator == (double const& r) const {
+		return cumulativeProbability == r;
+	}
+};
+
+template <class T>
+class ModelInterface : public ReferenceCounted<ModelInterface<T>> {
 public:
-	MultiInterface( const vector<T>& v, LocalityData const& locality = LocalityData() ) : bestCount(0) {
-		for(int i=0; i<v.size(); i++)
-			alternatives.push_back(KVPair<int,T>(LBDistance::DISTANT,v[i]));
-		deterministicRandom()->randomShuffle(alternatives);
-		if ( LBLocalityData<T>::Present ) {
-			for(int a=0; a<alternatives.size(); a++)
-				alternatives[a].k = loadBalanceDistance( locality, LBLocalityData<T>::getLocality( alternatives[a].v ), LBLocalityData<T>::getAddress( alternatives[a].v ) );
-			std::stable_sort( alternatives.begin(), alternatives.end() );
+	ModelInterface( const vector<T>& v ) {
+		for(int i = 0; i < v.size(); i++) {
+			alternatives.push_back(AlternativeInfo(v[i], 1.0/v.size(), (i+1.0)/v.size()));
 		}
-		if(size())
-			bestCount = std::lower_bound( alternatives.begin()+1, alternatives.end(), alternatives[0].k+1 ) - alternatives.begin();
+		if(v.size()) {
+			updater = recurring([this](){ updateProbabilities(); }, FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE);
+		}
 	}
 
 	int size() const { return alternatives.size(); }
-	int countBest() const {
-		return bestCount;
-	}
-	LBDistance::Type bestDistance() const {
-		if( !size() )
-			return LBDistance::DISTANT;
-		return (LBDistance::Type) alternatives[0].k;
-	}
+
 	bool alwaysFresh() const {
 		return LBLocalityData<T>::alwaysFresh();
 	}
 
-	template <class F>
-	F const& get( int index, F T::*member ) const {
-		return alternatives[index].v.*member;
+	int getBest() const {
+		return std::lower_bound( alternatives.begin(), alternatives.end(), deterministicRandom()->random01() ) - alternatives.begin();
 	}
 
-	T const& getInterface(int index) { return alternatives[index].v; }
-	UID getId( int index ) const { return alternatives[index].v.id(); }
+	void updateRecent( int index, int recentRequests ) {
+		alternatives[index].recentRequests = recentRequests;
+		alternatives[index].lastUpdate = now();
+	}
 
-	virtual ~MultiInterface() {}
+	void updateProbabilities() {
+		double totalRequests = 0;
+		for(auto& it : alternatives) {
+			totalRequests += it.recentRequests;
+			if(now() - it.lastUpdate > FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/2.0) {
+				return;
+			}
+		}
+		if(totalRequests < 1000) {
+			return;
+		}
+		
+		double totalProbability = 0;
+		for(auto& it : alternatives) {
+			it.probability += (1.0/alternatives.size()-(it.recentRequests/totalRequests))*FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_CHANGE;
+			it.probability = std::max(it.probability, 1/(FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_PROB*alternatives.size()));
+			it.probability = std::min(it.probability, FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_PROB/alternatives.size());
+			totalProbability += it.probability;
+		}
+
+		for(auto& it : alternatives) {
+			it.probability = it.probability/totalProbability;
+		}
+
+		totalProbability = 0;
+		for(auto& it : alternatives) {
+			totalProbability += it.probability;
+			it.cumulativeProbability = totalProbability;
+		}
+		alternatives.back().cumulativeProbability = 1.0;
+	}
+
+	template <class F>
+	F const& get( int index, F T::*member ) const {
+		return alternatives[index].interf.*member;
+	}
+
+	T const& getInterface(int index) { return alternatives[index].interf; }
+	UID getId( int index ) const { return alternatives[index].interf.id(); }
+
+	virtual ~ModelInterface() {}
 
 	std::string description() {
 		return describe( alternatives );
 	}
 private:
-	vector<KVPair<int,T>> alternatives;
-	int16_t bestCount;
+	vector<AlternativeInfo<T>> alternatives;
+	Future<Void> updater;
+};
+
+template <class T>
+class MultiInterface : public ReferenceCounted<MultiInterface<T>> {
+	MultiInterface( const vector<T>& v, LocalityData const& locality = LocalityData() ) {
+		//This version of MultInterface is no longer used, but was kept around because of templating
+		ASSERT(false); 
+	}
+
+	virtual ~MultiInterface() {}
 };
 
 template <class T>
@@ -155,5 +216,6 @@ private:
 };
 
 template <class Ar, class T> void load(Ar& ar, Reference<MultiInterface<T>>&) { ASSERT(false); }	//< required for Future<T>
+template <class Ar, class T> void load(Ar& ar, Reference<ModelInterface<T>>&) { ASSERT(false); }	//< required for Future<T>
 
 #endif
