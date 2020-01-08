@@ -175,16 +175,13 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	// Assumption 2: range files at one version > batchSizeThreshold.
 	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles, const std::vector<RestoreFileFR>& logFiles,
 	                         std::map<Version, VersionBatch>* versionBatches) {
-		// Version batch range [beginVersion, endVersion)
-		Version beginVersion = 0;
-		Version endVersion = 0;
 		Version prevEndVersion = 0;
 		double batchSize = 0; // TODO: Can be deleted
 		int rangeIdx = 0;
 		int logIdx = 0;
 		Version nextVersion = 0; // Used to calculate the batch's endVersion
 		VersionBatch vb;
-		vb.beginVersion = beginVersion;
+		vb.beginVersion = 0; // Version batch range [beginVersion, endVersion)
 		bool rewriteNextVersion = false;
 		while (rangeIdx < rangeFiles.size() || logIdx < logFiles.size()) {
 			if (!rewriteNextVersion) {
