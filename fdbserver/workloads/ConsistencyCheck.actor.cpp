@@ -669,8 +669,9 @@ public:
 		// for cacheServer reads
 		state ServerDBInfo system = self->dbInfo->get();
 		state MasterProxyInterface proxy = deterministicRandom()->randomChoice( system.client.proxies );
-		int id = 0;
-		state std::vector<std::pair<uint16_t,StorageServerInterface>>::iterator scit = find_if(system.storageCaches.begin(), system.storageCaches.end(), storageCachesComparator(id));
+		//auto storageCaches = system.storageCaches;
+		//int id = 0;
+		//state std::vector<std::pair<uint16_t,StorageServerInterface>>::iterator scit = find_if(system.storageCaches.begin(), system.storageCaches.end(), storageCachesComparator(id));
 
 		for(; i < ranges.size(); i += increment)
 		{
@@ -735,10 +736,13 @@ public:
 					}
 
 					// Try to read from the cache server as well
-					if (scit != system.storageCaches.end()) {
-						TraceEvent(SevDebug, "ConsistencyCheck_FoundSSIForCacheServer").detail("UID", scit->second.id()).detail("IsCacheServer", scit->second.isCacheServer);
-						storageServerInterfaces.push_back(scit->second);
-					}
+					//if (scit != system.storageCaches.end()) {
+						//TraceEvent("ConsistencyCheck_FoundSSIForCacheServer").detail("UID", scit->second.id()).detail("IsCacheServer", scit->second.isCacheServer);
+						//auto sz = storageServerInterfaces.size();
+						//storageServerInterfaces.push_back(scit->second);
+						//TraceEvent("ConsistencyCheck_VerifySSIForCacheServer").detail("Size", sz).detail("UID", storageServerInterfaces[sz].id()).detail("IsCacheServer", storageServerInterfaces[sz].isCacheServer);
+						//TraceEvent("ConsistencyCheck_UpdatedSize").detail("Size", storageServerInterfaces.size());
+					//}
 					break;
 				}
 				catch(Error &e) {
@@ -1450,17 +1454,16 @@ public:
 		}
 
 		// Check DataDistributor
-		ProcessClass::Fitness bestDistributorFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::DataDistributor);
-		if (db.distributor.present() && (!nonExcludedWorkerProcessMap.count(db.distributor.get().address()) || nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(ProcessClass::DataDistributor) != bestDistributorFitness)) {
-			TraceEvent("ConsistencyCheck_DistributorNotBest").detail("BestDataDistributorFitness", bestDistributorFitness)
+		ProcessClass::Fitness fitnessLowerBound = allWorkerProcessMap[db.master.address()].processClass.machineClassFitness(ProcessClass::DataDistributor);
+		if (db.distributor.present() && (!nonExcludedWorkerProcessMap.count(db.distributor.get().address()) || nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(ProcessClass::DataDistributor) > fitnessLowerBound)) {
+			TraceEvent("ConsistencyCheck_DistributorNotBest").detail("DataDistributorFitnessLowerBound", fitnessLowerBound)
 			.detail("ExistingDistributorFitness", nonExcludedWorkerProcessMap.count(db.distributor.get().address()) ? nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(ProcessClass::DataDistributor) : -1);
 			return false;
 		}
 
 		// Check Ratekeeper
-		ProcessClass::Fitness bestRatekeeperFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Ratekeeper);
-		if (db.ratekeeper.present() && (!nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) || nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::Ratekeeper) != bestRatekeeperFitness)) {
-			TraceEvent("ConsistencyCheck_RatekeeperNotBest").detail("BestRatekeeperFitness", bestRatekeeperFitness)
+		if (db.ratekeeper.present() && (!nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) || nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::Ratekeeper) > fitnessLowerBound)) {
+			TraceEvent("ConsistencyCheck_RatekeeperNotBest").detail("BestRatekeeperFitness", fitnessLowerBound)
 			.detail("ExistingRatekeeperFitness", nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) ? nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::Ratekeeper) : -1);
 			return false;
 		}

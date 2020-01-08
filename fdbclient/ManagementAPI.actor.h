@@ -146,7 +146,7 @@ ACTOR Future<Void> excludeServers( Database  cx, vector<AddressExclusion>  serve
 
 // Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given IP.  A NetworkAddress() means
 // all servers (don't exclude anything)
-ACTOR Future<Void> includeServers( Database  cx, vector<AddressExclusion>  servers );
+ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed = false);
 
 // Set the process class of processes with the given address.  A NetworkAddress with a port of 0 means all servers on the given IP.
 ACTOR Future<Void> setClass( Database  cx, AddressExclusion  server, ProcessClass  processClass );
@@ -197,6 +197,8 @@ bool schemaMatch( json_spirit::mValue const& schema, json_spirit::mValue const& 
 // execute payload in 'snapCmd' on all the coordinators, TLogs and
 // storage nodes
 ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
+
+ACTOR Future<Void> addCachedRange(Database cx, KeyRangeRef range);
 
 #include "flow/unactorcompiler.h"
 #endif

@@ -165,6 +165,11 @@ static std::string describe( const int item ) {
 	return format("%d", item);
 }
 
+// Allows describeList to work on a vector of std::string
+static std::string describe(const std::string& s) {
+	return s;
+}
+
 template <class T>
 static std::string describe( Reference<T> const& item ) {
 	return item->toString();
@@ -876,7 +881,9 @@ struct ClusterControllerPriorityInfo {
 	uint8_t dcFitness;
 
 	bool operator== (ClusterControllerPriorityInfo const& r) const { return processClassFitness == r.processClassFitness && isExcluded == r.isExcluded && dcFitness == r.dcFitness; }
-
+	ClusterControllerPriorityInfo()
+	  : ClusterControllerPriorityInfo(/*ProcessClass::UnsetFit*/ 2, false,
+	                                  ClusterControllerPriorityInfo::FitnessUnknown) {}
 	ClusterControllerPriorityInfo(uint8_t processClassFitness, bool isExcluded, uint8_t dcFitness) : processClassFitness(processClassFitness), isExcluded(isExcluded), dcFitness(dcFitness) {}
 
 	template <class Ar>

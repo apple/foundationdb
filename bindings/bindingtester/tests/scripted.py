@@ -358,7 +358,7 @@ class ScriptedTest(Test):
 
     def get_result_specifications(self):
         return [
-            ResultSpecification(self.results_subspace, ordering_index=0, global_error_filter=[1007, 1021])
+            ResultSpecification(self.results_subspace, ordering_index=0, global_error_filter=[1007, 1009, 1021])
         ]
 
     def get_expected_results(self):

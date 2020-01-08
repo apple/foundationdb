@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
+#include "Arena.h"
+#include "FDBOptions.g.h"
+#include "NativeAPI.actor.h"
+#include "SystemData.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -141,8 +145,8 @@ public:
 	Reference<ILogSystem> logSystem;
 	//Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
 	Key ck; //cacheKey
-	Reference<AsyncVar<ServerDBInfo>> db;
 	Database cx;
+	Reference<AsyncVar<ServerDBInfo>> const& db;
 
 	//KeyRangeMap <bool> cachedRangeMap; // map of cached key-ranges
 	KeyRangeMap <Reference<CacheRangeInfo>> cachedRangeMap; // map of cached key-ranges
@@ -1147,7 +1151,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, StorageCacheUpdater* updat
 		wait( data->fetchKeysParallelismLock.take( TaskPriority::DefaultYield, fetchBlockBytes ) );
 		state FlowLock::Releaser holdingFKPL( data->fetchKeysParallelismLock, fetchBlockBytes );
 
-		state double executeStart = now();
+		//state double executeStart = now();
 		//++data->counters.fetchWaitingCount;
 		//data->counters.fetchWaitingMS += 1000*(executeStart - startt);
 
@@ -1625,7 +1629,7 @@ ACTOR Future<Void> compactCache(StorageCacheData* data) {
 		//TODO not really in use as of now. may need in some failure cases. Revisit and remove if no plausible use
 		state Promise<Void> compactionInProgress;
 		data->compactionInProgress = compactionInProgress.getFuture();
-		state Version oldestVersion = data->oldestVersion.get();
+		//state Version oldestVersion = data->oldestVersion.get();
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		// Call the compaction routine that does the actual work,
 		// TODO It's a synchronous function call as of now. Should it asynch?
@@ -1861,7 +1865,29 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 	}
 }
 
-ACTOR Future<Void> storageCache(StorageServerInterface ssi, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db) {
+ACTOR Future<Void> watchInterface(StorageCacheData* self, StorageServerInterface ssi) {
+	state Transaction tr(self->cx);
+	state Key storageKey = storageCacheServerKey(ssi.id());
+	loop {
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		try {
+			Optional<Value> val = wait(tr.get(storageKey));
+			// This could race with the data distributor trying to remove
+			// the interface - but this is ok, as we don't need to kill
+			// ourselves if FailureMonitor marks us as down (this might save
+			// from unnecessary cache refreshes).
+			if (!val.present()) {
+				tr.set(storageKey, storageCacheServerValue(ssi));
+				wait(tr.commit());
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+		wait(delay(5.0));
+	}
+}
+ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db) {
 	state StorageCacheData self(ssi.id(), id, db);
 	state ActorCollection actors(false);
 	state Future<Void> dbInfoChange = Void();
@@ -1878,6 +1904,7 @@ ACTOR Future<Void> storageCache(StorageServerInterface ssi, uint16_t id, Referen
 
 	// pullAsyncData actor pulls mutations from the TLog and also applies them.
 	actors.add(pullAsyncData(&self));
+	actors.add(watchInterface(&self, ssi));
 
 	self.coreStarted.send( Void() );
 

@@ -57,7 +57,6 @@ struct WorkerInfo : NonCopyable {
 	WorkerDetails details;
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
-	Optional<uint16_t> storageCacheInfo;
 
 	WorkerInfo() : gen(-1), reboots(0), lastAvailableTime(now()), priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
 	WorkerInfo( Future<Void> watcher, ReplyPromise<RegisterWorkerReply> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, bool degraded ) :
@@ -65,7 +64,7 @@ struct WorkerInfo : NonCopyable {
 
 	WorkerInfo( WorkerInfo&& r ) BOOST_NOEXCEPT : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen),
 		reboots(r.reboots), lastAvailableTime(r.lastAvailableTime), initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
-		haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor), storageCacheInfo(r.storageCacheInfo) {}
+		haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor) {}
 	void operator=( WorkerInfo&& r ) BOOST_NOEXCEPT {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
@@ -77,7 +76,6 @@ struct WorkerInfo : NonCopyable {
 		details = std::move(r.details);
 		haltRatekeeper = r.haltRatekeeper;
 		haltDistributor = r.haltDistributor;
-		storageCacheInfo = r.storageCacheInfo;
 	}
 };
 
@@ -106,7 +104,6 @@ public:
 		Database db;
 		int unfinishedRecoveries;
 		int logGenerations;
-		std::map<uint16_t, std::pair<Optional<StorageServerInterface>, Optional<Key>>> cacheInterfaces;
 		bool cachePopulated;
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 
@@ -133,29 +130,6 @@ public:
 			serverInfo->set( newInfoCache );
 		}
 
-		void setStorageCache(uint16_t id, StorageServerInterface& interf) {
-			CachedSerialization<ServerDBInfo> newInfoCache = serverInfo->get();
-			auto& newInfo = newInfoCache.mutate();
-			bool found = false;
-			for(auto& it : newInfo.storageCaches) {
-				if(it.first == id) {
-					if(it.second != interf) {
-						newInfo.id = deterministicRandom()->randomUniqueID();
-						it.second = interf;
-					}
-					found = true;
-					break;
-				}
-			}
-			if(!found) {
-			    TraceEvent(SevDebug,"SetStorageCache").detail("UID", interf.uniqueID).detail("IsCacheServer", interf.isCacheServer);
-				newInfo.id = deterministicRandom()->randomUniqueID();
-				interf.isCacheServer = true;
-				newInfo.storageCaches.push_back(std::make_pair(id, interf));
-			}
-			serverInfo->set( newInfoCache );
-		}
-
 		void clearInterf(ProcessClass::ClassType t) {
 			CachedSerialization<ServerDBInfo> newInfoCache = serverInfo->get();
 			auto& newInfo = newInfoCache.mutate();
@@ -168,18 +142,6 @@ public:
 			serverInfo->set( newInfoCache );
 		}
 
-		void clearStorageCache(uint16_t id) {
-			CachedSerialization<ServerDBInfo> newInfoCache = serverInfo->get();
-			auto& newInfo = newInfoCache.mutate();
-			for(auto it = newInfo.storageCaches.begin(); it != newInfo.storageCaches.end(); ++it) {
-				if(it->first == id) {
-					newInfo.id = deterministicRandom()->randomUniqueID();
-					newInfo.storageCaches.erase(it);
-					break;
-				}
-			}
-			serverInfo->set( newInfoCache );
-		}
 	};
 
 	struct UpdateWorkerList {
@@ -360,7 +322,7 @@ public:
 						logServerMap->add(worker.interf.locality, &worker);
 					}
 				}
-				
+
 				if (logServerSet->size() < (addingDegraded == 0 ? desired : required)) {
 				}
 				else if (logServerSet->size() == required || logServerSet->size() <= desired) {
@@ -1196,17 +1158,24 @@ public:
 		return false;
 	}
 
-	bool isProxyOrResolver(Optional<Key> processId) {
+	bool isUsedNotMaster(Optional<Key> processId) {
 		ASSERT(masterProcessId.present());
 		if (processId == masterProcessId) return false;
 
 		auto& dbInfo = db.serverInfo->get().read();
+		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
+			for (const auto& tlog: tlogset.tLogs) {
+				if (tlog.present() && tlog.interf().locality.processId() == processId) return true;
+			}
+		}
 		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
 			if (interf.locality.processId() == processId) return true;
 		}
 		for (const ResolverInterface& interf: dbInfo.resolvers) {
 			if (interf.locality.processId() == processId) return true;
 		}
+		if (processId == clusterControllerProcessId) return true;
+
 		return false;
 	}
 
@@ -1216,7 +1185,7 @@ public:
 		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper) || pid == masterProcessId.get()) {
 			return false;
 		}
-		return isProxyOrResolver(pid);
+		return isUsedNotMaster(pid);
 	}
 
 	std::map< Optional<Standalone<StringRef>>, int> getUsedIds() {
@@ -1374,7 +1343,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				dbInfo.clusterInterface = db->serverInfo->get().read().clusterInterface;
 				dbInfo.distributor = db->serverInfo->get().read().distributor;
 				dbInfo.ratekeeper = db->serverInfo->get().read().ratekeeper;
-				dbInfo.storageCaches = db->serverInfo->get().read().storageCaches;
+				dbInfo.latencyBandConfig = db->serverInfo->get().read().latencyBandConfig;
 
 				TraceEvent("CCWDB", cluster->id).detail("Lifetime", dbInfo.masterLifetime.toString()).detail("ChangeID", dbInfo.id);
 				db->serverInfo->set( cachedInfo );
@@ -1439,7 +1408,7 @@ ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDa
 	if(db->clientStatus.size() > 10000) {
 		TraceEvent(SevWarnAlways, "TooManyClientStatusEntries").suppressFor(1.0);
 	}
-	
+
 	while (db->clientInfo->get().id == req.knownClientInfoID) {
 		choose {
 			when (wait( db->clientInfo->onChange() )) {}
@@ -1523,35 +1492,74 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 		return;
 	}
 
-	auto& db = self->db.serverInfo->get().read();
-	auto bestFitnessForRK = self->getBestFitnessForRoleInDatacenter(ProcessClass::Ratekeeper);
-	auto bestFitnessForDD = self->getBestFitnessForRoleInDatacenter(ProcessClass::DataDistributor);
+	std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+	WorkerDetails newRKWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::Ratekeeper, ProcessClass::NeverAssign, self->db.config, id_used, true).worker;
+	if (self->onMasterIsBetter(newRKWorker, ProcessClass::Ratekeeper)) {
+		newRKWorker = self->id_worker[self->masterProcessId.get()].details;
+	}
+	id_used = self->getUsedIds();
+	for(auto& it : id_used) {
+		it.second *= 2;
+	}
+	id_used[newRKWorker.interf.locality.processId()]++;
+	WorkerDetails newDDWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used, true).worker;
+	if (self->onMasterIsBetter(newDDWorker, ProcessClass::DataDistributor)) {
+		newDDWorker = self->id_worker[self->masterProcessId.get()].details;
+	}
+	auto bestFitnessForRK = newRKWorker.processClass.machineClassFitness(ProcessClass::Ratekeeper);
+	if(self->db.config.isExcludedServer(newRKWorker.interf.address())) {
+		bestFitnessForRK = std::max(bestFitnessForRK, ProcessClass::ExcludeFit);
+	}
+	auto bestFitnessForDD = newDDWorker.processClass.machineClassFitness(ProcessClass::DataDistributor);
+	if(self->db.config.isExcludedServer(newDDWorker.interf.address())) {
+		bestFitnessForDD = std::max(bestFitnessForDD, ProcessClass::ExcludeFit);
+	}
+	//TraceEvent("CheckBetterDDorRKNewRecruits", self->id).detail("MasterProcessId", self->masterProcessId)
+	//.detail("NewRecruitRKProcessId", newRKWorker.interf.locality.processId()).detail("NewRecruiteDDProcessId", newDDWorker.interf.locality.processId());
 
+	Optional<Standalone<StringRef>> currentRKProcessId;
+	Optional<Standalone<StringRef>> currentDDProcessId;
+
+	auto& db = self->db.serverInfo->get().read();
+	bool ratekeeperHealthy = false;
 	if (db.ratekeeper.present() && self->id_worker.count(db.ratekeeper.get().locality.processId()) &&
 	   (!self->recruitingRatekeeperID.present() || (self->recruitingRatekeeperID.get() == db.ratekeeper.get().id()))) {
 		auto& rkWorker = self->id_worker[db.ratekeeper.get().locality.processId()];
+		currentRKProcessId = rkWorker.details.interf.locality.processId();
 		auto rkFitness = rkWorker.details.processClass.machineClassFitness(ProcessClass::Ratekeeper);
 		if(rkWorker.priorityInfo.isExcluded) {
 			rkFitness = ProcessClass::ExcludeFit;
 		}
-		if (self->isProxyOrResolver(rkWorker.details.interf.locality.processId()) || rkFitness > bestFitnessForRK) {
+		if (self->isUsedNotMaster(rkWorker.details.interf.locality.processId()) || bestFitnessForRK < rkFitness
+				|| (rkFitness == bestFitnessForRK && rkWorker.details.interf.locality.processId() == self->masterProcessId && newRKWorker.interf.locality.processId() != self->masterProcessId)) {
 			TraceEvent("CCHaltRK", self->id).detail("RKID", db.ratekeeper.get().id())
 			.detail("Excluded", rkWorker.priorityInfo.isExcluded)
 			.detail("Fitness", rkFitness).detail("BestFitness", bestFitnessForRK);
 			self->recruitRatekeeper.set(true);
+		} else {
+			ratekeeperHealthy = true;
 		}
 	}
 
 	if (!self->recruitingDistributor && db.distributor.present() && self->id_worker.count(db.distributor.get().locality.processId())) {
 		auto& ddWorker = self->id_worker[db.distributor.get().locality.processId()];
 		auto ddFitness = ddWorker.details.processClass.machineClassFitness(ProcessClass::DataDistributor);
+		currentDDProcessId = ddWorker.details.interf.locality.processId();
 		if(ddWorker.priorityInfo.isExcluded) {
 			ddFitness = ProcessClass::ExcludeFit;
 		}
-		if (self->isProxyOrResolver(ddWorker.details.interf.locality.processId()) || ddFitness > bestFitnessForDD) {
+		if (self->isUsedNotMaster(ddWorker.details.interf.locality.processId()) || bestFitnessForDD < ddFitness
+				|| (ddFitness == bestFitnessForDD && ddWorker.details.interf.locality.processId() == self->masterProcessId && newDDWorker.interf.locality.processId() != self->masterProcessId)
+				|| (ddFitness == bestFitnessForDD && newRKWorker.interf.locality.processId() != newDDWorker.interf.locality.processId() && ratekeeperHealthy && currentRKProcessId.present() && currentDDProcessId == currentRKProcessId
+							&& (newRKWorker.interf.locality.processId() != self->masterProcessId  && newDDWorker.interf.locality.processId() != self->masterProcessId) )) {
 			TraceEvent("CCHaltDD", self->id).detail("DDID", db.distributor.get().id())
 			.detail("Excluded", ddWorker.priorityInfo.isExcluded)
-			.detail("Fitness", ddFitness).detail("BestFitness", bestFitnessForDD);
+			.detail("Fitness", ddFitness).detail("BestFitness", bestFitnessForDD)
+			.detail("CurrentRateKeeperProcessId", currentRKProcessId.present() ? currentRKProcessId.get() : LiteralStringRef("None"))
+			.detail("CurrentDDProcessId", currentDDProcessId)
+			.detail("MasterProcessID", self->masterProcessId)
+			.detail("NewRKWorkers", newRKWorker.interf.locality.processId())
+			.detail("NewDDWorker", newDDWorker.interf.locality.processId());
 			ddWorker.haltDistributor = brokenPromiseToNever(db.distributor.get().haltDataDistributor.getReply(HaltDataDistributorRequest(self->id)));
 		}
 	}
@@ -1627,27 +1635,9 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 			}
 			when( wait( failed ) ) {  // remove workers that have failed
 				WorkerInfo& failedWorkerInfo = cluster->id_worker[ worker.locality.processId() ];
-				if(failedWorkerInfo.storageCacheInfo.present()) {
-					bool found = false;
-					for(auto& it : cluster->id_worker) {
-						if(!it.second.storageCacheInfo.present() && it.second.details.processClass == ProcessClass::StorageCacheClass) {
-							found = true;
-							it.second.storageCacheInfo = failedWorkerInfo.storageCacheInfo;
-							cluster->db.cacheInterfaces[failedWorkerInfo.storageCacheInfo.get()] = std::make_pair(Optional<StorageServerInterface>(), it.first);
-							if(!it.second.reply.isSet()) {
-								it.second.reply.send( RegisterWorkerReply(it.second.details.processClass, it.second.priorityInfo, failedWorkerInfo.storageCacheInfo) );
-							}
-							break;
-						}
-					}
-					if(!found) {
-						cluster->db.cacheInterfaces[failedWorkerInfo.storageCacheInfo.get()] = std::make_pair(Optional<StorageServerInterface>(), Optional<Key>());
-					}
-					cluster->db.clearStorageCache(failedWorkerInfo.storageCacheInfo.get());
-				}
-				
+
 				if (!failedWorkerInfo.reply.isSet()) {
-					failedWorkerInfo.reply.send( RegisterWorkerReply(failedWorkerInfo.details.processClass, failedWorkerInfo.priorityInfo, Optional<uint16_t>()) );
+					failedWorkerInfo.reply.send( RegisterWorkerReply(failedWorkerInfo.details.processClass, failedWorkerInfo.priorityInfo) );
 				}
 				if (worker.locality.processId() == cluster->masterProcessId) {
 					cluster->masterProcessId = Optional<Key>();
@@ -1921,7 +1911,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 				if ( it.second.priorityInfo.isExcluded != isExcludedFromConfig ) {
 					it.second.priorityInfo.isExcluded = isExcludedFromConfig;
 					if( !it.second.reply.isSet() ) {
-						it.second.reply.send( RegisterWorkerReply( it.second.details.processClass, it.second.priorityInfo, it.second.storageCacheInfo ) );
+						it.second.reply.send( RegisterWorkerReply( it.second.details.processClass, it.second.priorityInfo ) );
 					}
 				}
 			}
@@ -2082,56 +2072,10 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			}
 		}
 	}
-	Optional<uint16_t> newStorageCache = req.storageCacheInterf.present() ? req.storageCacheInterf.get().first : Optional<uint16_t>();
-	auto& cacheInfo = self->id_worker[w.locality.processId()].storageCacheInfo;
-	if (req.storageCacheInterf.present()) {
-		auto it = self->db.cacheInterfaces.find(req.storageCacheInterf.get().first);
-		if(it == self->db.cacheInterfaces.end()) {
-			if(self->db.cachePopulated) {
-				if(cacheInfo.present()) {
-					self->db.clearStorageCache(cacheInfo.get());
-				}
-				newStorageCache = Optional<uint16_t>();
-				cacheInfo = Optional<uint16_t>();
-			} else {
-				self->db.setStorageCache(req.storageCacheInterf.get().first, req.storageCacheInterf.get().second);
-				self->db.cacheInterfaces[req.storageCacheInterf.get().first] = std::make_pair(req.storageCacheInterf.get().second, w.locality.processId());
-				cacheInfo = req.storageCacheInterf.get().first;
-			}
-		} else {
-			if(!it->second.second.present() || (cacheInfo.present() && cacheInfo.get() == it->first) ) {
-				self->db.setStorageCache(req.storageCacheInterf.get().first, req.storageCacheInterf.get().second);
-				it->second = std::make_pair(req.storageCacheInterf.get().second, w.locality.processId());
-				cacheInfo = req.storageCacheInterf.get().first;
-			}
-			else {
-				if(cacheInfo.present()) {
-					self->db.clearStorageCache(cacheInfo.get());
-				}
-				newStorageCache = Optional<uint16_t>();
-				cacheInfo = Optional<uint16_t>();
-			}
-		}
-	} else {
-		newStorageCache = cacheInfo;
-	}
-
-	if(self->gotProcessClasses && newProcessClass == ProcessClass::StorageCacheClass && !newStorageCache.present()) {
-		for(auto& it : self->db.cacheInterfaces) {
-			if(!it.second.second.present()) {
-				it.second.second = w.locality.processId();
-				self->id_worker[w.locality.processId()].storageCacheInfo = it.first;
-				newStorageCache = it.first;
-				break;
-			}
-		}
-	}
 
 	// Notify the worker to register again with new process class/exclusive property
-	if ( !req.reply.isSet() && ( newPriorityInfo != req.priorityInfo || 
-				newStorageCache.present() != req.storageCacheInterf.present() ||
-				(newStorageCache.present() && newStorageCache.get() != req.storageCacheInterf.get().first) ) ) {
-		req.reply.send( RegisterWorkerReply(newProcessClass, newPriorityInfo, newStorageCache) );
+	if ( !req.reply.isSet() && newPriorityInfo != req.priorityInfo ) {
+		req.reply.send( RegisterWorkerReply(newProcessClass, newPriorityInfo) );
 	}
 }
 
@@ -2352,7 +2296,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 							w.second.details.processClass = newProcessClass;
 							w.second.priorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
 							if (!w.second.reply.isSet()) {
-								w.second.reply.send( RegisterWorkerReply(w.second.details.processClass, w.second.priorityInfo, w.second.storageCacheInfo) );
+								w.second.reply.send( RegisterWorkerReply(w.second.details.processClass, w.second.priorityInfo) );
 							}
 						}
 					}
@@ -2406,81 +2350,7 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 				break;
 			}
 			catch (Error &e) {
-				wait(tr.onError(e));		
-			}
-		}
-	}
-}
-
-ACTOR Future<Void> monitorStorageCache(ClusterControllerData* self) {
-	loop {
-		state ReadYourWritesTransaction tr(self->db.db);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-
-				Optional<Value> changeVal = wait(tr.get(cacheChangeKey));
-				Standalone<RangeResultRef> changeKeys = wait(tr.getRange(cacheChangeKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT( !changeKeys.more && changeKeys.size() < CLIENT_KNOBS->TOO_MANY );
-
-				std::set<uint16_t> changeIDs;
-				for(auto& it : changeKeys) {
-					changeIDs.insert(cacheChangeKeyDecodeIndex(it.key));
-				}
-
-				for(auto& it : changeIDs) {
-					if(!self->db.cacheInterfaces.count(it)) {
-						self->db.cacheInterfaces[it] = std::make_pair(Optional<StorageServerInterface>(), Optional<Key>());
-					}
-				}
-
-				std::vector<uint16_t> removeIDs;
-				for(auto& it : self->db.cacheInterfaces) {
-					if(!changeIDs.count(it.first)) {
-						removeIDs.push_back(it.first);
-						if(it.second.second.present()) {
-							self->id_worker[it.second.second.get()].storageCacheInfo = Optional<uint16_t>();
-						}
-						self->db.clearStorageCache(it.first);
-					}
-				}
-
-				for(auto& it : removeIDs) {
-					self->db.cacheInterfaces.erase(it);
-				}
-
-				for(auto& c : self->db.cacheInterfaces) {
-					if(!c.second.second.present()) {
-						bool found = false;
-						for(auto& it : self->id_worker) {
-							if(!it.second.storageCacheInfo.present() && it.second.details.processClass == ProcessClass::StorageCacheClass) {
-								found = true;
-								it.second.storageCacheInfo = c.first;
-								c.second.second = it.first;
-								if(!it.second.reply.isSet()) {
-									it.second.reply.send( RegisterWorkerReply(it.second.details.processClass, it.second.priorityInfo, c.first) );
-								}
-								break;
-							}
-						}
-						if(!found) {
-							break;
-						}
-					}
-				}
-
-				state Future<Void> configChangeFuture = tr.watch(cacheChangeKey);
-
-				self->db.cachePopulated = true;
-				wait(tr.commit());
-				wait(configChangeFuture);
-
-				break;
-			}
-			catch (Error &e) {
-				wait(tr.onError(e));		
+				wait(tr.onError(e));
 			}
 		}
 	}
@@ -2536,7 +2406,7 @@ ACTOR Future<Void> updatedChangingDatacenters(ClusterControllerData *self) {
 			if ( worker.priorityInfo.dcFitness > newFitness ) {
 				worker.priorityInfo.dcFitness = newFitness;
 				if(!worker.reply.isSet()) {
-					worker.reply.send( RegisterWorkerReply( worker.details.processClass, worker.priorityInfo, worker.storageCacheInfo ) );
+					worker.reply.send( RegisterWorkerReply( worker.details.processClass, worker.priorityInfo ) );
 				}
 			} else {
 				state int currentFit = ProcessClass::BestFit;
@@ -2549,7 +2419,7 @@ ACTOR Future<Void> updatedChangingDatacenters(ClusterControllerData *self) {
 								updated = true;
 								it.second.priorityInfo.dcFitness = fitness;
 								if(!it.second.reply.isSet()) {
-									it.second.reply.send( RegisterWorkerReply( it.second.details.processClass, it.second.priorityInfo, it.second.storageCacheInfo ) );
+									it.second.reply.send( RegisterWorkerReply( it.second.details.processClass, it.second.priorityInfo ) );
 								}
 							}
 						}
@@ -2588,7 +2458,7 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData *self) {
 						if( worker.priorityInfo.dcFitness != newFitness ) {
 							worker.priorityInfo.dcFitness = newFitness;
 							if(!worker.reply.isSet()) {
-								worker.reply.send( RegisterWorkerReply( worker.details.processClass, worker.priorityInfo, worker.storageCacheInfo ) );
+								worker.reply.send( RegisterWorkerReply( worker.details.processClass, worker.priorityInfo ) );
 							}
 						}
 					} else {
@@ -2602,7 +2472,7 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData *self) {
 										updated = true;
 										it.second.priorityInfo.dcFitness = fitness;
 										if(!it.second.reply.isSet()) {
-											it.second.reply.send( RegisterWorkerReply( it.second.details.processClass, it.second.priorityInfo, it.second.storageCacheInfo ) );
+											it.second.reply.send( RegisterWorkerReply( it.second.details.processClass, it.second.priorityInfo ) );
 										}
 									}
 								}
@@ -2754,7 +2624,7 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 			if (self->onMasterIsBetter(worker, ProcessClass::DataDistributor)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
-			
+
 			InitializeDataDistributorRequest req(deterministicRandom()->randomUniqueID());
 			TraceEvent("CCDataDistributorRecruit", self->id).detail("Addr", worker.interf.address());
 
@@ -2889,7 +2759,6 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	self.addActor.send( handleForcedRecoveries(&self, interf) );
 	self.addActor.send( monitorDataDistributor(&self) );
 	self.addActor.send( monitorRatekeeper(&self) );
-	self.addActor.send( monitorStorageCache(&self) );
 	self.addActor.send( traceCounters("ClusterControllerMetrics", self.id, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self.clusterControllerMetrics, self.id.toString() + "/ClusterControllerMetrics") );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 

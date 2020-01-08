@@ -428,15 +428,16 @@ Value encodeKVFragment( KeyValueRef kv, uint32_t index) {
 	// a signed representation of the index value.  The type code for 0 is 0 (which is
 	// actually the null type in SQLite).
 	int8_t indexCode = 0;
-	uint32_t tmp = index;
-	while(tmp != 0) {
-		++indexCode;
-		tmp >>= 8;
+	if (index != 0) {
+		uint32_t tmp = index;
+		while (tmp != 0) {
+			++indexCode;
+			tmp >>= 8;
+		}
+		// An increment is required if the high bit of the N-byte index value is set, since it is
+		// positive number but SQLite only stores signed values and would interpret it as negative.
+		if (index >> (8 * indexCode - 1)) ++indexCode;
 	}
-	// An increment is required if the high bit of the N-byte index value is set, since it is
-	// positive number but SQLite only stores signed values and would interpret it as negative.
-	if(index >> (8 * indexCode - 1))
-		++indexCode;
 
 	int header_size = sqlite3VarintLen(keyCode) + sizeof(indexCode) + sqlite3VarintLen(valCode);
 	int hh = sqlite3VarintLen(header_size);

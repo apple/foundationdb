@@ -19,7 +19,11 @@
  */
 
 #include <cinttypes>
+#include <vector>
 
+#include "Arena.h"
+#include "FDBOptions.g.h"
+#include "ReadYourWrites.h"
 #include "fdbclient/ManagementAPI.actor.h"
 
 #include "fdbclient/SystemData.h"
@@ -1229,12 +1233,9 @@ ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers,
 	}
 }
 
-ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers ) {
-	state bool includeAll = false;
+ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
 	state Transaction tr(cx);
-	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
-	state std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
-
+	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
@@ -1244,13 +1245,21 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 
 			// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
 			tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
-			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) );
-			tr.set( excludedServersVersionKey, excludeVersionKey );
+			if (failed) {
+				tr.addReadConflictRange(singleKeyRange(failedServersVersionKey));
+				tr.set(failedServersVersionKey, versionKey);
+			} else {
+				tr.addReadConflictRange(singleKeyRange(excludedServersVersionKey));
+				tr.set(excludedServersVersionKey, versionKey);
+			}
 
 			for(auto& s : servers ) {
 				if (!s.isValid()) {
-					tr.clear( excludedServersKeys );
-					includeAll = true;
+					if (failed) {
+						tr.clear(failedServersKeys);
+					} else {
+						tr.clear(excludedServersKeys);
+					}
 				} else if (s.isWholeMachine()) {
 					// Eliminate both any ip-level exclusion (1.2.3.4) and any
 					// port-level exclusions (1.2.3.4:5)
@@ -1260,15 +1269,19 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 					//
 					// This is why we now make two clears: first only of the ip
 					// address, the second will delete all ports.
-					auto addr = encodeExcludedServersKey(s);
+					auto addr = failed ? encodeFailedServersKey(s) : encodeExcludedServersKey(s);
 					tr.clear(singleKeyRange(addr));
 					tr.clear(KeyRangeRef(addr + ':', addr + char(':' + 1)));
 				} else {
-					tr.clear( encodeExcludedServersKey(s) );
+					if (failed) {
+						tr.clear(encodeFailedServersKey(s));
+					} else {
+						tr.clear(encodeExcludedServersKey(s));
+					}
 				}
 			}
 
-			TraceEvent("IncludeServersCommit").detail("Servers", describe(servers));
+			TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
 
 			wait( tr.commit() );
 			return Void();
@@ -1766,6 +1779,24 @@ ACTOR Future<Void> waitForPrimaryDC( Database cx, StringRef dcId ) {
 			tr.reset();
 		} catch (Error& e) {
 			wait( tr.onError(e) );
+		}
+	}
+}
+
+ACTOR Future<Void> addCachedRange(Database cx, KeyRangeRef range) {
+	state ReadYourWritesTransaction tr(cx);
+	loop {
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.clear(range);
+		tr.set(storageCacheKey(range.begin), storageCacheValue(std::vector<uint16_t>{1}));
+		tr.set(storageCacheKey(range.end), storageCacheValue(std::vector<uint16_t>{}));
+		tr.addReadConflictRange(range);
+		try {
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
 		}
 	}
 }

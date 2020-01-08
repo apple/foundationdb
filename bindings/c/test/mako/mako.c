@@ -739,7 +739,7 @@ void *worker_thread(void *thread_args) {
   fdb_error_t err;
   int rc;
   FDBTransaction *transaction;
-  int thread_tps;
+  int thread_tps = 0;
   int thread_iters = 0;
   int op;
   volatile int *signal = &((thread_args_t *)thread_args)->process->shm->signal;
@@ -1813,8 +1813,8 @@ int main(int argc, char *argv[]) {
   shm->readycount = 0;
   shm->throttle_factor = 1.0;
 
-  /* fork worker processes */
-  worker_pids = (pid_t *)calloc(sizeof(pid_t), args.num_processes);
+  /* fork worker processes + 1 stats process */
+  worker_pids = (pid_t *)calloc(sizeof(pid_t), args.num_processes + 1);
   if (!worker_pids) {
     fprintf(stderr, "ERROR: cannot allocate worker_pids (%d processes)\n",
             args.num_processes);

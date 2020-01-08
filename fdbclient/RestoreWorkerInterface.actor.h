@@ -47,8 +47,8 @@ struct RestoreRecruitRoleRequest;
 struct RestoreSysInfoRequest;
 struct RestoreLoadFileRequest;
 struct RestoreVersionBatchRequest;
-struct RestoreSendMutationVectorVersionedRequest;
-struct RestoreSetApplierKeyRangeVectorRequest;
+struct RestoreSendMutationsToAppliersRequest;
+struct RestoreSendVersionedMutationsRequest;
 struct RestoreSysInfo;
 struct RestoreApplierInterface;
 
@@ -125,10 +125,10 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
 	RequestStream<RestoreSysInfoRequest> updateRestoreSysInfo;
-	RequestStream<RestoreSetApplierKeyRangeVectorRequest> setApplierKeyRangeVectorRequest;
 	RequestStream<RestoreLoadFileRequest> loadFile;
+	RequestStream<RestoreSendMutationsToAppliersRequest> sendMutations;
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
-	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces; // TODO: Change to collectRestoreRoleInterfaces
+	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
 	RequestStream<RestoreVersionBatchRequest> finishRestore;
 
 	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
@@ -144,8 +144,8 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 	void initEndpoints() {
 		heartbeat.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		updateRestoreSysInfo.getEndpoint(TaskPriority::LoadBalancedEndpoint);
-		setApplierKeyRangeVectorRequest.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		loadFile.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		sendMutations.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		initVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		collectRestoreRoleInterfaces.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		finishRestore.getEndpoint(TaskPriority::LoadBalancedEndpoint);
@@ -153,8 +153,8 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, updateRestoreSysInfo, setApplierKeyRangeVectorRequest,
-		           loadFile, initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
+		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, updateRestoreSysInfo, loadFile, sendMutations,
+		           initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
 	}
 };
 
@@ -162,7 +162,7 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 	constexpr static FileIdentifier file_identifier = 54253048;
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
-	RequestStream<RestoreSendMutationVectorVersionedRequest> sendMutationVector;
+	RequestStream<RestoreSendVersionedMutationsRequest> sendMutationVector;
 	RequestStream<RestoreVersionBatchRequest> applyToDB;
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
 	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
@@ -196,6 +196,52 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 	std::string toString() { return nodeID.toString(); }
 };
 
+// RestoreAsset uniquely identifies the work unit done by restore roles;
+// It is used to ensure exact-once processing on restore loader and applier;
+// By combining all RestoreAssets across all verstion batches, restore should process all mutations in
+// backup range and log files up to the target restore version.
+struct RestoreAsset {
+	Version beginVersion, endVersion; // Only use mutation in [begin, end) versions;
+	KeyRange range; // Only use mutations in range
+
+	int fileIndex;
+	std::string filename;
+	int64_t offset;
+	int64_t len;
+
+	RestoreAsset() = default;
+
+	bool operator==(const RestoreAsset& r) const {
+		return fileIndex == r.fileIndex && filename == r.filename && offset == r.offset && len == r.len &&
+		       beginVersion == r.beginVersion && endVersion == r.endVersion && range == r.range;
+	}
+	bool operator!=(const RestoreAsset& r) const {
+		return fileIndex != r.fileIndex || filename != r.filename || offset != r.offset || len != r.len ||
+		       beginVersion != r.beginVersion || endVersion != r.endVersion || range != r.range;
+	}
+	bool operator<(const RestoreAsset& r) const {
+		return std::make_tuple(fileIndex, filename, offset, len, beginVersion, endVersion, range.begin, range.end) <
+		       std::make_tuple(r.fileIndex, r.filename, r.offset, r.len, r.beginVersion, r.endVersion, r.range.begin,
+		                       r.range.end);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, beginVersion, endVersion, range, filename, fileIndex, offset, len);
+	}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "begin:" << beginVersion << " end:" << endVersion << " range:" << range.toString()
+		   << " filename:" << filename << " fileIndex:" << fileIndex << " offset:" << offset << " len:" << len;
+		return ss.str();
+	}
+
+	bool isInVersionRange(Version commitVersion) const {
+		return commitVersion >= beginVersion && commitVersion < endVersion;
+	}
+};
+
 // TODO: It is probably better to specify the (beginVersion, endVersion] for each loadingParam.
 // beginVersion (endVersion) is the version the applier is before (after) it receives the request.
 struct LoadingParam {
@@ -204,37 +250,29 @@ struct LoadingParam {
 	bool isRangeFile;
 	Key url;
 	Version prevVersion;
-	Version endVersion;
-	int fileIndex;
-	Version version;
-	std::string filename;
-	int64_t offset;
-	int64_t length;
+	Version endVersion; // range file's mutations are all at the endVersion
+
 	int64_t blockSize;
-	KeyRange restoreRange;
-	Key addPrefix;
-	Key removePrefix;
-	Key mutationLogPrefix;
+	RestoreAsset asset;
+
+	LoadingParam() = default;
 
 	// TODO: Compare all fields for loadingParam
-	bool operator==(const LoadingParam& r) const { return isRangeFile == r.isRangeFile && filename == r.filename; }
-	bool operator!=(const LoadingParam& r) const { return isRangeFile != r.isRangeFile || filename != r.filename; }
+	bool operator==(const LoadingParam& r) const { return isRangeFile == r.isRangeFile && asset == r.asset; }
+	bool operator!=(const LoadingParam& r) const { return isRangeFile != r.isRangeFile || asset != r.asset; }
 	bool operator<(const LoadingParam& r) const {
-		return (isRangeFile < r.isRangeFile) || (isRangeFile == r.isRangeFile && filename < r.filename);
+		return (isRangeFile < r.isRangeFile) || (isRangeFile == r.isRangeFile && asset < r.asset);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, isRangeFile, url, prevVersion, endVersion, fileIndex, version, filename, offset, length,
-		           blockSize, restoreRange, addPrefix, removePrefix, mutationLogPrefix);
+		serializer(ar, isRangeFile, url, prevVersion, endVersion, blockSize, asset);
 	}
 
 	std::string toString() {
 		std::stringstream str;
 		str << "isRangeFile:" << isRangeFile << " url:" << url.toString() << " prevVersion:" << prevVersion
-		    << " fileIndex:" << fileIndex << " endVersion:" << endVersion << " version:" << version
-		    << " filename:" << filename << " offset:" << offset << " length:" << length << " blockSize:" << blockSize
-		    << " restoreRange:" << restoreRange.toString() << " addPrefix:" << addPrefix.toString();
+		    << " endVersion:" << endVersion << " blockSize:" << blockSize << " RestoreAsset:" << asset.toString();
 		return str.str();
 	}
 };
@@ -319,16 +357,37 @@ struct RestoreSysInfoRequest : TimedRequest {
 	}
 };
 
+struct RestoreLoadFileReply : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 34077902;
+
+	LoadingParam param;
+	MutationsVec samples; // sampled mutations
+
+	RestoreLoadFileReply() = default;
+	explicit RestoreLoadFileReply(LoadingParam param, MutationsVec samples) : param(param), samples(samples) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, param, samples);
+	}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "LoadingParam:" << param.toString() << " samples.size:" << samples.size();
+		return ss.str();
+	}
+};
+
 // Sample_Range_File and Assign_Loader_Range_File, Assign_Loader_Log_File
 struct RestoreLoadFileRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 26557364;
 
 	LoadingParam param;
 
-	ReplyPromise<RestoreCommonReply> reply;
+	ReplyPromise<RestoreLoadFileReply> reply;
 
 	RestoreLoadFileRequest() = default;
-	explicit RestoreLoadFileRequest(LoadingParam param) : param(param) {}
+	explicit RestoreLoadFileRequest(LoadingParam& param) : param(param){};
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -342,32 +401,57 @@ struct RestoreLoadFileRequest : TimedRequest {
 	}
 };
 
-struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 69764565;
+struct RestoreSendMutationsToAppliersRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 68827305;
 
-	Version prevVersion, version; // version is the commitVersion of the mutation vector.
-	int fileIndex; // Unique index for a backup file
-	bool isRangeFile;
-	Standalone<VectorRef<MutationRef>> mutations; // All mutations are at version
+	std::map<Key, UID> rangeToApplier;
+	bool useRangeFile; // Send mutations parsed from range file?
 
 	ReplyPromise<RestoreCommonReply> reply;
 
-	RestoreSendMutationVectorVersionedRequest() = default;
-	explicit RestoreSendMutationVectorVersionedRequest(int fileIndex, Version prevVersion, Version version,
-	                                                   bool isRangeFile, VectorRef<MutationRef> mutations)
-	  : fileIndex(fileIndex), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile),
-	    mutations(mutations) {}
+	RestoreSendMutationsToAppliersRequest() = default;
+	explicit RestoreSendMutationsToAppliersRequest(std::map<Key, UID> rangeToApplier, bool useRangeFile)
+	  : rangeToApplier(rangeToApplier), useRangeFile(useRangeFile) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeToApplier, useRangeFile, reply);
+	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "fileIndex:" << fileIndex << " prevVersion:" << prevVersion << " version:" << version
+		ss << "RestoreSendMutationsToAppliersRequest keyToAppliers.size:" << rangeToApplier.size()
+		   << " useRangeFile:" << useRangeFile;
+		return ss.str();
+	}
+};
+
+struct RestoreSendVersionedMutationsRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 69764565;
+
+	RestoreAsset asset; // Unique identifier for the current restore asset
+
+	Version prevVersion, version; // version is the commitVersion of the mutation vector.
+	bool isRangeFile;
+	MutationsVec mutations; // All mutations at the same version parsed by one loader
+
+	ReplyPromise<RestoreCommonReply> reply;
+
+	RestoreSendVersionedMutationsRequest() = default;
+	explicit RestoreSendVersionedMutationsRequest(const RestoreAsset& asset, Version prevVersion, Version version,
+	                                              bool isRangeFile, MutationsVec mutations)
+	  : asset(asset), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile), mutations(mutations) {}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "RestoreAsset:" << asset.toString() << " prevVersion:" << prevVersion << " version:" << version
 		   << " isRangeFile:" << isRangeFile << " mutations.size:" << mutations.size();
 		return ss.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, fileIndex, prevVersion, version, isRangeFile, mutations, reply);
+		serializer(ar, asset, prevVersion, version, isRangeFile, mutations, reply);
 	}
 };
 
@@ -393,29 +477,6 @@ struct RestoreVersionBatchRequest : TimedRequest {
 	}
 };
 
-struct RestoreSetApplierKeyRangeVectorRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 92038306;
-
-	std::map<Standalone<KeyRef>, UID> rangeToApplier;
-
-	ReplyPromise<RestoreCommonReply> reply;
-
-	RestoreSetApplierKeyRangeVectorRequest() = default;
-	explicit RestoreSetApplierKeyRangeVectorRequest(std::map<Standalone<KeyRef>, UID> rangeToApplier)
-	  : rangeToApplier(rangeToApplier) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, rangeToApplier, reply);
-	}
-
-	std::string toString() {
-		std::stringstream ss;
-		ss << "RestoreVersionBatchRequest rangeToApplierSize:" << rangeToApplier.size();
-		return ss.str();
-	}
-};
-
 struct RestoreRequest {
 	constexpr static FileIdentifier file_identifier = 49589770;
 
@@ -432,17 +493,12 @@ struct RestoreRequest {
 	bool lockDB;
 	UID randomUid;
 
-	int testData;
 	std::vector<int> restoreRequests;
 	// Key restoreTag;
 
 	ReplyPromise<struct RestoreCommonReply> reply;
 
-	RestoreRequest() : testData(0) {}
-	explicit RestoreRequest(int testData) : testData(testData) {}
-	explicit RestoreRequest(int testData, std::vector<int>& restoreRequests)
-	  : testData(testData), restoreRequests(restoreRequests) {}
-
+	RestoreRequest() = default;
 	explicit RestoreRequest(const int index, const Key& tagName, const Key& url, bool waitForComplete,
 	                        Version targetVersion, bool verbose, const KeyRange& range, const Key& addPrefix,
 	                        const Key& removePrefix, bool lockDB, const UID& randomUid)
@@ -453,7 +509,7 @@ struct RestoreRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, index, tagName, url, waitForComplete, targetVersion, verbose, range, addPrefix, removePrefix,
-		           lockDB, randomUid, testData, restoreRequests, reply);
+		           lockDB, randomUid, restoreRequests, reply);
 	}
 
 	std::string toString() const {

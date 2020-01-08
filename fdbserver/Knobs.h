@@ -398,6 +398,7 @@ public:
 	int64_t BANDWIDTH_UNITS_PER_SAMPLE;
 	int64_t BYTES_READ_UNITS_PER_SAMPLE;
 	int64_t EMPTY_READ_PENALTY;
+	bool READ_SAMPLING_ENABLED;
 
 	//Storage Server
 	double STORAGE_LOGGING_DELAY;
@@ -470,6 +471,7 @@ public:
 	// Fast Restore
 	int64_t FASTRESTORE_FAILURE_TIMEOUT;
 	int64_t FASTRESTORE_HEARTBEAT_INTERVAL;
+	double FASTRESTORE_SAMPLING_PERCENT;
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL);
 };

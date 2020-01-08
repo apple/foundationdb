@@ -20,6 +20,8 @@
 
 #include <boost/lexical_cast.hpp>
 
+#include "Locality.h"
+#include "StorageServerInterface.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
@@ -227,7 +229,7 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 		return joinPath(folder, sample_filename);
 	else if( storeType == KeyValueStoreType::MEMORY )
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
-	
+
 	else if ( storeType == KeyValueStoreType::SSD_REDWOOD_V1 )
 		return joinPath(folder, sample_filename);
 	UNREACHABLE();
@@ -406,52 +408,17 @@ ACTOR Future<Void> registrationClient(
 	// The registration request piggybacks optional distributor interface if it exists.
 	state Generation requestGeneration = 0;
 	state ProcessClass processClass = initialClass;
-	state Reference<AsyncVar<Optional<std::pair<uint16_t,StorageServerInterface>>>> scInterf( new AsyncVar<Optional<std::pair<uint16_t,StorageServerInterface>>>() );
-	state Future<Void> cacheProcessFuture;
-	state Future<Void> cacheErrorsFuture;
 	loop {
-		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), scInterf->get(), degraded->get());
+		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), degraded->get());
 		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply(request) ) : Never();
 		choose {
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
-				processClass = reply.processClass;	
+				processClass = reply.processClass;
 				asyncPriorityInfo->set( reply.priorityInfo );
-
-				if(!reply.storageCache.present()) {
-					cacheProcessFuture.cancel();
-					scInterf->set(Optional<std::pair<uint16_t,StorageServerInterface>>());
-				} else if (!scInterf->get().present() || scInterf->get().get().first != reply.storageCache.get()) {
-					StorageServerInterface recruited;
-					recruited.locality = locality;
-					recruited.initEndpoints();
-					recruited.isCacheServer = true;
-					
-					std::map<std::string, std::string> details;
-					startRole( Role::STORAGE_CACHE, recruited.id(), interf.id(), details );
-					TraceEvent(SevDebug,"StartedCacheRole").detail("Id", interf.id());
-
-					//DUMPTOKEN(recruited.getVersion);
-					DUMPTOKEN(recruited.getValue);
-					DUMPTOKEN(recruited.getKey);
-					DUMPTOKEN(recruited.getKeyValues);
-					DUMPTOKEN(recruited.getShardState);
-					DUMPTOKEN(recruited.waitMetrics);
-					DUMPTOKEN(recruited.splitMetrics);
-					DUMPTOKEN(recruited.getStorageMetrics);
-					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.getQueuingMetrics);
-					DUMPTOKEN(recruited.getKeyValueStoreType);
-					DUMPTOKEN(recruited.watchValue);
-
-					cacheProcessFuture = storageCache( recruited, reply.storageCache.get(), dbInfo );
-					cacheErrorsFuture = forwardError(errors, Role::STORAGE_CACHE, recruited.id(), setWhenDoneOrError(cacheProcessFuture, scInterf, Optional<std::pair<uint16_t,StorageServerInterface>>()));
-					scInterf->set(std::make_pair(reply.storageCache.get(), recruited));
-				}
 			}
 			when ( wait( ccInterface->onChange() )) {}
 			when ( wait( ddInterf->onChange() ) ) {}
 			when ( wait( rkInterf->onChange() ) ) {}
-			when ( wait( scInterf->onChange() ) ) {}
 			when ( wait( degraded->onChange() ) ) {}
 		}
 	}
@@ -784,7 +751,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 				TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
 				.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
 				.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
-				
+
 				localInfo.myLocality = locality;
 				dbInfo->set(localInfo);
 			}
@@ -858,6 +825,7 @@ ACTOR Future<Void> workerServer(
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf( locality );
+	interf.initEndpoints();
 
 	folder = abspath(folder);
 
@@ -985,10 +953,39 @@ ACTOR Future<Void> workerServer(
 			}
 		}
 
+		bool hasCache = false;
+		//  start cache role if we have the right process class
+		if (initialClass.classType() == ProcessClass::StorageCacheClass) {
+			hasCache = true;
+			StorageServerInterface recruited;
+			recruited.locality = locality;
+			recruited.initEndpoints();
+
+			std::map<std::string, std::string> details;
+			startRole(Role::STORAGE_CACHE, recruited.id(), interf.id(), details);
+
+			// DUMPTOKEN(recruited.getVersion);
+			DUMPTOKEN(recruited.getValue);
+			DUMPTOKEN(recruited.getKey);
+			DUMPTOKEN(recruited.getKeyValues);
+			DUMPTOKEN(recruited.getShardState);
+			DUMPTOKEN(recruited.waitMetrics);
+			DUMPTOKEN(recruited.splitMetrics);
+			DUMPTOKEN(recruited.getStorageMetrics);
+			DUMPTOKEN(recruited.waitFailure);
+			DUMPTOKEN(recruited.getQueuingMetrics);
+			DUMPTOKEN(recruited.getKeyValueStoreType);
+			DUMPTOKEN(recruited.watchValue);
+
+			auto f = storageCacheServer(recruited, 1, dbInfo);
+			errorForwarders.add(forwardError(errors, Role::STORAGE_CACHE, recruited.id(), f));
+		}
+
 		std::map<std::string, std::string> details;
 		details["Locality"] = locality.toString();
 		details["DataFolder"] = folder;
 		details["StoresPresent"] = format("%d", stores.size());
+		details["CachePresent"] = hasCache ? "true" : "false";
 		startRole( Role::WORKER, interf.id(), interf.id(), details );
 
 		wait(waitForAll(recoveries));
@@ -1239,7 +1236,7 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN( recruited.getQueuingMetrics );
 				DUMPTOKEN( recruited.confirmRunning );
 
-				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(), 
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(),
 						logRouter( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
@@ -1495,7 +1492,7 @@ ACTOR Future<Void> fdbd(
 		// Endpoints should be registered first before any process trying to connect to it. So coordinationServer actor should be the first one executed before any other.
 		if ( coordFolder.size() )
 			actors.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
-		
+
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards

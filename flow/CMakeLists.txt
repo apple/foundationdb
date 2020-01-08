@@ -9,6 +9,7 @@ set(FLOW_SRCS
   CompressedInt.h
   Deque.cpp
   Deque.h
+  DeterministicRandom.cpp
   DeterministicRandom.h
   Error.cpp
   Error.h
@@ -86,6 +87,7 @@ if (NOT APPLE AND NOT WIN32)
   set (FLOW_LIBS ${FLOW_LIBS} rt)
 elseif(WIN32)
   target_link_libraries(flow PUBLIC winmm.lib)
+  target_link_libraries(flow PUBLIC psapi.lib)
 endif()
 target_link_libraries(flow PRIVATE ${FLOW_LIBS})
 target_link_libraries(flow PUBLIC boost_target Threads::Threads ${CMAKE_DL_LIBS})
@@ -104,4 +106,3 @@ if(APPLE)
   find_library(CORE_FOUNDATION CoreFoundation)
   target_link_libraries(flow PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
 endif()
-

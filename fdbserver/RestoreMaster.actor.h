@@ -54,13 +54,16 @@ struct VersionBatch {
 struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
 	// rangeToApplier is in master and loader node. Loader uses this to determine which applier a mutation should be sent.
 	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
-	std::map<Standalone<KeyRef>, UID> rangeToApplier;
+	std::map<Key, UID> rangeToApplier;
 	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
 
 	int batchIndex;
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
+
+	IndexedSet<Key, int64_t> samples; // sample of range and log files
+	double samplesSize; // sum of the metric of all samples
 
 	void addref() { return ReferenceCounted<RestoreMasterData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreMasterData>::delref(); }
@@ -73,7 +76,13 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	~RestoreMasterData() = default;
 
-	void resetPerVersionBatch() {}
+	void resetPerVersionBatch() {
+		TraceEvent("FastRestore")
+		    .detail("RestoreMaster", "ResetPerVersionBatch")
+		    .detail("VersionBatchIndex", batchIndex);
+		samplesSize = 0;
+		samples.clear();
+	}
 
 	std::string describeNode() {
 		std::stringstream ss;
@@ -153,9 +162,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		for (auto& versionBatch : *versionBatches) {
 			Version prevVersion = 0;
 			for (auto& logFile : versionBatch.second.logFiles) {
-				TraceEvent("FastRestore_Debug")
-				    .detail("PrevVersion", prevVersion)
-				    .detail("LogFile", logFile.toString());
+				TraceEvent("FastRestore").detail("PrevVersion", prevVersion).detail("LogFile", logFile.toString());
 				ASSERT(logFile.beginVersion >= versionBatch.second.beginVersion);
 				ASSERT(logFile.endVersion <= versionBatch.second.endVersion);
 				ASSERT(prevVersion <= logFile.beginVersion);
@@ -165,9 +172,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			}
 			prevVersion = 0;
 			for (auto& rangeFile : versionBatch.second.rangeFiles) {
-				TraceEvent("FastRestore_Debug")
-				    .detail("PrevVersion", prevVersion)
-				    .detail("RangeFile", rangeFile.toString());
+				TraceEvent("FastRestore").detail("PrevVersion", prevVersion).detail("RangeFile", rangeFile.toString());
 				ASSERT(rangeFile.beginVersion == rangeFile.endVersion);
 				ASSERT(rangeFile.beginVersion >= versionBatch.second.beginVersion);
 				ASSERT(rangeFile.endVersion < versionBatch.second.endVersion);
@@ -177,6 +182,26 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				fIndexSet.insert(rangeFile.fileIndex);
 			}
 		}
+	}
+
+	// Return true if pass the sanity check
+	bool sanityCheckApplierKeyRange() {
+		bool ret = true;
+		// An applier should only appear once in rangeToApplier
+		std::map<UID, Key> applierToRange;
+		for (auto& applier : rangeToApplier) {
+			if (applierToRange.find(applier.second) == applierToRange.end()) {
+				applierToRange[applier.second] = applier.first;
+			} else {
+				TraceEvent(SevError, "FastRestore")
+				    .detail("SanityCheckApplierKeyRange", applierToRange.size())
+				    .detail("ApplierID", applier.second)
+				    .detail("Key1", applierToRange[applier.second])
+				    .detail("Key2", applier.first);
+				ret = false;
+			}
+		}
+		return ret;
 	}
 
 	void logApplierKeyRange() {

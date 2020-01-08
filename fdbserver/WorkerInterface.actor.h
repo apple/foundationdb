@@ -69,6 +69,17 @@ struct WorkerInterface {
 	WorkerInterface() {}
 	WorkerInterface( const LocalityData& locality ) : locality( locality ) {}
 
+	void initEndpoints() {
+		clientInterface.initEndpoints();
+		tLog.getEndpoint( TaskPriority::Worker );
+		master.getEndpoint( TaskPriority::Worker );
+		masterProxy.getEndpoint( TaskPriority::Worker );
+		resolver.getEndpoint( TaskPriority::Worker );
+		logRouter.getEndpoint( TaskPriority::Worker );
+		debugPing.getEndpoint( TaskPriority::Worker );
+		coordinationPing.getEndpoint( TaskPriority::Worker );
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq);
@@ -456,7 +467,7 @@ ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest re
                              Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> storageCache(StorageServerInterface interf, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> storageCacheServer(StorageServerInterface interf, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db);
 
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);

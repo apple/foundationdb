@@ -34,7 +34,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req,
+ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self);
 ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self,
                                                  Database cx);
@@ -54,7 +54,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 					requestTypeStr = "heartbeat";
 					actors.add(handleHeartbeat(req, applierInterf.id()));
 				}
-				when(RestoreSendMutationVectorVersionedRequest req =
+				when(RestoreSendVersionedMutationsRequest req =
 				         waitNext(applierInterf.sendMutationVector.getFuture())) {
 					requestTypeStr = "sendMutationVector";
 					actors.add(handleSendMutationVectorRequest(req, self));
@@ -92,36 +92,49 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 // No race condition as long as we do not wait or yield when operate the shared data.
 // Multiple such actors can run on different fileIDs, because mutations in different files belong to different versions;
 // Only one actor can process mutations from the same file
-ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendMutationVectorVersionedRequest req,
+ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self) {
-	// Assume: self->processedFileState[req.fileIndex] will not be erased while the actor is active.
+	// Assume: self->processedFileState[req.asset] will not be erased while the actor is active.
 	// Note: Insert new items into processedFileState will not invalidate the reference.
-	state NotifiedVersion& curFilePos = self->processedFileState[req.fileIndex];
+	state NotifiedVersion& curFilePos = self->processedFileState[req.asset];
 
 	TraceEvent("FastRestore")
 	    .detail("ApplierNode", self->id())
-	    .detail("FileIndex", req.fileIndex)
+	    .detail("RestoreAsset", req.asset.toString())
 	    .detail("ProcessedFileVersion", curFilePos.get())
 	    .detail("Request", req.toString());
 
 	wait(curFilePos.whenAtLeast(req.prevVersion));
 
 	if (curFilePos.get() == req.prevVersion) {
-		// Applier will cache the mutations at each version. Once receive all mutations, applier will apply them to DB
-		state Version commitVersion = req.version;
-		VectorRef<MutationRef> mutations(req.mutations);
+		Version commitVersion = req.version;
+		MutationsVec mutations(req.mutations);
+		// Sanity check: mutations in range file is in [beginVersion, endVersion);
+		// mutations in log file is in [beginVersion, endVersion], both inclusive.
+		ASSERT_WE_THINK(commitVersion >= req.asset.beginVersion);
+		ASSERT_WE_THINK((req.isRangeFile && commitVersion < req.asset.endVersion) ||
+		                (!req.isRangeFile && commitVersion <= req.asset.endVersion));
+
 		if (self->kvOps.find(commitVersion) == self->kvOps.end()) {
-			self->kvOps.insert(std::make_pair(commitVersion, VectorRef<MutationRef>()));
+			self->kvOps.insert(std::make_pair(commitVersion, MutationsVec()));
 		}
-		state int mIndex = 0;
-		for (mIndex = 0; mIndex < mutations.size(); mIndex++) {
+		for (int mIndex = 0; mIndex < mutations.size(); mIndex++) {
 			MutationRef mutation = mutations[mIndex];
-			TraceEvent(SevDebug, "FastRestore")
+			TraceEvent(SevFRMutationInfo, "FastRestore")
 			    .detail("ApplierNode", self->id())
-			    .detail("FileUID", req.fileIndex)
+			    .detail("RestoreAsset", req.asset.toString())
 			    .detail("Version", commitVersion)
 			    .detail("Index", mIndex)
 			    .detail("MutationReceived", mutation.toString());
+			// Sanity check
+			if (g_network->isSimulated()) {
+				if (isRangeMutation(mutation)) {
+					ASSERT(mutation.param1 >= req.asset.range.begin &&
+					       mutation.param2 <= req.asset.range.end); // Range mutation's right side is exclusive
+				} else {
+					ASSERT(mutation.param1 >= req.asset.range.begin && mutation.param1 < req.asset.range.end);
+				}
+			}
 			self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
 			// TODO: What if log file's mutations are delivered out-of-order (behind) the range file's mutations?!
 		}
@@ -161,7 +174,7 @@ struct DBApplyProgress {
 	Reference<RestoreApplierData> self;
 
 	DBApplyProgress() = default;
-	DBApplyProgress(Reference<RestoreApplierData> self)
+	explicit DBApplyProgress(Reference<RestoreApplierData> self)
 	  : self(self), curIndexInCurTxn(0), startIndexInUncommittedTxn(0), curTxnId(0), uncommittedTxnId(0),
 	    lastTxnHasError(false), startNextVersion(false), numAtomicOps(0), transactionSize(0) {
 		curItInCurTxn = self->kvOps.begin();
@@ -245,7 +258,10 @@ struct DBApplyProgress {
 };
 
 ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
+	// state variables must be defined at the start of actor to be initialized in the actor constructor
 	state std::string typeStr = "";
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state DBApplyProgress progress(self);
 
 	// Assume the process will not crash when it apply mutations to DB. The reply message can be lost though
 	if (self->kvOps.empty()) {
@@ -262,8 +278,6 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 
 	self->sanityCheckMutationOps();
 
-	state DBApplyProgress progress(self);
-
 	if (progress.isDone()) {
 		TraceEvent("FastRestore_ApplierTxn")
 		    .detail("ApplierApplyToDBFinished", self->id())
@@ -271,7 +285,6 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 		return Void();
 	}
 
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	// Sanity check the restoreApplierKeys, which should be empty at this point
 	loop {
 		try {
@@ -340,7 +353,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 						TraceEvent(SevError, "FastRestore").detail("InvalidMutationType", m.type);
 					}
 
-					TraceEvent(SevDebug, "FastRestore_Debug")
+					TraceEvent(SevFRMutationInfo, "FastRestore")
 					    .detail("ApplierApplyToDB", self->describeNode())
 					    .detail("Version", progress.curItInCurTxn->first)
 					    .detail("Index", progress.curIndexInCurTxn)
@@ -399,8 +412,6 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 	TraceEvent("FastRestore_ApplierTxn")
 	    .detail("ApplierApplyToDBFinished", self->id())
 	    .detail("CleanupCurTxnIds", progress.curTxnId);
-	// House cleaning
-	self->kvOps.clear();
 	// clean up txn ids
 	loop {
 		try {
@@ -416,6 +427,8 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			wait(tr->onError(e));
 		}
 	}
+	// House cleaning
+	self->kvOps.clear();
 	TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDBFinished", self->id());
 
 	return Void();
