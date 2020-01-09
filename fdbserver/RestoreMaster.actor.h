@@ -29,6 +29,7 @@
 
 #include <sstream>
 #include "flow/Stats.h"
+#include "flow/Platform.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
@@ -48,6 +49,8 @@ struct VersionBatch {
 	std::vector<RestoreFileFR> logFiles;
 	std::vector<RestoreFileFR> rangeFiles;
 	double size; // size of data in range and log files
+
+	VersionBatch() = default;
 
 	bool isEmpty() { return logFiles.empty() && rangeFiles.empty(); }
 	void reset() {
@@ -159,7 +162,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			Version begin = std::max(prevVersion, logFiles[logIdx].beginVersion);
 			Version end = std::min(nextVersion, logFiles[logIdx].endVersion);
 			if (begin < end) { // logIdx file overlap in [prevVersion, nextVersion)
-				double ratio = (end - begin) / (logFiles[logIdx].endVersion - logFiles[logIdx].beginVersion);
+				double ratio = (end - begin) * 1.0 / (logFiles[logIdx].endVersion - logFiles[logIdx].beginVersion);
 				size += logFiles[logIdx].fileSize * ratio;
 				retLogs.push_back(logFiles[logIdx]);
 			}
@@ -174,6 +177,8 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	//    	   and each mutation in backup files is included in the version batches exactly once.
 	// Assumption 1: input files has no empty files;
 	// Assumption 2: range files at one version <= batchSizeThreshold.
+	// Note: We do not allow a versoinBatch size larger than the batchSizeThreshold because the range file size at
+	// a version depends on the number of backupAgents and its upper bound is hard to get.
 	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles, const std::vector<RestoreFileFR>& logFiles,
 	                         std::map<Version, VersionBatch>* versionBatches) {
 		bool rewriteNextVersion = false;
@@ -231,36 +236,39 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			    .detail("NextRangeIndex", nextRangeIdx)
 			    .detail("UsedLogFiles", curLogFiles.size());
 
+			ASSERT(prevEndVersion < nextVersion); // Ensure progress
 			if (vb.size + nextVersionSize <= opConfig.batchSizeThreshold) {
 				// nextVersion should be included in this batch
-				bool advanced = false;
 				vb.size += nextVersionSize;
 				while (rangeIdx < nextRangeIdx) {
+					ASSERT(rangeFiles[rangeIdx].fileSize > 0);
 					vb.rangeFiles.push_back(rangeFiles[rangeIdx]);
 					++rangeIdx;
-					advanced = true;
 				}
 
 				for (auto& log : curLogFiles) {
 					ASSERT(log.beginVersion < nextVersion);
 					ASSERT(log.endVersion > prevEndVersion);
+					ASSERT(log.fileSize > 0);
 					vb.logFiles.push_back(log);
-					advanced = true;
 				}
 
-				ASSERT(advanced == true || nextVersionSize > 0); // Ensure progress
 				vb.endVersion = nextVersion;
 				prevEndVersion = vb.endVersion;
 			} else {
 				if (vb.size < 1) {
 					// [vb.endVersion, nextVersion) > opConfig.batchSizeThreshold. We should split the version range
 					if (prevEndVersion >= nextVersion) {
-						// If range files at one version > batchSizeThreshold, DBA should increase batchSizeThreshold
+						// If range files at one version > batchSizeThreshold, DBA should increase batchSizeThreshold to
+						// some value larger than nextVersion
 						TraceEvent(SevError, "FastRestoreBuildVersionBatch")
 						    .detail("NextVersion", nextVersion)
 						    .detail("PreviousEndVersion", prevEndVersion)
 						    .detail("NextVersionIntervalSize", nextVersionSize)
-						    .detail("BatchSizeThreshold", opConfig.batchSizeThreshold);
+						    .detail("BatchSizeThreshold", opConfig.batchSizeThreshold)
+						    .detail("SuggestedMinimumBatchSizeThreshold", nextVersion);
+						// Exit restore early if it won't succeed
+						flushAndExit(FDB_EXIT_ERROR);
 					}
 					ASSERT(prevEndVersion < nextVersion); // Ensure progress
 					nextVersion = (prevEndVersion + nextVersion) / 2;
@@ -275,7 +283,6 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				vb.reset();
 				vb.size = 0;
 				vb.beginVersion = prevEndVersion;
-				nextVersion = prevEndVersion + 1;
 			}
 		}
 		// The last wip version batch has some files

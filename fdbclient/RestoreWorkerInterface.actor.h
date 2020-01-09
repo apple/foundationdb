@@ -251,7 +251,7 @@ struct LoadingParam {
 
 	bool isRangeFile;
 	Key url;
-	Version rangeVersion; // range file's version
+	Optional<Version> rangeVersion; // range file's version
 
 	int64_t blockSize;
 	RestoreAsset asset;
@@ -273,7 +273,8 @@ struct LoadingParam {
 	std::string toString() {
 		std::stringstream str;
 		str << "isRangeFile:" << isRangeFile << " url:" << url.toString()
-		    << " rangeVersion:" << rangeVersion << " blockSize:" << blockSize << " RestoreAsset:" << asset.toString();
+		    << " rangeVersion:" << (rangeVersion.present() ? rangeVersion.get() : -1) << " blockSize:" << blockSize
+		    << " RestoreAsset:" << asset.toString();
 		return str.str();
 	}
 };

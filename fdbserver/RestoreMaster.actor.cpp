@@ -237,7 +237,10 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	wait(collectBackupFiles(self->bc, &rangeFiles, &logFiles, cx, request));
 
 	std::sort(rangeFiles.begin(), rangeFiles.end());
-	std::sort(logFiles.begin(), logFiles.end());
+	std::sort(logFiles.begin(), logFiles.end(), [](RestoreFileFR const& f1, RestoreFileFR const& f2) -> bool {
+		return std::tie(f1.endVersion, f1.beginVersion, f1.fileIndex) <
+		       std::tie(f2.endVersion, f2.beginVersion, f2.fileIndex);
+	});
 
 	self->buildVersionBatches(rangeFiles, logFiles, &self->versionBatches); // Divide files into version batches
 	self->dumpVersionBatches(self->versionBatches);
@@ -273,7 +276,6 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 	std::vector<std::pair<UID, RestoreLoadFileRequest>> requests;
 	std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
 
-	Version prevVersion = 0;
 	for (auto& file : *files) {
 		// NOTE: Cannot skip empty files because empty files, e.g., log file, still need to generate dummy mutation to
 		// drive applier's NotifiedVersion.
@@ -295,8 +297,6 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		param.asset.range = request.range;
 		param.asset.beginVersion = versionBatch.beginVersion;
 		param.asset.endVersion = versionBatch.endVersion;
-
-		prevVersion = param.asset.endVersion;
 
 		TraceEvent("FastRestore").detail("LoadParam", param.toString()).detail("LoaderID", loader->first.toString());
 		ASSERT_WE_THINK(param.asset.len > 0);

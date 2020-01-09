@@ -44,8 +44,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequest req,
                                               Reference<RestoreLoaderData> self);
 ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, VersionedMutationsMap* kvOps,
-                                          bool isRangeFile, Version endVersion,
-                                          RestoreAsset asset);
+                                          bool isRangeFile, RestoreAsset asset);
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
                                                            SerializedMutationListMap* mutationMap,
                                                            SerializedMutationPartMap* mutationPartMap,
@@ -154,7 +153,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<RestoreLoa
 		subAsset.len = std::min<int64_t>(param.blockSize, param.asset.len - j);
 		if (param.isRangeFile) {
 			fileParserFutures.push_back(_parseRangeFileToMutationsOnLoader(kvOpsPerLPIter, samplesIter, self->bc,
-			                                                               param.rangeVersion, subAsset));
+			                                                               param.rangeVersion.get(), subAsset));
 		} else {
 			// TODO: Sanity check the log file's range is overlapped with the restored version range
 			fileParserFutures.push_back(_parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap,
@@ -198,8 +197,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	for (; item != self->kvOpsPerLP.end(); item++) {
 		if (item->first.isRangeFile == req.useRangeFile) {
 			// Send the parsed mutation to applier who will apply the mutation to DB
-			wait(sendMutationsToApplier(self, &item->second, item->first.isRangeFile,
-			                            item->first.asset.endVersion, item->first.asset));
+			wait(sendMutationsToApplier(self, &item->second, item->first.isRangeFile, item->first.asset));
 		}
 	}
 
@@ -210,8 +208,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 // TODO: This function can be revised better
 // Assume: kvOps data are from the same file.
 ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, VersionedMutationsMap* pkvOps,
-                                          bool isRangeFile, Version endVersion,
-                                          RestoreAsset asset) {
+                                          bool isRangeFile, RestoreAsset asset) {
 	state VersionedMutationsMap& kvOps = *pkvOps;
 	state VersionedMutationsMap::iterator kvOp = kvOps.begin();
 	state int kvCount = 0;
@@ -223,12 +220,12 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 	TraceEvent("FastRestore_SendMutationToApplier")
 	    .detail("Loader", self->id())
 	    .detail("IsRangeFile", isRangeFile)
-	    .detail("EndVersion", endVersion)
+	    .detail("EndVersion", asset.endVersion)
 	    .detail("RestoreAsset", asset.toString());
 
 	// Ensure there is a mutation request sent at endVersion, so that applier can advance its notifiedVersion
-	if (kvOps.find(endVersion) == kvOps.end()) {
-		kvOps[endVersion] = MutationsVec(); // Empty mutation vector will be handled by applier
+	if (kvOps.find(asset.endVersion) == kvOps.end()) {
+		kvOps[asset.endVersion] = MutationsVec(); // Empty mutation vector will be handled by applier
 	}
 
 	splitMutationIndex = 0;
