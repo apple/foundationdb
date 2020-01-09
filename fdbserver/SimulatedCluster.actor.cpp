@@ -810,7 +810,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	//		set_config("memory");
 	//	}
 	//	set_config("memory");
-	set_config("memory-radixtree");
+	set_config("memory-radixtree-beta");
 	if(simple) {
 		db.desiredTLogCount = 1;
 		db.masterProxyCount = 1;

@@ -270,7 +270,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		} else if( tLogDataStoreType == KeyValueStoreType::MEMORY && storageServerStoreType == KeyValueStoreType::MEMORY ) {
 			result["storage_engine"] = "memory-1";
 		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::MEMORY_RADIXTREE ) {
-			result["storage_engine"] = "memory-radixtree";
+			result["storage_engine"] = "memory-radixtree-beta";
 		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::MEMORY ) {
 			result["storage_engine"] = "memory-2";
 		} else {

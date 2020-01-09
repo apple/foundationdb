@@ -579,7 +579,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "memory",
              "memory-1",
              "memory-2",
-             "memory-radixtree"
+             "memory-radixtree-beta"
          ]},
          "coordinators_count":1,
          "excluded_servers":[

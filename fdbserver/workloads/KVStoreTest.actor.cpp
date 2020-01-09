@@ -375,7 +375,7 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 		test.store = keyValueStoreRedwoodV1(fn, id);
 	else if (workload->storeType == "memory")
 		test.store = keyValueStoreMemory(fn, id, 500e6);
-	else if (workload->storeType == "memory-radixtree")
+	else if (workload->storeType == "memory-radixtree-beta")
 		test.store = keyValueStoreMemory(fn, id, 500e6, "fdr", KeyValueStoreType::MEMORY_RADIXTREE);
 	else
 		ASSERT(false);
