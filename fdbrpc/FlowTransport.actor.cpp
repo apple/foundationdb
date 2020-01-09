@@ -1094,11 +1094,13 @@ Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
 void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 	if (!isStream || !endpoint.getPrimaryAddress().isValid())
 		return;
-	else if (FlowTransport::transport().isClient())
-		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 
 	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
+	
 	if(peer->peerReferences == -1) {
+		if (FlowTransport::transport().isClient()) {
+			IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
+		}
 		peer->peerReferences = 1;
 	} else {
 		peer->peerReferences++;
