@@ -2685,15 +2685,15 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 						tr->info.conflictingKeysRYW = std::make_shared<ReadYourWritesTransaction>(tr->getDatabase());
 						// To make the getRange call local, we need to explicitly set the read version here.
 						// This version number 100 set here does nothing but prevent getting read version from the proxy
-						tr->info.conflictingKeysRYW.get()->setVersion(100);
+						tr->info.conflictingKeysRYW->setVersion(100);
 						// Clear the whole key space, thus, RYWTr knows to only read keys locally
-						tr->info.conflictingKeysRYW.get()->clear(normalKeys);
+						tr->info.conflictingKeysRYW->clear(normalKeys);
 						// in case system keys are conflicting
-						tr->info.conflictingKeysRYW.get()->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr->info.conflictingKeysRYW.get()->clear(systemKeys);
+						tr->info.conflictingKeysRYW->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr->info.conflictingKeysRYW->clear(systemKeys);
 						for (auto const & kr : ci.conflictingKeyRanges.get()) {
-							tr->info.conflictingKeysRYW.get()->set(kr.begin, conflictingKeysTrue);
-							tr->info.conflictingKeysRYW.get()->set(kr.end, conflictingKeysFalse);
+							tr->info.conflictingKeysRYW->set(kr.begin, conflictingKeysTrue);
+							tr->info.conflictingKeysRYW->set(kr.end, conflictingKeysFalse);
 						}
 					}
 

@@ -149,7 +149,7 @@ struct TransactionInfo {
 	// shared_ptr used here since TransactionInfo is sometimes copied as function parameters.
 	std::shared_ptr<ReadYourWritesTransaction> conflictingKeysRYW;
 
-	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false), conflictingKeysRYW(nullptr) {}
+	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {

@@ -1300,7 +1300,8 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		begin.setKey(beginConflictingKey);
 		end.setKey(endConflictingKey);
 		if (tr.info.conflictingKeysRYW) {
-			Future<Standalone<RangeResultRef>> resultWithKeyPrefixFuture = tr.info.conflictingKeysRYW.get()->getRange(begin, end, limits, snapshot, reverse);
+			Future<Standalone<RangeResultRef>> resultWithKeyPrefixFuture = 
+				tr.info.conflictingKeysRYW->getRange(begin, end, limits, snapshot, reverse);
 			// Make sure it happens locally
 			ASSERT(resultWithKeyPrefixFuture.isReady());
 			return resultWithKeyPrefixFuture.get();
