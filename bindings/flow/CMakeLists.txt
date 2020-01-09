@@ -16,7 +16,7 @@ set(SRCS
   fdb_flow.actor.cpp
   fdb_flow.h)
 
-add_flow_target(NAME fdb_flow SRCS ${SRCS} STATIC_LIBRARY)
+add_flow_target(STATIC_LIBRARY NAME fdb_flow SRCS ${SRCS})
 target_link_libraries(fdb_flow PUBLIC fdb_c)
 
 add_subdirectory(tester)
