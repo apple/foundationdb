@@ -140,7 +140,7 @@ error. The above example may be rewritten as:
     })
 
 MustGet returns nil (which is different from empty slice []byte{}), when the
-key doesn't exist, and hence non-existing can be checked as follows:
+key doesn't exist, and hence non-existence can be checked as follows:
 
     val := tr.Get(fdb.Key("foobar")).MustGet()
     if val == nil {
