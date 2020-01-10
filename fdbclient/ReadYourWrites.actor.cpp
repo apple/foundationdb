@@ -1286,11 +1286,11 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	// <key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	// Due to the implementation of resolver, currently, 
 	// we can only give key ranges that contain at least one key is conflicting.
-	Key conflictingKeysPreifx = LiteralStringRef("\xff\xff/conflicting_keys/");
+	KeyRef conflictingKeysPreifx = LiteralStringRef("\xff\xff/conflicting_keys/");
 	if (begin.getKey().startsWith(conflictingKeysPreifx) && end.getKey().startsWith(conflictingKeysPreifx)) {
 		// Remove the special key prefix "\xff\xff/conflicting_keys/"
-		Key beginConflictingKey = begin.getKey().removePrefix(conflictingKeysPreifx);
-		Key endConflictingKey = end.getKey().removePrefix(conflictingKeysPreifx);
+		KeyRef beginConflictingKey = begin.getKey().removePrefix(conflictingKeysPreifx);
+		KeyRef endConflictingKey = end.getKey().removePrefix(conflictingKeysPreifx);
 
 		// Check if the conflicting key range to be read is valid
 		KeyRef maxKey = getMaxReadKey();
