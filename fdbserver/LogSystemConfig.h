@@ -214,6 +214,19 @@ struct LogSystemConfig {
 		return format("type: %d oldGenerations: %d tags: %d %s", logSystemType, oldTLogs.size(), logRouterTags, describe(tLogs).c_str());
 	}
 
+	Optional<Key> getRemoteDcId() const {
+		for( int i = 0; i < tLogs.size(); i++ ) {
+			if(!tLogs[i].isLocal) {
+				for( int j = 0; j < tLogs[i].tLogs.size(); j++ ) {
+					if( tLogs[i].tLogs[j].present() ) {
+						return tLogs[i].tLogs[j].interf().locality.dcId();
+					}
+				}
+			}
+		}
+		return Optional<Key>();
+	}
+
 	std::vector<TLogInterface> allLocalLogs(bool includeSatellite = true) const {
 		std::vector<TLogInterface> results;
 		for( int i = 0; i < tLogs.size(); i++ ) {
