@@ -341,7 +341,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( SAMPLE_EXPIRATION_TIME,                                1.0 );
 	init( SAMPLE_POLL_TIME,                                      0.1 );
 	init( RESOLVER_STATE_MEMORY_LIMIT,                           1e6 );
-	init( LAST_LIMITED_RATIO,                                    0.6 );
+	init( LAST_LIMITED_RATIO,                                    2.0 );
 
 	//Cluster Controller
 	init( CLUSTER_CONTROLLER_LOGGING_DELAY,                      5.0 );
