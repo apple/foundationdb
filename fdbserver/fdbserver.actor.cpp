@@ -1132,8 +1132,8 @@ int main(int argc, char* argv[]) {
 				}
 				case OPT_TRACECLOCK: {
 					const char* a = args.OptionArg();
-					if (!strcmp(a, "realtime")) g_trace_clock = TRACE_CLOCK_REALTIME;
-					else if (!strcmp(a, "now")) g_trace_clock = TRACE_CLOCK_NOW;
+					if (!strcmp(a, "realtime")) g_trace_clock.store(TRACE_CLOCK_REALTIME);
+					else if (!strcmp(a, "now")) g_trace_clock.store(TRACE_CLOCK_NOW);
 					else {
 						fprintf(stderr, "ERROR: Unknown clock source `%s'\n", a);
 						printHelpTeaser(argv[0]);

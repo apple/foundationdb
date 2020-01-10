@@ -113,7 +113,7 @@ struct SuppressionMap {
 };
 
 TraceBatch g_traceBatch;
-thread_local trace_clock_t g_trace_clock = TRACE_CLOCK_REALTIME;
+std::atomic<trace_clock_t> g_trace_clock{ TRACE_CLOCK_NOW };
 
 LatestEventCache latestEventCache;
 SuppressionMap suppressedEvents;
@@ -422,7 +422,7 @@ public:
 					TraceEventFields rolledFields;
 					for(auto itr = events[idx].begin(); itr != events[idx].end(); ++itr) {
 						if(itr->first == "Time") {
-							rolledFields.addField("Time", format("%.6f", (g_trace_clock == TRACE_CLOCK_NOW) ? now() : timer()));
+							rolledFields.addField("Time", format("%.6f", TraceEvent::getCurrentTime()));
 							rolledFields.addField("OriginalTime", itr->second);
 						}
 						else if(itr->first == "TrackLatestType") {
@@ -724,26 +724,12 @@ bool TraceEvent::init() {
 	if(enabled) {
 		tmpEventMetric = new DynamicEventMetric(MetricNameRef());
 
-		double time;
-		if(g_trace_clock == TRACE_CLOCK_NOW) {
-			if(!g_network) {
-				static double preNetworkTime = timer_monotonic();
-				time = preNetworkTime;
-			}
-			else {
-				time = now();
-			}
-		}
-		else {
-			time = timer();
-		}
-
 		if(err.isValid() && err.isInjectedFault() && severity == SevError) {
 			severity = SevWarnAlways;
 		}
 
 		detail("Severity", int(severity));
-		detailf("Time", "%.6f", time);
+		detailf("Time", "%.6f", getCurrentTime());
 		detail("Type", type);
 		if(g_network && g_network->isSimulated()) {
 			NetworkAddress local = g_network->getLocalAddress();
@@ -994,11 +980,24 @@ thread_local bool TraceEvent::networkThread = false;
 void TraceEvent::setNetworkThread() {
 	traceEventThrottlerCache = new TransientThresholdMetricSample<Standalone<StringRef>>(FLOW_KNOBS->TRACE_EVENT_METRIC_UNITS_PER_SAMPLE, FLOW_KNOBS->TRACE_EVENT_THROTTLER_MSG_LIMIT);
 	networkThread = true;
-	g_trace_clock = TRACE_CLOCK_NOW;
 }
 
 bool TraceEvent::isNetworkThread() {
 	return networkThread;
+}
+
+double TraceEvent::getCurrentTime() {
+	if(g_trace_clock.load() == TRACE_CLOCK_NOW) {
+		if(!isNetworkThread() || !g_network) {
+			return timer_monotonic();
+		}
+		else {
+			return now();
+		}
+	}
+	else {
+		return timer();
+	}
 }
 
 TraceInterval& TraceInterval::begin() {
@@ -1008,20 +1007,20 @@ TraceInterval& TraceInterval::begin() {
 }
 
 void TraceBatch::addEvent( const char *name, uint64_t id, const char *location ) {
-	eventBatch.push_back( EventInfo(g_trace_clock == TRACE_CLOCK_NOW ? now() : timer(), name, id, location));
+	eventBatch.push_back( EventInfo(TraceEvent::getCurrentTime(), name, id, location));
 	if( g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP )
 		dump();
 }
 
 void TraceBatch::addAttach( const char *name, uint64_t id, uint64_t to ) {
-	attachBatch.push_back( AttachInfo(g_trace_clock == TRACE_CLOCK_NOW ? now() : timer(), name, id, to));
+	attachBatch.push_back( AttachInfo(TraceEvent::getCurrentTime(), name, id, to));
 	if( g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP )
 		dump();
 }
 
 void TraceBatch::addBuggify( int activated, int line, std::string file ) {
 	if( g_network ) {
-		buggifyBatch.push_back( BuggifyInfo(g_trace_clock == TRACE_CLOCK_NOW ? now() : timer(), activated, line, file));
+		buggifyBatch.push_back( BuggifyInfo(TraceEvent::getCurrentTime(), activated, line, file));
 		if( g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP )
 			dump();
 	} else {
