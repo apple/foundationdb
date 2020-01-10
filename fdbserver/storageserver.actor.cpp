@@ -451,6 +451,7 @@ public:
 	bool shuttingDown;
 
 	bool behind;
+	bool versionBehind;
 
 	bool debug_inApplyUpdate;
 	double debug_lastValidateTime;
@@ -545,7 +546,7 @@ public:
 			shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0),
 			logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
 			readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")),
-			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false),
+			behind(false), versionBehind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false),
 			lastUpdate(now()), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0)
 	{
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
@@ -780,7 +781,7 @@ ACTOR Future<Version> waitForVersion( StorageServer* data, Version version ) {
 	else if (version <= data->version.get())
 		return version;
 
-	if(data->behind && version > data->version.get()) {
+	if((data->behind || data->versionBehind) && version > data->version.get()) {
 		throw process_behind();
 	}
 
@@ -3449,6 +3450,29 @@ ACTOR Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {
 	return Void();
 }
 
+ACTOR Future<Void> checkBehind( StorageServer* self ) {
+	state int behindCount = 0;
+	loop {
+		wait( delay(SERVER_KNOBS->BEHIND_CHECK_DELAY) );
+		loop {
+			try {
+				state Transaction tr(self->cx);
+				Version readVersion = wait( tr.getRawReadVersion() );
+				Version storageVersion = self->version.get();
+				if( readVersion > storageVersion + SERVER_KNOBS->BEHIND_CHECK_VERSIONS ) {
+					behindCount++;
+				} else {
+					behindCount = 0;
+				}
+				self->versionBehind = behindCount >= SERVER_KNOBS->BEHIND_CHECK_COUNT;
+				break;
+			} catch( Error &e ) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterface ssi )
 {
 	state Future<Void> doUpdate = Void();
@@ -3465,6 +3489,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	actors.add(self->otherError.getFuture());
 	actors.add(metricsCore(self, ssi));
 	actors.add(logLongByteSampleRecovery(self->byteSampleRecovery));
+	actors.add(checkBehind(self));
 
 	self->coreStarted.send( Void() );
 
