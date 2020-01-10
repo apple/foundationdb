@@ -756,10 +756,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			int64_t bestLoadBytes = 0;
 			Optional<Reference<IDataDistributionTeam>> bestOption;
 			std::vector<Reference<IDataDistributionTeam>> randomTeams;
-			std::set<UID> completeSources;
-			for( int i = 0; i < req.completeSources.size(); i++ ) {
-				completeSources.insert( req.completeSources[i] );
-			}
+			const std::set<UID> completeSources(req.completeSources.begin(), req.completeSources.end());
+
 			if( !req.wantsNewServers ) {
 				for( int i = 0; i < req.completeSources.size(); i++ ) {
 					if( !self->server_info.count( req.completeSources[i] ) ) {

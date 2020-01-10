@@ -181,8 +181,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( DATA_DISTRIBUTION_LOGGING_INTERVAL,                    5.0 );
 	init( DD_ENABLED_CHECK_DELAY,                                1.0 );
 	init( DD_STALL_CHECK_DELAY,                                  0.4 ); //Must be larger than 2*MAX_BUGGIFIED_DELAY
-	init( DD_LOW_BANDWIDTH_DELAY,        isSimulated ?  90.0 : 280.0 ); if( randomize && BUGGIFY ) DD_LOW_BANDWIDTH_DELAY = 0;
-	init( DD_MERGE_COALESCE_DELAY,       isSimulated ? 120.0 : 300.0 ); if( randomize && BUGGIFY ) { DD_LOW_BANDWIDTH_DELAY = 0; DD_MERGE_COALESCE_DELAY = 0.001; }
+	init( DD_LOW_BANDWIDTH_DELAY,        isSimulated ? 100.0 : 280.0 ); if( randomize && BUGGIFY ) DD_LOW_BANDWIDTH_DELAY = 0;
+	init( DD_MERGE_COALESCE_DELAY,       isSimulated ? 120.0 : 300.0 ); if( randomize && BUGGIFY ) DD_MERGE_COALESCE_DELAY = 0.001;
 	init( STORAGE_METRICS_POLLING_DELAY,                         2.0 ); if( randomize && BUGGIFY ) STORAGE_METRICS_POLLING_DELAY = 15.0;
 	init( STORAGE_METRICS_RANDOM_DELAY,                          0.2 );
 	init( FREE_SPACE_RATIO_CUTOFF,                               0.1 );
