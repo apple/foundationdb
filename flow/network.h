@@ -305,8 +305,9 @@ struct NetworkMetrics {
 	TaskPriority priorityBins[ PRIORITY_BINS ];
 	bool priorityBlocked[PRIORITY_BINS];
 	double priorityBlockedDuration[PRIORITY_BINS];
-	double secSquaredPriorityBlocked[PRIORITY_BINS];
+	double priorityMaxBlockedDuration[PRIORITY_BINS];
 	double priorityTimer[PRIORITY_BINS];
+	double windowedPriorityTimer[PRIORITY_BINS];
 
 	double oldestAlternativesFailure;
 	double newestAlternativesFailure;
