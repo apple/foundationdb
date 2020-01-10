@@ -54,14 +54,7 @@ struct RelocateData {
 			rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
 			rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
 			rs.priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD ||
-			rs.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT ||
-			mergeWantsNewServers(rs.keys, rs.priority)), interval("QueuedRelocation") {}
-
-	static bool mergeWantsNewServers(KeyRangeRef keys, int priority) {
-		return priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD &&
-		       (SERVER_KNOBS->MERGE_ONTO_NEW_TEAM == 2 ||
-		        (SERVER_KNOBS->MERGE_ONTO_NEW_TEAM == 1 && keys.begin.startsWith(LiteralStringRef("\xff"))));
-	}
+			rs.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT), interval("QueuedRelocation") {}
 
 	static bool isHealthPriority(int priority) {
 		return  priority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || 
@@ -937,7 +930,6 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					if(rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
 					auto req = GetTeamRequest(rd.wantsNewServers, rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, true, inflightPenalty);
-					req.sources = rd.src;
 					req.completeSources = rd.completeSources;
 					Optional<Reference<IDataDistributionTeam>> bestTeam = wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
 					// If a DC has no healthy team, we stop checking the other DCs until
