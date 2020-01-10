@@ -538,7 +538,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		Version minLimitingSSVer = std::numeric_limits<Version>::max();
 		for (const auto& it : self->storageQueueInfo) {
 			auto& ss = it.value;
-			if (!ss.valid) continue;
+			if (!ss.valid || (self->remoteDC.present() && ss.locality.dcId() == self->remoteDC)) continue;
 
 			minSSVer = std::min(minSSVer, ss.lastReply.version);
 

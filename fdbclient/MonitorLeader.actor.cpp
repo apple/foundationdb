@@ -671,7 +671,7 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 }
 
 void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::vector<MasterProxyInterface>& lastProxies ) {
-	if(ni.proxies.size() > CLIENT_KNOBS->MAX_CLIENT_PROXY_CONNECTIONS) {
+	if(ni.proxies.size() > CLIENT_KNOBS->MAX_PROXY_CONNECTIONS) {
 		std::vector<UID> proxyUIDs;
 		for(auto& proxy : ni.proxies) {
 			proxyUIDs.push_back(proxy.id());
@@ -680,9 +680,9 @@ void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::ve
 			lastProxyUIDs = proxyUIDs;
 			lastProxies = ni.proxies;
 			deterministicRandom()->randomShuffle(lastProxies);
-			lastProxies.resize(CLIENT_KNOBS->MAX_CLIENT_PROXY_CONNECTIONS);
+			lastProxies.resize(CLIENT_KNOBS->MAX_PROXY_CONNECTIONS);
 			for(int i = 0; i < lastProxies.size(); i++) {
-				TraceEvent("ServerConnectedProxy").detail("Proxy", lastProxies[i].id());
+				TraceEvent("ConnectedProxy").detail("Proxy", lastProxies[i].id());
 			}
 		}
 		ni.proxies = lastProxies;

@@ -3454,12 +3454,11 @@ ACTOR Future<Void> checkBehind( StorageServer* self ) {
 	state int behindCount = 0;
 	loop {
 		wait( delay(SERVER_KNOBS->BEHIND_CHECK_DELAY) );
+		state Transaction tr(self->cx);
 		loop {
 			try {
-				state Transaction tr(self->cx);
 				Version readVersion = wait( tr.getRawReadVersion() );
-				Version storageVersion = self->version.get();
-				if( readVersion > storageVersion + SERVER_KNOBS->BEHIND_CHECK_VERSIONS ) {
+				if( readVersion > self->version.get() + SERVER_KNOBS->BEHIND_CHECK_VERSIONS ) {
 					behindCount++;
 				} else {
 					behindCount = 0;
