@@ -146,6 +146,7 @@ public:
 	double DATA_DISTRIBUTION_LOGGING_INTERVAL;
 	double DD_ENABLED_CHECK_DELAY;
 	double DD_STALL_CHECK_DELAY;
+	double DD_LOW_BANDWIDTH_DELAY;
 	double DD_MERGE_COALESCE_DELAY;
 	double STORAGE_METRICS_POLLING_DELAY;
 	double STORAGE_METRICS_RANDOM_DELAY;
@@ -457,7 +458,7 @@ public:
 	int64_t TIME_KEEPER_MAX_ENTRIES;
 
 
-	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL);
+	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
 
 extern ServerKnobs const* SERVER_KNOBS;
