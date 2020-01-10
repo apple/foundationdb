@@ -761,31 +761,25 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				completeSources.insert( req.completeSources[i] );
 			}
 			if( !req.wantsNewServers ) {
-				int bestSize = 0;
 				for( int i = 0; i < req.completeSources.size(); i++ ) {
-					if( self->server_info.count( req.completeSources[i] ) ) {
-						auto& teamList = self->server_info[ req.completeSources[i] ]->teams;
-						for( int j = 0; j < teamList.size(); j++ ) {
-							bool found = true;
-							auto serverIDs = teamList[j]->getServerIDs();
-							for( int k = 0; k < teamList[j]->size(); k++ ) {
-								if( !completeSources.count( serverIDs[k] ) ) {
-									found = false;
-									break;
-								}
-							}
-							if(found && teamList[j]->isHealthy() && teamList[j]->size() > bestSize) {
-								bestOption = teamList[j];
-								bestSize = teamList[j]->size();
+					if( !self->server_info.count( req.completeSources[i] ) ) {
+						continue;
+					}
+					auto& teamList = self->server_info[ req.completeSources[i] ]->teams;
+					for( int j = 0; j < teamList.size(); j++ ) {
+						bool found = true;
+						auto serverIDs = teamList[j]->getServerIDs();
+						for( int k = 0; k < teamList[j]->size(); k++ ) {
+							if( !completeSources.count( serverIDs[k] ) ) {
+								found = false;
+								break;
 							}
 						}
-						break;
+						if(found && teamList[j]->isHealthy()) {
+							req.reply.send( teamList[j] );
+							return Void();
+						}
 					}
-				}
-
-				if(bestOption.present()) {
-					req.reply.send( bestOption );
-					return Void();
 				}
 			}
 
@@ -833,25 +827,24 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// We will get stuck at this! This only happens when a DC fails. No need to consider it right now.
 			if(!bestOption.present() && self->zeroHealthyTeams->get()) {
 				//Attempt to find the unhealthy source server team and return it
-				int bestSize = 0;
 				for( int i = 0; i < req.completeSources.size(); i++ ) {
-					if( self->server_info.count( req.completeSources[i] ) ) {
-						auto& teamList = self->server_info[ req.completeSources[i] ]->teams;
-						for( int j = 0; j < teamList.size(); j++ ) {
-							bool found = true;
-							auto serverIDs = teamList[j]->getServerIDs();
-							for( int k = 0; k < teamList[j]->size(); k++ ) {
-								if( !completeSources.count( serverIDs[k] ) ) {
-									found = false;
-									break;
-								}
-							}
-							if(found && teamList[j]->size() > bestSize) {
-								bestOption = teamList[j];
-								bestSize = teamList[j]->size();
+					if( !self->server_info.count( req.completeSources[i] ) ) {
+						continue;
+					}
+					auto& teamList = self->server_info[ req.completeSources[i] ]->teams;
+					for( int j = 0; j < teamList.size(); j++ ) {
+						bool found = true;
+						auto serverIDs = teamList[j]->getServerIDs();
+						for( int k = 0; k < teamList[j]->size(); k++ ) {
+							if( !completeSources.count( serverIDs[k] ) ) {
+								found = false;
+								break;
 							}
 						}
-						break;
+						if(found) {
+							req.reply.send( teamList[j] );
+							return Void();
+						}
 					}
 				}
 			}
