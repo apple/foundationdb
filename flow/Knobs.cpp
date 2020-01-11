@@ -73,6 +73,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
+	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,    isSimulated ? 1.0 : 10.0 );
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );
