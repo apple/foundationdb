@@ -32,9 +32,8 @@
 // Name of specialized TLS Plugin
 const char* tlsPluginName = "fdb-libressl-plugin";
 
-typedef std::pair<IPAddress, uint16_t> IpPortPair;
 typedef double ExpiryTime;
-static std::map<IpPortPair, ExpiryTime> serverTLSConnectionThrottler;
+static std::map<IPAddress, ExpiryTime> serverTLSConnectionThrottler;
 
 // Must not throw an exception from this function!
 static int send_func(void* ctx, const uint8_t* buf, int len) {
@@ -75,20 +74,17 @@ static int recv_func(void* ctx, uint8_t* buf, int len) {
 }
 
 ACTOR static Future<Void> handshake( TLSConnection* self ) {
-	state IpPortPair peerIpPortPair; // port will be 0 if the peer is a client
-	if(self->is_client) {
-		peerIpPortPair = IpPortPair(self->conn->getPeerAddress().ip, self->conn->getPeerAddress().port);
-	} else {
-		peerIpPortPair = IpPortPair(self->conn->getPeerAddress().ip, static_cast<uint16_t>(0));
-	}
-	auto iter(serverTLSConnectionThrottler.find(peerIpPortPair));
-	if(iter != serverTLSConnectionThrottler.end()) {
-		if (now() < iter->second) {
-			TraceEvent("TLSConnectionThrottlingWarning", self->getDebugID()).suppressFor(1.0).detail("IsClient", self->is_client).detail("PeerIP", peerIpPortPair.first.toString());
-			wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
-			throw connection_failed();
-		} else {
-			serverTLSConnectionThrottler.erase(peerIpPortPair);
+	if(!self->is_client) {
+		IPAddress peerIP = self->conn->getPeerAddress().ip;
+		auto iter(serverTLSConnectionThrottler.find(peerIP));
+		if(iter != serverTLSConnectionThrottler.end()) {
+			if (now() < iter->second) {
+				TraceEvent("TLSIncomingConnectionThrottlingWarning", self->getDebugID()).suppressFor(1.0).detail("PeerIP", peerIP.toString());
+				wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+				throw connection_failed();
+			} else {
+				serverTLSConnectionThrottler.erase(peerIP);
+			}
 		}
 	}
 
@@ -100,7 +96,7 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 		if ( r == ITLSSession::SUCCESS ) break;
 		if ( r == ITLSSession::FAILED ) {
 			TraceEvent("TLSConnectionHandshakeError", self->getDebugID()).suppressFor(1.0).detail("Peer", self->getPeerAddress());
-			serverTLSConnectionThrottler[peerIpPortPair] = now() + FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT;
+			serverTLSConnectionThrottler[self->getPeerAddress().ip] = now() + FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT;
 			throw connection_failed();
 		}
 		ASSERT( r == ITLSSession::WANT_WRITE || r == ITLSSession::WANT_READ );
