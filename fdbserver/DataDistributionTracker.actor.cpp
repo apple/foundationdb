@@ -311,7 +311,11 @@ ACTOR Future<Void> changeSizes( DataDistributionTracker* self, KeyRange keys, in
 }
 
 struct HasBeenTrueFor : NonCopyable {
-	explicit HasBeenTrueFor( bool value ) : trigger( value ? Void() : Future<Void>() ) {}
+	explicit HasBeenTrueFor( Optional<ShardMetrics> value ) {
+		if(value.present()) {
+			trigger = delayJittered(std::max(0.0, SERVER_KNOBS->DD_MERGE_COALESCE_DELAY + value.get().lastLowBandwidthStartTime - now()), decrementPriority(TaskPriority::DataDistribution) ) || cleared.getFuture();
+		}
+	}
 
 	Future<Void> set() {
 		if( !trigger.isValid() ) {
@@ -420,7 +424,7 @@ Future<Void> shardMerger(
 	KeyRangeRef merged;
 	StorageMetrics endingStats = shardSize->get().get().metrics;
 	double lastLowBandwidthStartTime = shardSize->get().get().lastLowBandwidthStartTime;
-	if(SERVER_KNOBS->DD_MERGE_COALESCE_DELAY > SERVER_KNOBS->DD_LOW_BANDWIDTH_DELAY && now() - lastLowBandwidthStartTime < SERVER_KNOBS->DD_LOW_BANDWIDTH_DELAY) {
+	if(FLOW_KNOBS->DELAY_JITTER_OFFSET*SERVER_KNOBS->DD_MERGE_COALESCE_DELAY > SERVER_KNOBS->DD_LOW_BANDWIDTH_DELAY && now() - lastLowBandwidthStartTime < SERVER_KNOBS->DD_LOW_BANDWIDTH_DELAY) {
 		TraceEvent( g_network->isSimulated() ? SevError : SevWarnAlways, "ShardMergeTooSoon", self->distributorId).detail("Keys", keys);
 	}
 
@@ -570,7 +574,7 @@ ACTOR Future<Void> shardTracker(
 		Reference<AsyncVar<Optional<ShardMetrics>>> shardSize)
 {
 	// Survives multiple calls to shardEvaluator and keeps merges from happening too quickly.
-	state HasBeenTrueFor wantsToMerge( shardSize->get().present() );
+	state HasBeenTrueFor wantsToMerge( shardSize->get() );
 
 	wait( yieldedFuture(self->readyToStart.getFuture()) );
 
