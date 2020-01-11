@@ -182,7 +182,9 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 				if (!self->skipCorrectnessCheck && self->reportConflictingKeys && isConflict) {
 					state KeyRange ckr = KeyRangeRef(LiteralStringRef("\xff\xff/conflicting_keys/"), LiteralStringRef("\xff\xff/conflicting_keys/\xff"));
 					// The getRange here using the special key prefix "\xff\xff/conflicting_keys/" happens locally, so error handling is not needed here
-					Standalone<RangeResultRef> conflictingKeyRanges = wait(tr.getRange(ckr, readConflictRanges.size() * 2));
+					Future<Standalone<RangeResultRef>> conflictingKeyRangesFuture = tr.getRange(ckr, readConflictRanges.size() * 2);
+					ASSERT(conflictingKeyRangesFuture.isReady());
+					const Standalone<RangeResultRef> conflictingKeyRanges = conflictingKeyRangesFuture.get();
 					ASSERT( conflictingKeyRanges.size() && ( conflictingKeyRanges.size() % 2 == 0 ) );
 					for (int i = 0; i < conflictingKeyRanges.size(); i += 2) {
 						KeyValueRef startKey = conflictingKeyRanges[i];
