@@ -755,59 +755,28 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 			int64_t bestLoadBytes = 0;
 			Optional<Reference<IDataDistributionTeam>> bestOption;
-			std::vector<std::pair<int, Reference<IDataDistributionTeam>>> randomTeams;
-			std::set< UID > sources;
+			std::vector<Reference<IDataDistributionTeam>> randomTeams;
+			const std::set<UID> completeSources(req.completeSources.begin(), req.completeSources.end());
 
 			if( !req.wantsNewServers ) {
-				std::vector<Reference<IDataDistributionTeam>> similarTeams;
-				bool foundExact = false;
-
-				for( int i = 0; i < req.sources.size(); i++ )
-					sources.insert( req.sources[i] );
-
-				for( int i = 0; i < req.sources.size(); i++ ) {
-					if( self->server_info.count( req.sources[i] ) ) {
-						auto& teamList = self->server_info[ req.sources[i] ]->teams;
-						for( int j = 0; j < teamList.size(); j++ ) {
-							if( teamList[j]->isHealthy() && (!req.preferLowerUtilization || teamList[j]->hasHealthyFreeSpace())) {
-								int sharedMembers = 0;
-								for( const UID& id : teamList[j]->getServerIDs() )
-									if( sources.count( id ) )
-										sharedMembers++;
-
-								if( !foundExact && sharedMembers == teamList[j]->size() ) {
-									foundExact = true;
-									bestOption = Optional<Reference<IDataDistributionTeam>>();
-									similarTeams.clear();
-								}
-
-								if( (sharedMembers == teamList[j]->size()) || (!foundExact && req.wantsTrueBest) ) {
-									int64_t loadBytes = SOME_SHARED * teamList[j]->getLoadBytes(true, req.inflightPenalty);
-									if( !bestOption.present() || ( req.preferLowerUtilization && loadBytes < bestLoadBytes ) || ( !req.preferLowerUtilization && loadBytes > bestLoadBytes ) ) {
-										bestLoadBytes = loadBytes;
-										bestOption = teamList[j];
-									}
-								}
-								else if( !req.wantsTrueBest && !foundExact )
-									similarTeams.push_back( teamList[j] );
+				for( int i = 0; i < req.completeSources.size(); i++ ) {
+					if( !self->server_info.count( req.completeSources[i] ) ) {
+						continue;
+					}
+					auto& teamList = self->server_info[ req.completeSources[i] ]->teams;
+					for( int j = 0; j < teamList.size(); j++ ) {
+						bool found = true;
+						auto serverIDs = teamList[j]->getServerIDs();
+						for( int k = 0; k < teamList[j]->size(); k++ ) {
+							if( !completeSources.count( serverIDs[k] ) ) {
+								found = false;
+								break;
 							}
 						}
-					}
-				}
-
-				if( foundExact || (req.wantsTrueBest && bestOption.present() ) ) {
-					ASSERT( bestOption.present() );
-					// Check the team size: be sure team size is correct
-					ASSERT(bestOption.get()->size() == self->configuration.storageTeamSize);
-					req.reply.send( bestOption );
-					return Void();
-				}
-
-				if( !req.wantsTrueBest ) {
-					while( similarTeams.size() && randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT ) {
-						int randomTeam = deterministicRandom()->randomInt( 0, similarTeams.size() );
-						randomTeams.push_back( std::make_pair( SOME_SHARED, similarTeams[randomTeam] ) );
-						swapAndPop( &similarTeams, randomTeam );
+						if(found && teamList[j]->isHealthy()) {
+							req.reply.send( teamList[j] );
+							return Void();
+						}
 					}
 				}
 			}
@@ -816,7 +785,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				ASSERT( !bestOption.present() );
 				for( int i = 0; i < self->teams.size(); i++ ) {
 					if( self->teams[i]->isHealthy() && (!req.preferLowerUtilization || self->teams[i]->hasHealthyFreeSpace()) ) {
-						int64_t loadBytes = NONE_SHARED * self->teams[i]->getLoadBytes(true, req.inflightPenalty);
+						int64_t loadBytes = self->teams[i]->getLoadBytes(true, req.inflightPenalty);
 						if( !bestOption.present() || ( req.preferLowerUtilization && loadBytes < bestLoadBytes ) || ( !req.preferLowerUtilization && loadBytes > bestLoadBytes ) ) {
 							bestLoadBytes = loadBytes;
 							bestOption = self->teams[i];
@@ -830,21 +799,24 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
 					bool ok = dest->isHealthy() && (!req.preferLowerUtilization || dest->hasHealthyFreeSpace());
-					for(int i=0; ok && i<randomTeams.size(); i++)
-						if (randomTeams[i].second->getServerIDs() == dest->getServerIDs())
+					for(int i=0; ok && i<randomTeams.size(); i++) {
+						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
 							ok = false;
+							break;
+						}
+					}
 
 					if (ok)
-						randomTeams.push_back( std::make_pair( NONE_SHARED, dest ) );
+						randomTeams.push_back( dest );
 					else
 						nTries++;
 				}
 
 				for( int i = 0; i < randomTeams.size(); i++ ) {
-					int64_t loadBytes = randomTeams[i].first * randomTeams[i].second->getLoadBytes(true, req.inflightPenalty);
+					int64_t loadBytes = randomTeams[i]->getLoadBytes(true, req.inflightPenalty);
 					if( !bestOption.present() || ( req.preferLowerUtilization && loadBytes < bestLoadBytes ) || ( !req.preferLowerUtilization && loadBytes > bestLoadBytes ) ) {
 						bestLoadBytes = loadBytes;
-						bestOption = randomTeams[i].second;
+						bestOption = randomTeams[i];
 					}
 				}
 			}
@@ -853,30 +825,24 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// We will get stuck at this! This only happens when a DC fails. No need to consider it right now.
 			if(!bestOption.present() && self->zeroHealthyTeams->get()) {
 				//Attempt to find the unhealthy source server team and return it
-				std::set<UID> completeSources;
 				for( int i = 0; i < req.completeSources.size(); i++ ) {
-					completeSources.insert( req.completeSources[i] );
-				}
-
-				int bestSize = 0;
-				for( int i = 0; i < req.completeSources.size(); i++ ) {
-					if( self->server_info.count( req.completeSources[i] ) ) {
-						auto& teamList = self->server_info[ req.completeSources[i] ]->teams;
-						for( int j = 0; j < teamList.size(); j++ ) {
-							bool found = true;
-							auto serverIDs = teamList[j]->getServerIDs();
-							for( int k = 0; k < teamList[j]->size(); k++ ) {
-								if( !completeSources.count( serverIDs[k] ) ) {
-									found = false;
-									break;
-								}
-							}
-							if(found && teamList[j]->size() > bestSize) {
-								bestOption = teamList[j];
-								bestSize = teamList[j]->size();
+					if( !self->server_info.count( req.completeSources[i] ) ) {
+						continue;
+					}
+					auto& teamList = self->server_info[ req.completeSources[i] ]->teams;
+					for( int j = 0; j < teamList.size(); j++ ) {
+						bool found = true;
+						auto serverIDs = teamList[j]->getServerIDs();
+						for( int k = 0; k < teamList[j]->size(); k++ ) {
+							if( !completeSources.count( serverIDs[k] ) ) {
+								found = false;
+								break;
 							}
 						}
-						break;
+						if(found) {
+							req.reply.send( teamList[j] );
+							return Void();
+						}
 					}
 				}
 			}

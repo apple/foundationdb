@@ -105,8 +105,7 @@ public:
 	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
-	int MERGE_ONTO_NEW_TEAM; // Merges will request new servers. 0 for off, 1 for \xff only, 2 for all shards.
-
+	
 	// Higher priorities are executed first
 	// Priority/100 is the "priority group"/"superpriority".  Priority inversion
 	//   is possible within but not between priority groups; fewer priority groups
@@ -118,11 +117,11 @@ public:
 	int PRIORITY_TEAM_HEALTHY;
 	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
 	int PRIORITY_TEAM_REDUNDANT;
-	int PRIORITY_MERGE_SHARD;
 	int PRIORITY_TEAM_UNHEALTHY;
 	int PRIORITY_TEAM_2_LEFT;
 	int PRIORITY_TEAM_1_LEFT;
 	int PRIORITY_TEAM_0_LEFT;
+	int PRIORITY_MERGE_SHARD;
 	int PRIORITY_SPLIT_SHARD;
 
 	// Data distribution
@@ -147,6 +146,7 @@ public:
 	double DATA_DISTRIBUTION_LOGGING_INTERVAL;
 	double DD_ENABLED_CHECK_DELAY;
 	double DD_STALL_CHECK_DELAY;
+	double DD_LOW_BANDWIDTH_DELAY;
 	double DD_MERGE_COALESCE_DELAY;
 	double STORAGE_METRICS_POLLING_DELAY;
 	double STORAGE_METRICS_RANDOM_DELAY;
@@ -461,7 +461,7 @@ public:
 	int64_t TIME_KEEPER_MAX_ENTRIES;
 
 
-	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL);
+	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
 
 extern ServerKnobs const* SERVER_KNOBS;
