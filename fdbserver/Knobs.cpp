@@ -473,6 +473,9 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( BYTE_SAMPLE_LOAD_DELAY,                                0.0 ); if( randomize && BUGGIFY ) BYTE_SAMPLE_LOAD_DELAY = 0.1;
 	init( BYTE_SAMPLE_START_DELAY,                               1.0 ); if( randomize && BUGGIFY ) BYTE_SAMPLE_START_DELAY = 0.0;
 	init( UPDATE_STORAGE_PROCESS_STATS_INTERVAL,                 5.0 );
+	init( BEHIND_CHECK_DELAY,                                    2.0 );
+	init( BEHIND_CHECK_COUNT,                                      2 );
+	init( BEHIND_CHECK_VERSIONS,             5 * VERSIONS_PER_SECOND );
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;

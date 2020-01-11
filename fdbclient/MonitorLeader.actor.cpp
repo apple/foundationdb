@@ -670,6 +670,25 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 	}
 }
 
+void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::vector<MasterProxyInterface>& lastProxies ) {
+	if(ni.proxies.size() > CLIENT_KNOBS->MAX_PROXY_CONNECTIONS) {
+		std::vector<UID> proxyUIDs;
+		for(auto& proxy : ni.proxies) {
+			proxyUIDs.push_back(proxy.id());
+		}
+		if(proxyUIDs != lastProxyUIDs) {
+			lastProxyUIDs = proxyUIDs;
+			lastProxies = ni.proxies;
+			deterministicRandom()->randomShuffle(lastProxies);
+			lastProxies.resize(CLIENT_KNOBS->MAX_PROXY_CONNECTIONS);
+			for(int i = 0; i < lastProxies.size(); i++) {
+				TraceEvent("ConnectedProxy").detail("Proxy", lastProxies[i].id());
+			}
+		}
+		ni.proxies = lastProxies;
+	}
+}
+
 // Leader is the process that will be elected by coordinators as the cluster controller
 ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, MonitorLeaderInfo info, Standalone<VectorRef<ClientVersionRef>> supportedVersions, Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnFile->getConnectionString();
@@ -730,24 +749,8 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 			connFile->notifyConnected();
 
 			auto& ni = rep.get().mutate();
-			if(ni.proxies.size() > CLIENT_KNOBS->MAX_CLIENT_PROXY_CONNECTIONS) {
-				std::vector<UID> proxyUIDs;
-				for(auto& proxy : ni.proxies) {
-					proxyUIDs.push_back(proxy.id());
-				}
-				if(proxyUIDs != lastProxyUIDs) {
-					lastProxyUIDs = proxyUIDs;
-					lastProxies = ni.proxies;
-					deterministicRandom()->randomShuffle(lastProxies);
-					lastProxies.resize(CLIENT_KNOBS->MAX_CLIENT_PROXY_CONNECTIONS);
-					for(int i = 0; i < lastProxies.size(); i++) {
-						TraceEvent("ClientConnectedProxy").detail("Proxy", lastProxies[i].id());
-					}
-				}
-				ni.proxies = lastProxies;
-			}
-
-			clientInfo->set( rep.get().read() );
+			shrinkProxyList(ni, lastProxyUIDs, lastProxies);
+			clientInfo->set( ni );
 			successIdx = idx;
 		} else if(idx == successIdx) {
 			wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));

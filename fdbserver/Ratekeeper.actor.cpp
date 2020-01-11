@@ -182,6 +182,7 @@ struct RatekeeperData {
 	RatekeeperLimits batchLimits;
 
 	Deque<double> actualTpsHistory;
+	Optional<Key> remoteDC;
 
 	RatekeeperData() : smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), 
 		actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")),
@@ -384,7 +385,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	// Look at each storage server's write queue and local rate, compute and store the desired rate ratio
 	for(auto i = self->storageQueueInfo.begin(); i != self->storageQueueInfo.end(); ++i) {
 		auto& ss = i->value;
-		if (!ss.valid) continue;
+		if (!ss.valid || (self->remoteDC.present() && ss.locality.dcId() == self->remoteDC)) continue;
 		++sscount;
 
 		limitReason_t ssLimitReason = limitReason_t::unlimited;
@@ -537,7 +538,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		Version minLimitingSSVer = std::numeric_limits<Version>::max();
 		for (const auto& it : self->storageQueueInfo) {
 			auto& ss = it.value;
-			if (!ss.valid) continue;
+			if (!ss.valid || (self->remoteDC.present() && ss.locality.dcId() == self->remoteDC)) continue;
 
 			minSSVer = std::min(minSSVer, ss.lastReply.version);
 
@@ -738,6 +739,8 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	for( int i = 0; i < tlogInterfs.size(); i++ )
 		tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );
 
+	self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
+
 	try {
 		state bool lastLimited = false;
 		loop choose {
@@ -794,6 +797,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 					for( int i = 0; i < tlogInterfs.size(); i++ )
 						tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );
 				}
+				self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
 			}
 			when ( wait(collection) ) {
 				ASSERT(false);

@@ -1453,6 +1453,17 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 	}
 }
 
+ACTOR Future<Version> getRawVersion( Database cx ) {
+	loop {
+		choose {
+			when ( wait( cx->onMasterProxiesChanged() ) ) {}
+			when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE ), cx->taskID ) ) ) {
+				return v.version;
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> readVersionBatcher(
 	DatabaseContext* cx, FutureStream<std::pair<Promise<GetReadVersionReply>, Optional<UID>>> versionStream,
 	uint32_t flags);
@@ -2131,6 +2142,10 @@ ACTOR Future<Void> watch( Reference<Watch> watch, Database cx, Transaction *self
 
 	cx->removeWatch();
 	return Void();
+}
+
+Future<Version> Transaction::getRawReadVersion() {
+	return ::getRawVersion(cx);
 }
 
 Future< Void > Transaction::watch( Reference<Watch> watch ) {
