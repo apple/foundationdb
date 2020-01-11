@@ -77,10 +77,14 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 	if(!self->is_client) {
 		IPAddress peerIP = self->conn->getPeerAddress().ip;
 		auto iter(serverTLSConnectionThrottler.find(peerIP));
-		if(iter != serverTLSConnectionThrottler.end() && now() < iter->second) {
-			TraceEvent("TLSIncomingConnectionThrottlingWarning", self->getDebugID()).suppressFor(1.0).detail("PeerIP", peerIP.toString());
-			wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
-			throw connection_failed();
+		if(iter != serverTLSConnectionThrottler.end()) {
+			if (now() < iter->second) {
+				TraceEvent("TLSIncomingConnectionThrottlingWarning", self->getDebugID()).suppressFor(1.0).detail("PeerIP", peerIP.toString());
+				wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+				throw connection_failed();
+			} else {
+				serverTLSConnectionThrottler.erase(peerIP);
+			}
 		}
 	}
 
@@ -99,7 +103,6 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 		wait( r == ITLSSession::WANT_WRITE ? self->conn->onWritable() : self->conn->onReadable() );
 	}
 
-	serverTLSConnectionThrottler.erase(self->getPeerAddress().ip);
 	TraceEvent("TLSConnectionHandshakeSuccessful", self->getDebugID()).suppressFor(1.0).detail("Peer", self->getPeerAddress());
 
 	return Void();
