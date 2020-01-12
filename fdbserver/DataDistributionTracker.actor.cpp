@@ -57,11 +57,13 @@ BandwidthStatus getBandwidthStatus( StorageMetrics const& metrics ) {
 }
 
 ReadBandwidthStatus getReadBandwidthStatus(StorageMetrics const& metrics) {
-	if (metrics.bytesReadPerKSecond > SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO * metrics.bytes *
-	                                      SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS)
-		return ReadBandwidthStatusHigh;
-	else
+	if (metrics.bytesReadPerKSecond <= SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS ||
+	    metrics.bytesReadPerKSecond <= SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO * metrics.bytes *
+	                                       SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS) {
 		return ReadBandwidthStatusNormal;
+	} else {
+		return ReadBandwidthStatusHigh;
+	}
 }
 
 ACTOR Future<Void> updateMaxShardSize( Reference<AsyncVar<int64_t>> dbSizeEstimate, Reference<AsyncVar<Optional<int64_t>>> maxShardSize ) {
@@ -188,7 +190,8 @@ ACTOR Future<Void> trackShardBytes(
 			state ShardSizeBounds bounds;
 			if( shardMetrics->get().present() ) {
 				auto bytes = shardMetrics->get().get().metrics.bytes;
-				auto newReadBandwidthStatus = getReadBandwidthStatus(shardMetrics->get().get().metrics);
+				auto readBandwidthStatus = getReadBandwidthStatus(shardMetrics->get().get().metrics);
+
 				bounds.max.bytes = std::max( int64_t(bytes * 1.1), (int64_t)SERVER_KNOBS->MIN_SHARD_BYTES );
 				bounds.min.bytes = std::min( int64_t(bytes * 0.9), std::max(int64_t(bytes - (SERVER_KNOBS->MIN_SHARD_BYTES * 0.1)), (int64_t)0) );
 				bounds.permittedError.bytes = bytes * 0.1;
@@ -208,24 +211,24 @@ ACTOR Future<Void> trackShardBytes(
 					ASSERT( false );
 				}
 				// handle read bandkwith status
-				if (newReadBandwidthStatus != readBandwidthStatus) {
-					TraceEvent("ReadBandwidthStatusChanged")
-					    .detail("From", readBandwidthStatus == ReadBandwidthStatusNormal ? "Normal" : "High")
-					    .detail("To", newReadBandwidthStatus == ReadBandwidthStatusNormal ? "Normal" : "High");
-					readBandwidthStatus = newReadBandwidthStatus;
-				}
-				if (newReadBandwidthStatus == ReadBandwidthStatusNormal) {
-					bounds.max.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO * bytes *
-					                                 SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS *
-					                                 (1.0 + SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC_JITTER);
+				if (readBandwidthStatus == ReadBandwidthStatusNormal) {
+					bounds.max.bytesReadPerKSecond =
+					    std::max((int64_t)(SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO * bytes *
+					                       SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS *
+					                       (1.0 + SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC_JITTER)),
+					             SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS);
 					bounds.min.bytesReadPerKSecond = 0;
 					bounds.permittedError.bytesReadPerKSecond = bounds.min.bytesReadPerKSecond / 4;
-				} else if (newReadBandwidthStatus == ReadBandwidthStatusHigh) {
+				} else if (readBandwidthStatus == ReadBandwidthStatusHigh) {
 					bounds.max.bytesReadPerKSecond = bounds.max.infinity;
 					bounds.min.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO * bytes *
 					                                 SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS *
 					                                 (1.0 - SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC_JITTER);
 					bounds.permittedError.bytesReadPerKSecond = bounds.min.bytesReadPerKSecond / 4;
+					// TraceEvent("RHDTriggerReadHotLoggingForShard")
+					//     .detail("ShardBegin", keys.begin.printable().c_str())
+					//     .detail("ShardEnd", keys.end.printable().c_str());
+					self->readHotShard.send(keys);
 				} else {
 					ASSERT(false);
 				}
@@ -297,8 +300,21 @@ ACTOR Future<Void> trackShardBytes(
 ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 	try {
 		loop {
-			// Use the current known size to check for (and start) splits and merges.
-			KeyRange keys = waitNext(self->readHotShard.getFuture());
+			state KeyRange keys = waitNext(self->readHotShard.getFuture());
+			state Transaction tr(self->cx);
+			loop {
+				try {
+					Standalone<VectorRef<KeyRangeRef>> readHotRanges = wait(tr.getReadHotRanges(keys));
+					for (auto& keyRange : readHotRanges) {
+						TraceEvent("ReadHotRangeLog")
+						    .detail("KeyRangeBegin", keyRange.begin)
+						    .detail("KeyRangeEnd", keyRange.end);
+					}
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled)
@@ -815,6 +831,7 @@ ACTOR Future<Void> dataDistributionTracker(
 {
 	state DataDistributionTracker self(cx, distributorId, readyToStart, output, shardsAffectedByTeamFailure, anyZeroHealthyTeams);
 	state Future<Void> loggingTrigger = Void();
+	state Future<Void> readHotDetect = readHotDetector(&self);
 	try {
 		wait( trackInitialShards( &self, initData ) );
 		initData = Reference<InitialDataDistribution>();

@@ -245,6 +245,7 @@ public:
 	Future< std::pair<Optional<StorageMetrics>, int> > waitStorageMetrics( KeyRange const& keys, StorageMetrics const& min, StorageMetrics const& max, StorageMetrics const& permittedError, int shardLimit, int expectedShardCount );
 	Future< StorageMetrics > getStorageMetrics( KeyRange const& keys, int shardLimit );
 	Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( KeyRange const& keys, StorageMetrics const& limit, StorageMetrics const& estimated );
+	Future<Standalone<VectorRef<KeyRangeRef>>> getReadHotRanges(KeyRange const& keys);
 
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set( const KeyRef& key, const ValueRef& value, bool addConflictRange = true );

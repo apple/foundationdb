@@ -83,12 +83,12 @@ struct StorageServerInterface {
 		// versioned carefully!
 
 		if constexpr (!is_fb_function<Ar>) {
-			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
+			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics, splitMetrics,
+			           getReadHotRanges, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
 		} else {
-			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
+			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics, splitMetrics,
+			           getReadHotRanges, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
 			           watchValue);
 		}
 	}
@@ -390,11 +390,11 @@ struct SplitMetricsRequest {
 
 struct ReadHotSubRangeReply {
 	constexpr static FileIdentifier file_identifier = 10424537;
-	Standalone<VectorRef<KeyRangeRef>> readHotRange;
+	Standalone<VectorRef<KeyRangeRef>> readHotRanges;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, readHotRange);
+		serializer(ar, readHotRanges);
 	}
 };
 struct ReadHotSubRangeRequest {

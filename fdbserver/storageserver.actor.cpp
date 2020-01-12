@@ -3501,7 +3501,12 @@ ACTOR Future<Void> metricsCore( StorageServer* self, StorageServerInterface ssi 
 				self->metrics.getStorageMetrics( req, sb, self->counters.bytesInput.getRate() );
 			}
 			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
-				self->metrics.getReadHotRanges(req);
+				if (!self->isReadable(req.keys)) {
+					TEST(true); // readHotSubRanges immediate wrong_shard_server()
+					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
+				} else {
+					self->metrics.getReadHotRanges(req);
+				}
 			}
 			when (wait(doPollMetrics) ) {
 				self->metrics.poll();

@@ -413,12 +413,36 @@ struct StorageServerMetrics {
 	// Given a read hot shard, this function will divid the shard into chunks and find those chunks whose
 	// readBytes/sizeBytes exceeds the `readDensityRatio`. Please make sure to run unit tests
 	// `StorageMetricsSampleTests.txt` after change made.
-	std::vector<KeyRangeRef> getReadHotRanges(KeyRangeRef shard, double readDensityRatio, int64_t baseChunkSize) {
-		int64_t chunkSize = baseChunkSize;
+	std::vector<KeyRangeRef> getReadHotRanges(KeyRangeRef shard, double readDensityRatio, int64_t baseChunkSize,
+	                                          int64_t minShardReadBandwidthPerKSeconds) {
+		double chunkSize = (double)baseChunkSize;
 		std::vector<KeyRangeRef> toReturn;
-		if (byteSample.getEstimate(shard) <= chunkSize) {
+		double shardSize = (double)byteSample.getEstimate(shard);
+		int64_t shardReadBandwidth = bytesReadSample.getEstimate(shard);
+		if (shardReadBandwidth * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS <=
+		    minShardReadBandwidthPerKSeconds) {
+			// TraceEvent("RHDLogSmallShardReturned")
+			//     .detail("ShardStart", shard.begin.printable().c_str())
+			//     .detail("ShardEnd", shard.end.printable().c_str())
+			//     .detail("ShardSize", shardSize)
+			//     .detail("RawReadBandwidth", shardReadBandwidth)
+			//     .detail("ReadBandWith",
+			//             shardReadBandwidth * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS)
+			//     .detail("ReadBandwithThreshold", minShardReadBandwidthPerKSeconds);
+			return toReturn;
+		}
+		if (shardSize <= chunkSize) {
 			// Shard is small, use it as is
-			toReturn.push_back(shard);
+			if (bytesReadSample.getEstimate(shard) / shardSize > readDensityRatio) {
+				// TraceEvent("RHDLogSmallShardReturned")
+				//     .detail("ShardStart", shard.begin.printable().c_str())
+				//     .detail("ShardEnd", shard.end.printable().c_str())
+				//     .detail("ShardSize", shardSize)
+				//     .detail("ReadBandWith", bytesReadSample.getEstimate(shard))
+				//     .detail("Ratio", bytesReadSample.getEstimate(shard) / shardSize)
+				//     .detail("RatioThrethold", readDensityRatio);
+				toReturn.push_back(shard);
+			}
 			return toReturn;
 		}
 		KeyRef beginKey = shard.begin;
@@ -447,7 +471,19 @@ struct StorageServerMetrics {
 					                *endKey); // in case two consecutive chunks both are over the ratio, merge them.
 					toReturn.pop_back();
 					toReturn.push_back(updatedTail);
+					// TraceEvent("RHDLogRangeReturned")
+					//     .detail("ShardStart", range.begin.printable().c_str())
+					//     .detail("ShardEnd", range.end.printable().c_str())
+					//     .detail("ReadBandWith", bytesReadSample.getEstimate(range))
+					//     .detail("Ratio", bytesReadSample.getEstimate(range) / chunkSize)
+					//     .detail("RatioThrethold", readDensityRatio);
 				} else {
+					// TraceEvent("RHDLogRangeReturned")
+					//     .detail("ShardStart", range.begin.printable().c_str())
+					//     .detail("ShardEnd", range.end.printable().c_str())
+					//     .detail("ReadBandWith", bytesReadSample.getEstimate(range))
+					//     .detail("Ratio", bytesReadSample.getEstimate(range) / chunkSize)
+					//     .detail("RatioThrethold", readDensityRatio);
 					toReturn.push_back(range);
 				}
 			}
@@ -466,8 +502,9 @@ struct StorageServerMetrics {
 	void getReadHotRanges(ReadHotSubRangeRequest req) {
 		ReadHotSubRangeReply reply;
 		std::vector<KeyRangeRef> v = getReadHotRanges(req.keys, SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO,
-		                                              SERVER_KNOBS->READ_HOT_SUB_RANGE_CHUNK_SIZE);
-		reply.readHotRange = VectorRef<KeyRangeRef>(v.begin().base(), v.size());
+		                                              SERVER_KNOBS->READ_HOT_SUB_RANGE_CHUNK_SIZE,
+		                                              SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS);
+		reply.readHotRanges = VectorRef<KeyRangeRef>(v.begin().base(), v.size());
 		req.reply.send(reply);
 	}
 
@@ -512,7 +549,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/simple") {
 	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 300 * sampleUnit);
 
 	vector<KeyRangeRef> t =
-	    ssm.getReadHotRanges(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 2.0, 200 * sampleUnit);
+	    ssm.getReadHotRanges(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 2.0, 200 * sampleUnit, 0);
 
 	ASSERT(t.size() == 1 && (*t.begin()).begin == LiteralStringRef("Bah") &&
 	       (*t.begin()).end == LiteralStringRef("Bob"));
@@ -543,7 +580,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/moreThanOneRange") {
 	ssm.byteSample.sample.insert(LiteralStringRef("Dah"), 300 * sampleUnit);
 
 	vector<KeyRangeRef> t =
-	    ssm.getReadHotRanges(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("D")), 2.0, 200 * sampleUnit);
+	    ssm.getReadHotRanges(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("D")), 2.0, 200 * sampleUnit, 0);
 
 	ASSERT(t.size() == 2 && (*t.begin()).begin == LiteralStringRef("Bah") &&
 	       (*t.begin()).end == LiteralStringRef("Bob"));
@@ -576,7 +613,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/consecutiveRanges") {
 	ssm.byteSample.sample.insert(LiteralStringRef("Dah"), 300 * sampleUnit);
 
 	vector<KeyRangeRef> t =
-	    ssm.getReadHotRanges(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("D")), 2.0, 200 * sampleUnit);
+	    ssm.getReadHotRanges(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("D")), 2.0, 200 * sampleUnit, 0);
 
 	ASSERT(t.size() == 2 && (*t.begin()).begin == LiteralStringRef("Bah") &&
 	       (*t.begin()).end == LiteralStringRef("But"));
