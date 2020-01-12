@@ -32,6 +32,9 @@
 // Name of specialized TLS Plugin
 const char* tlsPluginName = "fdb-libressl-plugin";
 
+typedef double ExpiryTime;
+static std::map<IPAddress, ExpiryTime> serverTLSConnectionThrottler;
+
 // Must not throw an exception from this function!
 static int send_func(void* ctx, const uint8_t* buf, int len) {
 	TLSConnection* conn = (TLSConnection*)ctx;
@@ -71,11 +74,29 @@ static int recv_func(void* ctx, uint8_t* buf, int len) {
 }
 
 ACTOR static Future<Void> handshake( TLSConnection* self ) {
+	if(!self->is_client) {
+		IPAddress peerIP = self->conn->getPeerAddress().ip;
+		auto iter(serverTLSConnectionThrottler.find(peerIP));
+		if(iter != serverTLSConnectionThrottler.end()) {
+			if (now() < iter->second) {
+				TraceEvent("TLSIncomingConnectionThrottlingWarning", self->getDebugID()).suppressFor(1.0).detail("PeerIP", peerIP.toString());
+				wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+				throw connection_failed();
+			} else {
+				serverTLSConnectionThrottler.erase(peerIP);
+			}
+		}
+	}
+
 	loop {
 		int r = self->session->handshake();
+		if(BUGGIFY_WITH_PROB(0.001)) {
+			r = ITLSSession::FAILED;
+		}
 		if ( r == ITLSSession::SUCCESS ) break;
 		if ( r == ITLSSession::FAILED ) {
 			TraceEvent("TLSConnectionHandshakeError", self->getDebugID()).suppressFor(1.0).detail("Peer", self->getPeerAddress());
+			serverTLSConnectionThrottler[self->getPeerAddress().ip] = now() + FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT;
 			throw connection_failed();
 		}
 		ASSERT( r == ITLSSession::WANT_WRITE || r == ITLSSession::WANT_READ );
@@ -87,7 +108,7 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 	return Void();
 }
 
-TLSConnection::TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client, std::string host) : conn(conn), write_wants(0), read_wants(0), uid(conn->getDebugID()) {
+TLSConnection::TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client, std::string host) : conn(conn), write_wants(0), read_wants(0), uid(conn->getDebugID()), is_client(is_client) {
 	const char * serverName = host.empty() ? NULL : host.c_str();
 	session = Reference<ITLSSession>( policy->create_session(is_client, serverName, send_func, this, recv_func, this, (void*)&uid) );
 	if ( !session ) {
