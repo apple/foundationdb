@@ -44,6 +44,7 @@ struct ProcessClass {
 		CoordinatorClass,
 		RatekeeperClass,
 		StorageCacheClass,
+		StrictTransactionClass,
 		InvalidClass = -1
 	};
 
@@ -74,6 +75,7 @@ public:
 		else if (s=="coordinator") _class = CoordinatorClass;
 		else if (s=="ratekeeper") _class = RatekeeperClass;
 		else if (s=="storage_cache") _class = StorageCacheClass;
+		else if (s=="strict_transaction") _class = StrictTransactionClass;
 		else _class = InvalidClass;
 	}
 
@@ -94,6 +96,7 @@ public:
 		else if (classStr=="coordinator") _class = CoordinatorClass;
 		else if (classStr=="ratekeeper") _class = RatekeeperClass;
 		else if (classStr=="storage_cache") _class = StorageCacheClass;
+		else if (classStr=="strict_transaction") _class = StrictTransactionClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -129,6 +132,7 @@ public:
 			case CoordinatorClass: return "coordinator";
 			case RatekeeperClass: return "ratekeeper";
 			case StorageCacheClass: return "storage_cache";
+			case StrictTransactionClass: return "strict_transaction";
 			default: return "invalid";
 		}
 	}

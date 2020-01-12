@@ -43,12 +43,16 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
 			return ProcessClass::NeverAssign;
+		case ProcessClass::StrictTransactionClass:
+			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::NeverAssign;
 		}
 	case ProcessClass::TLog:
 		switch( _class ) {
 		case ProcessClass::LogClass:
+			return ProcessClass::BestFit;
+		case ProcessClass::StrictTransactionClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::TransactionClass:
 			return ProcessClass::GoodFit;
@@ -79,6 +83,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
 			return ProcessClass::NeverAssign;
+		case ProcessClass::StrictTransactionClass:
+			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
 		}
@@ -96,6 +102,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
 			return ProcessClass::NeverAssign;
+		case ProcessClass::StrictTransactionClass:
+			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
 		}
@@ -112,6 +120,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+			return ProcessClass::NeverAssign;
+		case ProcessClass::StrictTransactionClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -131,6 +141,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+			return ProcessClass::NeverAssign;
+		case ProcessClass::StrictTransactionClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -157,6 +169,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
 			return ProcessClass::NeverAssign;
+		case ProcessClass::StrictTransactionClass:
+			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
 		}
@@ -174,6 +188,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
 			return ProcessClass::NeverAssign;
+		case ProcessClass::StrictTransactionClass:
+			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
 		}
@@ -190,6 +206,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+			return ProcessClass::NeverAssign;
+		case ProcessClass::StrictTransactionClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
