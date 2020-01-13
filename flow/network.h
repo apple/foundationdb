@@ -299,25 +299,31 @@ template <class T> class Promise;
 
 struct NetworkMetrics {
 	enum { SLOW_EVENT_BINS = 16 };
-	uint64_t countSlowEvents[SLOW_EVENT_BINS];
+	uint64_t countSlowEvents[SLOW_EVENT_BINS] = {};
 
 	enum { PRIORITY_BINS = 9 };
-	TaskPriority priorityBins[ PRIORITY_BINS ];
-	bool priorityBlocked[PRIORITY_BINS];
-	double priorityBlockedDuration[PRIORITY_BINS];
-	double priorityMaxBlockedDuration[PRIORITY_BINS];
-	double priorityTimer[PRIORITY_BINS];
-	double windowedPriorityTimer[PRIORITY_BINS];
+	TaskPriority priorityBins[PRIORITY_BINS] = {};
+	bool priorityBlocked[PRIORITY_BINS] = {};
+	double priorityBlockedDuration[PRIORITY_BINS] = {};
+	double priorityMaxBlockedDuration[PRIORITY_BINS] = {};
+	double priorityTimer[PRIORITY_BINS] = {};
+	double windowedPriorityTimer[PRIORITY_BINS] = {};
 
-	double oldestAlternativesFailure;
-	double newestAlternativesFailure;
-	double lastAlternativesFailureSkipDelay;
-	double lastSync;
+	double secSquaredSubmit = 0;
+	double secSquaredDiskStall = 0;
 
-	double secSquaredSubmit;
-	double secSquaredDiskStall;
+	NetworkMetrics() {}
+};
 
-	NetworkMetrics() { memset(this, 0, sizeof(*this)); }
+struct NetworkInfo {
+	NetworkMetrics metrics;
+	double oldestAlternativesFailure = 0;
+	double newestAlternativesFailure = 0;
+	double lastAlternativesFailureSkipDelay = 0;
+
+	std::map<std::pair<IPAddress, uint16_t>, double> serverTLSConnectionThrottler;
+
+	NetworkInfo() {}
 };
 
 class IEventFD : public ReferenceCounted<IEventFD> {
@@ -468,7 +474,7 @@ public:
 		return (netAddressesFuncPtr) ? reinterpret_cast<NetworkAddressesFuncPtr>(netAddressesFuncPtr)() : NetworkAddressList();
 	}
 
-	NetworkMetrics networkMetrics;
+	NetworkInfo networkInfo;
 protected:
 	INetwork() {}
 
