@@ -93,7 +93,7 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 		if ( r == ITLSSession::SUCCESS ) break;
 		if ( r == ITLSSession::FAILED ) {
 			TraceEvent("TLSConnectionHandshakeError", self->getDebugID()).suppressFor(1.0).detail("Peer", self->getPeerAddress());
-			g_network->networkInfo.serverTLSConnectionThrottler[peerIP] = now() + FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT;
+			g_network->networkInfo.serverTLSConnectionThrottler[peerIP] = now() + (self->is_client ? FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT : FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT);
 			throw connection_failed();
 		}
 		ASSERT( r == ITLSSession::WANT_WRITE || r == ITLSSession::WANT_READ );
