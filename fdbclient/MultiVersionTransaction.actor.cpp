@@ -152,8 +152,6 @@ ThreadFuture<int64_t> DLTransaction::getStorageByteSample(const KeyRangeRef& key
 		int64_t sampledSize;
 		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &sampledSize);
 		ASSERT(!error);
-
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
 		return sampledSize;
 	});
 }
