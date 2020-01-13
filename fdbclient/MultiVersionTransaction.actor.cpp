@@ -145,6 +145,19 @@ ThreadFuture<Standalone<StringRef>> DLTransaction::getVersionstamp() {
 	});
 }
 
+ThreadFuture<int64_t> DLTransaction::getStorageByteSample(const KeyRangeRef& keys) {
+	FdbCApi::FDBFuture *f = api->transactionGetStorageByteSample(tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size());
+
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		int64_t sampledSize;
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &sampledSize);
+		ASSERT(!error);
+
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		return sampledSize;
+	});
+}
+
 void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 	throwIfError(api->transactionAddConflictRange(tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDBConflictRangeTypes::READ));
 }
@@ -545,6 +558,12 @@ void MultiVersionTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 	if(tr.transaction) {
 		tr.transaction->addReadConflictRange(keys);
 	}
+}
+
+ThreadFuture<int64_t> MultiVersionTransaction::getStorageByteSample(const KeyRangeRef& keys) {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->getStorageByteSample(keys) : ThreadFuture<int64_t>(Never());
+	return abortableFuture(f, tr.onChange);
 }
 
 void MultiVersionTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {
