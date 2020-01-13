@@ -187,6 +187,11 @@ TLSNetworkConnections::TLSNetworkConnections( Reference<TLSOptions> options ) : 
 	g_network->setGlobal(INetwork::enumGlobal::enNetworkConnections, (flowGlobalType) this);
 }
 
+ACTOR Future<Reference<IConnection>> waitAndFailConnection() {
+	wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+	throw connection_failed();
+}
+
 Future<Reference<IConnection>> TLSNetworkConnections::connect( NetworkAddress toAddr, std::string host) {
 	if ( toAddr.isTLS() ) {
 		NetworkAddress clearAddr( toAddr.ip, toAddr.port, toAddr.isPublic(), false );
@@ -195,8 +200,7 @@ Future<Reference<IConnection>> TLSNetworkConnections::connect( NetworkAddress to
 		if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
 			if (now() < iter->second) {
 				TraceEvent("TLSOutgoingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", toAddr);
-				wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
-				throw connection_failed();
+				return waitAndFailConnection();
 			} else {
 				g_network->networkInfo.serverTLSConnectionThrottler.erase(peerIP);
 			}
