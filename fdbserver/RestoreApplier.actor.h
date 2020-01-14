@@ -44,21 +44,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	// processedFileState: key: RestoreAsset; value: largest version of mutation received on the applier
 	std::map<RestoreAsset, NotifiedVersion> processedFileState;
 	Optional<Future<Void>> dbApplier;
-
-	// rangeToApplier is in master and loader. Loader uses it to determine which applier a mutation should be sent
-	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
-	std::map<Key, UID> rangeToApplier;
-	// keyOpsCount is the number of operations per key that is used to determine the key-range boundary for appliers
-	std::map<Key, int> keyOpsCount;
-
-	// For master applier to hold the lower bound of key ranges for each appliers
-	std::vector<Key> keyRangeLowerBounds;
-
-	// TODO: This block of variables may be moved to RestoreRoleData
-	bool inProgressApplyToDB = false;
-
-	// Mutations at each version
-	VersionedMutationsMap kvOps;
+	VersionedMutationsMap kvOps; // Mutations at each version
 
 	void addref() { return ReferenceCounted<RestoreApplierData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreApplierData>::delref(); }
@@ -83,7 +69,6 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 
 	void resetPerVersionBatch() {
 		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnApplier", nodeID);
-		inProgressApplyToDB = false;
 		kvOps.clear();
 		dbApplier = Optional<Future<Void>>();
 	}

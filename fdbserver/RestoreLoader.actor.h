@@ -52,8 +52,6 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	// Sampled mutations to be sent back to restore master
 	std::map<LoadingParam, MutationsVec> sampleMutations;
-	// keyOpsCount is the number of operations per key which is used to determine the key-range boundary for appliers
-	std::map<Standalone<KeyRef>, int> keyOpsCount;
 	int numSampledMutations; // The total number of mutations received from sampled data.
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
@@ -80,7 +78,6 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	void resetPerVersionBatch() {
 		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnLoader", nodeID);
 		rangeToApplier.clear();
-		keyOpsCount.clear();
 		numSampledMutations = 0;
 		processedFileParams.clear();
 		kvOpsPerLP.clear();
