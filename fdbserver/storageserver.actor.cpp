@@ -885,7 +885,10 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
-		GetValueReply reply(v);
+		// Check if the desired key might be cached
+		auto cached = data->cachedRangeMap[req.key];
+
+		GetValueReply reply(v, cached);
 		reply.penalty = data->getPenalty();
 		req.reply.send(reply);
 	} catch (Error& e) {
@@ -1086,8 +1089,8 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	//state bool track = rrid.first() == 0x1bc134c2f752187cLL;
 
 	// Check if the desired key-range intersects the cached key-ranges
-	// TODO Find a more efficient way to do it
-	// TODO Also need this check in single key/value lookup
+	// TODO This will return true for cached even if only sub-ranges of desired ranges might be cached.
+	// Revisit to see if we only want to set it when the entire range is cached
 	auto cached = data->cachedRangeMap.intersectingRanges(range);
 	result.cached = (cached.begin() != cached.end());
 
@@ -1527,8 +1530,12 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 		data->counters.bytesQueried += resultSize;
 		++data->counters.rowsQueried;
 
-		GetKeyReply reply(updated);
+		// Check if the desired key might be cached
+		auto cached = data->cachedRangeMap[k];
+
+		GetKeyReply reply(updated, cached);
 		reply.penalty = data->getPenalty();
+
 		req.reply.send(reply);
 	}
 	catch (Error& e) {

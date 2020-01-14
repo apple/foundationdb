@@ -48,6 +48,7 @@ inline bool canReplyWith(Error e) {
 		case error_code_transaction_too_old:
 		case error_code_future_version:
 		case error_code_wrong_shard_server:
+		case error_code_cold_cache_server:
 		case error_code_process_behind:
 		//case error_code_all_alternatives_failed:
 			return true;
@@ -106,6 +107,7 @@ struct CacheRangeInfo : ReferenceCounted<CacheRangeInfo>, NonCopyable {
 	static CacheRangeInfo* newAdding(StorageCacheData* data, StorageCacheUpdater* updater, KeyRange keys) { return new CacheRangeInfo(keys, new AddingCacheRange(data, updater, keys), NULL); }
 
 	bool isReadable() const { return readWrite!=NULL; }
+	bool isAdding() const { return adding!=NULL; }
 	bool notAssigned() const { return !readWrite && !adding; }
 	bool assigned() const { return readWrite || adding; }
 	bool isInVersionedData() const { return readWrite || (adding && adding->isTransferred()); }
@@ -272,6 +274,7 @@ public:
 			cachedRangeMap[key]->changeCounter > oldCacheRangeChangeCounter)
 		{
 			TEST(true); // CacheRange change during getValueQ
+			// TODO: should we throw the cold_cache_server() error here instead?
 			throw wrong_shard_server();
 		}
 	}
@@ -282,6 +285,7 @@ public:
 			for(auto i = sh.begin(); i != sh.end(); ++i)
 				if (i->value()->changeCounter > oldCacheRangeChangeCounter) {
 					TEST(true); // CacheRange change during range operation
+					// TODO: should we throw the cold_cache_server() error here instead?
 					throw wrong_shard_server();
 				}
 		}
@@ -471,9 +475,12 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 
 		state uint64_t changeCounter = data->cacheRangeChangeCounter;
 
-		if (!data->cachedRangeMap[req.key]->isReadable()) {
+		if (data->cachedRangeMap[req.key]->notAssigned()) {
 			//TraceEvent("WrongCacheServer", data->thisServerID).detail("Key", req.key).detail("Version", version).detail("In", "getValueQ");
 			throw wrong_shard_server();
+		} else if (!data->cachedRangeMap[req.key]->isReadable()) {
+			//TraceEvent("ColdCacheServer", data->thisServerID).detail("Key", req.key).detail("Version", version).detail("In", "getValueQ");
+			throw cold_cache_server();
 		}
 
 		state int path = 0;
@@ -498,7 +505,7 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
-		GetValueReply reply(v);
+		GetValueReply reply(v, true);
 		req.reply.send(reply);
 	} catch (Error& e) {
 		if(!canReplyWith(e))
@@ -554,6 +561,7 @@ GetKeyValuesReply readRange(StorageCacheData* data, Version version, KeyRangeRef
 	ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
 	result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
 	result.version = version;
+	result.cached = true;
 	return result;
 }
 
@@ -630,7 +638,11 @@ KeyRange getCachedKeyRange( StorageCacheData* data, const KeySelectorRef& sel )
 {
 	auto i = sel.isBackward() ? data->cachedRangeMap.rangeContainingKeyBefore( sel.getKey() ) :
 		data->cachedRangeMap.rangeContaining( sel.getKey() );
-	if (!i->value()->isReadable()) throw wrong_shard_server();
+	if (i->value()->notAssigned())
+		throw wrong_shard_server();
+	else if (!i->value()->isReadable())
+		throw cold_cache_server();
+
 	ASSERT( selectorInRange(sel, i->range()) );
 	return i->range();
 }
@@ -776,11 +788,12 @@ ACTOR Future<Void> getKey( StorageCacheData* data, GetKeyRequest req ) {
 		data->counters.bytesQueried += resultSize;
 		++data->counters.rowsQueried;
 
-		GetKeyReply reply(updated);
+		GetKeyReply reply(updated, true);
 		req.reply.send(reply);
 	}
 	catch (Error& e) {
 		if (e.code() == error_code_wrong_shard_server) TraceEvent("WrongCacheRangeServer").detail("In","getKey");
+		if (e.code() == error_code_cold_cache_server) TraceEvent("ColdCacheRangeServer").detail("In","getKey");
 		if(!canReplyWith(e))
 			throw;
 		req.reply.sendError(e);
@@ -812,11 +825,10 @@ bool expandMutation( MutationRef& m, StorageCacheData::VersionedData const& data
 			// Expand to the next set or clear (from storage or latestVersion), and if it
 			// is a clear, engulf it as well
 			i = d.lower_bound(m.param2);
-			//KeyRef endKeyAtStorageVersion = m.param2 == eagerTrustedEnd ? eagerTrustedEnd : std::min( eager->getKeyEnd( m.param2 ), eagerTrustedEnd );
 			// TODO check if the following is correct
-			KeyRef endKeyAtStorageVersion = eagerTrustedEnd;
+			KeyRef endKey = eagerTrustedEnd;
 			if (!i || endKeyAtStorageVersion < i.key())
-				m.param2 = endKeyAtStorageVersion;
+				m.param2 = endKey;
 			else if (i->isClearTo())
 				m.param2 = i->getEndKey();
 			else
@@ -1112,7 +1124,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, StorageCacheUpdater* updat
 	state KeyRange keys = cacheRange->keys;
 	//state Future<Void> warningLogger = logFetchKeysWarning(cacheRange);
 	state double startt = now();
-	// TODO should we change this?
+	// TODO  we should probably change this for cache server
 	state int fetchBlockBytes = BUGGIFY ? SERVER_KNOBS->BUGGIFY_BLOCK_BYTES : SERVER_KNOBS->FETCH_BLOCK_BYTES;
 
 	// delay(0) to force a return to the run loop before the work of fetchKeys is started.
@@ -1316,7 +1328,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, StorageCacheUpdater* updat
 
 		cacheRange->updates.clear();
 
-		// TODO: NEELAM: what exactly doesn it do? Writing some mutations to log. Do we need it for caches?
+		// TODO: NEELAM: what exactly does it do? Writing some mutations to log. Do we need it for caches?
 		//setAvailableStatus(data, keys, true); // keys will be available when getLatestVersion()==transferredVersion is durable
 
 		// Wait for the transferredVersion (and therefore the cacheRange data) to be committed and compacted.

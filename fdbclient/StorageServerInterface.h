@@ -128,13 +128,14 @@ struct ServerCacheInfo {
 struct GetValueReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1378929;
 	Optional<Value> value;
+	bool cached;
 
-	GetValueReply() {}
-	GetValueReply(Optional<Value> value) : value(value) {}
+	GetValueReply() : cached(false) {}
+	GetValueReply(Optional<Value> value, bool cached) : value(value), cached(cached) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, value);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, value, cached);
 	}
 };
 
@@ -196,7 +197,7 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, arena);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, arena, cached);
 	}
 };
 
@@ -221,13 +222,14 @@ struct GetKeyValuesRequest : TimedRequest {
 struct GetKeyReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 11226513;
 	KeySelector sel;
+	bool cached;
 
-	GetKeyReply() {}
-	GetKeyReply(KeySelector sel) : sel(sel) {}
+	GetKeyReply() : cached(false) {}
+	GetKeyReply(KeySelector sel, bool cached) : sel(sel), cached(cached) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, sel);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, sel, cached);
 	}
 };
 
