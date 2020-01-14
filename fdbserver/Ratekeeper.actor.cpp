@@ -657,6 +657,9 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		reasonID = UID();
 		TraceEvent(SevWarnAlways, "RkSSListFetchTimeout").suppressFor(1.0);
 	}
+	else if(limits->tpsLimit == std::numeric_limits<double>::infinity()) {
+		limits->tpsLimit = SERVER_KNOBS->RATEKEEPER_DEFAULT_LIMIT;
+	}
 
 	limits->tpsLimitMetric = std::min(limits->tpsLimit, 1e6);
 	limits->reasonMetric = limitReason;
