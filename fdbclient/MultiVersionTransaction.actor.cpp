@@ -321,7 +321,7 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionReset, lib, fdbCPath, "fdb_transaction_reset");
 	loadClientFunction(&api->transactionCancel, lib, fdbCPath, "fdb_transaction_cancel");
 	loadClientFunction(&api->transactionAddConflictRange, lib, fdbCPath, "fdb_transaction_add_conflict_range");
-	loadClientFunction(&api->transactionGetStorageByteSample, lib, fdbCPath, "fdb_transaction_get_storage_byte_sample");
+	loadClientFunction(&api->transactionGetStorageByteSample, lib, fdbCPath, "fdb_transaction_get_storage_byte_sample", headerVersion >= 700);
 
 	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
