@@ -37,7 +37,7 @@
 #include "flow/Knobs.h"
 #include "flow/UnitTest.h"
 #include <stdio.h>
-#include "flow/Hash3.h"
+#include "flow/crc32c.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -733,7 +733,7 @@ void AsyncFileKAIO::KAIOLogBlockEvent(FILE *logFile, IOBlock *ioblock, OpLogEntr
 
 		// Log a checksum for Writes up to the Complete stage or Reads starting from the Complete stage
 		if( (op == OpLogEntry::WRITE && stage <= OpLogEntry::COMPLETE) || (op == OpLogEntry::READ && stage >= OpLogEntry::COMPLETE) )
-			e.checksum = hashlittle(ioblock->buf, ioblock->nbytes, 0xab12fd93);
+			e.checksum = crc32c_append(0xab12fd93, ioblock->buf, ioblock->nbytes);
 		else
 			e.checksum = 0;
 
