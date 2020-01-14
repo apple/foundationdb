@@ -1035,32 +1035,19 @@ ACTOR Future<Void> commitBatch(
 			// If enable the option to report conflicting keys from resolvers, we union all conflicting key ranges here and send back through CommitID
 			if (trs[t].transaction.report_conflicting_keys) {
 				Standalone<VectorRef<KeyRangeRef>> conflictingEntries;
-				std::vector<KeyRange> unmergedConflictingKRs;
+				int conflictingKeyRangeNum = 0;
+				for (int resolverInd : transactionResolverMap[t]) {
+					conflictingKeyRangeNum += resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]].size();
+				}
+				conflictingEntries.reserve(conflictingEntries.arena(), conflictingKeyRangeNum);
 				for (int resolverInd : transactionResolverMap[t]) {
 					for (const KeyRangeRef & kr : resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]]){
-						unmergedConflictingKRs.emplace_back(kr);
+						conflictingEntries.push_back(conflictingEntries.arena(), kr);
 					}
 				}
 				// At least one keyRange should be returned
-				ASSERT(unmergedConflictingKRs.size());
-				// Sort the keyranges by begin key, then union overlapping ranges from left to right
-				std::sort(unmergedConflictingKRs.begin(), unmergedConflictingKRs.end(), [](KeyRange a, KeyRange b){
-					return a.begin < b.begin;
-				});
-				auto next = unmergedConflictingKRs.begin();
-				// At least one conflicting keyrange should be returned, which means curr is valid
-				KeyRangeRef curr = *(next++);
-				while (next != unmergedConflictingKRs.end()) {
-					if (curr.end >= next->begin) {
-						curr = KeyRangeRef(curr.begin, std::max(curr.end, next->end));
-					} else {
-						conflictingEntries.push_back_deep(conflictingEntries.arena(), curr);
-						curr = *next;
-					}
-					next++;
-				}
-				conflictingEntries.push_back_deep(conflictingEntries.arena(), curr);
-				trs[t].reply.send(CommitID(invalidVersion, t, Optional<Value>(), Optional<Standalone<VectorRef<KeyRangeRef>>>(conflictingEntries)));
+				ASSERT(conflictingEntries.size());
+				trs[t].reply.send(CommitID(invalidVersion, t, Optional<Value>(), Optional<Standalone<VectorRef<KeyRangeRef>>>(conflictingEntries.contents())));
 			} else {
 				trs[t].reply.sendError(not_committed());
 			}

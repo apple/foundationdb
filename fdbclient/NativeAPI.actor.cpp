@@ -2677,6 +2677,29 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					// clear the RYW transaction which contains previous conflicting keys
 					tr->info.conflictingKeysRYW.reset();
 					if (ci.conflictingKeyRanges.present()){
+						// Since the performance of the proxy is important, we push the union of overlapped key range to client
+						// Union all overlapped key ranges here
+						std::vector<KeyRangeRef> unmergedConflictingKRs(ci.conflictingKeyRanges.get().begin(), ci.conflictingKeyRanges.get().end());
+						Standalone<VectorRef<KeyRangeRef>> mergedKeyRanges;
+						// At least one keyRange returned
+						ASSERT(unmergedConflictingKRs.size());
+						// Sort the keyranges by begin key, then union overlapping ranges from left to right
+						std::sort(unmergedConflictingKRs.begin(), unmergedConflictingKRs.end(), [](KeyRangeRef a, KeyRangeRef b){
+								return a.begin < b.begin;
+						});
+						auto next = unmergedConflictingKRs.begin();
+						// At least one conflicting keyrange should be returned, which means curr is valid
+						KeyRangeRef curr = *(next++);
+						while (next != unmergedConflictingKRs.end()) {
+								if (curr.end >= next->begin) {
+										curr = KeyRangeRef(curr.begin, std::max(curr.end, next->end));
+								} else {
+										mergedKeyRanges.push_back(mergedKeyRanges.arena(), curr);
+										curr = *next;
+								}
+								next++;
+						}
+						mergedKeyRanges.push_back(mergedKeyRanges.arena(), curr);
 						// In general, if we want to use getRange to expose conflicting keys, we need to support all the parameters getRange provides.
 						// It is difficult to take care of all corner cases of what getRange does.
 						// Consequently, we use a hack way here to achieve it.
@@ -2691,7 +2714,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 						// in case system keys are conflicting
 						tr->info.conflictingKeysRYW->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->info.conflictingKeysRYW->clear(systemKeys);
-						for (auto const & kr : ci.conflictingKeyRanges.get()) {
+						for (const KeyRangeRef & kr : mergedKeyRanges) {
 							tr->info.conflictingKeysRYW->set(kr.begin, conflictingKeysTrue);
 							tr->info.conflictingKeysRYW->set(kr.end, conflictingKeysFalse);
 						}
