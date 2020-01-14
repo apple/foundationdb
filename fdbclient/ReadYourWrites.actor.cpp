@@ -1279,16 +1279,17 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		}
 	}
 	
-	// Use special key prefix "\xff\xff/conflicting_keys/<some_key>",
+	// Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
 	// to retrieve keys which caused latest not_committed(conflicting with another transaction) error.
 	// The returned key value pairs are interpretted as :
 	// <key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// <key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	// Due to the implementation of resolver, currently, 
 	// we can only give key ranges that contain at least one key is conflicting.
-	KeyRef conflictingKeysPreifx = LiteralStringRef("\xff\xff/conflicting_keys/");
+	KeyRef conflictingKeysPreifx = LiteralStringRef("\xff\xff/transaction/conflicting_keys/");
+	// TODO : This condition need to be changed in the future when we have more special keys under "\xff\xff/transaction/"
 	if (begin.getKey().startsWith(conflictingKeysPreifx) && end.getKey().startsWith(conflictingKeysPreifx)) {
-		// Remove the special key prefix "\xff\xff/conflicting_keys/"
+		// Remove the special key prefix "\xff\xff/transaction/conflicting_keys/"
 		KeyRef beginConflictingKey = begin.getKey().removePrefix(conflictingKeysPreifx);
 		KeyRef endConflictingKey = end.getKey().removePrefix(conflictingKeysPreifx);
 

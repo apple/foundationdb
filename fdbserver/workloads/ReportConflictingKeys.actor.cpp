@@ -180,8 +180,9 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 				wait(tr.onError(e));
 				// check API correctness
 				if (!self->skipCorrectnessCheck && self->reportConflictingKeys && isConflict) {
-					state KeyRange ckr = KeyRangeRef(LiteralStringRef("\xff\xff/conflicting_keys/"), LiteralStringRef("\xff\xff/conflicting_keys/\xff"));
-					// The getRange here using the special key prefix "\xff\xff/conflicting_keys/" happens locally, so error handling is not needed here
+					state KeyRange ckr = KeyRangeRef(LiteralStringRef("\xff\xff/transaction/conflicting_keys/"), LiteralStringRef("\xff\xff/transaction/conflicting_keys/\xff"));
+					// The getRange here using the special key prefix "\xff\xff/transaction/conflicting_keys/" happens locally
+					// Thus, the error handling is not needed here
 					Future<Standalone<RangeResultRef>> conflictingKeyRangesFuture = tr.getRange(ckr, readConflictRanges.size() * 2);
 					ASSERT(conflictingKeyRangesFuture.isReady());
 					const Standalone<RangeResultRef> conflictingKeyRanges = conflictingKeyRangesFuture.get();
