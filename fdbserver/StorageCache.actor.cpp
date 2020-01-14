@@ -480,7 +480,7 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 			throw wrong_shard_server();
 		} else if (!data->cachedRangeMap[req.key]->isReadable()) {
 			//TraceEvent("ColdCacheServer", data->thisServerID).detail("Key", req.key).detail("Version", version).detail("In", "getValueQ");
-			throw cold_cache_server();
+			throw future_version();
 		}
 
 		state int path = 0;
@@ -641,7 +641,7 @@ KeyRange getCachedKeyRange( StorageCacheData* data, const KeySelectorRef& sel )
 	if (i->value()->notAssigned())
 		throw wrong_shard_server();
 	else if (!i->value()->isReadable())
-		throw cold_cache_server();
+		throw future_version();
 
 	ASSERT( selectorInRange(sel, i->range()) );
 	return i->range();
@@ -793,7 +793,7 @@ ACTOR Future<Void> getKey( StorageCacheData* data, GetKeyRequest req ) {
 	}
 	catch (Error& e) {
 		if (e.code() == error_code_wrong_shard_server) TraceEvent("WrongCacheRangeServer").detail("In","getKey");
-		if (e.code() == error_code_cold_cache_server) TraceEvent("ColdCacheRangeServer").detail("In","getKey");
+		if (e.code() == error_code_future_version) TraceEvent("ColdCacheRangeServer").detail("In","getKey");
 		if(!canReplyWith(e))
 			throw;
 		req.reply.sendError(e);
@@ -827,7 +827,7 @@ bool expandMutation( MutationRef& m, StorageCacheData::VersionedData const& data
 			i = d.lower_bound(m.param2);
 			// TODO check if the following is correct
 			KeyRef endKey = eagerTrustedEnd;
-			if (!i || endKeyAtStorageVersion < i.key())
+			if (!i || endKey < i.key())
 				m.param2 = endKey;
 			else if (i->isClearTo())
 				m.param2 = i->getEndKey();
