@@ -127,7 +127,7 @@ public:
 
 	UID id() const { return nodeID; }
 
-	virtual void resetPerVersionBatch() = 0;
+	virtual void resetPerVersionBatch(int batchIndex) = 0;
 
 	void clearInterfaces() {
 		loadersInterf.clear();

@@ -43,8 +43,8 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequest req,
                                               Reference<RestoreLoaderData> self);
-ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, VersionedMutationsMap* kvOps,
-                                          bool isRangeFile, RestoreAsset asset);
+ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, VersionedMutationsMap* pkvOps,
+                                          bool isRangeFile, RestoreAsset asset, int batchIndex);
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
                                                            SerializedMutationListMap* mutationMap,
                                                            SerializedMutationPartMap* mutationPartMap,
@@ -197,7 +197,10 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	for (; item != self->kvOpsPerLP.end(); item++) {
 		if (item->first.isRangeFile == req.useRangeFile) {
 			// Send the parsed mutation to applier who will apply the mutation to DB
-			wait(sendMutationsToApplier(self, &item->second, item->first.isRangeFile, item->first.asset));
+			// TODO: Change to parallel sending
+			// TODO: item should based on batchIndex
+			wait(sendMutationsToApplier(self, &item->second, item->first.isRangeFile, item->first.asset,
+			                            req.batchIndex));
 		}
 	}
 
@@ -208,7 +211,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 // TODO: This function can be revised better
 // Assume: kvOps data are from the same file.
 ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, VersionedMutationsMap* pkvOps,
-                                          bool isRangeFile, RestoreAsset asset) {
+                                          bool isRangeFile, RestoreAsset asset, int batchIndex) {
 	state VersionedMutationsMap& kvOps = *pkvOps;
 	state VersionedMutationsMap::iterator kvOp = kvOps.begin();
 	state int kvCount = 0;
@@ -289,8 +292,8 @@ ACTOR Future<Void> sendMutationsToApplier(Reference<RestoreLoaderData> self, Ver
 		// Send the mutations to appliers for each version
 		for (auto& applierID : applierIDs) {
 			requests.push_back(std::make_pair(
-			    applierID, RestoreSendVersionedMutationsRequest(asset, prevVersion, commitVersion, isRangeFile,
-			                                                    applierMutationsBuffer[applierID])));
+			    applierID, RestoreSendVersionedMutationsRequest(batchIndex, asset, prevVersion, commitVersion,
+			                                                    isRangeFile, applierMutationsBuffer[applierID])));
 		}
 		TraceEvent(SevDebug, "FastRestore_SendMutationToApplier")
 		    .detail("Loader", self->id())

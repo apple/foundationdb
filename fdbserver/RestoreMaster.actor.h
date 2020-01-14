@@ -71,7 +71,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	std::map<Key, UID> rangeToApplier;
 	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
 
-	int batchIndex;
+	int batchIndex; // The largest index of in-progress version batchs
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
@@ -90,7 +90,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	~RestoreMasterData() = default;
 
-	void resetPerVersionBatch() {
+	void resetPerVersionBatch(int batchIndex) {
 		TraceEvent("FastRestore")
 		    .detail("RestoreMaster", "ResetPerVersionBatch")
 		    .detail("VersionBatchIndex", batchIndex);

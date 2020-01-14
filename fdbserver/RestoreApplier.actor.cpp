@@ -94,12 +94,14 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 // Only one actor can process mutations from the same file
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self) {
-	// Assume: self->processedFileState[req.asset] will not be erased while the actor is active.
+	state Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
+	// Assume: processedFileState[req.asset] will not be erased while the actor is active.
 	// Note: Insert new items into processedFileState will not invalidate the reference.
-	state NotifiedVersion& curFilePos = self->processedFileState[req.asset];
+	state NotifiedVersion& curFilePos = batchData->processedFileState[req.asset];
 
 	TraceEvent("FastRestore")
 	    .detail("ApplierNode", self->id())
+	    .detail("VersionBatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
 	    .detail("ProcessedFileVersion", curFilePos.get())
 	    .detail("Request", req.toString());
@@ -116,8 +118,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 		ASSERT_WE_THINK((req.isRangeFile && commitVersion <= req.asset.endVersion) ||
 		                (!req.isRangeFile && commitVersion <= req.asset.endVersion));
 
-		if (self->kvOps.find(commitVersion) == self->kvOps.end()) {
-			self->kvOps.insert(std::make_pair(commitVersion, MutationsVec()));
+		if (batchData->kvOps.find(commitVersion) == batchData->kvOps.end()) {
+			batchData->kvOps.insert(std::make_pair(commitVersion, MutationsVec()));
 		}
 		for (int mIndex = 0; mIndex < mutations.size(); mIndex++) {
 			MutationRef mutation = mutations[mIndex];
@@ -136,7 +138,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 					ASSERT(mutation.param1 >= req.asset.range.begin && mutation.param1 < req.asset.range.end);
 				}
 			}
-			self->kvOps[commitVersion].push_back_deep(self->kvOps[commitVersion].arena(), mutation);
+			batchData->kvOps[commitVersion].push_back_deep(batchData->kvOps[commitVersion].arena(), mutation);
 			// TODO: What if log file's mutations are delivered out-of-order (behind) the range file's mutations?!
 		}
 		curFilePos.set(req.version);
@@ -172,26 +174,27 @@ struct DBApplyProgress {
 	int numAtomicOps;
 	double transactionSize;
 
-	Reference<RestoreApplierData> self;
+	Reference<ApplierBatchData> batchData;
+	UID applierId;
 
 	DBApplyProgress() = default;
-	explicit DBApplyProgress(Reference<RestoreApplierData> self)
-	  : self(self), curIndexInCurTxn(0), startIndexInUncommittedTxn(0), curTxnId(0), uncommittedTxnId(0),
-	    lastTxnHasError(false), startNextVersion(false), numAtomicOps(0), transactionSize(0) {
-		curItInCurTxn = self->kvOps.begin();
-		while (curItInCurTxn != self->kvOps.end() && curItInCurTxn->second.empty()) {
+	explicit DBApplyProgress(UID applierId, Reference<ApplierBatchData> batchData)
+	  : applierId(applierId), batchData(batchData), curIndexInCurTxn(0), startIndexInUncommittedTxn(0), curTxnId(0),
+	    uncommittedTxnId(0), lastTxnHasError(false), startNextVersion(false), numAtomicOps(0), transactionSize(0) {
+		curItInCurTxn = batchData->kvOps.begin();
+		while (curItInCurTxn != batchData->kvOps.end() && curItInCurTxn->second.empty()) {
 			curItInCurTxn++;
 		}
 		startItInUncommittedTxn = curItInCurTxn;
 	}
 
 	// Has all mutations been committed?
-	bool isDone() { return curItInCurTxn == self->kvOps.end(); }
+	bool isDone() { return curItInCurTxn == batchData->kvOps.end(); }
 
 	// Set cursor for next mutation
 	void nextMutation() {
 		curIndexInCurTxn++;
-		while (curItInCurTxn != self->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
+		while (curItInCurTxn != batchData->kvOps.end() && curIndexInCurTxn >= curItInCurTxn->second.size()) {
 			curIndexInCurTxn = 0;
 			curItInCurTxn++;
 			startNextVersion = true;
@@ -217,7 +220,7 @@ struct DBApplyProgress {
 	void rollback() {
 		TraceEvent(SevWarn, "FastRestore_ApplyTxnError")
 		    .detail("TxnStatusFailed", curTxnId)
-		    .detail("ApplierApplyToDB", self->id())
+		    .detail("ApplierApplyToDB", applierId)
 		    .detail("UncommittedTxnId", uncommittedTxnId)
 		    .detail("CurIteratorVersion", curItInCurTxn->first)
 		    .detail("StartIteratorVersionInUncommittedTxn", startItInUncommittedTxn->first)
@@ -236,7 +239,7 @@ struct DBApplyProgress {
 
 	bool shouldCommit() {
 		return (!lastTxnHasError && (startNextVersion || transactionSize >= opConfig.transactionBatchSizeThreshold ||
-		                             curItInCurTxn == self->kvOps.end()));
+		                             curItInCurTxn == batchData->kvOps.end()));
 	}
 
 	bool hasError() { return lastTxnHasError; }
@@ -244,7 +247,7 @@ struct DBApplyProgress {
 	void setTxnError(Error& e) {
 		TraceEvent(SevWarnAlways, "FastRestore_ApplyTxnError")
 		    .detail("TxnStatus", "?")
-		    .detail("ApplierApplyToDB", self->id())
+		    .detail("ApplierApplyToDB", applierId)
 		    .detail("TxnId", curTxnId)
 		    .detail("StartIndexInCurrentTxn", curIndexInCurTxn)
 		    .detail("Version", curItInCurTxn->first)
@@ -258,30 +261,30 @@ struct DBApplyProgress {
 	}
 };
 
-ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
+ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<ApplierBatchData> batchData, Database cx) {
 	// state variables must be defined at the start of actor to be initialized in the actor constructor
 	state std::string typeStr = "";
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state DBApplyProgress progress(self);
+	state DBApplyProgress progress(applierID, batchData);
 
 	// Assume the process will not crash when it apply mutations to DB. The reply message can be lost though
-	if (self->kvOps.empty()) {
+	if (batchData->kvOps.empty()) {
 		TraceEvent("FastRestore_ApplierTxn")
-		    .detail("ApplierApplyToDBFinished", self->id())
+		    .detail("ApplierApplyToDBFinished", applierID)
 		    .detail("Reason", "EmptyVersionMutation");
 		return Void();
 	}
-	ASSERT_WE_THINK(self->kvOps.size());
+	ASSERT_WE_THINK(batchData->kvOps.size());
 	TraceEvent("FastRestore")
-	    .detail("ApplierApplyToDB", self->id())
-	    .detail("FromVersion", self->kvOps.begin()->first)
-	    .detail("EndVersion", self->kvOps.rbegin()->first);
+	    .detail("ApplierApplyToDB", applierID)
+	    .detail("FromVersion", batchData->kvOps.begin()->first)
+	    .detail("EndVersion", batchData->kvOps.rbegin()->first);
 
-	self->sanityCheckMutationOps();
+	batchData->sanityCheckMutationOps();
 
 	if (progress.isDone()) {
 		TraceEvent("FastRestore_ApplierTxn")
-		    .detail("ApplierApplyToDBFinished", self->id())
+		    .detail("ApplierApplyToDBFinished", applierID)
 		    .detail("Reason", "NoMutationAtVersions");
 		return Void();
 	}
@@ -292,16 +295,20 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			Key begin = restoreApplierKeyFor(self->id(), 0);
-			Key end = restoreApplierKeyFor(self->id(), std::numeric_limits<int64_t>::max());
+			Key begin = restoreApplierKeyFor(applierID, batchIndex, 0);
+			Key end = restoreApplierKeyFor(applierID, batchIndex, std::numeric_limits<int64_t>::max());
 			Standalone<RangeResultRef> txnIds = wait(tr->getRange(KeyRangeRef(begin, end), CLIENT_KNOBS->TOO_MANY));
 			if (txnIds.size() > 0) {
 				TraceEvent(SevError, "FastRestore_ApplyTxnStateNotClean").detail("TxnIds", txnIds.size());
 				for (auto& kv : txnIds) {
-					std::pair<UID, Version> applierInfo = decodeRestoreApplierKey(kv.key);
+					UID id;
+					int64_t index;
+					Version txnId;
+					std::tie(id, index, txnId) = decodeRestoreApplierKey(kv.key);
 					TraceEvent(SevError, "FastRestore_ApplyTxnStateNotClean")
-					    .detail("Applier", applierInfo.first)
-					    .detail("ResidueTxnID", applierInfo.second);
+					    .detail("Applier", id)
+					    .detail("BatchIndex", index)
+					    .detail("ResidueTxnID", txnId);
 				}
 			}
 			break;
@@ -317,14 +324,15 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 				tr->reset();
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> txnSucceeded = wait(tr->get(restoreApplierKeyFor(self->id(), progress.curTxnId)));
+				Optional<Value> txnSucceeded =
+				    wait(tr->get(restoreApplierKeyFor(applierID, batchIndex, progress.curTxnId)));
 				if (!txnSucceeded.present()) {
 					progress.rollback();
 					continue;
 				} else {
 					TraceEvent(SevWarn, "FastRestore_ApplyTxnError")
 					    .detail("TxnStatusSucceeded", progress.curTxnId)
-					    .detail("ApplierApplyToDB", self->id())
+					    .detail("ApplierApplyToDB", applierID)
 					    .detail("CurIteratorVersion", progress.curItInCurTxn->first)
 					    .detail("CurrentIteratorMutations", progress.curItInCurTxn->second.size())
 					    .detail("CurrentIndexInSucceedTxn", progress.curIndexInCurTxn)
@@ -336,14 +344,14 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				TraceEvent("FastRestore_ApplierTxn")
-				    .detail("ApplierApplyToDB", self->id())
+				    .detail("ApplierApplyToDB", applierID)
 				    .detail("TxnId", progress.curTxnId)
 				    .detail("CurrentIndexInCurrentTxn", progress.curIndexInCurTxn)
 				    .detail("CurrentIteratorMutations", progress.curItInCurTxn->second.size())
 				    .detail("Version", progress.curItInCurTxn->first);
 
 				// restoreApplierKeyFor(self->id(), curTxnId) to tell if txn succeeds at an unknown error
-				tr->set(restoreApplierKeyFor(self->id(), progress.curTxnId), restoreApplierTxnValue);
+				tr->set(restoreApplierKeyFor(applierID, batchIndex, progress.curTxnId), restoreApplierTxnValue);
 
 				while (1) { // Loop: Accumulate mutations in a transaction
 					MutationRef m = progress.getCurrentMutation();
@@ -355,7 +363,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 					}
 
 					TraceEvent(SevFRMutationInfo, "FastRestore")
-					    .detail("ApplierApplyToDB", self->describeNode())
+					    .detail("ApplierApplyToDB", applierID)
 					    .detail("Version", progress.curItInCurTxn->first)
 					    .detail("Index", progress.curIndexInCurTxn)
 					    .detail("Mutation", m.toString())
@@ -397,7 +405,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "FastRestore_ApplyTxnError")
 			    .detail("TxnStatus", "?")
-			    .detail("ApplierApplyToDB", self->id())
+			    .detail("ApplierApplyToDB", applierID)
 			    .detail("TxnId", progress.curTxnId)
 			    .detail("CurrentIndexInCurrentTxn", progress.curIndexInCurTxn)
 			    .detail("Version", progress.curItInCurTxn->first)
@@ -411,7 +419,7 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 	}
 
 	TraceEvent("FastRestore_ApplierTxn")
-	    .detail("ApplierApplyToDBFinished", self->id())
+	    .detail("ApplierApplyToDBFinished", applierID)
 	    .detail("CleanupCurTxnIds", progress.curTxnId);
 	// clean up txn ids
 	loop {
@@ -420,8 +428,8 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			// Clear txnIds in [0, progress.curTxnId). We add 100 to curTxnId just to be safe.
-			tr->clear(KeyRangeRef(restoreApplierKeyFor(self->id(), 0),
-			                      restoreApplierKeyFor(self->id(), progress.curTxnId + 100)));
+			tr->clear(KeyRangeRef(restoreApplierKeyFor(applierID, batchIndex, 0),
+			                      restoreApplierKeyFor(applierID, batchIndex, progress.curTxnId + 100)));
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {
@@ -429,24 +437,32 @@ ACTOR Future<Void> applyToDB(Reference<RestoreApplierData> self, Database cx) {
 		}
 	}
 	// House cleaning
-	self->kvOps.clear();
-	TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDBFinished", self->id());
+	batchData->kvOps.clear();
+	TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDBFinished", applierID);
 
 	return Void();
 }
 
 ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self,
                                                  Database cx) {
+    // Ensure batch i is applied before batch (i+1)
+    wait(self->finishedBatch.whenAtLeast(req.batchIndex-1));
+
+	Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
+	ASSERT(batchData.isValid());
 	TraceEvent("FastRestore")
 	    .detail("ApplierApplyToDB", self->id())
-	    .detail("DBApplierPresent", self->dbApplier.present());
-	if (!self->dbApplier.present()) {
-		self->dbApplier = applyToDB(self, cx);
+	    .detail("VersionBatchIndex", req.batchIndex)
+	    .detail("DBApplierPresent", batchData->dbApplier.present());
+	if (!batchData->dbApplier.present()) {
+		batchData->dbApplier = applyToDB(self->id(), req.batchIndex, batchData, cx);
 	}
 
-	ASSERT(self->dbApplier.present());
+	ASSERT(batchData->dbApplier.present());
 
-	wait(self->dbApplier.get());
+	wait(batchData->dbApplier.get());
+
+	self->finishedBatch.set(req.batchIndex);
 	req.reply.send(RestoreCommonReply(self->id()));
 
 	return Void();

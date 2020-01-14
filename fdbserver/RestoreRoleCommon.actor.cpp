@@ -48,7 +48,7 @@ void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference
 	}
 
 	TraceEvent("FastRestore")
-	    .detail("FinishRestoreRequest", req.batchID)
+	    .detail("FinishRestoreRequest", req.batchIndex)
 	    .detail("Role", getRoleStr(self->role))
 	    .detail("Node", self->id());
 
@@ -56,16 +56,16 @@ void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference
 }
 
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
-	// batchId is continuous. (req.batchID-1) is the id of the just finished batch.
-	wait(self->versionBatchId.whenAtLeast(req.batchID - 1));
+	// batchId is continuous. (req.batchIndex-1) is the id of the just finished batch.
+	wait(self->versionBatchId.whenAtLeast(req.batchIndex - 1));
 
-	if (self->versionBatchId.get() == req.batchID - 1) {
-		self->resetPerVersionBatch();
+	if (self->versionBatchId.get() == req.batchIndex - 1) {
+		self->resetPerVersionBatch(req.batchIndex);
 		TraceEvent("FastRestore")
-		    .detail("InitVersionBatch", req.batchID)
+		    .detail("InitVersionBatch", req.batchIndex)
 		    .detail("Role", getRoleStr(self->role))
 		    .detail("Node", self->id());
-		self->versionBatchId.set(req.batchID);
+		self->versionBatchId.set(req.batchIndex);
 	}
 
 	req.reply.send(RestoreCommonReply(self->id()));

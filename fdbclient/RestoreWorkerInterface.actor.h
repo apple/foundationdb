@@ -406,24 +406,25 @@ struct RestoreLoadFileRequest : TimedRequest {
 struct RestoreSendMutationsToAppliersRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 68827305;
 
+	int batchIndex; // version batch index
 	std::map<Key, UID> rangeToApplier;
 	bool useRangeFile; // Send mutations parsed from range file?
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendMutationsToAppliersRequest() = default;
-	explicit RestoreSendMutationsToAppliersRequest(std::map<Key, UID> rangeToApplier, bool useRangeFile)
-	  : rangeToApplier(rangeToApplier), useRangeFile(useRangeFile) {}
+	explicit RestoreSendMutationsToAppliersRequest(int batchIndex, std::map<Key, UID> rangeToApplier, bool useRangeFile)
+	  : batchIndex(batchIndex), rangeToApplier(rangeToApplier), useRangeFile(useRangeFile) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeToApplier, useRangeFile, reply);
+		serializer(ar, rangeToApplier, useRangeFile, batchIndex, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
 		ss << "RestoreSendMutationsToAppliersRequest keyToAppliers.size:" << rangeToApplier.size()
-		   << " useRangeFile:" << useRangeFile;
+		   << " batchIndex:" << batchIndex << " useRangeFile:" << useRangeFile;
 		return ss.str();
 	}
 };
@@ -431,6 +432,7 @@ struct RestoreSendMutationsToAppliersRequest : TimedRequest {
 struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 69764565;
 
+	int batchIndex; // version batch index
 	RestoreAsset asset; // Unique identifier for the current restore asset
 
 	Version prevVersion, version; // version is the commitVersion of the mutation vector.
@@ -440,41 +442,43 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendVersionedMutationsRequest() = default;
-	explicit RestoreSendVersionedMutationsRequest(const RestoreAsset& asset, Version prevVersion, Version version,
-	                                              bool isRangeFile, MutationsVec mutations)
-	  : asset(asset), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile), mutations(mutations) {}
+	explicit RestoreSendVersionedMutationsRequest(int batchIndex, const RestoreAsset& asset, Version prevVersion,
+	                                              Version version, bool isRangeFile, MutationsVec mutations)
+	  : batchIndex(batchIndex), asset(asset), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile),
+	    mutations(mutations) {}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreAsset:" << asset.toString() << " prevVersion:" << prevVersion << " version:" << version
-		   << " isRangeFile:" << isRangeFile << " mutations.size:" << mutations.size();
+		ss << "VersionBatchIndex:" << batchIndex << "RestoreAsset:" << asset.toString()
+		   << " prevVersion:" << prevVersion << " version:" << version << " isRangeFile:" << isRangeFile
+		   << " mutations.size:" << mutations.size();
 		return ss.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, asset, prevVersion, version, isRangeFile, mutations, reply);
+		serializer(ar, batchIndex, asset, prevVersion, version, isRangeFile, mutations, reply);
 	}
 };
 
 struct RestoreVersionBatchRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 13018413;
 
-	int batchID;
+	int batchIndex;
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreVersionBatchRequest() = default;
-	explicit RestoreVersionBatchRequest(int batchID) : batchID(batchID) {}
+	explicit RestoreVersionBatchRequest(int batchIndex) : batchIndex(batchIndex) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, batchID, reply);
+		serializer(ar, batchIndex, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreVersionBatchRequest BatchID:" << batchID;
+		ss << "RestoreVersionBatchRequest batchIndex:" << batchIndex;
 		return ss.str();
 	}
 };

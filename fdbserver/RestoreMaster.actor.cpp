@@ -332,7 +332,8 @@ ACTOR static Future<Void> sendMutationsFromLoaders(Reference<RestoreMasterData> 
 
 	std::vector<std::pair<UID, RestoreSendMutationsToAppliersRequest>> requests;
 	for (auto& loader : self->loadersInterf) {
-		requests.emplace_back(loader.first, RestoreSendMutationsToAppliersRequest(self->rangeToApplier, useRangeFile));
+		requests.emplace_back(
+		    loader.first, RestoreSendMutationsToAppliersRequest(self->batchIndex, self->rangeToApplier, useRangeFile));
 	}
 	wait(sendBatchRequests(&RestoreLoaderInterface::sendMutations, self->loadersInterf, requests));
 
@@ -515,7 +516,7 @@ ACTOR static Future<Void> initializeVersionBatch(Reference<RestoreMasterData> se
 	}
 	wait(sendBatchRequests(&RestoreLoaderInterface::initVersionBatch, self->loadersInterf, requestsToLoaders));
 
-	self->resetPerVersionBatch();
+	self->resetPerVersionBatch(self->batchIndex);
 
 	return Void();
 }

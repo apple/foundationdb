@@ -42,6 +42,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+
 struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoaderData> {
 	std::map<LoadingParam, Future<Void>> processedFileParams;
 	std::map<LoadingParam, VersionedMutationsMap> kvOpsPerLP; // Buffered kvOps for each loading param
@@ -75,7 +76,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		return ss.str();
 	}
 
-	void resetPerVersionBatch() {
+	void resetPerVersionBatch(int batchIndex) {
 		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnLoader", nodeID);
 		rangeToApplier.clear();
 		numSampledMutations = 0;
