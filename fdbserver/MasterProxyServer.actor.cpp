@@ -218,8 +218,6 @@ struct ProxyCommitData {
 	NotifiedVersion latestLocalCommitBatchResolving;
 	NotifiedVersion latestLocalCommitBatchLogging;
 
-	PromiseStream<Void> commitBatchStartNotifications;
-	PromiseStream<Future<GetCommitVersionReply>> commitBatchVersions;  // 1:1 with commitBatchStartNotifications
 	RequestStream<GetReadVersionRequest> getConsistentReadVersion;
 	RequestStream<CommitTransactionRequest> commit;
 	Database cx;
@@ -421,7 +419,6 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 					}
 
 					if(!batch.size()) {
-						commitData->commitBatchStartNotifications.send(Void());
 						if(now() - lastBatch > commitData->commitBatchInterval) {
 							timeout = delayJittered(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE, TaskPriority::ProxyCommitBatcher);
 						}
@@ -433,7 +430,6 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 					if((batchBytes + bytes > CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT || req.firstInBatch()) && batch.size()) {
 						out.send({ batch, batchBytes });
 						lastBatch = now();
-						commitData->commitBatchStartNotifications.send(Void());
 						timeout = delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher);
 						batch = std::vector<CommitTransactionRequest>();
 						batchBytes = 0;
@@ -516,21 +512,16 @@ ACTOR Future<Void> commitBatch(
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.Before");
 
-	if (trs.empty()) {
-		// We are sending an empty batch, so we have to trigger the version fetcher
-		self->commitBatchStartNotifications.send(Void());
-	}
-
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 	TEST(self->latestLocalCommitBatchResolving.get() < localBatchNumber-1); // Queuing pre-resolution commit processing 
 	wait(self->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber-1));
-	wait(yield());
+	wait(yield(TaskPriority::ProxyCommitYield1));
 
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.GettingCommitVersion");
 
-	Future<GetCommitVersionReply> fVersionReply = waitNext(self->commitBatchVersions.getFuture());
-	GetCommitVersionReply versionReply = wait(fVersionReply);
+	GetCommitVersionRequest req(self->commitVersionRequestNumber++, self->mostRecentProcessedRequestNumber, self->dbgid);
+	GetCommitVersionReply versionReply = wait( brokenPromiseToNever(self->master.getCommitVersion.getReply(req, TaskPriority::ProxyMasterVersionReply)) );
 	self->mostRecentProcessedRequestNumber = versionReply.requestNum;
 
 	self->stats.txnCommitVersionAssigned += trs.size();
@@ -588,7 +579,7 @@ ACTOR Future<Void> commitBatch(
 	////// Phase 3: Post-resolution processing (CPU bound except for very rare situations; ordered; currently atomic but doesn't need to be)
 	TEST(self->latestLocalCommitBatchLogging.get() < localBatchNumber-1); // Queuing post-resolution commit processing 
 	wait(self->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber-1));
-	wait(yield());
+	wait(yield(TaskPriority::ProxyCommitYield2));
 
 	self->stats.txnCommitResolved += trs.size();
 
@@ -747,7 +738,7 @@ ACTOR Future<Void> commitBatch(
 			for (; mutationNum < pMutations->size(); mutationNum++) {
 				if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
 					yieldBytes = 0;
-					wait(yield());
+					wait(yield(TaskPriority::ProxyCommitYield2));
 				}
 
 				auto& m = (*pMutations)[mutationNum];
@@ -853,7 +844,7 @@ ACTOR Future<Void> commitBatch(
 			while(blobIter) {
 				if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
 					yieldBytes = 0;
-					wait(yield());
+					wait(yield(TaskPriority::ProxyCommitYield2));
 				}
 				valueWriter.serializeBytes(blobIter->data);
 				yieldBytes += blobIter->data.size();
@@ -987,7 +978,7 @@ ACTOR Future<Void> commitBatch(
 	}
 	self->lastCommitLatency = now()-commitStartTime;
 	self->lastCommitTime = std::max(self->lastCommitTime.get(), commitStartTime);
-	wait(yield());
+	wait(yield(TaskPriority::ProxyCommitYield3));
 
 	if( self->popRemoteTxs && msg.popTo > ( self->txsPopVersions.size() ? self->txsPopVersions.back().second : self->lastTxsPop ) ) {
 		if(self->txsPopVersions.size() >= SERVER_KNOBS->MAX_TXS_POP_VERSION_HISTORY) {
@@ -1133,14 +1124,6 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	commitData->stats.txnBatchPriorityStartOut += batchPriTransactionCount;
 
 	return rep;
-}
-
-ACTOR Future<Void> fetchVersions(ProxyCommitData *commitData) {
-	loop {
-		waitNext(commitData->commitBatchStartNotifications.getFuture());
-		GetCommitVersionRequest req(commitData->commitVersionRequestNumber++, commitData->mostRecentProcessedRequestNumber, commitData->dbgid);
-		commitData->commitBatchVersions.send(brokenPromiseToNever(commitData->master.getCommitVersion.getReply(req)));
-	}
 }
 
 struct TransactionRateInfo {
@@ -1606,7 +1589,6 @@ ACTOR Future<Void> masterProxyServerCore(
 	state GetHealthMetricsReply healthMetricsReply;
 	state GetHealthMetricsReply detailedHealthMetricsReply;
 
-	addActor.send( fetchVersions(&commitData) );
 	addActor.send( waitFailureServer(proxy.waitFailure.getFuture()) );
 
 	//TraceEvent("ProxyInit1", proxy.id());
