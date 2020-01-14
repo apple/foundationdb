@@ -146,6 +146,9 @@ ThreadFuture<Standalone<StringRef>> DLTransaction::getVersionstamp() {
 }
 
 ThreadFuture<int64_t> DLTransaction::getStorageByteSample(const KeyRangeRef& keys) {
+	if (!api->transactionGetStorageByteSample) {
+		return unsupported_operation();
+	}
 	FdbCApi::FDBFuture *f = api->transactionGetStorageByteSample(tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size());
 
 	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
@@ -318,6 +321,7 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionReset, lib, fdbCPath, "fdb_transaction_reset");
 	loadClientFunction(&api->transactionCancel, lib, fdbCPath, "fdb_transaction_cancel");
 	loadClientFunction(&api->transactionAddConflictRange, lib, fdbCPath, "fdb_transaction_add_conflict_range");
+	loadClientFunction(&api->transactionGetStorageByteSample, lib, fdbCPath, "fdb_transaction_get_storage_byte_sample");
 
 	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
