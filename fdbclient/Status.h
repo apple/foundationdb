@@ -47,7 +47,7 @@ void load(Ar& ar, StatusObject& statusObj) {
 	json_spirit::read_string( value, mv );
 	statusObj = StatusObject(mv.get_obj());
 
-	ASSERT( ar.protocolVersion() != 0 );
+	ASSERT( ar.protocolVersion().isValid() );
 }
 
 template <class Ar>
@@ -55,7 +55,7 @@ void save(Ar& ar, StatusObject const& statusObj) {
 	std::string value = json_spirit::write_string(json_spirit::mValue(statusObj));
 	ar << (int32_t)value.length();
 	ar.serializeBytes( (void*)&value[0], (int)value.length() );
-	ASSERT( ar.protocolVersion() != 0 );
+	ASSERT( ar.protocolVersion().isValid() );
 }
 
 struct StatusArray : json_spirit::mArray {

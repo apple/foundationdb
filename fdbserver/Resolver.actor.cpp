@@ -114,9 +114,9 @@ ACTOR Future<Void> resolveBatch(
 		}
 	}
 
-	if (check_yield(TaskDefaultEndpoint)) {
-		wait( delay( 0, TaskLowPriority ) || delay( SERVER_KNOBS->COMMIT_SLEEP_TIME ) );  // FIXME: Is this still right?
-		g_network->setCurrentTask(TaskDefaultEndpoint);
+	if (check_yield(TaskPriority::DefaultEndpoint)) {
+		wait( delay( 0, TaskPriority::Low ) || delay( SERVER_KNOBS->COMMIT_SLEEP_TIME ) );  // FIXME: Is this still right?
+		g_network->setCurrentTask(TaskPriority::DefaultEndpoint);
 	}
 
 	if (self->version.get() == req.prevVersion) {  // Not a duplicate (check relies on no waiting between here and self->version.set() below!)

@@ -282,6 +282,11 @@ public class AsyncStackTester {
 
 			return AsyncUtil.DONE;
 		}
+		else if(op == StackOperation.GET_APPROXIMATE_SIZE) {
+			return inst.tr.getApproximateSize().thenAcceptAsync(size -> {
+				inst.push("GOT_APPROXIMATE_SIZE".getBytes());
+			}, FDB.DEFAULT_EXECUTOR);
+		}
 		else if(op == StackOperation.GET_VERSIONSTAMP) {
 			try {
 				inst.push(inst.tr.getVersionstamp());
@@ -481,13 +486,16 @@ public class AsyncStackTester {
 				db.options().setMaxWatches(10001);
 				db.options().setDatacenterId("dc_id");
 				db.options().setMachineId("machine_id");
+				db.options().setSnapshotRywEnable();
+				db.options().setSnapshotRywDisable();
+				db.options().setTransactionLoggingMaxFieldLength(1000);
 				db.options().setTransactionTimeout(100000);
 				db.options().setTransactionTimeout(0);
 				db.options().setTransactionMaxRetryDelay(100);
 				db.options().setTransactionRetryLimit(10);
 				db.options().setTransactionRetryLimit(-1);
-				db.options().setSnapshotRywEnable();
-				db.options().setSnapshotRywDisable();
+				db.options().setTransactionCausalReadRisky();
+				db.options().setTransactionIncludePortInAddress();
 
 				tr.options().setPrioritySystemImmediate();
 				tr.options().setPriorityBatch();
@@ -496,6 +504,7 @@ public class AsyncStackTester {
 				tr.options().setReadYourWritesDisable();
 				tr.options().setReadSystemKeys();
 				tr.options().setAccessSystemKeys();
+				tr.options().setTransactionLoggingMaxFieldLength(1000);
 				tr.options().setTimeout(60*1000);
 				tr.options().setRetryLimit(50);
 				tr.options().setMaxRetryDelay(100);
@@ -504,6 +513,7 @@ public class AsyncStackTester {
 				tr.options().setLogTransaction();
 				tr.options().setReadLockAware();
 				tr.options().setLockAware();
+				tr.options().setIncludePortInAddress();
 
 				if(!(new FDBException("Fake", 1020)).isRetryable() ||
 						(new FDBException("Fake", 10)).isRetryable())

@@ -30,7 +30,7 @@ At project launch, FoundationDB has a light governance structure. The intention 
 
 We draw inspiration from the Apache Software Foundation's informal motto: ["community over code"](https://blogs.apache.org/foundation/entry/asf_15_community_over_code), and their emphasis on meritocratic rules. You'll also observe that some initial community structure is [inspired by the Swift community](https://swift.org/community/#community-structure).
 
-The project technical lead is Ben Collins (bbc@apple.com).
+The project technical lead is Evan Tschannen (ejt@apple.com).
 
 Members of the Apple FoundationDB team are part of the initial core committers helping review individual contributions; you'll see them commenting on your pull requests. Future committers to the open source project, and the process for adding individuals in this role will be formalized in the future.
 
@@ -38,7 +38,7 @@ Members of the Apple FoundationDB team are part of the initial core committers h
 ### Opening a Pull Request
 We love pull requests! For minor changes, feel free to open up a PR directly. For larger feature development and any changes that may require community discussion, we ask that you discuss your ideas on the [community forums](https://forums.foundationdb.org) prior to opening a PR, and then reference that thread within your PR comment.
 
-Upon release, no community CI is available. Tests can be run locally, and core committers will validate pull requests prior to merging them.
+CI will be run automatically for core committers, and for community PRs it will be initiated by the request of a core committer.  Tests can also be run locally via `ctest`, and core committers can run additional validation on pull requests prior to merging them.
 
 ### Reporting issues
 Please refer to the section below on [using GitHub issues and the community forums](#using-github-issues-and-community-forums) for more info.

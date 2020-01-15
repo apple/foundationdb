@@ -277,6 +277,12 @@ futures must apply the following rules to the result:
     internal stack machine state as the last seen version. Pushes the byte
     string "GOT_COMMITTED_VERSION" onto the stack.
 
+#### GET_APPROXIMATE_SIZE
+
+    Calls get_approximate_size and pushes the byte string "GOT_APPROXIMATE_SIZE"
+    onto the stack. Note bindings may issue GET_RANGE calls with different
+    limits, so these bindings can obtain different sizes back.
+
 #### WAIT_FUTURE
 
     Pops the top item off the stack and pushes it back on. If the top item on

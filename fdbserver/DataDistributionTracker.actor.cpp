@@ -26,11 +26,14 @@
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+// The used bandwidth of a shard. The higher the value is, the busier the shard is.
 enum BandwidthStatus {
 	BandwidthStatusLow,
 	BandwidthStatusNormal,
 	BandwidthStatusHigh
 };
+
+enum ReadBandwidthStatus { ReadBandwidthStatusNormal, ReadBandwidthStatusHigh };
 
 BandwidthStatus getBandwidthStatus( StorageMetrics const& metrics ) {
 	if( metrics.bytesPerKSecond > SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC )
@@ -39,6 +42,13 @@ BandwidthStatus getBandwidthStatus( StorageMetrics const& metrics ) {
 		return BandwidthStatusLow;
 
 	return BandwidthStatusNormal;
+}
+
+ReadBandwidthStatus getReadBandwidthStatus(StorageMetrics const& metrics) {
+	if (metrics.bytesReadPerKSecond > SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC)
+		return ReadBandwidthStatusHigh;
+	else
+		return ReadBandwidthStatusNormal;
 }
 
 ACTOR Future<Void> updateMaxShardSize( Reference<AsyncVar<int64_t>> dbSizeEstimate, Reference<AsyncVar<Optional<int64_t>>> maxShardSize ) {
@@ -68,6 +78,7 @@ struct DataDistributionTracker {
 	KeyRangeMap< ShardTrackedData > shards;
 	ActorCollection sizeChanges;
 
+	int64_t systemSizeEstimate;
 	Reference<AsyncVar<int64_t>> dbSizeEstimate;
 	Reference<AsyncVar<Optional<int64_t>>> maxShardSize;
 	Future<Void> maxShardSizeUpdater;
@@ -80,7 +91,7 @@ struct DataDistributionTracker {
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 
 	DataDistributionTracker(Database cx, UID distributorId, Promise<Void> const& readyToStart, PromiseStream<RelocateShard> const& output, Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure, Reference<AsyncVar<bool>> anyZeroHealthyTeams)
-		: cx(cx), distributorId( distributorId ), dbSizeEstimate( new AsyncVar<int64_t>() ),
+		: cx(cx), distributorId( distributorId ), dbSizeEstimate( new AsyncVar<int64_t>() ), systemSizeEstimate(0),
 			maxShardSize( new AsyncVar<Optional<int64_t>>() ),
 			sizeChanges(false), readyToStart(readyToStart), output( output ), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), anyZeroHealthyTeams(anyZeroHealthyTeams) {}
 
@@ -110,6 +121,7 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 
 	bounds.max.bytesPerKSecond = bounds.max.infinity;
 	bounds.max.iosPerKSecond = bounds.max.infinity;
+	bounds.max.bytesReadPerKSecond = bounds.max.infinity;
 
 	//The first shard can have arbitrarily small size
 	if(shard.begin == allKeys.begin) {
@@ -120,11 +132,13 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 
 	bounds.min.bytesPerKSecond = 0;
 	bounds.min.iosPerKSecond = 0;
+	bounds.min.bytesReadPerKSecond = 0;
 
 	//The permitted error is 1/3 of the general-case minimum bytes (even in the special case where this is the last shard)
 	bounds.permittedError.bytes = bounds.max.bytes / SERVER_KNOBS->SHARD_BYTES_RATIO / 3;
 	bounds.permittedError.bytesPerKSecond = bounds.permittedError.infinity;
 	bounds.permittedError.iosPerKSecond = bounds.permittedError.infinity;
+	bounds.permittedError.bytesReadPerKSecond = bounds.permittedError.infinity;
 
 	return bounds;
 }
@@ -137,24 +151,26 @@ int64_t getMaxShardSize( double dbSizeEstimate ) {
 ACTOR Future<Void> trackShardBytes(
 		DataDistributionTracker* self,
 		KeyRange keys,
-		Reference<AsyncVar<Optional<StorageMetrics>>> shardSize,
-		bool addToSizeEstimate = true)
+		Reference<AsyncVar<Optional<StorageMetrics>>> shardMetrics)
 {
-	wait( delay( 0, TaskDataDistribution ) );
+	wait( delay( 0, TaskPriority::DataDistribution ) );
 
 	/*TraceEvent("TrackShardBytesStarting")
-		.detail("TrackerID", trackerID)
-		.detail("Keys", keys)
-		.detail("TrackedBytesInitiallyPresent", shardSize->get().present())
-		.detail("StartingSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0)
-		.detail("StartingMerges", shardSize->get().present() ? shardSize->get().get().merges : 0);*/
+	    .detail("TrackerID", trackerID)
+	    .detail("Keys", keys)
+	    .detail("TrackedBytesInitiallyPresent", shardMetrics->get().present())
+	    .detail("StartingMetrics", shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0)
+	    .detail("StartingMerges", shardMetrics->get().present() ? shardMetrics->get().get().merges : 0);*/
 
+	state ReadBandwidthStatus readBandwidthStatus;
 	try {
 		loop {
 			ShardSizeBounds bounds;
-			if( shardSize->get().present() ) {
-				auto bytes = shardSize->get().get().bytes;
-				auto bandwidthStatus = getBandwidthStatus( shardSize->get().get() );
+			if (shardMetrics->get().present()) {
+				auto bytes = shardMetrics->get().get().bytes;
+				auto bandwidthStatus = getBandwidthStatus(shardMetrics->get().get());
+				auto newReadBandwidthStatus = getReadBandwidthStatus(shardMetrics->get().get());
+
 				bounds.max.bytes = std::max( int64_t(bytes * 1.1), (int64_t)SERVER_KNOBS->MIN_SHARD_BYTES );
 				bounds.min.bytes = std::min( int64_t(bytes * 0.9), std::max(int64_t(bytes - (SERVER_KNOBS->MIN_SHARD_BYTES * 0.1)), (int64_t)0) );
 				bounds.permittedError.bytes = bytes * 0.1;
@@ -170,9 +186,31 @@ ACTOR Future<Void> trackShardBytes(
 					bounds.max.bytesPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
 					bounds.min.bytesPerKSecond = 0;
 					bounds.permittedError.bytesPerKSecond = bounds.max.bytesPerKSecond / 4;
-				} else
+				} else {
 					ASSERT( false );
-
+				}
+				// handle read bandkwith status
+				if (newReadBandwidthStatus != readBandwidthStatus) {
+					TraceEvent("ReadBandwidthStatusChanged")
+					    .detail("From", readBandwidthStatus == ReadBandwidthStatusNormal ? "Normal" : "High")
+					    .detail("To", newReadBandwidthStatus == ReadBandwidthStatusNormal ? "Normal" : "High");
+					readBandwidthStatus = newReadBandwidthStatus;
+				}
+				if (newReadBandwidthStatus == ReadBandwidthStatusNormal) {
+					TEST(true);
+					bounds.max.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC *
+					                                 (1.0 + SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC_JITTER);
+					bounds.min.bytesReadPerKSecond = 0;
+					bounds.permittedError.bytesReadPerKSecond = bounds.min.bytesReadPerKSecond / 4;
+				} else if (newReadBandwidthStatus == ReadBandwidthStatusHigh) {
+					TEST(true);
+					bounds.max.bytesReadPerKSecond = bounds.max.infinity;
+					bounds.min.bytesReadPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC *
+					                                 (1.0 - SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC_JITTER);
+					bounds.permittedError.bytesReadPerKSecond = bounds.min.bytesReadPerKSecond / 4;
+				} else {
+					ASSERT(false);
+				}
 			} else {
 				bounds.max.bytes = -1;
 				bounds.min.bytes = -1;
@@ -180,6 +218,9 @@ ACTOR Future<Void> trackShardBytes(
 				bounds.max.bytesPerKSecond = bounds.max.infinity;
 				bounds.min.bytesPerKSecond = 0;
 				bounds.permittedError.bytesPerKSecond = bounds.permittedError.infinity;
+				bounds.max.bytesReadPerKSecond = bounds.max.infinity;
+				bounds.min.bytesReadPerKSecond = 0;
+				bounds.permittedError.bytesReadPerKSecond = bounds.permittedError.infinity;
 			}
 
 			bounds.max.iosPerKSecond = bounds.max.infinity;
@@ -193,7 +234,7 @@ ACTOR Future<Void> trackShardBytes(
 				.detail("Keys", keys)
 				.detail("UpdatedSize", metrics.metrics.bytes)
 				.detail("Bandwidth", metrics.metrics.bytesPerKSecond)
-				.detail("BandwithStatus", getBandwidthStatus(metrics))
+				.detail("BandwidthStatus", getBandwidthStatus(metrics))
 				.detail("BytesLower", bounds.min.bytes)
 				.detail("BytesUpper", bounds.max.bytes)
 				.detail("BandwidthLower", bounds.min.bytesPerKSecond)
@@ -202,10 +243,14 @@ ACTOR Future<Void> trackShardBytes(
 				.detail("OldShardSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0)
 				.detail("TrackerID", trackerID);*/
 
-			if( shardSize->get().present() && addToSizeEstimate )
-				self->dbSizeEstimate->set( self->dbSizeEstimate->get() + metrics.bytes - shardSize->get().get().bytes );
+			if( shardMetrics->get().present() ) {
+				self->dbSizeEstimate->set( self->dbSizeEstimate->get() + metrics.bytes - shardMetrics->get().get().bytes );
+				if(keys.begin >= systemKeys.begin) {
+					self->systemSizeEstimate += metrics.bytes - shardMetrics->get().get().bytes;
+				}
+			}
 
-			shardSize->set( metrics );
+			shardMetrics->set( metrics );
 		}
 	} catch( Error &e ) {
 		if (e.code() != error_code_actor_cancelled)
@@ -253,18 +298,27 @@ ACTOR Future<int64_t> getFirstSize( Reference<AsyncVar<Optional<StorageMetrics>>
 	}
 }
 
-ACTOR Future<Void> changeSizes( DataDistributionTracker* self, KeyRangeRef keys, int64_t oldShardsEndingSize ) {
+ACTOR Future<Void> changeSizes( DataDistributionTracker* self, KeyRange keys, int64_t oldShardsEndingSize ) {
 	state vector<Future<int64_t>> sizes;
+	state vector<Future<int64_t>> systemSizes;
 	for (auto it : self->shards.intersectingRanges(keys) ) {
-		sizes.push_back( getFirstSize( it->value().stats ) );
+		Future<int64_t> thisSize = getFirstSize( it->value().stats );
+		sizes.push_back( thisSize );
+		if(it->range().begin >= systemKeys.begin) {
+			systemSizes.push_back( thisSize );
+		}
 	}
 
 	wait( waitForAll( sizes ) );
-	wait( yield(TaskDataDistribution) );
+	wait( yield(TaskPriority::DataDistribution) );
 
 	int64_t newShardsStartingSize = 0;
 	for ( int i = 0; i < sizes.size(); i++ )
 		newShardsStartingSize += sizes[i].get();
+
+	int64_t newSystemShardsStartingSize = 0;
+	for ( int i = 0; i < systemSizes.size(); i++ )
+		newSystemShardsStartingSize += systemSizes[i].get();
 
 	int64_t totalSizeEstimate = self->dbSizeEstimate->get();
 	/*TraceEvent("TrackerChangeSizes")
@@ -272,6 +326,10 @@ ACTOR Future<Void> changeSizes( DataDistributionTracker* self, KeyRangeRef keys,
 		.detail("EndSizeOfOldShards", oldShardsEndingSize)
 		.detail("StartingSizeOfNewShards", newShardsStartingSize);*/
 	self->dbSizeEstimate->set( totalSizeEstimate + newShardsStartingSize - oldShardsEndingSize );
+	self->systemSizeEstimate += newSystemShardsStartingSize;
+	if(keys.begin >= systemKeys.begin) {
+		self->systemSizeEstimate -= oldShardsEndingSize;
+	}
 	return Void();
 }
 
@@ -281,7 +339,7 @@ struct HasBeenTrueFor : NonCopyable {
 	Future<Void> set() {
 		if( !trigger.isValid() ) {
 			cleared = Promise<Void>();
-			trigger = delayJittered( SERVER_KNOBS->DD_MERGE_COALESCE_DELAY, TaskDataDistribution - 1 ) || cleared.getFuture();
+			trigger = delayJittered( SERVER_KNOBS->DD_MERGE_COALESCE_DELAY, decrementPriority(TaskPriority::DataDistribution) ) || cleared.getFuture();
 		}
 		return trigger;
 	}
@@ -319,6 +377,7 @@ ACTOR Future<Void> shardSplitter(
 	splitMetrics.bytes = shardBounds.max.bytes / 2;
 	splitMetrics.bytesPerKSecond = keys.begin >= keyServersKeys.begin ? splitMetrics.infinity : SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
 	splitMetrics.iosPerKSecond = splitMetrics.infinity;
+	splitMetrics.bytesReadPerKSecond = splitMetrics.infinity;  // Don't split by readBandwidth
 
 	state Standalone<VectorRef<KeyRef>> splitKeys = wait( getSplitKeys(self, keys, splitMetrics, metrics ) );
 	//fprintf(stderr, "split keys:\n");
@@ -351,17 +410,17 @@ ACTOR Future<Void> shardSplitter(
 		for( int i = 0; i < skipRange; i++ ) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i+1]);
 			self->shardsAffectedByTeamFailure->defineShard( r );
-			self->output.send( RelocateShard( r, PRIORITY_SPLIT_SHARD) );
+			self->output.send( RelocateShard( r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD) );
 		}
 		for( int i = numShards-1; i > skipRange; i-- ) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i+1]);
 			self->shardsAffectedByTeamFailure->defineShard( r );
-			self->output.send( RelocateShard( r, PRIORITY_SPLIT_SHARD) );
+			self->output.send( RelocateShard( r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD) );
 		}
 
 		self->sizeChanges.add( changeSizes( self, keys, shardSize->get().get().bytes ) );
 	} else {
-		wait( delay(1.0, TaskDataDistribution) ); //In case the reason the split point was off was due to a discrepancy between storage servers
+		wait( delay(1.0, TaskPriority::DataDistribution) ); //In case the reason the split point was off was due to a discrepancy between storage servers
 	}
 	return Void();
 }
@@ -384,6 +443,7 @@ Future<Void> shardMerger(
 	bool forwardComplete = false;
 	KeyRangeRef merged;
 	StorageMetrics endingStats = shardSize->get().get();
+	int64_t systemBytes = keys.begin >= systemKeys.begin ? shardSize->get().get().bytes : 0; 
 
 	loop {
 		Optional<StorageMetrics> newMetrics;
@@ -421,13 +481,16 @@ Future<Void> shardMerger(
 
 		merged = KeyRangeRef( prevIter->range().begin, nextIter->range().end );
 		endingStats += newMetrics.get();
+		if((forwardComplete ? prevIter->range().begin : nextIter->range().begin) >= systemKeys.begin) {
+			systemBytes += newMetrics.get().bytes;
+		}
 		shardsMerged++;
 
 		auto shardBounds = getShardSizeBounds( merged, maxShardSize );
 		if( endingStats.bytes >= shardBounds.min.bytes ||
 				getBandwidthStatus( endingStats ) != BandwidthStatusLow ||
 				shardsMerged >= SERVER_KNOBS->DD_MERGE_LIMIT ) {
-			// The merged range is larger than the min bounds se we cannot continue merging in this direction.
+			// The merged range is larger than the min bounds so we cannot continue merging in this direction.
 			//  This means that:
 			//  1. If we were going forwards (the starting direction), we roll back the last speculative merge.
 			//      In this direction we do not want to go above this boundary since we will merge at least one in
@@ -439,6 +502,9 @@ Future<Void> shardMerger(
 
 			// If going forward, remove most recently added range
 			endingStats -= newMetrics.get();
+			if(nextIter->range().begin >= systemKeys.begin) {
+				systemBytes -= newMetrics.get().bytes;
+			}
 			shardsMerged--;
 			--nextIter;
 			merged = KeyRangeRef( prevIter->range().begin, nextIter->range().end );
@@ -455,9 +521,12 @@ Future<Void> shardMerger(
 		.detail("EndingSize", endingStats.bytes)
 		.detail("BatchedMerges", shardsMerged);
 
+	if(mergeRange.begin < systemKeys.begin) {
+		self->systemSizeEstimate -= systemBytes;
+	}
 	restartShardTrackers( self, mergeRange, endingStats );
 	self->shardsAffectedByTeamFailure->defineShard( mergeRange );
-	self->output.send( RelocateShard( mergeRange, PRIORITY_MERGE_SHARD ) );
+	self->output.send( RelocateShard( mergeRange, SERVER_KNOBS->PRIORITY_MERGE_SHARD ) );
 
 	// We are about to be cancelled by the call to restartShardTrackers
 	return Void();
@@ -476,11 +545,12 @@ ACTOR Future<Void> shardEvaluator(
 	//  so will will never attempt to merge that shard with the one previous.
 	ShardSizeBounds shardBounds = getShardSizeBounds(keys, self->maxShardSize->get().get());
 	StorageMetrics const& stats = shardSize->get().get();
+	auto bandwidthStatus = getBandwidthStatus( stats );
 
 	bool shouldSplit = stats.bytes > shardBounds.max.bytes ||
-							( getBandwidthStatus( stats ) == BandwidthStatusHigh && keys.begin < keyServersKeys.begin );
+							(bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin );
 	bool shouldMerge = stats.bytes < shardBounds.min.bytes &&
-							getBandwidthStatus( stats ) == BandwidthStatusLow;
+							bandwidthStatus == BandwidthStatusLow;
 
 	// Every invocation must set this or clear it
 	if(shouldMerge && !self->anyZeroHealthyTeams->get()) {
@@ -495,11 +565,18 @@ ACTOR Future<Void> shardEvaluator(
 		}
 	}
 
-	/*TraceEvent("ShardEvaluator", self->distributorId)
-		.detail("TrackerId", trackerID)
-		.detail("ShouldSplit", shouldSplit)
-		.detail("ShouldMerge", shouldMerge)
-		.detail("HasBeenTrueLongEnough", wantsToMerge->hasBeenTrueForLongEnough());*/
+	/*TraceEvent("EdgeCaseTraceShardEvaluator", self->distributorId)
+	    // .detail("TrackerId", trackerID)
+	    .detail("BeginKey", keys.begin.printableNonNull())
+	    .detail("EndKey", keys.end.printableNonNull())
+	    .detail("ShouldSplit", shouldSplit)
+	    .detail("ShouldMerge", shouldMerge)
+	    .detail("HasBeenTrueLongEnough", wantsToMerge->hasBeenTrueForLongEnough())
+	    .detail("CurrentMetrics", stats.toString())
+	    .detail("ShardBoundsMaxBytes", shardBounds.max.bytes)
+	    .detail("ShardBoundsMinBytes", shardBounds.min.bytes)
+	    .detail("WriteBandwitdhStatus", bandwidthStatus)
+	    .detail("SplitBecauseHighWriteBandWidth", ( bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin ) ? "Yes" :"No");*/
 
 	if(!self->anyZeroHealthyTeams->get() && wantsToMerge->hasBeenTrueForLongEnough()) {
 		onChange = onChange || shardMerger( self, keys, shardSize );
@@ -529,7 +606,7 @@ ACTOR Future<Void> shardTracker(
 		wait( yieldedFuture(self->maxShardSize->onChange()) );
 
 	// Since maxShardSize will become present for all shards at once, avoid slow tasks with a short delay
-	wait( delay( 0, TaskDataDistribution ) );
+	wait( delay( 0, TaskPriority::DataDistribution ) );
 
 	/*TraceEvent("ShardTracker", self->distributorId)
 		.detail("Begin", keys.begin)
@@ -546,7 +623,7 @@ ACTOR Future<Void> shardTracker(
 
 			// We could have a lot of actors being released from the previous wait at the same time. Immediately calling
 			// delay(0) mitigates the resulting SlowTask
-			wait( delay(0, TaskDataDistribution) );
+			wait( delay(0, TaskPriority::DataDistribution) );
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled)
@@ -593,12 +670,12 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker *self, Reference<I
 
 	//This line reduces the priority of shard initialization to prevent interference with failure monitoring.
 	//SOMEDAY: Figure out what this priority should actually be
-	wait( delay( 0.0, TaskDataDistribution ) );
+	wait( delay( 0.0, TaskPriority::DataDistribution ) );
 
 	state int s;
 	for(s=0; s<initData->shards.size()-1; s++) {
 		restartShardTrackers( self, KeyRangeRef( initData->shards[s].key, initData->shards[s+1].key ) );
-		wait( yield( TaskDataDistribution ) );
+		wait( yield( TaskPriority::DataDistribution ) );
 	}
 
 	Future<Void> initialSize = changeSizes( self, KeyRangeRef(allKeys.begin, allKeys.end), 0 );
@@ -640,7 +717,7 @@ ACTOR Future<Void> fetchShardMetrics_impl( DataDistributionTracker* self, GetMet
 ACTOR Future<Void> fetchShardMetrics( DataDistributionTracker* self, GetMetricsRequest req ) {
 	choose {
 		when( wait( fetchShardMetrics_impl( self, req ) ) ) {}
-		when( wait( delay( SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT ) ) ) {
+		when( wait( delay( SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT, TaskPriority::DataDistribution ) ) ) {
 			TEST(true); // DD_SHARD_METRICS_TIMEOUT
 			StorageMetrics largeMetrics;
 			largeMetrics.bytes = SERVER_KNOBS->MAX_SHARD_BYTES;
@@ -723,6 +800,7 @@ ACTOR Future<Void> dataDistributionTracker(
 				TraceEvent("DDTrackerStats", self.distributorId)
 					.detail("Shards", self.shards.size())
 					.detail("TotalSizeBytes", self.dbSizeEstimate->get())
+					.detail("SystemSizeBytes", self.systemSizeEstimate)
 					.trackLatest( "DDTrackerStats" );
 
 				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL);
@@ -758,9 +836,17 @@ std::pair<vector<ShardsAffectedByTeamFailure::Team>,vector<ShardsAffectedByTeamF
 
 void ShardsAffectedByTeamFailure::erase(Team team, KeyRange const& range) {
 	if(team_shards.erase( std::pair<Team,KeyRange>(team, range) ) > 0) {
-		for(auto uid = team.servers.begin(); uid != team.servers.end(); ++uid)
-			storageServerShards[*uid]--;
+		for (auto uid = team.servers.begin(); uid != team.servers.end(); ++uid) {
+			// Safeguard against going negative after eraseServer() sets value to 0
+			if (storageServerShards[*uid] > 0) {
+				storageServerShards[*uid]--;
+			}
+		}
 	}
+}
+
+void ShardsAffectedByTeamFailure::eraseServer(UID ssID) {
+	storageServerShards[ssID] = 0;
 }
 
 void ShardsAffectedByTeamFailure::insert(Team team, KeyRange const& range) {
@@ -803,6 +889,7 @@ void ShardsAffectedByTeamFailure::defineShard( KeyRangeRef keys ) {
 	check();
 }
 
+// Move keys to destinationTeams by updating shard_teams
 void ShardsAffectedByTeamFailure::moveShard( KeyRangeRef keys, std::vector<Team> destinationTeams ) {
 	/*TraceEvent("ShardsAffectedByTeamFailureMove")
 		.detail("KeyBegin", keys.begin)

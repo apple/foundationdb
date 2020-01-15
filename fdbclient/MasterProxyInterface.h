@@ -31,6 +31,7 @@
 #include "fdbclient/CommitTransaction.h"
 
 #include "flow/Stats.h"
+#include "fdbrpc/TimedRequest.h"
 
 struct MasterProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8954922;
@@ -49,9 +50,9 @@ struct MasterProxyInterface {
 
 	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
 	RequestStream< struct TxnStateRequest >  txnState;
-	RequestStream<struct ExecRequest> execReq;
-
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
+	RequestStream< struct ProxySnapRequest > proxySnapReq;
+	RequestStream< struct ExclusionSafetyCheckRequest > exclusionSafetyCheckReq;
 	RequestStream< struct GetDDMetricsRequest > getDDMetrics;
 
 	UID id() const { return commit.getEndpoint().token; }
@@ -64,15 +65,38 @@ struct MasterProxyInterface {
 	void serialize(Archive& ar) {
 		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
 				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics, execReq, getDDMetrics);
+				   txnState, getHealthMetrics, proxySnapReq, exclusionSafetyCheckReq, getDDMetrics);
 	}
 
 	void initEndpoints() {
-		getConsistentReadVersion.getEndpoint(TaskProxyGetConsistentReadVersion);
-		getRawCommittedVersion.getEndpoint(TaskProxyGetRawCommittedVersion);
-		commit.getEndpoint(TaskProxyCommitDispatcher);
-		getStorageServerRejoinInfo.getEndpoint(TaskProxyStorageRejoin);
+		getConsistentReadVersion.getEndpoint(TaskPriority::ProxyGetConsistentReadVersion);
+		getRawCommittedVersion.getEndpoint(TaskPriority::ProxyGetRawCommittedVersion);
+		commit.getEndpoint(TaskPriority::ProxyCommitDispatcher);
+		getStorageServerRejoinInfo.getEndpoint(TaskPriority::ProxyStorageRejoin);
 		//getKeyServersLocations.getEndpoint(TaskProxyGetKeyServersLocations); //do not increase the priority of these requests, because clients cans bring down the cluster with too many of these messages.
+	}
+};
+
+// ClientDBInfo is all the information needed by a database client to access the database
+// It is returned (and kept up to date) by the OpenDatabaseRequest interface of ClusterInterface
+struct ClientDBInfo {
+	constexpr static FileIdentifier file_identifier = 5355080;
+	UID id;  // Changes each time anything else changes
+	vector< MasterProxyInterface > proxies;
+	double clientTxnInfoSampleRate;
+	int64_t clientTxnInfoSizeLimit;
+	Optional<Value> forward;
+	ClientDBInfo() : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1) {}
+
+	bool operator == (ClientDBInfo const& r) const { return id == r.id; }
+	bool operator != (ClientDBInfo const& r) const { return id != r.id; }
+
+	template <class Archive>
+	void serialize(Archive& ar) {
+		if constexpr (!is_fb_function<Archive>) {
+			ASSERT(ar.protocolVersion().isValid());
+		}
+		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward);
 	}
 };
 
@@ -133,6 +157,8 @@ struct GetReadVersionReply {
 	Version version;
 	bool locked;
 	Optional<Value> metadataVersion;
+
+	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -328,20 +354,50 @@ struct GetDDMetricsRequest {
   }
 };
 
-struct ExecRequest
+struct ProxySnapRequest
 {
-	constexpr static FileIdentifier file_identifier = 22403900;
+	constexpr static FileIdentifier file_identifier = 22204900;
 	Arena arena;
-	StringRef execPayload;
+	StringRef snapPayload;
+	UID snapUID;
 	ReplyPromise<Void> reply;
 	Optional<UID> debugID;
 
-	explicit ExecRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
-	explicit ExecRequest(StringRef exec, Optional<UID> debugID = Optional<UID>()) : execPayload(exec), debugID(debugID) {}
+	explicit ProxySnapRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
+	explicit ProxySnapRequest(StringRef snap, UID snapUID, Optional<UID> debugID = Optional<UID>()) : snapPayload(snap), snapUID(snapUID), debugID(debugID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, execPayload, reply, arena, debugID);
+		serializer(ar, snapPayload, snapUID, reply, arena, debugID);
+	}
+};
+
+struct ExclusionSafetyCheckReply
+{
+	constexpr static FileIdentifier file_identifier = 11;
+	bool safe;
+
+	ExclusionSafetyCheckReply() : safe(false) {}
+	explicit ExclusionSafetyCheckReply(bool safe) : safe(safe) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, safe);
+	}
+};
+
+struct ExclusionSafetyCheckRequest
+{
+	constexpr static FileIdentifier file_identifier = 13852702;
+	vector<AddressExclusion> exclusions;
+	ReplyPromise<ExclusionSafetyCheckReply> reply;
+
+	ExclusionSafetyCheckRequest() {}
+	explicit ExclusionSafetyCheckRequest(vector<AddressExclusion> exclusions) : exclusions(exclusions) {}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, exclusions, reply);
 	}
 };
 

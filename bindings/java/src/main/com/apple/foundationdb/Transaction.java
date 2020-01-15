@@ -157,7 +157,13 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 *  exclusive; that is, the key (if one exists) that is specified as the end
 	 *  of the range will NOT be cleared as part of this operation.  Range clears are
 	 *  efficient with FoundationDB -- clearing large amounts of data will be fast.
+	 *  However, this will not immediately free up disk - data for the deleted range
+	 *  is cleaned up in the background.
 	 *  This will not affect the database until {@link #commit} is called.
+	 *  <br>
+	 *  For purposes of computing the transaction size, only the begin and end keys of a clear range are counted.
+	 *  The size of the data stored in the range does not count against the transaction size limit.
+	 *
 	 *
 	 * @param range the range of keys to clear
 	 *
@@ -259,6 +265,15 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 * in this transaction
 	 */
 	CompletableFuture<byte[]> getVersionstamp();
+
+	/**
+	 * Returns a future that will contain the approximated size of the commit, which is the
+	 * summation of mutations, read conflict ranges, and write conflict ranges. This can be
+	 * called multiple times before transaction commit.
+	 *
+	 * @return a future that will contain the approximated size of the commit.
+	 */
+	CompletableFuture<Long> getApproximateSize();
 
 	/**
 	 * Resets a transaction and returns a delayed signal for error recovery.  If the error

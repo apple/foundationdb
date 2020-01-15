@@ -24,7 +24,7 @@
 fdbmonitor_CFLAGS := -I.
 
 ifeq ($(PLATFORM),linux)
-  fdbmonitor_LDFLAGS := -static-libstdc++ -static-libgcc -lrt
+  fdbmonitor_LDFLAGS := -static-libstdc++ -static-libgcc -pthread -lrt
 else ifeq ($(PLATFORM),osx)
   fdbmonitor_LDFLAGS := -lc++
 endif

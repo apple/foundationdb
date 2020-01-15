@@ -97,9 +97,9 @@ StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
 template<> Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return Tuple().append(val); }
 template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
 
-ACTOR Future<std::vector<KeyBackedTag>> TagUidMap::getAll_impl(TagUidMap *tagsMap, Reference<ReadYourWritesTransaction> tr) {
+ACTOR Future<std::vector<KeyBackedTag>> TagUidMap::getAll_impl(TagUidMap *tagsMap, Reference<ReadYourWritesTransaction> tr, bool snapshot) {
 	state Key prefix = tagsMap->prefix; // Copying it here as tagsMap lifetime is not tied to this actor
-	TagMap::PairsType tagPairs = wait(tagsMap->getRange(tr, std::string(), {}, 1e6));
+	TagMap::PairsType tagPairs = wait(tagsMap->getRange(tr, std::string(), {}, 1e6, snapshot));
 	std::vector<KeyBackedTag> results;
 	for(auto &p : tagPairs)
 		results.push_back(KeyBackedTag(p.first, prefix));
@@ -284,7 +284,7 @@ public:
 
 	void clearApplyMutationsKeys(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
-		
+
 		// Clear add/remove prefix keys
 		tr->clear(uidPrefixKey(applyMutationsAddPrefixRange.begin, uid));
 		tr->clear(uidPrefixKey(applyMutationsRemovePrefixRange.begin, uid));
@@ -572,8 +572,8 @@ namespace fileBackup {
 
 		// Functions for consuming big endian (network byte order) integers.
 		// Consumes a big endian number, swaps it to little endian, and returns it.
-		const int32_t  consumeNetworkInt32()  { return (int32_t)bigEndian32((uint32_t)consume< int32_t>());}
-		const uint32_t consumeNetworkUInt32() { return          bigEndian32(          consume<uint32_t>());}
+		int32_t  consumeNetworkInt32()  { return (int32_t)bigEndian32((uint32_t)consume< int32_t>());}
+		uint32_t consumeNetworkUInt32() { return          bigEndian32(          consume<uint32_t>());}
 
 		bool eof() { return rptr == end; }
 
@@ -1855,6 +1855,11 @@ namespace fileBackup {
 			}
 
 			Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
+
+			// Get the set of key ranges that hold mutations for (beginVersion, endVersion).  They will be queried in parallel below
+			// and there is a limit on how many we want to process in a single BackupLogRangeTask so if that limit is exceeded then
+			// set the addBackupLogRangeTasks boolean in Params and stop, signalling the finish() step to break up the
+			// (beginVersion, endVersion) range into smaller intervals which are then processed by individual BackupLogRangeTasks.
 			state Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(beginVersion, endVersion, destUidValue);
 			if (ranges.size() > CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES) {
 				Params.addBackupLogRangeTasks().set(task, true);
@@ -1866,6 +1871,9 @@ namespace fileBackup {
 			state Reference<IBackupFile> outFile = wait(bc->writeLogFile(beginVersion, endVersion, blockSize));
 			state LogFileWriter logFile(outFile, blockSize);
 
+			// Query all key ranges covering (beginVersion, endVersion) in parallel, writing their results to the results promise stream
+			// as they are received.  Note that this means the records read from the results stream are not likely to be in increasing
+			// Version order.
 			state PromiseStream<RangeResultWithVersion> results;
 			state std::vector<Future<Void>> rc;
 
@@ -1988,6 +1996,7 @@ namespace fileBackup {
 	const uint32_t BackupLogRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(BackupLogRangeTaskFunc);
 
+	//This task stopped being used in 6.2, however the code remains here to handle upgrades.
 	struct EraseLogRangeTaskFunc : BackupTaskFuncBase {
 		static StringRef name;
 		static const uint32_t version;
@@ -2005,21 +2014,6 @@ namespace fileBackup {
 			}
 		} Params;
 
-		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			state Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
-			wait(checkTaskVersion(cx, task, EraseLogRangeTaskFunc::name, EraseLogRangeTaskFunc::version));
-
-			state Version endVersion = Params.endVersion().get(task);
-			state Key destUidValue = Params.destUidValue().get(task);
-
-			state BackupConfig config(task);
-			state Key logUidValue = config.getUidAsKey();
-
-			wait(eraseLogData(cx, logUidValue, destUidValue, endVersion != 0 ? Optional<Version>(endVersion) : Optional<Version>()));
-
-			return Void();
-		}
-
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, UID logUid, TaskCompletionKey completionKey, Key destUidValue, Version endVersion = 0, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 			Key key = wait(addBackupTask(EraseLogRangeTaskFunc::name,
 										 EraseLogRangeTaskFunc::version,
@@ -2036,16 +2030,23 @@ namespace fileBackup {
 			return key;
 		}
 
-
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
-			wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
+			wait(checkTaskVersion(tr->getDatabase(), task, EraseLogRangeTaskFunc::name, EraseLogRangeTaskFunc::version));
+
+			state Version endVersion = Params.endVersion().get(task);
+			state Key destUidValue = Params.destUidValue().get(task);
+
+			state BackupConfig config(task);
+			state Key logUidValue = config.getUidAsKey();
+
+			wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task) && eraseLogData(tr, logUidValue, destUidValue, endVersion != 0 ? Optional<Version>(endVersion) : Optional<Version>()));
 
 			return Void();
 		}
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef EraseLogRangeTaskFunc::name = LiteralStringRef("file_backup_erase_logs_5.2");
@@ -2132,7 +2133,7 @@ namespace fileBackup {
 			// Do not erase at the first time
 			if (prevBeginVersion > 0) {
 				state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
-				wait(success(EraseLogRangeTaskFunc::addTask(tr, taskBucket, config.getUid(), TaskCompletionKey::joinWith(logDispatchBatchFuture), destUidValue, beginVersion)));
+				wait( eraseLogData(tr, config.getUidAsKey(), destUidValue, Optional<Version>(beginVersion)) );
 			}
 
 			wait(taskBucket->finish(tr, task));
@@ -2183,7 +2184,7 @@ namespace fileBackup {
 
 			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 			state Key destUidValue = wait(backup.destUidValue().getOrThrow(tr));
-			wait(success(EraseLogRangeTaskFunc::addTask(tr, taskBucket, backup.getUid(), TaskCompletionKey::noSignal(), destUidValue)));
+			wait( eraseLogData(tr, backup.getUidAsKey(), destUidValue) );
 			
 			backup.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
 
@@ -3418,7 +3419,6 @@ namespace fileBackup {
 						++nFiles;
 					}
 
-					// Increment counts
 					restore.fileCount().atomicOp(tr, nFiles, MutationRef::Type::AddValue);
 					restore.fileBlockCount().atomicOp(tr, nFileBlocks, MutationRef::Type::AddValue);
 
@@ -3626,13 +3626,18 @@ public:
 
 		state Key destUidValue(BinaryWriter::toValue(uid, Unversioned()));
 		if (normalizedRanges.size() == 1) {
-			state Key destUidLookupPath = BinaryWriter::toValue(normalizedRanges[0], IncludeVersion()).withPrefix(destUidLookupPrefix);
-			Optional<Key> existingDestUidValue = wait(tr->get(destUidLookupPath));
-			if (existingDestUidValue.present()) {
-				destUidValue = existingDestUidValue.get();
-			} else {
+			Standalone<RangeResultRef> existingDestUidValues = wait(tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
+			bool found = false;
+			for(auto it : existingDestUidValues) {
+				if( BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) == normalizedRanges[0] ) {
+					destUidValue = it.value;
+					found = true;
+					break;
+				}
+			}
+			if( !found ) {
 				destUidValue = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
-				tr->set(destUidLookupPath, destUidValue);
+				tr->set(BinaryWriter::toValue(normalizedRanges[0], IncludeVersion(ProtocolVersion::withSharedMutations())).withPrefix(destUidLookupPrefix), destUidValue);
 			}
 		}
 
@@ -3755,7 +3760,8 @@ public:
 				Optional<UidAndAbortedFlagT> current = wait(tag.get(tr));
 				if(!current.present()) {
 					if(verbose)
-						printf("Tag: %s  State: %s\n", tagName.toString().c_str(), FileBackupAgent::restoreStateText(ERestoreState::UNITIALIZED).toString().c_str());
+						printf("waitRestore: Tag: %s  State: %s\n", tagName.toString().c_str(),
+						       FileBackupAgent::restoreStateText(ERestoreState::UNITIALIZED).toString().c_str());
 					return ERestoreState::UNITIALIZED;
 				}
 
@@ -3820,8 +3826,7 @@ public:
 
 			state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
 			wait(success(tr->getReadVersion()));
-
-			wait(success(fileBackup::EraseLogRangeTaskFunc::addTask(tr, backupAgent->taskBucket, config.getUid(), TaskCompletionKey::noSignal(), destUidValue)));
+			wait( eraseLogData(tr, config.getUidAsKey(), destUidValue) );
 
 			config.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
 
@@ -3860,8 +3865,8 @@ public:
 
 		// Cancel backup task through tag
 		wait(tag.cancel(tr));
-
-		wait(success(fileBackup::EraseLogRangeTaskFunc::addTask(tr, backupAgent->taskBucket, config.getUid(), TaskCompletionKey::noSignal(), destUidValue)));
+		
+		wait(eraseLogData(tr, config.getUidAsKey(), destUidValue));
 
 		config.stateEnum().set(tr, EBackupState::STATE_ABORTED);
 
@@ -4197,10 +4202,10 @@ public:
 		return statusText;
 	}
 
-	ACTOR static Future<Version> getLastRestorable(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName) {
+	ACTOR static Future<Version> getLastRestorable(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName, bool snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state Optional<Value> version = wait(tr->get(backupAgent->lastRestorable.pack(tagName)));
+		state Optional<Value> version = wait(tr->get(backupAgent->lastRestorable.pack(tagName), snapshot));
 
 		return (version.present()) ? BinaryReader::fromStringRef<Version>(version.get(), Unversioned()) : 0;
 	}
@@ -4413,8 +4418,8 @@ Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagN
 	return FileBackupAgentImpl::getStatusJSON(this, cx, tagName);
 }
 
-Future<Version> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName) {
-	return FileBackupAgentImpl::getLastRestorable(this, tr, tagName);
+Future<Version> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, bool snapshot) {
+	return FileBackupAgentImpl::getLastRestorable(this, tr, tagName, snapshot);
 }
 
 void FileBackupAgent::setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version) {

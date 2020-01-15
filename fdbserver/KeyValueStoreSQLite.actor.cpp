@@ -94,10 +94,9 @@ struct PageChecksumCodec {
 		SumType *pSumInPage = (SumType *)(pData + dataLen);
 
 		if (write) {
-			// Always write a hashlittle2 checksum for new pages
-			pSumInPage->part1 = pageNumber; // DO NOT CHANGE
-			pSumInPage->part2 = 0x5ca1ab1e;
-			hashlittle2(pData, dataLen, &pSumInPage->part1, &pSumInPage->part2);
+			// Always write a CRC32 checksum for new pages
+			pSumInPage->part1 = 0; // Indicates CRC32 is being used
+			pSumInPage->part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
 			return true;
 		}
 
@@ -429,15 +428,16 @@ Value encodeKVFragment( KeyValueRef kv, uint32_t index) {
 	// a signed representation of the index value.  The type code for 0 is 0 (which is
 	// actually the null type in SQLite).
 	int8_t indexCode = 0;
-	uint32_t tmp = index;
-	while(tmp != 0) {
-		++indexCode;
-		tmp >>= 8;
+	if (index != 0) {
+		uint32_t tmp = index;
+		while (tmp != 0) {
+			++indexCode;
+			tmp >>= 8;
+		}
+		// An increment is required if the high bit of the N-byte index value is set, since it is
+		// positive number but SQLite only stores signed values and would interpret it as negative.
+		if (index >> (8 * indexCode - 1)) ++indexCode;
 	}
-	// An increment is required if the high bit of the N-byte index value is set, since it is
-	// positive number but SQLite only stores signed values and would interpret it as negative.
-	if(index >> (8 * indexCode - 1))
-		++indexCode;
 
 	int header_size = sqlite3VarintLen(keyCode) + sizeof(indexCode) + sqlite3VarintLen(valCode);
 	int hh = sqlite3VarintLen(header_size);
@@ -1938,8 +1938,8 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 	readCursors.resize(64); //< number of read threads
 
 	sqlite3_soft_heap_limit64( SERVER_KNOBS->SOFT_HEAP_LIMIT );  // SOMEDAY: Is this a performance issue?  Should we drop the cache sizes for individual threads?
-	int taskId = g_network->getCurrentTask();
-	g_network->setCurrentTask(TaskDiskWrite);
+	TaskPriority taskId = g_network->getCurrentTask();
+	g_network->setCurrentTask(TaskPriority::DiskWrite);
 	writeThread->addThread( new Writer(filename, type==KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity, writesComplete, springCleaningStats, diskBytesUsed, freeListPages, id, &readCursors) );
 	g_network->setCurrentTask(taskId);
 	auto p = new Writer::InitAction();
@@ -1964,8 +1964,8 @@ StorageBytes KeyValueStoreSQLite::getStorageBytes() {
 
 void KeyValueStoreSQLite::startReadThreads() {
 	int nReadThreads = readCursors.size();
-	int taskId = g_network->getCurrentTask();
-	g_network->setCurrentTask(TaskDiskRead);
+	TaskPriority taskId = g_network->getCurrentTask();
+	g_network->setCurrentTask(TaskPriority::DiskRead);
 	for(int i=0; i<nReadThreads; i++)
 		readThreads->addThread( new Reader(filename, type==KeyValueStoreType::SSD_BTREE_V2, readsComplete, logID, &readCursors[i]) );
 	g_network->setCurrentTask(taskId);

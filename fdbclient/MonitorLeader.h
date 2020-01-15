@@ -25,26 +25,49 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ClusterInterface.h"
+#include "fdbclient/MasterProxyInterface.h"
 
 #define CLUSTER_FILE_ENV_VAR_NAME "FDB_CLUSTER_FILE"
 
 class ClientCoordinators;
 
+struct ClientStatusInfo {
+	Key traceLogGroup;
+	Standalone<VectorRef<ClientVersionRef>> versions;
+	Standalone<VectorRef<StringRef>> issues;
+
+	ClientStatusInfo() {}
+	ClientStatusInfo(Key const& traceLogGroup, Standalone<VectorRef<ClientVersionRef>> versions, Standalone<VectorRef<StringRef>> issues) : traceLogGroup(traceLogGroup), versions(versions), issues(issues) {}
+};
+
+struct ClientData {
+	std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap;
+	Reference<AsyncVar<CachedSerialization<ClientDBInfo>>> clientInfo;
+
+	OpenDatabaseRequest getRequest();
+
+	ClientData() : clientInfo( new AsyncVar<CachedSerialization<ClientDBInfo>>( CachedSerialization<ClientDBInfo>() ) ) {}
+};
+
 template <class LeaderInterface>
-Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader, Reference<AsyncVar<int>> connectedCoordinatorsNum = Reference<AsyncVar<int>>() );
+Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader );
 // Monitors the given coordination group's leader election process and provides a best current guess
 // of the current leader.  If a leader is elected for long enough and communication with a quorum of
 // coordinators is possible, eventually outKnownLeader will be that leader's interface.
 
+Future<Void> monitorLeaderForProxies( Value const& key, vector<NetworkAddress> const& coordinators, ClientData* const& clientData );
+
+Future<Void> monitorProxies( Reference<AsyncVar<Reference<ClusterConnectionFile>>> const& connFile, Reference<AsyncVar<ClientDBInfo>> const& clientInfo, Standalone<VectorRef<ClientVersionRef>> const& supportedVersions, Key const& traceLogGroup );
+
 #pragma region Implementation
 
-Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Value>> const& outSerializedLeaderInfo, Reference<AsyncVar<int>> const& connectedCoordinatorsNum  );
+Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Value>> const& outSerializedLeaderInfo );
 
 template <class LeaderInterface>
 struct LeaderDeserializer {
 	Future<Void> operator()(const Reference<AsyncVar<Value>>& serializedInfo,
 							const Reference<AsyncVar<Optional<LeaderInterface>>>& outKnownLeader) {
-		return asyncDeserialize(serializedInfo, outKnownLeader, g_network->useObjectSerializer());
+		return asyncDeserialize(serializedInfo, outKnownLeader, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
 	}
 };
 
@@ -61,11 +84,10 @@ struct LeaderDeserializer<ClusterInterface> {
 
 template <class LeaderInterface>
 Future<Void> monitorLeader(Reference<ClusterConnectionFile> const& connFile,
-						   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader,
-						   Reference<AsyncVar<int>> connectedCoordinatorsNum) {
+						   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
 	LeaderDeserializer<LeaderInterface> deserializer;
 	Reference<AsyncVar<Value>> serializedInfo( new AsyncVar<Value> );
-	Future<Void> m = monitorLeaderInternal( connFile, serializedInfo, connectedCoordinatorsNum );
+	Future<Void> m = monitorLeaderInternal( connFile, serializedInfo );
 	return m || deserializer( serializedInfo, outKnownLeader );
 }
 

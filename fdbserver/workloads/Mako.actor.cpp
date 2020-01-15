@@ -4,6 +4,7 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h"
+#include "fdbclient/zipf.h"
 
 
 enum {OP_GETREADVERSION, OP_GET, OP_GETRANGE, OP_SGET, OP_SGETRANGE, OP_UPDATE, OP_INSERT, OP_INSERTRANGE, OP_CLEAR, OP_SETCLEAR, OP_CLEARRANGE, OP_SETCLEARRANGE, OP_COMMIT, MAX_OP};
@@ -12,8 +13,8 @@ constexpr int MAXKEYVALUESIZE = 1000;
 constexpr int RANGELIMIT = 10000;
 struct MakoWorkload : TestWorkload {
 	uint64_t rowCount, seqNumLen, sampleSize, actorCountPerClient, keyBytes, maxValueBytes, minValueBytes;
-	double testDuration, loadTime, warmingDelay, maxInsertRate, transactionsPerSecond, allowedLatency, periodicLoggingInterval;
-	bool enableLogging, commitGet, populateData, runBenchmark, preserveData;
+	double testDuration, loadTime, warmingDelay, maxInsertRate, transactionsPerSecond, allowedLatency, periodicLoggingInterval, zipfConstant;
+	bool enableLogging, commitGet, populateData, runBenchmark, preserveData, zipf;
 	PerfIntCounter xacts, retries, conflicts, commits, totalOps;
 	std::vector<PerfIntCounter> opCounters;
 	std::vector<uint64_t> insertionCountsToMeasure;
@@ -57,6 +58,9 @@ struct MakoWorkload : TestWorkload {
 		// If true, record latency metrics per periodicLoggingInterval; For details, see tracePeriodically()
 		enableLogging = getOption(options, LiteralStringRef("enableLogging"), false);
 		periodicLoggingInterval = getOption( options, LiteralStringRef("periodicLoggingInterval"), 5.0 );
+		// If true, the workload will picking up keys which are zipfian distributed
+		zipf = getOption(options, LiteralStringRef("zipf"), false);
+		zipfConstant = getOption(options, LiteralStringRef("zipfConstant"), 0.99);
 		// Specified length of keys and length range of values
 		keyBytes = std::max( getOption( options, LiteralStringRef("keyBytes"), 16 ), 16);
 		maxValueBytes = getOption( options, LiteralStringRef("valueBytes"), 16 );
@@ -98,6 +102,9 @@ struct MakoWorkload : TestWorkload {
 			// initialize per-operation counter
 			opCounters.push_back(PerfIntCounter(opNames[i]));
 		}
+		if (zipf){
+			zipfian_generator3(0, (int)rowCount-1, zipfConstant);
+		}
 	}
 
 	std::string description() override {
@@ -120,6 +127,9 @@ struct MakoWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override {
 		return true;
 	}
+
+	// disable the default timeout setting
+	double getCheckTimeout() {return std::numeric_limits<double>::max();}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		// metrics of population process
@@ -289,7 +299,7 @@ struct MakoWorkload : TestWorkload {
 						range = std::min(RANGELIMIT, self->operations[i][1]);
 						rangeLen = digits(range);
 						// generate random key-val pair for operation
-						indBegin = self->getRandomKey(self->rowCount);
+						indBegin = self->getRandomKeyIndex(self->rowCount);
 						rkey = self->keyForIndex(indBegin);
 						rval = self->randomValue();
 						indEnd = std::min(indBegin + range, self->rowCount);
@@ -417,14 +427,19 @@ struct MakoWorkload : TestWorkload {
 	ACTOR template<class T>
 	static Future<Void> logLatency(Future<T> f,  ContinuousSample<double>* opLatencies){
 		state double opBegin = now();
-		T value = wait(f);
+		wait(success(f));
 		opLatencies->addSample(now() - opBegin);
 		return Void();
 	}
 
-	int64_t getRandomKey(uint64_t rowCount) {
-		// TODO: support other distribution like zipf
-		return deterministicRandom()->randomInt64(0, rowCount); 
+	int64_t getRandomKeyIndex(uint64_t rowCount) {
+		int64_t randomKeyIndex;
+		if (zipf){
+			randomKeyIndex = zipfian_next();
+		} else {
+			randomKeyIndex = deterministicRandom()->randomInt64(0, rowCount);
+		}
+		return randomKeyIndex;  
 	}
 	void parseOperationsSpec() {
 		const char *ptr = operationsSpec.c_str();

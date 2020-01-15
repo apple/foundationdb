@@ -59,8 +59,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 	netData.init();
 	if (!DEBUG_DETERMINISM && currentStats.initialized) {
 		{
-			TraceEvent e(eventName.c_str());
-			e
+			TraceEvent(eventName.c_str())
 				.detail("Elapsed", currentStats.elapsed)
 				.detail("CPUSeconds", currentStats.processCPUSeconds)
 				.detail("MainThreadCPUSeconds", currentStats.mainThreadCPUSeconds)
@@ -116,10 +115,11 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.DETAILALLOCATORMEMUSAGE(2048)
 				.DETAILALLOCATORMEMUSAGE(4096)
 				.DETAILALLOCATORMEMUSAGE(8192)
-				.detail("HugeArenaMemory", g_hugeArenaMemory);
+				.detail("HugeArenaMemory", g_hugeArenaMemory.load());
 
 			TraceEvent n("NetworkMetrics");
 			n
+				.detail("Elapsed", currentStats.elapsed)
 				.detail("CantSleep", netData.countCantSleep - statState->networkState.countCantSleep)
 				.detail("WontSleep", netData.countWontSleep - statState->networkState.countWontSleep)
 				.detail("Yields", netData.countYields - statState->networkState.countYields)
@@ -137,14 +137,31 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("WriteProbes", netData.countWriteProbes - statState->networkState.countWriteProbes)
 				.detail("PacketsRead", netData.countPacketsReceived - statState->networkState.countPacketsReceived)
 				.detail("PacketsGenerated", netData.countPacketsGenerated - statState->networkState.countPacketsGenerated)
-				.detail("WouldBlock", netData.countWouldBlock - statState->networkState.countWouldBlock);
+				.detail("WouldBlock", netData.countWouldBlock - statState->networkState.countWouldBlock)
+				.detail("LaunchTime", netData.countLaunchTime - statState->networkState.countLaunchTime)
+				.detail("ReactTime", netData.countReactTime - statState->networkState.countReactTime);
 
-			for (int i = 0; i<NetworkMetrics::SLOW_EVENT_BINS; i++)
-				if (int c = g_network->networkMetrics.countSlowEvents[i] - statState->networkMetricsState.countSlowEvents[i])
+			for (int i = 0; i<NetworkMetrics::SLOW_EVENT_BINS; i++) {
+				if (int c = g_network->networkMetrics.countSlowEvents[i] - statState->networkMetricsState.countSlowEvents[i]) {
 					n.detail(format("SlowTask%dM", 1 << i).c_str(), c);
-			for (int i = 0; i<NetworkMetrics::PRIORITY_BINS; i++)
-				if (double x = g_network->networkMetrics.secSquaredPriorityBlocked[i] - statState->networkMetricsState.secSquaredPriorityBlocked[i])
-					n.detail(format("S2Pri%d", g_network->networkMetrics.priorityBins[i]).c_str(), x);
+				}
+			}
+
+			for (int i = 0; i < NetworkMetrics::PRIORITY_BINS && g_network->networkMetrics.priorityBins[i] != TaskPriority::Zero; i++) {
+				if(g_network->networkMetrics.priorityBlocked[i]) {
+					double lastSegment = std::min(currentStats.elapsed, now() - g_network->networkMetrics.priorityTimer[i]);
+					g_network->networkMetrics.priorityBlockedDuration[i] += lastSegment;
+					g_network->networkMetrics.secSquaredPriorityBlocked[i] += lastSegment * lastSegment;
+					g_network->networkMetrics.priorityTimer[i] = now();
+				}
+
+				double blocked = g_network->networkMetrics.priorityBlockedDuration[i] - statState->networkMetricsState.priorityBlockedDuration[i];
+				double s2Blocked = g_network->networkMetrics.secSquaredPriorityBlocked[i] - statState->networkMetricsState.secSquaredPriorityBlocked[i];
+				n.detail(format("PriorityBusy%d", g_network->networkMetrics.priorityBins[i]).c_str(), blocked);
+				n.detail(format("SumOfSquaredPriorityBusy%d", g_network->networkMetrics.priorityBins[i]).c_str(), s2Blocked);
+			}
+
+			n.trackLatest("NetworkMetrics");
 		}
 
 		if(machineMetrics) {

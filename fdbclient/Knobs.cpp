@@ -42,6 +42,11 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( FAILURE_EMERGENCY_DELAY,                30.0 );
 	init( FAILURE_MAX_GENERATIONS,                  10 );
 
+	init( COORDINATOR_RECONNECTION_DELAY,          1.0 );
+	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
+	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
+	init( MAX_CLIENT_PROXY_CONNECTIONS,              5 ); if( randomize && BUGGIFY ) MAX_CLIENT_PROXY_CONNECTIONS = 1;
+
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 
 	init( WRONG_SHARD_SERVER_DELAY,                .01 ); if( randomize && BUGGIFY ) WRONG_SHARD_SERVER_DELAY = deterministicRandom()->random01(); // FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
@@ -63,8 +68,9 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
 	init( BROADCAST_BATCH_SIZE,                     20 ); if( randomize && BUGGIFY ) BROADCAST_BATCH_SIZE = 1;
+	init( TRANSACTION_TIMEOUT_DELAY_INTERVAL,     10.0 ); if( randomize && BUGGIFY ) TRANSACTION_TIMEOUT_DELAY_INTERVAL = 1.0;
 
-	init( LOCATION_CACHE_EVICTION_SIZE,         300000 );
+	init( LOCATION_CACHE_EVICTION_SIZE,         600000 );
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
@@ -92,6 +98,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( MUTATION_BLOCK_SIZE,	            	  10000 );
 
 	// TaskBucket
+	init( TASKBUCKET_LOGGING_DELAY,                5.0 );
 	init( TASKBUCKET_MAX_PRIORITY,                   1 );
 	init( TASKBUCKET_CHECK_TIMEOUT_CHANCE,        0.02 ); if( randomize && BUGGIFY ) TASKBUCKET_CHECK_TIMEOUT_CHANCE = 1.0;
 	init( TASKBUCKET_TIMEOUT_JITTER_OFFSET,        0.9 );
@@ -140,7 +147,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_ERROR_DELAY,                     10.0 );
 	init( BACKUP_STATUS_DELAY,                    40.0 );
 	init( BACKUP_STATUS_JITTER,                   0.05 );
-	init( CLEAR_LOG_RANGE_COUNT,                   1500); // transaction size / (size of '\xff\x02/blog/' + size of UID + size of hash result) = 200,000 / (8 + 16 + 8)
+	init( MIN_CLEANUP_SECONDS,                  3600.0 );
 
 	// Configuration
 	init( DEFAULT_AUTO_PROXIES,                      3 );
@@ -192,7 +199,4 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,		  50e6 ); // Limit in per sec
 	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
-
-	// TLS related
-	init( CHECK_CONNECTED_COORDINATOR_NUM_DELAY,  1.0 ); if( randomize && BUGGIFY ) CHECK_CONNECTED_COORDINATOR_NUM_DELAY =  deterministicRandom()->random01() * 60.0; // In seconds
 }

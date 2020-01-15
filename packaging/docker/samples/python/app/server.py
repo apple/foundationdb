@@ -19,10 +19,11 @@
 
 from flask import Flask
 import fdb
+import os
 
 app = Flask(__name__)
 
-fdb.api_version(510)
+fdb.api_version(int(os.getenv('FDB_API_VERSION')))
 db=fdb.open()
 
 COUNTER_KEY=fdb.tuple.pack(('counter',))

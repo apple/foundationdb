@@ -46,7 +46,7 @@ A basic interaction with the FoundationDB API is demonstrated below:
 
     func main() {
         // Different API versions may expose different runtime behaviors.
-        fdb.MustAPIVersion(610)
+        fdb.MustAPIVersion(620)
 
         // Open the default database from the system cluster
         db := fdb.MustOpenDefault()
@@ -203,7 +203,8 @@ operands to atomic operations in this API must be provided as appropriately
 encoded byte slices. To convert a Go type to a byte slice, see the binary
 package.
 
-The current atomic operations in this API are Add, BitAnd, BitOr, BitXor, Max, Min,
-SetVersionstampedKey, SetVersionstampedValue (all methods on Transaction).
+The current atomic operations in this API are Add, BitAnd, BitOr, BitXor,
+CompareAndClear, Max, Min, SetVersionstampedKey, SetVersionstampedValue
+(all methods on Transaction).
 */
 package fdb

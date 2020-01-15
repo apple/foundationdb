@@ -30,6 +30,8 @@ struct DataDistributorInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct HaltDataDistributorRequest> haltDataDistributor;
 	struct LocalityData locality;
+	RequestStream<struct DistributorSnapRequest> distributorSnapReq;
+	RequestStream<struct DistributorExclusionSafetyCheckRequest> distributorExclCheckReq;
 	RequestStream<struct GetDataDistributorMetricsRequest> dataDistributorMetrics;
 
 	DataDistributorInterface() {}
@@ -47,7 +49,7 @@ struct DataDistributorInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, haltDataDistributor, locality, dataDistributorMetrics);
+		serializer(ar, waitFailure, haltDataDistributor, locality, distributorSnapReq, distributorExclCheckReq, dataDistributorMetrics);
 	}
 };
 
@@ -89,6 +91,53 @@ struct GetDataDistributorMetricsRequest {
 	template<class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, shardLimit, reply);
+	}
+};
+
+struct DistributorSnapRequest
+{
+	constexpr static FileIdentifier file_identifier = 22204900;
+	Arena arena;
+	StringRef snapPayload;
+	UID snapUID;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	explicit DistributorSnapRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
+	explicit DistributorSnapRequest(StringRef snap, UID snapUID, Optional<UID> debugID = Optional<UID>()) : snapPayload(snap), snapUID(snapUID), debugID(debugID) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, snapPayload, snapUID, reply, arena, debugID);
+	}
+};
+
+struct DistributorExclusionSafetyCheckReply
+{
+	constexpr static FileIdentifier file_identifier = 382104712;
+	bool safe;
+
+	DistributorExclusionSafetyCheckReply() : safe(false) {}
+	explicit DistributorExclusionSafetyCheckReply(bool safe) : safe(safe) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, safe);
+	}
+};
+
+struct DistributorExclusionSafetyCheckRequest
+{
+	constexpr static FileIdentifier file_identifier = 5830931;
+	vector<AddressExclusion> exclusions;
+	ReplyPromise<DistributorExclusionSafetyCheckReply> reply;
+
+	DistributorExclusionSafetyCheckRequest() {}
+	explicit DistributorExclusionSafetyCheckRequest(vector<AddressExclusion> exclusions) : exclusions(exclusions) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, exclusions, reply);
 	}
 };
 

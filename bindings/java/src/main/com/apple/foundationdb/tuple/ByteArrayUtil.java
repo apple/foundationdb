@@ -360,6 +360,21 @@ public class ByteArrayUtil {
 	}
 
 	/**
+	 * Computes the key that would sort immediately after {@code key}.
+	 *  {@code key} must be non-null.
+	 *
+	 * @param key byte array for which next key is to be computed
+	 *
+	 * @return a newly created byte array that would sort immediately after {@code key}
+	*/
+	public static byte[] keyAfter(byte[] key) {
+		byte[] copy = new byte[key.length + 1];
+		System.arraycopy(key, 0, copy, 0, key.length);
+		copy[key.length] = 0x0;
+		return copy;
+	}
+
+	/**
 	 * Get a copy of an array, with all matching characters stripped from trailing edge.
 	 * @param input array to copy. Must not be null.
 	 * @param target byte to exclude from copy.

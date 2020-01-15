@@ -148,7 +148,7 @@ IPv6 Support
 
 FoundationDB (since v6.1) can accept network connections from clients connecting over IPv6. IPv6 address/port pair is represented as ``[IP]:PORT``, e.g. "[::1]:4800", "[abcd::dead:beef]:4500".
 
-1) The cluster file can contain mix of IPv6 and IPv6 addresses. For example::
+1) The cluster file can contain mix of IPv4 and IPv6 addresses. For example::
 
      description:ID@127.0.0.1:4500,[::1]:4500,...
 
@@ -213,6 +213,10 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
     
     If you interrupt the exclude command with Ctrl-C after seeing the "waiting for state to be removed" message, the exclusion work will continue in the background. Repeating the command will continue waiting for the exclusion to complete. To reverse the effect of the ``exclude`` command, use the ``include`` command.
 
+    Excluding a server with the ``failed`` flag will shut it down immediately; it will assume that it has already become unrecoverable or unreachable, and will not attempt to move the data on the machine away. This may break the guarantee required to maintain the configured redundancy mode, which will be checked internally, and the command may be denied if the guarantee is violated. This safety check can be ignored by using the command ``exclude FORCE failed``.
+
+    In case you want to include a new machine with the same address as a server previously marked as failed, you can allow it to join by using the ``include failed`` command.
+
 4) On each removed machine, stop the FoundationDB server and prevent it from starting at the next boot. Follow the :ref:`instructions for your platform <administration-running-foundationdb>`. For example, on Ubuntu::
 
     user@host3$ sudo service foundationdb stop
@@ -222,7 +226,7 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
 
 6) You can optionally :ref:`uninstall <administration-removing>` the FoundationDB server package entirely and/or delete database files on removed servers.
 
-7) If you ever want to add a removed machine back to the cluster, you will have to take it off the excluded servers list to which it was added in step 3. This can be done using the ``include`` command of ``fdbcli``. Typing ``exclude`` with no parameters will tell you the current list of excluded machines.
+7) If you ever want to add a removed machine back to the cluster, you will have to take it off the excluded servers list to which it was added in step 3. This can be done using the ``include`` command of ``fdbcli``. If attempting to re-include a failed server, this can be done using the ``include failed`` command of ``fdbcli``. Typing ``exclude`` with no parameters will tell you the current list of excluded and failed machines.
 
 Moving a cluster
 ================
@@ -501,14 +505,14 @@ To make configuring, starting, stopping, and restarting ``fdbserver`` processes 
 
 During normal operation, ``fdbmonitor`` is transparent, and you interact with it only by modifying the configuration in :ref:`foundationdb.conf <foundationdb-conf>` and perhaps occasionally by :ref:`starting and stopping <administration-running-foundationdb>` it manually. If some problem prevents an ``fdbserver`` or ``backup-agent`` process from starting or causes it to stop unexpectedly, ``fdbmonitor`` will log errors to the system log.
 
-If ``kill_on_configuration_change`` parameter is unset or set to ``true`` in foundationdb.conf then fdbmonitor will restart on changes automatically. If this parameter is set to ``false`` it will not restart on changes.
+If ``kill_on_configuration_change`` parameter is unset or set to ``true`` in foundationdb.conf then fdbmonitor will restart monitored processes on changes automatically. If this parameter is set to ``false`` it will not restart any monitored processes on changes.
 
 .. _administration-managing-trace-files:
 
 Managing trace files
 ====================
 
- By default, trace files are output to:
+By default, trace files are output to:
 
 * ``/var/log/foundationdb/`` on Linux
 * ``/usr/local/foundationdb/logs/`` on macOS
@@ -661,15 +665,20 @@ You can now remove old client library versions from your clients. This is only t
 Version-specific notes on upgrading
 ===================================
 
+Upgrading from 6.2.x
+--------------------
+
+Upgrades from 6.2.x will keep all your old data and configuration settings.
+
 Upgrading from 6.1.x
 --------------------
 
-Upgrades from 6.1.x will keep all your old data and configuration settings. 
+Upgrades from 6.1.x will keep all your old data and configuration settings. Data distribution will slowly reorganize how data is spread across storage servers.
 
 Upgrading from 6.0.x
 --------------------
 
-Upgrades from 6.0.x will keep all your old data and configuration settings. 
+Upgrades from 6.0.x will keep all your old data and configuration settings. Data distribution will slowly reorganize how data is spread across storage servers.
 
 Upgrading from 5.2.x
 --------------------

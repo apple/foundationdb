@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#ifndef FDBCLIENT_BackupContainer_H
+#define FDBCLIENT_BackupContainer_H
 #pragma once
 
 #include "flow/flow.h"
@@ -26,6 +28,8 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include <vector>
+
+class ReadYourWritesTransaction;
 
 Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const &v, Reference<ReadYourWritesTransaction> const &tr);
 Future<Version> timeKeeperVersionFromDatetime(std::string const &datetime, Database const &db);
@@ -69,6 +73,14 @@ struct LogFile {
 	bool operator< (const LogFile &rhs) const {
 		return beginVersion == rhs.beginVersion ? endVersion < rhs.endVersion : beginVersion < rhs.beginVersion;
 	}
+
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "beginVersion:" << std::to_string(beginVersion) << " endVersion:" << std::to_string(endVersion) <<
+		      " blockSize:" << std::to_string(blockSize) << " filename:" << fileName <<
+		      " fileSize:" << std::to_string(fileSize);
+		return ss.str();
+	}
 };
 
 struct RangeFile {
@@ -80,6 +92,13 @@ struct RangeFile {
 	// Order by version, break ties with name
 	bool operator< (const RangeFile &rhs) const {
 		return version == rhs.version ? fileName < rhs.fileName : version < rhs.version;
+	}
+
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "version:" << std::to_string(version) << " blockSize:" << std::to_string(blockSize) <<
+		      " fileName:" << fileName << " fileSize:" << std::to_string(fileSize);
+		return ss.str();
 	}
 };
 
@@ -154,7 +173,7 @@ struct RestorableFileSet {
 	Version targetVersion;
 	std::vector<LogFile> logs;
 	std::vector<RangeFile> ranges;
-	KeyspaceSnapshotFile snapshot;
+	KeyspaceSnapshotFile snapshot; // Info. for debug purposes
 };
 
 /* IBackupContainer is an interface to a set of backup data, which contains
@@ -239,3 +258,4 @@ private:
 	std::string URL;
 };
 
+#endif

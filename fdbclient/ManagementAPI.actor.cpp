@@ -67,7 +67,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
 
-		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "log_routers" || key == "satellite_logs" || key == "usable_regions" || key == "repopulate_anti_quorum") && isInteger(value) ) {
+		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "log_routers" || key == "usable_regions" || key == "repopulate_anti_quorum") && isInteger(value) ) {
 			out[p+key] = value;
 		}
 
@@ -333,7 +333,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 					if(!newConfig.isValid()) {
 						return ConfigurationResult::INVALID_CONFIGURATION;
 					}
-					
+
 					if(newConfig.tLogPolicy->attributeKeys().count("dcid") && newConfig.regions.size()>0) {
 						return ConfigurationResult::REGION_REPLICATION_MISMATCH;
 					}
@@ -423,11 +423,11 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 						for(auto& it : newConfig.regions) {
 							newDcIds.insert(it.dcId);
 						}
-						std::set<Key> missingDcIds;
+						std::set<Optional<Key>> missingDcIds;
 						for(auto& s : serverList) {
 							auto ssi = decodeServerListValue( s.value );
 							if ( !ssi.locality.dcId().present() || !newDcIds.count(ssi.locality.dcId().get()) ) {
-								missingDcIds.insert(ssi.locality.dcId().get());
+								missingDcIds.insert(ssi.locality.dcId());
 							}
 						}
 						if(missingDcIds.size() > (oldReplicationUsesDcId ? 1 : 0)) {
@@ -484,8 +484,9 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 				tr.addReadConflictRange( singleKeyRange(m.begin()->first) );
 			}
 
-			for(auto i=m.begin(); i!=m.end(); ++i)
+			for (auto i = m.begin(); i != m.end(); ++i) {
 				tr.set( StringRef(i->first), StringRef(i->second) );
+			}
 
 			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
 			tr.set( moveKeysLockOwnerKey, versionKey );
@@ -916,6 +917,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 		try {
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
+			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			Optional<Value> currentKey = wait( tr.get( coordinatorsKey ) );
 
 			if (!currentKey.present())
@@ -967,7 +969,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 			vector<Future<Optional<LeaderInfo>>> leaderServers;
 			ClientCoordinators coord( Reference<ClusterConnectionFile>( new ClusterConnectionFile( conn ) ) );
 			for( int i = 0; i < coord.clientLeaderServers.size(); i++ )
-				leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskCoordinationReply ) );
+				leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskPriority::CoordinationReply ) );
 
 			choose {
 				when( wait( waitForAll( leaderServers ) ) ) {}
@@ -1047,7 +1049,7 @@ struct AutoQuorumChange : IQuorumChange {
 		ClientCoordinators coord(ccf);
 		vector<Future<Optional<LeaderInfo>>> leaderServers;
 		for( int i = 0; i < coord.clientLeaderServers.size(); i++ )
-			leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskCoordinationReply ) );
+			leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskPriority::CoordinationReply ) );
 		Optional<vector<Optional<LeaderInfo>>> results = wait( timeout( getAll(leaderServers), CLIENT_KNOBS->IS_ACCEPTABLE_DELAY ) );
 		if (!results.present()) return false;  // Not all responded
 		for(auto& r : results.get())
@@ -1195,7 +1197,7 @@ struct AutoQuorumChange : IQuorumChange {
 };
 Reference<IQuorumChange> autoQuorumChange( int desired ) { return Reference<IQuorumChange>(new AutoQuorumChange(desired)); }
 
-ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers ) {
+ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
 	state Transaction tr(cx);
 	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
 	state std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
@@ -1206,15 +1208,18 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
+			auto serversVersionKey = failed ? failedServersVersionKey : excludedServersVersionKey;
+			tr.addReadConflictRange( singleKeyRange(serversVersionKey) ); //To conflict with parallel includeServers
+			tr.set( serversVersionKey, excludeVersionKey );
+			for(auto& s : servers) {
+				if (failed) {
+					tr.set( encodeFailedServersKey(s), StringRef() );
+				} else {
+					tr.set( encodeExcludedServersKey(s), StringRef() );
+				}
+			}
 
-			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) ); //To conflict with parallel includeServers
-			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
-			tr.set( moveKeysLockOwnerKey, versionKey );
-			tr.set( excludedServersVersionKey, excludeVersionKey );
-			for(auto& s : servers)
-				tr.set( encodeExcludedServersKey(s), StringRef() );
-
-			TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers));
+			TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers)).detail("ExcludeFailed", failed);
 
 			wait( tr.commit() );
 			return Void();
@@ -1224,12 +1229,9 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 	}
 }
 
-ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers ) {
-	state bool includeAll = false;
+ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
 	state Transaction tr(cx);
-	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
-	state std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
-
+	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
@@ -1239,16 +1241,21 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 
 			// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
 			tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
-			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) );
-			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
-
-			tr.set( moveKeysLockOwnerKey, versionKey );
-			tr.set( excludedServersVersionKey, excludeVersionKey );
+			if (failed) {
+				tr.addReadConflictRange(singleKeyRange(failedServersVersionKey));
+				tr.set(failedServersVersionKey, versionKey);
+			} else {
+				tr.addReadConflictRange(singleKeyRange(excludedServersVersionKey));
+				tr.set(excludedServersVersionKey, versionKey);
+			}
 
 			for(auto& s : servers ) {
 				if (!s.isValid()) {
-					tr.clear( excludedServersKeys );
-					includeAll = true;
+					if (failed) {
+						tr.clear(failedServersKeys);
+					} else {
+						tr.clear(excludedServersKeys);
+					}
 				} else if (s.isWholeMachine()) {
 					// Eliminate both any ip-level exclusion (1.2.3.4) and any
 					// port-level exclusions (1.2.3.4:5)
@@ -1258,15 +1265,19 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 					//
 					// This is why we now make two clears: first only of the ip
 					// address, the second will delete all ports.
-					auto addr = encodeExcludedServersKey(s);
+					auto addr = failed ? encodeFailedServersKey(s) : encodeExcludedServersKey(s);
 					tr.clear(singleKeyRange(addr));
 					tr.clear(KeyRangeRef(addr + ':', addr + char(':' + 1)));
 				} else {
-					tr.clear( encodeExcludedServersKey(s) );
+					if (failed) {
+						tr.clear(encodeFailedServersKey(s));
+					} else {
+						tr.clear(encodeExcludedServersKey(s));
+					}
 				}
 			}
 
-			TraceEvent("IncludeServersCommit").detail("Servers", describe(servers));
+			TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
 
 			wait( tr.commit() );
 			return Void();
@@ -1312,8 +1323,10 @@ ACTOR Future<Void> setClass( Database cx, AddressExclusion server, ProcessClass 
 }
 
 ACTOR static Future<vector<AddressExclusion>> getExcludedServers( Transaction* tr ) {
-	Standalone<RangeResultRef> r = wait( tr->getRange( excludedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
+	state Standalone<RangeResultRef> r = wait( tr->getRange( excludedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
 	ASSERT( !r.more && r.size() < CLIENT_KNOBS->TOO_MANY );
+	state Standalone<RangeResultRef> r2 = wait( tr->getRange( failedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
+	ASSERT( !r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY );
 
 	vector<AddressExclusion> exclusions;
 	for(auto i = r.begin(); i != r.end(); ++i) {
@@ -1321,6 +1334,12 @@ ACTOR static Future<vector<AddressExclusion>> getExcludedServers( Transaction* t
 		if (a.isValid())
 			exclusions.push_back( a );
 	}
+	for(auto i = r2.begin(); i != r2.end(); ++i) {
+		auto a = decodeFailedServersKey( i->key );
+		if (a.isValid())
+			exclusions.push_back( a );
+	}
+	uniquify(exclusions);
 	return exclusions;
 }
 
@@ -1345,7 +1364,10 @@ ACTOR Future<Void> printHealthyZone( Database cx ) {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> val = wait( tr.get(healthyZoneKey) );
-			if(!val.present() || decodeHealthyZoneValue(val.get()).second <= tr.getReadVersion().get()) {
+			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
+				printf("Data distribution has been disabled for all storage server failures in this cluster and thus "
+				       "maintenance mode is not active.\n");
+			} else if(!val.present() || decodeHealthyZoneValue(val.get()).second <= tr.getReadVersion().get()) {
 				printf("No ongoing maintenance.\n");
 			} else {
 				auto healthyZone = decodeHealthyZoneValue(val.get());
@@ -1358,30 +1380,68 @@ ACTOR Future<Void> printHealthyZone( Database cx ) {
 	}
 }
 
-ACTOR Future<Void> clearHealthyZone( Database cx ) {
+ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning, bool clearSSFailureZoneString) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Optional<Value> val = wait(tr.get(healthyZoneKey));
+			if (!clearSSFailureZoneString && val.present() &&
+			    decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
+				if (printWarning) {
+					printf("ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
+					       "server failures. Use 'datadistribution on' to reenable data distribution.\n");
+				}
+				return false;
+			}
+
 			tr.clear(healthyZoneKey);
 			wait(tr.commit());
-			return Void();
+			return true;
 		} catch( Error &e ) {
 			wait(tr.onError(e));
 		}
 	}
 }
 
-ACTOR Future<Void> setHealthyZone( Database cx, StringRef zoneId, double seconds ) {
+ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Optional<Value> val = wait(tr.get(healthyZoneKey));
+			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
+				if (printWarning) {
+					printf("ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
+					       "server failures. Use 'datadistribution on' to reenable data distribution.\n");
+				}
+				return false;
+			}
 			Version readVersion = wait(tr.getReadVersion());
 			tr.set(healthyZoneKey, healthyZoneValue(zoneId, readVersion + (seconds*CLIENT_KNOBS->CORE_VERSIONSPERSECOND)));
 			wait(tr.commit());
-			return Void();
+			return true;
 		} catch( Error &e ) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Database cx, bool ignoreRebalance) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			if (ignoreRebalance) {
+				tr.set(rebalanceDDIgnoreKey, LiteralStringRef("on"));
+			} else {
+				tr.clear(rebalanceDDIgnoreKey);
+			}
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
@@ -1403,14 +1463,24 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 					rd >> oldMode;
 				}
 			}
-			if (!mode) {
-				BinaryWriter wrMyOwner(Unversioned());
-				wrMyOwner << dataDistributionModeLock;
-				tr.set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
-			}
+			BinaryWriter wrMyOwner(Unversioned());
+			wrMyOwner << dataDistributionModeLock;
+			tr.set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
+			BinaryWriter wrLastWrite(Unversioned());
+			wrLastWrite << deterministicRandom()->randomUniqueID();
+			tr.set( moveKeysLockWriteKey, wrLastWrite.toValue() );
 
 			tr.set( dataDistributionModeKey, wr.toValue() );
-
+			if (mode) {
+				// set DDMode to 1 will enable all disabled parts, for instance the SS failure monitors.
+				Optional<Value> currentHealthyZoneValue = wait(tr.get(healthyZoneKey));
+				if (currentHealthyZoneValue.present() &&
+				    decodeHealthyZoneValue(currentHealthyZoneValue.get()).first == ignoreSSFailuresZoneString) {
+					// only clear the key if it is currently being used to disable all SS failure data movement
+					tr.clear(healthyZoneKey);
+				}
+				tr.clear(rebalanceDDIgnoreKey);
+			}
 			wait( tr.commit() );
 			return oldMode;
 		} catch (Error& e) {
@@ -1420,13 +1490,16 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 	}
 }
 
-ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion> excl ) {
+ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vector<AddressExclusion> excl,
+                                                                bool waitForAllExcluded) {
 	state std::set<AddressExclusion> exclusions( excl.begin(), excl.end() );
+	state std::set<NetworkAddress> inProgressExclusion;
 
-	if (!excl.size()) return Void();
+	if (!excl.size()) return inProgressExclusion;
 
 	loop {
 		state Transaction tr(cx);
+
 		try {
 			tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );  // necessary?
@@ -1439,11 +1512,12 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 			ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
 
 			state bool ok = true;
+			inProgressExclusion.clear();
 			for(auto& s : serverList) {
 				auto addr = decodeServerListValue( s.value ).address();
 				if ( addressExcluded(exclusions, addr) ) {
 					ok = false;
-					break;
+					inProgressExclusion.insert(addr);
 				}
 			}
 
@@ -1454,47 +1528,38 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 				for( auto const& log : logs.first ) {
 					if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
 						ok = false;
-						break;
+						inProgressExclusion.insert(log.second);
 					}
 				}
 				for( auto const& log : logs.second ) {
 					if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
 						ok = false;
-						break;
+						inProgressExclusion.insert(log.second);
 					}
 				}
 			}
 
-			if (ok) return Void();
+			if (ok) return inProgressExclusion;
+			if (!waitForAllExcluded) break;
 
 			wait( delayJittered( 1.0 ) );  // SOMEDAY: watches!
 		} catch (Error& e) {
 			wait( tr.onError(e) );
 		}
 	}
+
+	return inProgressExclusion;
 }
 
-ACTOR Future<Void> mgmtSnapCreate(Database cx, StringRef snapCmd) {
-	state int retryCount = 0;
-
-	loop {
-		state UID snapUID = deterministicRandom()->randomUniqueID();
-		try {
-			wait(snapCreate(cx, snapCmd, snapUID));
-			printf("Snapshots tagged with UID: %s, check logs for status\n", snapUID.toString().c_str());
-			TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
-			break;
-		} catch (Error& e) {
-			++retryCount;
-			TraceEvent(retryCount > 3 ? SevWarn : SevInfo, "SnapCreateFailed").error(e);
-			if (retryCount > 3) {
-				fprintf(stderr, "Snapshot create failed, %d (%s)."
-						" Please cleanup any instance level snapshots created.\n", e.code(), e.what());
-				throw;
-			}
-		}
+ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
+	try {
+		wait(snapCreate(cx, snapCmd, snapUID));
+		TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
+		return Void();
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "SnapCreateFailed").detail("snapUID", snapUID).error(e);
+		throw;
 	}
-	return Void();
 }
 
 ACTOR Future<Void> waitForFullReplication( Database cx ) {

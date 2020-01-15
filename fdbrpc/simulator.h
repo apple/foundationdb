@@ -98,6 +98,7 @@ public:
 				case ProcessClass::ClusterControllerClass: return false;
 				case ProcessClass::DataDistributorClass: return false;
 				case ProcessClass::RatekeeperClass: return false;
+				case ProcessClass::StorageCacheClass: return false;
 				default: return false;
 			}
 		}
@@ -137,8 +138,8 @@ public:
 
 	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
 	ProcessInfo* getCurrentProcess() { return currentProcess; }
-	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
-	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
+	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, TaskPriority taskID = TaskPriority::Zero ) = 0;
+	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, TaskPriority taskID = TaskPriority::Zero ) = 0;
 
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
@@ -155,7 +156,6 @@ public:
 	virtual bool isAvailable() const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
-	virtual bool useObjectSerializer() const = 0;
 
 	virtual void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role] ++;
@@ -311,8 +311,18 @@ public:
 	virtual flowGlobalType global(int id) { return getCurrentProcess()->global(id); };
 	virtual void setGlobal(size_t id, flowGlobalType v) { getCurrentProcess()->setGlobal(id,v); };
 
-	Future<Void> checkDisabled(const std::string& desc) const;
-	void disableFor(const std::string& desc, double time);
+	virtual void disableFor(const std::string& desc, double time) {
+		disabledMap[desc] = time;
+	}
+
+	virtual double checkDisabled(const std::string& desc) const
+	{
+		auto iter = disabledMap.find(desc);
+		if (iter != disabledMap.end()) {
+			return iter->second;
+		}
+		return 0;
+	}
 
 	static thread_local ProcessInfo* currentProcess;
 protected:
@@ -323,7 +333,7 @@ private:
 	std::map<NetworkAddress, int> excludedAddresses;
 	std::map<NetworkAddress, int> clearedAddresses;
 	std::map<NetworkAddress, std::map<std::string, int>> roleAddresses;
-	std::map<std::string, Future<Void>> disabledMap;
+	std::map<std::string, double> disabledMap;
 	bool allSwapsDisabled;
 };
 
@@ -331,7 +341,7 @@ private:
 extern ISimulator* g_pSimulator;
 #define g_simulator (*g_pSimulator)
 
-void startNewSimulator(bool useObjectSerializer);
+void startNewSimulator();
 
 //Parameters used to simulate disk performance
 struct DiskParameters : ReferenceCounted<DiskParameters> {
