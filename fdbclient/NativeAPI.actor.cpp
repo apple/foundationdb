@@ -3197,14 +3197,11 @@ ACTOR Future<Void> trackBoundedStorageMetrics(
 	}
 }
 
-ACTOR Future< StorageMetrics > waitStorageMetricsMultipleLocations(
-	vector< pair<KeyRange,Reference<LocationInfo>> > locations,
-	StorageMetrics min,
-	StorageMetrics max,
-	StorageMetrics permittedError)
-{
+ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(
+    vector<pair<KeyRange, Reference<LocationInfo>>> locations, StorageMetrics min, StorageMetrics max,
+    StorageMetrics permittedError, bool largeKeyRange, Database cx) {
 	state int nLocs = locations.size();
-	state vector<Future<StorageMetrics>> fx( nLocs );
+	state vector<Future<StorageMetrics>> fx(largeKeyRange ? nLocs * 2 : nLocs);
 	state StorageMetrics total;
 	state PromiseStream<StorageMetrics> deltas;
 	state vector<Future<Void>> wx( fx.size() );
@@ -3212,17 +3209,57 @@ ACTOR Future< StorageMetrics > waitStorageMetricsMultipleLocations(
 	state StorageMetrics maxPlus = max + halfErrorPerMachine * (nLocs-1);
 	state StorageMetrics minMinus = min - halfErrorPerMachine * (nLocs-1);
 
-	for(int i=0; i<nLocs; i++) {
-		WaitMetricsRequest req(locations[i].first, StorageMetrics(), StorageMetrics());
-		req.min.bytes = 0;
-		req.max.bytes = -1;
-		fx[i] = loadBalance( locations[i].second, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution );
-	}
-	wait( waitForAll(fx) );
+	state int i = 0;
+	if (largeKeyRange) {
+		// The caller wish to query a huge key-range, could be as large as the whole DB, and thus we do not want to
+		// re-call the API for all locations when the key-range got moved.
+		for (; i < nLocs; i++) {
+			WaitMetricsRequest req(locations[i].first, StorageMetrics(), StorageMetrics());
+			req.min.bytes = 0;
+			req.max.bytes = -1;
+			try {
+				fx[i] = loadBalance(locations[i].second, &StorageServerInterface::waitMetrics, req,
+				                    TaskPriority::DataDistribution);
+				StorageMetrics tmp = wait(fx[i]);
+				total += tmp;
+				if (i > 0 && i % 100 == 0) {
+					wait(yield(TaskPriority::DataDistribution));
+				}
+			} catch (Error& e) {
+				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+					TraceEvent(SevError, "WaitStorageMetricsLargeKeyRangeError").error(e);
+					throw;
+				}
+				// This key-range got moved by DD during the process. Need to find out its new location(s)
+				cx->invalidateCache(locations[i].first);
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+				vector<pair<KeyRange, Reference<LocationInfo>>> newLocations =
+				    wait(getKeyRangeLocations(cx, locations[i].first, -1, false, &StorageServerInterface::waitMetrics,
+				                              TransactionInfo(TaskPriority::DataDistribution)));
+				for (auto& l : newLocations) {
+					locations.push_back(l);
+				}
+				nLocs = locations.size();
+				// Consider we already reserved the size of these two vectors to be twice the size of the locations,
+				// the following operations should be fairly cheap unless there are tons of DD going on across the whole
+				// DB's key range, which should be rare.
+				fx.resize(nLocs);
+				wx.resize(nLocs);
+			}
+		}
+	} else {
+		for (; i < nLocs; i++) {
+			WaitMetricsRequest req(locations[i].first, StorageMetrics(), StorageMetrics());
+			req.min.bytes = 0;
+			req.max.bytes = -1;
+			fx[i] = loadBalance(locations[i].second, &StorageServerInterface::waitMetrics, req,
+			                    TaskPriority::DataDistribution);
+		}
+		wait(waitForAll(fx));
 
-	// invariant: true total is between (total-permittedError/2, total+permittedError/2)
-	for(int i=0; i<nLocs; i++)
-		total += fx[i].get();
+		// invariant: true total is between (total-permittedError/2, total+permittedError/2)
+		for (int i = 0; i < nLocs; i++) total += fx[i].get();
+	}
 
 	if (!total.allLessOrEqual( maxPlus )) return total;
 	if (!minMinus.allLessOrEqual( total )) return total;
@@ -3263,7 +3300,7 @@ ACTOR Future< std::pair<Optional<StorageMetrics>, int> > waitStorageMetrics(
 			try {
 				Future<StorageMetrics> fx;
 				if (locations.size() > 1) {
-					fx = waitStorageMetricsMultipleLocations( locations, min, max, permittedError );
+					fx = waitStorageMetricsMultipleLocations(locations, min, max, permittedError, shardLimit == -1, cx);
 				} else {
 					WaitMetricsRequest req( keys, min, max );
 					fx = loadBalance( locations[0].second, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution );
