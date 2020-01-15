@@ -134,8 +134,8 @@ function(strip_debug_symbols target)
   set(out_files "${out_file}")
   if(is_exec AND NOT APPLE)
   add_custom_command(OUTPUT "${out_file}.debug"
-    COMMAND objcopy --verbose --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug" &> "${out_file}.objcopy1"
-    COMMAND objcopy --verbose --add-gnu-debuglink="${out_file}.debug" "${out_file}" &> "${out_file}.objcopy2"
+    COMMAND objcopy --verbose --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug"
+    COMMAND objcopy --verbose --add-gnu-debuglink="${out_file}.debug" "${out_file}"
     COMMENT "Copy debug symbols to ${out_name}.debug")
     list(APPEND out_files "${out_file}.debug")
   endif()
