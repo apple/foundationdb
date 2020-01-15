@@ -504,7 +504,7 @@ struct StorageServerMetrics {
 		std::vector<KeyRangeRef> v = getReadHotRanges(req.keys, SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO,
 		                                              SERVER_KNOBS->READ_HOT_SUB_RANGE_CHUNK_SIZE,
 		                                              SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS);
-		reply.readHotRanges = VectorRef<KeyRangeRef>(v.begin().base(), v.size());
+		reply.readHotRanges = VectorRef<KeyRangeRef>(v.data(), v.size());
 		req.reply.send(reply);
 	}
 
