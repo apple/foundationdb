@@ -3359,9 +3359,18 @@ ACTOR Future<Void> waitMetrics( StorageServerMetrics* self, WaitMetricsRequest r
 				break;
 			}
 
-			if ( timedout || !req.min.allLessOrEqual( metrics ) || !metrics.allLessOrEqual( req.max ) ) {
-				TEST( !timedout ); // ShardWaitMetrics return case 2 (delayed)
-				TEST( timedout ); // ShardWaitMetrics return on timeout
+			if( timedout ) {
+				TEST( true ); // ShardWaitMetrics return on timeout
+				if(deterministicRandom()->random01() < SERVER_KNOBS->WAIT_METRICS_WRONG_SHARD_CHANCE) {
+					req.reply.sendError( wrong_shard_server() );
+				} else {
+					req.reply.send( metrics );
+				}
+				break;
+			}
+
+			if ( !req.min.allLessOrEqual( metrics ) || !metrics.allLessOrEqual( req.max ) ) {
+				TEST( true ); // ShardWaitMetrics return case 2 (delayed)
 				req.reply.send( metrics );
 				break;
 			}
