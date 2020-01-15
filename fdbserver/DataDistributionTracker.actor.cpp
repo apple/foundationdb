@@ -419,7 +419,7 @@ ACTOR Future<Void> shardSplitter(
 	return Void();
 }
 
-ACTOR Future<Void> BrokenPromiseToReady( Future<Void> f ) {
+ACTOR Future<Void> brokenPromiseToReady( Future<Void> f ) {
 	try {
 		wait(f);
 	} catch( Error &e ) {
@@ -482,7 +482,7 @@ Future<Void> shardMerger(
 			if( !newMetrics.present() || shardCount + newMetrics.get().shardCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT ) {
 				if( shardsMerged == 1 ) {
 					TEST( true ); // shardMerger cannot merge anything
-					return BrokenPromiseToReady( prevIter->value().stats->onChange() );
+					return brokenPromiseToReady( prevIter->value().stats->onChange() );
 				}
 
 				++prevIter;
