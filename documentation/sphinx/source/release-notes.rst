@@ -2,6 +2,15 @@
 Release Notes
 #############
 
+6.2.13
+======
+
+Performance
+-----------
+
+* Optimized the commit path the proxies to significantly reduce commit latencies in large clusters. `(PR #2536) <https://github.com/apple/foundationdb/pull/2536>`_.
+* Data distribution could create temporarily untrackable shards which could not be split if they became hot. `(PR #2546) <https://github.com/apple/foundationdb/pull/2546>`_.
+
 6.2.12
 ======
 

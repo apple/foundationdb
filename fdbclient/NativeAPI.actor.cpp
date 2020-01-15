@@ -3230,16 +3230,25 @@ ACTOR Future< StorageMetrics > waitStorageMetricsMultipleLocations(
 	}
 }
 
-ACTOR Future< StorageMetrics > waitStorageMetrics(
+ACTOR Future< StorageMetrics > extractMetrics( Future<std::pair<Optional<StorageMetrics>, int>> fMetrics ) {
+	std::pair<Optional<StorageMetrics>, int> x = wait(fMetrics);
+	return x.first.get();
+}
+	
+ACTOR Future< std::pair<Optional<StorageMetrics>, int> > waitStorageMetrics(
 	Database cx,
 	KeyRange keys,
 	StorageMetrics min,
 	StorageMetrics max,
 	StorageMetrics permittedError,
-	int shardLimit )
+	int shardLimit,
+	int expectedShardCount )
 {
 	loop {
 		vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, shardLimit, false, &StorageServerInterface::waitMetrics, TransactionInfo(TaskPriority::DataDistribution) ) );
+		if(expectedShardCount >= 0 && locations.size() != expectedShardCount) {
+			return std::make_pair(Optional<StorageMetrics>(), locations.size());
+		}
 
 		//SOMEDAY: Right now, if there are too many shards we delay and check again later. There may be a better solution to this.
 		if(locations.size() < shardLimit) {
@@ -3252,7 +3261,7 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 					fx = loadBalance( locations[0].second, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution );
 				}
 				StorageMetrics x = wait(fx);
-				return x;
+				return std::make_pair(x,-1);
 			} catch (Error& e) {
 				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
 					TraceEvent(SevError, "WaitStorageMetricsError").error(e);
@@ -3273,20 +3282,21 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 	}
 }
 
-Future< StorageMetrics > Transaction::waitStorageMetrics(
+Future< std::pair<Optional<StorageMetrics>, int> > Transaction::waitStorageMetrics(
 	KeyRange const& keys,
 	StorageMetrics const& min,
 	StorageMetrics const& max,
 	StorageMetrics const& permittedError,
-	int shardLimit )
+	int shardLimit,
+	int expectedShardCount )
 {
-	return ::waitStorageMetrics( cx, keys, min, max, permittedError, shardLimit );
+	return ::waitStorageMetrics( cx, keys, min, max, permittedError, shardLimit, expectedShardCount );
 }
 
 Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, int shardLimit ) {
 	StorageMetrics m;
 	m.bytes = -1;
-	return ::waitStorageMetrics( cx, keys, StorageMetrics(), m, StorageMetrics(), shardLimit );
+	return extractMetrics( ::waitStorageMetrics( cx, keys, StorageMetrics(), m, StorageMetrics(), shardLimit, -1 ) );
 }
 
 ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, KeyRange keys, StorageMetrics limit, StorageMetrics estimated )

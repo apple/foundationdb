@@ -282,13 +282,11 @@ struct GetShardStateRequest {
 
 struct StorageMetrics {
 	constexpr static FileIdentifier file_identifier = 13622226;
-	int64_t bytes;				// total storage
-	int64_t bytesPerKSecond;	// network bandwidth (average over 10s)
-	int64_t iosPerKSecond;
+	int64_t bytes = 0;				// total storage
+	int64_t bytesPerKSecond = 0;	// network bandwidth (average over 10s)
+	int64_t iosPerKSecond = 0;
 
 	static const int64_t infinity = 1LL<<60;
-
-	StorageMetrics() : bytes(0), bytesPerKSecond(0), iosPerKSecond(0) {}
 
 	bool allLessOrEqual( const StorageMetrics& rhs ) const {
 		return bytes <= rhs.bytes && bytesPerKSecond <= rhs.bytesPerKSecond && iosPerKSecond <= rhs.iosPerKSecond;

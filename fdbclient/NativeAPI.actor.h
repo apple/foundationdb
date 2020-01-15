@@ -237,7 +237,7 @@ public:
 
 	Future< Void > warmRange( Database cx, KeyRange keys );
 
-	Future< StorageMetrics > waitStorageMetrics( KeyRange const& keys, StorageMetrics const& min, StorageMetrics const& max, StorageMetrics const& permittedError, int shardLimit );
+	Future< std::pair<Optional<StorageMetrics>, int> > waitStorageMetrics( KeyRange const& keys, StorageMetrics const& min, StorageMetrics const& max, StorageMetrics const& permittedError, int shardLimit, int expectedShardCount );
 	Future< StorageMetrics > getStorageMetrics( KeyRange const& keys, int shardLimit );
 	Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( KeyRange const& keys, StorageMetrics const& limit, StorageMetrics const& estimated );
 
