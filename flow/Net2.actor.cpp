@@ -688,7 +688,7 @@ void Net2::run() {
 		FDB_TRACE_PROBE(run_loop_done, queueSize);
 
 #if defined(__linux__)
-		if(FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
+		if(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0) {
 			sigset_t orig_set;
 			pthread_sigmask(SIG_BLOCK, &sigprof_set, &orig_set);
 
