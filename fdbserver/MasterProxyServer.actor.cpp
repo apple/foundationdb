@@ -1040,7 +1040,7 @@ ACTOR Future<Void> commitBatch(
 						conflictingEntryIds.push_back(conflictingEntryIds.arena(), rCRIndex);
 					}
 				}
-				// At least one keyRange should be returned
+				// At least one keyRange index should be returned
 				ASSERT(conflictingEntryIds.size());
 				trs[t].reply.send(CommitID(invalidVersion, t, Optional<Value>(), Optional<Standalone<VectorRef<int>>>(conflictingEntryIds)));
 			} else {
