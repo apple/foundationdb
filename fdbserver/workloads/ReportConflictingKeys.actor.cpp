@@ -192,13 +192,13 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 						ASSERT(startKey.value == conflictingKeysTrue);
 						KeyValueRef endKey = conflictingKeyRanges[i+1];
 						ASSERT(endKey.value ==  conflictingKeysFalse);
-						KeyRange kr = KeyRangeRef(startKey.key, endKey.key);
+						KeyRangeRef kr = KeyRangeRef(startKey.key, endKey.key);
 						if (!std::any_of(readConflictRanges.begin(), readConflictRanges.end(), [&kr](KeyRange rCR) {
 								// Read_conflict_range remains same in the resolver.
 								// Thus, the returned keyrange is either the original read_conflict_range or merged
 								// by several overlapped ones In either case, it contains at least one original
 								// read_conflict_range
-								return kr.intersects(rCR);
+								return kr.contains(rCR);
 							})) {
 							++self->invalidReports;
 							TraceEvent(SevError, "TestFailure").detail("Reason", "InvalidKeyRangeReturned");

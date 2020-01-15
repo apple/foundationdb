@@ -1034,20 +1034,15 @@ ACTOR Future<Void> commitBatch(
 		else {
 			// If enable the option to report conflicting keys from resolvers, we union all conflicting key ranges here and send back through CommitID
 			if (trs[t].transaction.report_conflicting_keys) {
-				Standalone<VectorRef<KeyRangeRef>> conflictingEntries;
-				int conflictingKeyRangeNum = 0;
+				Standalone<VectorRef<int>> conflictingEntryIds;
 				for (int resolverInd : transactionResolverMap[t]) {
-					conflictingKeyRangeNum += resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]].size();
-				}
-				conflictingEntries.reserve(conflictingEntries.arena(), conflictingKeyRangeNum);
-				for (int resolverInd : transactionResolverMap[t]) {
-					for (const KeyRangeRef & kr : resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]]){
-						conflictingEntries.push_back(conflictingEntries.arena(), kr);
+					for (auto const & rCRIndex : resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]]){
+						conflictingEntryIds.push_back(conflictingEntryIds.arena(), rCRIndex);
 					}
 				}
 				// At least one keyRange should be returned
-				ASSERT(conflictingEntries.size());
-				trs[t].reply.send(CommitID(invalidVersion, t, Optional<Value>(), Optional<Standalone<VectorRef<KeyRangeRef>>>(conflictingEntries.contents())));
+				ASSERT(conflictingEntryIds.size());
+				trs[t].reply.send(CommitID(invalidVersion, t, Optional<Value>(), Optional<Standalone<VectorRef<int>>>(conflictingEntryIds)));
 			} else {
 				trs[t].reply.sendError(not_committed());
 			}
