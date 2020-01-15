@@ -304,7 +304,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<RestoreMasterData> self, 
 		ASSERT_WE_THINK(param.asset.offset <= file.fileSize);
 		ASSERT_WE_THINK(param.asset.beginVersion <= param.asset.endVersion);
 
-		requests.emplace_back(loader->first, RestoreLoadFileRequest(param));
+		requests.emplace_back(loader->first, RestoreLoadFileRequest(self->batchIndex, param));
 		loader++;
 	}
 

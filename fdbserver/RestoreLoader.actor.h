@@ -42,8 +42,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-
-struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoaderData> {
+struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	std::map<LoadingParam, Future<Void>> processedFileParams;
 	std::map<LoadingParam, VersionedMutationsMap> kvOpsPerLP; // Buffered kvOps for each loading param
 
@@ -54,6 +53,19 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	// Sampled mutations to be sent back to restore master
 	std::map<LoadingParam, MutationsVec> sampleMutations;
 	int numSampledMutations; // The total number of mutations received from sampled data.
+
+	void reset() {
+		processedFileParams.clear();
+		kvOpsPerLP.clear();
+		sampleMutations.clear();
+		numSampledMutations = 0;
+		rangeToApplier.clear();
+	}
+};
+
+struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoaderData> {
+	// buffered data per version batch
+	std::map<int, Reference<LoaderBatchData>> batch;
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
@@ -78,22 +90,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	void resetPerVersionBatch(int batchIndex) {
 		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnLoader", nodeID);
-		rangeToApplier.clear();
-		numSampledMutations = 0;
-		processedFileParams.clear();
-		kvOpsPerLP.clear();
-		sampleMutations.clear();
-	}
-
-	// Only get the appliers that are responsible for a range
-	std::vector<UID> getWorkingApplierIDs() {
-		std::vector<UID> applierIDs;
-		for (auto& applier : rangeToApplier) {
-			applierIDs.push_back(applier.second);
-		}
-
-		ASSERT(!applierIDs.empty());
-		return applierIDs;
+		batch[batchIndex] = Reference<LoaderBatchData>(new LoaderBatchData());
 	}
 
 	void initBackupContainer(Key url) {

@@ -337,6 +337,7 @@ struct RestoreRecruitRoleRequest : TimedRequest {
 	std::string toString() { return printable(); }
 };
 
+// Static info. across version batches
 struct RestoreSysInfoRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 75960741;
 
@@ -384,21 +385,22 @@ struct RestoreLoadFileReply : TimedRequest {
 struct RestoreLoadFileRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 26557364;
 
+	int batchIndex;
 	LoadingParam param;
 
 	ReplyPromise<RestoreLoadFileReply> reply;
 
 	RestoreLoadFileRequest() = default;
-	explicit RestoreLoadFileRequest(LoadingParam& param) : param(param){};
+	explicit RestoreLoadFileRequest(int batchIndex, LoadingParam& param) : batchIndex(batchIndex), param(param){};
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, param, reply);
+		serializer(ar, batchIndex, param, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreLoadFileRequest param:" << param.toString();
+		ss << "RestoreLoadFileRequest batchIndex:" << batchIndex << " param:" << param.toString();
 		return ss.str();
 	}
 };
