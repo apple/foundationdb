@@ -594,6 +594,7 @@ void Net2::run() {
 			trackMinPriority(TaskPriority::RunCycleFunction, taskBegin);
 			runFunc();
 			double taskEnd = timer_monotonic();
+			trackMinPriority(TaskPriority::RunLoop, taskEnd);
 			countLaunchTime += taskEnd - taskBegin;
 			checkForSlowTask(tsc_begin, __rdtsc(), taskEnd - taskBegin, TaskPriority::RunCycleFunction);
 		}
@@ -627,6 +628,7 @@ void Net2::run() {
 		
 		updateNow();
 		double now = this->currentTime;
+		trackMinPriority(TaskPriority::RunLoop, now);
 
 		countReactTime += now - taskBegin;
 		checkForSlowTask(tsc_begin, __rdtsc(), now - taskBegin, TaskPriority::ASIOReactor);
@@ -657,8 +659,11 @@ void Net2::run() {
 		while (!ready.empty()) {
 			++countTasks;
 			currentTaskID = ready.top().taskID;
+			if(currentTaskID < minTaskID) {
+				trackMinPriority(currentTaskID, taskBegin);
+				minTaskID = currentTaskID;
+			}
 			priorityMetric = static_cast<int64_t>(currentTaskID);
-			minTaskID = std::min(minTaskID, currentTaskID);
 			Task* task = ready.top().task;
 			ready.pop();
 
@@ -673,16 +678,17 @@ void Net2::run() {
 			if (check_yield(TaskPriority::Max, true)) {
 				FDB_TRACE_PROBE(run_loop_yield);
 				++countYields;
-                break;
+				break;
 			}
 		}
+
+		trackMinPriority(TaskPriority::RunLoop, taskBegin);
+
 		queueSize = ready.size();
 		FDB_TRACE_PROBE(run_loop_done, queueSize);
 
-		trackMinPriority(minTaskID, now);
-
 #if defined(__linux__)
-		if(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0) {
+		if(FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
 			sigset_t orig_set;
 			pthread_sigmask(SIG_BLOCK, &sigprof_set, &orig_set);
 
@@ -799,6 +805,14 @@ bool Net2::check_yield( TaskPriority taskID, bool isRunLoop ) {
 		return true;
 	}
 
+	// SOMEDAY: Yield if there are lots of higher priority tasks queued?
+	int64_t tsc_now = __rdtsc();
+	if(isRunLoop) {
+		double newTaskBegin = timer_monotonic();
+		checkForSlowTask(tsc_begin, tsc_now, newTaskBegin-taskBegin, currentTaskID);
+		taskBegin = newTaskBegin;
+	}
+
 	if ((g_stackYieldLimit) && ( (intptr_t)&taskID < g_stackYieldLimit )) {
 		++countYieldBigStack;
 		return true;
@@ -811,15 +825,8 @@ bool Net2::check_yield( TaskPriority taskID, bool isRunLoop ) {
 		return true;
 	}
 
-	// SOMEDAY: Yield if there are lots of higher priority tasks queued?
-	int64_t tsc_now = __rdtsc();
-	double newTaskBegin = timer_monotonic();
 	if (tsc_now < tsc_begin) {
 		return true;
-	}
-
-	if(isRunLoop) {
-		checkForSlowTask(tsc_begin, tsc_now, newTaskBegin-taskBegin, currentTaskID);
 	}
 
 	if (tsc_now > tsc_end) {
@@ -827,8 +834,8 @@ bool Net2::check_yield( TaskPriority taskID, bool isRunLoop ) {
 		return true;
 	}
 
-	taskBegin = newTaskBegin;
 	tsc_begin = tsc_now;
+
 	return false;
 }
 
