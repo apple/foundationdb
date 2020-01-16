@@ -108,6 +108,7 @@ module FDB
       attach_function :fdb_transaction_get, [ :pointer, :pointer, :int, :int ], :pointer
       attach_function :fdb_transaction_get_key, [ :pointer, :pointer, :int, :int, :int, :int ], :pointer
       attach_function :fdb_transaction_get_range, [ :pointer, :pointer, :int, :int, :int, :pointer, :int, :int, :int, :int, :int, :int, :int, :int, :int ], :pointer
+      attach_function :fdb_transaction_get_storage_byte_sample, [ :pointer, :pointer, :int, :pointer, :int ], :pointer
       attach_function :fdb_transaction_set, [ :pointer, :pointer, :int, :pointer, :int ], :void
       attach_function :fdb_transaction_clear, [ :pointer, :pointer, :int ], :void
       attach_function :fdb_transaction_clear_range, [ :pointer, :pointer, :int, :pointer, :int ], :void
@@ -817,6 +818,13 @@ module FDB
       prefix = prefix.dup.force_encoding "BINARY"
       get_range(prefix, FDB.strinc(prefix), options, &block)
     end
+
+    def get_storage_byte_sample(beginKey, endKey)
+      bkey = FDB.key_to_bytes(beginKey)
+      ekey = FDB.key_to_bytes(endKey)
+      Int64Future.new(FDBC.fdb_transaction_get_storage_byte_sample(@tpointer, bkey, bkey.bytesize, ekey, ekey.bytesize))
+    end
+
   end
 
   TransactionRead.class_variable_set("@@StreamingMode", @@StreamingMode)

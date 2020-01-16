@@ -39,6 +39,7 @@ type ReadTransaction interface {
 	GetReadVersion() FutureInt64
 	GetDatabase() Database
 	Snapshot() Snapshot
+	GetStorageByteSample(r Range) FutureInt64
 
 	ReadTransactor
 }
@@ -303,6 +304,28 @@ func (t *transaction) getRange(r Range, options RangeOptions, snapshot bool) Ran
 // are asynchronous and do not block the calling goroutine.
 func (t Transaction) GetRange(r Range, options RangeOptions) RangeResult {
 	return t.getRange(r, options, false)
+}
+
+func (t *transaction) getStorageByteSample(beginKey Key, endKey Key) FutureInt64 {
+	return futureInt64 {
+		future: newFuture(C.fdb_transaction_get_storage_byte_sample(
+			t.ptr,
+			byteSliceToPtr(beginKey),
+			C.int(len(beginKey)),
+			byteSliceToPtr(endKey),
+			C.int(len(endKey))
+		))
+	}
+}
+
+// GetStorageByteSample will get the byte size of the key range based on the
+// byte sample collected by FDB
+func (t Transaction) GetStorageByteSample(r Range) FutureInt64 {
+	begin, end := r.FDBRangeKeySelectors()
+	return t.getStorageByteSample(
+		begin.FDBKeySelector().Key.FDBKey(), 
+		end.FDBKeySelector().Key.FDBKey()
+	)
 }
 
 func (t *transaction) getReadVersion() FutureInt64 {
