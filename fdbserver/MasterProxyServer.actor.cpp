@@ -1034,15 +1034,15 @@ ACTOR Future<Void> commitBatch(
 		else {
 			// If enable the option to report conflicting keys from resolvers, we union all conflicting key ranges here and send back through CommitID
 			if (trs[t].transaction.report_conflicting_keys) {
-				std::vector<int> conflictingEntryIds;
+				std::vector<int> conflictingKRIndices;
 				for (int resolverInd : transactionResolverMap[t]) {
 					for (auto const & rCRIndex : resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]]){
-						conflictingEntryIds.emplace_back(rCRIndex);
+						conflictingKRIndices.emplace_back(rCRIndex);
 					}
 				}
 				// At least one keyRange index should be returned
-				ASSERT(conflictingEntryIds.size());
-				trs[t].reply.send(CommitID(invalidVersion, t, Optional<Value>(), Optional<std::vector<int>>(conflictingEntryIds)));
+				ASSERT(conflictingKRIndices.size());
+				trs[t].reply.send(CommitID(invalidVersion, t, Optional<Value>(), Optional<std::vector<int>>(conflictingKRIndices)));
 			} else {
 				trs[t].reply.sendError(not_committed());
 			}
