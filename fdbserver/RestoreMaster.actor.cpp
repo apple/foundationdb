@@ -254,13 +254,13 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	// TODO: Control how many batches can be processed in parallel. Avoid dead lock due to OOM on loaders
 	for (versionBatch = self->versionBatches.begin(); versionBatch != self->versionBatches.end(); versionBatch++) {
 		self->batch[self->batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
-		// fBatches.push_back(
-		//     distributeWorkloadPerVersionBatch(self, self->batchIndex, cx, request, versionBatch->second));
-		wait(distributeWorkloadPerVersionBatch(self, self->batchIndex, cx, request, versionBatch->second));
+		fBatches.push_back(
+		    distributeWorkloadPerVersionBatch(self, self->batchIndex, cx, request, versionBatch->second));
+		// wait(distributeWorkloadPerVersionBatch(self, self->batchIndex, cx, request, versionBatch->second));
 		self->batchIndex++;
 	}
 
-	//wait(waitForAll(fBatches));
+	wait(waitForAll(fBatches));
 
 	TraceEvent("FastRestore").detail("RestoreToVersion", request.targetVersion);
 	return request.targetVersion;
