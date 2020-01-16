@@ -229,10 +229,19 @@ static Optional<ValueRef> doCompareAndClear(const Optional<ValueRef>& existingVa
 	return existingValueOptional; // No change required.
 }
 
+static void placeVersionstamp( uint8_t* destination, Version version, uint16_t transactionNumber ) {
+	version = bigEndian64(version);
+	transactionNumber = bigEndian16(transactionNumber);
+	static_assert( sizeof(version) == 8, "version size mismatch" );
+	memcpy( destination, &version, sizeof(version) );
+	static_assert( sizeof(transactionNumber) == 2, "txn num size mismatch");
+	memcpy( destination + sizeof(version), &transactionNumber, sizeof(transactionNumber) );
+}
+
 /*
 * Returns the range corresponding to the specified versionstamp key.
 */
-static KeyRangeRef getVersionstampKeyRange(Arena& arena, const KeyRef &key, const KeyRef &maxKey) {
+static KeyRangeRef getVersionstampKeyRange(Arena& arena, const KeyRef &key, Version minVersion, const KeyRef &maxKey) {
 	KeyRef begin(arena, key);
 	KeyRef end(arena, key);
 
@@ -249,19 +258,10 @@ static KeyRangeRef getVersionstampKeyRange(Arena& arena, const KeyRef &key, cons
 	if (pos < 0 || pos + 10 > begin.size())
 		throw client_invalid_operation();
 
-	memset(mutateString(begin) + pos, 0, 10);
+	placeVersionstamp(mutateString(begin)+pos, minVersion, 0);
 	memset(mutateString(end) + pos, '\xff', 10);
 
 	return KeyRangeRef(begin, std::min(end, maxKey));
-}
-
-static void placeVersionstamp( uint8_t* destination, Version version, uint16_t transactionNumber ) {
-	version = bigEndian64(version);
-	transactionNumber = bigEndian16(transactionNumber);
-	static_assert( sizeof(version) == 8, "version size mismatch" );
-	memcpy( destination, &version, sizeof(version) );
-	static_assert( sizeof(transactionNumber) == 2, "txn num size mismatch");
-	memcpy( destination + sizeof(version), &transactionNumber, sizeof(transactionNumber) );
 }
 
 static void transformVersionstampMutation( MutationRef& mutation, StringRef MutationRef::* param, Version version, uint16_t transactionNumber ) {

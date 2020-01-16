@@ -3114,6 +3114,14 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	return readVersion;
 }
 
+Optional<Version> Transaction::getCachedReadVersion() {
+	if (readVersion.isValid() && readVersion.isReady() && !readVersion.isError()) {
+		return readVersion.get();
+	} else {
+		return Optional<Version>();
+	}
+}
+
 Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 	if(committing.isValid()) {
 		return transaction_invalid_version();
