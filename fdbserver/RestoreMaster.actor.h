@@ -65,10 +65,45 @@ struct VersionBatch {
 	bool isInVersionRange(Version version) const { return version >= beginVersion && version < endVersion; }
 };
 
-struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
+struct MasterBatchData : public ReferenceCounted<MasterBatchData> {
 	// rangeToApplier is in master and loader node. Loader uses this to determine which applier a mutation should be sent.
 	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
 	std::map<Key, UID> rangeToApplier;
+	IndexedSet<Key, int64_t> samples; // sample of range and log files
+	double samplesSize; // sum of the metric of all samples
+
+	MasterBatchData() = default;
+	~MasterBatchData() = default;
+
+	// Return true if pass the sanity check
+	bool sanityCheckApplierKeyRange() {
+		bool ret = true;
+		// An applier should only appear once in rangeToApplier
+		std::map<UID, Key> applierToRange;
+		for (auto& applier : rangeToApplier) {
+			if (applierToRange.find(applier.second) == applierToRange.end()) {
+				applierToRange[applier.second] = applier.first;
+			} else {
+				TraceEvent(SevError, "FastRestore")
+				    .detail("SanityCheckApplierKeyRange", applierToRange.size())
+				    .detail("ApplierID", applier.second)
+				    .detail("Key1", applierToRange[applier.second])
+				    .detail("Key2", applier.first);
+				ret = false;
+			}
+		}
+		return ret;
+	}
+
+	void logApplierKeyRange() {
+		TraceEvent("FastRestore").detail("ApplierKeyRangeNum", rangeToApplier.size());
+		for (auto& applier : rangeToApplier) {
+			TraceEvent("FastRestore").detail("KeyRangeLowerBound", applier.first).detail("Applier", applier.second);
+		}
+	}
+};
+
+struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
 	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
 
 	int batchIndex; // The largest index of in-progress version batchs
@@ -76,8 +111,14 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
 
-	IndexedSet<Key, int64_t> samples; // sample of range and log files
-	double samplesSize; // sum of the metric of all samples
+	// // rangeToApplier is in master and loader node. Loader uses this to determine which applier a mutation should be
+	// sent.
+	// //   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
+	// std::map<Key, UID> rangeToApplier;
+	// IndexedSet<Key, int64_t> samples; // sample of range and log files
+	// double samplesSize; // sum of the metric of all samples
+
+	std::map<int, Reference<MasterBatchData>> batch;
 
 	void addref() { return ReferenceCounted<RestoreMasterData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreMasterData>::delref(); }
@@ -94,8 +135,6 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		TraceEvent("FastRestore")
 		    .detail("RestoreMaster", "ResetPerVersionBatch")
 		    .detail("VersionBatchIndex", batchIndex);
-		samplesSize = 0;
-		samples.clear();
 	}
 
 	std::string describeNode() {
@@ -289,33 +328,6 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		if (vb.size > 0) {
 			vb.endVersion = nextVersion;
 			versionBatches->emplace(vb.beginVersion, vb);
-		}
-	}
-
-	// Return true if pass the sanity check
-	bool sanityCheckApplierKeyRange() {
-		bool ret = true;
-		// An applier should only appear once in rangeToApplier
-		std::map<UID, Key> applierToRange;
-		for (auto& applier : rangeToApplier) {
-			if (applierToRange.find(applier.second) == applierToRange.end()) {
-				applierToRange[applier.second] = applier.first;
-			} else {
-				TraceEvent(SevError, "FastRestore")
-				    .detail("SanityCheckApplierKeyRange", applierToRange.size())
-				    .detail("ApplierID", applier.second)
-				    .detail("Key1", applierToRange[applier.second])
-				    .detail("Key2", applier.first);
-				ret = false;
-			}
-		}
-		return ret;
-	}
-
-	void logApplierKeyRange() {
-		TraceEvent("FastRestore").detail("ApplierKeyRangeNum", rangeToApplier.size());
-		for (auto& applier : rangeToApplier) {
-			TraceEvent("FastRestore").detail("KeyRangeLowerBound", applier.first).detail("Applier", applier.second);
 		}
 	}
 
