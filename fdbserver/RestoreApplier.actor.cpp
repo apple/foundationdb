@@ -462,7 +462,11 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 
 	wait(batchData->dbApplier.get());
 
-	self->finishedBatch.set(req.batchIndex);
+	if (self->finishedBatch.get() == req.batchIndex-1) {
+		// Multiple actor invokation can wait on req.batchIndex-1;
+		// Avoid setting finishedBatch when finishedBatch > req.batchIndex
+		self->finishedBatch.set(req.batchIndex);
+	}
 	req.reply.send(RestoreCommonReply(self->id()));
 
 	return Void();
