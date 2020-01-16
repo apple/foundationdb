@@ -86,3 +86,11 @@ func (s Snapshot) GetReadVersion() FutureInt64 {
 func (s Snapshot) GetDatabase() Database {
 	return s.transaction.db
 }
+
+func (s Snapshot) GetStorageByteSample(r Range) FutureInt64 {
+	begin, end := r.FDBRangeKeySelectors()
+	return s.getStorageByteSample(
+		begin.FDBKeySelector().Key.FDBKey(),
+		end.FDBKeySelector().Key.FDBKey(),
+	)
+}
