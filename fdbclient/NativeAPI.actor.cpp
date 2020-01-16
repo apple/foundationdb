@@ -2691,6 +2691,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 						// in case system keys are conflicting
 						tr->info.conflictingKeysRYW->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->info.conflictingKeysRYW->clear(systemKeys);
+						// merge duplicate indices
 						const auto cKRs = ci.conflictingKeyRanges.get();
 						std::set<int> mergedIds(cKRs.begin(), cKRs.end());
 						for (auto const & rCRIndex : mergedIds) {

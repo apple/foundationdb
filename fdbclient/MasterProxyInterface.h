@@ -104,7 +104,7 @@ struct CommitID {
 	Version version; 			// returns invalidVersion if transaction conflicts
 	uint16_t txnBatchId;
 	Optional<Value> metadataVersion;
-	Optional<Standalone<VectorRef<int>>> conflictingKeyRanges;
+	Optional<std::vector<int>> conflictingKeyRanges;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -112,7 +112,7 @@ struct CommitID {
 	}
 
 	CommitID() : version(invalidVersion), txnBatchId(0) {}
-	CommitID( Version version, uint16_t txnBatchId, const Optional<Value>& metadataVersion, const Optional<Standalone<VectorRef<int>>>& conflictingKeyRanges = Optional<Standalone<VectorRef<int>>>() ) : version(version), txnBatchId(txnBatchId), metadataVersion(metadataVersion), conflictingKeyRanges(conflictingKeyRanges) {}
+	CommitID( Version version, uint16_t txnBatchId, const Optional<Value>& metadataVersion, const Optional<std::vector<int>>& conflictingKeyRanges = Optional<std::vector<int>>() ) : version(version), txnBatchId(txnBatchId), metadataVersion(metadataVersion), conflictingKeyRanges(conflictingKeyRanges) {}
 };
 
 struct CommitTransactionRequest : TimedRequest {
