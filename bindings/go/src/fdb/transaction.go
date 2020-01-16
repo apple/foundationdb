@@ -313,7 +313,7 @@ func (t *transaction) getStorageByteSample(beginKey Key, endKey Key) FutureInt64
 			byteSliceToPtr(beginKey),
 			C.int(len(beginKey)),
 			byteSliceToPtr(endKey),
-			C.int(len(endKey))
+			C.int(len(endKey)),
 		))
 	}
 }
@@ -324,7 +324,7 @@ func (t Transaction) GetStorageByteSample(r Range) FutureInt64 {
 	begin, end := r.FDBRangeKeySelectors()
 	return t.getStorageByteSample(
 		begin.FDBKeySelector().Key.FDBKey(), 
-		end.FDBKeySelector().Key.FDBKey()
+		end.FDBKeySelector().Key.FDBKey(),
 	)
 }
 
