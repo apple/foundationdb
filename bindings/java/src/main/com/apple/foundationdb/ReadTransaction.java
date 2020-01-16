@@ -385,6 +385,17 @@ public interface ReadTransaction extends ReadTransactionContext {
 	AsyncIterable<KeyValue> getRange(Range range,
 			int limit, boolean reverse, StreamingMode mode);
 
+
+	/**
+	 * Gets the sample byte size for the given key range.
+	 *
+	 * @param begin the beginning of the range (inclusive)
+	 * @param end the end of the range (exclusive)
+	 *
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	CompletableFuture<Long> getStorageByteSample(byte[] begin, byte[] end);
+
 	/**
 	 * Returns a set of options that can be set on a {@code Transaction}
 	 *

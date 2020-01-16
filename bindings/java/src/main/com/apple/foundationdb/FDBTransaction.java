@@ -70,6 +70,16 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			return getKey_internal(selector, true);
 		}
 
+		@Override
+		public CompletableFuture<Long> getStorageByteSample(byte[] begin, byte[] end) {
+			pointerReadLock.lock();
+			try {
+				return new FutureInt64(Transaction_getStorageByteSample(getPtr(), begin, end), executor);
+			} finally {
+				pointerReadLock.unlock();
+			}
+		}
+
 		///////////////////
 		//  getRange -> KeySelectors
 		///////////////////
@@ -252,6 +262,16 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		try {
 			return new FutureKey(Transaction_getKey(getPtr(),
 					selector.getKey(), selector.orEqual(), selector.getOffset(), isSnapshot), executor);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
+	public CompletableFuture<Long> getStorageByteSample(byte[] begin, byte[] end) {
+		pointerReadLock.lock();
+		try {
+			return new FutureInt64(Transaction_getStorageByteSample(getPtr(), begin, end), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -659,4 +679,5 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private native long Transaction_watch(long ptr, byte[] key) throws FDBException;
 	private native void Transaction_cancel(long cPtr);
 	private native long Transaction_getKeyLocations(long cPtr, byte[] key);
+	private native long Transaction_getStorageByteSample(long cPtr, byte[] keyBegin, byte[] keyEnd);
 }
