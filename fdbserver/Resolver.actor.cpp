@@ -165,7 +165,8 @@ ACTOR Future<Void> resolveBatch(
 		for (int c = 0; c<tooOldList.size(); c++)
 			reply.committed[tooOldList[c]] = ConflictBatch::TransactionTooOld;
 		
-		reply.conflictingKeyRangeMap = std::move(conflictingKeyRangeMap);
+		if (!conflictingKeyRangeMap.empty())
+			reply.conflictingKeyRangeMap = std::move(conflictingKeyRangeMap);
 
 		ASSERT(req.prevVersion >= 0 || req.txnStateTransactions.size() == 0); // The master's request should not have any state transactions
 

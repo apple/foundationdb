@@ -2676,7 +2676,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
 					tr->info.conflictingKeysRYW.reset();
-					if (ci.conflictingKeyRanges.present()){
+					if (ci.conflictingKRIndices.present()){
 						// In general, if we want to use getRange to expose conflicting keys, we need to support all the parameters getRange provides.
 						// It is difficult to take care of all corner cases of what getRange does.
 						// Consequently, we use a hack way here to achieve it.
@@ -2692,7 +2692,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 						tr->info.conflictingKeysRYW->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->info.conflictingKeysRYW->clear(systemKeys);
 						// merge duplicate indices
-						const auto cKRs = ci.conflictingKeyRanges.get();
+						const auto cKRs = ci.conflictingKRIndices.get();
 						std::set<int> mergedIds(cKRs.begin(), cKRs.end());
 						for (auto const & rCRIndex : mergedIds) {
 							const KeyRangeRef & kr = req.transaction.read_conflict_ranges[rCRIndex];

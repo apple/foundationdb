@@ -1036,9 +1036,9 @@ ACTOR Future<Void> commitBatch(
 			if (trs[t].transaction.report_conflicting_keys) {
 				std::vector<int> conflictingKRIndices;
 				for (int resolverInd : transactionResolverMap[t]) {
-					for (auto const & rCRIndex : resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]]){
+					const std::vector<int>& cKRs = resolution[resolverInd].conflictingKeyRangeMap.get()[nextTr[resolverInd]];
+					for (auto const & rCRIndex : cKRs)
 						conflictingKRIndices.emplace_back(rCRIndex);
-					}
 				}
 				// At least one keyRange index should be returned
 				ASSERT(conflictingKRIndices.size());
