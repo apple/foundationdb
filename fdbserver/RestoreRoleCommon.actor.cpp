@@ -42,13 +42,10 @@ ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
 	return Void();
 }
 
-void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self) {
-	if (self->versionBatchStart) {
-		self->versionBatchStart = false;
-	}
-
+void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<RestoreRoleData> self) {
+	self->resetPerRestoreRequest();
 	TraceEvent("FastRestore")
-	    .detail("FinishRestoreRequest", req.batchIndex)
+	    .detail("FinishRestoreRequest", req.terminate)
 	    .detail("Role", getRoleStr(self->role))
 	    .detail("Node", self->id());
 

@@ -67,10 +67,12 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 					requestTypeStr = "initVersionBatch";
 					wait(handleInitVersionBatchRequest(req, self));
 				}
-				when(RestoreVersionBatchRequest req = waitNext(applierInterf.finishRestore.getFuture())) {
+				when(RestoreFinishRequest req = waitNext(applierInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
 					handleFinishRestoreRequest(req, self);
-					exitRole = Void();
+					if (req.terminate) {
+						exitRole = Void();
+					}
 				}
 				when(wait(exitRole)) {
 					TraceEvent("FastRestore").detail("RestoreApplierCore", "ExitRole").detail("NodeID", self->id());

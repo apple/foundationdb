@@ -93,6 +93,10 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		batch[batchIndex] = Reference<LoaderBatchData>(new LoaderBatchData());
 	}
 
+	void resetPerRestoreRequest() {
+		batch.clear();
+	}
+
 	void initBackupContainer(Key url) {
 		if (bcUrl == url && bc.isValid()) {
 			return;

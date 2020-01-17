@@ -137,6 +137,14 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		    .detail("VersionBatchIndex", batchIndex);
 	}
 
+	// Reset master data at the beginning of each restore request
+	void resetPerRestoreRequest() {
+		TraceEvent("FastRestoreMasterReset").detail("OldVersionBatches", versionBatches.size());
+		versionBatches.clear();
+		batchIndex = 1;
+		batch.clear();
+	}
+
 	std::string describeNode() {
 		std::stringstream ss;
 		ss << "Master versionBatch:" << batchIndex;

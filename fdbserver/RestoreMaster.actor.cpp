@@ -55,7 +55,8 @@ ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInt
                                                  std::map<UID, RestoreLoaderInterface> loadersInterf, int batchIndex);
 ACTOR static Future<Void> notifyApplierToApplyMutations(std::map<UID, RestoreApplierInterface> appliersInterf,
                                                         int batchIndex);
-ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, Database cx);
+ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, bool terminate);
+ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreMasterData> self, Database cx);
 
 void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
                               std::map<UID, RestoreApplierInterface> appliersInterf, int batchIndex);
@@ -199,7 +200,10 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 		for (restoreIndex = 0; restoreIndex < restoreRequests.size(); restoreIndex++) {
 			RestoreRequest& request = restoreRequests[restoreIndex];
 			TraceEvent("FastRestore").detail("RestoreRequestInfo", request.toString());
+			// TODO: Initialize MasterData and all loaders and appliers' data for each restore request!
+			self->resetPerRestoreRequest();
 			wait(success(processRestoreRequest(self, cx, request)));
+			wait(notifyRestoreCompleted(self, false));
 		}
 	} catch (Error& e) {
 		if (restoreIndex < restoreRequests.size()) {
@@ -213,7 +217,7 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	}
 
 	// Step: Notify all restore requests have been handled by cleaning up the restore keys
-	wait(notifyRestoreCompleted(self, cx));
+	wait(signalRestoreCompleted(self, cx));
 
 	try {
 		wait(unlockDatabase(cx, randomUID));
@@ -559,24 +563,33 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(std::map<UID, RestoreApp
 	return Void();
 }
 
-// Ask all loaders and appliers to perform housecleaning at the end of restore and
-// Register the restoreRequestDoneKey to signal the end of restore
-ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, Database cx) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-
-	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requests;
+// Ask all loaders and appliers to perform housecleaning at the end of a restore request
+// Terminate those roles if terminate = true
+ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, bool terminate=false) {
+	std::vector<std::pair<UID, RestoreFinishRequest>> requests;
 	for (auto& loader : self->loadersInterf) {
-		requests.push_back(std::make_pair(loader.first, RestoreVersionBatchRequest(self->batchIndex)));
+		requests.push_back(std::make_pair(loader.first, RestoreFinishRequest(terminate)));
 	}
 	// A loader exits immediately after it receives the request. Master may not receive acks.
 	Future<Void> endLoaders = sendBatchRequests(&RestoreLoaderInterface::finishRestore, self->loadersInterf, requests);
 
 	requests.clear();
 	for (auto& applier : self->appliersInterf) {
-		requests.push_back(std::make_pair(applier.first, RestoreVersionBatchRequest(self->batchIndex)));
+		requests.push_back(std::make_pair(applier.first, RestoreFinishRequest(terminate)));
 	}
 	Future<Void> endApplier =
 	    sendBatchRequests(&RestoreApplierInterface::finishRestore, self->appliersInterf, requests);
+
+	TraceEvent("FastRestore").detail("RestoreMaster", "RestoreRequestCompleted");
+
+	return Void();
+}
+
+// Register the restoreRequestDoneKey to signal the end of restore
+ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreMasterData> self, Database cx) {
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+
+	wait(notifyRestoreCompleted(self, true));
 
 	wait(delay(5.0)); // Give some time for loaders and appliers to exit
 
@@ -596,7 +609,7 @@ ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> se
 		}
 	}
 
-	TraceEvent("FastRestore").detail("RestoreMaster", "RestoreCompleted");
+	TraceEvent("FastRestore").detail("RestoreMaster", "AllRestoreCompleted");
 
 	return Void();
 }

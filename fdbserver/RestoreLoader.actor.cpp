@@ -88,10 +88,12 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 					requestTypeStr = "initVersionBatch";
 					wait(handleInitVersionBatchRequest(req, self));
 				}
-				when(RestoreVersionBatchRequest req = waitNext(loaderInterf.finishRestore.getFuture())) {
+				when(RestoreFinishRequest req = waitNext(loaderInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
 					handleFinishRestoreRequest(req, self);
-					exitRole = Void();
+					if (req.terminate) {
+						exitRole = Void();
+					}
 				}
 				when(wait(exitRole)) {
 					TraceEvent("FastRestore").detail("RestoreLoaderCore", "ExitRole").detail("NodeID", self->id());
@@ -180,12 +182,12 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	ASSERT(batchData.isValid());
 
 	if (batchData->processedFileParams.find(req.param) == batchData->processedFileParams.end()) {
-		TraceEvent("FastRestore").detail("Loader", self->id()).detail("ProcessLoadParam", req.param.toString());
+		TraceEvent("FastRestoreLoadFile", self->id()).detail("BatchIndex", req.batchIndex).detail("ProcessLoadParam", req.param.toString());
 		ASSERT(batchData->sampleMutations.find(req.param) == batchData->sampleMutations.end());
 		batchData->processedFileParams[req.param] = Never(); // Ensure second exec. wait on _processLoadingParam()
 		batchData->processedFileParams[req.param] = _processLoadingParam(req.param, batchData, self->id(), self->bc);
 	} else {
-		TraceEvent("FastRestore").detail("Loader", self->id()).detail("WaitOnProcessLoadParam", req.param.toString());
+		TraceEvent("FastRestoreLoadFile", self->id()).detail("BatchIndex", req.batchIndex).detail("WaitOnProcessLoadParam", req.param.toString());
 	}
 	ASSERT(batchData->processedFileParams.find(req.param) != batchData->processedFileParams.end());
 	wait(batchData->processedFileParams[req.param]); // wait on the processing of the req.param.
@@ -199,6 +201,8 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
                                               Reference<RestoreLoaderData> self) {
 	state Reference<LoaderBatchData> batchData = self->batch[req.batchIndex];
 	state std::map<LoadingParam, VersionedMutationsMap>::iterator item = batchData->kvOpsPerLP.begin();
+
+	TraceEvent("FastRestoreSendMutations", self->id()).detail("BatchIndex", req.batchIndex).detail("UseRangeFile", req.useRangeFile);
 
 	batchData->rangeToApplier = req.rangeToApplier;
 	for (; item != batchData->kvOpsPerLP.end(); item++) {

@@ -56,7 +56,7 @@ using VersionedMutationsMap = std::map<Version, MutationsVec>;
 
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
-void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self);
+void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<RestoreRoleData> self);
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
 // This struct is mostly copied from StringRefReader. We add a sanity check in this struct.
@@ -128,6 +128,8 @@ public:
 	UID id() const { return nodeID; }
 
 	virtual void resetPerVersionBatch(int batchIndex) = 0;
+
+	virtual void resetPerRestoreRequest() = 0;
 
 	void clearInterfaces() {
 		loadersInterf.clear();

@@ -118,6 +118,11 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 		batch[batchIndex] = Reference<ApplierBatchData>(new ApplierBatchData());
 	}
 
+	void resetPerRestoreRequest() {
+		batch.clear();
+		finishedBatch = NotifiedVersion(0);
+	}
+
 	std::string describeNode() {
 		std::stringstream ss;
 		ss << "NodeID:" << nodeID.toString() << " nodeIndex:" << nodeIndex;

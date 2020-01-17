@@ -51,6 +51,7 @@ struct RestoreSendMutationsToAppliersRequest;
 struct RestoreSendVersionedMutationsRequest;
 struct RestoreSysInfo;
 struct RestoreApplierInterface;
+struct RestoreFinishRequest;
 
 // RestoreSysInfo includes information each (type of) restore roles should know.
 // At this moment, it only include appliers. We keep the name for future extension.
@@ -129,7 +130,7 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 	RequestStream<RestoreSendMutationsToAppliersRequest> sendMutations;
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
 	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
-	RequestStream<RestoreVersionBatchRequest> finishRestore;
+	RequestStream<RestoreFinishRequest> finishRestore;
 
 	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator!=(RestoreWorkerInterface const& r) const { return id() != r.id(); }
@@ -166,7 +167,7 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 	RequestStream<RestoreVersionBatchRequest> applyToDB;
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
 	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
-	RequestStream<RestoreVersionBatchRequest> finishRestore;
+	RequestStream<RestoreFinishRequest> finishRestore;
 
 	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator!=(RestoreWorkerInterface const& r) const { return id() != r.id(); }
@@ -481,6 +482,28 @@ struct RestoreVersionBatchRequest : TimedRequest {
 	std::string toString() {
 		std::stringstream ss;
 		ss << "RestoreVersionBatchRequest batchIndex:" << batchIndex;
+		return ss.str();
+	}
+};
+
+struct RestoreFinishRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 13018413;
+
+	bool terminate;
+
+	ReplyPromise<RestoreCommonReply> reply;
+
+	RestoreFinishRequest() = default;
+	explicit RestoreFinishRequest(bool terminate) : terminate(terminate) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, terminate, reply);
+	}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "RestoreFinishRequest terminate:" << terminate;
 		return ss.str();
 	}
 };
