@@ -450,12 +450,12 @@ class TransactionRead(_FDBBase):
             return self.get_range(key.start, key.stop, reverse=(key.step == -1))
         return self.get(key)
     
-    def get_storage_byte_sample(self, beginKey, endKey):
+    def get_estimated_range_size_bytes(self, beginKey, endKey):
         if begin is None:
             begin = b''
         if end is None:
             end = b'\xff'
-        return FutureInt64(self.capi.fdb_transaction_get_storage_byte_sample(
+        return FutureInt64(self.capi.fdb_transaction_get_estimated_range_size_bytes(
             self.tpointer,
             beginKey, len(beginKey), 
             endKey, len(endKey)
@@ -1435,8 +1435,8 @@ def init_c_api():
                                                 ctypes.c_int, ctypes.c_int]
     _capi.fdb_transaction_get_range.restype = ctypes.c_void_p
 
-    _capi.fdb_transaction_get_storage_byte_sample.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
-    _capi.fdb_transaction_get_range.restype = ctypes.c_void_p
+    _capi.fdb_transaction_get_estimated_range_size_bytes.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    _capi.fdb_transaction_get_estimated_range_size_bytes.restype = ctypes.c_void_p
 
     _capi.fdb_transaction_add_conflict_range.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
     _capi.fdb_transaction_add_conflict_range.restype = ctypes.c_int

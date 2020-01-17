@@ -89,7 +89,7 @@ namespace FDB {
 							streamingMode);
 		}
 
-		virtual Future<int64_t> getStorageByteSample(const KeyRange& keys) = 0;
+		virtual Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys) = 0;
 
 		virtual void addReadConflictRange(KeyRangeRef const& keys) = 0;
 		virtual void addReadConflictKey(KeyRef const& key) = 0;

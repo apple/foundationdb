@@ -414,14 +414,14 @@ public interface ReadTransaction extends ReadTransactionContext {
 
 
 	/**
-	 * Gets the sample byte size for the given key range.
+	 * Gets the estimated byte size for the given key range based on the byte sample collcted.
 	 *
 	 * @param begin the beginning of the range (inclusive)
 	 * @param end the end of the range (exclusive)
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	CompletableFuture<Long> getStorageByteSample(byte[] begin, byte[] end);
+	CompletableFuture<Long> getEstimatedRangeSizeBytes(byte[] begin, byte[] end);
 
 	/**
 	 * Returns a set of options that can be set on a {@code Transaction}

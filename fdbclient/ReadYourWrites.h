@@ -84,7 +84,7 @@ public:
 	}
 
 	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
-	Future<int64_t> getStorageByteSample( const KeyRangeRef& keys );
+	Future<int64_t> getEstimatedRangeSizeBytes( const KeyRangeRef& keys );
 
 	void addReadConflictRange( KeyRangeRef const& keys );
 	void makeSelfConflicting() { tr.makeSelfConflicting(); }
