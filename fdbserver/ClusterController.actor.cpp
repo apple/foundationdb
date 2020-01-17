@@ -780,8 +780,9 @@ public:
 			}
 		}
 
-		// TODO: revisit the number of workers. Consider the number of log routers?
-		const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
+		const int nBackup = std::max<int>(
+		    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tlogs.size()),
+		    req.maxOldLogRouters);
 		auto backupWorkers =
 		    getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup, req.configuration, id_used);
 		std::transform(backupWorkers.begin(), backupWorkers.end(), std::back_inserter(result.backupWorkers),
@@ -1041,6 +1042,8 @@ public:
 		std::vector<WorkerDetails> satellite_tlogs;
 		std::vector<WorkerDetails> log_routers;
 		std::set<NetworkAddress> logRouterAddresses;
+		std::vector<WorkerDetails> backup_workers;
+		std::set<NetworkAddress> backup_addresses;
 
 		for( auto& logSet : dbi.logSystemConfig.tLogs ) {
 			for( auto& it : logSet.tLogs ) {
@@ -1069,6 +1072,16 @@ public:
 				if( !logRouterAddresses.count( tlogWorker->second.details.interf.address() ) ) {
 					logRouterAddresses.insert( tlogWorker->second.details.interf.address() );
 					log_routers.push_back(tlogWorker->second.details);
+				}
+			}
+
+			for (const auto& worker : logSet.backupWorkers) {
+				auto workerIt = id_worker.find(worker.interf().locality.processId());
+				if (workerIt == id_worker.end()) return false;
+				if (workerIt->second.priorityInfo.isExcluded) return true;
+				if (backup_addresses.count(workerIt->second.details.interf.address()) == 0) {
+					backup_addresses.insert(workerIt->second.details.interf.address());
+					backup_workers.push_back(workerIt->second.details);
 				}
 			}
 		}
@@ -1228,15 +1241,36 @@ public:
 		if(oldInFit.proxy.betterFitness(newInFit.proxy) || oldInFit.resolver.betterFitness(newInFit.resolver)) {
 			return false;
 		}
-		if(oldTLogFit > newTLogFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLogFit || oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit) {
-			TraceEvent("BetterMasterExists", id).detail("OldMasterFit", oldMasterFit).detail("NewMasterFit", newMasterFit)
-				.detail("OldTLogFit", oldTLogFit.toString()).detail("NewTLogFit", newTLogFit.toString())
-				.detail("OldProxyFit", oldInFit.proxy.toString()).detail("NewProxyFit", newInFit.proxy.toString())
-				.detail("OldResolverFit", oldInFit.resolver.toString()).detail("NewResolverFit", newInFit.resolver.toString())
-				.detail("OldSatelliteFit", oldSatelliteTLogFit.toString()).detail("NewSatelliteFit", newSatelliteTLogFit.toString())
-				.detail("OldRemoteFit", oldRemoteTLogFit.toString()).detail("NewRemoteFit", newRemoteTLogFit.toString())
-				.detail("OldRouterFit", oldLogRoutersFit.toString()).detail("NewRouterFit", newLogRoutersFit.toString())
-				.detail("OldSatelliteFallback", oldSatelliteFallback).detail("NewSatelliteFallback", newSatelliteFallback);
+
+		// Check backup worker fitness
+		RoleFitness oldBackupWorkersFit(backup_workers, ProcessClass::Backup);
+		const int nBackup = backup_addresses.size();
+		RoleFitness newBackupWorkersFit(
+		    getWorkersForRoleInDatacenter(clusterControllerDcId, ProcessClass::Backup, nBackup, db.config, id_used),
+		    ProcessClass::Backup);
+
+		if (oldTLogFit > newTLogFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLogFit ||
+		    oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit ||
+		    oldBackupWorkersFit > newBackupWorkersFit) {
+			TraceEvent("BetterMasterExists", id)
+			    .detail("OldMasterFit", oldMasterFit)
+			    .detail("NewMasterFit", newMasterFit)
+			    .detail("OldTLogFit", oldTLogFit.toString())
+			    .detail("NewTLogFit", newTLogFit.toString())
+			    .detail("OldProxyFit", oldInFit.proxy.toString())
+			    .detail("NewProxyFit", newInFit.proxy.toString())
+			    .detail("OldResolverFit", oldInFit.resolver.toString())
+			    .detail("NewResolverFit", newInFit.resolver.toString())
+			    .detail("OldSatelliteFit", oldSatelliteTLogFit.toString())
+			    .detail("NewSatelliteFit", newSatelliteTLogFit.toString())
+			    .detail("OldRemoteFit", oldRemoteTLogFit.toString())
+			    .detail("NewRemoteFit", newRemoteTLogFit.toString())
+			    .detail("OldRouterFit", oldLogRoutersFit.toString())
+			    .detail("NewRouterFit", newLogRoutersFit.toString())
+			    .detail("OldBackupWorkerFit", oldBackupWorkersFit.toString())
+			    .detail("NewBackupWorkerFit", newBackupWorkersFit.toString())
+			    .detail("OldSatelliteFallback", oldSatelliteFallback)
+			    .detail("NewSatelliteFallback", newSatelliteFallback);
 			return true;
 		}
 
