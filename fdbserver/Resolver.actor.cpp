@@ -130,14 +130,15 @@ ACTOR Future<Void> resolveBatch(
 		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterOrderer");
 		
+		ResolveTransactionBatchReply &reply = proxyInfo.outstandingBatches[req.version];
+
 		vector<int> commitList;
 		vector<int> tooOldList;
-		std::map< int, std::vector< int > > conflictingKeyRangeMap;
 
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
 		double tstart = timer();
-		ConflictBatch conflictBatch(self->conflictSet, &conflictingKeyRangeMap);
+		ConflictBatch conflictBatch(self->conflictSet, &reply.conflictingKeyRangeMap, &reply.arena);
 		int keys = 0;
 		for(int t=0; t<req.transactions.size(); t++) {
 			conflictBatch.addTransaction( req.transactions[t] );
@@ -156,7 +157,6 @@ ACTOR Future<Void> resolveBatch(
 		g_counters.conflictTransactions += req.transactions.size();
 		g_counters.conflictKeys += keys;
 
-		ResolveTransactionBatchReply &reply = proxyInfo.outstandingBatches[req.version];
 		reply.debugID = req.debugID;
 		reply.committed.resize( reply.arena, req.transactions.size() );
 		for(int c=0; c<commitList.size(); c++)
@@ -164,9 +164,6 @@ ACTOR Future<Void> resolveBatch(
 
 		for (int c = 0; c<tooOldList.size(); c++)
 			reply.committed[tooOldList[c]] = ConflictBatch::TransactionTooOld;
-		
-		if (!conflictingKeyRangeMap.empty())
-			reply.conflictingKeyRangeMap = std::move(conflictingKeyRangeMap);
 
 		ASSERT(req.prevVersion >= 0 || req.txnStateTransactions.size() == 0); // The master's request should not have any state transactions
 

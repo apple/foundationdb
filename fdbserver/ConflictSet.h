@@ -33,7 +33,7 @@ void clearConflictSet( ConflictSet*, Version );
 void destroyConflictSet(ConflictSet*);
 
 struct ConflictBatch {
-	explicit ConflictBatch( ConflictSet*,  std::map< int, std::vector< int > >* conflictingKeyRangeMap = nullptr);
+	explicit ConflictBatch( ConflictSet*,  std::map< int, VectorRef< int > >* conflictingKeyRangeMap = nullptr, Arena* resolveBatchReplyArena = nullptr);
 	~ConflictBatch();
 
 	enum TransactionCommitResult {
@@ -54,7 +54,8 @@ private:
 	std::vector< std::pair<StringRef,StringRef> > combinedWriteConflictRanges;
 	std::vector< struct ReadConflictRange > combinedReadConflictRanges;
 	bool* transactionConflictStatus;
-	std::map< int, std::vector< int > >* conflictingKeyRangeMap;
+	std::map< int, VectorRef< int > >* conflictingKeyRangeMap;
+	Arena* resolveBatchReplyArena;
 
 	void checkIntraBatchConflicts();
 	void combineWriteConflictRanges();
