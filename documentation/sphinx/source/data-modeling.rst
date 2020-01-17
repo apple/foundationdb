@@ -273,9 +273,9 @@ Using the table name as the subspace, we could implement the common row-oriented
 Versionstamps
 -------------
 
-A common data model is to index your data with a sequencing prefix to allow log scans or tails of recent data. This index requires a unique, monotonically increasing value. Rather than implementing this feature yourself at the client level, which would require reading the value for conflict checks before every increment, the versionstamp provides unique, in-order id generation with a single conflict-free write.
+A common data model is to index your data with a sequencing prefix to allow log scans or tails of recent data. This index requires a unique, monotonically increasing value. This could be implemented at the client level by reading the value for conflict checks before every increment. A better solution is the versionstamp, which can be generated at commit-time with no read conflict ranges, providing a unique sequence ID in a single conflict-free write.
 
-The version is used by FoundationDB to provide MVCC guarantees and transactional integrity. Versionstamps write the transaction's commit version as a value to an arbitrary key as part of the same transaction, allowing the client to leverage the version's unique and serial properties.
+The version is used by FoundationDB to provide MVCC guarantees and transactional integrity. Versionstamps write the transaction's commit version as a value to an arbitrary key as part of the same transaction, allowing the client to leverage the version's unique and serial properties.  Because the versionstamp is generated at commit-time, the versionstamped key cannot be read in the same transaction that it is written, and the versionstamp's value will be unknown until the transaction is committed. After the transaction is committed, the versionstamp can be obtained.
 
 The versionstamp guarantees uniqueness and monotonically increasing values for the entire lifetime of a single FDB cluster. This is even true if the cluster is restored from a backup, as a restored cluster will begin at a higher version than when the backup was taken.
 
@@ -283,7 +283,7 @@ If data is migrated from one FDB cluster to another, for example if a specialize
 * The new FDB cluster can restore at a higher version than the backup was taken, by setting the ``\xff/minRequiredCommitVersion`` metadata key.
 * The 2 byte user version provided by the client can be used to preserve generations across restores.  This method will only provide uniqueness, not sequential serialization, across restores.
 
-The versionstamp consists of 12 bytes. The first 10 bytes are the transaction's commit version and transaction batch order. The final 2 bytes are an optional user version provided by the client.  The tuple layer provides a useful api for getting and setting the 10 byte system version and the 2 byte user version. For examples on how to use the version stamp in the python binding, see the :doc:`api-python` documentation.
+There are two concepts of versionstamp depending on your context. At the fdb_c client level, or any binding outside of the Tuple layer, the 'versionstamp' is 10 bytes: the transaction's commit version (8 bytes) and transaction batch order (2 bytes). The user can manually add 2 additional bytes to provide application level ordering. The tuple layer provides a useful api for getting and setting both the 10 byte system version and the 2 byte user version. In the context of the Tuple layer, the 'versionstamp' is all 12 bytes. For examples on how to use the version stamp in the python binding, see the :doc:`api-python` documentation.
 
 .. _data-modeling-entity-relationship:
 
