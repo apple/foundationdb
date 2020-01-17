@@ -30,19 +30,16 @@ struct BackupInterface {
 	constexpr static FileIdentifier file_identifier = 6762745;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	struct LocalityData locality;
-	LogEpoch backupEpoch;
-	UID myId;
 
 	BackupInterface() = default;
-	explicit BackupInterface(const struct LocalityData& l, UID id, LogEpoch epoch)
-	  : locality(l), myId(id), backupEpoch(epoch) {}
+	explicit BackupInterface(const struct LocalityData& l) : locality(l) {}
 
 	void initEndpoints() {}
-	UID id() const { return myId; }
+	UID id() const { return getToken(); }
 	NetworkAddress address() const { return waitFailure.getEndpoint().getPrimaryAddress(); }
 	UID getToken() const { return waitFailure.getEndpoint().token; }
 	bool operator== (const BackupInterface& r) const {
-		return id() == r.id();
+		return getToken() == r.getToken();
 	}
 	bool operator!= (const BackupInterface& r) const {
 		return !(*this == r);
@@ -50,7 +47,7 @@ struct BackupInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, locality, backupEpoch, myId);
+		serializer(ar, waitFailure, locality);
 	}
 };
 

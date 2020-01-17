@@ -1243,7 +1243,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 	state Reference<BackupProgress> backupProgress(
 	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochTagsVersionsInfo()));
 	state Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress);
-	state std::vector<Future<BackupInterface>> initializationReplies;
+	state std::vector<Future<InitializeBackupReply>> initializationReplies;
 
 	state std::vector<std::pair<UID, Tag>> idsTags; // worker IDs and tags for current epoch
 	state int logRouterTags = self->logSystem->getLogRouterTags();
@@ -1298,13 +1298,8 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
 		}
 	}
 
-	std::vector<BackupInterface> newRecruits = wait(getAll(initializationReplies));
-	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
-	for (const auto& interf : newRecruits) {
-		backupWorkers.emplace_back(
-		    new AsyncVar<OptionalInterface<BackupInterface>>(OptionalInterface<BackupInterface>(interf)));
-	}
-	self->logSystem->setBackupWorkers(backupWorkers);
+	std::vector<InitializeBackupReply> newRecruits = wait(getAll(initializationReplies));
+	self->logSystem->setBackupWorkers(newRecruits);
 	TraceEvent("BackupRecruitmentDone", self->dbgid);
 	self->registrationTrigger.trigger();
 	return Void();

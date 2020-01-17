@@ -1116,7 +1116,7 @@ ACTOR Future<Void> workerServer(
 				req.reply.send(recruited);
 			}
 			when (InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
-				BackupInterface recruited(locality, req.reqId, req.backupEpoch);
+				BackupInterface recruited(locality);
 				recruited.initEndpoints();
 
 				startRole(Role::BACKUP, recruited.id(), interf.id());
@@ -1125,7 +1125,8 @@ ACTOR Future<Void> workerServer(
 				Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
 				errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
 				TraceEvent("Backup_InitRequest", req.reqId).detail("BackupId", recruited.id());
-				req.reply.send(recruited);
+				InitializeBackupReply reply(recruited, req.backupEpoch);
+				req.reply.send(reply);
 			}
 			when( InitializeTLogRequest req = waitNext(interf.tLog.getFuture()) ) {
 				// For now, there's a one-to-one mapping of spill type to TLogVersion.

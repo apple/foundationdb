@@ -1375,17 +1375,17 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Reference<LogSet>(nullptr);
 	}
 
-	void setBackupWorkers(
-	    const std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>>& backupWorkers) override {
+	void setBackupWorkers(const std::vector<InitializeBackupReply>& replies) override {
 		ASSERT(tLogs.size() > 0);
 
 		Reference<LogSet> logset = tLogs[0];  // Master recruits this epoch's worker first.
 		LogEpoch logsetEpoch = this->epoch;
 		oldestBackupEpoch = this->epoch;
-		for (const auto& worker : backupWorkers) {
-			if (worker->get().interf().backupEpoch != logsetEpoch) {
+		for (const auto& reply : replies) {
+			Reference<AsyncVar<OptionalInterface<BackupInterface>>> worker(new AsyncVar<OptionalInterface<BackupInterface>>(OptionalInterface<BackupInterface>(reply.interf)));
+			if (reply.backupEpoch != logsetEpoch) {
 				// find the logset from oldLogData
-				logsetEpoch = worker->get().interf().backupEpoch;
+				logsetEpoch = reply.backupEpoch;
 				oldestBackupEpoch = std::min(oldestBackupEpoch, logsetEpoch);
 				logset = getEpochLogSet(logsetEpoch);
 				ASSERT(logset.isValid());

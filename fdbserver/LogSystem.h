@@ -770,8 +770,7 @@ struct ILogSystem {
 	// are multiple pseudo tags, the returned version is the min(all pseudo tags' "upTo" versions).
 	virtual Version popPseudoLocalityTag(Tag tag, Version upTo) = 0;
 
-	virtual void setBackupWorkers(
-	    const std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>>& backupWorkers) = 0;
+	virtual void setBackupWorkers(const std::vector<InitializeBackupReply>& replies) = 0;
 
 	// Removes a finished backup worker from log system and returns true. Returns false
 	// if the worker is not found.

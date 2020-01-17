@@ -491,10 +491,10 @@ ProcessData decodeWorkerListValue( ValueRef const& value ) {
 	return s;
 }
 
-const KeyRangeRef backupProgressKeys(LiteralStringRef("\xff/backupProgress/"),
-                                     LiteralStringRef("\xff/backupProgress0"));
+const KeyRangeRef backupProgressKeys(LiteralStringRef("\xff\x02/backupProgress/"),
+                                     LiteralStringRef("\xff\x02/backupProgress0"));
 const KeyRef backupProgressPrefix = backupProgressKeys.begin;
-const KeyRef backupStartedKey = LiteralStringRef("\xff/backupStarted");
+const KeyRef backupStartedKey = LiteralStringRef("\xff\x02/backupStarted");
 
 const Key backupProgressKeyFor(UID workerID) {
 	BinaryWriter wr(Unversioned());

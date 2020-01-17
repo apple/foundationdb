@@ -148,6 +148,20 @@ struct InitializeLogRouterRequest {
 	}
 };
 
+struct InitializeBackupReply {
+	constexpr static FileIdentifier file_identifier = 63843557;
+	struct BackupInterface interf;
+	LogEpoch backupEpoch;
+
+	InitializeBackupReply() = default;
+	InitializeBackupReply(BackupInterface interface, LogEpoch e) : interf(interface), backupEpoch(e) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, interf, backupEpoch);
+	}
+};
+
 struct InitializeBackupRequest {
 	constexpr static FileIdentifier file_identifier = 68354279;
 	UID reqId;
@@ -157,7 +171,7 @@ struct InitializeBackupRequest {
 	Tag routerTag;
 	Version startVersion;
 	Optional<Version> endVersion;
-	ReplyPromise<struct BackupInterface> reply;
+	ReplyPromise<struct InitializeBackupReply> reply;
 
 	InitializeBackupRequest() = default;
 	explicit InitializeBackupRequest(UID id) : reqId(id) {}

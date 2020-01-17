@@ -62,10 +62,12 @@ ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupPro
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			state Optional<Value> value = wait(tr.get(backupStartedKey));
-			Standalone<RangeResultRef> results = wait(tr.getRange(backupProgressKeys, CLIENT_KNOBS->TOO_MANY));
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			state Future<Optional<Value>> fValue = tr.get(backupStartedKey);
+			state Standalone<RangeResultRef> results = wait(tr.getRange(backupProgressKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
 
+			Optional<Value> value = wait(fValue);
 			bStatus->setBackupStartedValue(value);
 			for (auto& it : results) {
 				const UID workerID = decodeBackupProgressKey(it.key);
