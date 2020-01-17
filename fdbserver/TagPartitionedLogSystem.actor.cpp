@@ -269,7 +269,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for (const int8_t locality : pseudoLocalities) {
 			minVersion = std::min(minVersion, pseudoLocalityPopVersion[Tag(locality, tag.id)]);
 		}
-		TraceEvent("Pop", dbgid).detail("Tag", tag.toString()).detail("Version", upTo).detail("PopVersion", minVersion);
+		// TraceEvent("TLogPopPseudoTag", dbgid).detail("Tag", tag.toString()).detail("Version", upTo).detail("PopVersion", minVersion);
 		return minVersion;
 	}
 
