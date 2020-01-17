@@ -138,12 +138,14 @@ Default Peer Verification
 The default peer verification is ``Check.Valid=1``.
 
 Default Password
-^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^
 
 There is no default password. If no password is specified, it is assumed that the private key is unencrypted.
 
-Parameters and client bindings
-------------------------------
+Permissions
+-----------
+
+All files used by TLS must have sufficient read permissions such that the user running the FoundationDB server or client process can access them. It may also be necessary to have similar read permissions on the parent directories of the files used in the TLS configuration.
 
 Automatic TLS certificate refresh
 ---------------------------------

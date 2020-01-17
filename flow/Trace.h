@@ -22,6 +22,7 @@
 #define FLOW_TRACE_H
 #pragma once
 
+#include <atomic>
 #include <stdarg.h>
 #include <stdint.h>
 #include <string>
@@ -381,6 +382,8 @@ struct TraceEvent {
 	static void setNetworkThread();
 	static bool isNetworkThread();
 
+	static double getCurrentTime();
+
 	//Must be called directly after constructing the trace event
 	TraceEvent& error(const class Error& e, bool includeCancelled=false) {
 		if (enabled) {
@@ -572,7 +575,7 @@ void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
-extern thread_local trace_clock_t g_trace_clock;
+extern std::atomic<trace_clock_t> g_trace_clock;
 extern TraceBatch g_traceBatch;
 
 #define DUMPTOKEN(name)                                                                                                \
