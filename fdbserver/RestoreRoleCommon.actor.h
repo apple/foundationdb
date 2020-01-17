@@ -113,13 +113,10 @@ public:
 
 	std::map<UID, RestoreLoaderInterface> loadersInterf; // UID: loaderInterf's id
 	std::map<UID, RestoreApplierInterface> appliersInterf; // UID: applierInterf's id
-	RestoreApplierInterface masterApplierInterf; // TODO: Delete
 
 	NotifiedVersion versionBatchId; // Continuously increase for each versionBatch
 
 	bool versionBatchStart = false;
-
-	uint32_t inProgressFlag = 0;
 
 	RestoreRoleData() : role(RestoreRole::Invalid){};
 

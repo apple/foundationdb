@@ -237,7 +237,6 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	state std::vector<RestoreFileFR> rangeFiles;
 	state std::vector<RestoreFileFR> logFiles;
 	state std::vector<RestoreFileFR> allFiles;
-	state std::map<Version, VersionBatch>::iterator versionBatch = self->versionBatches.begin();
 
 	self->initBackupContainer(request.url);
 
@@ -253,15 +252,31 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	self->buildVersionBatches(rangeFiles, logFiles, &self->versionBatches); // Divide files into version batches
 	self->dumpVersionBatches(self->versionBatches);
 
-	ASSERT(self->batchIndex == 1); // versionBatchIndex starts at 1 because NotifiedVersion starts at 0
 	std::vector<Future<Void>> fBatches;
-	// TODO: Control how many batches can be processed in parallel. Avoid dead lock due to OOM on loaders
-	for (versionBatch = self->versionBatches.begin(); versionBatch != self->versionBatches.end(); versionBatch++) {
-		self->batch[self->batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
-		fBatches.push_back(
-		    distributeWorkloadPerVersionBatch(self, self->batchIndex, cx, request, versionBatch->second));
-		// wait(distributeWorkloadPerVersionBatch(self, self->batchIndex, cx, request, versionBatch->second));
-		self->batchIndex++;
+	int batchIndex = 1;  // versionBatchIndex starts at 1 because NotifiedVersion starts at 0
+	if (!g_network->isSimulated() || deterministicRandom()->random01() > 0.5) {
+		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchStart", batchIndex);
+		// TODO: Control how many batches can be processed in parallel. Avoid dead lock due to OOM on loaders
+		for (std::map<Version, VersionBatch>::iterator versionBatch = self->versionBatches.begin(); versionBatch != self->versionBatches.end(); versionBatch++) {
+			self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
+			fBatches.push_back(
+				distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
+			// wait(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
+			batchIndex++;
+		}
+		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchEnd", batchIndex);
+	} else {
+		batchIndex = self->versionBatches.size();
+		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchStart", batchIndex);
+		for (std::map<Version, VersionBatch>::reverse_iterator versionBatch = self->versionBatches.rbegin(); versionBatch != self->versionBatches.rend(); versionBatch++) {
+			self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
+			fBatches.push_back(
+				distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
+			// wait(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
+			batchIndex--;
+		}
+		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchEnd", batchIndex);
+		ASSERT(batchIndex == 0);
 	}
 
 	wait(waitForAll(fBatches));
@@ -293,8 +308,6 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 	std::map<UID, RestoreLoaderInterface>::iterator loader = loadersInterf.begin();
 
 	for (auto& file : *files) {
-		// NOTE: Cannot skip empty files because empty files, e.g., log file, still need to generate dummy mutation to
-		// drive applier's NotifiedVersion.
 		if (loader == loadersInterf.end()) {
 			loader = loadersInterf.begin();
 		}
@@ -533,7 +546,7 @@ ACTOR static Future<Void> clearDB(Database cx) {
 
 ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInterface> appliersInterf,
                                                  std::map<UID, RestoreLoaderInterface> loadersInterf, int batchIndex) {
-
+    TraceEvent("FastRestoreInitVersionBatch").detail("BatchIndex", batchIndex).detail("Appliers", appliersInterf.size()).detail("Loaders", loadersInterf.size());
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requestsToAppliers;
 	for (auto& applier : appliersInterf) {
 		requestsToAppliers.push_back(std::make_pair(applier.first, RestoreVersionBatchRequest(batchIndex)));

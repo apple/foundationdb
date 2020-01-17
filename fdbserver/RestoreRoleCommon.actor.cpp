@@ -53,6 +53,7 @@ void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<Resto
 }
 
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
+	TraceEvent("FastRestoreHandleInitVersionBatch", self->id()).detail("Role",  getRoleStr(self->role)).detail("BatchIndex", req.batchIndex).detail("VersionBatchId", self->versionBatchId.get());
 	// batchId is continuous. (req.batchIndex-1) is the id of the just finished batch.
 	wait(self->versionBatchId.whenAtLeast(req.batchIndex - 1));
 

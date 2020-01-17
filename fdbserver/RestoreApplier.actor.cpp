@@ -65,7 +65,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 				}
 				when(RestoreVersionBatchRequest req = waitNext(applierInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
-					wait(handleInitVersionBatchRequest(req, self));
+					actors.add(handleInitVersionBatchRequest(req, self));
 				}
 				when(RestoreFinishRequest req = waitNext(applierInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
@@ -450,24 +450,26 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
     // Ensure batch i is applied before batch (i+1)
     wait(self->finishedBatch.whenAtLeast(req.batchIndex-1));
 
-	Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
-	ASSERT(batchData.isValid());
-	TraceEvent("FastRestore")
-	    .detail("ApplierApplyToDB", self->id())
-	    .detail("VersionBatchIndex", req.batchIndex)
-	    .detail("DBApplierPresent", batchData->dbApplier.present());
-	if (!batchData->dbApplier.present()) {
-		batchData->dbApplier = applyToDB(self->id(), req.batchIndex, batchData, cx);
-	}
-
-	ASSERT(batchData->dbApplier.present());
-
-	wait(batchData->dbApplier.get());
-
 	if (self->finishedBatch.get() == req.batchIndex-1) {
+		Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
+		ASSERT(batchData.isValid());
+		TraceEvent("FastRestore")
+			.detail("ApplierApplyToDB", self->id())
+			.detail("VersionBatchIndex", req.batchIndex)
+			.detail("DBApplierPresent", batchData->dbApplier.present());
+		if (!batchData->dbApplier.present()) {
+			batchData->dbApplier = applyToDB(self->id(), req.batchIndex, batchData, cx);
+		}
+
+		ASSERT(batchData->dbApplier.present());
+
+		wait(batchData->dbApplier.get());
+
 		// Multiple actor invokation can wait on req.batchIndex-1;
 		// Avoid setting finishedBatch when finishedBatch > req.batchIndex
-		self->finishedBatch.set(req.batchIndex);
+		if (self->finishedBatch.get() == req.batchIndex-1) {
+			self->finishedBatch.set(req.batchIndex);
+		}
 	}
 	req.reply.send(RestoreCommonReply(self->id()));
 

@@ -106,17 +106,8 @@ struct MasterBatchData : public ReferenceCounted<MasterBatchData> {
 struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
 	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
 
-	int batchIndex; // The largest index of in-progress version batchs
-
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
-
-	// // rangeToApplier is in master and loader node. Loader uses this to determine which applier a mutation should be
-	// sent.
-	// //   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
-	// std::map<Key, UID> rangeToApplier;
-	// IndexedSet<Key, int64_t> samples; // sample of range and log files
-	// double samplesSize; // sum of the metric of all samples
 
 	std::map<int, Reference<MasterBatchData>> batch;
 
@@ -126,7 +117,6 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	RestoreMasterData() {
 		role = RestoreRole::Master;
 		nodeID = UID();
-		batchIndex = 1; // starts with 1 because batchId (NotifiedVersion) in loaders and appliers start with 0
 	}
 
 	~RestoreMasterData() = default;
@@ -141,18 +131,17 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	void resetPerRestoreRequest() {
 		TraceEvent("FastRestoreMasterReset").detail("OldVersionBatches", versionBatches.size());
 		versionBatches.clear();
-		batchIndex = 1;
 		batch.clear();
 	}
 
 	std::string describeNode() {
 		std::stringstream ss;
-		ss << "Master versionBatch:" << batchIndex;
+		ss << "Master";
 		return ss.str();
 	}
 
 	void dumpVersionBatches(const std::map<Version, VersionBatch>& versionBatches) {
-		int i = 0;
+		int i = 1;
 		for (auto& vb : versionBatches) {
 			TraceEvent("FastRestoreVersionBatches")
 			    .detail("BatchIndex", i)
