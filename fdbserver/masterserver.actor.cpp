@@ -469,7 +469,7 @@ Future<Void> sendMasterRegistration( MasterData* self, LogSystemConfig const& lo
 
 ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILogSystem> logSystem ) {
 	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
-	state Future<Void> trigger =  self->registrationTrigger.onTrigger();
+	state Future<Void> trigger = self->registrationTrigger.onTrigger();
 	state Future<Void> updateLogsKey;
 
 	loop {
@@ -1202,8 +1202,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 	}
 }
 
-ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
-	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
+ACTOR Future<Void> configurationMonitor(Reference<MasterData> self, Database cx) {
 	loop {
 		state ReadYourWritesTransaction tr(cx);
 
@@ -1235,11 +1234,10 @@ ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
 	}
 }
 
-ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self) {
-	if (self->backupWorkers.size() == 0) return Void();
+ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Database cx) {
+	ASSERT(self->backupWorkers.size() > 0);
 
 	state LogEpoch epoch = self->cstate.myDBState.recoveryCount;
-	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
 	state Reference<BackupProgress> backupProgress(
 	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochTagsVersionsInfo()));
 	state Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress);
@@ -1525,8 +1523,9 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		self->addActor.send( resolutionBalancing(self) );
 
 	self->addActor.send( changeCoordinators(self) );
-	self->addActor.send( configurationMonitor( self ) );
-	self->addActor.send(recruitBackupWorkers(self));
+	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
+	self->addActor.send(configurationMonitor(self, cx));
+	self->addActor.send(recruitBackupWorkers(self, cx));
 
 	wait( Future<Void>(Never()) );
 	throw internal_error();
@@ -1558,8 +1557,8 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 			when(BackupWorkerDoneRequest req = waitNext(mi.notifyBackupWorkerDone.getFuture())) {
 				if (self->logSystem.isValid() && self->logSystem->removeBackupWorker(req)) {
 					self->registrationTrigger.trigger();
-					req.reply.send(Void());
 				}
+				req.reply.send(Void());
 			}
 			when (wait(collection) ) { ASSERT(false); throw internal_error(); }
 		}

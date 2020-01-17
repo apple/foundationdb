@@ -700,7 +700,7 @@ ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Refere
 			upTo = logData->logSystem->get()->popPseudoLocalityTag(inputTag, to);
 			tagLocality = tagLocalityLogRouter;
 		} else {
-			TraceEvent("TLogPopNoLogSystem", self->dbgid).detail("Locality", tagLocality).detail("Version", upTo);
+			TraceEvent(SevWarn, "TLogPopNoLogSystem", self->dbgid).detail("Locality", tagLocality).detail("Version", upTo);
 			return Void();
 		}
 	}

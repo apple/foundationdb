@@ -1178,15 +1178,15 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
                                   ProxyStats* stats, Version minKnownCommittedVersion) {
 	GetReadVersionReply reply = wait(replyFuture);
 
-	GetReadVersionReply minKCVReply = reply;
-	minKCVReply.version = minKnownCommittedVersion;
-
 	double end = timer();
 	for(GetReadVersionRequest const& request : requests) {
 		if(request.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
 			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
 		}
 		if (request.flags & GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION) {
+			// Only backup worker may infrequently use this flag.
+			GetReadVersionReply minKCVReply = reply;
+			minKCVReply.version = minKnownCommittedVersion;
 			request.reply.send(minKCVReply);
 		} else {
 			request.reply.send(reply);

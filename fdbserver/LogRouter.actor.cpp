@@ -221,6 +221,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 	state Reference<ILogSystem::IPeekCursor> r;
 	state Version tagAt = self->version.get() + 1;
 	state Version lastVer = 0;
+	state std::vector<int> tags; // an optimization to avoid reallocating vector memory in every loop
 
 	loop {
 		loop choose {
@@ -271,7 +272,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 
 			TagsAndMessage tagAndMsg;
 			tagAndMsg.message = r->getMessageWithTags();
-			std::vector<int> tags;
+			tags.clear();
 			self->logSet.getPushLocations(r->getTags(), tags, 0);
 			tagAndMsg.tags.reserve(arena, tags.size());
 			for (const auto& t : tags) {

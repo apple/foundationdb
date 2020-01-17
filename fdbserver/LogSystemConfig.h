@@ -151,21 +151,8 @@ struct TLogSet {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		if constexpr (is_fb_function<Ar>) {
-			serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities,
-			           isLocal, locality, startVersion, satelliteTagLocations, tLogVersion, backupWorkers);
-		} else {
-			serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
-			if (ar.isDeserializing && !ar.protocolVersion().hasTLogVersion()) {
-				tLogVersion = TLogVersion::V2;
-			} else {
-				serializer(ar, tLogVersion);
-			}
-			if (ar.protocolVersion().hasBackupWorker()) {
-				serializer(ar, backupWorkers);
-			}
-			ASSERT(tLogPolicy.getPtr() == nullptr || tLogVersion != TLogVersion::UNSET);
-		}
+		serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities,
+		           isLocal, locality, startVersion, satelliteTagLocations, tLogVersion, backupWorkers);
 	}
 };
 
