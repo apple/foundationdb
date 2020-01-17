@@ -2723,9 +2723,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 		}
 		wait(logData->committingQueue.getFuture() || logData->removed );
 	} catch( Error &e ) {
-		if(e.code() != error_code_actor_cancelled) {
-			req.reply.sendError(e);
-		}
+		req.reply.sendError(recruitment_failed());
 
 		if( e.code() != error_code_worker_removed ) {
 			throw;
