@@ -646,7 +646,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 	return (jlong)f;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getStorageByteSample(JNIEnv *jenv, jobject, jlong tPtr, 
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getEstimatedRangeSizeBytes(JNIEnv *jenv, jobject, jlong tPtr, 
 		jbyteArray beginKeyBytes, jbyteArray endKeyBytes) {
 	if( !tPtr || !beginKeyBytes || !endKeyBytes) {
 		throwParamNotNull(jenv);
@@ -669,7 +669,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		return 0;
 	}
 
-	FDBFuture *f = fdb_transaction_get_storage_byte_sample( tr, startKey, jenv->GetArrayLength( beginKeyBytes ), endKey, jenv->GetArrayLength( endKeyBytes ) );
+	FDBFuture *f = fdb_transaction_get_estimated_range_size_bytes( tr, startKey, jenv->GetArrayLength( beginKeyBytes ), endKey, jenv->GetArrayLength( endKeyBytes ) );
 	jenv->ReleaseByteArrayElements( beginKeyBytes, (jbyte *)startKey, JNI_ABORT );
 	jenv->ReleaseByteArrayElements( endKeyBytes, (jbyte *)endKey, JNI_ABORT );
 	return (jlong)f;

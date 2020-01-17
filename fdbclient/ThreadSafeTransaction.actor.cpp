@@ -157,12 +157,12 @@ ThreadFuture< Key > ThreadSafeTransaction::getKey( const KeySelectorRef& key, bo
 		} );
 }
 
-ThreadFuture<int64_t> ThreadSafeTransaction::getStorageByteSample( const KeyRangeRef& keys ) {
+ThreadFuture<int64_t> ThreadSafeTransaction::getEstimatedRangeSizeBytes( const KeyRangeRef& keys ) {
 	KeyRange r = keys;
 
 	ReadYourWritesTransaction *tr = this->tr;
 	return onMainThread( [tr, r]() -> Future<int64_t> {
-			return tr->getStorageByteSample(r);
+			return tr->getEstimatedRangeSizeBytes(r);
 		} );
 }
 

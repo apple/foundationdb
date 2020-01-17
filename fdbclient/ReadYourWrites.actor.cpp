@@ -1343,7 +1343,7 @@ Future< Standalone<VectorRef<const char*> >> ReadYourWritesTransaction::getAddre
 	return result;
 }
 
-Future<int64_t> ReadYourWritesTransaction::getStorageByteSample(const KeyRangeRef& keys) {
+Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
 	if(checkUsedDuringCommit()) {
 		throw used_during_commit();
 	}

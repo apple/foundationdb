@@ -82,7 +82,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	void (*transactionClearRange)(FDBTransaction *tr, uint8_t const *beginKeyName, int beginKeyNameLength, uint8_t const *endKeyName, int endKeyNameLength);
 	void (*transactionAtomicOp)(FDBTransaction *tr, uint8_t const *keyName, int keyNameLength, uint8_t const *param, int paramLength, FDBMutationTypes::Option operationType);
 
-	FDBFuture* (*transactionGetStorageByteSample)(FDBTransaction* tr, uint8_t const* begin_key_name,
+	FDBFuture* (*transactionGetEstimatedRangeSizeBytes)(FDBTransaction* tr, uint8_t const* begin_key_name,
         int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length);
 	
 	FDBFuture* (*transactionCommit)(FDBTransaction *tr);
@@ -132,7 +132,7 @@ public:
 	ThreadFuture<Standalone<RangeResultRef>> getRange( const KeyRangeRef& keys, GetRangeLimits limits, bool snapshot=false, bool reverse=false) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
-	ThreadFuture<int64_t> getStorageByteSample(const KeyRangeRef& keys) override;
+	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
  
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 
@@ -232,7 +232,7 @@ public:
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
  
 	void addReadConflictRange(const KeyRangeRef& keys) override;
-	ThreadFuture<int64_t> getStorageByteSample(const KeyRangeRef& keys) override;
+	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
 
 	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) override;
 	void set(const KeyRef& key, const ValueRef& value) override;

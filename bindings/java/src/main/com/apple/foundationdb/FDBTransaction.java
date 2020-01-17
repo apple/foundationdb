@@ -71,10 +71,10 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 
 		@Override
-		public CompletableFuture<Long> getStorageByteSample(byte[] begin, byte[] end) {
+		public CompletableFuture<Long> getEstimatedRangeSizeBytes(byte[] begin, byte[] end) {
 			pointerReadLock.lock();
 			try {
-				return new FutureInt64(Transaction_getStorageByteSample(getPtr(), begin, end), executor);
+				return new FutureInt64(Transaction_getEstimatedRangeSizeBytes(getPtr(), begin, end), executor);
 			} finally {
 				pointerReadLock.unlock();
 			}
@@ -268,10 +268,10 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	@Override
-	public CompletableFuture<Long> getStorageByteSample(byte[] begin, byte[] end) {
+	public CompletableFuture<Long> getEstimatedRangeSizeBytes(byte[] begin, byte[] end) {
 		pointerReadLock.lock();
 		try {
-			return new FutureInt64(Transaction_getStorageByteSample(getPtr(), begin, end), executor);
+			return new FutureInt64(Transaction_getEstimatedRangeSizeBytes(getPtr(), begin, end), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -679,5 +679,5 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private native long Transaction_watch(long ptr, byte[] key) throws FDBException;
 	private native void Transaction_cancel(long cPtr);
 	private native long Transaction_getKeyLocations(long cPtr, byte[] key);
-	private native long Transaction_getStorageByteSample(long cPtr, byte[] keyBegin, byte[] keyEnd);
+	private native long Transaction_getEstimatedRangeSizeBytes(long cPtr, byte[] keyBegin, byte[] keyEnd);
 }

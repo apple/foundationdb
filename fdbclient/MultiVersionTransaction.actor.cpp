@@ -145,11 +145,11 @@ ThreadFuture<Standalone<StringRef>> DLTransaction::getVersionstamp() {
 	});
 }
 
-ThreadFuture<int64_t> DLTransaction::getStorageByteSample(const KeyRangeRef& keys) {
-	if (!api->transactionGetStorageByteSample) {
+ThreadFuture<int64_t> DLTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
+	if (!api->transactionGetEstimatedRangeSizeBytes) {
 		return unsupported_operation();
 	}
-	FdbCApi::FDBFuture *f = api->transactionGetStorageByteSample(tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size());
+	FdbCApi::FDBFuture *f = api->transactionGetEstimatedRangeSizeBytes(tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size());
 
 	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
 		int64_t sampledSize;
@@ -321,7 +321,7 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionReset, lib, fdbCPath, "fdb_transaction_reset");
 	loadClientFunction(&api->transactionCancel, lib, fdbCPath, "fdb_transaction_cancel");
 	loadClientFunction(&api->transactionAddConflictRange, lib, fdbCPath, "fdb_transaction_add_conflict_range");
-	loadClientFunction(&api->transactionGetStorageByteSample, lib, fdbCPath, "fdb_transaction_get_storage_byte_sample", headerVersion >= 700);
+	loadClientFunction(&api->transactionGetEstimatedRangeSizeBytes, lib, fdbCPath, "fdb_transaction_get_estimated_range_size_bytes", headerVersion >= 700);
 
 	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
@@ -562,9 +562,9 @@ void MultiVersionTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 	}
 }
 
-ThreadFuture<int64_t> MultiVersionTransaction::getStorageByteSample(const KeyRangeRef& keys) {
+ThreadFuture<int64_t> MultiVersionTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getStorageByteSample(keys) : ThreadFuture<int64_t>(Never());
+	auto f = tr.transaction ? tr.transaction->getEstimatedRangeSizeBytes(keys) : ThreadFuture<int64_t>(Never());
 	return abortableFuture(f, tr.onChange);
 }
 
