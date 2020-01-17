@@ -1286,7 +1286,7 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	// <key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	// Due to the implementation of resolver, currently, 
 	// we can only give key ranges that contain at least one key is conflicting.
-	KeyRef conflictingKeysPreifx = LiteralStringRef("\xff\xff/transaction/conflicting_keys/");
+	const KeyRef conflictingKeysPreifx = LiteralStringRef("\xff\xff/transaction/conflicting_keys/");
 	// TODO : This condition need to be changed in the future when we have more special keys under "\xff\xff/transaction/"
 	if (begin.getKey().startsWith(conflictingKeysPreifx) && end.getKey().startsWith(conflictingKeysPreifx)) {
 		// Remove the special key prefix "\xff\xff/transaction/conflicting_keys/"
