@@ -56,7 +56,7 @@ Python 2.7 - 3.5
 
 On macOS and Windows, the FoundationDB Python API bindings are installed as part of your FoundationDB installation.
 
-If you need to use the FoundationDB Python API from other Python installations or paths, download the Python package:
+If you need to use the FoundationDB Python API from other Python installations or paths, use the Python package manager ``pip`` (``pip install foundationdb``) or download the Python package:
 
 * `foundationdb-6.2.13.tar.gz <https://www.foundationdb.org/downloads/6.2.13/bindings/python/foundationdb-6.2.13.tar.gz>`_
 
