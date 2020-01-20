@@ -2,6 +2,16 @@
 Release Notes
 #############
 
+6.2.14
+======
+
+Fixes
+-----
+
+* Data distribution was prioritizing shard merges too highly. `(PR #2562) <https://github.com/apple/foundationdb/pull/2562>`_.
+* Status would incorrectly mark clusters as having no fault tolerance. `(PR #2562) <https://github.com/apple/foundationdb/pull/2562>`_.
+* A proxy could run out of memory if disconnected from the cluster for too long. `(PR #2562) <https://github.com/apple/foundationdb/pull/2562>`_.
+
 6.2.13
 ======
 
