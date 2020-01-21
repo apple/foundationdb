@@ -366,18 +366,21 @@ struct RestoreLoadFileReply : TimedRequest {
 
 	LoadingParam param;
 	MutationsVec samples; // sampled mutations
+	bool isDuplicated; // true if loader thinks the request is a duplicated one
 
 	RestoreLoadFileReply() = default;
-	explicit RestoreLoadFileReply(LoadingParam param, MutationsVec samples) : param(param), samples(samples) {}
+	explicit RestoreLoadFileReply(LoadingParam param, MutationsVec samples, bool isDuplicated)
+	  : param(param), samples(samples), isDuplicated(isDuplicated) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, param, samples);
+		serializer(ar, param, samples, isDuplicated);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "LoadingParam:" << param.toString() << " samples.size:" << samples.size();
+		ss << "LoadingParam:" << param.toString() << " samples.size:" << samples.size()
+		   << " isDuplicated:" << isDuplicated;
 		return ss.str();
 	}
 };

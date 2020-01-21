@@ -103,6 +103,26 @@ struct MasterBatchData : public ReferenceCounted<MasterBatchData> {
 	}
 };
 
+enum class RestoreAssetStatus { Init, Loading, Loaded };
+
+enum class RestoreSendStatus { Init, SendingLogs, SendedLogs, SendingRanges, SendedRanges };
+
+enum class RestoreApplyStatus { Init, Applying, Applied };
+
+// Track restore progress of each RestoreAsset (RA) and
+// Use status to sanity check restore property, e.g., each RA should be processed exactly once.
+struct MasterBatchStatus : public ReferenceCounted<MasterBatchStatus> {
+	std::map<RestoreAsset, RestoreAssetStatus> raStatus;
+	std::map<UID, RestoreSendStatus> loadStatus;
+	std::map<UID, RestoreApplyStatus> applyStatus;
+
+	void addref() { return ReferenceCounted<MasterBatchStatus>::addref(); }
+	void delref() { return ReferenceCounted<MasterBatchStatus>::delref(); }
+
+	MasterBatchStatus() = default;
+	~MasterBatchStatus() = default;
+};
+
 struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
 	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
 
@@ -110,6 +130,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	Key bcUrl; // The url used to get the bc
 
 	std::map<int, Reference<MasterBatchData>> batch;
+	std::map<int, Reference<MasterBatchStatus>> batchStatus;
 
 	void addref() { return ReferenceCounted<RestoreMasterData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreMasterData>::delref(); }
@@ -132,6 +153,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		TraceEvent("FastRestoreMasterReset").detail("OldVersionBatches", versionBatches.size());
 		versionBatches.clear();
 		batch.clear();
+		batchStatus.clear();
 	}
 
 	std::string describeNode() {

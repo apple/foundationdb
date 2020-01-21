@@ -110,7 +110,9 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 
 	wait(curFilePos.whenAtLeast(req.prevVersion));
 
+	state bool isDuplicated = true;
 	if (curFilePos.get() == req.prevVersion) {
+		isDuplicated = false;
 		Version commitVersion = req.version;
 		MutationsVec mutations(req.mutations);
 		// Sanity check: mutations in range file is in [beginVersion, endVersion);
@@ -146,7 +148,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 		curFilePos.set(req.version);
 	}
 
-	req.reply.send(RestoreCommonReply(self->id()));
+	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 	return Void();
 }
 
@@ -450,6 +452,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
     // Ensure batch i is applied before batch (i+1)
     wait(self->finishedBatch.whenAtLeast(req.batchIndex-1));
 
+	state bool isDuplicated = true;
 	if (self->finishedBatch.get() == req.batchIndex-1) {
 		Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
 		ASSERT(batchData.isValid());
@@ -458,6 +461,8 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 			.detail("VersionBatchIndex", req.batchIndex)
 			.detail("DBApplierPresent", batchData->dbApplier.present());
 		if (!batchData->dbApplier.present()) {
+			isDuplicated = false;
+			batchData->dbApplier = Never();
 			batchData->dbApplier = applyToDB(self->id(), req.batchIndex, batchData, cx);
 		}
 
@@ -471,7 +476,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 			self->finishedBatch.set(req.batchIndex);
 		}
 	}
-	req.reply.send(RestoreCommonReply(self->id()));
+	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 
 	return Void();
 }

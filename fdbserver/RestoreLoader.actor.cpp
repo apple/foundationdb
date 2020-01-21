@@ -179,6 +179,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<LoaderBatc
 // A loader can process multiple RestoreLoadFileRequest in parallel.
 ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self) {
 	state Reference<LoaderBatchData> batchData = self->batch[req.batchIndex];
+	state bool isDuplicated = true;
 	ASSERT(batchData.isValid());
 
 	if (batchData->processedFileParams.find(req.param) == batchData->processedFileParams.end()) {
@@ -186,13 +187,14 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		ASSERT(batchData->sampleMutations.find(req.param) == batchData->sampleMutations.end());
 		batchData->processedFileParams[req.param] = Never(); // Ensure second exec. wait on _processLoadingParam()
 		batchData->processedFileParams[req.param] = _processLoadingParam(req.param, batchData, self->id(), self->bc);
+		isDuplicated = false;
 	} else {
 		TraceEvent("FastRestoreLoadFile", self->id()).detail("BatchIndex", req.batchIndex).detail("WaitOnProcessLoadParam", req.param.toString());
 	}
 	ASSERT(batchData->processedFileParams.find(req.param) != batchData->processedFileParams.end());
 	wait(batchData->processedFileParams[req.param]); // wait on the processing of the req.param.
 
-	req.reply.send(RestoreLoadFileReply(req.param, batchData->sampleMutations[req.param]));
+	req.reply.send(RestoreLoadFileReply(req.param, batchData->sampleMutations[req.param], isDuplicated));
 	// TODO: clear self->sampleMutations[req.param] memory to save memory on loader
 	return Void();
 }
@@ -201,21 +203,71 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
                                               Reference<RestoreLoaderData> self) {
 	state Reference<LoaderBatchData> batchData = self->batch[req.batchIndex];
 	state std::map<LoadingParam, VersionedMutationsMap>::iterator item = batchData->kvOpsPerLP.begin();
+	state Reference<LoaderBatchStatus> batchStatus = self->status[req.batchIndex];
+	state bool isDuplicated = true;
 
-	TraceEvent("FastRestoreSendMutations", self->id()).detail("BatchIndex", req.batchIndex).detail("UseRangeFile", req.useRangeFile);
+	TraceEvent("FastRestoreSendMutations", self->id())
+	    .detail("BatchIndex", req.batchIndex)
+	    .detail("UseRangeFile", req.useRangeFile)
+	    .detail("LoaderSendStatus", batchStatus->toString());
 
-	batchData->rangeToApplier = req.rangeToApplier;
-	for (; item != batchData->kvOpsPerLP.end(); item++) {
-		if (item->first.isRangeFile == req.useRangeFile) {
-			// Send the parsed mutation to applier who will apply the mutation to DB
-			// TODO: Change to parallel sending
-			// TODO: item should based on batchIndex
-			wait(sendMutationsToApplier(&item->second, req.batchIndex, item->first.asset, item->first.isRangeFile,
-			                            &batchData->rangeToApplier, &self->appliersInterf));
+	if (!req.useRangeFile) {
+		if (!batchStatus->sendAllLogs.present()) {
+			batchStatus->sendAllLogs = Never();
+			isDuplicated = false;
+			TraceEvent(SevInfo, "FastRestoreSendMutationsProcessLogRequest", self->id())
+			    .detail("BatchIndex", req.batchIndex)
+			    .detail("UseRangeFile", req.useRangeFile);
+			ASSERT(!batchStatus->sendAllRanges.present());
+		} else if (!batchStatus->sendAllLogs.get().isReady()) {
+			TraceEvent(SevDebug, "FastRestoreSendMutationsWaitDuplicateLogRequest", self->id())
+			    .detail("BatchIndex", req.batchIndex)
+			    .detail("UseRangeFile", req.useRangeFile);
+			wait(batchStatus->sendAllLogs.get());
+		} else {
+			TraceEvent(SevDebug, "FastRestoreSendMutationsSkipDuplicateLogRequest", self->id())
+			    .detail("BatchIndex", req.batchIndex)
+			    .detail("UseRangeFile", req.useRangeFile);
+		}
+	} else {
+		if (!batchStatus->sendAllRanges.present()) {
+			batchStatus->sendAllRanges = Never(); // Signal the loader is sending kv parsed from range files
+			isDuplicated = false;
+			TraceEvent(SevInfo, "FastRestoreSendMutationsProcessRangeRequest", self->id())
+			    .detail("BatchIndex", req.batchIndex)
+			    .detail("UseRangeFile", req.useRangeFile);
+			ASSERT(batchStatus->sendAllLogs.get().isReady());
+		} else if (!batchStatus->sendAllRanges.get().isReady()) {
+			TraceEvent(SevDebug, "FastRestoreSendMutationsWaitDuplicateRangeRequest", self->id())
+			    .detail("BatchIndex", req.batchIndex)
+			    .detail("UseRangeFile", req.useRangeFile);
+			wait(batchStatus->sendAllRanges.get());
+		} else if (req.useRangeFile) {
+			TraceEvent(SevDebug, "FastRestoreSendMutationsSkipDuplicateRangeRequest", self->id())
+			    .detail("BatchIndex", req.batchIndex)
+			    .detail("UseRangeFile", req.useRangeFile);
 		}
 	}
 
-	req.reply.send(RestoreCommonReply(self->id()));
+	if (!isDuplicated) {
+		batchData->rangeToApplier = req.rangeToApplier;
+		for (; item != batchData->kvOpsPerLP.end(); item++) {
+			if (item->first.isRangeFile == req.useRangeFile) {
+				// Send the parsed mutation to applier who will apply the mutation to DB
+				// TODO: Change to parallel sending
+				// TODO: item should based on batchIndex
+				wait(sendMutationsToApplier(&item->second, req.batchIndex, item->first.asset, item->first.isRangeFile,
+				                            &batchData->rangeToApplier, &self->appliersInterf));
+			}
+		}
+		if (req.useRangeFile) {
+			batchStatus->sendAllRanges = Void(); // Finish sending kvs parsed from range files
+		} else {
+			batchStatus->sendAllLogs = Void();
+		}
+	}
+
+	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 	return Void();
 }
 
@@ -305,6 +357,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 			}
 		} // Mutations at the same version
 
+		// TODO: Sanity check each asset has been received exactly once!
 		// Send the mutations to appliers for each version
 		for (auto& applierID : applierIDs) {
 			requests.push_back(std::make_pair(

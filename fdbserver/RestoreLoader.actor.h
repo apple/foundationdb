@@ -63,9 +63,27 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	}
 };
 
+struct LoaderBatchStatus : public ReferenceCounted<LoaderBatchStatus> {
+	Optional<Future<Void>> sendAllRanges;
+	Optional<Future<Void>> sendAllLogs;
+
+	void addref() { return ReferenceCounted<LoaderBatchStatus>::addref(); }
+	void delref() { return ReferenceCounted<LoaderBatchStatus>::delref(); }
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "sendAllRanges: "
+		   << (!sendAllRanges.present() ? "invalid" : (sendAllRanges.get().isReady() ? "ready" : "notReady"))
+		   << " sendAllLogs: "
+		   << (!sendAllLogs.present() ? "invalid" : (sendAllLogs.get().isReady() ? "ready" : "notReady"));
+		return ss.str();
+	}
+};
+
 struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoaderData> {
 	// buffered data per version batch
 	std::map<int, Reference<LoaderBatchData>> batch;
+	std::map<int, Reference<LoaderBatchStatus>> status;
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
@@ -91,10 +109,12 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	void resetPerVersionBatch(int batchIndex) {
 		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnLoader", nodeID);
 		batch[batchIndex] = Reference<LoaderBatchData>(new LoaderBatchData());
+		status[batchIndex] = Reference<LoaderBatchStatus>(new LoaderBatchStatus());
 	}
 
 	void resetPerRestoreRequest() {
 		batch.clear();
+		status.clear();
 	}
 
 	void initBackupContainer(Key url) {
