@@ -67,10 +67,12 @@ enum Arguments {
   ARG_FLATBUFFERS,
   ARG_TRACE,
   ARG_TRACEPATH,
+  ARG_TRACEFORMAT,
   ARG_TPSMAX,
   ARG_TPSMIN,
   ARG_TPSINTERVAL,
-  ARG_TPSCHANGE
+  ARG_TPSCHANGE,
+  ARG_TXNTRACE
 };
 
 enum TPSChangeTypes {
@@ -117,8 +119,10 @@ typedef struct {
   char cluster_file[PATH_MAX];
   int trace;
   char tracepath[PATH_MAX];
+  int traceformat; /* 0 - XML, 1 - JSON */
   char knobs[KNOB_MAX];
   uint8_t flatbuffers;
+  int txntrace;
 } mako_args_t;
 
 /* shared memory */

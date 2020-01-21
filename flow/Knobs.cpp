@@ -75,6 +75,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT,           3600.0 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
+	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );
+	init( TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT,             11.0 );
 
 	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
 

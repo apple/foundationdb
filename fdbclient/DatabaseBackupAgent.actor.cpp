@@ -2391,28 +2391,28 @@ public:
 		return statusText;
 	}
 
-	ACTOR static Future<int> getStateValue(DatabaseBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, UID logUid) {
+	ACTOR static Future<int> getStateValue(DatabaseBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state Key statusKey = backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned())).pack(DatabaseBackupAgent::keyStateStatus);
-		Optional<Value> status = wait(tr->get(statusKey));
+		Optional<Value> status = wait(tr->get(statusKey, snapshot));
 
 		return (!status.present()) ? DatabaseBackupAgent::STATE_NEVERRAN : BackupAgentBase::getState(status.get().toString());
 	}
 
-	ACTOR static Future<UID> getDestUid(DatabaseBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, UID logUid) {
+	ACTOR static Future<UID> getDestUid(DatabaseBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state Key destUidKey = backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned())).pack(BackupAgentBase::destUid);
-		Optional<Value> destUid = wait(tr->get(destUidKey));
+		Optional<Value> destUid = wait(tr->get(destUidKey, snapshot));
 
 		return (destUid.present()) ? BinaryReader::fromStringRef<UID>(destUid.get(), Unversioned()) : UID();
 	}
 
-	ACTOR static Future<UID> getLogUid(DatabaseBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName) {
+	ACTOR static Future<UID> getLogUid(DatabaseBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName, bool snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state Optional<Value> logUid = wait(tr->get(backupAgent->tagNames.pack(tagName)));
+		state Optional<Value> logUid = wait(tr->get(backupAgent->tagNames.pack(tagName), snapshot));
 
 		return (logUid.present()) ? BinaryReader::fromStringRef<UID>(logUid.get(), Unversioned()) : UID();
 	}
@@ -2442,16 +2442,16 @@ Future<std::string> DatabaseBackupAgent::getStatus(Database cx, int errorLimit, 
 	return DatabaseBackupAgentImpl::getStatus(this, cx, errorLimit, tagName);
 }
 
-Future<int> DatabaseBackupAgent::getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid) {
-	return DatabaseBackupAgentImpl::getStateValue(this, tr, logUid);
+Future<int> DatabaseBackupAgent::getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot) {
+	return DatabaseBackupAgentImpl::getStateValue(this, tr, logUid, snapshot);
 }
 
-Future<UID> DatabaseBackupAgent::getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid) {
-	return DatabaseBackupAgentImpl::getDestUid(this, tr, logUid);
+Future<UID> DatabaseBackupAgent::getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot) {
+	return DatabaseBackupAgentImpl::getDestUid(this, tr, logUid, snapshot);
 }
 
-Future<UID> DatabaseBackupAgent::getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName) {
-	return DatabaseBackupAgentImpl::getLogUid(this, tr, tagName);
+Future<UID> DatabaseBackupAgent::getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName, bool snapshot) {
+	return DatabaseBackupAgentImpl::getLogUid(this, tr, tagName, snapshot);
 }
 
 Future<Void> DatabaseBackupAgent::waitUpgradeToLatestDrVersion(Database cx, Key tagName) {
@@ -2466,10 +2466,10 @@ Future<int> DatabaseBackupAgent::waitSubmitted(Database cx, Key tagName) {
 	return DatabaseBackupAgentImpl::waitSubmitted(this, cx, tagName);
 }
 
-Future<int64_t> DatabaseBackupAgent::getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid) {
-	return DRConfig(logUid).rangeBytesWritten().getD(tr);
+Future<int64_t> DatabaseBackupAgent::getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot) {
+	return DRConfig(logUid).rangeBytesWritten().getD(tr, snapshot);
 }
 
-Future<int64_t> DatabaseBackupAgent::getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid) {
-	return DRConfig(logUid).logBytesWritten().getD(tr);
+Future<int64_t> DatabaseBackupAgent::getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot) {
+	return DRConfig(logUid).logBytesWritten().getD(tr, snapshot);
 }

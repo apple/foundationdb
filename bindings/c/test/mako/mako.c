@@ -182,6 +182,7 @@ int populate(FDBTransaction *transaction, mako_args_t *args, int worker_id,
   int end = insert_end(args->rows, worker_id, thread_id, args->num_processes,
                        args->num_threads);
   int xacts = 0;
+  int tracetimer = 0;
 
   keystr = (char *)malloc(sizeof(char) * args->key_length + 1);
   if (!keystr)
@@ -200,8 +201,13 @@ int populate(FDBTransaction *transaction, mako_args_t *args, int worker_id,
 
   for (i = begin; i <= end; i++) {
 
-    if ((thread_tps > 0) && (xacts >= thread_tps)) {
-      /* throttling is on */
+    /* sequential keys */
+    genkey(keystr, i, args->rows, args->key_length + 1);
+    /* random values */
+    randstr(valstr, args->value_length + 1);
+
+    if (((thread_tps > 0) && (xacts >= thread_tps)) /* throttle */ ||
+	(args->txntrace) /* txn tracing */){
 
     throttle:
       clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_now);
@@ -212,17 +218,40 @@ int populate(FDBTransaction *transaction, mako_args_t *args, int worker_id,
         xacts = 0;
         timer_prev.tv_sec = timer_now.tv_sec;
         timer_prev.tv_nsec = timer_now.tv_nsec;
-      } else {
-        /* 1 second not passed, throttle */
-        usleep(1000); /* sleep for 1ms */
-        goto throttle;
-      }
-    } /* throttle */
 
-    /* sequential keys */
-    genkey(keystr, i, args->rows, args->key_length + 1);
-    /* random values */
-    randstr(valstr, args->value_length + 1);
+	/* enable transaction tracing */
+	if (args->txntrace) {
+	  tracetimer++;
+	  if (tracetimer == args->txntrace) {
+	    fdb_error_t err;
+	    tracetimer = 0;
+	    fprintf(debugme, "DEBUG: txn tracing %s\n", keystr);
+	    err = fdb_transaction_set_option(transaction,
+					     FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER,
+					     (uint8_t *)keystr, strlen(keystr));
+	    if (err) {
+	      fprintf(stderr,
+		      "ERROR: fdb_transaction_set_option(FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER): %s\n",
+		      fdb_get_error(err));
+	    }
+	    err = fdb_transaction_set_option(transaction,
+					     FDB_TR_OPTION_LOG_TRANSACTION,
+					     (uint8_t *)NULL, 0);
+	    if (err) {
+	      fprintf(stderr,
+		      "ERROR: fdb_transaction_set_option(FDB_TR_OPTION_LOG_TRANSACTION): %s\n",
+		      fdb_get_error(err));
+	    }
+	  }
+	}
+      } else {
+	if (thread_tps > 0) {
+	  /* 1 second not passed, throttle */
+	  usleep(1000); /* sleep for 1ms */
+	  goto throttle;
+	}
+      }
+    } /* throttle or txntrace */
 
     /* insert (SET) */
     fdb_transaction_set(transaction, (uint8_t *)keystr, strlen(keystr),
@@ -427,8 +456,10 @@ int run_one_transaction(FDBTransaction *transaction, mako_args_t *args,
   int randstrlen;
   int rangei;
 
+#if 0 /* this call conflicts with debug transaction */
   /* make sure that the transaction object is clean */
   fdb_transaction_reset(transaction);
+#endif
 
   clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_start);
 
@@ -531,6 +562,8 @@ int run_one_transaction(FDBTransaction *transaction, mako_args_t *args,
 		stats->errors[OP_COMMIT]++;
 	      }
 	      if (rc == FDB_ERROR_ABORT) {
+		/* make sure to reset transaction */
+		fdb_transaction_reset(transaction);
 		return rc; /* abort */
 	      }
 	      goto retryTxn;
@@ -562,6 +595,8 @@ int run_one_transaction(FDBTransaction *transaction, mako_args_t *args,
 	    if (rc == FDB_ERROR_RETRY) {
 	      goto retryTxn;
 	    } else if (rc == FDB_ERROR_ABORT) {
+	      /* make sure to reset transaction */
+	      fdb_transaction_reset(transaction);
 	      return rc; /* abort */
 	    }
 	  }
@@ -580,6 +615,8 @@ int run_one_transaction(FDBTransaction *transaction, mako_args_t *args,
 	      stats->errors[OP_COMMIT]++;
 	    }
 	    if (rc == FDB_ERROR_ABORT) {
+	      /* make sure to reset transaction */
+	      fdb_transaction_reset(transaction);
 	      return rc; /* abort */
 	    }
 	    goto retryTxn;
@@ -612,6 +649,8 @@ int run_one_transaction(FDBTransaction *transaction, mako_args_t *args,
 	    stats->errors[OP_COMMIT]++;
 	  }
 	  if (rc == FDB_ERROR_ABORT) {
+	    /* make sure to reset transaction */
+	    fdb_transaction_reset(transaction);
 	    return rc; /* abort */
 	  }
 	  goto retryTxn;
@@ -637,6 +676,8 @@ int run_one_transaction(FDBTransaction *transaction, mako_args_t *args,
 	stats->errors[OP_COMMIT]++;
       }
       if (rc == FDB_ERROR_ABORT) {
+	/* make sure to reset transaction */
+	fdb_transaction_reset(transaction);
 	return rc; /* abort */
       }
       goto retryTxn;
@@ -645,24 +686,34 @@ int run_one_transaction(FDBTransaction *transaction, mako_args_t *args,
 
   stats->xacts++;
 
+  /* make sure to reset transaction */
+  fdb_transaction_reset(transaction);
   return 0;
 }
 
 
 int run_workload(FDBTransaction *transaction, mako_args_t *args,
 		 int thread_tps, volatile double *throttle_factor,
-                 int thread_iters, volatile int *signal, mako_stats_t *stats) {
+                 int thread_iters, volatile int *signal, mako_stats_t *stats,
+		 int dotrace) {
   int xacts = 0;
+  int64_t total_xacts = 0;
   int rc = 0;
   struct timespec timer_prev, timer_now;
   char *keystr;
   char *keystr2;
   char *valstr;
   int current_tps;
+  char *traceid;
+  int tracetimer = 0;
 
   if (thread_tps < 0)
     return 0;
 
+  if (dotrace) {
+    traceid = (char *)malloc(32);
+  }
+  
   current_tps = (int)((double)thread_tps * *throttle_factor);
 
   keystr = (char *)malloc(sizeof(char) * args->key_length + 1);
@@ -685,25 +736,52 @@ int run_workload(FDBTransaction *transaction, mako_args_t *args,
   /* main transaction loop */
   while (1) {
 
-    if ((thread_tps > 0) && (xacts >= current_tps)) {
-      /* throttling is on */
+    if (((thread_tps > 0) && (xacts >= current_tps)) /* throttle on */ ||
+	dotrace /* transaction tracing on */ ){
 
       clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_now);
       if ((timer_now.tv_sec > timer_prev.tv_sec + 1) ||
           ((timer_now.tv_sec == timer_prev.tv_sec + 1) &&
            (timer_now.tv_nsec > timer_prev.tv_nsec))) {
         /* more than 1 second passed, no need to throttle */
-        xacts = 0;
+	xacts = 0;
         timer_prev.tv_sec = timer_now.tv_sec;
         timer_prev.tv_nsec = timer_now.tv_nsec;
+
 	/* update throttle rate */
-	current_tps = (int)((double)thread_tps * *throttle_factor);
+	if (thread_tps > 0) {
+	  current_tps = (int)((double)thread_tps * *throttle_factor);
+	}
+
+	/* enable transaction trace */
+	if (dotrace) {
+	  tracetimer++;
+	  if (tracetimer == dotrace) {
+	    fdb_error_t err;
+	    tracetimer = 0;
+	    snprintf(traceid, 32, "makotrace%019lld", total_xacts);
+	    fprintf(debugme, "DEBUG: txn tracing %s\n", traceid);
+	    err = fdb_transaction_set_option(transaction, FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER,
+					     (uint8_t *)traceid, strlen(traceid));
+	    if (err) {
+	      fprintf(stderr, "ERROR: FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: %s\n", fdb_get_error(err));
+	    }
+	    err = fdb_transaction_set_option(transaction, FDB_TR_OPTION_LOG_TRANSACTION,
+					     (uint8_t *)NULL, 0);
+	    if (err) {
+	      fprintf(stderr, "ERROR: FDB_TR_OPTION_LOG_TRANSACTION: %s\n", fdb_get_error(err));
+	    }
+	  }
+	}
+	
       } else {
-        /* 1 second not passed, throttle */
-        usleep(1000);
-        continue;
+	if (thread_tps > 0) {
+	  /* 1 second not passed, throttle */
+	  usleep(1000);
+	  continue;
+	}
       }
-    }
+    } /* throttle or txntrace */
 
     rc = run_one_transaction(transaction, args, stats, keystr, keystr2, valstr);
     if (rc) {
@@ -721,10 +799,14 @@ int run_workload(FDBTransaction *transaction, mako_args_t *args,
       break;
     }
     xacts++;
+    total_xacts++;
   }
   free(keystr);
   free(keystr2);
   free(valstr);
+  if (dotrace) {
+    free(traceid);
+  }
 
   return rc;
 }
@@ -742,6 +824,7 @@ void *worker_thread(void *thread_args) {
   int thread_tps = 0;
   int thread_iters = 0;
   int op;
+  int dotrace = (worker_id == 0 && thread_id == 0 && args->txntrace) ? args->txntrace : 0;
   volatile int *signal = &((thread_args_t *)thread_args)->process->shm->signal;
   volatile double *throttle_factor = &((thread_args_t *)thread_args)->process->shm->throttle_factor;
   volatile int *readycount =
@@ -801,7 +884,7 @@ void *worker_thread(void *thread_args) {
   /* run the workload */
   else if (args->mode == MODE_RUN) {
     rc = run_workload(transaction, args, thread_tps, throttle_factor,
-		      thread_iters, signal, stats);
+		      thread_iters, signal, stats, dotrace);
     if (rc < 0) {
       fprintf(stderr, "ERROR: run_workload failed\n");
     }
@@ -859,9 +942,9 @@ int worker_process_main(mako_args_t *args, int worker_id, mako_shmhdr_t *shm) {
 
   /* enable tracing if specified */
   if (args->trace) {
-    fprintf(debugme, "DEBUG: Enable Tracing (%s)\n", (args->tracepath[0] == '\0')
-	    ? "current directory"
-	    : args->tracepath);
+    fprintf(debugme, "DEBUG: Enable Tracing in %s (%s)\n",
+	    (args->traceformat == 0) ? "XML" : "JSON",
+	    (args->tracepath[0] == '\0') ? "current directory" : args->tracepath);
     err = fdb_network_set_option(FDB_NET_OPTION_TRACE_ENABLE,
                                  (uint8_t *)args->tracepath,
                                  strlen(args->tracepath));
@@ -870,6 +953,16 @@ int worker_process_main(mako_args_t *args, int worker_id, mako_shmhdr_t *shm) {
           stderr,
           "ERROR: fdb_network_set_option(FDB_NET_OPTION_TRACE_ENABLE): %s\n",
           fdb_get_error(err));
+    }
+    if (args->traceformat == 1) {
+      err = fdb_network_set_option(FDB_NET_OPTION_TRACE_FORMAT,
+				   (uint8_t *)"json", 4);
+      if (err) {
+	fprintf(
+		stderr,
+		"ERROR: fdb_network_set_option(FDB_NET_OPTION_TRACE_FORMAT): %s\n",
+		fdb_get_error(err));
+      }
     }
   }
 
@@ -1019,6 +1112,8 @@ int init_args(mako_args_t *args) {
   args->knobs[0] = '\0';
   args->trace = 0;
   args->tracepath[0] = '\0';
+  args->traceformat = 0; /* default to client's default (XML) */
+  args->txntrace = 0;
   for (i = 0; i < MAX_OP; i++) {
     args->txnspec.ops[i][OP_COUNT] = 0;
   }
@@ -1148,40 +1243,42 @@ int parse_transaction(mako_args_t *args, char *optarg) {
 
 void usage() {
   printf("Usage:\n");
-  printf("%-24s%s\n", "-h, --help", "Print this message");
-  printf("%-24s%s\n", "    --version", "Print FDB version");
-  printf("%-24s%s\n", "-v, --verbose", "Specify verbosity");
-  printf("%-24s%s\n", "-a, --api_version=API_VERSION", "Specify API_VERSION to use");
-  printf("%-24s%s\n", "-c, --cluster=FILE", "Specify FDB cluster file");
-  printf("%-24s%s\n", "-p, --procs=PROCS",
+  printf("%-24s %s\n", "-h, --help", "Print this message");
+  printf("%-24s %s\n", "    --version", "Print FDB version");
+  printf("%-24s %s\n", "-v, --verbose", "Specify verbosity");
+  printf("%-24s %s\n", "-a, --api_version=API_VERSION", "Specify API_VERSION to use");
+  printf("%-24s %s\n", "-c, --cluster=FILE", "Specify FDB cluster file");
+  printf("%-24s %s\n", "-p, --procs=PROCS",
          "Specify number of worker processes");
-  printf("%-24s%s\n", "-t, --threads=THREADS",
+  printf("%-24s %s\n", "-t, --threads=THREADS",
          "Specify number of worker threads");
-  printf("%-24s%s\n", "-r, --rows=ROWS", "Specify number of records");
-  printf("%-24s%s\n", "-s, --seconds=SECONDS",
+  printf("%-24s %s\n", "-r, --rows=ROWS", "Specify number of records");
+  printf("%-24s %s\n", "-s, --seconds=SECONDS",
          "Specify the test duration in seconds\n");
-  printf("%-24s%s\n", "", "This option cannot be specified with --iteration.");
-  printf("%-24s%s\n", "-i, --iteration=ITERS",
+  printf("%-24s %s\n", "", "This option cannot be specified with --iteration.");
+  printf("%-24s %s\n", "-i, --iteration=ITERS",
          "Specify the number of iterations.\n");
-  printf("%-24s%s\n", "", "This option cannot be specified with --seconds.");
-  printf("%-24s%s\n", "    --keylen=LENGTH", "Specify the key lengths");
-  printf("%-24s%s\n", "    --vallen=LENGTH", "Specify the value lengths");
-  printf("%-24s%s\n", "-x, --transaction=SPEC", "Transaction specification");
-  printf("%-24s%s\n", "    --tps|--tpsmax=TPS", "Specify the target max TPS");
-  printf("%-24s%s\n", "    --tpsmin=TPS", "Specify the target min TPS");
-  printf("%-24s%s\n", "    --tpsinterval=SEC", "Specify the TPS change interval (Default: 10 seconds)");
-  printf("%-24s%s\n", "    --tpschange=<sin|square|pulse>", "Specify the TPS change type (Default: sin)");
-  printf("%-24s%s\n", "    --sampling=RATE",
+  printf("%-24s %s\n", "", "This option cannot be specified with --seconds.");
+  printf("%-24s %s\n", "    --keylen=LENGTH", "Specify the key lengths");
+  printf("%-24s %s\n", "    --vallen=LENGTH", "Specify the value lengths");
+  printf("%-24s %s\n", "-x, --transaction=SPEC", "Transaction specification");
+  printf("%-24s %s\n", "    --tps|--tpsmax=TPS", "Specify the target max TPS");
+  printf("%-24s %s\n", "    --tpsmin=TPS", "Specify the target min TPS");
+  printf("%-24s %s\n", "    --tpsinterval=SEC", "Specify the TPS change interval (Default: 10 seconds)");
+  printf("%-24s %s\n", "    --tpschange=<sin|square|pulse>", "Specify the TPS change type (Default: sin)");
+  printf("%-24s %s\n", "    --sampling=RATE",
          "Specify the sampling rate for latency stats");
-  printf("%-24s%s\n", "-m, --mode=MODE",
+  printf("%-24s %s\n", "-m, --mode=MODE",
          "Specify the mode (build, run, clean)");
-  printf("%-24s%s\n", "-z, --zipf",
+  printf("%-24s %s\n", "-z, --zipf",
          "Use zipfian distribution instead of uniform distribution");
-  printf("%-24s%s\n", "    --commitget", "Commit GETs");
-  printf("%-24s%s\n", "    --trace", "Enable tracing");
-  printf("%-24s%s\n", "    --tracepath=PATH", "Set trace file path");
-  printf("%-24s%s\n", "    --knobs=KNOBS", "Set client knobs");
-  printf("%-24s%s\n", "    --flatbuffers", "Use flatbuffers");
+  printf("%-24s %s\n", "    --commitget", "Commit GETs");
+  printf("%-24s %s\n", "    --trace", "Enable tracing");
+  printf("%-24s %s\n", "    --tracepath=PATH", "Set trace file path");
+  printf("%-24s %s\n", "    --trace_format <xml|json>", "Set trace format (Default: json)");
+  printf("%-24s %s\n", "    --txntrace=sec", "Specify transaction tracing interval (Default: 0)");
+  printf("%-24s %s\n", "    --knobs=KNOBS", "Set client knobs");
+  printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
 }
 
 
@@ -1214,6 +1311,8 @@ int parse_args(int argc, char *argv[], mako_args_t *args) {
         {"mode", required_argument, NULL, 'm'},
         {"knobs", required_argument, NULL, ARG_KNOBS},
         {"tracepath", required_argument, NULL, ARG_TRACEPATH},
+        {"trace_format", required_argument, NULL, ARG_TRACEFORMAT},
+        {"txntrace", required_argument, NULL, ARG_TXNTRACE},
         /* no args */
         {"help", no_argument, NULL, 'h'},
         {"json", no_argument, NULL, 'j'},
@@ -1323,6 +1422,19 @@ int parse_args(int argc, char *argv[], mako_args_t *args) {
     case ARG_TRACEPATH:
       args->trace = 1;
       memcpy(args->tracepath, optarg, strlen(optarg) + 1);
+      break;
+    case ARG_TRACEFORMAT:
+      if (strncmp(optarg, "json", 5) == 0) {
+	args->traceformat = 1;
+      } else if (strncmp(optarg, "xml", 4) == 0) {
+	args->traceformat = 0;
+      } else {
+	fprintf(stderr, "Error: Invalid trace_format %s\n", optarg);
+	exit(0);
+      }
+      break;
+    case ARG_TXNTRACE:
+      args->txntrace = atoi(optarg);
       break;
     }
   }

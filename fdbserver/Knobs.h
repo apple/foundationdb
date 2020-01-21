@@ -106,8 +106,7 @@ public:
 	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
-	int MERGE_ONTO_NEW_TEAM; // Merges will request new servers. 0 for off, 1 for \xff only, 2 for all shards.
-
+	
 	// Higher priorities are executed first
 	// Priority/100 is the "priority group"/"superpriority".  Priority inversion
 	//   is possible within but not between priority groups; fewer priority groups
@@ -151,6 +150,7 @@ public:
 	double DATA_DISTRIBUTION_LOGGING_INTERVAL;
 	double DD_ENABLED_CHECK_DELAY;
 	double DD_STALL_CHECK_DELAY;
+	double DD_LOW_BANDWIDTH_DELAY;
 	double DD_MERGE_COALESCE_DELAY;
 	double STORAGE_METRICS_POLLING_DELAY;
 	double STORAGE_METRICS_RANDOM_DELAY;
@@ -352,6 +352,7 @@ public:
 	double METRIC_UPDATE_RATE;
 	double DETAILED_METRIC_UPDATE_RATE;
 	double LAST_LIMITED_RATIO;
+	double RATEKEEPER_DEFAULT_LIMIT;
 
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER;
 	int64_t SPRING_BYTES_STORAGE_SERVER;
@@ -427,6 +428,10 @@ public:
 	double BYTE_SAMPLE_LOAD_DELAY;
 	double BYTE_SAMPLE_START_DELAY;
 	double UPDATE_STORAGE_PROCESS_STATS_INTERVAL;
+	double BEHIND_CHECK_DELAY;
+	int BEHIND_CHECK_COUNT;
+	int64_t BEHIND_CHECK_VERSIONS;
+	double WAIT_METRICS_WRONG_SHARD_CHANCE;
 
 	//Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -473,7 +478,7 @@ public:
 	int64_t FASTRESTORE_HEARTBEAT_INTERVAL;
 	double FASTRESTORE_SAMPLING_PERCENT;
 
-	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL);
+	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
 
 extern ServerKnobs const* SERVER_KNOBS;

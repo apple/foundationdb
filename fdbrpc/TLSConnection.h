@@ -36,6 +36,7 @@ struct TLSConnection : IConnection, ReferenceCounted<TLSConnection> {
 	int write_wants, read_wants;
 
 	UID uid;
+	bool is_client;
 
 	virtual void addref() { ReferenceCounted<TLSConnection>::addref(); }
 	virtual void delref() { ReferenceCounted<TLSConnection>::delref(); }
