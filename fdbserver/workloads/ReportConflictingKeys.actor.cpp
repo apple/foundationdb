@@ -180,7 +180,9 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 				wait(tr.onError(e));
 				// check API correctness
 				if (!self->skipCorrectnessCheck && self->reportConflictingKeys && isConflict) {
-					state KeyRange ckr = KeyRangeRef(LiteralStringRef("\xff\xff/transaction/conflicting_keys/"), LiteralStringRef("\xff\xff/transaction/conflicting_keys/\xff"));
+					const KeyRef conflictingKeysPreifx = LiteralStringRef("\xff\xff/transaction/conflicting_keys/");
+					state KeyRange ckr = KeyRangeRef(LiteralStringRef("").withPrefix(conflictingKeysPreifx),
+						LiteralStringRef("\xff").withPrefix(conflictingKeysPreifx));
 					// The getRange here using the special key prefix "\xff\xff/transaction/conflicting_keys/" happens locally
 					// Thus, the error handling is not needed here
 					Future<Standalone<RangeResultRef>> conflictingKeyRangesFuture = tr.getRange(ckr, readConflictRanges.size() * 2);
@@ -188,11 +190,14 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					const Standalone<RangeResultRef> conflictingKeyRanges = conflictingKeyRangesFuture.get();
 					ASSERT( conflictingKeyRanges.size() && ( conflictingKeyRanges.size() % 2 == 0 ) );
 					for (int i = 0; i < conflictingKeyRanges.size(); i += 2) {
-						KeyValueRef startKey = conflictingKeyRanges[i];
-						ASSERT(startKey.value == conflictingKeysTrue);
-						KeyValueRef endKey = conflictingKeyRanges[i+1];
-						ASSERT(endKey.value ==  conflictingKeysFalse);
-						KeyRangeRef kr = KeyRangeRef(startKey.key, endKey.key);
+						KeyValueRef startKeyWithPreifx = conflictingKeyRanges[i];
+						ASSERT(startKeyWithPreifx.value == conflictingKeysTrue);
+						KeyValueRef endKeyWithPrefix = conflictingKeyRanges[i+1];
+						ASSERT(endKeyWithPrefix.value ==  conflictingKeysFalse);
+						// Remove the prefix of returning keys
+						Key startKey = startKeyWithPreifx.key.removePrefix(conflictingKeysPreifx);
+						Key endKey = endKeyWithPrefix.key.removePrefix(conflictingKeysPreifx);
+						KeyRangeRef kr = KeyRangeRef(startKey, endKey);
 						if (!std::any_of(readConflictRanges.begin(), readConflictRanges.end(), [&kr](KeyRange rCR) {
 								// Read_conflict_range remains same in the resolver.
 								// Thus, the returned keyrange is either the original read_conflict_range or merged

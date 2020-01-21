@@ -1282,11 +1282,11 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	// Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
 	// to retrieve keys which caused latest not_committed(conflicting with another transaction) error.
 	// The returned key value pairs are interpretted as :
-	// <key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
-	// <key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
+	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
+	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	// Currently, the conflicting keyranges returned are original read_conflict_ranges.
 	const KeyRef conflictingKeysPreifx = LiteralStringRef("\xff\xff/transaction/conflicting_keys/");
-	// TODO : This condition need to be changed in the future when we have more special keys under "\xff\xff/transaction/"
+	// TODO : This condition needs to be changed in the future when we have more special keys under "\xff\xff/transaction/"
 	if (begin.getKey().startsWith(conflictingKeysPreifx) && end.getKey().startsWith(conflictingKeysPreifx)) {
 		// Remove the special key prefix "\xff\xff/transaction/conflicting_keys/"
 		KeyRef beginConflictingKey = begin.getKey().removePrefix(conflictingKeysPreifx);
@@ -1300,11 +1300,19 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		begin.setKey(beginConflictingKey);
 		end.setKey(endConflictingKey);
 		if (tr.info.conflictingKeysRYW) {
-			Future<Standalone<RangeResultRef>> resultFuture = 
+			Future<Standalone<RangeResultRef>> resultWithoutPrefixFuture = 
 				tr.info.conflictingKeysRYW->getRange(begin, end, limits, snapshot, reverse);
 			// Make sure it happens locally
-			ASSERT(resultFuture.isReady());
-			return resultFuture.get();
+			ASSERT(resultWithoutPrefixFuture.isReady());
+			Standalone<RangeResultRef> resultWithoutPrefix = resultWithoutPrefixFuture.get();
+			// Add prefix to results, making keys consistent with the getRange query
+			Standalone<RangeResultRef> resultWithPrefix;
+			resultWithPrefix.reserve(resultWithPrefix.arena(), resultWithoutPrefix.size());
+			for (auto const & kv : resultWithoutPrefix) {
+				KeyValueRef kvWithPrefix(kv.key.withPrefix(conflictingKeysPreifx), kv.value);
+				resultWithPrefix.push_back_deep(resultWithPrefix.arena(), kvWithPrefix);
+			}
+			return resultWithPrefix;
 		} else {
 			return Standalone<RangeResultRef>();
 		}
