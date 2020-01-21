@@ -1285,12 +1285,12 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	// Currently, the conflicting keyranges returned are original read_conflict_ranges.
-	const KeyRef conflictingKeysPreifx = LiteralStringRef("\xff\xff/transaction/conflicting_keys/");
+	const KeyRef conflictingKeysPrefix = LiteralStringRef("\xff\xff/transaction/conflicting_keys/");
 	// TODO : This condition needs to be changed in the future when we have more special keys under "\xff\xff/transaction/"
-	if (begin.getKey().startsWith(conflictingKeysPreifx) && end.getKey().startsWith(conflictingKeysPreifx)) {
+	if (begin.getKey().startsWith(conflictingKeysPrefix) && end.getKey().startsWith(conflictingKeysPrefix)) {
 		// Remove the special key prefix "\xff\xff/transaction/conflicting_keys/"
-		KeyRef beginConflictingKey = begin.getKey().removePrefix(conflictingKeysPreifx);
-		KeyRef endConflictingKey = end.getKey().removePrefix(conflictingKeysPreifx);
+		KeyRef beginConflictingKey = begin.getKey().removePrefix(conflictingKeysPrefix);
+		KeyRef endConflictingKey = end.getKey().removePrefix(conflictingKeysPrefix);
 
 		// Check if the conflicting key range to be read is valid
 		KeyRef maxKey = getMaxReadKey();
@@ -1309,8 +1309,8 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 			Standalone<RangeResultRef> resultWithPrefix;
 			resultWithPrefix.reserve(resultWithPrefix.arena(), resultWithoutPrefix.size());
 			for (auto const & kv : resultWithoutPrefix) {
-				KeyValueRef kvWithPrefix(kv.key.withPrefix(conflictingKeysPreifx), kv.value);
-				resultWithPrefix.push_back_deep(resultWithPrefix.arena(), kvWithPrefix);
+				KeyValueRef kvWithPrefix(kv.key.withPrefix(conflictingKeysPrefix, resultWithPrefix.arena()), kv.value);
+				resultWithPrefix.push_back(resultWithPrefix.arena(), kvWithPrefix);
 			}
 			return resultWithPrefix;
 		} else {
