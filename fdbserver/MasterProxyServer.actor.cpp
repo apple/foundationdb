@@ -1196,29 +1196,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	return rep;
 }
 
-struct TransactionRateInfo {
-	double rate;
-	double limit;
-
-	TransactionRateInfo(double rate) : rate(rate), limit(0) {}
-
-	void reset(double elapsed) {
-		limit = std::min(0.0, limit) + rate * elapsed; // Adjust the limit based on the full elapsed interval in order to properly erase a deficit
-		limit = std::min(limit, rate * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MAX); // Don't allow the rate to exceed what would be allowed in the maximum batch interval
-		limit = std::min(limit, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
-	}
-
-	bool canStart(int64_t numAlreadyStarted) {
-		return numAlreadyStarted < limit;
-	}
-
-	void updateBudget(int64_t numStarted) {
-		limit -= numStarted;
-	}
-};
-
-ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests,
-                                  ProxyStats* stats, Version minKnownCommittedVersion) {
+ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests, ProxyStats *stats, Version minKnownCommittedVersion) {
 	GetReadVersionReply reply = wait(replyFuture);
 
 	double end = timer();
