@@ -264,6 +264,16 @@ static KeyRangeRef getVersionstampKeyRange(Arena& arena, const KeyRef &key, Vers
 	return KeyRangeRef(begin, std::min(end, maxKey));
 }
 
+static void transformVersionstampKey( StringRef& key, Version version, uint16_t transactionNumber ) {
+	int32_t pos;
+	memcpy(&pos, key.end() - sizeof(int32_t), sizeof(int32_t));
+	pos = littleEndian32(pos);
+	if (pos < 0 || pos + 10 > key.size())
+		throw client_invalid_operation();
+
+	placeVersionstamp( mutateString(key) + pos, version, transactionNumber );
+}
+
 static void transformVersionstampMutation( MutationRef& mutation, StringRef MutationRef::* param, Version version, uint16_t transactionNumber ) {
 	if ((mutation.*param).size() >= 4) {
 		int32_t pos;

@@ -1574,7 +1574,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 		// k is the unversionstamped key provided by the user.  If we've filled in a minimum bound
 		// for the versionstamp, we need to make sure that's reflected when we insert it into the
 		// WriteMap below.
-		k = range.begin;
+		transformVersionstampKey( k, tr.getCachedReadVersion().orDefault(0), 0 );
 	}
 
 	if(operationType == MutationRef::SetVersionstampedValue) {
