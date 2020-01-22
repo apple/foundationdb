@@ -1390,17 +1390,13 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 
 			trackerData.lastUpdate = now();
 			std::pair<Version, bool> prevPeekData = wait(trackerData.sequence_version[sequence].getFuture());
-			req.begin = std::max(prevPeekData.first, req.begin);
+			ASSERT_WE_THINK( prevPeekData.first >= req.begin );
+			req.begin = prevPeekData.first;
 			req.onlySpilled = prevPeekData.second;
 			wait(yield());
 		} catch( Error &e ) {
 			if(e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);
-				auto& trackerData = logData->peekTracker[peekId];
-				auto& sequenceData = trackerData.sequence_version[sequence+1];
-				if (!sequenceData.isSet()) {
-					sequenceData.send(std::make_pair(req.begin, req.onlySpilled));
-				}
 				return Void();
 			} else {
 				throw;
@@ -1459,7 +1455,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			if(trackerData.sequence_version.size() && sequence+1 < trackerData.sequence_version.begin()->first) {
 				req.reply.sendError(operation_obsolete());
 				if (!sequenceData.isSet())
-					sequenceData.send(std::make_pair(rep.end, rep.onlySpilled));
+					sequenceData.sendError(operation_obsolete());
 				return Void();
 			}
 			if(sequenceData.isSet()) {
@@ -1622,8 +1618,13 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		trackerData.lastUpdate = now();
 		if(trackerData.sequence_version.size() && sequence+1 < trackerData.sequence_version.begin()->first) {
 			req.reply.sendError(operation_obsolete());
-			if(!sequenceData.isSet())
-				sequenceData.send(std::make_pair(req.begin, req.onlySpilled));
+			if(!sequenceData.isSet()) {
+				// It would technically be more correct to .send({req.begin, req.onlySpilled}), as the next
+				// request might still be in the window of active requests, but LogSystemPeekCursor will
+				// throw away all future responses upon getting an operation_obsolete(), so computing a
+				// response will probably be a waste of CPU.
+				sequenceData.sendError(operation_obsolete());
+			}
 			return Void();
 		}
 		if(sequenceData.isSet()) {

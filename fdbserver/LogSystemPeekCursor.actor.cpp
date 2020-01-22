@@ -153,9 +153,6 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 				if (self->sequence == std::numeric_limits<decltype(self->sequence)>::max()) {
 					throw operation_obsolete();
 				}
-			} else if (self->futureResults.size() == 1) {
-				self->randomID = deterministicRandom()->randomUniqueID();
-				self->sequence = 0;
 			} else if (self->futureResults.size() == 0) {
 				return Void();
 			}

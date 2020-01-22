@@ -430,7 +430,7 @@ ACTOR Future<Void> logRouterPeekMessages( LogRouterData* self, TLogPeekRequest r
 		if(trackerData.sequence_version.size() && sequence+1 < trackerData.sequence_version.begin()->first) {
 			req.reply.sendError(operation_obsolete());
 			if(!sequenceData.isSet())
-				sequenceData.send(std::make_pair(req.begin, req.onlySpilled));
+				sequenceData.sendError(operation_obsolete());
 			return Void();
 		}
 		if(sequenceData.isSet()) {
