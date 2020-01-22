@@ -2369,22 +2369,20 @@ namespace fileBackup {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					state Future<Void> keepRunning = taskBucket->keepRunning(tr, task);
 
 					Optional<Value> value = wait(tr->get(backupStartedKey));
 					std::vector<std::pair<UID, Version>> ids;
 					if (value.present()) {
 						ids = decodeBackupStartedValue(value.get());
 					}
-					UID uid = config.getUid();
-					bool found = false;
-					for (int i = 0; i < ids.size(); i++) {
-						if (ids[i].first == uid) {
-							ids[i].second = Params.beginVersion().get(task);
-							found = true;
-						}
-					}
-					if (!found) {
-						ids.emplace_back(config.getUid(), Params.beginVersion().get(task));
+					const UID uid = config.getUid();
+				    auto it = std::find_if(ids.begin(), ids.end(),
+				                           [uid](const std::pair<UID, Version>& p) { return p.first == uid; });
+					if (it == ids.end()) {
+						ids.emplace_back(uid, Params.beginVersion().get(task));
+					} else {
+						Params.beginVersion().set(task, it->second);
 					}
 					for (auto p : ids) {
 						std::cout << "setBackupStartedKey UID: " << p.first.toString() << " Version: " << p.second << "\n";
@@ -2392,6 +2390,7 @@ namespace fileBackup {
 
 					tr->set(backupStartedKey, encodeBackupStartedValue(ids));
 					state Future<Void> watchFuture = tr->watch(config.allWorkerStarted().key);
+					wait(keepRunning);
 					wait(tr->commit());
 					wait(watchFuture);
 					return Void();
