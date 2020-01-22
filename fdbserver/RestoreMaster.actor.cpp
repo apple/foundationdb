@@ -419,16 +419,15 @@ ACTOR static Future<Void> sendMutationsFromLoaders(Reference<MasterBatchData> ba
 
 	for (auto& reply : replies) {
 		RestoreSendStatus status = batchStatus->loadStatus[reply.id];
-		if ((status == RestoreSendStatus::SendingRanges || status == RestoreSendStatus::SendingLogs) &&
-		    !reply.isDuplicated) {
+		if ((status == RestoreSendStatus::SendingRanges || status == RestoreSendStatus::SendingLogs)) {
 			batchStatus->loadStatus[reply.id] = (status == RestoreSendStatus::SendingRanges)
 			                                        ? RestoreSendStatus::SendedRanges
 			                                        : RestoreSendStatus::SendedLogs;
-		} else if ((status == RestoreSendStatus::SendingRanges || status == RestoreSendStatus::SendingLogs) &&
-		           reply.isDuplicated) {
-			TraceEvent(SevWarn, "FastRestoreSendMutations")
+			if (reply.isDuplicated) {
+				TraceEvent(SevWarn, "FastRestoreSendMutations")
 			    .detail("Loader", reply.id)
-			    .detail("RequestUnprocessed", "Waiting for ack that loader has processed the request");
+			    .detail("DuplicateRequestAcked", "Request should have been processed");
+			}
 		} else if ((status == RestoreSendStatus::SendedRanges || status == RestoreSendStatus::SendedLogs) &&
 		           reply.isDuplicated) {
 			TraceEvent(SevDebug, "FastRestoreSendMutations")
