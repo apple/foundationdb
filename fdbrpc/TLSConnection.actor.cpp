@@ -76,7 +76,7 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
 		if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
 			if (now() < iter->second.second) {
-				if(iter->second.first >= 1) {
+				if(iter->second.first >= FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS) {
 					TraceEvent("TLSIncomingConnectionThrottlingWarning", self->getDebugID()).suppressFor(1.0).detail("PeerIP", peerIP.first.toString());
 					wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
 					throw connection_failed();
@@ -215,7 +215,7 @@ Future<Reference<IConnection>> TLSNetworkConnections::connect( NetworkAddress to
 		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
 		if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
 			if (now() < iter->second.second) {
-				if(iter->second.first >= 0) {
+				if(iter->second.first >= FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS) {
 					TraceEvent("TLSOutgoingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", toAddr);
 					return waitAndFailConnection();
 				}
