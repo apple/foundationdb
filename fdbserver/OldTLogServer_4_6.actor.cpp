@@ -882,7 +882,7 @@ namespace oldTLog_4_6 {
 					auto& trackerData = self->peekTracker[peekId];
 					trackerData.lastUpdate = now();
 					Version ver = wait(trackerData.sequence_version[sequence].getFuture());
-					req.begin = ver;
+					req.begin = std::max(ver, req.begin);
 					wait(yield());
 				}
 			} catch( Error &e ) {
