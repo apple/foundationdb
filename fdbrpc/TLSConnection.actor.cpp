@@ -184,7 +184,9 @@ ACTOR Future<Reference<IConnection>> wrap( Reference<ITLSPolicy> policy, bool is
 	state Reference<IConnection> conn = wait(c);
 	try {
 		state Reference<TLSConnection> tlsConn(new TLSConnection( conn, policy, is_client, host ));
-		wait(tlsConn->handshook);
+		if(is_client) {
+			wait(tlsConn->handshook);
+		}
 		return tlsConn;
 	} catch( Error &e ) {
 		conn->close();
