@@ -166,6 +166,7 @@ struct TransactionRateInfo {
 };
 
 ACTOR Future<Void> queueTransactionStartRequests(
+    Reference<AsyncVar<ServerDBInfo>> db,
     std::priority_queue<std::pair<GetReadVersionRequest, int64_t>,
                         std::vector<std::pair<GetReadVersionRequest, int64_t>>>* transactionQueue,
     FutureStream<GetReadVersionRequest> readVersionRequests, PromiseStream<Void> GRVTimer, double* lastGRVTime,
@@ -183,7 +184,8 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				stats->txnDefaultPriorityStartIn += req.transactionCount;
 			} else {
 				// Return error for bath_priority GRV requests
-				if (batchRateInfo->limit <= 1) {
+				double proxiesCount = (double)(std::max((int)db->get().client.proxies.size(), 1));
+				if (batchRateInfo->rate <= (1 / proxiesCount)) {
 					TEST(true);
 					TraceEvent(SevInfo, "RejectedBatchGRV").detail("CurrentBatchRateLimit", batchRateInfo->limit);
 					req.reply.sendError(batch_transaction_throttled());
@@ -1238,9 +1240,9 @@ ACTOR static Future<Void> transactionStarter(
 
 	state PromiseStream<double> replyTimes;
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate, &batchRateInfo.rate, healthMetricsReply, detailedHealthMetricsReply));
-	addActor.send(queueTransactionStartRequests(&transactionQueue, proxy.getConsistentReadVersion.getFuture(), GRVTimer,
-	                                            &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats,
-	                                            &batchRateInfo));
+	addActor.send(queueTransactionStartRequests(db, &transactionQueue, proxy.getConsistentReadVersion.getFuture(),
+	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(),
+	                                            &commitData->stats, &batchRateInfo));
 
 	// Get a list of the other proxies that go together with us
 	while (std::find(db->get().client.proxies.begin(), db->get().client.proxies.end(), proxy) == db->get().client.proxies.end())
