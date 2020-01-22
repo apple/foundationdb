@@ -46,8 +46,8 @@ extern int restoreStatusIndex;
 struct VersionBatch {
 	Version beginVersion; // Inclusive
 	Version endVersion; // exclusive
-	std::vector<RestoreFileFR> logFiles;
-	std::vector<RestoreFileFR> rangeFiles;
+	std::set<RestoreFileFR> logFiles;
+	std::set<RestoreFileFR> rangeFiles;
 	double size; // size of data in range and log files
 
 	VersionBatch() = default;
@@ -300,7 +300,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				vb.size += nextVersionSize;
 				while (rangeIdx < nextRangeIdx) {
 					ASSERT(rangeFiles[rangeIdx].fileSize > 0);
-					vb.rangeFiles.push_back(rangeFiles[rangeIdx]);
+					vb.rangeFiles.insert(rangeFiles[rangeIdx]);
 					++rangeIdx;
 				}
 
@@ -308,7 +308,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					ASSERT(log.beginVersion < nextVersion);
 					ASSERT(log.endVersion > prevEndVersion);
 					ASSERT(log.fileSize > 0);
-					vb.logFiles.push_back(log);
+					vb.logFiles.insert(log);
 				}
 
 				vb.endVersion = nextVersion;

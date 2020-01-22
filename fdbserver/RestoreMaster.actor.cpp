@@ -298,7 +298,8 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 	    .detail("BeginVersion", versionBatch.beginVersion)
 	    .detail("EndVersion", versionBatch.endVersion);
 
-	std::vector<RestoreFileFR>* files = nullptr;
+	// set is internally sorted
+	std::set<RestoreFileFR>* files = nullptr;
 	if (isRangeFile) {
 		files = &versionBatch.rangeFiles;
 	} else {
@@ -306,7 +307,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 	}
 
 	// sort files in increasing order of beginVersion
-	std::sort(files->begin(), files->end());
+	//std::sort(files->begin(), files->end());
 
 	std::vector<std::pair<UID, RestoreLoadFileRequest>> requests;
 	std::map<UID, RestoreLoaderInterface>::iterator loader = loadersInterf.begin();
@@ -701,15 +702,19 @@ ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> se
 	for (auto& loader : self->loadersInterf) {
 		requests.emplace_back(loader.first, RestoreFinishRequest(terminate));
 	}
-	// A loader exits immediately after it receives the request. Master may not receive acks.
+	
 	Future<Void> endLoaders = sendBatchRequests(&RestoreLoaderInterface::finishRestore, self->loadersInterf, requests);
 
 	requests.clear();
 	for (auto& applier : self->appliersInterf) {
 		requests.emplace_back(applier.first, RestoreFinishRequest(terminate));
 	}
-	Future<Void> endApplier =
-	    sendBatchRequests(&RestoreApplierInterface::finishRestore, self->appliersInterf, requests);
+	Future<Void> endAppliers = sendBatchRequests(&RestoreApplierInterface::finishRestore, self->appliersInterf, requests);
+
+	// If terminate = true, loaders and appliers exits immediately after it receives the request. Master may not receive acks.
+	if (!terminate) {
+		wait(endLoaders && endAppliers);
+	}
 
 	TraceEvent("FastRestore").detail("RestoreMaster", "RestoreRequestCompleted");
 
