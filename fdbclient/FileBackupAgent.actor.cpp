@@ -23,6 +23,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Status.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/JsonBuilder.h"
 
@@ -2346,8 +2347,8 @@ namespace fileBackup {
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			wait(checkTaskVersion(cx, task, StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version));
 
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			loop{
-				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2361,7 +2362,43 @@ namespace fileBackup {
 				}
 			}
 
-			return Void();
+			// Set the "backupStartedKey" and wait for all backup worker started
+			tr->reset();
+			state BackupConfig config(task);
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+					Optional<Value> value = wait(tr->get(backupStartedKey));
+					std::vector<std::pair<UID, Version>> ids;
+					if (value.present()) {
+						ids = decodeBackupStartedValue(value.get());
+					}
+					UID uid = config.getUid();
+					bool found = false;
+					for (int i = 0; i < ids.size(); i++) {
+						if (ids[i].first == uid) {
+							ids[i].second = Params.beginVersion().get(task);
+							found = true;
+						}
+					}
+					if (!found) {
+						ids.emplace_back(config.getUid(), Params.beginVersion().get(task));
+					}
+					for (auto p : ids) {
+						std::cout << "setBackupStartedKey UID: " << p.first.toString() << " Version: " << p.second << "\n";
+					}
+
+					tr->set(backupStartedKey, encodeBackupStartedValue(ids));
+					state Future<Void> watchFuture = tr->watch(config.allWorkerStarted().key);
+					wait(tr->commit());
+					wait(watchFuture);
+					return Void();
+				} catch (Error &e) {
+					wait(tr->onError(e));
+				}
+			}
 		}
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
@@ -2396,6 +2433,8 @@ namespace fileBackup {
 			wait(success(FileBackupFinishedTask::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), backupFinished)));
 
 			wait(taskBucket->finish(tr, task));
+
+			// Clear the "backupStartedKey" to pause backup workers
 			return Void();
 		}
 

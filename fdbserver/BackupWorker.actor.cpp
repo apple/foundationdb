@@ -18,11 +18,13 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
+#include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -58,6 +60,8 @@ struct BackupData {
 	std::vector<VersionedMessage> messages;
 	Reference<IBackupContainer> container;
 	AsyncVar<bool> pullFinished;
+
+	AsyncVar<std::vector<std::pair<UID, Version>>> backupUidVersions; // active backup (UID, StartVersion) pairs
 
 	CounterCollection cc;
 	Future<Void> logger;
@@ -121,8 +125,20 @@ ACTOR Future<Void> monitorBackupChanges(BackupData* self, bool started) {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Standalone<StringRef>> value = wait(tr.get(backupStartedKey));
-				if ((value.present() && started) || (!value.present() && !started)) {
+				Optional<Value> value = wait(tr.get(backupStartedKey));
+				if (value.present() && started) {
+					self->backupUidVersions.set(decodeBackupStartedValue(value.get()));
+					TraceEvent e("BackupWorkerGotStartKey", self->myId);
+					int i = 1;
+					for (auto uidVersion : self->backupUidVersions.get()) {
+						e.detail(format("BackupID%d", i), uidVersion.first.toString())
+						    .detail(format("Version%d", i), uidVersion.second);
+						i++;
+					}
+					return Void();
+				}
+				if (!value.present() && !started) {
+					TraceEvent("BackupWorkerNoStartKey", self->myId);
 					return Void();
 				}
 
@@ -134,6 +150,69 @@ ACTOR Future<Void> monitorBackupChanges(BackupData* self, bool started) {
 				wait(tr.onError(e));
 			}
 		}
+	}
+}
+
+// Monitor all backup worker in the recruited epoch has been started. If so,
+// set the "allWorkerStarted" key of the BackupConfig to true, which in turn
+// unblocks StartFullBackupTaskFunc::_execute.
+ACTOR Future<Void> monitorAllWorkerStarted(BackupData* self) {
+	loop {
+		while (self->backupUidVersions.get().empty()) {
+			wait(self->backupUidVersions.onChange());
+		}
+
+		// check all workers have started by checking their progress is larger
+		// than the backup's start version.
+		state Reference<BackupProgress> progress(new BackupProgress(self->myId, {}));
+		wait(getBackupProgress(self->cx, self->myId, progress));
+		std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
+
+		state std::vector<UID> ready;
+		if (tagVersions.size() == self->logSystem.get()->getLogRouterTags()) {
+			// Check every version is larger than backup's startVersion
+			for (const auto uidVersion : self->backupUidVersions.get()) {
+				bool saved = true;
+				for (const std::pair<Tag, Version> tv : tagVersions) {
+					if (tv.second < uidVersion.second) {
+						saved = false;
+						break;
+					}
+				}
+				if (saved) {
+					ready.push_back(uidVersion.first);
+				}
+			}
+
+			// Set "allWorkerStarted" key for ready backups
+			loop {
+				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+					state std::vector<Future<Optional<Value>>> readyValues;
+					state std::vector<BackupConfig> configs;
+					for (UID uid : ready) {
+						configs.emplace_back(uid);
+						readyValues.push_back(tr->get(configs.back().allWorkerStarted().key));
+					}
+					wait(waitForAll(readyValues));
+					for (int i = 0; i < readyValues.size(); i++) {
+						if (!readyValues[i].get().present()) {
+							configs[i].allWorkerStarted().set(tr, true);
+							TraceEvent("BackupWorkerSetReady", self->myId).detail("BackupID", ready[i].toString());
+						}
+					}
+					wait(tr->commit());
+					break;
+				} catch (Error& e) {
+					wait(tr->onError(e));
+				}
+			}
+		}
+
+		wait(delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL / 2.0) || self->backupUidVersions.onChange());
 	}
 }
 
@@ -426,6 +505,9 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 		addActor.send(monitorBackupKeyOrPullData(&self));
 		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
 		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
+		if (req.recruitedEpoch == req.backupEpoch && req.routerTag.id == 0) {
+			addActor.send(monitorAllWorkerStarted(&self));
+		}
 
 		state Future<Void> done = uploadData(&self);
 
