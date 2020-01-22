@@ -599,6 +599,8 @@ ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std
 	ASSERT(rangeFiles->empty());
 	ASSERT(logFiles->empty());
 
+	std::set<RestoreFileFR> uniqueRangeFiles;
+	std::set<RestoreFileFR> uniqueLogFiles;
 	for (const RangeFile& f : restorable.get().ranges) {
 		TraceEvent("FastRestore").detail("RangeFile", f.toString());
 		if (f.fileSize <= 0) {
@@ -606,7 +608,7 @@ ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std
 		}
 		RestoreFileFR file(f.version, f.fileName, true, f.blockSize, f.fileSize, f.version, f.version);
 		TraceEvent("FastRestore").detail("RangeFileFR", file.toString());
-		rangeFiles->push_back(file);
+		uniqueRangeFiles.insert(file);
 	}
 	for (const LogFile& f : restorable.get().logs) {
 		TraceEvent("FastRestore").detail("LogFile", f.toString());
@@ -616,7 +618,11 @@ ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std
 		RestoreFileFR file(f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.beginVersion);
 		TraceEvent("FastRestore").detail("LogFileFR", file.toString());
 		logFiles->push_back(file);
+		uniqueLogFiles.insert(file);
 	}
+	// Assign unique range files and log files to output
+	rangeFiles->assign(uniqueRangeFiles.begin(), uniqueRangeFiles.end());
+	logFiles->assign(uniqueLogFiles.begin(), uniqueLogFiles.end());
 
 	return Void();
 }
