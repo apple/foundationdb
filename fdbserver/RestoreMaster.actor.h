@@ -103,11 +103,11 @@ struct MasterBatchData : public ReferenceCounted<MasterBatchData> {
 	}
 };
 
-enum class RestoreAssetStatus { Init, Loading, Loaded };
+enum class RestoreAssetStatus { Loading, Loaded };
 
-enum class RestoreSendStatus { Init, SendingLogs, SendedLogs, SendingRanges, SendedRanges };
+enum class RestoreSendStatus { SendingLogs, SendedLogs, SendingRanges, SendedRanges };
 
-enum class RestoreApplyStatus { Init, Applying, Applied };
+enum class RestoreApplyStatus { Applying, Applied };
 
 // Track restore progress of each RestoreAsset (RA) and
 // Use status to sanity check restore property, e.g., each RA should be processed exactly once.

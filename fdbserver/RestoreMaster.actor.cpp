@@ -145,7 +145,7 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> masterW
 	RestoreSysInfo sysInfo(masterData->appliersInterf);
 	std::vector<std::pair<UID, RestoreSysInfoRequest>> requests;
 	for (auto& loader : masterData->loadersInterf) {
-		requests.push_back(std::make_pair(loader.first, RestoreSysInfoRequest(sysInfo)));
+		requests.emplace_back(loader.first, RestoreSysInfoRequest(sysInfo));
 	}
 
 	TraceEvent("FastRestore").detail("DistributeRestoreSysInfoToLoaders", masterData->loadersInterf.size());
@@ -312,6 +312,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 	std::map<UID, RestoreLoaderInterface>::iterator loader = loadersInterf.begin();
 	state std::vector<RestoreAsset> assets; // all assets loaded, used for sanity check restore progress
 
+	int paramIdx = 0;
 	for (auto& file : *files) {
 		if (loader == loadersInterf.end()) {
 			loader = loadersInterf.begin();
@@ -332,7 +333,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		param.asset.beginVersion = versionBatch.beginVersion;
 		param.asset.endVersion = versionBatch.endVersion;
 
-		TraceEvent("FastRestore").detail("LoadParam", param.toString()).detail("LoaderID", loader->first.toString());
+		TraceEvent("FastRestoreLoadFiles").detail("BatchIndex", batchIndex).detail("LoadParamIndex", paramIdx).detail("LoaderID", loader->first.toString()).detail("LoadParam", param.toString());
 		ASSERT_WE_THINK(param.asset.len > 0);
 		ASSERT_WE_THINK(param.asset.offset >= 0);
 		ASSERT_WE_THINK(param.asset.offset <= file.fileSize);
@@ -340,15 +341,17 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 
 		requests.emplace_back(loader->first, RestoreLoadFileRequest(batchIndex, param));
 		// Restore asset should only be loaded exactly once.
-		if (batchStatus->raStatus[param.asset] != RestoreAssetStatus::Init) {
+		if (batchStatus->raStatus.find(param.asset) != batchStatus->raStatus.end()) {
 			TraceEvent(SevError, "FastRestoreLoadFiles")
 			    .detail("LoadingParam", param.toString())
-			    .detail("RestoreAssetStatusNotInit", batchStatus->raStatus[param.asset]);
+			    .detail("RestoreAssetAlreadyProcessed", batchStatus->raStatus[param.asset]);
 		}
 		batchStatus->raStatus[param.asset] = RestoreAssetStatus::Loading;
 		assets.push_back(param.asset);
 		loader++;
+		++paramIdx;
 	}
+	TraceEvent(files->size() != paramIdx ? SevError : SevInfo, "FastRestoreLoadFiles").detail("Files", files->size()).detail("LoadParams", paramIdx);
 
 	state std::vector<RestoreLoadFileReply> replies;
 	// Wait on the batch of load files or log files
@@ -404,8 +407,7 @@ ACTOR static Future<Void> sendMutationsFromLoaders(Reference<MasterBatchData> ba
 
 	std::vector<std::pair<UID, RestoreSendMutationsToAppliersRequest>> requests;
 	for (auto& loader : loadersInterf) {
-		RestoreSendStatus status = batchStatus->loadStatus[loader.first];
-		ASSERT(status == RestoreSendStatus::Init || status == RestoreSendStatus::SendedLogs);
+		ASSERT(batchStatus->loadStatus.find(loader.first) == batchStatus->loadStatus.end() || batchStatus->loadStatus[loader.first] == RestoreSendStatus::SendedLogs);
 		requests.emplace_back(
 		    loader.first, RestoreSendMutationsToAppliersRequest(batchIndex, batchData->rangeToApplier, useRangeFile));
 		batchStatus->loadStatus[loader.first] =
@@ -635,13 +637,13 @@ ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInt
     TraceEvent("FastRestoreInitVersionBatch").detail("BatchIndex", batchIndex).detail("Appliers", appliersInterf.size()).detail("Loaders", loadersInterf.size());
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requestsToAppliers;
 	for (auto& applier : appliersInterf) {
-		requestsToAppliers.push_back(std::make_pair(applier.first, RestoreVersionBatchRequest(batchIndex)));
+		requestsToAppliers.emplace_back(applier.first, RestoreVersionBatchRequest(batchIndex));
 	}
 	wait(sendBatchRequests(&RestoreApplierInterface::initVersionBatch, appliersInterf, requestsToAppliers));
 
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requestsToLoaders;
 	for (auto& loader : loadersInterf) {
-		requestsToLoaders.push_back(std::make_pair(loader.first, RestoreVersionBatchRequest(batchIndex)));
+		requestsToLoaders.emplace_back(loader.first, RestoreVersionBatchRequest(batchIndex));
 	}
 	wait(sendBatchRequests(&RestoreLoaderInterface::initVersionBatch, loadersInterf, requestsToLoaders));
 
@@ -656,9 +658,8 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchSta
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requests;
 
 	for (auto& applier : appliersInterf) {
-		RestoreApplyStatus status = batchStatus->applyStatus[applier.first];
-		ASSERT(status == RestoreApplyStatus::Init);
-		requests.push_back(std::make_pair(applier.first, RestoreVersionBatchRequest(batchIndex)));
+		ASSERT(batchStatus->applyStatus.find(applier.first) == batchStatus->applyStatus.end());
+		requests.emplace_back(applier.first, RestoreVersionBatchRequest(batchIndex));
 		batchStatus->applyStatus[applier.first] = RestoreApplyStatus::Applying;
 	}
 	state std::vector<RestoreCommonReply> replies;
@@ -692,14 +693,14 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchSta
 ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, bool terminate=false) {
 	std::vector<std::pair<UID, RestoreFinishRequest>> requests;
 	for (auto& loader : self->loadersInterf) {
-		requests.push_back(std::make_pair(loader.first, RestoreFinishRequest(terminate)));
+		requests.emplace_back(loader.first, RestoreFinishRequest(terminate));
 	}
 	// A loader exits immediately after it receives the request. Master may not receive acks.
 	Future<Void> endLoaders = sendBatchRequests(&RestoreLoaderInterface::finishRestore, self->loadersInterf, requests);
 
 	requests.clear();
 	for (auto& applier : self->appliersInterf) {
-		requests.push_back(std::make_pair(applier.first, RestoreFinishRequest(terminate)));
+		requests.emplace_back(applier.first, RestoreFinishRequest(terminate));
 	}
 	Future<Void> endApplier =
 	    sendBatchRequests(&RestoreApplierInterface::finishRestore, self->appliersInterf, requests);
