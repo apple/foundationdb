@@ -326,7 +326,7 @@ struct NetworkInfo {
 	double newestAlternativesFailure = 0;
 	double lastAlternativesFailureSkipDelay = 0;
 
-	std::map<std::pair<IPAddress, uint16_t>, double> serverTLSConnectionThrottler;
+	std::map<std::pair<IPAddress, uint16_t>, std::pair<int,double>> serverTLSConnectionThrottler;
 
 	NetworkInfo() {}
 };

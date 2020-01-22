@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.2.15
+======
+
+Fixes
+-----
+
+* TLS throttling could block legitimate connections. `(PR #2575) <https://github.com/apple/foundationdb/pull/2575>`_.
+
 6.2.14
 ======
 
