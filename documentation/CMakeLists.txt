@@ -59,6 +59,12 @@ endfunction()
 message(STATUS "Add html target")
 add_documentation_target(GENERATOR html)
 
+add_custom_target(docpreview
+  COMMAND ${python_command} -m SimpleHTTPServer 0
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/html
+  USES_TERMINAL)
+add_dependencies(docpreview html)
+
 set(tar_file ${CMAKE_BINARY_DIR}/packages/${CMAKE_PROJECT_NAME}-docs-${FDB_VERSION}.tar.gz)
 add_custom_command(
   OUTPUT ${tar_file}
