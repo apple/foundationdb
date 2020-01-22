@@ -59,7 +59,7 @@ endfunction()
 message(STATUS "Add html target")
 add_documentation_target(GENERATOR html)
 
-set(DOCSERVER_PORT "-1" CACHE STRING "Port to which the documentation server should bind (negative means cmake will chose one)")
+set(DOCSERVER_PORT "-1" CACHE STRING "Port to which the documentation server should bind (negative means cmake will choose one)")
 
 if(DOCSERVER_PORT GREATER_EQUAL 0)
   set(port ${DOCSERVER_PORT})
