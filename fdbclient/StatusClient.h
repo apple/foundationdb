@@ -23,11 +23,12 @@
 
 #include "flow/flow.h"
 #include "fdbclient/Status.h"
+#include "fdbclient/DatabaseContext.h"
 
 class StatusClient {
 public:
 	enum StatusLevel { MINIMAL = 0, NORMAL = 1, DETAILED = 2, JSON = 3 };
-	static Future<StatusObject> statusFetcher(Reference<ClusterConnectionFile> clusterFile);
+	static Future<StatusObject> statusFetcher(Database db);
 };
 
 #endif

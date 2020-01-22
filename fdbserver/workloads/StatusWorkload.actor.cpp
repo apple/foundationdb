@@ -69,7 +69,7 @@ struct StatusWorkload : TestWorkload {
 		if (clientId != 0)
 			return Void();
 
-		return success(timeout(fetcher(cx->getConnectionFile(), this), testDuration));
+		return success(timeout(fetcher(cx, this), testDuration));
 	}
 	virtual Future<bool> check(Database const& cx) {
 		return errors.getValue() == 0;
@@ -161,7 +161,7 @@ struct StatusWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> fetcher(Reference<ClusterConnectionFile> connFile, StatusWorkload *self) {
+	ACTOR Future<Void> fetcher(Database cx, StatusWorkload *self) {
 		state double lastTime = now();
 
 		loop{
@@ -170,7 +170,7 @@ struct StatusWorkload : TestWorkload {
 				// Since we count the requests that start, we could potentially never really hear back?
 				++self->requests;
 				state double issued = now();
-				StatusObject result = wait(StatusClient::statusFetcher(connFile));
+				StatusObject result = wait(StatusClient::statusFetcher(cx));
 				++self->replies;
 				BinaryWriter br(AssumeVersion(currentProtocolVersion));
 				save(br, result);

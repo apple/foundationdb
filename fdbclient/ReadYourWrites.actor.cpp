@@ -1165,8 +1165,8 @@ Optional<Value> getValueFromJSON(StatusObject statusObj) {
 	}
 }
 
-ACTOR Future<Optional<Value>> getJSON(Reference<ClusterConnectionFile> clusterFile) {
-	StatusObject statusObj = wait(StatusClient::statusFetcher(clusterFile));
+ACTOR Future<Optional<Value>> getJSON(Database db) {
+	StatusObject statusObj = wait(StatusClient::statusFetcher(db));
 	return getValueFromJSON(statusObj);
 }
 
@@ -1194,7 +1194,7 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 	
 	if (key == LiteralStringRef("\xff\xff/status/json")){
 		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-			return getJSON(tr.getDatabase()->getConnectionFile());
+			return getJSON(tr.getDatabase());
 		}
 		else {
 			return Optional<Value>();

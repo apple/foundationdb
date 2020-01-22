@@ -46,7 +46,7 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 
 	ACTOR static Future<double> getMovingDataAmount(Database cx, DDMetricsExcludeWorkload* self) {
 		try {
-			StatusObject statusObj = wait(StatusClient::statusFetcher(cx->getConnectionFile()));
+			StatusObject statusObj = wait(StatusClient::statusFetcher(cx));
 			StatusObjectReader statusObjCluster;
 			((StatusObjectReader)statusObj).get("cluster", statusObjCluster);
 			StatusObjectReader statusObjData;
