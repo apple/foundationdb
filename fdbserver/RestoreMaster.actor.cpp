@@ -246,8 +246,8 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 
 	std::sort(rangeFiles.begin(), rangeFiles.end());
 	std::sort(logFiles.begin(), logFiles.end(), [](RestoreFileFR const& f1, RestoreFileFR const& f2) -> bool {
-		return std::tie(f1.endVersion, f1.beginVersion, f1.fileIndex) <
-		       std::tie(f2.endVersion, f2.beginVersion, f2.fileIndex);
+		return std::tie(f1.endVersion, f1.beginVersion, f1.fileIndex, f1.fileName) <
+		       std::tie(f2.endVersion, f2.beginVersion, f2.fileIndex, f2.fileName);
 	});
 
 	self->buildVersionBatches(rangeFiles, logFiles, &self->versionBatches); // Divide files into version batches
