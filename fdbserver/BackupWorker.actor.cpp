@@ -118,6 +118,7 @@ ACTOR Future<Void> monitorBackupStarted(BackupData* self) {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Standalone<StringRef>> value = wait(tr.get(backupStartedKey));
 				if (value.present()) return Void();
 

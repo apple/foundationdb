@@ -1398,11 +1398,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	bool removeBackupWorker(const BackupWorkerDoneRequest& req) override {
 		bool removed = false;
 		Reference<LogSet> logset = getEpochLogSet(req.backupEpoch);
-		std::string msg("BackupWorkerNotFound");
 		if (logset.isValid()) {
 			for (auto it = logset->backupWorkers.begin(); it != logset->backupWorkers.end(); it++) {
 				if (it->getPtr()->get().interf().id() == req.workerUID) {
-					msg = "BackupWorkerRemoved";
 					logset->backupWorkers.erase(it);
 					removed = true;
 					break;
@@ -1420,7 +1418,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			backupWorkerChanged.trigger();
 		}
 
-		TraceEvent(msg.c_str(), dbgid)
+		TraceEvent("RemoveBackupWorker", dbgid)
+		    .detail("Removed", removed)
 		    .detail("BackupEpoch", req.backupEpoch)
 		    .detail("WorkerID", req.workerUID)
 		    .detail("OldestBackupEpoch", oldestBackupEpoch);
