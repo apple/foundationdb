@@ -3198,7 +3198,7 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRang
 	state int nLocs = locations.size();
 	state vector<Future<StorageMetrics>> fx(nLocs);
 	state StorageMetrics total;
-	state int i = 0;
+	int i = 0;
 	for (; i < nLocs; i++) {
 		fx[i] = doGetStorageMetrics(cx, locations[i].first, locations[i].second);
 	}
@@ -3335,7 +3335,7 @@ Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, i
 	if (shardLimit > 0) {
 		StorageMetrics m;
 		m.bytes = -1;
-		return ::waitStorageMetrics(cx, keys, StorageMetrics(), m, StorageMetrics(), shardLimit);
+		return extractMetrics(::waitStorageMetrics(cx, keys, StorageMetrics(), m, StorageMetrics(), shardLimit, -1));
 	} else {
 		return ::getStorageMetricsLargeKeyRange(cx, keys);
 	}
