@@ -73,11 +73,11 @@ struct LogRouterData {
 		}
 	};
 
-	UID dbgid;
+	const UID dbgid;
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
 	NotifiedVersion version;
 	NotifiedVersion minPopped;
-	Version startVersion;
+	const Version startVersion;
 	Version minKnownCommittedVersion;
 	Version poppedVersion;
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
@@ -108,7 +108,7 @@ struct LogRouterData {
 
 	//only callable after getTagData returns a null reference
 	Reference<TagData> createTagData(Tag tag, Version popped, Version knownCommittedVersion) {
-		Reference<TagData> newTagData = Reference<TagData>( new TagData(tag, popped, knownCommittedVersion) );
+		Reference<TagData> newTagData(new TagData(tag, popped, knownCommittedVersion));
 		tag_data[tag.id] = newTagData;
 		return newTagData;
 	}
@@ -221,21 +221,18 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 	state Reference<ILogSystem::IPeekCursor> r;
 	state Version tagAt = self->version.get() + 1;
 	state Version lastVer = 0;
-	state std::vector<int> tags;
+	state std::vector<int> tags; // an optimization to avoid reallocating vector memory in every loop
 
 	loop {
-		loop {
-			choose {
-				when(wait( r ? r->getMore(TaskPriority::TLogCommit) : Never() ) ) {
-					break;
+		loop choose {
+			when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+			when(wait(dbInfoChange)) { // FIXME: does this actually happen?
+				if (self->logSystem->get()) {
+					r = self->logSystem->get()->peekLogRouter(self->dbgid, tagAt, self->routerTag);
+				} else {
+					r = Reference<ILogSystem::IPeekCursor>();
 				}
-				when( wait( dbInfoChange ) ) { //FIXME: does this actually happen?
-					if( self->logSystem->get() )
-						r = self->logSystem->get()->peekLogRouter( self->dbgid, tagAt, self->routerTag );
-					else
-						r = Reference<ILogSystem::IPeekCursor>();
-					dbInfoChange = self->logSystem->onChange();
-				}
+				dbInfoChange = self->logSystem->onChange();
 			}
 		}
 
@@ -537,26 +534,11 @@ ACTOR Future<Void> logRouterCore(
 }
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount, TLogInterface myInterface) {
-	loop{
-		bool isDisplaced = ( (db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED) || (db->get().recoveryCount == recoveryCount && db->get().recoveryState == RecoveryState::FULLY_RECOVERED) );
-		if(isDisplaced) {
-			for(auto& log : db->get().logSystemConfig.tLogs) {
-				if( std::count( log.logRouters.begin(), log.logRouters.end(), myInterface.id() ) ) {
-					isDisplaced = false;
-					break;
-				}
-			}
-		}
-		if(isDisplaced) {
-			for(auto& old : db->get().logSystemConfig.oldTLogs) {
-				for(auto& log : old.tLogs) {
-					 if( std::count( log.logRouters.begin(), log.logRouters.end(), myInterface.id() ) ) {
-						isDisplaced = false;
-						break;
-					 }
-				}
-			}
-		}
+	loop {
+		bool isDisplaced =
+		    ((db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED) ||
+		     (db->get().recoveryCount == recoveryCount && db->get().recoveryState == RecoveryState::FULLY_RECOVERED));
+		isDisplaced = isDisplaced && !db->get().logSystemConfig.hasLogRouter(myInterface.id());
 		if (isDisplaced) {
 			throw worker_removed();
 		}

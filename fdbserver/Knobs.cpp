@@ -354,6 +354,11 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( RESOLVER_STATE_MEMORY_LIMIT,                           1e6 );
 	init( LAST_LIMITED_RATIO,                                    2.0 );
 
+	// Backup Worker
+	init( BACKUP_TIMEOUT,                                        0.4 );
+	init( BACKUP_NOOP_POP_DELAY,                                 5.0 );
+	init( BACKUP_FILE_BLOCK_BYTES,                       1024 * 1024 );
+
 	//Cluster Controller
 	init( CLUSTER_CONTROLLER_LOGGING_DELAY,                      5.0 );
 	init( MASTER_FAILURE_REACTION_TIME,                          0.4 ); if( randomize && BUGGIFY ) MASTER_FAILURE_REACTION_TIME = 10.0;

@@ -487,7 +487,7 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 }
 
 ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, MutationListRef>* logRangeMutations,
-                         LogPushData* toCommit, Version commitVersion) {
+                                      LogPushData* toCommit, Version commitVersion) {
 	state std::map<Key, MutationListRef>::iterator logRangeMutation = logRangeMutations->begin();
 	state int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
 	state int yieldBytes = 0;
@@ -1174,14 +1174,23 @@ struct TransactionRateInfo {
 	}
 };
 
-ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests, ProxyStats *stats) {
+ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests,
+                                  ProxyStats* stats, Version minKnownCommittedVersion) {
 	GetReadVersionReply reply = wait(replyFuture);
+
 	double end = timer();
 	for(GetReadVersionRequest const& request : requests) {
 		if(request.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
 			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
 		}
-		request.reply.send(reply);
+		if (request.flags & GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION) {
+			// Only backup worker may infrequently use this flag.
+			GetReadVersionReply minKCVReply = reply;
+			minKCVReply.version = minKnownCommittedVersion;
+			request.reply.send(minKCVReply);
+		} else {
+			request.reply.send(reply);
+		}
 	}
 
 	return Void();
@@ -1299,7 +1308,8 @@ ACTOR static Future<Void> transactionStarter(
 		for (int i = 0; i < start.size(); i++) {
 			if (start[i].size()) {
 				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(commitData, i, &otherProxies, debugID, transactionsStarted[i], systemTransactionsStarted[i], defaultPriTransactionsStarted[i], batchPriTransactionsStarted[i]);
-				addActor.send(sendGrvReplies(readVersionReply, start[i], &commitData->stats));
+				addActor.send(sendGrvReplies(readVersionReply, start[i], &commitData->stats,
+				                             commitData->minKnownCommittedVersion));
 
 				// for now, base dynamic batching on the time for normal requests (not read_risky)
 				if (i == 0) { 
