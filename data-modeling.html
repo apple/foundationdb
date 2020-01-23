@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.7',
+        VERSION:     '6.2.11',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -255,7 +255,7 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
     <span class="k">return</span> <span class="s1">&#39;</span><span class="se">\t</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">tup</span><span class="p">)</span>
 
 <span class="c1"># Example: Order first by state, then by county</span>
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">set_county_population</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">county</span><span class="p">,</span> <span class="n">pop</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">tuple_to_key_with_tab</span><span class="p">((</span><span class="n">state</span><span class="p">,</span> <span class="n">county</span><span class="p">))]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">pop</span><span class="p">)</span>
 </pre></div>
@@ -268,11 +268,11 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 </div>
 <p>Because of its ordering of keys, FoundationDB supports efficient range reads on any set of keys that share a prefix. The tuple layer preserves the ordering of tuples sorted by element from left to right; as a result, the leftmost elements of a tuple will always represent a prefix in keyspace and can be used for range reads. A basic principle of data modeling with the tuple layer is to order tuple elements to facilitate such range reads. The examples below illustrate this principle.</p>
 <p>Sometimes data attributes will have a natural order of containment imposed by your domain. A common example is geographic attributes, such as state and county in the Unites States. By constructing keys from tuples of the form <code class="docutils literal"><span class="pre">(state,</span> <span class="pre">county)</span></code>, where state is the first tuple element, all data for states will be stored in an adjacent range of keys. This ordering allows you to retrieve the populations for all counties in a given state with a single range read. You could use the tuple layer with the following functions:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">set_county_population</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">county</span><span class="p">,</span> <span class="n">pop</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">state</span><span class="p">,</span> <span class="n">county</span><span class="p">))]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">pop</span><span class="p">)</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">get_county_populations_in_state</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">state</span><span class="p">):</span>
     <span class="k">return</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">pop</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">pop</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="n">state</span><span class="p">,))]]</span>
 </pre></div>
@@ -287,27 +287,27 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 <p>You can easily map arrays to the key-value store using tuples. To model a named, one-dimensional array, you can construct a key for each array element using the array name as the subspace and the array index as the second tuple element.</p>
 <p>For example, suppose you have a <code class="docutils literal"><span class="pre">'temps2012'</span></code> array containing a year&#8217;s worth of daily temperature averages. The temperatures are indexed by an integer ranging from 1 to 365 representing the day. Your keys would then be constructed from tuples of the form <code class="docutils literal"><span class="pre">('temps2012',</span> <span class="pre">day)</span></code>.</p>
 <p>To set and get array elements with this technique, you can use Python functions such as:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">array_set</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">array_space</span><span class="p">,</span> <span class="n">index</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">array_space</span><span class="p">[</span><span class="n">index</span><span class="p">]]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">array_get</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">array_space</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">tr</span><span class="p">[</span><span class="n">array_space</span><span class="p">[</span><span class="n">index</span><span class="p">]]</span>
 
 <span class="n">temp_array</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;temps2012&#39;</span><span class="p">,))</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">add_temp</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">day</span><span class="p">,</span> <span class="n">temp</span><span class="p">):</span>
     <span class="n">array_set</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">temp_array</span><span class="p">,</span> <span class="n">day</span><span class="p">,</span> <span class="n">temp</span><span class="p">)</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">get_temp</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">day</span><span class="p">):</span>
     <span class="n">val</span> <span class="o">=</span> <span class="n">array_get</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">temp_array</span><span class="p">,</span> <span class="n">day</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">val</span><span class="o">.</span><span class="n">present</span><span class="p">():</span>
         <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">val</span><span class="p">)</span>
     <span class="k">else</span><span class="p">:</span>
-        <span class="k">return</span> <span class="bp">None</span>
+        <span class="k">return</span> <span class="kc">None</span>
 </pre></div>
 </div>
 <p>This approach has a few nice properties:</p>
@@ -323,27 +323,27 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 <p>A multimap is a generalization of an associative array in which each key may be associated with multiple values. Multimaps are often implemented as associative arrays in which the values are sets rather than primitive data types.</p>
 <p>Suppose you have a multimap that records student enrollment in classes, with students as keys and classes as values. Each student can be enrolled in more than one class, so you need to map the key-value pairs of the multimap (with their multiple values) to the database.</p>
 <p>A simple approach is to use the multimap name (say, <code class="docutils literal"><span class="pre">'enroll'</span></code>) as the subspace and construct a key from a tuple of the form <code class="docutils literal"><span class="pre">('enroll',</span> <span class="pre">student,</span> <span class="pre">class_name)</span></code> for each class in which a student is enrolled. Each class will generate a unique key, allowing as many classes as needed. Moreover, all the data in the multimap will be captured in the key, so you can just use an empty string for its value. Using this approach, you can add a class for a student or get all the student&#8217;s classes with the Python functions:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">multi_set</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">multi_space</span><span class="p">,</span> <span class="n">index</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">multi_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">index</span><span class="p">,</span> <span class="n">value</span><span class="p">))]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">multi_get</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">multi_space</span><span class="p">,</span> <span class="n">index</span><span class="p">):</span>
     <span class="n">pairs</span> <span class="o">=</span> <span class="n">tr</span><span class="p">[</span><span class="n">multi_space</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="n">index</span><span class="p">,))]</span>
     <span class="k">return</span> <span class="p">[</span><span class="n">multi_space</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">k</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">pairs</span><span class="p">]</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">multi_is_element</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">multi_space</span><span class="p">,</span> <span class="n">index</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
     <span class="n">val</span> <span class="o">=</span> <span class="n">tr</span><span class="p">[</span><span class="n">multi_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">index</span><span class="p">,</span> <span class="n">value</span><span class="p">))]</span>
     <span class="k">return</span> <span class="n">val</span><span class="o">.</span><span class="n">present</span><span class="p">()</span>
 
 <span class="n">enroll_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;enroll&#39;</span><span class="p">,))</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">add_class</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">student</span><span class="p">,</span> <span class="n">class_name</span><span class="p">):</span>
     <span class="n">multi_set</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">enroll_space</span><span class="p">,</span> <span class="n">student</span><span class="p">,</span> <span class="n">class_name</span><span class="p">)</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">get_classes</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">student</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">multi_get</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">enroll_space</span><span class="p">,</span> <span class="n">student</span><span class="p">)</span>
 </pre></div>
@@ -356,21 +356,21 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 <p>You can easily use tuples to store data in tabular form with rows and columns. The simplest data model for a table is to make each cell in the table a key-value pair. To do this, you construct a key from a tuple containing the row and column identifiers. As with the array model, unassigned cells in tables constructed using this technique will consume no storage, so sparse tables can be stored efficiently. As a result, a table can safely have a very large number of columns.</p>
 <p>You can make your model row-oriented or column-oriented by placing either the row or column first in the tuple, respectively. Because the lexicographic order sorts tuple elements from left to right, access is optimized for the element placed first. Placing the row first makes it efficient to read all the cells in a particular row; reversing the order makes reading a column more efficient.</p>
 <p>Using the table name as the subspace, we could implement the common row-oriented version in Python as follows:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">table_set_cell</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">table_space</span><span class="p">,</span> <span class="n">row</span><span class="p">,</span> <span class="n">column</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">table_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">row</span><span class="p">,</span> <span class="n">column</span><span class="p">))]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">table_get_cell</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">table_space</span><span class="p">,</span> <span class="n">row</span><span class="p">,</span> <span class="n">column</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">tr</span><span class="p">[</span><span class="n">table_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">row</span><span class="p">,</span> <span class="n">column</span><span class="p">))]</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">table_set_row</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">table_space</span><span class="p">,</span> <span class="n">row</span><span class="p">,</span> <span class="n">cols</span><span class="p">):</span>
     <span class="k">del</span> <span class="n">tr</span><span class="p">[</span><span class="n">table_space</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="n">row</span><span class="p">,))]</span>
     <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">cols</span><span class="o">.</span><span class="n">iteritems</span><span class="p">():</span>
         <span class="n">table_set_cell</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">table_space</span><span class="p">,</span> <span class="n">row</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">table_get_row</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">table_space</span><span class="p">,</span> <span class="n">row</span><span class="p">):</span>
     <span class="n">cols</span> <span class="o">=</span> <span class="p">{}</span>
     <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">table_space</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="n">row</span><span class="p">,))]:</span>
@@ -389,15 +389,15 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 <p>Suppose you&#8217;re storing entity-relationship data for users in an <code class="docutils literal"><span class="pre">'ER'</span></code> subspace. You might identify each entity with a unique identifier and define a key for each attribute with the tuple <code class="docutils literal"><span class="pre">('ER',</span> <span class="pre">entity_ID,</span> <span class="pre">attribute)</span></code>. You could then store the user&#8217;s region using the Python functions:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="n">ER_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;ER&#39;</span><span class="p">,))</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">add_attribute_value</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">entity_ID</span><span class="p">,</span> <span class="n">attribute</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">ER_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">entity_ID</span><span class="p">,</span> <span class="n">attribute</span><span class="p">))]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">get_attribute_value</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">entity_ID</span><span class="p">,</span> <span class="n">attribute</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">tr</span><span class="p">[</span><span class="n">ER_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">entity_ID</span><span class="p">,</span> <span class="n">attribute</span><span class="p">))]</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">add_user_region</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">user_ID</span><span class="p">,</span> <span class="n">region</span><span class="p">):</span>
     <span class="n">add_attribute_value</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">user_ID</span><span class="p">,</span> <span class="s1">&#39;region&#39;</span><span class="p">,</span> <span class="n">region</span><span class="p">)</span>
 </pre></div>
@@ -406,30 +406,30 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 <div class="section" id="relationships">
 <h3>Relationships</h3>
 <p>Using the pattern we saw above with multimaps, you can store relationships and related entities as an element of the key and use an empty string as the physical value. Suppose your users can belong to one or more groups. To add a user to a group or retrieve all groups to which a user belongs, you can use the Python functions:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">add_relationship</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">relationship</span><span class="p">,</span> <span class="n">primary_key</span><span class="p">,</span> <span class="n">foreign_key</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">ER_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">relationship</span><span class="p">,</span> <span class="n">primary_key</span><span class="p">,</span> <span class="n">foreign_key</span><span class="p">))]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">get_relationships</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">relationship</span><span class="p">):</span>
     <span class="k">return</span> <span class="p">[</span><span class="n">ER_space</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">k</span><span class="p">)[</span><span class="mi">1</span><span class="p">:]</span>
             <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="o">.</span><span class="n">get_range_startswith</span><span class="p">(</span><span class="n">ER_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">relationship</span><span class="p">,)),</span>
                                         <span class="n">streaming_mode</span><span class="o">=</span><span class="n">fdb</span><span class="o">.</span><span class="n">StreamingMode</span><span class="o">.</span><span class="n">want_all</span><span class="p">)]</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">get_related_entities</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">relationship</span><span class="p">,</span> <span class="n">primary_key</span><span class="p">):</span>
     <span class="n">items</span> <span class="o">=</span> <span class="n">tr</span><span class="p">[</span><span class="n">ER_space</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="n">relationship</span><span class="p">,</span> <span class="n">primary_key</span><span class="p">))]</span>
     <span class="k">return</span> <span class="p">[</span><span class="n">ER_space</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">k</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">items</span><span class="p">]</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">is_related_entity</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">relationship</span><span class="p">,</span> <span class="n">primary_key</span><span class="p">,</span> <span class="n">foreign_key</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">tr</span><span class="p">[</span><span class="n">ER_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">relationship</span><span class="p">,</span> <span class="n">primary_key</span><span class="p">,</span> <span class="n">foreign_key</span><span class="p">))]</span><span class="o">.</span><span class="n">present</span><span class="p">()</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">add_user_to_group</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">user_ID</span><span class="p">,</span> <span class="n">group_name</span><span class="p">):</span>
     <span class="n">add_relationship</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="s1">&#39;belongs_to&#39;</span><span class="p">,</span> <span class="n">user_ID</span><span class="p">,</span> <span class="n">group_name</span><span class="p">)</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">get_users_groups</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">user_ID</span><span class="p">):</span>
    <span class="k">return</span> <span class="n">get_related_entities</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="s1">&#39;belongs_to&#39;</span><span class="p">,</span> <span class="n">user_ID</span><span class="p">)</span>
 </pre></div>
@@ -446,12 +446,12 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="n">user_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;user&#39;</span><span class="p">,))</span>
 <span class="n">region_index</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;region_idx&#39;</span><span class="p">,))</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">add_user</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">user_ID</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">region</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">user_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">user_ID</span><span class="p">,</span> <span class="n">region</span><span class="p">))]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">region_index</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">region</span><span class="p">,</span> <span class="n">user_ID</span><span class="p">))]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">get_users_in_region</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">region</span><span class="p">):</span>
     <span class="n">items</span> <span class="o">=</span> <span class="n">tr</span><span class="p">[</span><span class="n">region_index</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="n">region</span><span class="p">,))]</span>
     <span class="k">return</span> <span class="p">[</span><span class="n">region_index</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">k</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">items</span><span class="p">]</span>
@@ -467,16 +467,16 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 <span class="n">row_index</span> <span class="o">=</span> <span class="n">table_space</span><span class="p">[</span><span class="s1">&#39;row_idx&#39;</span><span class="p">]</span>
 <span class="n">col_index</span> <span class="o">=</span> <span class="n">table_space</span><span class="p">[</span><span class="s1">&#39;col_idx&#39;</span><span class="p">]</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">table_set_cell</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">row_index</span><span class="p">,</span> <span class="n">col_index</span><span class="p">,</span> <span class="n">row</span><span class="p">,</span> <span class="n">column</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">row_index</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">row</span><span class="p">,</span> <span class="n">column</span><span class="p">))]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">col_index</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">column</span><span class="p">,</span> <span class="n">row</span><span class="p">))]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">table_get_cell</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">row_index</span><span class="p">,</span> <span class="n">row</span><span class="p">,</span> <span class="n">column</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">tr</span><span class="p">[</span><span class="n">row_index</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">row</span><span class="p">,</span> <span class="n">column</span><span class="p">))]</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">table_get_row</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">row_index</span><span class="p">,</span> <span class="n">row</span><span class="p">):</span>
     <span class="n">cols</span> <span class="o">=</span> <span class="p">{}</span>
     <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">row_index</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="n">row</span><span class="p">,))]:</span>
@@ -484,7 +484,7 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
         <span class="n">cols</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
     <span class="k">return</span> <span class="n">cols</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">table_get_col</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">col_index</span><span class="p">,</span> <span class="n">col</span><span class="p">):</span>
     <span class="n">rows</span> <span class="o">=</span> <span class="p">{}</span>
     <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">col_index</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="n">col</span><span class="p">,))]:</span>
@@ -526,9 +526,9 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 
 <span class="k">def</span> <span class="nf">to_tuples</span><span class="p">(</span><span class="n">item</span><span class="p">):</span>
     <span class="k">if</span> <span class="n">item</span> <span class="o">==</span> <span class="p">{}:</span>
-        <span class="k">return</span> <span class="p">[(</span><span class="n">EMPTY_OBJECT</span><span class="p">,</span> <span class="bp">None</span><span class="p">)]</span>
+        <span class="k">return</span> <span class="p">[(</span><span class="n">EMPTY_OBJECT</span><span class="p">,</span> <span class="kc">None</span><span class="p">)]</span>
     <span class="k">elif</span> <span class="n">item</span> <span class="o">==</span> <span class="p">[]:</span>
-        <span class="k">return</span> <span class="p">[(</span><span class="n">EMPTY_ARRAY</span><span class="p">,</span> <span class="bp">None</span><span class="p">)]</span>
+        <span class="k">return</span> <span class="p">[(</span><span class="n">EMPTY_ARRAY</span><span class="p">,</span> <span class="kc">None</span><span class="p">)]</span>
     <span class="k">elif</span> <span class="nb">type</span><span class="p">(</span><span class="n">item</span><span class="p">)</span> <span class="o">==</span> <span class="nb">dict</span><span class="p">:</span>
         <span class="k">return</span> <span class="p">[(</span><span class="n">k</span><span class="p">,)</span> <span class="o">+</span> <span class="n">sub</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">item</span><span class="o">.</span><span class="n">iteritems</span><span class="p">()</span> <span class="k">for</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">to_tuples</span><span class="p">(</span><span class="n">v</span><span class="p">)]</span>
     <span class="k">elif</span> <span class="nb">type</span><span class="p">(</span><span class="n">item</span><span class="p">)</span> <span class="o">==</span> <span class="nb">list</span><span class="p">:</span>
@@ -536,7 +536,7 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
     <span class="k">else</span><span class="p">:</span>
         <span class="k">return</span> <span class="p">[(</span><span class="n">item</span><span class="p">,)]</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">insert_hier</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">hier</span><span class="p">):</span>
     <span class="k">if</span> <span class="nb">type</span><span class="p">(</span><span class="n">hier</span><span class="p">)</span> <span class="o">==</span> <span class="nb">str</span><span class="p">:</span>
         <span class="n">hier</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">hier</span><span class="p">)</span>
@@ -550,8 +550,8 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
     <span class="n">first</span> <span class="o">=</span> <span class="n">tuples</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># The first tuple will tell us what kind of object we have</span>
 
     <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">first</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span> <span class="k">return</span> <span class="n">first</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># Primitive value</span>
-    <span class="k">if</span> <span class="n">first</span> <span class="o">==</span> <span class="p">(</span><span class="n">EMPTY_OBJECT</span><span class="p">,</span><span class="bp">None</span><span class="p">):</span> <span class="k">return</span> <span class="p">{}</span>
-    <span class="k">if</span> <span class="n">first</span> <span class="o">==</span> <span class="p">(</span><span class="n">EMPTY_ARRAY</span><span class="p">,</span> <span class="bp">None</span><span class="p">):</span> <span class="k">return</span> <span class="p">[]</span>
+    <span class="k">if</span> <span class="n">first</span> <span class="o">==</span> <span class="p">(</span><span class="n">EMPTY_OBJECT</span><span class="p">,</span><span class="kc">None</span><span class="p">):</span> <span class="k">return</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="n">first</span> <span class="o">==</span> <span class="p">(</span><span class="n">EMPTY_ARRAY</span><span class="p">,</span> <span class="kc">None</span><span class="p">):</span> <span class="k">return</span> <span class="p">[]</span>
 
     <span class="c1"># For an object or array, we need to group the tuples by their first element</span>
     <span class="n">groups</span> <span class="o">=</span> <span class="p">[</span><span class="nb">list</span><span class="p">(</span><span class="n">g</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">itertools</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">tuples</span><span class="p">,</span> <span class="k">lambda</span> <span class="n">t</span><span class="p">:</span><span class="n">t</span><span class="p">[</span><span class="mi">0</span><span class="p">])]</span>
@@ -561,7 +561,7 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
     <span class="k">else</span><span class="p">:</span>    <span class="c1"># object</span>
         <span class="k">return</span> <span class="nb">dict</span><span class="p">((</span><span class="n">g</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span> <span class="n">from_tuples</span><span class="p">([</span><span class="n">t</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">g</span><span class="p">]))</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">groups</span><span class="p">)</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">get_sub_hier</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">prefix</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">from_tuples</span><span class="p">([</span><span class="n">hier_space</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">k</span><span class="p">)</span>
                         <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">hier_space</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="n">prefix</span><span class="p">)]])</span>
@@ -576,7 +576,7 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 
 <span class="n">doc_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;doc&#39;</span><span class="p">,))</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">insert_doc</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">doc</span><span class="p">):</span>
     <span class="k">if</span> <span class="nb">type</span><span class="p">(</span><span class="n">doc</span><span class="p">)</span> <span class="o">==</span> <span class="nb">str</span><span class="p">:</span>
         <span class="n">doc</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">doc</span><span class="p">)</span>
@@ -586,7 +586,7 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
         <span class="n">tr</span><span class="p">[</span><span class="n">doc_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">doc</span><span class="p">[</span><span class="s1">&#39;doc_id&#39;</span><span class="p">],)</span> <span class="o">+</span> <span class="n">tup</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">])]</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">tup</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],))</span>
     <span class="k">return</span> <span class="n">doc</span><span class="p">[</span><span class="s1">&#39;doc_id&#39;</span><span class="p">]</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">get_doc</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">doc_id</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">from_tuples</span><span class="p">([</span><span class="n">doc_space</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">k</span><span class="p">)[</span><span class="mi">1</span><span class="p">:]</span> <span class="o">+</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
                         <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">doc_space</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="n">doc_id</span><span class="p">,))]])</span>
@@ -599,7 +599,7 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
 <p>Suppose you want to maintain data in a singly linked list. The application data can use a tuple structure like those of single-valued relationships. Links will be similar but will use node identifiers as their values. Here is an example of removing the next node from the list:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="n">node_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;node&#39;</span><span class="p">,))</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">remove_next_node</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">node_ID</span><span class="p">):</span>
     <span class="n">next_ID</span> <span class="o">=</span> <span class="n">tr</span><span class="p">[</span><span class="n">node_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">node_ID</span><span class="p">,</span> <span class="s1">&#39;next&#39;</span><span class="p">))]</span>
     <span class="k">if</span> <span class="n">next_ID</span> <span class="o">!=</span> <span class="s1">&#39;&#39;</span><span class="p">:</span>
@@ -680,7 +680,7 @@ all non-NaN values. Otherwise, the representation is consistent with the mathema
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 25, 2019.<br/>
+      Last updated on Jan 23, 2020.<br/>
     </p>
   </div>
 </footer>

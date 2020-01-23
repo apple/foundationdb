@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.7',
+        VERSION:     '6.2.11',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -82,9 +82,25 @@
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id1">6.2.7</a><ul>
-<li><a class="reference internal" href="#performance">Performance</a></li>
+<li><a class="reference internal" href="#id1">6.2.11</a><ul>
 <li><a class="reference internal" href="#fixes">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id2">6.2.10</a><ul>
+<li><a class="reference internal" href="#id3">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id4">6.2.9</a><ul>
+<li><a class="reference internal" href="#id5">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id7">6.2.8</a><ul>
+<li><a class="reference internal" href="#id8">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id9">6.2.7</a><ul>
+<li><a class="reference internal" href="#performance">Performance</a></li>
+<li><a class="reference internal" href="#id11">Fixes</a></li>
 <li><a class="reference internal" href="#status">Status</a></li>
 <li><a class="reference internal" href="#bindings">Bindings</a></li>
 <li><a class="reference internal" href="#features">Features</a></li>
@@ -137,9 +153,25 @@
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id1">6.2.7</a><ul>
-<li><a class="reference internal" href="#performance">Performance</a></li>
+<li><a class="reference internal" href="#id1">6.2.11</a><ul>
 <li><a class="reference internal" href="#fixes">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id2">6.2.10</a><ul>
+<li><a class="reference internal" href="#id3">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id4">6.2.9</a><ul>
+<li><a class="reference internal" href="#id5">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id7">6.2.8</a><ul>
+<li><a class="reference internal" href="#id8">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id9">6.2.7</a><ul>
+<li><a class="reference internal" href="#performance">Performance</a></li>
+<li><a class="reference internal" href="#id11">Fixes</a></li>
 <li><a class="reference internal" href="#status">Status</a></li>
 <li><a class="reference internal" href="#bindings">Bindings</a></li>
 <li><a class="reference internal" href="#features">Features</a></li>
@@ -159,6 +191,49 @@
   <div class="section" id="release-notes">
 <h1>Release Notes</h1>
 <div class="section" id="id1">
+<h2>6.2.11</h2>
+<div class="section" id="fixes">
+<h3>Fixes</h3>
+<ul class="simple">
+<li>Clients could hang indefinitely on reads if all storage servers holding a keyrange were removed from a cluster since the last time the client read a key in the range. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2377">(PR #2377)</a>.</li>
+<li>In rare scenarios, status could falsely report no replicas remain of some data. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2380">(PR #2380)</a>.</li>
+<li>Latency band tracking could fail to configure correctly after a recovery or upon process startup. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2371">(PR #2371)</a>.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="id2">
+<h2>6.2.10</h2>
+<div class="section" id="id3">
+<h3>Fixes</h3>
+<ul class="simple">
+<li><code class="docutils literal"><span class="pre">backup_agent</span></code> crashed on startup. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2356">(PR #2356)</a>.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="id4">
+<h2>6.2.9</h2>
+<div class="section" id="id5">
+<h3>Fixes</h3>
+<ul class="simple">
+<li>Small clusters using specific sets of process classes could cause the data distributor to be continuously killed and re-recruited. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2344">(PR #2344)</a>.</li>
+<li>The data distributor and ratekeeper could be recruited on non-optimal processes. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2344">(PR #2344)</a>.</li>
+<li>A <code class="docutils literal"><span class="pre">kill</span></code> command from <code class="docutils literal"><span class="pre">fdbcli</span></code> could take a long time before being executed by a busy process. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2339">(PR #2339)</a>.</li>
+<li>Committing transactions larger than 1 MB could cause the proxy to stall for up to a second. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2350">(PR #2350)</a>.</li>
+<li>Transaction timeouts would use memory for the entire duration of the timeout, regardless of whether the transaction had been destroyed. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2353">(PR #2353)</a>.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="id7">
+<h2>6.2.8</h2>
+<div class="section" id="id8">
+<h3>Fixes</h3>
+<ul class="simple">
+<li>Significantly improved the rate at which the transaction logs in a remote region can pull data from the primary region. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2307">(PR #2307)</a> <a class="reference external" href="https://github.com/apple/foundationdb/pull/2323">(PR #2323)</a>.</li>
+<li>The <code class="docutils literal"><span class="pre">system_kv_size_bytes</span></code> status field could report a size much larger than the actual size of the system keyspace. <a class="reference external" href="https://github.com/apple/foundationdb/pull/2305">(PR #2305)</a>.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="id9">
 <h2>6.2.7</h2>
 <div class="section" id="performance">
 <h3>Performance</h3>
@@ -185,7 +260,7 @@
 <li>Raised the data distribution priority of splitting shards because delaying splits can cause hot write shards. [6.2.6] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2234">(PR #2234)</a>.</li>
 </ul>
 </div>
-<div class="section" id="fixes">
+<div class="section" id="id11">
 <h3>Fixes</h3>
 <ul class="simple">
 <li>During an upgrade, the multi-version client now persists database default options and transaction options that aren&#8217;t reset on retry (e.g. transaction timeout). In order for these options to function correctly during an upgrade, a 6.2 or later client should be used as the primary client. <a class="reference external" href="https://github.com/apple/foundationdb/pull/1767">(PR #1767)</a>.</li>
@@ -210,7 +285,6 @@
 <li>Status would report incorrect fault tolerance metrics when a remote region was configured and the primary region lost a storage replica. [6.2.6] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2230">(PR #2230)</a></li>
 <li>The cluster would not change to a new set of satellite transaction logs when they become available in a better satellite location. [6.2.6] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2241">(PR #2241)</a>.</li>
 <li>The existence of <code class="docutils literal"><span class="pre">proxy</span></code> or <code class="docutils literal"><span class="pre">resolver</span></code> class processes prevented <code class="docutils literal"><span class="pre">stateless</span></code> class processes from being recruited as proxies or resolvers. [6.2.6] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2241">(PR #2241)</a>.</li>
-<li>Committing transactions larger than 1 MB could cause the proxy to stall for up to a second. [6.2.6] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2250">(PR #2250)</a>.</li>
 <li>The cluster controller could become saturated in clusters with large numbers of connected clients using TLS. [6.2.6] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2252">(PR #2252)</a>.</li>
 <li>Backup and DR would not share a mutation stream if they were started on different versions of FoundationDB. Either backup or DR must be restarted to resolve this issue. [6.2.6] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2202">(PR #2202)</a>.</li>
 <li>Don&#8217;t track batch priority GRV requests in latency bands. [6.2.7] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2279">(PR #2279)</a>.</li>
@@ -294,7 +368,6 @@
 <li>The cluster controller would saturate its CPU for a few seconds when sending configuration information to all of the worker processes. [6.2.4] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2086">(PR #2086)</a>.</li>
 <li>The data distributor would build all possible team combinations if it was tracking an unhealthy server with less than 10 teams. [6.2.4] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2099">(PR #2099)</a>.</li>
 <li>The cluster controller could crash if a coordinator was unreachable when compiling cluster status. [6.2.4] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2065">(PR #2065)</a>.</li>
-<li>The cluster controller could crash if a coordinator was unreachable when compiling cluster status. [6.2.4] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2065">(PR #2065)</a>.</li>
 <li>A storage server could crash if it took longer than 10 minutes to fetch a key range from another server. [6.2.5] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2170">(PR #2170)</a>.</li>
 <li>Excluding or including servers would restart the data distributor. [6.2.5] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2170">(PR #2170)</a>.</li>
 <li>The data distributor could read invalid memory when estimating database size. [6.2.6] <a class="reference external" href="https://github.com/apple/foundationdb/pull/2225">(PR #2225)</a>.</li>
@@ -349,7 +422,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 25, 2019.<br/>
+      Last updated on Jan 23, 2020.<br/>
     </p>
   </div>
 </footer>

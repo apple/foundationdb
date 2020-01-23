@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.7',
+        VERSION:     '6.2.11',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -680,7 +680,7 @@ value of the key is also retrieved, using network bandwidth.</p>
 <code class="descclassname">&#64;</code><code class="descclassname">fdb.</code><code class="descname">transactional</code></dt>
 <dd><p>The <code class="docutils literal"><span class="pre">&#64;fdb.transactional</span></code> decorator is a convenience designed to concisely wrap a function with logic to automatically create a transaction and retry until success.</p>
 <p>For example:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">simple_function</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="sa">b</span><span class="s1">&#39;foo&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">x</span>
     <span class="n">tr</span><span class="p">[</span><span class="sa">b</span><span class="s1">&#39;bar&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">y</span>
@@ -694,7 +694,7 @@ value of the key is also retrieved, using network bandwidth.</p>
 </div>
 <p>is equivalent to something like</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="n">tr</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">create_transaction</span><span class="p">()</span>
-<span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+<span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
     <span class="k">try</span><span class="p">:</span>
         <span class="n">simple_function</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="s1">&#39;a&#39;</span><span class="p">,</span> <span class="s1">&#39;b&#39;</span><span class="p">)</span>
         <span class="n">tr</span><span class="o">.</span><span class="n">commit</span><span class="p">()</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
@@ -1296,13 +1296,13 @@ both the caching and the increased network bandwidth.</p>
 <dt id="fdb.Value.present">
 <code class="descclassname">Value.</code><code class="descname">present</code><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
 <dd><p>Returns <code class="docutils literal"><span class="pre">False</span></code> if the key used to request this value was not present in the database. For example:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">foo</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
     <span class="n">val</span> <span class="o">=</span> <span class="n">tr</span><span class="p">[</span><span class="sa">b</span><span class="s1">&#39;foo&#39;</span><span class="p">]</span>
     <span class="k">if</span> <span class="n">val</span><span class="o">.</span><span class="n">present</span><span class="p">():</span>
-        <span class="k">print</span> <span class="s1">&#39;Got value: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">val</span>
+        <span class="nb">print</span> <span class="s1">&#39;Got value: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">val</span>
     <span class="k">else</span><span class="p">:</span>
-        <span class="k">print</span> <span class="s1">&#39;foo was not present&#39;</span>
+        <span class="nb">print</span> <span class="s1">&#39;foo was not present&#39;</span>
 </pre></div>
 </div>
 </dd></dl>
@@ -1652,17 +1652,17 @@ unsigned integer. It is set by the client, and it is used to impose an order bet
 serialized within a single transaction. If left unset, then final two bytes of the serialized
 <code class="docutils literal"><span class="pre">Versionstamp</span></code> are filled in with a default (constant) value.</p>
 <p>Sample usage of this class might be something like this:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">write_versionstamp</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">prefix</span><span class="p">):</span>
     <span class="n">tr</span><span class="o">.</span><span class="n">set_versionstamped_key</span><span class="p">(</span><span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack_with_versionstamp</span><span class="p">((</span><span class="n">prefix</span><span class="p">,</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">Versionstamp</span><span class="p">())),</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">tr</span><span class="o">.</span><span class="n">get_versionstamp</span><span class="p">()</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">read_versionstamp</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">prefix</span><span class="p">):</span>
     <span class="n">subspace</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">Subspace</span><span class="p">((</span><span class="n">prefix</span><span class="p">,))</span>
     <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">subspace</span><span class="o">.</span><span class="n">range</span><span class="p">()</span><span class="o">.</span><span class="n">start</span><span class="p">,</span> <span class="n">subspace</span><span class="o">.</span><span class="n">range</span><span class="p">()</span><span class="o">.</span><span class="n">stop</span><span class="p">,</span> <span class="mi">1</span><span class="p">):</span>
         <span class="k">return</span> <span class="n">subspace</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">k</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
-    <span class="k">return</span> <span class="bp">None</span>
+    <span class="k">return</span> <span class="kc">None</span>
 
 <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
 <span class="k">del</span> <span class="n">db</span><span class="p">[</span><span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="s1">&#39;prefix&#39;</span><span class="p">,))]</span>
@@ -1998,7 +1998,7 @@ this subspace and the passed tuple.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 25, 2019.<br/>
+      Last updated on Jan 23, 2020.<br/>
     </p>
   </div>
 </footer>

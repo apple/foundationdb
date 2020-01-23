@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.7',
+        VERSION:     '6.2.11',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -324,34 +324,34 @@ The multitester (or test orchestrator) will collect all metrics from all test cl
 <h2>Implementing a Java Workload</h2>
 <p>In order to implement your own workload in Java you can simply create an implementation of the abstract class <code class="docutils literal"><span class="pre">AbstractWorkload</span></code>.
 A minimal implementation will look like this:</p>
-<div class="highlight-java"><div class="highlight"><pre><span></span><span class="kn">package</span> <span class="nn">my.package</span><span class="o">;</span>
-<span class="kn">import</span> <span class="nn">com.apple.foundationdb.testing.Promise</span><span class="o">;</span>
-<span class="kn">import</span> <span class="nn">com.apple.foundationdb.testing.AbstractWorkload</span><span class="o">;</span>
-<span class="kn">import</span> <span class="nn">com.apple.foundationdb.testing.WorkloadContext</span><span class="o">;</span>
+<div class="highlight-java"><div class="highlight"><pre><span></span><span class="kn">package</span> <span class="nn">my.package</span><span class="p">;</span>
+<span class="kn">import</span> <span class="nn">com.apple.foundationdb.testing.Promise</span><span class="p">;</span>
+<span class="kn">import</span> <span class="nn">com.apple.foundationdb.testing.AbstractWorkload</span><span class="p">;</span>
+<span class="kn">import</span> <span class="nn">com.apple.foundationdb.testing.WorkloadContext</span><span class="p">;</span>
 
-<span class="kd">class</span> <span class="nc">MinimalWorkload</span> <span class="kd">extends</span> <span class="n">AbstractWorkload</span> <span class="o">{</span>
-    <span class="kd">public</span> <span class="nf">MinimalWorkload</span><span class="o">(</span><span class="n">WorkloadContext</span> <span class="n">ctx</span><span class="o">)</span> <span class="o">{</span>
-        <span class="kd">super</span><span class="o">(</span><span class="n">ctx</span><span class="o">);</span>
-    <span class="o">}</span>
-
-    <span class="nd">@Override</span>
-    <span class="kd">public</span> <span class="kt">void</span> <span class="nf">setup</span><span class="o">(</span><span class="n">Database</span> <span class="n">db</span><span class="o">,</span> <span class="n">Promise</span> <span class="n">promise</span><span class="o">)</span> <span class="o">{</span>
-        <span class="n">log</span><span class="o">(</span><span class="mi">20</span><span class="o">,</span> <span class="s">&quot;WorkloadSetup&quot;</span><span class="o">,</span> <span class="kc">null</span><span class="o">);</span>
-        <span class="n">promise</span><span class="o">.</span><span class="na">send</span><span class="o">(</span><span class="kc">true</span><span class="o">);</span>
-    <span class="o">}</span>
+<span class="kd">class</span> <span class="nc">MinimalWorkload</span> <span class="kd">extends</span> <span class="n">AbstractWorkload</span> <span class="p">{</span>
+    <span class="kd">public</span> <span class="nf">MinimalWorkload</span><span class="p">(</span><span class="n">WorkloadContext</span> <span class="n">ctx</span><span class="p">)</span> <span class="p">{</span>
+        <span class="kd">super</span><span class="p">(</span><span class="n">ctx</span><span class="p">);</span>
+    <span class="p">}</span>
 
     <span class="nd">@Override</span>
-    <span class="kd">public</span> <span class="kt">void</span> <span class="nf">start</span><span class="o">(</span><span class="n">Database</span> <span class="n">db</span><span class="o">)</span> <span class="o">{</span>
-        <span class="n">log</span><span class="o">(</span><span class="mi">20</span><span class="o">,</span> <span class="s">&quot;WorkloadStarted&quot;</span><span class="o">,</span> <span class="kc">null</span><span class="o">);</span>
-        <span class="n">promise</span><span class="o">.</span><span class="na">send</span><span class="o">(</span><span class="kc">true</span><span class="o">);</span>
-    <span class="o">}</span>
+    <span class="kd">public</span> <span class="kt">void</span> <span class="nf">setup</span><span class="p">(</span><span class="n">Database</span> <span class="n">db</span><span class="p">,</span> <span class="n">Promise</span> <span class="n">promise</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">log</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="s">&quot;WorkloadSetup&quot;</span><span class="p">,</span> <span class="kc">null</span><span class="p">);</span>
+        <span class="n">promise</span><span class="p">.</span><span class="na">send</span><span class="p">(</span><span class="kc">true</span><span class="p">);</span>
+    <span class="p">}</span>
 
     <span class="nd">@Override</span>
-    <span class="kd">public</span> <span class="kt">boolean</span> <span class="nf">check</span><span class="o">(</span><span class="n">Database</span> <span class="n">db</span><span class="o">)</span> <span class="o">{</span>
-        <span class="n">log</span><span class="o">(</span><span class="mi">20</span><span class="o">,</span> <span class="s">&quot;WorkloadFailureCheck&quot;</span><span class="o">,</span> <span class="kc">null</span><span class="o">);</span>
-        <span class="n">promise</span><span class="o">.</span><span class="na">send</span><span class="o">(</span><span class="kc">true</span><span class="o">);</span>
-    <span class="o">}</span>
-<span class="o">}</span>
+    <span class="kd">public</span> <span class="kt">void</span> <span class="nf">start</span><span class="p">(</span><span class="n">Database</span> <span class="n">db</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">log</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="s">&quot;WorkloadStarted&quot;</span><span class="p">,</span> <span class="kc">null</span><span class="p">);</span>
+        <span class="n">promise</span><span class="p">.</span><span class="na">send</span><span class="p">(</span><span class="kc">true</span><span class="p">);</span>
+    <span class="p">}</span>
+
+    <span class="nd">@Override</span>
+    <span class="kd">public</span> <span class="kt">boolean</span> <span class="nf">check</span><span class="p">(</span><span class="n">Database</span> <span class="n">db</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">log</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="s">&quot;WorkloadFailureCheck&quot;</span><span class="p">,</span> <span class="kc">null</span><span class="p">);</span>
+        <span class="n">promise</span><span class="p">.</span><span class="na">send</span><span class="p">(</span><span class="kc">true</span><span class="p">);</span>
+    <span class="p">}</span>
+<span class="p">}</span>
 </pre></div>
 </div>
 <p>The lifecycle of a test will look like this:</p>
@@ -544,7 +544,7 @@ with the <code class="docutils literal"><span class="pre">multitest</span></code
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 25, 2019.<br/>
+      Last updated on Jan 23, 2020.<br/>
     </p>
   </div>
 </footer>
