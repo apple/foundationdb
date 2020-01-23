@@ -360,6 +360,7 @@ ACTOR Future<Void> pingDatabase( Database cx ) {
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 			Optional<Value> v = wait( tr.get( StringRef("/Liveness/" + deterministicRandom()->randomUniqueID().toString() ) ) );
 			tr.makeSelfConflicting();
 			wait( tr.commit() );
@@ -404,10 +405,10 @@ ACTOR Future<Void> runWorkloadAsync( Database cx, WorkloadInterface workIface, T
 	state unique_ptr<TestWorkload> delw(workload);
 	state Optional<ErrorOr<Void>> setupResult;
 	state Optional<ErrorOr<Void>> startResult;
-	state Optional<ErrorOr<bool>> checkResult;
+	state Optional<ErrorOr<CheckReply>> checkResult;
 	state ReplyPromise<Void> setupReq;
 	state ReplyPromise<Void> startReq;
-	state ReplyPromise<bool> checkReq;
+	state ReplyPromise<CheckReply> checkReq;
 
 	TraceEvent("TestBeginAsync", workIface.id()).detail("Workload", workload->description()).detail("DatabasePingDelay", databasePingDelay);
 
@@ -452,12 +453,12 @@ ACTOR Future<Void> runWorkloadAsync( Database cx, WorkloadInterface workIface, T
 			}
 			sendResult( startReq, startResult );
 		}
-		when( ReplyPromise<bool> req = waitNext( workIface.check.getFuture() ) ) {
+		when(ReplyPromise<CheckReply> req = waitNext(workIface.check.getFuture())) {
 			checkReq = req;
 			if (!checkResult.present()) {
 				try {
 					bool check = wait( timeoutError( workload->check(cx), workload->getCheckTimeout() ) );
-					checkResult = (!startResult.present() || !startResult.get().isError()) && check;
+					checkResult = CheckReply{ (!startResult.present() || !startResult.get().isError()) && check };
 				} catch (Error& e) {
 					checkResult = operation_failed();  // was: checkResult = false;
 					if( e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete) throw;
@@ -505,7 +506,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 		startRole(Role::TESTER, workIface.id(), UID(), details);
 
 		if( work.useDatabase ) {
-			cx = Database::createDatabase(ccf, -1, locality);
+			cx = Database::createDatabase(ccf, -1, true, locality);
 			wait( delay(1.0) );
 		}
 
@@ -693,16 +694,19 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 			wait( delay(3.0) );
 		}
 
-		state std::vector< Future<ErrorOr<bool>> > checks;
+		state std::vector<Future<ErrorOr<CheckReply>>> checks;
 		TraceEvent("CheckingResults");
+
 		printf("checking test (%s)...\n", printable(spec.title).c_str());
+
 		for(int i= 0; i < workloads.size(); i++)
-			checks.push_back( workloads[i].check.template getReplyUnlessFailedFor<bool>(waitForFailureTime, 0) );
+			checks.push_back(workloads[i].check.template getReplyUnlessFailedFor<CheckReply>(waitForFailureTime, 0));
 		wait( waitForAll( checks ) );
+
 		throwIfError(checks, "CheckFailedForWorkload" + printable(spec.title));
 
 		for(int i = 0; i < checks.size(); i++) {
-			if(checks[i].get().get())
+			if (checks[i].get().get().value)
 				success++;
 			else
 				failure++;
@@ -1024,6 +1028,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	state double databasePingDelay = 1e9;
 	state ISimulator::BackupAgentType simBackupAgents = ISimulator::NoBackupAgents;
 	state ISimulator::BackupAgentType simDrAgents = ISimulator::NoBackupAgents;
+	state bool enableDD = false;
 	if (tests.empty()) useDB = true;
 	for( auto iter = tests.begin(); iter != tests.end(); ++iter ) {
 		if( iter->useDB ) useDB = true;
@@ -1036,6 +1041,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		if (iter->simDrAgents != ISimulator::NoBackupAgents) {
 			simDrAgents = iter->simDrAgents;
 		}
+		enableDD = enableDD || getOption(iter->options[0], LiteralStringRef("enableDD"), false);
 	}
 
 	if (g_network->isSimulated()) {
@@ -1048,7 +1054,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		databasePingDelay = 0.0;
 	
 	if (useDB) {
-		cx = DatabaseContext::create(ci, Reference<ClusterConnectionFile>(), locality);
+		cx = openDBOnServer(dbInfo);
 	}
 
 	state Future<Void> disabler = disableConnectionFailuresAfter(450, "Tester");
@@ -1058,6 +1064,9 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	if(useDB && startingConfiguration != StringRef()) {
 		try {
 			wait(timeoutError(changeConfiguration(cx, testers, startingConfiguration), 2000.0));
+			if (g_network->isSimulated() && enableDD) {
+				wait(success(setDDMode(cx, 1)));
+			}
 		}
 		catch(Error& e) {
 			TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to set starting configuration");
@@ -1078,15 +1087,18 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
 	state int idx = 0;
 	for(; idx < tests.size(); idx++ ) {
+		printf("Run test:%s start\n", tests[idx].title.toString().c_str());
 		wait(success(runTest(cx, testers, tests[idx], dbInfo)));
+		printf("Run test:%s Done.\n", tests[idx].title.toString().c_str());
 		// do we handle a failure here?
 	}
 
-	printf("\n%d tests passed; %d tests failed, waiting for DD to end...\n\n", passCount, failCount);
-	
+	printf("\n%d tests passed; %d tests failed.\n", passCount, failCount);
+
 	//If the database was deleted during the workload we need to recreate the database
 	if(tests.empty() || useDB) {
 		if(waitForQuiescenceEnd) {
+			printf("Waiting for DD to end...\n");
 			try {
 				wait(quietDatabase(cx, dbInfo, "End", 0, 2e6, 2e6) ||
 				     (databasePingDelay == 0.0 ? Never()
@@ -1097,6 +1109,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 			}
 		}
 	}
+	printf("\n");
 
 	return Void();
 }

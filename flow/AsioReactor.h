@@ -22,6 +22,11 @@
 #define FLOW_ASIOREACTOR_H
 #pragma once
 
+#include <boost/asio.hpp>
+#include <boost/bind.hpp>
+
+#include "flow/flow.h"
+
 namespace N2 {  // No indent, it's the whole file
 
 class Net2;
@@ -32,7 +37,8 @@ class ASIOReactor {
 public:
 	explicit ASIOReactor(Net2*);
 
-	void sleepAndReact(double timeout);
+	void sleep(double timeout);
+	void react();
 
 	void wake();
 	
@@ -73,7 +79,7 @@ private:
 		}
 
 		int open() {
-			fd = eventfd(0, EFD_NONBLOCK);
+			fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
 			if (fd<0) {
 				TraceEvent(SevError, "EventfdError").GetLastError();
 				throw platform_error();

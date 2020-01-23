@@ -333,7 +333,7 @@ public:
 	Future<std::string> getStatus(Database cx, bool showErrors, std::string tagName);
 	Future<std::string> getStatusJSON(Database cx, std::string tagName);
 
-	Future<Version> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName);
+	Future<Version> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, bool snapshot = false);
 	void setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version);
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
@@ -414,23 +414,23 @@ public:
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 
-	Future<int> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid);
+	Future<int> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
 	Future<int> getStateValue(Database cx, UID logUid) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getStateValue(tr, logUid); });
 	}
 
-	Future<UID> getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid);
+	Future<UID> getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
 	Future<UID> getDestUid(Database cx, UID logUid) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getDestUid(tr, logUid); });
 	}
 
-	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName);
+	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName, bool snapshot = false);
 	Future<UID> getLogUid(Database cx, Key tagName) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getLogUid(tr, tagName); });
 	}
 
-	Future<int64_t> getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid);
-	Future<int64_t> getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid);
+	Future<int64_t> getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
+	Future<int64_t> getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
@@ -485,7 +485,7 @@ bool copyParameter(Reference<Task> source, Reference<Task> dest, Key key);
 Version getVersionFromString(std::string const& value);
 Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version endVersion, Key destUidValue, int blockSize = CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
 Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version endVersion, Key backupUid);
-Future<Void> eraseLogData(Database cx, Key logUidValue, Key destUidValue, Optional<Version> endVersion = Optional<Version>(), bool checkBackupUid = false, Version backupUid = 0);
+Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr, Key logUidValue, Key destUidValue, Optional<Version> endVersion = Optional<Version>(), bool checkBackupUid = false, Version backupUid = 0);
 Key getApplyKey( Version version, Key backupUid );
 std::pair<uint64_t, uint32_t> decodeBKMutationLogKey(Key key);
 Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value);
@@ -503,6 +503,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key removePrefix, Version beginVersion,
                                   Version* endVersion, RequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion, Reference<KeyRangeMap<Version>> keyVersion);
+ACTOR Future<Void> cleanupBackup(Database cx, bool deleteData);
 
 typedef BackupAgentBase::enumState EBackupState;
 template<> inline Tuple Codec<EBackupState>::pack(EBackupState const &val) { return Tuple().append(val); }
@@ -542,11 +543,10 @@ class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
 public:
 	TagUidMap(const StringRef & prefix) : TagMap(LiteralStringRef("tag->uid/").withPrefix(prefix)), prefix(prefix) {}
 
-	ACTOR static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap,
-	                                                           Reference<ReadYourWritesTransaction> tr);
+	ACTOR static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap, Reference<ReadYourWritesTransaction> tr, bool snapshot);
 
-	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr) {
-		return getAll_impl(this, tr);
+	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr, bool snapshot = false) {
+		return getAll_impl(this, tr, snapshot);
 	}
 
 	Key prefix;
@@ -560,12 +560,12 @@ static inline KeyBackedTag makeBackupTag(std::string tagName) {
 	return KeyBackedTag(tagName, fileBackupPrefixRange.begin);
 }
 
-static inline Future<std::vector<KeyBackedTag>> getAllRestoreTags(Reference<ReadYourWritesTransaction> tr) {
-	return TagUidMap(fileRestorePrefixRange.begin).getAll(tr);
+static inline Future<std::vector<KeyBackedTag>> getAllRestoreTags(Reference<ReadYourWritesTransaction> tr, bool snapshot = false) {
+	return TagUidMap(fileRestorePrefixRange.begin).getAll(tr, snapshot);
 }
 
-static inline Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTransaction> tr) {
-	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr);
+static inline Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTransaction> tr, bool snapshot = false) {
+	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr, snapshot);
 }
 
 class KeyBackedConfig {
@@ -843,4 +843,10 @@ public:
 		return updateErrorInfo(cx, e, details);
 	}
 };
+
+ACTOR Future<Version> fastRestore(Database cx, Standalone<StringRef> tagName, Standalone<StringRef> url,
+                                  bool waitForComplete, long targetVersion, bool verbose, Standalone<KeyRangeRef> range,
+                                  Standalone<StringRef> addPrefix, Standalone<StringRef> removePrefix);
+
+#include "flow/unactorcompiler.h"
 #endif

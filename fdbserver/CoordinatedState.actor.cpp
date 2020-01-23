@@ -212,7 +212,7 @@ struct MovableValue {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ASSERT( ar.protocolVersion() >= 0x0FDB00A2000D0001LL );
+		ASSERT( ar.protocolVersion().hasMovableCoordinatedState() );
 		serializer(ar, value, mode, other);
 	}
 };
@@ -230,7 +230,7 @@ struct MovableCoordinatedStateImpl {
 		Value rawValue = wait( self->cs.read() );
 		if( rawValue.size() ) {
 			BinaryReader r( rawValue, IncludeVersion() );
-			if (r.protocolVersion() < 0x0FDB00A2000D0001LL) {
+			if (!r.protocolVersion().hasMovableCoordinatedState()) {
 				// Old coordinated state, not a MovableValue
 				moveState.value = rawValue;
 			} else

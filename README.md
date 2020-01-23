@@ -39,7 +39,7 @@ To build with CMake, generally the following is required (works on Linux and
 Mac OS - for Windows see below):
 
 1. Check out this repository.
-1. Install cmake Version 3.12 or higher [CMake](https://cmake.org/)
+1. Install cmake Version 3.13 or higher [CMake](https://cmake.org/)
 1. Download version 1.67 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.67.0/). 
 1. Unpack boost (you don't need to compile it)
 1. Install [Mono](http://www.mono-project.com/download/stable/).
@@ -53,7 +53,7 @@ Mac OS - for Windows see below):
 CMake will try to find its dependencies. However, for LibreSSL this can be often
 problematic (especially if OpenSSL is installed as well). For that we recommend
 passing the argument `-DLibreSSL_ROOT` to cmake. So, for example, if you
-LibreSSL is installed under /usr/local/libressl-2.8.3, you should call cmake like
+LibreSSL is installed under `/usr/local/libressl-2.8.3`, you should call cmake like
 this:
 
 ```
@@ -202,7 +202,7 @@ will automatically find it and build with TLS support.
 If you installed WIX before running `cmake` you should find the
 `FDBInstaller.msi` in your build directory under `packaging/msi`. 
 
-## Makefile
+## Makefile (Deprecated - all users should transition to using cmake)
 
 #### MacOS
 
@@ -219,7 +219,7 @@ If you installed WIX before running `cmake` you should find the
 
 1. Install [Docker](https://www.docker.com/).
 1. Check out the foundationdb repo.
-1. Run the docker image interactively [Docker Run](https://docs.docker.com/engine/reference/run/#general-form) with the directory containing the foundationdb repo mounted [Docker Mounts](https://docs.docker.com/storage/volumes/).
+1. Run the docker image interactively with [Docker Run](https://docs.docker.com/engine/reference/run/#general-form), and with the directory containing the foundationdb repo mounted via [Docker Mounts](https://docs.docker.com/storage/volumes/).
 
     ```shell
     docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' foundationdb/foundationdb-build:latest

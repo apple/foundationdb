@@ -590,6 +590,9 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			panic(e)
 		}
 		sm.store(idx, []byte("GOT_COMMITTED_VERSION"))
+	case op == "GET_APPROXIMATE_SIZE":
+		_ = sm.currentTransaction().GetApproximateSize().MustGet()
+		sm.store(idx, []byte("GOT_APPROXIMATE_SIZE"))
 	case op == "GET_VERSIONSTAMP":
 		sm.store(idx, sm.currentTransaction().GetVersionstamp())
 	case op == "GET_KEY":
@@ -793,13 +796,16 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		db.Options().SetMaxWatches(10001)
 		db.Options().SetDatacenterId("dc_id")
 		db.Options().SetMachineId("machine_id")
+		db.Options().SetSnapshotRywEnable()
+		db.Options().SetSnapshotRywDisable()
+		db.Options().SetTransactionLoggingMaxFieldLength(1000)
 		db.Options().SetTransactionTimeout(100000)
 		db.Options().SetTransactionTimeout(0)
 		db.Options().SetTransactionMaxRetryDelay(100)
 		db.Options().SetTransactionRetryLimit(10)
 		db.Options().SetTransactionRetryLimit(-1)
-		db.Options().SetSnapshotRywEnable()
-		db.Options().SetSnapshotRywDisable()
+		db.Options().SetTransactionCausalReadRisky()
+		db.Options().SetTransactionIncludePortInAddress()
 
 		if !fdb.IsAPIVersionSelected() {
 			log.Fatal("API version should be selected")
@@ -836,6 +842,7 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			tr.Options().SetReadYourWritesDisable()
 			tr.Options().SetReadSystemKeys()
 			tr.Options().SetAccessSystemKeys()
+			tr.Options().SetTransactionLoggingMaxFieldLength(1000)
 			tr.Options().SetTimeout(60 * 1000)
 			tr.Options().SetRetryLimit(50)
 			tr.Options().SetMaxRetryDelay(100)
@@ -844,6 +851,7 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			tr.Options().SetLogTransaction()
 			tr.Options().SetReadLockAware()
 			tr.Options().SetLockAware()
+			tr.Options().SetIncludePortInAddress()
 
 			return tr.Get(fdb.Key("\xff")).MustGet(), nil
 		})

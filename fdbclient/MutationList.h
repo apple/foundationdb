@@ -28,15 +28,25 @@
 struct MutationListRef {
 	// Represents an ordered, but not random-access, list of mutations that can be O(1) deserialized and
 	// quickly serialized, (forward) iterated or appended to.
+	// MutationListRef is a list of struct Blob
+	// Each blob has a struct Header following by the mutation's param1 and param2 content.
+	// The Header has the mutation's type and the length of param1 and param2
 
-private:
+public:
 	struct Blob {
+		// StringRef data Format: |type|p1len|p2len|p1_content|p2_content|
+		// |type|p1len|p2len| is the header; p1_content has p1len length; p2_content has p2len length
 		StringRef data;
 		Blob* next;
 	};
+	Blob *blob_begin;
+private:
 	struct Header {
 		int type, p1len, p2len;
-		const uint8_t* p1begin() const { return (const uint8_t*)(this+1); }
+		const uint8_t* p1begin() const {
+			//(this+1) moves the pointer by Header size and get to the beginning of p1_content
+			return (const uint8_t*)(this + 1);
+		}
 		const uint8_t* p2begin() const { return (const uint8_t*)(this+1) + p1len; }
 		const uint8_t* end() const { return (const uint8_t*)(this+1) + p1len + p2len; }
 	};
@@ -49,8 +59,8 @@ public:
 		const MutationRef* operator->() { return &item; }
 		void operator++() {
 			ASSERT(blob->data.size() > 0);
-			auto e = ptr->end();
-			if (e == blob->data.end()) {
+			auto e = ptr->end(); // e points to the end of the current blob
+			if (e == blob->data.end()) { // the condition sanity checks e is at the end of current blob
 				blob = blob->next;
 				e = blob ? blob->data.begin() : NULL;
 			}
@@ -140,6 +150,8 @@ public:
 			blob_begin->data = StringRef((const uint8_t*)ar.arenaRead(totalBytes), totalBytes); // Zero-copy read when deserializing from an ArenaReader
 		}
 	}
+
+	//FIXME: this is re-implemented on the master proxy to include a yield, any changes to this function should also done there
 	template <class Ar>
 	void serialize_save( Ar& ar ) const {
 		serializer(ar, totalBytes);
@@ -172,7 +184,7 @@ private:
 		return b;
 	}
 
-	Blob *blob_begin, *blob_end;
+	Blob *blob_end;
 	int totalBytes;
 };
 typedef Standalone<MutationListRef> MutationList;

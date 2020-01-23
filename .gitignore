@@ -31,8 +31,10 @@ bindings/ruby/lib/fdboptions.rb
 bindings/ruby/fdb.gemspec
 fdbclient/vexillographer/obj/
 fdbrpc/hgVersion*.h
+fdbrpc/SourceVersion*.h
 fdbrpc/libeio/config.h
 flow/hgVersion*.h
+flow/SourceVersion*.h
 generated.mk
 versions.h
 packaging/msi/FDBInstaller.wix*

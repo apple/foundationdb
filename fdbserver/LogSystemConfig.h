@@ -28,7 +28,7 @@
 
 template <class Interface>
 struct OptionalInterface {
-	friend class serializable_traits<OptionalInterface<Interface>>;
+	friend struct serializable_traits<OptionalInterface<Interface>>;
 	// Represents an interface with a known id() and possibly known actual endpoints.
 	// For example, an OptionalInterface<TLogInterface> represents a particular tlog by id, which you might or might not presently know how to communicate with
 
@@ -142,7 +142,7 @@ struct TLogSet {
 			           isLocal, locality, startVersion, satelliteTagLocations, tLogVersion);
 		} else {
 			serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
-			if (ar.isDeserializing && ar.protocolVersion() < 0x0FDB00B061030001LL) {
+			if (ar.isDeserializing && !ar.protocolVersion().hasTLogVersion()) {
 				tLogVersion = TLogVersion::V2;
 			} else {
 				serializer(ar, tLogVersion);
@@ -157,9 +157,10 @@ struct OldTLogConf {
 	std::vector<TLogSet> tLogs;
 	Version epochEnd;
 	int32_t logRouterTags;
-	std::set<int8_t> pseudoLocalities;
+	int32_t txsTags;
+	std::set<int8_t> pseudoLocalities; // Tracking pseudo localities, e.g., tagLocalityLogRouterMapped, used in the old epoch.
 
-	OldTLogConf() : epochEnd(0), logRouterTags(0) {}
+	OldTLogConf() : epochEnd(0), logRouterTags(0), txsTags(0) {}
 	explicit OldTLogConf(const OldLogData&);
 
 	std::string toString() const {
@@ -167,7 +168,7 @@ struct OldTLogConf {
 	}
 
 	bool operator == ( const OldTLogConf& rhs ) const {
-		return tLogs == rhs.tLogs && epochEnd == rhs.epochEnd && logRouterTags == rhs.logRouterTags && pseudoLocalities == rhs.pseudoLocalities;
+		return tLogs == rhs.tLogs && epochEnd == rhs.epochEnd && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags && pseudoLocalities == rhs.pseudoLocalities;
 	}
 
 	bool isEqualIds(OldTLogConf const& r) const {
@@ -184,12 +185,15 @@ struct OldTLogConf {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, tLogs, epochEnd, logRouterTags, pseudoLocalities);
+		serializer(ar, tLogs, epochEnd, logRouterTags, pseudoLocalities, txsTags);
 	}
 };
 
+// LogSystemType is always 2 (tagPartitioned). There is no other tag partitioned system.
+// This type is supposed to be removed. However, because the serialized value of the type is stored in coordinators,
+// removing it is complex in order to support forward and backward compatibility.
 enum class LogSystemType {
-	empty = 0,
+	empty = 0, // Never used.
 	tagPartitioned = 2,
 };
 BINARY_SERIALIZABLE(LogSystemType);
@@ -199,6 +203,7 @@ struct LogSystemConfig {
 	LogSystemType logSystemType;
 	std::vector<TLogSet> tLogs;
 	int32_t logRouterTags;
+	int32_t txsTags;
 	std::vector<OldTLogConf> oldTLogs;
 	int32_t expectedLogSets;
 	UID recruitmentID;
@@ -206,15 +211,32 @@ struct LogSystemConfig {
 	Optional<Version> recoveredAt;
 	std::set<int8_t> pseudoLocalities;
 
-	LogSystemConfig() : logSystemType(LogSystemType::empty), logRouterTags(0), expectedLogSets(0), stopped(false) {}
+	LogSystemConfig() : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false) {}
 
 	std::string toString() const {
 		return format("type: %d oldGenerations: %d tags: %d %s", logSystemType, oldTLogs.size(), logRouterTags, describe(tLogs).c_str());
 	}
 
-	std::vector<TLogInterface> allLocalLogs() const {
+	Optional<Key> getRemoteDcId() const {
+		for( int i = 0; i < tLogs.size(); i++ ) {
+			if(!tLogs[i].isLocal) {
+				for( int j = 0; j < tLogs[i].tLogs.size(); j++ ) {
+					if( tLogs[i].tLogs[j].present() ) {
+						return tLogs[i].tLogs[j].interf().locality.dcId();
+					}
+				}
+			}
+		}
+		return Optional<Key>();
+	}
+
+	std::vector<TLogInterface> allLocalLogs(bool includeSatellite = true) const {
 		std::vector<TLogInterface> results;
 		for( int i = 0; i < tLogs.size(); i++ ) {
+			// skip satellite TLogs, if it was not needed
+			if (!includeSatellite && tLogs[i].locality == tagLocalitySatellite) {
+				continue;
+			}
 			if(tLogs[i].isLocal) {
 				for( int j = 0; j < tLogs[i].tLogs.size(); j++ ) {
 					if( tLogs[i].tLogs[j].present() ) {
@@ -327,7 +349,7 @@ struct LogSystemConfig {
 	bool operator == ( const LogSystemConfig& rhs ) const { return isEqual(rhs); }
 
 	bool isEqual(LogSystemConfig const& r) const {
-		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && recruitmentID == r.recruitmentID && stopped == r.stopped && recoveredAt == r.recoveredAt && pseudoLocalities == r.pseudoLocalities;
+		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && txsTags == r.txsTags && recruitmentID == r.recruitmentID && stopped == r.stopped && recoveredAt == r.recoveredAt && pseudoLocalities == r.pseudoLocalities;
 	}
 
 	bool isEqualIds(LogSystemConfig const& r) const {
@@ -358,7 +380,7 @@ struct LogSystemConfig {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, logSystemType, tLogs, logRouterTags, oldTLogs, expectedLogSets, recruitmentID, stopped, recoveredAt, pseudoLocalities);
+		serializer(ar, logSystemType, tLogs, logRouterTags, oldTLogs, expectedLogSets, recruitmentID, stopped, recoveredAt, pseudoLocalities, txsTags);
 	}
 };
 

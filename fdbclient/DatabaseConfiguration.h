@@ -32,6 +32,7 @@
 struct SatelliteInfo {
 	Key dcId;
 	int32_t priority;
+	int32_t satelliteDesiredTLogCount = -1;
 
 	SatelliteInfo() : priority(0) {}
 
@@ -41,7 +42,7 @@ struct SatelliteInfo {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, dcId, priority);
+		serializer(ar, dcId, priority, satelliteDesiredTLogCount);
 	}
 };
 
@@ -123,7 +124,7 @@ struct DatabaseConfiguration {
 		}
 		return minRequired;
 	}
-	int32_t minMachinesRequiredPerDatacenter() const {
+	int32_t minZonesRequiredPerDatacenter() const {
 		int minRequired = std::max( remoteTLogReplicationFactor, std::max(tLogReplicationFactor, storageTeamSize) );
 		for(auto& r : regions) {
 			minRequired = std::max( minRequired, r.satelliteTLogReplicationFactor/std::max(1, r.satelliteTLogUsableDcs) );
@@ -131,8 +132,8 @@ struct DatabaseConfiguration {
 		return minRequired;
 	}
 
-	//Killing an entire datacenter counts as killing one machine in modes that support it
-	int32_t maxMachineFailuresTolerated() const {
+	//Killing an entire datacenter counts as killing one zone in modes that support it
+	int32_t maxZoneFailuresTolerated() const {
 		int worstSatellite = regions.size() ? std::numeric_limits<int>::max() : 0;
 		for(auto& r : regions) {
 			worstSatellite = std::min(worstSatellite, r.satelliteTLogReplicationFactor - r.satelliteTLogWriteAntiQuorum);

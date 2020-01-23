@@ -197,6 +197,7 @@
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="Resolver.actor.cpp" />
+    <ActorCompiler Include="StorageCache.actor.cpp" />
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
     <ActorCompiler Include="Orderer.actor.h" />
     <ActorCompiler Include="workloads\DiskDurabilityTest.actor.cpp">
@@ -234,6 +235,9 @@
     <ActorCompiler Include="workloads\TriggerRecovery.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\SuspendProcesses.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\StatusWorkload.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -253,6 +257,9 @@
     <ActorCompiler Include="workloads\TimeKeeperCorrectness.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\DifferentClustersSameRV.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\BackupToDBAbort.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -268,8 +275,6 @@
     <ActorCompiler Include="workloads\AtomicRestore.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
-    <ActorCompiler Include="MemoryPager.actor.cpp" />
-    <ActorCompiler Include="IndirectShadowPager.actor.cpp" />
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
     <ActorCompiler Include="LogRouter.actor.cpp" />
     <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp">
@@ -324,6 +329,7 @@
     <ClInclude Include="pubsub.h" />
     <ClInclude Include="Knobs.h" />
     <ClInclude Include="WorkerInterface.h" />
+    <ClInclude Include="RestoreCommon.actor.h" />
     <ClInclude Include="WaitFailure.h" />
     <ClInclude Include="TesterInterface.actor.h" />
     <ClInclude Include="workloads\workloads.actor.h">
@@ -379,8 +385,6 @@
     <ClInclude Include="LogProtocolMessage.h" />
     <ClInclude Include="IPager.h" />
     <ClInclude Include="IVersionedStore.h" />
-    <ClInclude Include="MemoryPager.h" />
-    <ClInclude Include="IndirectShadowPager.h" />
     <ClInclude Include="template_fdb.h" />
     <ClInclude Include="LatencyBandConfig.h" />
   </ItemGroup>

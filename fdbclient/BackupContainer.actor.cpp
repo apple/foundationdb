@@ -1031,8 +1031,10 @@ public:
 			restorable.ranges = ranges;
 
 			// No logs needed if there is a complete key space snapshot at the target version.
-			if(snapshot.get().beginVersion == snapshot.get().endVersion && snapshot.get().endVersion == targetVersion)
+			if (snapshot.get().beginVersion == snapshot.get().endVersion &&
+			    snapshot.get().endVersion == targetVersion) {
 				return Optional<RestorableFileSet>(restorable);
+			}
 
 			state std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion));
 
@@ -1410,7 +1412,7 @@ public:
 
 	ACTOR static Future<std::vector<std::string>> listURLs(Reference<BlobStoreEndpoint> bstore, std::string bucket) {
 		state std::string basePath = INDEXFOLDER + '/';
-		BlobStoreEndpoint::ListResult contents = wait(bstore->listBucket(bucket, basePath));
+		BlobStoreEndpoint::ListResult contents = wait(bstore->listObjects(bucket, basePath));
 		std::vector<std::string> results;
 		for(auto &f : contents.objects) {
 			results.push_back(bstore->getResourceURL(f.name.substr(basePath.size()), format("bucket=%s", bucket.c_str())));
@@ -1456,7 +1458,7 @@ public:
 			return pathFilter(folderPath.substr(prefixTrim));
 		};
 
-		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listBucket(bc->m_bucket, bc->dataPath(path), '/', std::numeric_limits<int>::max(), rawPathFilter));
+		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listObjects(bc->m_bucket, bc->dataPath(path), '/', std::numeric_limits<int>::max(), rawPathFilter));
 		FilesAndSizesT files;
 		for(auto &o : result.objects) {
 			ASSERT(o.name.size() >= prefixTrim);

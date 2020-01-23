@@ -41,7 +41,7 @@ ACTOR Future<Void> failureMonitorClientLoop(
 {
 	state Version version = 0;
 	state Future<FailureMonitoringReply> request = Never();
-	state Future<Void> nextRequest = delay(0, TaskFailureMonitor);
+	state Future<Void> nextRequest = delay(0, TaskPriority::FailureMonitor);
 	state Future<Void> requestTimeout = Never();
 	state double before = now();
 	state double waitfor = 0;
@@ -61,7 +61,7 @@ ACTOR Future<Void> failureMonitorClientLoop(
 		loop {
 			choose {
 				when( FailureMonitoringReply reply = wait( request ) ) {
-					g_network->setCurrentTask(TaskDefaultDelay);
+					g_network->setCurrentTask(TaskPriority::DefaultDelay);
 					request = Never();
 					requestTimeout = Never();
 					if (reply.allOthersFailed) {
@@ -122,10 +122,10 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					}
 					before = now();
 					waitfor = reply.clientRequestIntervalMS * .001;
-					nextRequest = delayJittered( waitfor, TaskFailureMonitor );
+					nextRequest = delayJittered( waitfor, TaskPriority::FailureMonitor );
 				}
 				when( wait( requestTimeout ) ) {
-					g_network->setCurrentTask(TaskDefaultDelay);
+					g_network->setCurrentTask(TaskPriority::DefaultDelay);
 					requestTimeout = Never();
 					TraceEvent(SevWarn, "FailureMonitoringServerDown").detail("OldServerID",controller.id());
 					monitor->setStatus(controlAddr.address, FailureStatus(true));
@@ -136,7 +136,7 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					}
 				}
 				when( wait( nextRequest ) ) {
-					g_network->setCurrentTask(TaskDefaultDelay);
+					g_network->setCurrentTask(TaskPriority::DefaultDelay);
 					nextRequest = Never();
 
 					double elapsed = now() - before;
@@ -152,9 +152,9 @@ ACTOR Future<Void> failureMonitorClientLoop(
 					req.addresses = g_network->getLocalAddresses();
 					if (trackMyStatus)
 						req.senderStatus = FailureStatus(false);
-					request = controller.failureMonitoring.getReply( req, TaskFailureMonitor );
+					request = controller.failureMonitoring.getReply( req, TaskPriority::FailureMonitor );
 					if(!controller.failureMonitoring.getEndpoint().isLocal())
-						requestTimeout = delay( fmState->serverFailedTimeout, TaskFailureMonitor );
+						requestTimeout = delay( fmState->serverFailedTimeout, TaskPriority::FailureMonitor );
 				}
 			}
 		}

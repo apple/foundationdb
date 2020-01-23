@@ -27,6 +27,7 @@ FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
+// clang-format off
 FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( AUTOMATIC_TRACE_DUMP,                                  1 );
 	init( PREVENT_FAST_SPIN_DELAY,                             .01 );
@@ -35,8 +36,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( DELAY_JITTER_OFFSET,                                 0.9 );
 	init( DELAY_JITTER_RANGE,                                  0.2 );
 	init( BUSY_WAIT_THRESHOLD,                                   0 ); // 1e100 == never sleep
-	init( CLIENT_REQUEST_INTERVAL,                             0.1 ); if( randomize && BUGGIFY ) CLIENT_REQUEST_INTERVAL = 1.0;
-	init( SERVER_REQUEST_INTERVAL,                             0.1 ); if( randomize && BUGGIFY ) SERVER_REQUEST_INTERVAL = 1.0;
+	init( CLIENT_REQUEST_INTERVAL,                             1.0 ); if( randomize && BUGGIFY ) CLIENT_REQUEST_INTERVAL = 2.0;
+	init( SERVER_REQUEST_INTERVAL,                             1.0 ); if( randomize && BUGGIFY ) SERVER_REQUEST_INTERVAL = 2.0;
 
 	init( REACTOR_FLAGS,                                         0 );
 
@@ -55,6 +56,9 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
 	init( CONNECTION_MONITOR_TIMEOUT,     isSimulated ? 1.50 : 2.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_TIMEOUT = 6.0;
+	init( CONNECTION_MONITOR_IDLE_TIMEOUT,                   180.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_IDLE_TIMEOUT = 5.0;
+	init( CONNECTION_MONITOR_INCOMING_IDLE_MULTIPLIER,         1.2 );
+	init( CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY,         2.0 );
 
 	//FlowTransport
 	init( CONNECTION_REJECTED_MESSAGE_DELAY,                   1.0 );
@@ -64,14 +68,21 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_RECONNECTION_TIME,                               0.5 );
 	init( RECONNECTION_TIME_GROWTH_RATE,                       1.2 );
 	init( RECONNECTION_RESET_TIME,                             5.0 );
-	init( CONNECTION_ACCEPT_DELAY,                            0.01 );
+	init( CONNECTION_ACCEPT_DELAY,                             0.5 );
+	init( USE_OBJECT_SERIALIZER,                                 1 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
+	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );
+	init( TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT,             11.0 );
+	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
+	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               0 );
+
+	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
 
 	//AsyncFileCached
-	init( PAGE_CACHE_4K,                                2000LL<<20 );
+	init( PAGE_CACHE_4K,                                   2LL<<30 );
 	init( PAGE_CACHE_64K,                                200LL<<20 );
 	init( SIM_PAGE_CACHE_4K,                                   1e8 );
 	init( SIM_PAGE_CACHE_64K,                                  1e7 );
@@ -80,6 +91,10 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_EVICT_ATTEMPTS,                                  100 ); if( randomize && BUGGIFY ) MAX_EVICT_ATTEMPTS = 2;
 	init( CACHE_EVICTION_POLICY,                          "random" );
 	init( PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION,                 0.1 ); if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 0.0; else if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 1.0;
+
+	//AsyncFileEIO
+	init( EIO_MAX_PARALLELISM,                                  4  );
+	init( EIO_USE_ODIRECT,                                      0  );
 
 	//AsyncFileKAIO
 	init( MAX_OUTSTANDING,                                      64 );
@@ -109,6 +124,11 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( PACKET_LIMIT,                                  100LL<<20 );
 	init( PACKET_WARNING,                                  2LL<<20 );  // 2MB packet warning quietly allows for 1MB system messages
 	init( TIME_OFFSET_LOGGING_INTERVAL,                       60.0 );
+	init( MAX_PACKET_SEND_BYTES,                        256 * 1024 );
+	init( MIN_PACKET_BUFFER_BYTES,                        4 * 1024 );
+	init( MIN_PACKET_BUFFER_FREE_BYTES,                        256 );
+	init( FLOW_TCP_NODELAY,                                      1 );
+	init( FLOW_TCP_QUICKACK,                                     0 );
 
 	//Sim2
 	init( MIN_OPEN_TIME,                                    0.0002 );
@@ -120,17 +140,20 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( SLOW_NETWORK_LATENCY,                             100e-3 );
 	init( MAX_CLOGGING_LATENCY,                                  0 ); if( randomize && BUGGIFY ) MAX_CLOGGING_LATENCY =  0.1 * deterministicRandom()->random01();
 	init( MAX_BUGGIFIED_DELAY,                                   0 ); if( randomize && BUGGIFY ) MAX_BUGGIFIED_DELAY =  0.2 * deterministicRandom()->random01();
+	init( SIM_CONNECT_ERROR_MODE, deterministicRandom()->randomInt(0,3) );
 
 	//Tracefiles
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );
 	init( TRACE_FLUSH_INTERVAL,                               0.25 );
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
-	init( MIN_TRACE_SEVERITY,                 isSimulated ? 0 : 10 ); // Related to the trace severity in Trace.h
+	init( MIN_TRACE_SEVERITY,                 isSimulated ? 1 : 10 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
 	init( TRACE_SYNC_ENABLED,                                    0 );
 	init( TRACE_EVENT_METRIC_UNITS_PER_SAMPLE,                 500 );
 	init( TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY,              1800.0 ); // 30 mins
 	init( TRACE_EVENT_THROTTLER_MSG_LIMIT,                   20000 );
+	init( MAX_TRACE_FIELD_LENGTH,                              495 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
+	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
@@ -141,6 +164,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( METRIC_LIMIT_RESPONSE_FACTOR,                         10 );  // The additional queue size at which to disable logging of another level (higher == less restrictive)
 
 	//Load Balancing
+	init( LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED,                 0 );
+	init( LOAD_BALANCE_DC_ID_LOCALITY_ENABLED,                   1 );
 	init( LOAD_BALANCE_MAX_BACKOFF,                            5.0 );
 	init( LOAD_BALANCE_START_BACKOFF,                         0.01 );
 	init( LOAD_BALANCE_BACKOFF_RATE,                           2.0 );
@@ -152,12 +177,28 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( SECOND_REQUEST_BUDGET_GROWTH,                       0.05 );
 	init( SECOND_REQUEST_MAX_BUDGET,                         100.0 );
 	init( ALTERNATIVES_FAILURE_RESET_TIME,                     5.0 );
-	init( ALTERNATIVES_FAILURE_MAX_DELAY,                      1.0 );
 	init( ALTERNATIVES_FAILURE_MIN_DELAY,                     0.05 );
 	init( ALTERNATIVES_FAILURE_DELAY_RATIO,                    0.2 );
+	init( ALTERNATIVES_FAILURE_MAX_DELAY,                      1.0 );
+	init( ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO,              0.04 );
+	init( ALTERNATIVES_FAILURE_SLOW_MAX_DELAY,                30.0 );
+	init( ALTERNATIVES_FAILURE_SKIP_DELAY,                     1.0 );
 	init( FUTURE_VERSION_INITIAL_BACKOFF,                      1.0 );
 	init( FUTURE_VERSION_MAX_BACKOFF,                          8.0 );
 	init( FUTURE_VERSION_BACKOFF_GROWTH,                       2.0 );
+	init( LOAD_BALANCE_MAX_BAD_OPTIONS,                          1 ); //should be the same as MAX_MACHINES_FALLING_BEHIND
+	init( LOAD_BALANCE_PENALTY_IS_BAD,                        true );
+}
+// clang-format on
+
+static std::string toLower( std::string const& name ) {
+	std::string lower_name;
+	for(auto c = name.begin(); c != name.end(); ++c)
+		if (*c >= 'A' && *c <= 'Z')
+			lower_name += *c - 'A' + 'a';
+		else
+			lower_name += *c;
+	return lower_name;
 }
 
 bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
@@ -167,6 +208,25 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 		if (sscanf(value.c_str(), "%lf%n", &v, &n) != 1 || n != value.size())
 			throw invalid_option_value();
 		*double_knobs[knob] = v;
+		return true;
+	}
+	if (bool_knobs.count(knob)) {
+		if(toLower(value) == "true") {
+			*bool_knobs[knob] = true;
+		} else if(toLower(value) == "false") {
+			*bool_knobs[knob] = false;
+		} else {
+			int64_t v;
+			int n=0;
+			if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
+				if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
+					throw invalid_option_value();
+			} else {
+				if (sscanf(value.c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != value.size())
+					throw invalid_option_value();
+			}
+			*bool_knobs[knob] = v;
+		}
 		return true;
 	}
 	if (int64_knobs.count(knob) || int_knobs.count(knob)) {
@@ -195,16 +255,6 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 	return false;
 }
 
-static std::string toLower( std::string const& name ) {
-	std::string lower_name;
-	for(auto c = name.begin(); c != name.end(); ++c)
-		if (*c >= 'A' && *c <= 'Z')
-			lower_name += *c - 'A' + 'a';
-		else
-			lower_name += *c;
-	return lower_name;
-}
-
 void Knobs::initKnob( double& knob, double value, std::string const& name ) {
 	knob = value;
 	double_knobs[toLower(name)] = &knob;
@@ -225,6 +275,11 @@ void Knobs::initKnob( std::string& knob, const std::string& value, const std::st
 	string_knobs[toLower(name)] = &knob;
 }
 
+void Knobs::initKnob( bool& knob, bool value, std::string const& name ) {
+	knob = value;
+	bool_knobs[toLower(name)] = &knob;
+}
+
 void Knobs::trace() {
 	for(auto &k : double_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
@@ -233,5 +288,7 @@ void Knobs::trace() {
 	for(auto &k : int64_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 	for(auto &k : string_knobs)
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
+	for(auto &k : bool_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 }

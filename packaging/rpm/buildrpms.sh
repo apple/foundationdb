@@ -39,7 +39,6 @@ dos2unix -q -n README.md $INSTDIR/usr/share/doc/foundationdb-server/README
 chmod 0644 $INSTDIR/usr/share/doc/foundationdb-clients/README
 chmod 0644 $INSTDIR/usr/share/doc/foundationdb-server/README
 install -m 0755 bin/fdbbackup $INSTDIR/usr/lib/foundationdb/backup_agent/backup_agent
-install -m 0644 packaging/argparse.py $INSTDIR/usr/lib/foundationdb
 install -m 0755 packaging/make_public.py $INSTDIR/usr/lib/foundationdb
 
 ln -s ../lib/foundationdb/backup_agent/backup_agent $INSTDIR/usr/bin/fdbbackup

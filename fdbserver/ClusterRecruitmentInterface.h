@@ -63,19 +63,19 @@ struct ClusterControllerFullInterface {
 
 	void initEndpoints() {
 		clientInterface.initEndpoints();
-		recruitFromConfiguration.getEndpoint( TaskClusterController );
-		recruitRemoteFromConfiguration.getEndpoint( TaskClusterController );
-		recruitStorage.getEndpoint( TaskClusterController );
-		registerWorker.getEndpoint( TaskClusterController );
-		getWorkers.getEndpoint( TaskClusterController );
-		registerMaster.getEndpoint( TaskClusterController );
-		getServerDBInfo.getEndpoint( TaskClusterController );
+		recruitFromConfiguration.getEndpoint( TaskPriority::ClusterControllerRecruit );
+		recruitRemoteFromConfiguration.getEndpoint( TaskPriority::ClusterControllerRecruit );
+		recruitStorage.getEndpoint( TaskPriority::ClusterController );
+		registerWorker.getEndpoint( TaskPriority::ClusterControllerWorker );
+		getWorkers.getEndpoint( TaskPriority::ClusterController );
+		registerMaster.getEndpoint( TaskPriority::ClusterControllerRegister );
+		getServerDBInfo.getEndpoint( TaskPriority::ClusterController );
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
-			ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+			ASSERT(ar.protocolVersion().isValid());
 		}
 		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage,
 		           registerWorker, getWorkers, registerMaster, getServerDBInfo);
@@ -175,13 +175,14 @@ struct RegisterWorkerReply {
 	constexpr static FileIdentifier file_identifier = 16475696;
 	ProcessClass processClass;
 	ClusterControllerPriorityInfo priorityInfo;
+	Optional<uint16_t> storageCache;
 
 	RegisterWorkerReply() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
-	RegisterWorkerReply(ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo) : processClass(processClass), priorityInfo(priorityInfo) {}
+	RegisterWorkerReply(ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Optional<uint16_t> storageCache) : processClass(processClass), priorityInfo(priorityInfo), storageCache(storageCache) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, processClass, priorityInfo);
+		serializer(ar, processClass, priorityInfo, storageCache);
 	}
 };
 
@@ -194,16 +195,17 @@ struct RegisterWorkerRequest {
 	Generation generation;
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
+	Optional<std::pair<uint16_t,StorageServerInterface>> storageCacheInterf;
 	ReplyPromise<RegisterWorkerReply> reply;
 	bool degraded;
 
 	RegisterWorkerRequest() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
-	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation, Optional<DataDistributorInterface> ddInterf, Optional<RatekeeperInterface> rkInterf, bool degraded) :
-	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded) {}
+	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation, Optional<DataDistributorInterface> ddInterf, Optional<RatekeeperInterface> rkInterf, Optional<std::pair<uint16_t,StorageServerInterface>> storageCacheInterf, bool degraded) :
+	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), storageCacheInterf(storageCacheInterf), degraded(degraded) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, distributorInterf, ratekeeperInterf, reply, degraded);
+		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, distributorInterf, ratekeeperInterf, storageCacheInterf, reply, degraded);
 	}
 };
 
@@ -244,7 +246,7 @@ struct RegisterMasterRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
-			ASSERT(ar.protocolVersion() >= 0x0FDB00A200040001LL);
+			ASSERT(ar.protocolVersion().isValid());
 		}
 		serializer(ar, id, mi, logSystemConfig, proxies, resolvers, recoveryCount, registrationCount, configuration,
 		           priorCommittedLogServers, recoveryState, recoveryStalled, reply);

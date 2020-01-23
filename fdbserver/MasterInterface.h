@@ -44,20 +44,36 @@ struct MasterInterface {
 	template <class Archive>
 	void serialize(Archive& ar) {
 		if constexpr (!is_fb_function<Archive>) {
-                ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
+                ASSERT( ar.protocolVersion().isValid() );
         }
 		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion);
 	}
 
 	void initEndpoints() {
-		getCommitVersion.getEndpoint( TaskProxyGetConsistentReadVersion );
+		getCommitVersion.getEndpoint( TaskPriority::ProxyGetConsistentReadVersion );
+		tlogRejoin.getEndpoint( TaskPriority::MasterTLogRejoin );
+	}
+};
+
+struct TLogRejoinReply {
+	constexpr static FileIdentifier file_identifier = 11;
+
+	// false means someone else registered, so we should re-register.  true means this master is recovered, so don't
+	// send again to the same master.
+	bool masterIsRecovered;
+	TLogRejoinReply() = default;
+	explicit TLogRejoinReply(bool masterIsRecovered) : masterIsRecovered(masterIsRecovered) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, masterIsRecovered);
 	}
 };
 
 struct TLogRejoinRequest {
 	constexpr static FileIdentifier file_identifier = 15692200;
 	TLogInterface myInterface;
-	ReplyPromise<bool> reply;   // false means someone else registered, so we should re-register.  true means this master is recovered, so don't send again to the same master.
+	ReplyPromise<TLogRejoinReply> reply;
 
 	TLogRejoinRequest() { }
 	explicit TLogRejoinRequest(const TLogInterface &interf) : myInterface(interf) { }

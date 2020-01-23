@@ -22,7 +22,7 @@
 
 package fdb
 
-// #define FDB_API_VERSION 610
+// #define FDB_API_VERSION 620
 // #include <foundationdb/fdb_c.h>
 import "C"
 
@@ -337,6 +337,11 @@ func (t Transaction) Clear(key KeyConvertible) {
 // ClearRange removes all keys k such that begin <= k < end, and their
 // associated values. ClearRange returns immediately, having modified the
 // snapshot of the database represented by the transaction.
+// Range clears are efficient with FoundationDB -- clearing large amounts of data
+// will be fast. However, this will not immediately free up disk -
+// data for the deleted range is cleaned up in the background.
+// For purposes of computing the transaction size, only the begin and end keys of a clear range are counted.
+// The size of the data stored in the range does not count against the transaction size limit.
 func (t Transaction) ClearRange(er ExactRange) {
 	begin, end := er.FDBRangeKeys()
 	bkb := begin.FDBKey()
@@ -370,6 +375,16 @@ func (t Transaction) GetCommittedVersion() (int64, error) {
 // values may be optimized to a read-only transaction.
 func (t Transaction) GetVersionstamp() FutureKey {
 	return &futureKey{future: newFuture(C.fdb_transaction_get_versionstamp(t.ptr))}
+}
+
+func (t *transaction) getApproximateSize() FutureInt64 {
+	return &futureInt64{
+		future: newFuture(C.fdb_transaction_get_approximate_size(t.ptr)),
+	}
+}
+
+func (t Transaction) GetApproximateSize() FutureInt64 {
+	return t.getApproximateSize()
 }
 
 // Reset rolls back a transaction, completely resetting it to its initial

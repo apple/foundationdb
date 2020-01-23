@@ -27,11 +27,12 @@
 #include <functional>
 #include <vector>
 #include <variant>
+#include <boost/variant.hpp>
 
 template <class T, typename = void>
 struct is_fb_function_t : std::false_type {};
 
-template<class T>
+template <class T>
 struct is_fb_function_t<T, typename std::enable_if<T::is_fb_visitor>::type> : std::true_type {};
 
 template <class T>
@@ -41,7 +42,6 @@ template <class Visitor, class... Items>
 typename std::enable_if<is_fb_function<Visitor>, void>::type serializer(Visitor& visitor, Items&... items) {
 	visitor(items...);
 }
-
 
 template <class... Ts>
 struct pack {};
@@ -62,47 +62,11 @@ struct index_impl<0, pack<T, Ts...>> {
 template <int i, class Pack>
 using index_t = typename index_impl<i, Pack>::type;
 
-//  A smart pointer that knows whether or not to delete itself.
-template <class T>
-using OwnershipErasedPtr = std::unique_ptr<T, std::function<void(T*)>>;
-
-// Creates an OwnershipErasedPtr<T> that will delete itself.
-template <class T, class Deleter = std::default_delete<T>>
-OwnershipErasedPtr<T> ownedPtr(T* t, Deleter&& d = Deleter{}) {
-	return OwnershipErasedPtr<T>{ t, std::forward<Deleter>(d) };
-}
-
-// Creates an OwnershipErasedPtr<T> that will not delete itself.
-template <class T>
-OwnershipErasedPtr<T> unownedPtr(T* t) {
-	return OwnershipErasedPtr<T>{ t, [](T*) {} };
-}
-
-struct WriteRawMemory {
-	using Block = std::pair<OwnershipErasedPtr<const uint8_t>, size_t>;
-	std::vector<Block> blocks;
-
-	WriteRawMemory() {}
-	WriteRawMemory(Block&& b) { blocks.emplace_back(std::move(b.first), b.second); }
-	WriteRawMemory(std::vector<Block>&& v) : blocks(std::move(v)) {}
-
-	WriteRawMemory(WriteRawMemory&&) = default;
-	WriteRawMemory& operator=(WriteRawMemory&&) = default;
-
-	size_t size() const {
-		size_t result = 0;
-		for (const auto& b : blocks) {
-			result += b.second;
-		}
-		return result;
-	}
-};
-
-
 template <class T, typename = void>
 struct scalar_traits : std::false_type {
 	constexpr static size_t size = 0;
-	static void save(uint8_t*, const T&);
+	template <class Context>
+	static void save(uint8_t*, const T&, Context&);
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.
@@ -110,10 +74,15 @@ struct scalar_traits : std::false_type {
 	static void load(const uint8_t*, T&, Context&);
 };
 
-
 template <class T>
 struct dynamic_size_traits : std::false_type {
-	static WriteRawMemory save(const T&);
+	// May be called multiple times during one serialization. Guaranteed not to be called after save.
+	template <class Context>
+	static size_t size(const T&, Context&);
+
+	// Guaranteed to be called only once during serialization
+	template <class Context>
+	static void save(uint8_t*, const T&, Context&);
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.
@@ -127,6 +96,12 @@ struct serializable_traits : std::false_type {
 	static void serialize(Archiver& ar, T& v);
 };
 
+template <class T>
+struct serialize_raw : std::false_type {
+	template <class Context>
+	static uint8_t* save_raw(Context& context, const T& obj);
+};
+
 template <class VectorLike>
 struct vector_like_traits : std::false_type {
 	// Write this at the beginning of the buffer
@@ -134,27 +109,31 @@ struct vector_like_traits : std::false_type {
 	using iterator = void;
 	using insert_iterator = void;
 
-	static size_t num_entries(VectorLike&);
+	template <class Context>
+	static size_t num_entries(VectorLike&, Context&);
 	template <class Context>
 	static void reserve(VectorLike&, size_t, Context&);
 
-	static insert_iterator insert(VectorLike&);
-	static iterator begin(const VectorLike&);
-	static void deserialization_done(VectorLike&); // Optional
+	template <class Context>
+	static insert_iterator insert(VectorLike&, Context&);
+	template <class Context>
+	static iterator begin(const VectorLike&, Context&);
 };
 
 template <class UnionLike>
 struct union_like_traits : std::false_type {
 	using Member = UnionLike;
 	using alternatives = pack<>;
-	static uint8_t index(const Member&);
-	static bool empty(const Member& variant);
+	template <class Context>
+	static uint8_t index(const Member&, Context&);
+	template <class Context>
+	static bool empty(const Member& variant, Context&);
 
-	template <int i>
-	static const index_t<i, alternatives>& get(const Member&);
+	template <int i, class Context>
+	static const index_t<i, alternatives>& get(const Member&, Context&);
 
-	template <int i, class Alternative>
-	static const void assign(Member&, const Alternative&);
+	template <int i, class Alternative, class Context>
+	static void assign(Member&, const Alternative&, Context&);
 
 	template <class Context>
 	static void done(Member&, Context&);
@@ -167,30 +146,36 @@ struct struct_like_traits : std::false_type {
 	using Member = StructLike;
 	using types = pack<>;
 
-	template <int i>
-	static const index_t<i, types>& get(const Member&);
+	template <int i, class Context>
+	static const index_t<i, types>& get(const Member&, Context&);
 
-	template <int i>
-	static const void assign(Member&, const index_t<i, types>&);
+	template <int i, class Context>
+	static void assign(Member&, const index_t<i, types>&, Context&);
 
 	template <class Context>
 	static void done(Member&, Context&);
 };
 
 template <class... Alternatives>
-struct union_like_traits<std::variant<Alternatives...>> : std::true_type {
-	using Member = std::variant<Alternatives...>;
+struct union_like_traits<boost::variant<Alternatives...>> : std::true_type {
+	using Member = boost::variant<Alternatives...>;
 	using alternatives = pack<Alternatives...>;
-	static uint8_t index(const Member& variant) { return variant.index(); }
-	static bool empty(const Member& variant) { return false; }
-
-	template <int i>
-	static const index_t<i, alternatives>& get(const Member& variant) {
-		return std::get<index_t<i, alternatives>>(variant);
+	template <class Context>
+	static uint8_t index(const Member& variant, Context&) {
+		return variant.which();
+	}
+	template <class Context>
+	static bool empty(const Member& variant, Context&) {
+		return false;
 	}
 
-	template <size_t i, class Alternative>
-	static const void assign(Member& member, const Alternative& a) {
+	template <int i, class Context>
+	static const index_t<i, alternatives>& get(const Member& variant, Context&) {
+		return boost::get<index_t<i, alternatives>>(variant);
+	}
+
+	template <size_t i, class Alternative, class Context>
+	static void assign(Member& member, const Alternative& a, Context&) {
 		static_assert(std::is_same_v<index_t<i, alternatives>, Alternative>);
 		member = a;
 	}

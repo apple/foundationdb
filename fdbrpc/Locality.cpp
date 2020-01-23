@@ -40,8 +40,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::LogClass:
 			return ProcessClass::WorstFit;
 		case ProcessClass::CoordinatorClass:
-			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::NeverAssign;
@@ -57,8 +57,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::StorageClass:
 			return ProcessClass::WorstFit;
 		case ProcessClass::CoordinatorClass:
-			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::NeverAssign;
@@ -76,8 +76,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
-			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -93,8 +93,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::ResolutionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
-			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -110,8 +110,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
-			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -129,8 +129,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
-			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -154,8 +154,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::LogRouterClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
-			return ProcessClass::NeverAssign;
 		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -172,6 +172,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
@@ -188,9 +189,17 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::OkayFit;
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;
+		}
+	case ProcessClass::StorageCache:
+		switch( _class ) {
+		case ProcessClass::StorageCacheClass:
+			return ProcessClass::BestFit;
+		default:
+			return ProcessClass::NeverAssign;
 		}
 	default:
 		return ProcessClass::NeverAssign;
@@ -198,13 +207,14 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 }
 
 LBDistance::Type loadBalanceDistance( LocalityData const& loc1, LocalityData const& loc2, NetworkAddress const& addr2 ) {
-	if ( loc1.zoneId().present() && loc1.zoneId() == loc2.zoneId() )
+	if ( FLOW_KNOBS->LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED && loc1.zoneId().present() && loc1.zoneId() == loc2.zoneId() ) {
 		return LBDistance::SAME_MACHINE;
-
+	}
 	//FIXME: add this back in when load balancing works with local requests
 	//if ( g_network->isAddressOnThisHost( addr2 ) )
 	//	return LBDistance::SAME_MACHINE;
-	if ( loc1.dcId().present() && loc1.dcId() == loc2.dcId() )
+	if ( FLOW_KNOBS->LOAD_BALANCE_DC_ID_LOCALITY_ENABLED && loc1.dcId().present() && loc1.dcId() == loc2.dcId() ) {
 		return LBDistance::SAME_DC;
+	}
 	return LBDistance::DISTANT;
 }

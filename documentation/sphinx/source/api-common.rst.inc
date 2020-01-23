@@ -97,7 +97,7 @@
     If a transaction uses both an atomic operation and a strictly serializable read on the same key, the benefits of using the atomic operation (for both conflict checking and performance) are lost.
 
 .. |atomic-add1| replace::
-    Performs an addition of little-endian integers. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
+    Performs an addition of little-endian integers. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. In case of overflow, the result is truncated to the width of ``param``.
 
 .. |atomic-add2| replace::
     The integers to be added must be stored in a little-endian representation. They can be signed in two's complement representation or unsigned. You can add to an integer at a known offset in the value by prepending the appropriate number of zero bytes to ``param`` and padding with zero bytes to match the length of the value. However, this offset technique requires that you know the addition will not cause the integer field within the value to overflow.
@@ -110,6 +110,9 @@
 
 .. |atomic-xor| replace::
     Performs a bitwise "xor" operation. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes. If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
+
+.. |atomic-compare-and-clear| replace::
+   Performs an atomic ``compare and clear`` operation. If the existing value in the database is equal to the given value, then given key is cleared.
 
 .. |atomic-max1| replace::
     Sets the value in the database to the larger of the existing value and ``param``. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes. If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
@@ -147,7 +150,7 @@
 .. |atomic-versionstamps-tuple-warning-value| replace::
     At this time, versionstamped values are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped values may not be used with the Subspace and Directory layers except in those languages.
 
-.. |api-version| replace:: 610
+.. |api-version| replace:: 620
 
 .. |streaming-mode-blurb1| replace::
     When using |get-range-func| and similar interfaces, API clients can request large ranges of the database to iterate over.  Making such a request doesn't necessarily mean that the client will consume all of the data in the range - sometimes the client doesn't know how far it intends to iterate in advance.  FoundationDB tries to balance latency and bandwidth by requesting data for iteration in batches.
@@ -191,6 +194,10 @@
 .. |transaction-watch-limit-blurb| replace::
 
     By default, each database connection can have no more than 10,000 watches that have not yet reported a change. When this number is exceeded, an attempt to create a watch will |error-raise-type| a :ref:`too_many_watches <developer-guide-error-codes>` |error-type|. This limit can be changed using |max-watches-database-option|. Because a watch outlives the transaction that creates it, any watch that is no longer needed should be cancelled by calling |future-cancel| on its returned future.
+
+.. |transaction-clear-range-blurb| replace::
+
+    Range clears are efficient with FoundationDB -- clearing large amounts of data will be fast. However, this will not immediately free up disk - data for the deleted range is cleaned up in the background. For purposes of computing the transaction size, only the begin and end keys of a clear range are counted. The size of the data stored in the range does not count against the transaction size limit.
 
 .. |conflict-range-note| replace::
 
@@ -306,6 +313,10 @@
 
     Set the default maximum number of retries for each transaction after which additional calls to |on-error-func| will throw the most recently seen error code. This is equivalent to calling |retry-limit-transaction-option| on each transaction created by this database.
 
+.. |option-db-tr-size-limit-blurb| replace::
+
+    Set the default maximum transaction size in bytes. This is equivalent to calling |transaction-size-limit-database-option| on each transaction created by this database.
+
 .. |option-db-tr-timeout-blurb| replace::
 
     Set the default timeout duration in milliseconds after which all transactions created by this database will automatically be cancelled. This is equivalent to calling |timeout-transaction-option| on each transaction created by this database. This option can only be called if the API version is at least 610.
@@ -314,6 +325,14 @@
 
     Set the default maximum backoff delay incurred by each transaction in the call to |on-error-func| if the error is retryable. This is equivalent to calling |max-retry-delay-transaction-option| on each transaction created by this database.
 
+.. |option-db-causal-read-risky-blurb| replace::
+
+    Transactions do not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock. Enabling this option is equivalent to calling |causal-read-risky-transaction-option| on each transaction created by this database.
+
+.. |option-db-include-port-in-address-blurb| replace::
+
+    Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated. Enabling this option is equivalent to calling |include-port-in-address-transaction-option| on each transaction created by this database.
+
 .. |option-db-snapshot-ryw-enable-blurb| replace::
 
     If this option has been set an equal or more times with this database than the disable option, snapshot reads *will* see the effects of prior writes in the same transaction. Enabling this option is equivalent to calling |snapshot-ryw-enable-transaction-option| on each transaction created by this database.
@@ -321,6 +340,10 @@
 .. |option-db-snapshot-ryw-disable-blurb| replace::
 
     If this option has been set more times with this database than the disable option, snapshot reads will *not* see the effects of prior writes in the same transaction. Disabling this option is equivalent to calling |snapshot-ryw-disable-transaction-option| on each transaction created by this database.
+
+.. |option-db-tr-transaction-logging-max-field-length-blurb| replace::
+
+    Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option. This is equivalent to calling |transaction-logging-max-field-length-transaction-option| on each transaction created by this database.
 
 .. |transaction-options-blurb| replace::
 
@@ -347,7 +370,11 @@
 
 .. |option-causal-read-risky-blurb| replace::
 
-    This transaction does not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version of the transaction will be a committed version, and usually will be the latest committed, but it might be an older version in the event of a fault or network partition.
+    This transaction does not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock. One can set this for all transactions by calling |causal-read-risky-database-option|.
+
+.. |option-include-port-in-address-blurb| replace::
+
+    Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated. One can set this for all transactions by calling |include-port-in-address-database-option|.
 
 .. |option-causal-write-risky-blurb| replace::
 
@@ -393,6 +420,10 @@
 
     Set the maximum backoff delay incurred in the call to |on-error-func| if the error is retryable. Prior to API version 610, like all other transaction options, the maximum retry delay must be reset after a call to |on-error-func|. If the API version is 610 or newer, then the maximum retry delay is not reset. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most cade written assuming the older behavior can be upgraded without requiring any modification. This also means there is no need to introduce logic to conditionally set this option within retry loops. One can set the default retry limit for all transactions by calling |max-retry-delay-database-option|.
 
+..  |option-set-size-limit-blurb| replace::
+
+    Set the transaction size limit in bytes. The size is calculated by combining the sizes of all keys and values written or mutated, all key ranges cleared, and all read and write conflict ranges. (In other words, it includes the total size of all data included in the request to the cluster to commit the transaction.) Large transactions can cause performance problems on FoundationDB clusters, so setting this limit to a smaller value than the default can help prevent the client from accidentally degrading the cluster's performance. This value must be at least 32 and cannot be set to higher than 10,000,000, the default transaction size limit.
+
 ..  |option-set-timeout-blurb1| replace::
 
     Set a timeout duration in milliseconds after which the transaction automatically to be cancelled. The time is measured from transaction creation (or the most call to |reset-func-name|, if any). Valid parameter values are [0, INT_MAX]. If set to 0, all timeouts will be disabled. Once a transaction has timed out, all pending or future uses of the transaction will |error-raise-type| a :ref:`transaction_timed_out <developer-guide-error-codes>` |error-type|. The transaction can be used again after it is |reset-func-name|.
@@ -403,7 +434,7 @@
 
 .. |option-set-timeout-blurb3| replace::
 
-    Prior to API version 610, like all other transaction options, a timeout must be reset after a call to |on-error-func|. Note that resetting this option resets only the timeout *duration*, not the starting point from which the time is measured. If the API version is 610 or newer, then the timeout is not reset. This allows the user to specify a timeout for specific transactions that is longer than the timeout specified by |timeout-database-option|. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most code written assuming the older behavior can be upgraded without requiring any modification. This also means that there is no need to introduce logic to conditionally set this option within retry loops.  One can set the default timeout for all transactions by calling |timeout-database-option|.
+    Prior to API version 610, like all other transaction options, a timeout must be reset after a call to |on-error-func|. Note that resetting this option resets only the timeout *duration*, not the starting point from which the time is measured. If the API version is 610 or newer, then the timeout is not reset. This allows the user to specify a timeout for specific transactions that is longer than the timeout specified by |timeout-database-option|. Note that at all API versions, it is safe and legal to call this option after each call to |on-error-func|, so most code written assuming the older behavior can be upgraded without requiring any modification. This also means that there is no need to introduce logic to conditionally set this option within retry loops. One can set the default timeout for all transactions by calling |timeout-database-option|.
 
 .. |option-next-write-no-write-conflict-range-blurb| replace::
 
@@ -413,6 +444,18 @@
 
     Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on.
 
+..  |option-set-transaction-logging-max-field-length-blurb| replace::
+
+    Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option, after which the field will be truncated. A negative value disables truncation. One can set the default max field length for all transactions by calling |transaction-logging-max-field-length-database-option|.
+
+..  |option-set-debug-transaction-identifier| replace::
+
+    Sets a client provided string identifier for the transaction that will be used in scenarios like tracing or profiling. Client trace logging or transaction profiling must be separately enabled.
+
+..  |option-set-log-transaction| replace::
+
+    Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled to get log output.
+
 .. |future-blurb1| replace::
     Many FoundationDB API functions return "future" objects. A brief overview of futures is included in the :doc:`class scheduling tutorial <class-scheduling>`. Most future objects behave just like a normal object, but block when you use them for the first time if the asynchronous function which returned the future has not yet completed its action. A future object is considered ready when either a value is available, or when an error has occurred.
 
@@ -420,8 +463,11 @@
 
     Cancels |future-type-string| and its associated asynchronous operation. If called before the future is ready, attempts to access its value will |error-raise-type| an :ref:`operation_cancelled <developer-guide-error-codes>` |error-type|. Cancelling a future which is already ready has no effect. Note that even if a future is not ready, its associated asynchronous operation may have succesfully completed and be unable to be cancelled.
 
-.. |fdb-open-blurb| replace::
-    Initializes the FoundationDB API and connects to the cluster specified by the :ref:`cluster file <foundationdb-cluster-file>`. This function is often called without any parameters, using only the defaults. If no cluster file is passed, FoundationDB automatically :ref:`determines a cluster file <specifying-a-cluster-file>` with which to connect to a cluster.
+.. |fdb-open-blurb1| replace::
+    Connects to the cluster specified by the :ref:`cluster file <foundationdb-cluster-file>`. This function is often called without any parameters, using only the defaults. If no cluster file is passed, FoundationDB automatically :ref:`determines a cluster file <specifying-a-cluster-file>` with which to connect to a cluster.
+
+.. |fdb-open-blurb2| replace::
+	A single client can use this function multiple times to connect to different clusters simultaneously, with each invocation requiring its own cluster file. To connect to multiple clusters running at different, incompatible versions, the :ref:`multi-version client API <multi-version-client-api>` must be used.
 
 .. |fdb-transactional-unknown-result-note| replace::
     In some failure scenarios, it is possible that your transaction will be executed twice. See :ref:`developer-guide-unknown-results` for more information.

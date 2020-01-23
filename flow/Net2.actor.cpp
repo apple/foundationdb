@@ -36,6 +36,7 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
+#include "flow/ProtocolVersion.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
@@ -48,31 +49,6 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
-// These impact both communications and the deserialization of certain database and IKeyValueStore keys.
-//
-// The convention is that 'x' and 'y' should match the major and minor version of the software, and 'z' should be 0.
-// To make a change without a corresponding increase to the x.y version, increment the 'dev' digit.
-//
-//                                                       xyzdev
-//                                                       vvvv
-const uint64_t currentProtocolVersion        = 0x0FDB00B061070001LL;
-const uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
-const uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
-const uint64_t objectSerializerFlag          = 0x1000000000000000LL;
-const uint64_t versionFlagMask               = 0x0FFFFFFFFFFFFFFFLL;
-
-uint64_t removeFlags(uint64_t version) {
-	return version & versionFlagMask;
-}
-uint64_t addObjectSerializerFlag(uint64_t version) {
-	return version | objectSerializerFlag;
-}
-bool hasObjectSerializerFlag(uint64_t version) {
-	return (version & objectSerializerFlag) > 0;
-}
-
-// This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to change when we reach version 10.
-static_assert(currentProtocolVersion < 0x0FDB00B100000000LL, "Unexpected protocol version");
 
 #if defined(__linux__)
 #include <execinfo.h>
@@ -124,9 +100,9 @@ public:
 
 struct OrderedTask {
 	int64_t priority;
-	int taskID;
+	TaskPriority taskID;
 	Task *task;
-	OrderedTask(int64_t priority, int taskID, Task* task) : priority(priority), taskID(taskID), task(task) {}
+	OrderedTask(int64_t priority, TaskPriority taskID, Task* task) : priority(priority), taskID(taskID), task(task) {}
 	bool operator < (OrderedTask const& rhs) const { return priority < rhs.priority; }
 };
 
@@ -135,7 +111,7 @@ thread_local INetwork* thread_network = 0;
 class Net2 sealed : public INetwork, public INetworkConnections {
 
 public:
-	Net2(bool useThreadPool, bool useMetrics, bool useObjectSerializer);
+	Net2(bool useThreadPool, bool useMetrics);
 	void run();
 	void initMetrics();
 
@@ -146,12 +122,15 @@ public:
 
 	// INetwork interface
 	virtual double now() { return currentTime; };
-	virtual Future<Void> delay( double seconds, int taskId );
-	virtual Future<class Void> yield( int taskID );
-	virtual bool check_yield(int taskId);
-	virtual int getCurrentTask() { return currentTaskID; }
-	virtual void setCurrentTask(int taskID ) { priorityMetric = currentTaskID = taskID; }
-	virtual void onMainThread( Promise<Void>&& signal, int taskID );
+	virtual Future<Void> delay( double seconds, TaskPriority taskId );
+	virtual Future<class Void> yield( TaskPriority taskID );
+	virtual bool check_yield(TaskPriority taskId);
+	virtual TaskPriority getCurrentTask() { return currentTaskID; }
+	virtual void setCurrentTask(TaskPriority taskID ) { currentTaskID = taskID; priorityMetric = (int64_t)taskID; }
+	virtual void onMainThread( Promise<Void>&& signal, TaskPriority taskID );
+	bool isOnMainThread() const override {
+		return thread_network == this;
+	}
 	virtual void stop() {
 		if ( thread_network == this )
 			stopImmediately();
@@ -169,11 +148,9 @@ public:
 
 	virtual flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; }
 	virtual void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; }
-	virtual bool useObjectSerializer() const { return _useObjectSerializer; }
 	std::vector<flowGlobalType>		globals;
 
 	bool useThreadPool;
-	bool _useObjectSerializer = false;
 //private:
 
 	ASIOReactor reactor;
@@ -181,7 +158,7 @@ public:
 
 	int64_t tsc_begin, tsc_end;
 	double taskBegin;
-	int currentTaskID;
+	TaskPriority currentTaskID;
 	uint64_t tasksIssued;
 	TDMetricCollection tdmetrics;
 	double currentTime;
@@ -190,24 +167,22 @@ public:
 
 	uint64_t numYields;
 
-	double lastPriorityTrackTime;
-	int lastMinTaskID;
-	double priorityTimer[NetworkMetrics::PRIORITY_BINS];
+	TaskPriority lastMinTaskID;
 
 	std::priority_queue<OrderedTask, std::vector<OrderedTask>> ready;
 	ThreadSafeQueue<OrderedTask> threadReady;
 
 	struct DelayedTask : OrderedTask {
 		double at;
-		DelayedTask(double at, int64_t priority, int taskID, Task* task) : at(at), OrderedTask(priority, taskID, task) {}
+		DelayedTask(double at, int64_t priority, TaskPriority taskID, Task* task) : at(at), OrderedTask(priority, taskID, task) {}
 		bool operator < (DelayedTask const& rhs) const { return at > rhs.at; } // Ordering is reversed for priority_queue
 	};
 	std::priority_queue<DelayedTask, std::vector<DelayedTask>> timers;
 
-	void checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, int64_t priority);
-	bool check_yield(int taskId, bool isRunLoop);
+	void checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, TaskPriority priority);
+	bool check_yield(TaskPriority taskId, bool isRunLoop);
 	void processThreadReady();
-	void trackMinPriority( int minTaskID, double now );
+	void trackMinPriority( TaskPriority minTaskID, double now );
 	void stopImmediately() {
 		stopped=true; decltype(ready) _1; ready.swap(_1); decltype(timers) _2; timers.swap(_2);
 	}
@@ -233,6 +208,8 @@ public:
 	Int64MetricHandle countASIOEvents;
 	Int64MetricHandle countSlowTaskSignals;
 	Int64MetricHandle priorityMetric;
+	DoubleMetricHandle countLaunchTime;
+	DoubleMetricHandle countReactTime;
 	BoolMetricHandle awakeMetric;
 
 	EventMetricHandle<SlowTask> slowTaskMetric;
@@ -431,7 +408,17 @@ private:
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
 		socket.non_blocking(true);
-		socket.set_option(boost::asio::ip::tcp::no_delay(true));
+		if (FLOW_KNOBS->FLOW_TCP_NODELAY & 1) {
+		  socket.set_option(boost::asio::ip::tcp::no_delay(true));
+		}
+		if (FLOW_KNOBS->FLOW_TCP_QUICKACK & 1) {
+#ifdef __linux__
+		  socket.set_option(boost::asio::detail::socket_option::boolean<IPPROTO_TCP, TCP_QUICKACK>(true));
+#else
+		  TraceEvent(SevWarn, "N2_InitWarn").detail("Message", "TCP_QUICKACK not supported");
+#endif
+		}
+		platform::setCloseOnExec(socket.native_handle());
 	}
 
 	void closeSocket() {
@@ -459,6 +446,7 @@ public:
 	Listener( boost::asio::io_service& io_service, NetworkAddress listenAddress )
 		: listenAddress(listenAddress), acceptor( io_service, tcpEndpoint( listenAddress ) )
 	{
+		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
 	virtual void addref() { ReferenceCounted<Listener>::addref(); }
@@ -503,16 +491,15 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	}
 };
 
-Net2::Net2(bool useThreadPool, bool useMetrics, bool useObjectSerializer)
+Net2::Net2(bool useThreadPool, bool useMetrics)
 	: useThreadPool(useThreadPool),
-	  _useObjectSerializer(useObjectSerializer),
 	  network(this),
 	  reactor(this),
 	  stopped(false),
 	  tasksIssued(0),
 	  // Until run() is called, yield() will always yield
-	  tsc_begin(0), tsc_end(0), taskBegin(0), currentTaskID(TaskDefaultYield),
-	  lastMinTaskID(0),
+	  tsc_begin(0), tsc_end(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield),
+	  lastMinTaskID(TaskPriority::Zero),
 	  numYields(0)
 {
 	TraceEvent("Net2Starting");
@@ -533,7 +520,7 @@ Net2::Net2(bool useThreadPool, bool useMetrics, bool useObjectSerializer)
 	int priBins[] = { 1, 2050, 3050, 4050, 4950, 5050, 7050, 8050, 10050 };
 	static_assert( sizeof(priBins) == sizeof(int)*NetworkMetrics::PRIORITY_BINS, "Fix priority bins");
 	for(int i=0; i<NetworkMetrics::PRIORITY_BINS; i++)
-		networkMetrics.priorityBins[i] = priBins[i];
+		networkInfo.metrics.priorityBins[i] = static_cast<TaskPriority>(priBins[i]);
 	updateNow();
 
 }
@@ -568,6 +555,8 @@ void Net2::initMetrics() {
 	priorityMetric.init(LiteralStringRef("Net2.Priority"));
 	awakeMetric.init(LiteralStringRef("Net2.Awake"));
 	slowTaskMetric.init(LiteralStringRef("Net2.SlowTask"));
+	countLaunchTime.init(LiteralStringRef("Net2.CountLaunchTime"));
+	countReactTime.init(LiteralStringRef("Net2.CountReactTime"));
 }
 
 void Net2::run() {
@@ -595,13 +584,17 @@ void Net2::run() {
 	double nnow = timer_monotonic();
 
 	while(!stopped) {
+		FDB_TRACE_PROBE(run_loop_begin);
 		++countRunLoop;
 
 		if (runFunc) {
 			tsc_begin = __rdtsc();
-			taskBegin = timer_monotonic();
+			taskBegin = nnow;
+			trackMinPriority(TaskPriority::RunCycleFunction, taskBegin);
 			runFunc();
-			checkForSlowTask(tsc_begin, __rdtsc(), timer_monotonic() - taskBegin, TaskRunCycleFunction);
+			double taskEnd = timer_monotonic();
+			countLaunchTime += taskEnd - taskBegin;
+			checkForSlowTask(tsc_begin, __rdtsc(), taskEnd - taskBegin, TaskPriority::RunCycleFunction);
 		}
 
 		double sleepTime = 0;
@@ -613,28 +606,42 @@ void Net2::run() {
 			++countWontSleep;
 		if (b) {
 			sleepTime = 1e99;
-			if (!timers.empty())
-				sleepTime = timers.top().at - timer_monotonic();  // + 500e-6?
+			double sleepStart = timer_monotonic();
+			if (!timers.empty()) {
+				sleepTime = timers.top().at - sleepStart;  // + 500e-6?
+			}
+			if (sleepTime > 0) {
+				trackMinPriority(TaskPriority::Zero, sleepStart);
+				awakeMetric = false;
+				priorityMetric = 0;
+				reactor.sleep(sleepTime);
+				awakeMetric = true;
+			}
 		}
 
-		awakeMetric = false;
-		if( sleepTime > 0 )
-			priorityMetric = 0;
-		reactor.sleepAndReact(sleepTime);
-		awakeMetric = true;
-
+		tsc_begin = __rdtsc();
+		taskBegin = timer_monotonic();
+		trackMinPriority(TaskPriority::ASIOReactor, taskBegin);
+		reactor.react();
+		
 		updateNow();
 		double now = this->currentTime;
+
+		countReactTime += now - taskBegin;
+		checkForSlowTask(tsc_begin, __rdtsc(), now - taskBegin, TaskPriority::ASIOReactor);
 
 		if ((now-nnow) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && nondeterministicRandom()->random01() < (now-nnow)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopTop").detail("Elapsed", now - nnow);
 
-		if (sleepTime) trackMinPriority( 0, now );
+		int numTimers = 0;
 		while (!timers.empty() && timers.top().at < now) {
+			++numTimers;
 			++countTimers;
 			ready.push( timers.top() );
 			timers.pop();
 		}
+		countTimers += numTimers;
+		FDB_TRACE_PROBE(run_loop_ready_timers, numTimers);
 
 		processThreadReady();
 
@@ -642,12 +649,14 @@ void Net2::run() {
 		tsc_end = tsc_begin + FLOW_KNOBS->TSC_YIELD_TIME;
 		taskBegin = timer_monotonic();
 		numYields = 0;
-		int minTaskID = TaskMaxPriority;
+		TaskPriority minTaskID = TaskPriority::Max;
+		int queueSize = ready.size();
 
+		FDB_TRACE_PROBE(run_loop_tasks_start, queueSize);
 		while (!ready.empty()) {
 			++countTasks;
 			currentTaskID = ready.top().taskID;
-			priorityMetric = currentTaskID;
+			priorityMetric = static_cast<int64_t>(currentTaskID);
 			minTaskID = std::min(minTaskID, currentTaskID);
 			Task* task = ready.top().task;
 			ready.pop();
@@ -660,10 +669,16 @@ void Net2::run() {
 				TraceEvent(SevError, "TaskError").error(unknown_error());
 			}
 
-			if (check_yield(TaskMaxPriority, true)) { ++countYields; break; }
+			if (check_yield(TaskPriority::Max, true)) {
+				FDB_TRACE_PROBE(run_loop_yield);
+				++countYields;
+                break;
+			}
 		}
+		queueSize = ready.size();
+		FDB_TRACE_PROBE(run_loop_done, queueSize);
 
-		nnow = timer_monotonic();
+		trackMinPriority(minTaskID, now);
 
 #if defined(__linux__)
 		if(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0) {
@@ -707,11 +722,10 @@ void Net2::run() {
 			net2liveness.fetch_add(1);
 		}
 #endif
+		nnow = timer_monotonic();
 
 		if ((nnow-now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && nondeterministicRandom()->random01() < (nnow-now)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopBottom").detail("Elapsed", nnow - now); // This includes the time spent running tasks
-
-		trackMinPriority( minTaskID, nnow );
 	}
 
 	#ifdef WIN32
@@ -719,44 +733,51 @@ void Net2::run() {
 	#endif
 }
 
-void Net2::trackMinPriority( int minTaskID, double now ) {
-	if (minTaskID != lastMinTaskID)
+void Net2::trackMinPriority( TaskPriority minTaskID, double now ) {
+	if (minTaskID != lastMinTaskID) {
 		for(int c=0; c<NetworkMetrics::PRIORITY_BINS; c++) {
-			int64_t pri = networkMetrics.priorityBins[c];
-			if (pri >= minTaskID && pri < lastMinTaskID) {  // busy -> idle
-				double busyFor = lastPriorityTrackTime - priorityTimer[c];
-				networkMetrics.secSquaredPriorityBlocked[c] += busyFor*busyFor;
+			TaskPriority pri = networkInfo.metrics.priorityBins[c];
+			if (pri > minTaskID && pri <= lastMinTaskID) {  // busy -> idle
+				networkInfo.metrics.priorityBlocked[c] = false;
+				networkInfo.metrics.priorityBlockedDuration[c] += now - networkInfo.metrics.windowedPriorityTimer[c];
+				networkInfo.metrics.priorityMaxBlockedDuration[c] = std::max(networkInfo.metrics.priorityMaxBlockedDuration[c], now - networkInfo.metrics.priorityTimer[c]);
 			}
-			if (pri < minTaskID && pri >= lastMinTaskID) {  // idle -> busy
-				priorityTimer[c] = now;
+			if (pri <= minTaskID && pri > lastMinTaskID) {  // idle -> busy
+				networkInfo.metrics.priorityBlocked[c] = true;
+				networkInfo.metrics.priorityTimer[c] = now;
+				networkInfo.metrics.windowedPriorityTimer[c] = now;
 			}
 		}
+	}
+
 	lastMinTaskID = minTaskID;
-	lastPriorityTrackTime = now;
 }
 
 void Net2::processThreadReady() {
+	int numReady = 0;
 	while (true) {
 		Optional<OrderedTask> t = threadReady.pop();
 		if (!t.present()) break;
 		t.get().priority -= ++tasksIssued;
 		ASSERT( t.get().task != 0 );
 		ready.push( t.get() );
+		++numReady;
 	}
+	FDB_TRACE_PROBE(run_loop_thread_ready, numReady);
 }
 
-void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, int64_t priority) {
+void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, TaskPriority priority) {
 	int64_t elapsed = tscEnd-tscBegin;
 	if (elapsed > FLOW_KNOBS->TSC_YIELD_TIME && tscBegin > 0) {
 		int i = std::min<double>(NetworkMetrics::SLOW_EVENT_BINS-1, log( elapsed/1e6 ) / log(2.));
-		++networkMetrics.countSlowEvents[i];
+		++networkInfo.metrics.countSlowEvents[i];
 		int64_t warnThreshold = g_network->isSimulated() ? 10e9 : 500e6;
 
 		//printf("SlowTask: %d, %d yields\n", (int)(elapsed/1e6), numYields);
 
 		slowTaskMetric->clocks = elapsed;
 		slowTaskMetric->duration = (int64_t)(duration*1e9);
-		slowTaskMetric->priority = priority;
+		slowTaskMetric->priority = static_cast<int64_t>(priority);
 		slowTaskMetric->numYields = numYields;
 		slowTaskMetric->log();
 
@@ -770,7 +791,7 @@ void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, i
 	}
 }
 
-bool Net2::check_yield( int taskID, bool isRunLoop ) {
+bool Net2::check_yield( TaskPriority taskID, bool isRunLoop ) {
 	if(!isRunLoop && numYields > 0) {
 		++numYields;
 		return true;
@@ -783,8 +804,8 @@ bool Net2::check_yield( int taskID, bool isRunLoop ) {
 
 	processThreadReady();
 
-	if (taskID == TaskDefaultYield) taskID = currentTaskID;
-	if (!ready.empty() && ready.top().priority > (int64_t(taskID)<<32))  {
+	if (taskID == TaskPriority::DefaultYield) taskID = currentTaskID;
+	if (!ready.empty() && ready.top().priority > int64_t(taskID)<<32)  {
 		return true;
 	}
 
@@ -809,13 +830,13 @@ bool Net2::check_yield( int taskID, bool isRunLoop ) {
 	return false;
 }
 
-bool Net2::check_yield( int taskID ) {
+bool Net2::check_yield( TaskPriority taskID ) {
 	return check_yield(taskID, false);
 }
 
-Future<class Void> Net2::yield( int taskID ) {
+Future<class Void> Net2::yield( TaskPriority taskID ) {
 	++countYieldCalls;
-	if (taskID == TaskDefaultYield) taskID = currentTaskID;
+	if (taskID == TaskPriority::DefaultYield) taskID = currentTaskID;
 	if (check_yield(taskID, false)) {
 		++countYieldCallsTrue;
 		return delay(0, taskID);
@@ -824,7 +845,7 @@ Future<class Void> Net2::yield( int taskID ) {
 	return Void();
 }
 
-Future<Void> Net2::delay( double seconds, int taskId ) {
+Future<Void> Net2::delay( double seconds, TaskPriority taskId ) {
 	if (seconds <= 0.) {
 		PromiseTask* t = new PromiseTask;
 		this->ready.push( OrderedTask( (int64_t(taskId)<<32)-(++tasksIssued), taskId, t) );
@@ -839,7 +860,7 @@ Future<Void> Net2::delay( double seconds, int taskId ) {
 	return t->promise.getFuture();
 }
 
-void Net2::onMainThread(Promise<Void>&& signal, int taskID) {
+void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 	if (stopped) return;
 	PromiseTask* p = new PromiseTask( std::move(signal) );
 	int64_t priority = int64_t(taskID)<<32;
@@ -988,7 +1009,7 @@ ASIOReactor::ASIOReactor(Net2* net)
 #endif
 }
 
-void ASIOReactor::sleepAndReact(double sleepTime) {
+void ASIOReactor::sleep(double sleepTime) {
 	if (sleepTime > FLOW_KNOBS->BUSY_WAIT_THRESHOLD) {
 		if (FLOW_KNOBS->REACTOR_FLAGS & 4) {
 #ifdef __linux
@@ -1015,6 +1036,9 @@ void ASIOReactor::sleepAndReact(double sleepTime) {
 		if (!(FLOW_KNOBS->REACTOR_FLAGS & 8))
 			threadYield();
 	}
+}
+
+void ASIOReactor::react() {
 	while (ios.poll_one()) ++network->countASIOEvents;  // Make this a task?
 }
 
@@ -1024,9 +1048,9 @@ void ASIOReactor::wake() {
 
 } // namespace net2
 
-INetwork* newNet2(bool useThreadPool, bool useMetrics, bool useObjectSerializer) {
+INetwork* newNet2(bool useThreadPool, bool useMetrics) {
 	try {
-		N2::g_net2 = new N2::Net2(useThreadPool, useMetrics, useObjectSerializer);
+		N2::g_net2 = new N2::Net2(useThreadPool, useMetrics);
 	}
 	catch(boost::system::system_error e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());

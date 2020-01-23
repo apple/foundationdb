@@ -75,6 +75,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 	//Whether to continuously perfom the consistency check
 	bool indefinite;
 
+	// Whether to suspendConsistencyCheck
+	AsyncVar<bool> suspendConsistencyCheck;
+
+	Future<Void> monitorConsistencyCheckSettingsActor;
+
 	ConsistencyCheckWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx)
 	{
@@ -86,6 +91,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		rateLimitMax = getOption(options, LiteralStringRef("rateLimitMax"), 0);
 		shuffleShards = getOption(options, LiteralStringRef("shuffleShards"), false);
 		indefinite = getOption(options, LiteralStringRef("indefinite"), false);
+		suspendConsistencyCheck.set(true);
 
 		success = true;
 
@@ -124,6 +130,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 		}
 
+		self->monitorConsistencyCheckSettingsActor = self->monitorConsistencyCheckSettings(cx, self);
 		return Void();
 	}
 
@@ -156,14 +163,43 @@ struct ConsistencyCheckWorkload : TestWorkload
 		failEvent.detail("Reason", "Consistency check: " + message);
 	}
 
+	ACTOR Future<Void> monitorConsistencyCheckSettings(Database cx, ConsistencyCheckWorkload *self) {
+		loop {
+			state ReadYourWritesTransaction tr(cx);
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				state Optional<Value> ccSuspendVal = wait(tr.get(fdbShouldConsistencyCheckBeSuspended));
+				bool ccSuspend = ccSuspendVal.present() ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned()) : false;
+				self->suspendConsistencyCheck.set(ccSuspend);
+				state Future<Void> watchCCSuspendFuture = tr.watch(fdbShouldConsistencyCheckBeSuspended);
+				wait(tr.commit());
+				wait(watchCCSuspendFuture);
+			}
+			catch (Error &e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<Void> _start(Database cx, ConsistencyCheckWorkload *self)
 	{
 		loop {
-			wait(self->runCheck(cx, self));
-			if(!self->indefinite)
-				break;
-			self->repetitions++;
-			wait(delay(5.0));
+			while(self->suspendConsistencyCheck.get()) {
+				TraceEvent("ConsistencyCheck_Suspended");
+				wait(self->suspendConsistencyCheck.onChange());
+			}
+			TraceEvent("ConsistencyCheck_StartingOrResuming");
+			choose {
+				when(wait(self->runCheck(cx, self))) { 
+					if(!self->indefinite)
+						break;
+					self->repetitions++;
+					wait(delay(5.0));
+				}
+				when(wait(self->suspendConsistencyCheck.onChange())) { }
+			}
 		}
 		return Void();
 	}
@@ -321,7 +357,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 			catch(Error &e)
 			{
-				tr.onError(e);
+				wait(tr.onError(e));
 			}
 		}
 	}
@@ -1388,17 +1424,16 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 
 		// Check DataDistributor
-		ProcessClass::Fitness bestDistributorFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::DataDistributor);
-		if (db.distributor.present() && (!nonExcludedWorkerProcessMap.count(db.distributor.get().address()) || nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(ProcessClass::DataDistributor) != bestDistributorFitness)) {
-			TraceEvent("ConsistencyCheck_DistributorNotBest").detail("BestDataDistributorFitness", bestDistributorFitness)
+		ProcessClass::Fitness fitnessLowerBound = allWorkerProcessMap[db.master.address()].processClass.machineClassFitness(ProcessClass::DataDistributor);
+		if (db.distributor.present() && (!nonExcludedWorkerProcessMap.count(db.distributor.get().address()) || nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(ProcessClass::DataDistributor) > fitnessLowerBound)) {
+			TraceEvent("ConsistencyCheck_DistributorNotBest").detail("DataDistributorFitnessLowerBound", fitnessLowerBound)
 			.detail("ExistingDistributorFitness", nonExcludedWorkerProcessMap.count(db.distributor.get().address()) ? nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(ProcessClass::DataDistributor) : -1);
 			return false;
 		}
 
 		// Check Ratekeeper
-		ProcessClass::Fitness bestRatekeeperFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Ratekeeper);
-		if (db.ratekeeper.present() && (!nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) || nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::Ratekeeper) != bestRatekeeperFitness)) {
-			TraceEvent("ConsistencyCheck_RatekeeperNotBest").detail("BestRatekeeperFitness", bestRatekeeperFitness)
+		if (db.ratekeeper.present() && (!nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) || nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::Ratekeeper) > fitnessLowerBound)) {
+			TraceEvent("ConsistencyCheck_RatekeeperNotBest").detail("BestRatekeeperFitness", fitnessLowerBound)
 			.detail("ExistingRatekeeperFitness", nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) ? nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::Ratekeeper) : -1);
 			return false;
 		}

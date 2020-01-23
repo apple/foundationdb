@@ -73,9 +73,9 @@ void SimpleFailureMonitor::setStatus( NetworkAddress const& address, FailureStat
 	// for an endpoint that is waited on changes, the waiter sees its failure status change
 	auto it = addressStatus.find(address);
 
-	//TraceEvent("NotifyFailureStatus").detail("Address", address).detail("Status", status.failed ? "Failed" : "OK").detail("Present", it == addressStatus.end());
 	if (it == addressStatus.end()) {
 		if (status != FailureStatus()) {
+			TraceEvent("NotifyAddressHealthy").suppressFor(1.0).detail("Address", address);
 			addressStatus[address]=status;
 			endpointKnownFailed.triggerRange( Endpoint({address}, UID()), Endpoint({address}, UID(-1,-1)) );
 		}
@@ -85,13 +85,23 @@ void SimpleFailureMonitor::setStatus( NetworkAddress const& address, FailureStat
 			it->second = status;
 		else
 			addressStatus.erase(it);
-		if(triggerEndpoint)
+		if(triggerEndpoint) {
+			if(status.failed) {
+				TraceEvent("NotifyAddressFailed").suppressFor(1.0).detail("Address", address);
+			} else {
+				TraceEvent("NotifyAddressHealthyPresent").suppressFor(1.0).detail("Address", address);
+			}
 			endpointKnownFailed.triggerRange( Endpoint({address}, UID()), Endpoint({address}, UID(-1,-1)) );
+		}
 	}
 }
 
 void SimpleFailureMonitor::endpointNotFound( Endpoint const& endpoint ) {
 	// SOMEDAY: Expiration (this "leaks" memory)
+	if(endpoint.token.first() == -1) {
+		TraceEvent("WellKnownEndpointNotFound").suppressFor(1.0).detail("Address", endpoint.getPrimaryAddress()).detail("TokenFirst", endpoint.token.first()).detail("TokenSecond", endpoint.token.second());
+		return;
+	}
 	TraceEvent("EndpointNotFound").suppressFor(1.0).detail("Address", endpoint.getPrimaryAddress()).detail("Token", endpoint.token);
 	endpointKnownFailed.set( endpoint, true );
 }
