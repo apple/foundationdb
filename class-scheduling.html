@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.7',
+        VERSION:     '6.2.11',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -368,14 +368,14 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 <div class="section" id="seats-are-limited">
 <h3>Seats are limited!</h3>
 <p>Let&#8217;s go back to the data model. Remember that we stored the number of seats in the class in the value of the key-value entry in the class list. Let&#8217;s refine that a bit to track the <em>remaining</em> number of seats in the class. The initialization can work the same way. (In our example, all classes initially have 100 seats), but the <code class="docutils literal"><span class="pre">available_classes</span></code>, <code class="docutils literal"><span class="pre">signup</span></code>, and <code class="docutils literal"><span class="pre">drop</span></code> functions are going to have to change. Let&#8217;s start with <code class="docutils literal"><span class="pre">available_classes</span></code>:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">available_classes</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
     <span class="k">return</span> <span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">k</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">range</span><span class="p">(())]</span>
 <span class="hll">            <span class="k">if</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">v</span><span class="p">)[</span><span class="mi">0</span><span class="p">]]</span>
 </span></pre></div>
 </div>
 <p>This is easy &#8211; we simply add a condition to check that the value is non-zero. Let&#8217;s check out <code class="docutils literal"><span class="pre">signup</span></code> next:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">signup</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
     <span class="n">rec</span> <span class="o">=</span> <span class="n">attends</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span>
 <span class="hll">    <span class="k">if</span> <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span><span class="o">.</span><span class="n">present</span><span class="p">():</span> <span class="k">return</span>  <span class="c1"># already signed up</span>
@@ -389,7 +389,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 </div>
 <p>We now have to check that we aren&#8217;t already signed up, since we don&#8217;t want a double sign up to decrease the number of seats twice. Then we look up how many seats are left to make sure there is a seat remaining so we don&#8217;t push the counter into the negative. If there is a seat remaining, we decrement the counter.</p>
 <p>Similarly, the <code class="docutils literal"><span class="pre">drop</span></code> function is modified as follows:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">drop</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
     <span class="n">rec</span> <span class="o">=</span> <span class="n">attends</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span>
 <span class="hll">    <span class="k">if</span> <span class="ow">not</span> <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span><span class="o">.</span><span class="n">present</span><span class="p">():</span> <span class="k">return</span>  <span class="c1"># not taking this class</span>
@@ -412,7 +412,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 <div class="section" id="more-features">
 <h3>More features?!</h3>
 <p>Of course, as soon as our new version of the system goes live, we hear of a trick that certain students are using. They are signing up for all classes immediately, and only later dropping those that they don&#8217;t want to take. This has led to an unusable system, and we have been asked to fix it. We decide to limit students to five classes:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">signup</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
     <span class="n">rec</span> <span class="o">=</span> <span class="n">attends</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span>
     <span class="k">if</span> <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span><span class="o">.</span><span class="n">present</span><span class="p">():</span> <span class="k">return</span>  <span class="c1"># already signed up</span>
@@ -624,7 +624,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 25, 2019.<br/>
+      Last updated on Jan 23, 2020.<br/>
     </p>
   </div>
 </footer>

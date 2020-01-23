@@ -488,6 +488,19 @@ If a process has had more than 10 TCP segments retransmitted in the last 5 secon
 
       10.0.4.1:4500       ( 3% cpu;  2% machine; 0.004 Gbps;  0% disk; REXMIT! 2.5 GB / 4.1 GB RAM  )
 
+Machine-readable status
+--------------------------------
+
+The status command can provide a complete summary of statistics about the cluster and the database with the ``json`` argument. Full documentation for ``status json`` output can be found :doc:`here <mr-status>`.
+From the output of ``status json``, operators can find useful health metrics to determine whether or not their cluster is hitting performance limits.
+
+====================== ==============================================================================================================
+Ratekeeper limit        ``cluster.qos.transactions_per_second_limit`` contains the number of read versions per second that the cluster can give out. A low ratekeeper limit indicates that the cluster performance is limited in some way. The reason for a low ratekeeper limit can be found at ``cluster.qos.performance_limited_by``. ``cluster.qos.released_transactions_per_second`` describes the number of read versions given out per second, and can be used to tell how close the ratekeeper is to throttling.
+Storage queue size      ``cluster.qos.worst_queue_bytes_storage_server`` contains the maximum size in bytes of a storage queue. Each storage server has mutations that have not yet been made durable, stored in its storage queue. If this value gets too large, it indicates a storage server is falling behind. A large storage queue will cause the ratekeeper to increase throttling. However, depending on the configuration, the ratekeeper can ignore the worst storage queue from one fault domain. Thus, ratekeeper uses ``cluster.qos.limiting_queue_bytes_storage_server`` to determine the throttling level.
+Durable version lag     ``cluster.qos.worst_durability_lag_storage_server`` contains information about the worst storage server durability lag. The ``versions`` subfield contains the maximum number of versions in a storage queue. Ideally, this should be near 5 million. The ``seconds`` subfield contains the maximum number of seconds of non-durable data in a storage queue. Ideally, this should be near 5 seconds. If a storage server is overwhelmed, the durability lag could rise, causing performance issues.
+Transaction log queue   ``cluster.qos.worst_queue_bytes_log_server`` contains the maximum size in bytes of the mutations stored on a transaction log that have not yet been popped by storage servers. A large transaction log queue size can potentially cause the ratekeeper to increase throttling.
+====================== ==============================================================================================================
+
 .. _administration_fdbmonitor:
 
 ``fdbmonitor`` and ``fdbserver``
@@ -508,7 +521,7 @@ If ``kill_on_configuration_change`` parameter is unset or set to ``true`` in fou
 Managing trace files
 ====================
 
- By default, trace files are output to:
+By default, trace files are output to:
 
 * ``/var/log/foundationdb/`` on Linux
 * ``/usr/local/foundationdb/logs/`` on macOS

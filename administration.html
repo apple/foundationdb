@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.7',
+        VERSION:     '6.2.11',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -102,6 +102,7 @@
 <li><a class="reference internal" href="#converting-an-existing-cluster-to-use-tls">Converting an existing cluster to use TLS</a></li>
 <li><a class="reference internal" href="#monitoring-cluster-status">Monitoring cluster status</a><ul>
 <li><a class="reference internal" href="#process-details">Process details</a></li>
+<li><a class="reference internal" href="#machine-readable-status">Machine-readable status</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#fdbmonitor-and-fdbserver"><code class="docutils literal"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal"><span class="pre">fdbserver</span></code></a></li>
@@ -197,6 +198,7 @@
 <li><a class="reference internal" href="#converting-an-existing-cluster-to-use-tls">Converting an existing cluster to use TLS</a></li>
 <li><a class="reference internal" href="#monitoring-cluster-status">Monitoring cluster status</a><ul>
 <li><a class="reference internal" href="#process-details">Process details</a></li>
+<li><a class="reference internal" href="#machine-readable-status">Machine-readable status</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#fdbmonitor-and-fdbserver"><code class="docutils literal"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal"><span class="pre">fdbserver</span></code></a></li>
@@ -355,7 +357,7 @@ host:~ user$ sudo launchctl unload /Library/LaunchDaemons/com.foundationdb.fdbmo
 <p>FoundationDB (since v6.1) can accept network connections from clients connecting over IPv6. IPv6 address/port pair is represented as <code class="docutils literal"><span class="pre">[IP]:PORT</span></code>, e.g. &#8220;[::1]:4800&#8221;, &#8220;[abcd::dead:beef]:4500&#8221;.</p>
 <ol class="arabic">
 <li><p class="first">The cluster file can contain mix of IPv6 and IPv6 addresses. For example:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">description</span><span class="p">:</span><span class="n">ID</span><span class="nd">@127</span><span class="o">.</span><span class="mf">0.0</span><span class="o">.</span><span class="mi">1</span><span class="p">:</span><span class="mi">4500</span><span class="p">,[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">4500</span><span class="p">,</span><span class="o">...</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">description</span><span class="p">:</span><span class="n">ID</span><span class="o">@</span><span class="mf">127.0</span><span class="o">.</span><span class="mf">0.1</span><span class="p">:</span><span class="mi">4500</span><span class="p">,[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">4500</span><span class="p">,</span><span class="o">...</span>
 </pre></div>
 </div>
 </li>
@@ -775,6 +777,31 @@ Client time: 03/19/18 08:59:37
 </pre></div>
 </div>
 </div>
+<div class="section" id="machine-readable-status">
+<h3>Machine-readable status</h3>
+<p>The status command can provide a complete summary of statistics about the cluster and the database with the <code class="docutils literal"><span class="pre">json</span></code> argument. Full documentation for <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code> output can be found <a class="reference internal" href="mr-status.html"><span class="doc">here</span></a>.
+From the output of <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code>, operators can find useful health metrics to determine whether or not their cluster is hitting performance limits.</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="4%" />
+<col width="96%" />
+</colgroup>
+<tbody valign="top">
+<tr class="row-odd"><td>Ratekeeper limit</td>
+<td><code class="docutils literal"><span class="pre">cluster.qos.transactions_per_second_limit</span></code> contains the number of read versions per second that the cluster can give out. A low ratekeeper limit indicates that the cluster performance is limited in some way. The reason for a low ratekeeper limit can be found at <code class="docutils literal"><span class="pre">cluster.qos.performance_limited_by</span></code>. <code class="docutils literal"><span class="pre">cluster.qos.released_transactions_per_second</span></code> describes the number of read versions given out per second, and can be used to tell how close the ratekeeper is to throttling.</td>
+</tr>
+<tr class="row-even"><td>Storage queue size</td>
+<td><code class="docutils literal"><span class="pre">cluster.qos.worst_queue_bytes_storage_server</span></code> contains the maximum size in bytes of a storage queue. Each storage server has mutations that have not yet been made durable, stored in its storage queue. If this value gets too large, it indicates a storage server is falling behind. A large storage queue will cause the ratekeeper to increase throttling. However, depending on the configuration, the ratekeeper can ignore the worst storage queue from one fault domain. Thus, ratekeeper uses <code class="docutils literal"><span class="pre">cluster.qos.limiting_queue_bytes_storage_server</span></code> to determine the throttling level.</td>
+</tr>
+<tr class="row-odd"><td>Durable version lag</td>
+<td><code class="docutils literal"><span class="pre">cluster.qos.worst_durability_lag_storage_server</span></code> contains information about the worst storage server durability lag. The <code class="docutils literal"><span class="pre">versions</span></code> subfield contains the maximum number of versions in a storage queue. Ideally, this should be near 5 million. The <code class="docutils literal"><span class="pre">seconds</span></code> subfield contains the maximum number of seconds of non-durable data in a storage queue. Ideally, this should be near 5 seconds. If a storage server is overwhelmed, the durability lag could rise, causing performance issues.</td>
+</tr>
+<tr class="row-even"><td>Transaction log queue</td>
+<td><code class="docutils literal"><span class="pre">cluster.qos.worst_queue_bytes_log_server</span></code> contains the maximum size in bytes of the mutations stored on a transaction log that have not yet been popped by storage servers. A large transaction log queue size can potentially cause the ratekeeper to increase throttling.</td>
+</tr>
+</tbody>
+</table>
+</div>
 </div>
 <div class="section" id="fdbmonitor-and-fdbserver">
 <span id="administration-fdbmonitor"></span><h2><code class="docutils literal"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal"><span class="pre">fdbserver</span></code></h2>
@@ -789,8 +816,7 @@ Client time: 03/19/18 08:59:37
 </div>
 <div class="section" id="managing-trace-files">
 <span id="administration-managing-trace-files"></span><h2>Managing trace files</h2>
-<blockquote>
-<div>By default, trace files are output to:</div></blockquote>
+<p>By default, trace files are output to:</p>
 <ul class="simple">
 <li><code class="docutils literal"><span class="pre">/var/log/foundationdb/</span></code> on Linux</li>
 <li><code class="docutils literal"><span class="pre">/usr/local/foundationdb/logs/</span></code> on macOS</li>
@@ -897,13 +923,13 @@ Client time: 03/19/18 08:59:37
 <h3>Perform the upgrade</h3>
 <p>For <strong>Ubuntu</strong>, perform the upgrade using the dpkg command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo dpkg -i foundationdb-clients_6.2.7-1_amd64.deb \
-foundationdb-server_6.2.7-1_amd64.deb
+user&#64;host$ sudo dpkg -i foundationdb-clients_6.2.11-1_amd64.deb \
+foundationdb-server_6.2.11-1_amd64.deb
 </pre>
 <p>For <strong>RHEL/CentOS</strong>, perform the upgrade using the rpm command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo rpm -Uvh foundationdb-clients-6.2.7-1.el7.x86_64.rpm \
-foundationdb-server-6.2.7-1.el7.x86_64.rpm
+user&#64;host$ sudo rpm -Uvh foundationdb-clients-6.2.11-1.el7.x86_64.rpm \
+foundationdb-server-6.2.11-1.el7.x86_64.rpm
 </pre>
 <p>The <code class="docutils literal"><span class="pre">foundationdb-clients</span></code> package also installs the <a class="reference internal" href="api-python.html"><span class="doc">Python</span></a> and <a class="reference internal" href="api-c.html"><span class="doc">C</span></a> APIs. If your clients use <a class="reference internal" href="api-ruby.html"><span class="doc">Ruby</span></a>, <a class="reference external" href="javadoc/index.html">Java</a>, or <a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go</a>, follow the instructions in the corresponding language documentation to install the APIs.</p>
 </div>
@@ -965,7 +991,7 @@ foundationdb-server-6.2.7-1.el7.x86_64.rpm
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 25, 2019.<br/>
+      Last updated on Jan 23, 2020.<br/>
     </p>
   </div>
 </footer>

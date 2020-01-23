@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.7',
+        VERSION:     '6.2.11',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -312,9 +312,42 @@ If you are having trouble finding something in particular, try the search box in
 </li>
 <li class="toctree-l3"><a class="reference internal" href="client-design.html">Client Design</a><ul>
 <li class="toctree-l4"><a class="reference internal" href="release-notes.html">Release Notes</a><ul>
-<li class="toctree-l5"><a class="reference internal" href="release-notes.html#id1">6.2.7</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="release-notes.html#performance">Performance</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes.html#id1">6.2.15</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="release-notes.html#fixes">Fixes</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes.html#id2">6.2.14</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="release-notes.html#id3">Fixes</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes.html#id6">6.2.13</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="release-notes.html#performance">Performance</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes.html#id7">6.2.12</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="release-notes.html#id8">Performance</a></li>
+<li class="toctree-l6"><a class="reference internal" href="release-notes.html#id9">Fixes</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes.html#id10">6.2.11</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="release-notes.html#id11">Fixes</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes.html#id12">6.2.10</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="release-notes.html#id13">Fixes</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes.html#id14">6.2.9</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="release-notes.html#id15">Fixes</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes.html#id17">6.2.8</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="release-notes.html#id18">Fixes</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes.html#id19">6.2.7</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="release-notes.html#id20">Performance</a></li>
+<li class="toctree-l6"><a class="reference internal" href="release-notes.html#id22">Fixes</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes.html#status">Status</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes.html#bindings">Bindings</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes.html#features">Features</a></li>
@@ -472,6 +505,14 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l5"><a class="reference internal" href="api-general.html#installing-foundationdb-client-binaries">Installing FoundationDB client binaries</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-general.html#multi-version-client">Multi-version client</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-general.html#setting-network-options-with-environment-variables">Setting network options with environment variables</a></li>
+<li class="toctree-l5"><a class="reference internal" href="api-general.html#client-network-thread">Client network thread</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="api-general.html#performance">Performance</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="api-general.html#client-trace-logging">Client trace logging</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="api-general.html#client-trace-logging-multi-version-client">Multi-version client API</a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li class="toctree-l4"><a class="reference internal" href="known-limitations.html">Known Limitations</a><ul>
@@ -1049,7 +1090,7 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l7"><a class="reference internal" href="tls.html#default-password">Default Password</a></li>
 </ul>
 </li>
-<li class="toctree-l6"><a class="reference internal" href="tls.html#parameters-and-client-bindings">Parameters and client bindings</a></li>
+<li class="toctree-l6"><a class="reference internal" href="tls.html#permissions">Permissions</a></li>
 <li class="toctree-l6"><a class="reference internal" href="tls.html#automatic-tls-certificate-refresh">Automatic TLS certificate refresh</a></li>
 </ul>
 </li>
@@ -1094,6 +1135,7 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l4"><a class="reference internal" href="administration.html#converting-an-existing-cluster-to-use-tls">Converting an existing cluster to use TLS</a></li>
 <li class="toctree-l4"><a class="reference internal" href="administration.html#monitoring-cluster-status">Monitoring cluster status</a><ul>
 <li class="toctree-l5"><a class="reference internal" href="administration.html#process-details">Process details</a></li>
+<li class="toctree-l5"><a class="reference internal" href="administration.html#machine-readable-status">Machine-readable status</a></li>
 </ul>
 </li>
 <li class="toctree-l4"><a class="reference internal" href="administration.html#fdbmonitor-and-fdbserver"><code class="docutils literal"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal"><span class="pre">fdbserver</span></code></a></li>
@@ -1661,7 +1703,7 @@ If you are having trouble finding something in particular, try the search box in
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 25, 2019.<br/>
+      Last updated on Jan 23, 2020.<br/>
     </p>
   </div>
 </footer>

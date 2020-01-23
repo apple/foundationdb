@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.7',
+        VERSION:     '6.2.11',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -268,19 +268,19 @@
 <p>For example, suppose your application tracks profile data for your users. You could store the data in a <code class="docutils literal"><span class="pre">user_space</span></code> subspace that would make <code class="docutils literal"><span class="pre">'user'</span></code> the first element of each tuple. A back-end function might have the form:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="n">user_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;user&#39;</span><span class="p">,))</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">set_user_data</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">user_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">key</span><span class="p">,))]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>Subspaces support the <a class="reference internal" href="api-python.html#api-python-keys"><span class="std std-ref">as_foundationdb_key</span></a> method to implicitly pack keys, so you could also write the <code class="docutils literal"><span class="pre">set_user_data</span></code> as:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">set_user_data</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">user_space</span><span class="p">[</span><span class="n">key</span><span class="p">]]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>Finally, you may want to clear a subspace before working with it (as long as you&#8217;re sure it should be empty):</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">clear_subspace</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">subspace</span><span class="p">):</span>
     <span class="n">tr</span><span class="o">.</span><span class="n">clear_range_startswith</span><span class="p">(</span><span class="n">subspace</span><span class="o">.</span><span class="n">key</span><span class="p">())</span>
 </pre></div>
@@ -476,7 +476,7 @@
 <p>FoundationDB provides concurrency control via transactions, allowing multiple clients to concurrently read and write data in the database with strong guarantees about how they affect each other. Specifically, FoundationDB provides global, ACID transactions with strict serializability using optimistic concurrency.</p>
 <p>All reads and modifications of key-value pairs in FoundationDB are done within the context of a transaction. A transaction is a small unit of work that is both reliably performed and logically independent of other transactions.</p>
 <p>In Python, a simple transaction looks like this:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">example</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
     <span class="c1"># Read two values from the database</span>
     <span class="n">a</span> <span class="o">=</span> <span class="n">tr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;a&#39;</span><span class="p">)</span>
@@ -513,7 +513,7 @@
     <span class="c1"># make a new Transaction object on the database</span>
     <span class="n">tr</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">create_transaction</span><span class="p">()</span>
 
-    <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
         <span class="k">try</span><span class="p">:</span>
             <span class="c1"># Read two values from the transaction snapshot</span>
             <span class="n">a</span> <span class="o">=</span> <span class="n">tr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;a&#39;</span><span class="p">)</span>
@@ -544,7 +544,7 @@
 <span class="c1"># Read two values from the database in parallel</span>
 <span class="n">a</span> <span class="o">=</span> <span class="n">tr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;A&#39;</span><span class="p">)</span>
 <span class="n">b</span> <span class="o">=</span> <span class="n">tr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;B&#39;</span><span class="p">)</span>
-<span class="k">print</span> <span class="n">a</span><span class="o">+</span><span class="n">b</span>
+<span class="nb">print</span> <span class="n">a</span><span class="o">+</span><span class="n">b</span>
 </pre></div>
 </div>
 <p>The addition of <code class="docutils literal"><span class="pre">a</span></code> and <code class="docutils literal"><span class="pre">b</span></code> implicitly blocks. You can also explicitly block on a future
@@ -553,7 +553,7 @@ until it&#8217;s ready.</p>
 <p>Another approach to programming with futures in FoundationDB is to set a callback function to be invoked asynchronously when the future is ready.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">Be very careful when mixing callbacks with explicit or implicit blocking. Blocking in a callback on a non-ready future will cause a deadlock. Blocking on anything else or performing CPU intensive tasks will block the FoundationDB client thread and therefore all database access from that client.</p>
+<p class="last">Be very careful when mixing callbacks with explicit or implicit blocking. Blocking in a callback on a non-ready future will cause a deadlock. Blocking on anything else or performing CPU intensive tasks will block the FoundationDB <a class="reference internal" href="api-general.html#client-network-thread"><span class="std std-ref">client thread</span></a> and therefore all database access from that client.</p>
 </div>
 <p>For further details, see the <a class="reference internal" href="api-reference.html"><span class="doc">API reference</span></a> documentation for your language.</p>
 </div>
@@ -562,36 +562,36 @@ until it&#8217;s ready.</p>
 <p>FoundationDB supports efficient range reads based on the lexicographic ordering of keys. Range reads are a powerful technique commonly used with FoundationDB. A recommended approach is to design your keys so that you can use range reads to retrieve your most frequently accessed data.</p>
 <p>A range read within a transaction returns a container that issues asynchronous reads to the database. The client usually processes the data by iterating over the values returned by the container. Range reads can be specified explicitly by giving the <code class="docutils literal"><span class="pre">begin</span></code> and <code class="docutils literal"><span class="pre">end</span></code> of a range:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="s1">&#39;a&#39;</span><span class="p">,</span> <span class="s1">&#39;m&#39;</span><span class="p">):</span>
-    <span class="k">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>To define ranges that extend from the beginning the database, you can use the empty string <code class="docutils literal"><span class="pre">''</span></code>:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;m&#39;</span><span class="p">):</span>
-    <span class="k">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>Likewise, to define ranges that extend to the end of the database, you can use the key <code class="docutils literal"><span class="pre">'\xFF'</span></code>:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="s1">&#39;m&#39;</span><span class="p">,</span> <span class="s1">&#39;</span><span class="se">\xFF</span><span class="s1">&#39;</span><span class="p">):</span>
-    <span class="k">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>A range read can also retrieve all keys starting with a given <code class="docutils literal"><span class="pre">prefix</span></code>:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="o">.</span><span class="n">get_range_startswith</span><span class="p">(</span><span class="s1">&#39;a&#39;</span><span class="p">):</span>
-    <span class="k">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>The API balances latency and bandwidth by fetching data in batches as determined by the <a class="reference internal" href="api-python.html#streaming-mode-python"><span class="std std-ref">streaming mode</span></a> parameter. Streaming modes allow you to customize this balance based on how you intend to consume the data. The default streaming mode (<code class="docutils literal"><span class="pre">iterator</span></code>) is quite efficient. However, if you anticipate that your range read will retrieve a large amount of data, you should select a streaming mode to match your use case. For example, if you&#8217;re iterating through a large range and testing against a condition that may result in early termination, you may want to use the <code class="docutils literal"><span class="pre">small</span></code> streaming mode:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="o">.</span><span class="n">get_range_startswith</span><span class="p">(</span><span class="s1">&#39;a&#39;</span><span class="p">,</span> <span class="n">streaming_mode</span><span class="o">=</span><span class="n">fdb</span><span class="o">.</span><span class="n">StreamingMode</span><span class="o">.</span><span class="n">small</span><span class="p">):</span>
     <span class="k">if</span> <span class="n">halting_condition</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">):</span> <span class="k">break</span>
-    <span class="k">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>In some situations, you may want to explicitly control the number of key-value pairs returned. You can use the <code class="docutils literal"><span class="pre">limit</span></code> parameter for this purpose. For example, suppose you want to iterate through a range while retrieving blocks of a predetermined size:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="n">LIMIT</span> <span class="o">=</span> <span class="mi">100</span> <span class="c1"># adjust according to data characteristics</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">get_range_limited</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">begin</span><span class="p">,</span> <span class="n">end</span><span class="p">):</span>
-    <span class="n">keys_found</span> <span class="o">=</span> <span class="bp">True</span>
+    <span class="n">keys_found</span> <span class="o">=</span> <span class="kc">True</span>
     <span class="k">while</span> <span class="n">keys_found</span><span class="p">:</span>
         <span class="n">keys_found</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">begin</span><span class="p">,</span> <span class="n">end</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="n">LIMIT</span><span class="p">):</span>
@@ -625,11 +625,11 @@ the operation is done. The switch can be performed transactionally with a single
 change of a reference.</p>
 <p>For example, you can store the version reference using a <code class="docutils literal"><span class="pre">'mostRecentVersion'</span></code>
 key:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">setMostRecentVersion</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">versionNumber</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="s1">&#39;mostRecentVersion&#39;</span><span class="p">,))]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">versionNumber</span><span class="p">)</span>
 
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">getMostRecentVersion</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">tr</span><span class="p">[</span><span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="s1">&#39;mostRecentVersion&#39;</span><span class="p">,))]</span>
 </pre></div>
@@ -646,14 +646,25 @@ of the data while concurrently writing the new version.</p>
 <div class="section" id="atomic-operations">
 <span id="developer-guide-atomic-operations"></span><h3>Atomic operations</h3>
 <p>An atomic operation is a single database command that carries out several logical steps: reading the value of a key, performing a transformation on that value, and writing the result. Different atomic operations perform different transformations. Like other database operations, an atomic operation is used within a transaction; however, its use within a transaction will not cause the transaction to conflict.</p>
-<p>Atomic operations are ideal for operating on keys that multiple clients modify frequently. For example, you can use a key as a counter and increment it with atomic <code class="xref py py-func docutils literal"><span class="pre">add()</span></code>:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<p>Atomic operations are ideal for operating on keys that multiple clients modify frequently. For example, you can use a key as a counter and increment/decrement it with atomic <code class="xref py py-func docutils literal"><span class="pre">add()</span></code>:</p>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">increment</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counter</span><span class="p">):</span>
     <span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">counter</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;&lt;i&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<span class="k">def</span> <span class="nf">decrement</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counter</span><span class="p">):</span>
+    <span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">counter</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;&lt;i&#39;</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>When the counter value is decremented down to 0, you may want to clear the key from database. An easy way to do that is to use <code class="xref py py-func docutils literal"><span class="pre">compare_and_clear()</span></code>, which atomically compares the value against given parameter and clears it without issuing a read from client:</p>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<span class="k">def</span> <span class="nf">decrement</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counter</span><span class="p">):</span>
+    <span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">counter</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;&lt;i&#39;</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+    <span class="n">tr</span><span class="o">.</span><span class="n">compare_and_clear</span><span class="p">(</span><span class="n">counter</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;&lt;i&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
 </pre></div>
 </div>
 <p>Similarly, you can use a key as a flag and toggle it with atomic <code class="xref py py-func docutils literal"><span class="pre">xor()</span></code>:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">toggle</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">flag</span><span class="p">):</span>
     <span class="n">tr</span><span class="o">.</span><span class="n">xor</span><span class="p">(</span><span class="n">flag</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;=?&#39;</span><span class="p">,</span><span class="mi">1</span><span class="p">))</span>
 </pre></div>
@@ -679,7 +690,7 @@ of the data while concurrently writing the new version.</p>
 </ul>
 <p>The following example illustrates both techniques. Together, they make a transaction idempotent that otherwise would not have been:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="c1"># Increases account balance and stores a record of the deposit with a unique depositId</span>
-<span class="nd">@fdb.transactional</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">deposit</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">acctId</span><span class="p">,</span> <span class="n">depositId</span><span class="p">,</span> <span class="n">amount</span><span class="p">):</span>
 
     <span class="c1"># If the deposit record exists, the deposit already succeeded, and we can quit</span>
@@ -710,7 +721,7 @@ of the data while concurrently writing the new version.</p>
 <p class="last"><em>add read conflict range</em> behaves as if the client is reading the range. This means <em>add read conflict range</em> will not add conflict ranges for keys that have been written earlier in the same transaction. This is the intended behavior, as it allows users to compose transactions together without introducing unnecessary conflicts.</p>
 </div>
 <p>For example, suppose you have a transactional function that increments a set of counters using atomic addition. <a class="reference internal" href="#developer-guide-atomic-operations"><span class="std std-ref">Atomic operations</span></a> do not add read conflict ranges and so cannot cause the transaction in which they occur to fail. More precisely, the read version for an atomic operation is the same as transaction&#8217;s commit version, and thus no conflicting write from other transactions could be serialized between the read and write of the key. Most of the time, this is exactly what we want. However, suppose there is another transaction that (infrequently) resets one or more counters, and our contract requires that we must advance all specified counters in unison. We want to guarantee that if a counter is reset during an incrementing transaction, then the incrementing transaction will conflict. We can selectively add read conflicts ranges for this purpose:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">guarded_increment</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counters</span><span class="p">):</span>
     <span class="k">for</span> <span class="n">counter</span> <span class="ow">in</span> <span class="n">counters</span><span class="p">:</span>
         <span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">counter</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;&lt;i&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
@@ -723,7 +734,7 @@ of the data while concurrently writing the new version.</p>
 <p>Snapshot reads selectively relax FoundationDB&#8217;s isolation property, reducing <a class="reference internal" href="#developer-guide-transaction-conflicts"><span class="std std-ref">conflicts</span></a> but making it harder to reason about concurrency.</p>
 <p>The strictly serializable isolation that transactions maintain by default has little performance cost when there are few conflicts but can be expensive when there are many. FoundationDB therefore also permits individual reads within a transaction to be done as snapshot reads. Snapshot reads differ from ordinary (strictly serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas strictly serializable reads cause conflicts in that case.</p>
 <p>Consider a transaction which needs to remove and return an arbitrary value from a small range of keys.  The simplest implementation (using strictly serializable isolation) would be:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">remove_one</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="nb">range</span><span class="p">):</span>
     <span class="n">all_kv</span> <span class="o">=</span> <span class="n">tr</span><span class="p">[</span><span class="nb">range</span><span class="p">]</span>
     <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">all_kv</span><span class="p">))</span>
@@ -732,7 +743,7 @@ of the data while concurrently writing the new version.</p>
 </pre></div>
 </div>
 <p>Unfortunately, if a concurrent transaction happens to insert a new key anywhere in the range, our transaction will conflict with it and fail (resulting in a retry) because seeing the other transaction&#8217;s write would change the result of the range read.  FoundationDB is enforcing a stronger contract than we actually need.  A snapshot read allows us to weaken the contract, but we don&#8217;t want to weaken it too far: it&#8217;s still important to us that the actual value we returned existed in the database at the time of our transaction. Adding a <a class="reference internal" href="#conflict-ranges"><span class="std std-ref">conflict range</span></a> for our key ensures that we will fail if someone else modifies the key simultaneously:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">remove_one</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="nb">range</span><span class="p">):</span>
     <span class="n">all_kv</span> <span class="o">=</span> <span class="n">tr</span><span class="o">.</span><span class="n">snapshot</span><span class="p">[</span><span class="nb">range</span><span class="p">]</span>              <span class="c1"># Snapshot read</span>
     <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">all_kv</span><span class="p">))</span>
@@ -768,7 +779,7 @@ of the data while concurrently writing the new version.</p>
 <h3>Transaction cancellation</h3>
 <p>The FoundationDB language bindings all provide a mechanism for cancelling an outstanding transaction. However there are also special transaction options for specifying the conditions under which a transaction should automatically be cancelled.</p>
 <p>In the following example, a retry loop is combined with transaction options that ensure that the operation will not be attempted more than 6 times or for longer than 3 seconds:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">example_with_cancellation</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
     <span class="c1"># Set maximum number of times that on_error() can be called (implicitly by the decorator).</span>
     <span class="c1"># On the 6th time, on_error() will throw retry_limit_exceeded rather than resetting and retrying.</span>
@@ -795,12 +806,12 @@ of the data while concurrently writing the new version.</p>
 <p>For example, suppose you have a polling loop that checks keys for changes once a second:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">polling_loop</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">keys</span><span class="p">):</span>
 
-    <span class="nd">@fdb.transactional</span>
+    <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
     <span class="k">def</span> <span class="nf">read_keys</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
         <span class="k">return</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span><span class="n">tr</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">}</span>
 
     <span class="n">cache</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span><span class="nb">object</span><span class="p">()</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">}</span>
-    <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
         <span class="n">value</span> <span class="o">=</span> <span class="n">read_keys</span><span class="p">(</span><span class="n">db</span><span class="p">)</span>
         <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">:</span>
             <span class="k">if</span> <span class="n">cache</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">!=</span> <span class="n">value</span><span class="p">[</span><span class="n">k</span><span class="p">]:</span>
@@ -816,12 +827,12 @@ of the data while concurrently writing the new version.</p>
 <p>With watches, you can eliminate the sleep and perform new reads only after a change to one of the keys:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">watching_read_loop</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">keys</span><span class="p">):</span>
 
-    <span class="nd">@fdb.transactional</span>
+    <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
     <span class="k">def</span> <span class="nf">watch_keys</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
         <span class="k">return</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span><span class="n">tr</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">},</span> <span class="p">[</span><span class="n">tr</span><span class="o">.</span><span class="n">watch</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">]</span>
 
     <span class="n">cache</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span><span class="nb">object</span><span class="p">()</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">}</span>
-    <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
         <span class="n">value</span><span class="p">,</span> <span class="n">watches</span> <span class="o">=</span> <span class="n">watch_keys</span><span class="p">(</span><span class="n">db</span><span class="p">)</span>
         <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">:</span>
             <span class="k">if</span> <span class="n">cache</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">!=</span> <span class="n">value</span><span class="p">[</span><span class="n">k</span><span class="p">]:</span>
@@ -838,11 +849,11 @@ of the data while concurrently writing the new version.</p>
 <p>If you only need to detect the <em>fact</em> of a change, and your response doesn&#8217;t depend on the new <em>value</em>, then you can eliminate the reads altogether:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">watching_loop</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">keys</span><span class="p">):</span>
 
-    <span class="nd">@fdb.transactional</span>
+    <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
     <span class="k">def</span> <span class="nf">watch_keys</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
         <span class="k">return</span> <span class="p">[</span><span class="n">tr</span><span class="o">.</span><span class="n">watch</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">]</span>
 
-    <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
         <span class="n">fdb</span><span class="o">.</span><span class="n">Future</span><span class="o">.</span><span class="n">wait_for_any</span><span class="p">(</span><span class="o">*</span><span class="n">watch_keys</span><span class="p">(</span><span class="n">db</span><span class="p">))</span>
         <span class="k">yield</span>
 </pre></div>
@@ -930,7 +941,7 @@ of the data while concurrently writing the new version.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 25, 2019.<br/>
+      Last updated on Jan 23, 2020.<br/>
     </p>
   </div>
 </footer>

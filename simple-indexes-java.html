@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.7',
+        VERSION:     '6.2.11',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -209,54 +209,54 @@
 <div class="section" id="code">
 <h2>Code</h2>
 <p>In this example, we’re storing user data based on user ID but sometimes need to retrieve users based on their zipcode. We use a transactional function to set user data and its index and another to retrieve data using the index.</p>
-<div class="highlight-java"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">java.util.ArrayList</span><span class="o">;</span>
+<div class="highlight-java"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">java.util.ArrayList</span><span class="p">;</span>
 
-<span class="kd">public</span> <span class="kd">class</span> <span class="nc">MicroIndexes</span> <span class="o">{</span>
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">MicroIndexes</span> <span class="p">{</span>
 
-    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">FDB</span> <span class="n">fdb</span><span class="o">;</span>
-    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Database</span> <span class="n">db</span><span class="o">;</span>
-    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Subspace</span> <span class="n">main</span><span class="o">;</span>
-    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Subspace</span> <span class="n">index</span><span class="o">;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">FDB</span> <span class="n">fdb</span><span class="p">;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Database</span> <span class="n">db</span><span class="p">;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Subspace</span> <span class="n">main</span><span class="p">;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Subspace</span> <span class="n">index</span><span class="p">;</span>
 
-    <span class="kd">static</span> <span class="o">{</span>
-        <span class="n">fdb</span> <span class="o">=</span> <span class="n">FDB</span><span class="o">.</span><span class="na">selectAPIVersion</span><span class="o">(</span><span class="mi">620</span><span class="o">);</span>
-        <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="na">open</span><span class="o">();</span>
-        <span class="n">main</span> <span class="o">=</span> <span class="k">new</span> <span class="n">Subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="s">&quot;user&quot;</span><span class="o">));</span>
-        <span class="n">index</span> <span class="o">=</span> <span class="k">new</span> <span class="n">Subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="s">&quot;zipcode_index&quot;</span><span class="o">));</span>
-    <span class="o">}</span>
+    <span class="kd">static</span> <span class="p">{</span>
+        <span class="n">fdb</span> <span class="o">=</span> <span class="n">FDB</span><span class="p">.</span><span class="na">selectAPIVersion</span><span class="p">(</span><span class="mi">620</span><span class="p">);</span>
+        <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="p">.</span><span class="na">open</span><span class="p">();</span>
+        <span class="n">main</span> <span class="o">=</span> <span class="k">new</span> <span class="n">Subspace</span><span class="p">(</span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="s">&quot;user&quot;</span><span class="p">));</span>
+        <span class="n">index</span> <span class="o">=</span> <span class="k">new</span> <span class="n">Subspace</span><span class="p">(</span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="s">&quot;zipcode_index&quot;</span><span class="p">));</span>
+    <span class="p">}</span>
 
     <span class="c1">// TODO These three methods (setUser, getUser, and getUserIDsInRegion)</span>
     <span class="c1">// are all in the recipe book.</span>
-    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">setUser</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">,</span> <span class="kd">final</span> <span class="n">String</span> <span class="n">ID</span><span class="o">,</span> <span class="kd">final</span> <span class="n">String</span> <span class="n">name</span><span class="o">,</span> <span class="kd">final</span> <span class="n">String</span> <span class="n">zipcode</span><span class="o">){</span>
-        <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">(</span><span class="n">tr</span> <span class="o">-&gt;</span>
-            <span class="n">tr</span><span class="o">.</span><span class="na">set</span><span class="o">(</span><span class="n">main</span><span class="o">.</span><span class="na">pack</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">ID</span><span class="o">,</span><span class="n">zipcode</span><span class="o">)),</span> <span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">name</span><span class="o">).</span><span class="na">pack</span><span class="o">());</span>
-            <span class="n">tr</span><span class="o">.</span><span class="na">set</span><span class="o">(</span><span class="n">index</span><span class="o">.</span><span class="na">pack</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">zipcode</span><span class="o">,</span><span class="n">ID</span><span class="o">)),</span> <span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">().</span><span class="na">pack</span><span class="o">());</span>
-            <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
-        <span class="o">});</span>
-    <span class="o">}</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">setUser</span><span class="p">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="p">,</span> <span class="kd">final</span> <span class="n">String</span> <span class="n">ID</span><span class="p">,</span> <span class="kd">final</span> <span class="n">String</span> <span class="n">name</span><span class="p">,</span> <span class="kd">final</span> <span class="n">String</span> <span class="n">zipcode</span><span class="p">){</span>
+        <span class="n">tcx</span><span class="p">.</span><span class="na">run</span><span class="p">(</span><span class="n">tr</span> <span class="o">-&gt;</span>
+            <span class="n">tr</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="n">main</span><span class="p">.</span><span class="na">pack</span><span class="p">(</span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="n">ID</span><span class="p">,</span><span class="n">zipcode</span><span class="p">)),</span> <span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="n">name</span><span class="p">).</span><span class="na">pack</span><span class="p">());</span>
+            <span class="n">tr</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="n">index</span><span class="p">.</span><span class="na">pack</span><span class="p">(</span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="n">zipcode</span><span class="p">,</span><span class="n">ID</span><span class="p">)),</span> <span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">().</span><span class="na">pack</span><span class="p">());</span>
+            <span class="k">return</span> <span class="kc">null</span><span class="p">;</span>
+        <span class="p">});</span>
+    <span class="p">}</span>
 
     <span class="c1">// Normal lookup.</span>
-    <span class="kd">public</span> <span class="kd">static</span> <span class="n">String</span> <span class="nf">getUser</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">,</span> <span class="kd">final</span> <span class="n">String</span> <span class="n">ID</span><span class="o">){</span>
-        <span class="k">return</span> <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">(</span><span class="n">tr</span> <span class="o">-&gt;</span> <span class="o">{</span>
-            <span class="k">for</span><span class="o">(</span><span class="n">KeyValue</span> <span class="n">kv</span> <span class="o">:</span> <span class="n">tr</span><span class="o">.</span><span class="na">getRange</span><span class="o">(</span><span class="n">main</span><span class="o">.</span><span class="na">subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">ID</span><span class="o">)).</span><span class="na">range</span><span class="o">(),</span> <span class="mi">1</span><span class="o">)){</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="n">String</span> <span class="nf">getUser</span><span class="p">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="p">,</span> <span class="kd">final</span> <span class="n">String</span> <span class="n">ID</span><span class="p">){</span>
+        <span class="k">return</span> <span class="n">tcx</span><span class="p">.</span><span class="na">run</span><span class="p">(</span><span class="n">tr</span> <span class="o">-&gt;</span> <span class="p">{</span>
+            <span class="k">for</span><span class="p">(</span><span class="n">KeyValue</span> <span class="n">kv</span> <span class="p">:</span> <span class="n">tr</span><span class="p">.</span><span class="na">getRange</span><span class="p">(</span><span class="n">main</span><span class="p">.</span><span class="na">subspace</span><span class="p">(</span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="n">ID</span><span class="p">)).</span><span class="na">range</span><span class="p">(),</span> <span class="mi">1</span><span class="p">)){</span>
                 <span class="c1">// Return user with correct ID (if exists).</span>
-                <span class="k">return</span> <span class="n">Tuple</span><span class="o">.</span><span class="na">fromBytes</span><span class="o">(</span><span class="n">kv</span><span class="o">.</span><span class="na">getValue</span><span class="o">()).</span><span class="na">getString</span><span class="o">(</span><span class="mi">0</span><span class="o">);</span>
-            <span class="o">}</span>
-            <span class="k">return</span> <span class="s">&quot;&quot;</span><span class="o">;</span>
-        <span class="o">});</span>
-    <span class="o">}</span>
+                <span class="k">return</span> <span class="n">Tuple</span><span class="p">.</span><span class="na">fromBytes</span><span class="p">(</span><span class="n">kv</span><span class="p">.</span><span class="na">getValue</span><span class="p">()).</span><span class="na">getString</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+            <span class="p">}</span>
+            <span class="k">return</span> <span class="s">&quot;&quot;</span><span class="p">;</span>
+        <span class="p">});</span>
+    <span class="p">}</span>
 
     <span class="c1">// Index lookup.</span>
-    <span class="kd">public</span> <span class="kd">static</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span> <span class="nf">getUserIDsInRegion</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">,</span> <span class="kd">final</span> <span class="n">String</span> <span class="n">zipcode</span><span class="o">){</span>
-        <span class="k">return</span> <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">(</span><span class="n">tr</span> <span class="o">-&gt;</span> <span class="o">{</span>
-            <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span> <span class="n">IDs</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;();</span>
-            <span class="k">for</span><span class="o">(</span><span class="n">KeyValue</span> <span class="n">kv</span> <span class="o">:</span> <span class="n">tr</span><span class="o">.</span><span class="na">getRange</span><span class="o">(</span><span class="n">index</span><span class="o">.</span><span class="na">subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">zipcode</span><span class="o">)).</span><span class="na">range</span><span class="o">())){</span>
-                <span class="n">IDs</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">index</span><span class="o">.</span><span class="na">unpack</span><span class="o">(</span><span class="n">kv</span><span class="o">.</span><span class="na">getKey</span><span class="o">()).</span><span class="na">getString</span><span class="o">(</span><span class="mi">1</span><span class="o">));</span>
-            <span class="o">}</span>
-            <span class="k">return</span> <span class="n">IDs</span><span class="o">;</span>
-        <span class="o">});</span>
-    <span class="o">}</span>
-<span class="o">}</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span> <span class="nf">getUserIDsInRegion</span><span class="p">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="p">,</span> <span class="kd">final</span> <span class="n">String</span> <span class="n">zipcode</span><span class="p">){</span>
+        <span class="k">return</span> <span class="n">tcx</span><span class="p">.</span><span class="na">run</span><span class="p">(</span><span class="n">tr</span> <span class="o">-&gt;</span> <span class="p">{</span>
+            <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span> <span class="n">IDs</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span><span class="p">();</span>
+            <span class="k">for</span><span class="p">(</span><span class="n">KeyValue</span> <span class="n">kv</span> <span class="p">:</span> <span class="n">tr</span><span class="p">.</span><span class="na">getRange</span><span class="p">(</span><span class="n">index</span><span class="p">.</span><span class="na">subspace</span><span class="p">(</span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="n">zipcode</span><span class="p">)).</span><span class="na">range</span><span class="p">())){</span>
+                <span class="n">IDs</span><span class="p">.</span><span class="na">add</span><span class="p">(</span><span class="n">index</span><span class="p">.</span><span class="na">unpack</span><span class="p">(</span><span class="n">kv</span><span class="p">.</span><span class="na">getKey</span><span class="p">()).</span><span class="na">getString</span><span class="p">(</span><span class="mi">1</span><span class="p">));</span>
+            <span class="p">}</span>
+            <span class="k">return</span> <span class="n">IDs</span><span class="p">;</span>
+        <span class="p">});</span>
+    <span class="p">}</span>
+<span class="p">}</span>
 </pre></div>
 </div>
 <p>That&#8217;s just about all you need to create an index.</p>
@@ -283,7 +283,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 25, 2019.<br/>
+      Last updated on Jan 23, 2020.<br/>
     </p>
   </div>
 </footer>

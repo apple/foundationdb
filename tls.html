@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.7',
+        VERSION:     '6.2.11',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -96,7 +96,7 @@
 <li><a class="reference internal" href="#default-password">Default Password</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#parameters-and-client-bindings">Parameters and client bindings</a></li>
+<li><a class="reference internal" href="#permissions">Permissions</a></li>
 <li><a class="reference internal" href="#automatic-tls-certificate-refresh">Automatic TLS certificate refresh</a></li>
 </ul>
 </li>
@@ -177,7 +177,7 @@
 <li><a class="reference internal" href="#default-password">Default Password</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#parameters-and-client-bindings">Parameters and client bindings</a></li>
+<li><a class="reference internal" href="#permissions">Permissions</a></li>
 <li><a class="reference internal" href="#automatic-tls-certificate-refresh">Automatic TLS certificate refresh</a></li>
 </ul>
 </li>
@@ -367,8 +367,9 @@ to trust</td>
 <p>There is no default password. If no password is specified, it is assumed that the private key is unencrypted.</p>
 </div>
 </div>
-<div class="section" id="parameters-and-client-bindings">
-<h3>Parameters and client bindings</h3>
+<div class="section" id="permissions">
+<h3>Permissions</h3>
+<p>All files used by TLS must have sufficient read permissions such that the user running the FoundationDB server or client process can access them. It may also be necessary to have similar read permissions on the parent directories of the files used in the TLS configuration.</p>
 </div>
 <div class="section" id="automatic-tls-certificate-refresh">
 <h3>Automatic TLS certificate refresh</h3>
@@ -669,7 +670,7 @@ to proceed.</td>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 25, 2019.<br/>
+      Last updated on Jan 23, 2020.<br/>
     </p>
   </div>
 </footer>
