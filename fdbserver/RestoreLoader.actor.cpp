@@ -181,7 +181,14 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	state Reference<LoaderBatchData> batchData = self->batch[req.batchIndex];
 	state bool isDuplicated = true;
 	ASSERT(batchData.isValid());
+	bool paramExist = batchData->processedFileParams.find(req.param) != batchData->processedFileParams.end();
+	bool isReady = paramExist ? batchData->processedFileParams[req.param].isReady() : false;
 
+	TraceEvent("FastRestoreLoaderPhaseLoadFile", self->id())
+	    .detail("BatchIndex", req.batchIndex)
+	    .detail("ProcessLoadParam", req.param.toString())
+	    .detail("NotProcessed", !paramExist)
+	    .detail("Processed", isReady);
 	if (batchData->processedFileParams.find(req.param) == batchData->processedFileParams.end()) {
 		TraceEvent("FastRestoreLoadFile", self->id()).detail("BatchIndex", req.batchIndex).detail("ProcessLoadParam", req.param.toString());
 		ASSERT(batchData->sampleMutations.find(req.param) == batchData->sampleMutations.end());
@@ -195,6 +202,9 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	wait(batchData->processedFileParams[req.param]); // wait on the processing of the req.param.
 
 	req.reply.send(RestoreLoadFileReply(req.param, batchData->sampleMutations[req.param], isDuplicated));
+	TraceEvent("FastRestoreLoaderPhaseLoadFileDone", self->id())
+	    .detail("BatchIndex", req.batchIndex)
+	    .detail("ProcessLoadParam", req.param.toString());
 	// TODO: clear self->sampleMutations[req.param] memory to save memory on loader
 	return Void();
 }
@@ -206,7 +216,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	state Reference<LoaderBatchStatus> batchStatus = self->status[req.batchIndex];
 	state bool isDuplicated = true;
 
-	TraceEvent("FastRestoreSendMutations", self->id())
+	TraceEvent("FastRestoreLoaderPhaseSendMutations", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("UseRangeFile", req.useRangeFile)
 	    .detail("LoaderSendStatus", batchStatus->toString());
@@ -267,6 +277,10 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 		}
 	}
 
+	TraceEvent("FastRestoreLoaderPhaseSendMutationsDone", self->id())
+	    .detail("BatchIndex", req.batchIndex)
+	    .detail("UseRangeFile", req.useRangeFile)
+	    .detail("LoaderSendStatus", batchStatus->toString());
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 	return Void();
 }
@@ -288,11 +302,19 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	state Version prevVersion = 0; // startVersion
 	state std::vector<UID> applierIDs = getApplierIDs(*pRangeToApplier);
 
-	TraceEvent("FastRestore_SendMutationToApplier")
+	TraceEvent("FastRestoreLoaderSendMutationToApplier")
 	    .detail("IsRangeFile", isRangeFile)
 	    .detail("EndVersion", asset.endVersion)
 	    .detail("RestoreAsset", asset.toString());
 
+	// There should be no mutation at asset.endVersion version because it is exclusive
+	if (kvOps.find(asset.endVersion) != kvOps.end()) {
+		TraceEvent(SevError, "FastRestoreLoaderSendMutationToApplier")
+		    .detail("BatchIndex", batchIndex)
+		    .detail("RestoreAsset", asset.toString())
+		    .detail("IsRangeFile", isRangeFile)
+		    .detail("Data loss at version", asset.endVersion);
+	}
 	// Ensure there is a mutation request sent at endVersion, so that applier can advance its notifiedVersion
 	if (kvOps.find(asset.endVersion) == kvOps.end()) {
 		kvOps[asset.endVersion] = MutationsVec(); // Empty mutation vector will be handled by applier

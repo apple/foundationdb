@@ -101,9 +101,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	// Note: Insert new items into processedFileState will not invalidate the reference.
 	state NotifiedVersion& curFilePos = batchData->processedFileState[req.asset];
 
-	TraceEvent("FastRestore")
-	    .detail("ApplierNode", self->id())
-	    .detail("VersionBatchIndex", req.batchIndex)
+	TraceEvent("FastRestoreApplierPhaseReceiveMutations", self->id())
+	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
 	    .detail("ProcessedFileVersion", curFilePos.get())
 	    .detail("Request", req.toString());
@@ -148,6 +147,11 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 		curFilePos.set(req.version);
 	}
 
+	TraceEvent("FastRestoreApplierPhaseReceiveMutationsDone", self->id())
+	    .detail("BatchIndex", req.batchIndex)
+	    .detail("RestoreAsset", req.asset.toString())
+	    .detail("ProcessedFileVersion", curFilePos.get())
+	    .detail("Request", req.toString());
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 	return Void();
 }
@@ -271,24 +275,22 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state DBApplyProgress progress(applierID, batchData);
 
+	TraceEvent("FastRestoreApplerPhaseApplyTxn", applierID)
+	    .detail("BatchIndex", batchIndex)
+	    .detail("FromVersion", batchData->kvOps.empty() ? -1 : batchData->kvOps.begin()->first)
+	    .detail("EndVersion", batchData->kvOps.empty() ? -1 : batchData->kvOps.rbegin()->first);
+
 	// Assume the process will not crash when it apply mutations to DB. The reply message can be lost though
 	if (batchData->kvOps.empty()) {
-		TraceEvent("FastRestore_ApplierTxn")
-		    .detail("ApplierApplyToDBFinished", applierID)
-		    .detail("Reason", "EmptyVersionMutation");
 		return Void();
 	}
 	ASSERT_WE_THINK(batchData->kvOps.size());
-	TraceEvent("FastRestore")
-	    .detail("ApplierApplyToDB", applierID)
-	    .detail("FromVersion", batchData->kvOps.begin()->first)
-	    .detail("EndVersion", batchData->kvOps.rbegin()->first);
 
 	batchData->sanityCheckMutationOps();
 
 	if (progress.isDone()) {
-		TraceEvent("FastRestore_ApplierTxn")
-		    .detail("ApplierApplyToDBFinished", applierID)
+		TraceEvent("FastRestoreApplerPhaseApplyTxnDone", applierID)
+		    .detail("BatchIndex", batchIndex)
 		    .detail("Reason", "NoMutationAtVersions");
 		return Void();
 	}
@@ -422,8 +424,8 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 		}
 	}
 
-	TraceEvent("FastRestore_ApplierTxn")
-	    .detail("ApplierApplyToDBFinished", applierID)
+	TraceEvent("FastRestoreApplerPhaseApplyTxn", applierID)
+	    .detail("BatchIndex", batchIndex)
 	    .detail("CleanupCurTxnIds", progress.curTxnId);
 	// clean up txn ids
 	loop {
@@ -442,7 +444,7 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 	}
 	// House cleaning
 	batchData->kvOps.clear();
-	TraceEvent("FastRestore_ApplierTxn").detail("ApplierApplyToDBFinished", applierID);
+	TraceEvent("FastRestoreApplerPhaseApplyTxnDone", applierID).detail("BatchIndex", batchIndex);
 
 	return Void();
 }
@@ -452,14 +454,14 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
     // Ensure batch i is applied before batch (i+1)
     wait(self->finishedBatch.whenAtLeast(req.batchIndex-1));
 
+	TraceEvent("FastRestoreApplierPhaseHandleApplyToDB", self->id())
+		    .detail("BatchIndex", req.batchIndex)
+			.detail("FinishedBatch", self->finishedBatch.get())
+		    .detail("HasStarted", batchData->dbApplier.present());
 	state bool isDuplicated = true;
 	if (self->finishedBatch.get() == req.batchIndex-1) {
 		Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
 		ASSERT(batchData.isValid());
-		TraceEvent("FastRestore")
-			.detail("ApplierApplyToDB", self->id())
-			.detail("VersionBatchIndex", req.batchIndex)
-			.detail("DBApplierPresent", batchData->dbApplier.present());
 		if (!batchData->dbApplier.present()) {
 			isDuplicated = false;
 			batchData->dbApplier = Never();

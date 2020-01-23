@@ -329,7 +329,7 @@ struct AtomicOpsWorkload : TestWorkload {
 			memcpy(&intValue, kv.value.begin(), kv.value.size());
 			opsVal[kv.key] = intValue;
 			if (!inRecord) {
-				TraceEvent(SevError, "MissingLogKey").detail("OpsKey", kv.key);
+				TraceEvent(SevWarnAlways, "MissingLogKey").detail("OpsKey", kv.key);
 			}
 			if (inRecord && (self->actorCount == 1 && intValue != logVal[records[kv.key]])) {
 				// When multiple actors exist, 1 opsKey can have multiple log keys

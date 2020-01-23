@@ -44,16 +44,18 @@ ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
 
 void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<RestoreRoleData> self) {
 	self->resetPerRestoreRequest();
-	TraceEvent("FastRestore")
+	TraceEvent("FastRestoreRolePhaseFinishRestoreRequest", self->id())
 	    .detail("FinishRestoreRequest", req.terminate)
-	    .detail("Role", getRoleStr(self->role))
-	    .detail("Node", self->id());
+	    .detail("Role", getRoleStr(self->role));
 
 	req.reply.send(RestoreCommonReply(self->id()));
 }
 
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
-	TraceEvent("FastRestoreHandleInitVersionBatch", self->id()).detail("Role",  getRoleStr(self->role)).detail("BatchIndex", req.batchIndex).detail("VersionBatchId", self->versionBatchId.get());
+	TraceEvent("FastRestoreRolePhaseInitVersionBatch", self->id())
+	    .detail("BatchIndex", req.batchIndex)
+	    .detail("Role", getRoleStr(self->role))
+	    .detail("VersionBatchId", self->versionBatchId.get());
 	// batchId is continuous. (req.batchIndex-1) is the id of the just finished batch.
 	wait(self->versionBatchId.whenAtLeast(req.batchIndex - 1));
 

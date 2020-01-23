@@ -293,7 +293,8 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
                                              std::map<UID, RestoreLoaderInterface> loadersInterf, int batchIndex,
                                              Database cx, RestoreRequest request, VersionBatch versionBatch,
                                              bool isRangeFile) {
-	TraceEvent("FastRestore")
+	TraceEvent("FastRestoreMasterPhaseLoadFiles")
+	    .detail("BatchIndex", batchIndex)
 	    .detail("FileTypeLoadedInVersionBatch", isRangeFile)
 	    .detail("BeginVersion", versionBatch.beginVersion)
 	    .detail("EndVersion", versionBatch.endVersion);
@@ -404,7 +405,9 @@ ACTOR static Future<Void> sendMutationsFromLoaders(Reference<MasterBatchData> ba
                                                    Reference<MasterBatchStatus> batchStatus,
                                                    std::map<UID, RestoreLoaderInterface> loadersInterf, int batchIndex,
                                                    bool useRangeFile) {
-	TraceEvent("FastRestore").detail("SendMutationsFromLoaders", batchIndex).detail("UseRangeFiles", useRangeFile);
+	TraceEvent("FastRestoreMasterPhaseSendMutationsFromLoaders")
+	    .detail("BatchIndex", batchIndex)
+	    .detail("UseRangeFiles", useRangeFile);
 
 	std::vector<std::pair<UID, RestoreSendMutationsToAppliersRequest>> requests;
 	for (auto& loader : loadersInterf) {
@@ -502,7 +505,9 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 	std::vector<Key> keyrangeSplitter;
 	keyrangeSplitter.push_back(normalKeys.begin); // First slot
 	double cumulativeSize = slotSize;
-	TraceEvent("FastRestore").detail("VersionBatch", batchIndex).detail("SamplingSize", batchData->samplesSize);
+	TraceEvent("FastRestoreMasterPhaseCalculateApplierKeyRanges")
+	    .detail("BatchIndex", batchIndex)
+	    .detail("SamplingSize", batchData->samplesSize);
 	while (cumulativeSize < batchData->samplesSize) {
 		IndexedSet<Key, int64_t>::iterator lowerBound = batchData->samples.index(cumulativeSize);
 		if (lowerBound == batchData->samples.end()) {
@@ -640,7 +645,10 @@ ACTOR static Future<Void> clearDB(Database cx) {
 
 ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInterface> appliersInterf,
                                                  std::map<UID, RestoreLoaderInterface> loadersInterf, int batchIndex) {
-    TraceEvent("FastRestoreInitVersionBatch").detail("BatchIndex", batchIndex).detail("Appliers", appliersInterf.size()).detail("Loaders", loadersInterf.size());
+	TraceEvent("FastRestoreMasterPhaseInitVersionBatch")
+	    .detail("BatchIndex", batchIndex)
+	    .detail("Appliers", appliersInterf.size())
+	    .detail("Loaders", loadersInterf.size());
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requestsToAppliers;
 	for (auto& applier : appliersInterf) {
 		requestsToAppliers.emplace_back(applier.first, RestoreVersionBatchRequest(batchIndex));
@@ -663,6 +671,9 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchSta
 	// Prepare the applyToDB requests
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requests;
 
+	TraceEvent("FastRestoreMasterPhaseApplyMutations")
+	    .detail("BatchIndex", batchIndex)
+	    .detail("Appliers", appliersInterf.size());
 	for (auto& applier : appliersInterf) {
 		ASSERT(batchStatus->applyStatus.find(applier.first) == batchStatus->applyStatus.end());
 		requests.emplace_back(applier.first, RestoreVersionBatchRequest(batchIndex));
@@ -701,7 +712,7 @@ ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> se
 	for (auto& loader : self->loadersInterf) {
 		requests.emplace_back(loader.first, RestoreFinishRequest(terminate));
 	}
-	
+
 	Future<Void> endLoaders = sendBatchRequests(&RestoreLoaderInterface::finishRestore, self->loadersInterf, requests);
 
 	requests.clear();
