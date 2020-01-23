@@ -38,11 +38,6 @@ struct RelocateShard {
 	RelocateShard( KeyRange const& keys, int priority ) : keys(keys), priority(priority) {}
 };
 
-enum {
-	SOME_SHARED = 2,
-	NONE_SHARED = 3
-};
-
 struct IDataDistributionTeam {
 	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() = 0;
 	virtual int size() = 0;
@@ -81,7 +76,6 @@ struct GetTeamRequest {
 	bool wantsTrueBest;
 	bool preferLowerUtilization;
 	double inflightPenalty;
-	std::vector<UID> sources;
 	std::vector<UID> completeSources;
 	Promise< Optional< Reference<IDataDistributionTeam> > > reply;
 
@@ -93,10 +87,6 @@ struct GetTeamRequest {
 
 		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
 		   << " PreferLowerUtilization:" << preferLowerUtilization << " inflightPenalty:" << inflightPenalty << ";";
-		ss << "Sources:";
-		for (auto& s : sources) {
-			ss << s.toString() << ",";
-		}
 		ss << "CompleteSources:";
 		for (auto& cs : completeSources) {
 			ss << cs.toString() << ",";

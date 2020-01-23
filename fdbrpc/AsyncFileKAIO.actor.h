@@ -416,7 +416,7 @@ public:
 			++ctx.countAIOSubmit;
 
 			double elapsed = timer_monotonic() - begin;
-			g_network->networkMetrics.secSquaredSubmit += elapsed*elapsed/2;	
+			g_network->networkInfo.metrics.secSquaredSubmit += elapsed*elapsed/2;	
 
 			//TraceEvent("Launched").detail("N", rc).detail("Queued", ctx.queue.size()).detail("Elapsed", elapsed).detail("Outstanding", ctx.outstanding+rc);
 			//printf("launched: %d/%d in %f us (%d outstanding; lowest prio %d)\n", rc, ctx.queue.size(), elapsed*1e6, ctx.outstanding + rc, toStart[n-1]->getTask());
@@ -672,7 +672,7 @@ private:
 				double t = timer_monotonic();
 				double elapsed = t - ctx.ioStallBegin;
 				ctx.ioStallBegin = t;
-				g_network->networkMetrics.secSquaredDiskStall += elapsed*elapsed/2;
+				g_network->networkInfo.metrics.secSquaredDiskStall += elapsed*elapsed/2;
 			}
 
 			ctx.outstanding -= n;
