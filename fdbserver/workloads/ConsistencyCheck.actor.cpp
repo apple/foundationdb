@@ -737,13 +737,12 @@ public:
 
 					// Try to read from the cache server as well
 					//if (scit != system.storageCaches.end()) {
-					if (false) {
 						//TraceEvent("ConsistencyCheck_FoundSSIForCacheServer").detail("UID", scit->second.id()).detail("IsCacheServer", scit->second.isCacheServer);
 						//auto sz = storageServerInterfaces.size();
 						//storageServerInterfaces.push_back(scit->second);
 						//TraceEvent("ConsistencyCheck_VerifySSIForCacheServer").detail("Size", sz).detail("UID", storageServerInterfaces[sz].id()).detail("IsCacheServer", storageServerInterfaces[sz].isCacheServer);
 						//TraceEvent("ConsistencyCheck_UpdatedSize").detail("Size", storageServerInterfaces.size());
-					}
+					//}
 					break;
 				}
 				catch(Error &e) {
@@ -788,7 +787,6 @@ public:
 				state KeySelector begin = firstGreaterOrEqual(range.begin);
 				state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 
-				TraceEvent("ConsistencyCheck_InsideLoop").detail("Size", storageServerInterfaces.size());
 				//Read a limited number of entries at a time, repeating until all keys in the shard have been read
 				loop
 				{
@@ -812,23 +810,10 @@ public:
 						for(j = 0; j < storageServerInterfaces.size(); j++)
 						{
 							resetReply(req);
-							//if (storageServerInterfaces[j].isCacheServer)
-							//if (j == storageServerInterfaces.size()-1)
-							TraceEvent("ConsistencyCheck_CacheServerInterface").detail("J", j).detail("UID", storageServerInterfaces[j].uniqueID).detail("IsCacheServer", storageServerInterfaces[j].isCacheServer);
+							if (storageServerInterfaces[j].isCacheServer)
+								TraceEvent(SevDebug, "ConsistencyCheck_CacheServerInterface").detail("J", j).detail("UID", storageServerInterfaces[j].uniqueID).detail("IsCacheServer", storageServerInterfaces[j].isCacheServer);
 							keyValueFutures.push_back(storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 						}
-
-						// Try to read from the cache server as well
-						//state ServerDBInfo system = self->dbInfo->get();
-						//state MasterProxyInterface proxy = deterministicRandom()->randomChoice( system.client.proxies );
-						//auto storageCaches = system.storageCaches;
-						//int id = 0;
-						//auto it = find_if(storageCaches.begin(), storageCaches.end(), storageCachesComparator(id));
-						//if (it != storageCaches.end()) {
-							//TraceEvent(SevDebug, "FoundUIDForServerIdx", commitData.dbgid).detail("Key", kv.key.toString()).detail("serverIdx", id);
-						//	resetReply(req);
-						//	keyValueFutures.push_back(it->second.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
-						//}
 
 						wait(waitForAll(keyValueFutures));
 

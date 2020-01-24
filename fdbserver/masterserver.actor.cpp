@@ -128,7 +128,7 @@ private:
 		if(finalWrite) {
 			self->finalWriteStarted = true;
 		}
-		
+
 		try {
 			wait( self->cstate.setExclusive( BinaryWriter::toValue(newState, IncludeVersion()) ) );
 		} catch (Error& e) {
@@ -156,7 +156,7 @@ private:
 		} else {
 			self->fullyRecovered.send(Void());
 		}
-		
+
 		return Void();
 	}
 };
@@ -370,7 +370,7 @@ ACTOR Future<Void> newSeedServers( Reference<MasterData> self, RecruitFromConfig
 				dcId_tags[recruits.storageServers[idx].locality.dcId()] = Tag(nextLocality, 0);
 				nextLocality++;
 			}
-				
+
 			Tag& tag = dcId_tags[recruits.storageServers[idx].locality.dcId()];
 			tag.id++;
 			idx++;
@@ -573,7 +573,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 			.detail("DesiredResolvers", self->configuration.getDesiredResolvers())
 			.detail("StoreType", self->configuration.storageServerStoreType)
 			.trackLatest("MasterRecoveryState");
-	
+
 	//FIXME: we only need log routers for the same locality as the master
 	int maxLogRouters = self->cstate.prevDBState.logRouterTags;
 	for(auto& old : self->cstate.prevDBState.oldTLogData) {
@@ -592,7 +592,7 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 			self->remoteDcIds.push_back(recruits.dcId.get() == self->configuration.regions[0].dcId ? self->configuration.regions[1].dcId : self->configuration.regions[0].dcId);
 		}
 	}
-	
+
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])
@@ -808,7 +808,7 @@ void updateConfigForForcedRecovery(Reference<MasterData> self, vector<Standalone
 		StatusObject regionJSON;
 		regionJSON["regions"] = self->configuration.getRegionJSON();
 		regionCommit.mutations.push_back_deep(regionCommit.arena(), MutationRef(MutationRef::SetValue, configKeysPrefix.toString() + "regions", BinaryWriter::toValue(regionJSON, IncludeVersion()).toString()));
-		self->configuration.applyMutation( regionCommit.mutations.back() ); //modifying the configuration directly does not change the configuration when it is re-serialized unless we call applyMutation 
+		self->configuration.applyMutation( regionCommit.mutations.back() ); //modifying the configuration directly does not change the configuration when it is re-serialized unless we call applyMutation
 		TraceEvent("ForcedRecoveryConfigChange", self->dbgid)
 			.setMaxEventLength(11000)
 			.setMaxFieldLength(10000)
@@ -1348,7 +1348,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccf->getConnectionString().toString());
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
 	tr.set(recoveryCommitRequest.arena, primaryDatacenterKey, self->myInterface.locality.dcId().present() ? self->myInterface.locality.dcId().get() : StringRef());
-	
+
 	//FIXME: remove this code, caching the entire normal keyspace as a test of functionality
 	//TODO: caching disabled for this merge
 	//tr.set(recoveryCommitRequest.arena, storageCacheKey(normalKeys.begin), storageCacheValue({0}));
@@ -1484,7 +1484,7 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 		while(!self->addActor.isEmpty()) {
 			self->addActor.getFuture().pop();
 		}
-			
+
 		TEST(err.code() == error_code_master_tlog_failed);  // Master: terminated because of a tLog failure
 		TEST(err.code() == error_code_master_proxy_failed);  // Master: terminated because of a proxy failure
 		TEST(err.code() == error_code_master_resolver_failed);  // Master: terminated because of a resolver failure
