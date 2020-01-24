@@ -38,6 +38,7 @@ private:
 	uint64_t maxLogsSize;
 	int traceFileFD;
 	uint32_t index;
+	uint64_t unsuccessfulFlushCount;
 
 	std::function<void()> onError;
 
@@ -56,6 +57,7 @@ public:
 	void sync();
 
 	void cleanupTraceFiles();
+	uint64_t getUnsuccessfulFlushCount() override;
 };
 
 #endif

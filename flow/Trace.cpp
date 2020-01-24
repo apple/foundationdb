@@ -493,6 +493,8 @@ public:
 		}
 	}
 
+	uint64_t getUnsuccessfulFlushCount() { return logWriter->getUnsuccessfulFlushCount(); }
+
 	~TraceLog() {
 		close();
 		if (writer) writer->addref(); // FIXME: We are not shutting down the writer thread at all, because the ThreadPool shutdown mechanism is blocking (necessarily waits for current work items to finish) and we might not be able to finish everything.
@@ -651,6 +653,10 @@ void addTraceRole(std::string role) {
 
 void removeTraceRole(std::string role) {
 	g_traceLog.removeRole(role);
+}
+
+uint64_t getUnsuccessfulFlushCount() {
+	return g_traceLog.getUnsuccessfulFlushCount();
 }
 
 TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true), logged(false) {
