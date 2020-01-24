@@ -54,7 +54,7 @@ struct BackupData {
 	const LogEpoch recruitedEpoch;
 	const LogEpoch backupEpoch;
 	Version minKnownCommittedVersion;
-	Version savedVersion, lastSeenVersion;
+	Version savedVersion;
 	AsyncVar<Reference<ILogSystem>> logSystem;
 	Database cx;
 	std::vector<VersionedMessage> messages;
@@ -66,10 +66,10 @@ struct BackupData {
 	CounterCollection cc;
 	Future<Void> logger;
 
-	explicit BackupData(Reference<AsyncVar<ServerDBInfo>> db, const InitializeBackupRequest& req)
-	  : myId(req.reqId), tag(req.routerTag), startVersion(req.startVersion), endVersion(req.endVersion),
+	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo>> db, const InitializeBackupRequest& req)
+	  : myId(id), tag(req.routerTag), startVersion(req.startVersion), endVersion(req.endVersion),
 	    recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch), minKnownCommittedVersion(invalidVersion),
-	    savedVersion(invalidVersion), lastSeenVersion(invalidVersion), cc("BackupWorker", myId.toString()) {
+	    savedVersion(invalidVersion), cc("BackupWorker", myId.toString()) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 		pullFinished.set(false);
 
@@ -126,7 +126,7 @@ ACTOR Future<Void> monitorBackupChanges(BackupData* self, bool started) {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> value = wait(tr.get(backupStartedKey));
-				if (value.present() && started) {
+				if (value.present()) {
 					self->backupUidVersions.set(decodeBackupStartedValue(value.get()));
 					TraceEvent e("BackupWorkerGotStartKey", self->myId);
 					int i = 1;
@@ -135,7 +135,7 @@ ACTOR Future<Void> monitorBackupChanges(BackupData* self, bool started) {
 						    .detail(format("Version%d", i), uidVersion.second);
 						i++;
 					}
-					return Void();
+					if (started) return Void();
 				}
 				if (!value.present() && !started) {
 					TraceEvent("BackupWorkerNoStartKey", self->myId);
@@ -158,8 +158,10 @@ ACTOR Future<Void> monitorBackupChanges(BackupData* self, bool started) {
 // unblocks StartFullBackupTaskFunc::_execute.
 ACTOR Future<Void> monitorAllWorkerStarted(BackupData* self) {
 	loop {
-		while (self->backupUidVersions.get().empty()) {
-			wait(self->backupUidVersions.onChange());
+		wait(delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL / 2.0) || self->backupUidVersions.onChange());
+
+		if (self->backupUidVersions.get().empty()) {
+			continue;
 		}
 
 		// check all workers have started by checking their progress is larger
@@ -211,8 +213,6 @@ ACTOR Future<Void> monitorAllWorkerStarted(BackupData* self) {
 				}
 			}
 		}
-
-		wait(delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL / 2.0) || self->backupUidVersions.onChange());
 	}
 }
 
@@ -235,20 +235,6 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 			wait(tr.onError(e));
 		}
 	}
-}
-
-static std::string tagsToString(const VectorRef<Tag>& tags) {
-	std::string s;
-	bool first = true;
-	for (auto t = tags.begin(); t != tags.end(); t++) {
-		if (first) {
-			first = false;
-		} else {
-			s.append(", ");
-		}
-		s.append((*t).toString());
-	}
-	return s;
 }
 
 // Returns true if the message is a mutation that should be backuped, i.e.,
@@ -356,12 +342,12 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		// lag TLog might have. Changing to 20s may fail consistency check.
 		state Future<Void> uploadDelay = delay(10);
 
+		const Version maxPopVersion =
+		    self->endVersion.present() ? self->endVersion.get() : self->minKnownCommittedVersion;
 		if (self->messages.empty()) {
 			// Even though messages is empty, we still want to advance popVersion.
-			popVersion = std::max(popVersion, self->lastSeenVersion);
+			popVersion = std::max(popVersion, maxPopVersion);
 		} else {
-			const Version maxPopVersion =
-			    self->endVersion.present() ? self->endVersion.get() : self->minKnownCommittedVersion;
 			int numMsg = 0;
 			for (const auto& message : self->messages) {
 				if (message.getVersion() > maxPopVersion) break;
@@ -398,8 +384,9 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Future<Void> logSystemChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
-	state Version tagAt = self->startVersion;
+	state Version tagAt = std::max(self->startVersion, self->savedVersion);
 
+	TraceEvent("BackupWorkerPull", self->myId);
 	loop {
 		loop choose {
 			when (wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
@@ -424,7 +411,6 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		}
 
 		tagAt = r->version().version;
-		self->lastSeenVersion = std::max(tagAt, self->lastSeenVersion);
 		TraceEvent("BackupWorkerGot", self->myId).suppressFor(1.0).detail("V", tagAt);
 		if (self->endVersion.present() && tagAt > self->endVersion.get()) {
 			self->eraseMessagesAfterEndVersion();
@@ -441,8 +427,10 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 }
 
 ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self) {
+	state Future<Void> started, pullFinished;
+
 	loop {
-		state Future<Void> started = monitorBackupChanges(self, true);
+		started = monitorBackupChanges(self, true);
 		loop {
 			GetReadVersionRequest request(1, GetReadVersionRequest::PRIORITY_DEFAULT |
 			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
@@ -455,18 +443,18 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self) {
 				                                                  request, self->cx->taskID))) {
 					self->savedVersion = std::max(reply.version, self->savedVersion);
 					self->minKnownCommittedVersion = std::max(reply.version, self->minKnownCommittedVersion);
+					TraceEvent("BackupWorkerNoopPop", self->myId).detail("SavedVersion", self->savedVersion);
 					self->pop(); // Pop while the worker is in this NOOP state.
 					wait(delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID));
 				}
 			}
 		}
 
-		TraceEvent("BackupWorkerStartPullData", self->myId);
-
 		Future<Void> stopped = monitorBackupChanges(self, false);
-		state Future<Void> pullFinished = pullAsyncData(self);
+		pullFinished = pullAsyncData(self);
 		wait(stopped || pullFinished);
 		if (pullFinished.isReady()) return Void(); // backup is done for some old epoch.
+		TraceEvent("BackupWorkerPaused", self->myId);
 	}
 }
 
@@ -490,7 +478,7 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, LogEpoch r
 
 ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest req,
                                 Reference<AsyncVar<ServerDBInfo>> db) {
-	state BackupData self(db, req);
+	state BackupData self(interf.id(), db, req);
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection(addActor.getFuture());
 	state Future<Void> dbInfoChange = Void();
