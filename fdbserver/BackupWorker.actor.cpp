@@ -78,8 +78,8 @@ struct BackupData {
 			container = IBackupContainer::openContainer("file://simfdb/mutation_backups/");
 		} else {
 			// TODO: use blobstore URL passed from somewhere.
-			ASSERT(false);
-			container = IBackupContainer::openContainer("blobstore://");
+			//ASSERT(false);
+			//container = IBackupContainer::openContainer("blobstore://");
 		}
 	}
 
