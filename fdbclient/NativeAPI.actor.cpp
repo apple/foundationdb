@@ -663,17 +663,6 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& k
 }
 
 void DatabaseContext::invalidateCache( const KeyRef& key, bool isBackward ) {
-	CoalescedKeyRangeMap<bool>::Iterator cacheIter;
-	if (isBackward) {
-		cacheIter = cachedRanges.rangeContainingKeyBefore(key);
-	} else {
-		cacheIter = cachedRanges.rangeContaining(key);
-	}
-	if (cacheIter->value()) {
-		// We had this cached, so we can now retry without the cache
-		cacheIter->value() = false;
-		return;
-	}
 	if( isBackward ) {
 		locationCache.rangeContainingKeyBefore(key)->value() = Reference<LocationInfo>();
 	} else {
@@ -1236,21 +1225,6 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( 
 template <class F>
 Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation( Database const& cx, Key const& key, F StorageServerInterface::*member, TransactionInfo const& info, bool isBackward = false ) {
 	// we first check whether this range is cached
-	auto cacheIter = isBackward ? cx->cachedRanges.rangeContainingKeyBefore(key) : cx->cachedRanges.rangeContaining(key);
-	if (cacheIter->value()) {
-		// this key is cached
-		auto range = cacheIter->range();
-		// we need to check whether we know about caches that are up
-		std::vector<Reference<ReferencedInterface<StorageServerInterface>>> alternatives;
-		for (auto& csi : cx->cacheServers) {
-			if (!IFailureMonitor::failureMonitor().onlyEndpointFailed((csi.*member).getEndpoint())) {
-				alternatives.push_back(Reference<ReferencedInterface<StorageServerInterface>>(new ReferencedInterface<StorageServerInterface>(csi)));
-			}
-		}
-		if (!alternatives.empty()) {
-			return std::make_pair(KeyRange{range}, Reference<LocationInfo>(new LocationInfo(alternatives)));
-		}
-	}
 	auto ssi = cx->getCachedLocation( key, isBackward );
 	if (!ssi.second) {
 		return getKeyLocation_internal( cx, key, info, isBackward );

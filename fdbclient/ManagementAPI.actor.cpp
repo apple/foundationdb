@@ -23,6 +23,7 @@
 
 #include "Arena.h"
 #include "FDBOptions.g.h"
+#include "FDBTypes.h"
 #include "ReadYourWrites.h"
 #include "fdbclient/ManagementAPI.actor.h"
 
@@ -1783,22 +1784,57 @@ ACTOR Future<Void> waitForPrimaryDC( Database cx, StringRef dcId ) {
 	}
 }
 
-ACTOR Future<Void> addCachedRange(Database cx, KeyRangeRef range) {
+ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 	state ReadYourWritesTransaction tr(cx);
+	state KeyRange sysRange = KeyRangeRef(storageCacheKey(range.begin), storageCacheKey(range.end));
+	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
+	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
 	loop {
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr.clear(range);
-		tr.set(storageCacheKey(range.begin), storageCacheValue(std::vector<uint16_t>{1}));
-		tr.set(storageCacheKey(range.end), storageCacheValue(std::vector<uint16_t>{}));
-		tr.addReadConflictRange(range);
 		try {
+			tr.clear(sysRange);
+			Standalone<RangeResultRef> previous =
+			    wait(tr.getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, true));
+			bool prevIsCached = false;
+			if (!previous.empty()) {
+				std::vector<uint16_t> prevVal;
+				decodeStorageCacheValue(previous[0].value, prevVal);
+				prevIsCached = !prevVal.empty();
+			}
+			if (prevIsCached && !add) {
+				// we need to uncache from here
+				tr.set(sysRange.begin, falseValue);
+			} else if (!prevIsCached && add) {
+				// we need to cache, starting from here
+				tr.set(sysRange.begin, trueValue);
+			}
+			Standalone<RangeResultRef> after =
+			    wait(tr.getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, false));
+			bool afterIsCached = false;
+			if (!after.empty()) {
+				std::vector<uint16_t> afterVal;
+				decodeStorageCacheValue(after[0].value, afterVal);
+				afterIsCached = !afterVal.empty();
+			}
+			if (afterIsCached && !add) {
+				tr.set(sysRange.end, trueValue);
+			} else if (!afterIsCached && add) {
+				tr.set(sysRange.end, falseValue);
+			}
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
+}
+
+Future<Void> addCachedRange(const Database& cx, KeyRangeRef range) {
+	return changeCachedRange(cx, range, true);
+}
+Future<Void> removeCachedRange(const Database& cx, KeyRangeRef range) {
+	return changeCachedRange(cx, range, true);
 }
 
 json_spirit::Value_type normJSONType(json_spirit::Value_type type) {

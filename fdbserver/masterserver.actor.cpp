@@ -1351,12 +1351,12 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	
 	//FIXME: remove this code, caching the entire normal keyspace as a test of functionality
 	//TODO: caching disabled for this merge
-	tr.set(recoveryCommitRequest.arena, storageCacheKey(normalKeys.begin), storageCacheValue({0}));
-	tr.set(recoveryCommitRequest.arena, storageCacheKey(normalKeys.end), storageCacheValue({}));
-	tr.set(recoveryCommitRequest.arena, cacheKeysKey(0, normalKeys.begin), serverKeysTrue);
-	tr.set(recoveryCommitRequest.arena, cacheKeysKey(0, normalKeys.end), serverKeysFalse);
-	tr.set(recoveryCommitRequest.arena, cacheChangeKeyFor(0), BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned()));
-	tr.set(recoveryCommitRequest.arena, cacheChangeKey, BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned()));
+	//tr.set(recoveryCommitRequest.arena, storageCacheKey(normalKeys.begin), storageCacheValue({0}));
+	//tr.set(recoveryCommitRequest.arena, storageCacheKey(normalKeys.end), storageCacheValue({}));
+	//tr.set(recoveryCommitRequest.arena, cacheKeysKey(0, normalKeys.begin), serverKeysTrue);
+	//tr.set(recoveryCommitRequest.arena, cacheKeysKey(0, normalKeys.end), serverKeysFalse);
+	//tr.set(recoveryCommitRequest.arena, cacheChangeKeyFor(0), BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned()));
+	//tr.set(recoveryCommitRequest.arena, cacheChangeKey, BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned()));
 
 	tr.clear(recoveryCommitRequest.arena, tLogDatacentersKeys);
 	for(auto& dc : self->primaryDcId) {

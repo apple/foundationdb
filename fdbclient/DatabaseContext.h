@@ -203,9 +203,6 @@ public:
 	double detailedHealthMetricsLastUpdated;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
-	// TODO: These will need to change as soon as caching becomes a bit
-	// more clever. For now, this simple schema should do the job
-	CoalescedKeyRangeMap<bool> cachedRanges;
 	Standalone<VectorRef<StorageServerInterface>> cacheServers;
 	Future<Void> cacheListMonitor;
 };
