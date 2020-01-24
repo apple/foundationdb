@@ -71,6 +71,7 @@ struct MasterBatchData : public ReferenceCounted<MasterBatchData> {
 	std::map<Key, UID> rangeToApplier;
 	IndexedSet<Key, int64_t> samples; // sample of range and log files
 	double samplesSize; // sum of the metric of all samples
+	Optional<Future<Void>> applyToDB;
 
 	MasterBatchData() = default;
 	~MasterBatchData() = default;
@@ -131,6 +132,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	std::map<int, Reference<MasterBatchData>> batch;
 	std::map<int, Reference<MasterBatchStatus>> batchStatus;
+	NotifiedVersion finishedBatch; // The highest batch index all appliers have applied mutations
 
 	void addref() { return ReferenceCounted<RestoreMasterData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreMasterData>::delref(); }
@@ -154,6 +156,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		versionBatches.clear();
 		batch.clear();
 		batchStatus.clear();
+		finishedBatch = NotifiedVersion();
 	}
 
 	std::string describeNode() {

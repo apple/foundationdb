@@ -53,9 +53,10 @@ ACTOR static Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> 
 ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx);
 ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInterface> appliersInterf,
                                                  std::map<UID, RestoreLoaderInterface> loadersInterf, int batchIndex);
-ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchStatus> batchStatus,
+ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchData> batchData,
+                                                        Reference<MasterBatchStatus> batchStatus,
                                                         std::map<UID, RestoreApplierInterface> appliersInterf,
-                                                        int batchIndex);
+                                                        int batchIndex, NotifiedVersion* finishedBatch);
 ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, bool terminate);
 ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreMasterData> self, Database cx);
 
@@ -489,7 +490,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	wait(sendMutationsFromLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, false));
 	wait(sendMutationsFromLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, true));
 
-	wait(notifyApplierToApplyMutations(batchStatus, self->appliersInterf, batchIndex));
+	wait(notifyApplierToApplyMutations(batchData, batchStatus, self->appliersInterf, batchIndex, &self->finishedBatch));
 
 	return Void();
 }
@@ -665,43 +666,67 @@ ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInt
 }
 
 // Ask each applier to apply its received mutations to DB
-ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchStatus> batchStatus,
+// NOTE: Master cannot start applying mutations at batchIndex until all appliers have applied for (batchIndex - 1)
+//       because appliers at different batchIndex may have overlapped key ranges.
+ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchData> batchData,
+                                                        Reference<MasterBatchStatus> batchStatus,
                                                         std::map<UID, RestoreApplierInterface> appliersInterf,
-                                                        int batchIndex) {
-	// Prepare the applyToDB requests
-	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requests;
+                                                        int batchIndex, NotifiedVersion* finishedBatch) {
 
-	TraceEvent("FastRestoreMasterPhaseApplyMutations")
+	wait(finishedBatch->whenAtLeast(batchIndex - 1));
+	TraceEvent("FastRestoreMasterPhaseApplyToDB")
 	    .detail("BatchIndex", batchIndex)
-	    .detail("Appliers", appliersInterf.size());
-	for (auto& applier : appliersInterf) {
-		ASSERT(batchStatus->applyStatus.find(applier.first) == batchStatus->applyStatus.end());
-		requests.emplace_back(applier.first, RestoreVersionBatchRequest(batchIndex));
-		batchStatus->applyStatus[applier.first] = RestoreApplyStatus::Applying;
-	}
-	state std::vector<RestoreCommonReply> replies;
-	wait(getBatchReplies(&RestoreApplierInterface::applyToDB, appliersInterf, requests, &replies));
+	    .detail("FinishedBatch", finishedBatch->get());
 
-	for (auto& reply : replies) {
-		if (batchStatus->applyStatus[reply.id] == RestoreApplyStatus::Applying) {
-			batchStatus->applyStatus[reply.id] = RestoreApplyStatus::Applied;
-			if (reply.isDuplicated) {
-				TraceEvent(SevWarn, "FastRestoreNotifyApplierToApplierMutations")
-				    .detail("Applier", reply.id)
-				    .detail("DuplicateRequestReturnEarlier", "Apply db request should have been processed");
+	if (finishedBatch->get() == batchIndex - 1) {
+		// Prepare the applyToDB requests
+		std::vector<std::pair<UID, RestoreVersionBatchRequest>> requests;
+
+		TraceEvent("FastRestoreMasterPhaseApplyMutations")
+		    .detail("BatchIndex", batchIndex)
+		    .detail("Appliers", appliersInterf.size());
+		for (auto& applier : appliersInterf) {
+			ASSERT(batchStatus->applyStatus.find(applier.first) == batchStatus->applyStatus.end());
+			requests.emplace_back(applier.first, RestoreVersionBatchRequest(batchIndex));
+			batchStatus->applyStatus[applier.first] = RestoreApplyStatus::Applying;
+		}
+		state std::vector<RestoreCommonReply> replies;
+		// The actor at each batchIndex should only occur once.
+		// Use batchData->applyToDB just incase the actor at a batchIndex is executed more than once.
+		if (!batchData->applyToDB.present()) {
+			batchData->applyToDB = Never();
+			batchData->applyToDB =
+			    getBatchReplies(&RestoreApplierInterface::applyToDB, appliersInterf, requests, &replies);
+		} else {
+			TraceEvent(SevError, "FastRestoreNotifyApplierToApplierMutations")
+			    .detail("BatchIndex", batchIndex)
+			    .detail("Attention", "Actor should not be invoked twice for the same batch index");
+		}
+		// wait(getBatchReplies(&RestoreApplierInterface::applyToDB, appliersInterf, requests, &replies));
+		ASSERT(batchData->applyToDB.present());
+		wait(batchData->applyToDB.get());
+
+		// Sanity check all appliers have applied data to destination DB
+		for (auto& reply : replies) {
+			if (batchStatus->applyStatus[reply.id] == RestoreApplyStatus::Applying) {
+				batchStatus->applyStatus[reply.id] = RestoreApplyStatus::Applied;
+				if (reply.isDuplicated) {
+					TraceEvent(SevWarn, "FastRestoreNotifyApplierToApplierMutations")
+					    .detail("Applier", reply.id)
+					    .detail("DuplicateRequestReturnEarlier", "Apply db request should have been processed");
+				}
 			}
 		}
-	}
-	// Sanity check all appliers have applied data to destination DB
-	for (auto& applier : appliersInterf) {
-		if (batchStatus->applyStatus[applier.first] != RestoreApplyStatus::Applied) {
-			TraceEvent(SevError, "FastRestoreNotifyApplierToApplierMutations")
-			    .detail("Applier", applier.first)
-			    .detail("ApplyStatus", batchStatus->applyStatus[applier.first]);
+		for (auto& applier : appliersInterf) {
+			if (batchStatus->applyStatus[applier.first] != RestoreApplyStatus::Applied) {
+				TraceEvent(SevError, "FastRestoreNotifyApplierToApplierMutations")
+				    .detail("Applier", applier.first)
+				    .detail("ApplyStatus", batchStatus->applyStatus[applier.first]);
+			}
 		}
+		finishedBatch->set(batchIndex);
 	}
 
-	TraceEvent("FastRestore").detail("ApplyToDB", "Completed");
 	return Void();
 }
 

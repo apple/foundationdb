@@ -454,13 +454,13 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
     // Ensure batch i is applied before batch (i+1)
     wait(self->finishedBatch.whenAtLeast(req.batchIndex-1));
 
+	state bool isDuplicated = true;
+	Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
 	TraceEvent("FastRestoreApplierPhaseHandleApplyToDB", self->id())
 		    .detail("BatchIndex", req.batchIndex)
 			.detail("FinishedBatch", self->finishedBatch.get())
 		    .detail("HasStarted", batchData->dbApplier.present());
-	state bool isDuplicated = true;
 	if (self->finishedBatch.get() == req.batchIndex-1) {
-		Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
 		ASSERT(batchData.isValid());
 		if (!batchData->dbApplier.present()) {
 			isDuplicated = false;
