@@ -308,12 +308,15 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		files = &versionBatch.logFiles;
 	}
 
-	// sort files in increasing order of beginVersion
-	//std::sort(files->begin(), files->end());
-
 	std::vector<std::pair<UID, RestoreLoadFileRequest>> requests;
 	std::map<UID, RestoreLoaderInterface>::iterator loader = loadersInterf.begin();
 	state std::vector<RestoreAsset> assets; // all assets loaded, used for sanity check restore progress
+
+	// Balance workload on loaders for parsing range and log files across version batches
+	int random = deterministicRandom()->randomInt(0, loadersInterf.size());
+	while (random-- > 0) {
+		loader++;
+	}
 
 	int paramIdx = 0;
 	for (auto& file : *files) {
