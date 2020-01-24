@@ -91,22 +91,24 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> masterWorker
 
 	TraceEvent("FastRestore")
 	    .detail("RecruitRestoreRoles", masterWorker->workerInterfaces.size())
-	    .detail("NumLoaders", opConfig.num_loaders)
-	    .detail("NumAppliers", opConfig.num_appliers);
+	    .detail("NumLoaders", SERVER_KNOBS->FASTRESTORE_NUM_LOADERS)
+	    .detail("NumAppliers", SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS);
 	ASSERT(masterData->loadersInterf.empty() && masterData->appliersInterf.empty());
 
 	ASSERT(masterData.isValid());
-	ASSERT(opConfig.num_loaders > 0 && opConfig.num_appliers > 0);
+	ASSERT(SERVER_KNOBS->FASTRESTORE_NUM_LOADERS > 0 && SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS > 0);
 	// We assign 1 role per worker for now
-	ASSERT(opConfig.num_loaders + opConfig.num_appliers <= masterWorker->workerInterfaces.size());
+	ASSERT(SERVER_KNOBS->FASTRESTORE_NUM_LOADERS + SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS <=
+	       masterWorker->workerInterfaces.size());
 
 	// Assign a role to each worker
 	std::vector<std::pair<UID, RestoreRecruitRoleRequest>> requests;
 	for (auto& workerInterf : masterWorker->workerInterfaces) {
-		if (nodeIndex >= 0 && nodeIndex < opConfig.num_appliers) {
+		if (nodeIndex >= 0 && nodeIndex < SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS) {
 			// [0, numApplier) are appliers
 			role = RestoreRole::Applier;
-		} else if (nodeIndex >= opConfig.num_appliers && nodeIndex < opConfig.num_loaders + opConfig.num_appliers) {
+		} else if (nodeIndex >= SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS &&
+		           nodeIndex < SERVER_KNOBS->FASTRESTORE_NUM_LOADERS + SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS) {
 			// [numApplier, numApplier + numLoader) are loaders
 			role = RestoreRole::Loader;
 		} else {

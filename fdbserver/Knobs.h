@@ -106,7 +106,7 @@ public:
 	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
-	
+
 	// Higher priorities are executed first
 	// Priority/100 is the "priority group"/"superpriority".  Priority inversion
 	//   is possible within but not between priority groups; fewer priority groups
@@ -482,6 +482,12 @@ public:
 	int64_t FASTRESTORE_FAILURE_TIMEOUT;
 	int64_t FASTRESTORE_HEARTBEAT_INTERVAL;
 	double FASTRESTORE_SAMPLING_PERCENT;
+	int64_t FASTRESTORE_NUM_LOADERS;
+	int64_t FASTRESTORE_NUM_APPLIERS;
+	// FASTRESTORE_TXN_BATCH_MAX_BYTES is used when applier applies multiple mutations in a transaction to DB
+	double FASTRESTORE_TXN_BATCH_MAX_BYTES;
+	// FASTRESTORE_VERSIONBATCH_MAX_BYTES is the maximum data size in each version batch
+	double FASTRESTORE_VERSIONBATCH_MAX_BYTES;
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };

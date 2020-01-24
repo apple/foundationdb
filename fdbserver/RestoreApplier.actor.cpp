@@ -246,8 +246,9 @@ struct DBApplyProgress {
 	}
 
 	bool shouldCommit() {
-		return (!lastTxnHasError && (startNextVersion || transactionSize >= opConfig.transactionBatchSizeThreshold ||
-		                             curItInCurTxn == batchData->kvOps.end()));
+		return (!lastTxnHasError &&
+		        (startNextVersion || transactionSize >= SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES ||
+		         curItInCurTxn == batchData->kvOps.end()));
 	}
 
 	bool hasError() { return lastTxnHasError; }
@@ -392,7 +393,7 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 					progress.transactionSize += m.expectedSize();
 
 					progress.nextMutation(); // Prepare for the next mutation
-					// commit per transactionBatchSizeThreshold bytes; and commit does not cross version boundary
+					// commit per FASTRESTORE_TXN_BATCH_MAX_BYTES bytes; and commit does not cross version boundary
 					if (progress.shouldCommit()) {
 						break; // Got enough mutation in the txn
 					}

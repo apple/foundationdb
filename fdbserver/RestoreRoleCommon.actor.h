@@ -41,8 +41,6 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-extern bool debug_verbose;
-
 struct RestoreRoleInterface;
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;

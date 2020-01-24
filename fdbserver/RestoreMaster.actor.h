@@ -41,8 +41,6 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-extern int restoreStatusIndex;
-
 struct VersionBatch {
 	Version beginVersion; // Inclusive
 	Version endVersion; // exclusive
@@ -234,12 +232,12 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	// Split backup files into version batches, each of which has similar data size
 	// Input: sorted range files, sorted log files;
-	// Output: a set of version batches whose size is less than opConfig.batchSizeThreshold
+	// Output: a set of version batches whose size is less than SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES
 	//    	   and each mutation in backup files is included in the version batches exactly once.
 	// Assumption 1: input files has no empty files;
-	// Assumption 2: range files at one version <= batchSizeThreshold.
-	// Note: We do not allow a versionBatch size larger than the batchSizeThreshold because the range file size at
-	// a version depends on the number of backupAgents and its upper bound is hard to get.
+	// Assumption 2: range files at one version <= FASTRESTORE_VERSIONBATCH_MAX_BYTES.
+	// Note: We do not allow a versionBatch size larger than the FASTRESTORE_VERSIONBATCH_MAX_BYTES because the range
+	// file size at a version depends on the number of backupAgents and its upper bound is hard to get.
 	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles, const std::vector<RestoreFileFR>& logFiles,
 	                         std::map<Version, VersionBatch>* versionBatches) {
 		bool rewriteNextVersion = false;
@@ -291,14 +289,14 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			    .detail("RangeFiles", rangeFiles.size())
 			    .detail("LogIndex", logIdx)
 			    .detail("LogFiles", logFiles.size())
-			    .detail("BatchSizeThreshold", opConfig.batchSizeThreshold)
+			    .detail("VersionBatchSizeThreshold", SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES)
 			    .detail("CurrentBatchSize", vb.size)
 			    .detail("NextVersionIntervalSize", nextVersionSize)
 			    .detail("NextRangeIndex", nextRangeIdx)
 			    .detail("UsedLogFiles", curLogFiles.size());
 
 			ASSERT(prevEndVersion < nextVersion); // Ensure progress
-			if (vb.size + nextVersionSize <= opConfig.batchSizeThreshold) {
+			if (vb.size + nextVersionSize <= SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES) {
 				// nextVersion should be included in this batch
 				vb.size += nextVersionSize;
 				while (rangeIdx < nextRangeIdx) {
@@ -318,16 +316,17 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				prevEndVersion = vb.endVersion;
 			} else {
 				if (vb.size < 1) {
-					// [vb.endVersion, nextVersion) > opConfig.batchSizeThreshold. We should split the version range
+					// [vb.endVersion, nextVersion) > SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES. We should split
+					// the version range
 					if (prevEndVersion >= nextVersion) {
-						// If range files at one version > batchSizeThreshold, DBA should increase batchSizeThreshold to
-						// some value larger than nextVersion
+						// If range files at one version > FASTRESTORE_VERSIONBATCH_MAX_BYTES, DBA should increase
+						// FASTRESTORE_VERSIONBATCH_MAX_BYTES to some value larger than nextVersion
 						TraceEvent(SevError, "FastRestoreBuildVersionBatch")
 						    .detail("NextVersion", nextVersion)
 						    .detail("PreviousEndVersion", prevEndVersion)
 						    .detail("NextVersionIntervalSize", nextVersionSize)
-						    .detail("BatchSizeThreshold", opConfig.batchSizeThreshold)
-						    .detail("SuggestedMinimumBatchSizeThreshold", nextVersion);
+						    .detail("VersionBatchSizeThreshold", SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES)
+						    .detail("SuggestedMinimumVersionBatchSizeThreshold", nextVersion);
 						// Exit restore early if it won't succeed
 						flushAndExit(FDB_EXIT_ERROR);
 					}
