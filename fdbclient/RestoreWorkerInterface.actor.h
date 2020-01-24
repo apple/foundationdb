@@ -209,6 +209,8 @@ struct RestoreAsset {
 	int64_t offset;
 	int64_t len;
 
+	UID uid;
+
 	RestoreAsset() = default;
 
 	bool operator==(const RestoreAsset& r) const {
@@ -227,30 +229,29 @@ struct RestoreAsset {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, beginVersion, endVersion, range, filename, fileIndex, offset, len);
+		serializer(ar, beginVersion, endVersion, range, filename, fileIndex, offset, len, uid);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "begin:" << beginVersion << " end:" << endVersion << " range:" << range.toString()
-		   << " filename:" << filename << " fileIndex:" << fileIndex << " offset:" << offset << " len:" << len;
+		ss << "UID:" << uid.toString() << " begin:" << beginVersion << " end:" << endVersion
+		   << " range:" << range.toString() << " filename:" << filename << " fileIndex:" << fileIndex
+		   << " offset:" << offset << " len:" << len;
 		return ss.str();
 	}
 
+	// RestoreAsset and VersionBatch both use endVersion as exclusive in version range
 	bool isInVersionRange(Version commitVersion) const {
 		return commitVersion >= beginVersion && commitVersion < endVersion;
 	}
 };
 
-// TODO: It is probably better to specify the (beginVersion, endVersion] for each loadingParam.
-// beginVersion (endVersion) is the version the applier is before (after) it receives the request.
 struct LoadingParam {
 	constexpr static FileIdentifier file_identifier = 17023837;
 
 	bool isRangeFile;
 	Key url;
-	Version prevVersion;
-	Version endVersion; // range file's mutations are all at the endVersion
+	Optional<Version> rangeVersion; // range file's version
 
 	int64_t blockSize;
 	RestoreAsset asset;
@@ -266,13 +267,14 @@ struct LoadingParam {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, isRangeFile, url, prevVersion, endVersion, blockSize, asset);
+		serializer(ar, isRangeFile, url, rangeVersion, blockSize, asset);
 	}
 
 	std::string toString() {
 		std::stringstream str;
-		str << "isRangeFile:" << isRangeFile << " url:" << url.toString() << " prevVersion:" << prevVersion
-		    << " endVersion:" << endVersion << " blockSize:" << blockSize << " RestoreAsset:" << asset.toString();
+		str << "isRangeFile:" << isRangeFile << " url:" << url.toString()
+		    << " rangeVersion:" << (rangeVersion.present() ? rangeVersion.get() : -1) << " blockSize:" << blockSize
+		    << " RestoreAsset:" << asset.toString();
 		return str.str();
 	}
 };

@@ -29,6 +29,7 @@
 
 #include <sstream>
 #include "flow/Stats.h"
+#include "flow/Platform.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
@@ -44,11 +45,24 @@ extern int restoreStatusIndex;
 
 struct VersionBatch {
 	Version beginVersion; // Inclusive
-	Version endVersion; // Inclusive if it has log files, exclusive if it has only range file
+	Version endVersion; // exclusive
 	std::vector<RestoreFileFR> logFiles;
 	std::vector<RestoreFileFR> rangeFiles;
+	double size; // size of data in range and log files
+
+	VersionBatch() = default;
 
 	bool isEmpty() { return logFiles.empty() && rangeFiles.empty(); }
+	void reset() {
+		beginVersion = 0;
+		endVersion = 0;
+		logFiles.clear();
+		rangeFiles.clear();
+		size = 0;
+	}
+
+	// RestoreAsset and VersionBatch both use endVersion as exclusive in version range
+	bool isInVersionRange(Version version) const { return version >= beginVersion && version < endVersion; }
 };
 
 struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
@@ -90,97 +104,191 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		return ss.str();
 	}
 
-	// Split allFiles into multiple versionBatches based on files' version
-	void buildVersionBatches(const std::vector<RestoreFileFR>& allFiles,
-	                         std::map<Version, VersionBatch>* versionBatches) {
-		// A version batch includes a log file; Because log file's verion range does not overlap,
-		// we use log file's version range as the version range of a version batch.
-		Version beginVersion = 0;
-		Version maxVersion = 0;
-		for (int i = 0; i < allFiles.size(); ++i) {
-			if (!allFiles[i].isRange) {
-				ASSERT(versionBatches->find(allFiles[i].beginVersion) == versionBatches->end());
-				VersionBatch vb;
-				vb.beginVersion = beginVersion;
-				vb.endVersion = allFiles[i].endVersion;
-				versionBatches->insert(std::make_pair(vb.beginVersion, vb));
-				//(*versionBatches)[vb.beginVersion] = vb; // Ensure continuous version range across version batches
-				beginVersion = allFiles[i].endVersion;
+	void dumpVersionBatches(const std::map<Version, VersionBatch>& versionBatches) {
+		int i = 0;
+		for (auto& vb : versionBatches) {
+			TraceEvent("FastRestoreVersionBatches")
+			    .detail("BatchIndex", i)
+			    .detail("BeginVersion", vb.second.beginVersion)
+			    .detail("EndVersion", vb.second.endVersion)
+			    .detail("Size", vb.second.size);
+			for (auto& f : vb.second.rangeFiles) {
+				bool invalidVersion = (f.beginVersion != f.endVersion) || (f.beginVersion >= vb.second.endVersion ||
+				                                                           f.beginVersion < vb.second.beginVersion);
+				TraceEvent(invalidVersion ? SevError : SevInfo, "FastRestoreVersionBatches")
+				    .detail("BatchIndex", i)
+				    .detail("RangeFile", f.toString());
 			}
-			if (maxVersion < allFiles[i].endVersion) {
-				maxVersion = allFiles[i].endVersion;
+			for (auto& f : vb.second.logFiles) {
+				bool outOfRange = (f.beginVersion >= vb.second.endVersion || f.endVersion <= vb.second.beginVersion);
+				TraceEvent(outOfRange ? SevError : SevInfo, "FastRestoreVersionBatches")
+				    .detail("BatchIndex", i)
+				    .detail("LogFile", f.toString());
 			}
+			++i;
 		}
-		// In case there is no log file
-		if (versionBatches->empty()) {
-			VersionBatch vb;
-			vb.beginVersion = 0;
-			vb.endVersion = maxVersion + 1; // version batch's endVersion is exclusive
-			versionBatches->insert(std::make_pair(vb.beginVersion, vb));
-			//(*versionBatches)[vb.beginVersion] = vb; // We ensure the version range are continuous across version batches
-		}
-		// Put range and log files into its version batch
-		for (int i = 0; i < allFiles.size(); ++i) {
-			// vbiter's beginVersion > allFiles[i].beginVersion.
-			std::map<Version, VersionBatch>::iterator vbIter = versionBatches->upper_bound(allFiles[i].beginVersion);
-			--vbIter;
-			ASSERT_WE_THINK(vbIter != versionBatches->end());
-			if (allFiles[i].isRange) {
-				vbIter->second.rangeFiles.push_back(allFiles[i]);
+	}
+
+	// Input: Get the size of data in backup files in version range [prevVersion, nextVersion)
+	// Return: param1: the size of data at nextVersion, param2: the minimum range file index whose version >
+	// nextVersion, param3: log files with data in [prevVersion, nextVersion)
+	std::tuple<double, int, std::vector<RestoreFileFR>> getVersionSize(Version prevVersion, Version nextVersion,
+	                                                                   const std::vector<RestoreFileFR>& rangeFiles,
+	                                                                   int rangeIdx,
+	                                                                   const std::vector<RestoreFileFR>& logFiles) {
+		double size = 0;
+		TraceEvent("FastRestoreGetVersionSize")
+		    .detail("PreviousVersion", prevVersion)
+		    .detail("NextVersion", nextVersion)
+		    .detail("RangeFiles", rangeFiles.size())
+		    .detail("RangeIndex", rangeIdx)
+		    .detail("LogFiles", logFiles.size());
+		ASSERT(prevVersion <= nextVersion);
+		while (rangeIdx < rangeFiles.size()) {
+			TraceEvent(SevDebug, "FastRestoreGetVersionSize").detail("RangeFile", rangeFiles[rangeIdx].toString());
+			if (rangeFiles[rangeIdx].version < nextVersion) {
+				ASSERT(rangeFiles[rangeIdx].version >= prevVersion);
+				size += rangeFiles[rangeIdx].fileSize;
 			} else {
-				vbIter->second.logFiles.push_back(allFiles[i]);
+				break;
+			}
+			++rangeIdx;
+		}
+		int logIdx = 0;
+		std::vector<RestoreFileFR> retLogs;
+		// Scan all logFiles every time to avoid assumption on log files' version ranges.
+		// For example, we do not assume each version range only exists in one log file
+		while (logIdx < logFiles.size()) {
+			Version begin = std::max(prevVersion, logFiles[logIdx].beginVersion);
+			Version end = std::min(nextVersion, logFiles[logIdx].endVersion);
+			if (begin < end) { // logIdx file overlap in [prevVersion, nextVersion)
+				double ratio = (end - begin) * 1.0 / (logFiles[logIdx].endVersion - logFiles[logIdx].beginVersion);
+				size += logFiles[logIdx].fileSize * ratio;
+				retLogs.push_back(logFiles[logIdx]);
+			}
+			++logIdx;
+		}
+		return std::make_tuple(size, rangeIdx, retLogs);
+	}
+
+	// Split backup files into version batches, each of which has similar data size
+	// Input: sorted range files, sorted log files;
+	// Output: a set of version batches whose size is less than opConfig.batchSizeThreshold
+	//    	   and each mutation in backup files is included in the version batches exactly once.
+	// Assumption 1: input files has no empty files;
+	// Assumption 2: range files at one version <= batchSizeThreshold.
+	// Note: We do not allow a versionBatch size larger than the batchSizeThreshold because the range file size at
+	// a version depends on the number of backupAgents and its upper bound is hard to get.
+	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles, const std::vector<RestoreFileFR>& logFiles,
+	                         std::map<Version, VersionBatch>* versionBatches) {
+		bool rewriteNextVersion = false;
+		int rangeIdx = 0;
+		int logIdx = 0; // Ensure each log file is included in version batch
+		Version prevEndVersion = 0;
+		Version nextVersion = 0; // Used to calculate the batch's endVersion
+		VersionBatch vb;
+		vb.beginVersion = 0; // Version batch range [beginVersion, endVersion)
+
+		while (rangeIdx < rangeFiles.size() || logIdx < logFiles.size()) {
+			if (!rewriteNextVersion) {
+				if (rangeIdx < rangeFiles.size() && logIdx < logFiles.size()) {
+					// nextVersion as endVersion is exclusive in the version range
+					nextVersion = std::max(rangeFiles[rangeIdx].version + 1, nextVersion);
+				} else if (rangeIdx < rangeFiles.size()) { // i.e., logIdx >= logFiles.size()
+					nextVersion = rangeFiles[rangeIdx].version + 1;
+				} else if (logIdx < logFiles.size()) {
+					while (logIdx < logFiles.size() && logFiles[logIdx].endVersion <= nextVersion) {
+						logIdx++;
+					}
+					if (logIdx < logFiles.size()) {
+						nextVersion = logFiles[logIdx].endVersion;
+					} else {
+						break; // Finished all log files
+					}
+				} else {
+					TraceEvent(SevError, "FastRestoreBuildVersionBatch")
+					    .detail("RangeIndex", rangeIdx)
+					    .detail("RangeFiles", rangeFiles.size())
+					    .detail("LogIndex", logIdx)
+					    .detail("LogFiles", logFiles.size());
+				}
+			} else {
+				rewriteNextVersion = false;
+			}
+
+			double nextVersionSize;
+			int nextRangeIdx;
+			std::vector<RestoreFileFR> curLogFiles;
+			std::tie(nextVersionSize, nextRangeIdx, curLogFiles) =
+			    getVersionSize(prevEndVersion, nextVersion, rangeFiles, rangeIdx, logFiles);
+
+			TraceEvent("FastRestoreBuildVersionBatch")
+			    .detail("VersionBatchBeginVersion", vb.beginVersion)
+			    .detail("PreviousEndVersion", prevEndVersion)
+			    .detail("NextVersion", nextVersion)
+			    .detail("RangeIndex", rangeIdx)
+			    .detail("RangeFiles", rangeFiles.size())
+			    .detail("LogIndex", logIdx)
+			    .detail("LogFiles", logFiles.size())
+			    .detail("BatchSizeThreshold", opConfig.batchSizeThreshold)
+			    .detail("CurrentBatchSize", vb.size)
+			    .detail("NextVersionIntervalSize", nextVersionSize)
+			    .detail("NextRangeIndex", nextRangeIdx)
+			    .detail("UsedLogFiles", curLogFiles.size());
+
+			ASSERT(prevEndVersion < nextVersion); // Ensure progress
+			if (vb.size + nextVersionSize <= opConfig.batchSizeThreshold) {
+				// nextVersion should be included in this batch
+				vb.size += nextVersionSize;
+				while (rangeIdx < nextRangeIdx) {
+					ASSERT(rangeFiles[rangeIdx].fileSize > 0);
+					vb.rangeFiles.push_back(rangeFiles[rangeIdx]);
+					++rangeIdx;
+				}
+
+				for (auto& log : curLogFiles) {
+					ASSERT(log.beginVersion < nextVersion);
+					ASSERT(log.endVersion > prevEndVersion);
+					ASSERT(log.fileSize > 0);
+					vb.logFiles.push_back(log);
+				}
+
+				vb.endVersion = nextVersion;
+				prevEndVersion = vb.endVersion;
+			} else {
+				if (vb.size < 1) {
+					// [vb.endVersion, nextVersion) > opConfig.batchSizeThreshold. We should split the version range
+					if (prevEndVersion >= nextVersion) {
+						// If range files at one version > batchSizeThreshold, DBA should increase batchSizeThreshold to
+						// some value larger than nextVersion
+						TraceEvent(SevError, "FastRestoreBuildVersionBatch")
+						    .detail("NextVersion", nextVersion)
+						    .detail("PreviousEndVersion", prevEndVersion)
+						    .detail("NextVersionIntervalSize", nextVersionSize)
+						    .detail("BatchSizeThreshold", opConfig.batchSizeThreshold)
+						    .detail("SuggestedMinimumBatchSizeThreshold", nextVersion);
+						// Exit restore early if it won't succeed
+						flushAndExit(FDB_EXIT_ERROR);
+					}
+					ASSERT(prevEndVersion < nextVersion); // Ensure progress
+					nextVersion = (prevEndVersion + nextVersion) / 2;
+					rewriteNextVersion = true;
+					TraceEvent("FastRestoreBuildVersionBatch")
+					    .detail("NextVersionIntervalSize", nextVersionSize); // Duplicate Trace
+					continue;
+				}
+				// Finalize the current version batch
+				versionBatches->emplace(vb.beginVersion, vb); // copy vb to versionBatch
+				// start finding the next version batch
+				vb.reset();
+				vb.size = 0;
+				vb.beginVersion = prevEndVersion;
 			}
 		}
-
-		// Sort files in each of versionBatches and set fileIndex, which is used in deduplicating mutations sent from
-		// loader to applier.
-		// Assumption: fileIndex starts at 1. Each loader's initized fileIndex (NotifiedVersion type) starts at 0
-		int fileIndex = 0; // fileIndex must be unique; ideally it continuously increase across verstionBatches for
-		                   // easier progress tracking
-		int versionBatchId = 1;
-		for (auto versionBatch = versionBatches->begin(); versionBatch != versionBatches->end(); versionBatch++) {
-			std::sort(versionBatch->second.rangeFiles.begin(), versionBatch->second.rangeFiles.end());
-			std::sort(versionBatch->second.logFiles.begin(), versionBatch->second.logFiles.end());
-			for (auto& logFile : versionBatch->second.logFiles) {
-				logFile.fileIndex = ++fileIndex;
-				TraceEvent("FastRestore")
-				    .detail("VersionBatchId", versionBatchId)
-				    .detail("LogFile", logFile.toString());
-			}
-			for (auto& rangeFile : versionBatch->second.rangeFiles) {
-				rangeFile.fileIndex = ++fileIndex;
-				TraceEvent("FastRestore")
-				    .detail("VersionBatchId", versionBatchId)
-				    .detail("RangeFile", rangeFile.toString());
-			}
-			versionBatchId++;
-		}
-
-		TraceEvent("FastRestore").detail("VersionBatches", versionBatches->size());
-		// Sanity check
-		std::set<uint32_t> fIndexSet;
-		for (auto& versionBatch : *versionBatches) {
-			Version prevVersion = 0;
-			for (auto& logFile : versionBatch.second.logFiles) {
-				TraceEvent("FastRestore").detail("PrevVersion", prevVersion).detail("LogFile", logFile.toString());
-				ASSERT(logFile.beginVersion >= versionBatch.second.beginVersion);
-				ASSERT(logFile.endVersion <= versionBatch.second.endVersion);
-				ASSERT(prevVersion <= logFile.beginVersion);
-				prevVersion = logFile.endVersion;
-				ASSERT(fIndexSet.find(logFile.fileIndex) == fIndexSet.end());
-				fIndexSet.insert(logFile.fileIndex);
-			}
-			prevVersion = 0;
-			for (auto& rangeFile : versionBatch.second.rangeFiles) {
-				TraceEvent("FastRestore").detail("PrevVersion", prevVersion).detail("RangeFile", rangeFile.toString());
-				ASSERT(rangeFile.beginVersion == rangeFile.endVersion);
-				ASSERT(rangeFile.beginVersion >= versionBatch.second.beginVersion);
-				ASSERT(rangeFile.endVersion < versionBatch.second.endVersion);
-				ASSERT(prevVersion <= rangeFile.beginVersion);
-				prevVersion = rangeFile.beginVersion;
-				ASSERT(fIndexSet.find(rangeFile.fileIndex) == fIndexSet.end());
-				fIndexSet.insert(rangeFile.fileIndex);
-			}
+		// The last wip version batch has some files
+		if (vb.size > 0) {
+			vb.endVersion = nextVersion;
+			versionBatches->emplace(vb.beginVersion, vb);
 		}
 	}
 

@@ -185,8 +185,10 @@ ACTOR Future<Void> monitorWorkerLiveness(Reference<RestoreWorkerData> self) {
 void initRestoreWorkerConfig() {
 	opConfig.num_loaders = g_network->isSimulated() ? 3 : opConfig.num_loaders;
 	opConfig.num_appliers = g_network->isSimulated() ? 3 : opConfig.num_appliers;
+	// TODO: Set the threshold to a random value in a range
 	opConfig.transactionBatchSizeThreshold =
 	    g_network->isSimulated() ? 512 : opConfig.transactionBatchSizeThreshold; // Byte
+	opConfig.batchSizeThreshold = g_network->isSimulated() ? 10 * 1024 * 1024 : opConfig.batchSizeThreshold; // Byte
 	TraceEvent("FastRestore")
 	    .detail("InitOpConfig", "Result")
 	    .detail("NumLoaders", opConfig.num_loaders)
