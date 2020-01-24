@@ -2366,15 +2366,19 @@ namespace fileBackup {
 			tr->reset();
 			state BackupConfig config(task);
 			loop {
+				state Future<Void> watchFuture;
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					state Future<Void> keepRunning = taskBucket->keepRunning(tr, task);
 
-					Optional<Value> value = wait(tr->get(backupStartedKey));
+					state Future<Optional<Value>> started = tr->get(backupStartedKey);
+					state Future<Optional<Value>> taskStarted = tr->get(config.allWorkerStarted().key);
+					wait(success(started) && success(taskStarted));
+
 					std::vector<std::pair<UID, Version>> ids;
-					if (value.present()) {
-						ids = decodeBackupStartedValue(value.get());
+					if (started.get().present()) {
+						ids = decodeBackupStartedValue(started.get().get());
 					}
 					const UID uid = config.getUid();
 				    auto it = std::find_if(ids.begin(), ids.end(),
@@ -2389,10 +2393,17 @@ namespace fileBackup {
 					}
 
 					tr->set(backupStartedKey, encodeBackupStartedValue(ids));
-					state Future<Void> watchFuture = tr->watch(config.allWorkerStarted().key);
+
+					// The task may be restarted. Set the watch if started key has NOT been set.
+					if (!taskStarted.get().present()) {
+						watchFuture = tr->watch(config.allWorkerStarted().key);
+					}
+
 					wait(keepRunning);
 					wait(tr->commit());
-					wait(watchFuture);
+					if (!taskStarted.get().present()) {
+						wait(watchFuture);
+					}
 					return Void();
 				} catch (Error &e) {
 					wait(tr->onError(e));
