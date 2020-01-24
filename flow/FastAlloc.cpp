@@ -24,6 +24,7 @@
 #include "flow/Trace.h"
 #include "flow/Error.h"
 #include "flow/Knobs.h"
+#include "flow/crc32c.h"
 #include "flow/flow.h"
 
 #include <cstdint>
@@ -143,9 +144,9 @@ void recordAllocation( void *ptr, size_t size ) {
 #error Instrumentation not supported on this platform
 #endif
 
-		uint32_t a = 0, b = 0;
+		uint32_t a = 0;
 		if( nptrs > 0 ) {
-			hashlittle2( buffer, nptrs * sizeof(void *), &a, &b );
+			a = crc32c_append( 0xfdbeefdb, buffer, nptrs * sizeof(void *));
 		}
 
 		double countDelta = std::max(1.0, ((double)SAMPLE_BYTES) / size);
