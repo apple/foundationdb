@@ -1815,7 +1815,7 @@ ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 			if (!after.empty()) {
 				std::vector<uint16_t> afterVal;
 				decodeStorageCacheValue(after[0].value, afterVal);
-				afterIsCached = !afterVal.empty();
+				afterIsCached = afterVal.empty();
 			}
 			if (afterIsCached && !add) {
 				tr.set(sysRange.end, trueValue);
