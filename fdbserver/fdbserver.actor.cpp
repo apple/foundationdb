@@ -1143,10 +1143,8 @@ private:
 			}
 			case OPT_TRACECLOCK: {
 				const char* a = args.OptionArg();
-				if (!strcmp(a, "realtime"))
-					g_trace_clock = TRACE_CLOCK_REALTIME;
-				else if (!strcmp(a, "now"))
-					g_trace_clock = TRACE_CLOCK_NOW;
+				if (!strcmp(a, "realtime")) g_trace_clock.store(TRACE_CLOCK_REALTIME);
+				else if (!strcmp(a, "now")) g_trace_clock.store(TRACE_CLOCK_NOW);
 				else {
 					fprintf(stderr, "ERROR: Unknown clock source `%s'\n", a);
 					printHelpTeaser(argv[0]);
@@ -1538,7 +1536,7 @@ int main(int argc, char* argv[]) {
 		delete CLIENT_KNOBS;
 		FlowKnobs* flowKnobs = new FlowKnobs(true, role == Simulation);
 		ClientKnobs* clientKnobs = new ClientKnobs(true);
-		ServerKnobs* serverKnobs = new ServerKnobs(true, clientKnobs);
+		ServerKnobs* serverKnobs = new ServerKnobs(true, clientKnobs, role == Simulation);
 		FLOW_KNOBS = flowKnobs;
 		SERVER_KNOBS = serverKnobs;
 		CLIENT_KNOBS = clientKnobs;
@@ -1721,8 +1719,11 @@ int main(int argc, char* argv[]) {
 			std::vector<std::string> directories = platform::listDirectories( dataFolder );
 			for(int i = 0; i < directories.size(); i++)
 				if (directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." &&
-				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos) {
-					TraceEvent(SevError, "IncompatibleDirectoryFound").detail("DataFolder", dataFolder).detail("SuspiciousFile", directories[i]);
+				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos &&
+				    directories[i] != "mutation_backups") {
+					TraceEvent(SevError, "IncompatibleDirectoryFound")
+					    .detail("DataFolder", dataFolder)
+					    .detail("SuspiciousFile", directories[i]);
 					fprintf(stderr, "ERROR: Data folder `%s' had non fdb file `%s'; please use clean, fdb-only folder\n", dataFolder.c_str(), directories[i].c_str());
 					flushAndExit(FDB_EXIT_ERROR);
 				}

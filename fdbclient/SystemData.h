@@ -174,6 +174,17 @@ const Value workerListValue( ProcessData const& );
 Key decodeWorkerListKey( KeyRef const& );
 ProcessData decodeWorkerListValue( ValueRef const& );
 
+//    "\xff/backupProgress/[[workerID]]" := "[[WorkerBackupStatus]]"
+extern const KeyRangeRef backupProgressKeys;
+extern const KeyRef backupProgressPrefix;
+const Key backupProgressKeyFor(UID workerID);
+const Value backupProgressValue(const WorkerBackupStatus& status);
+UID decodeBackupProgressKey(const KeyRef& key);
+WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value);
+
+//    "\xff/backupStarted"
+extern const KeyRef backupStartedKey;
+
 extern const KeyRef coordinatorsKey;
 extern const KeyRef logsKey;
 extern const KeyRef minRequiredCommitVersionKey;

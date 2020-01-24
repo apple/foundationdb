@@ -22,10 +22,13 @@
 #define FDBSERVER_CLUSTERRECRUITMENTINTERFACE_H
 #pragma once
 
+#include <vector>
+
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbserver/BackupInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/RecoveryState.h"
@@ -63,12 +66,12 @@ struct ClusterControllerFullInterface {
 
 	void initEndpoints() {
 		clientInterface.initEndpoints();
-		recruitFromConfiguration.getEndpoint( TaskPriority::ClusterController );
-		recruitRemoteFromConfiguration.getEndpoint( TaskPriority::ClusterController );
+		recruitFromConfiguration.getEndpoint( TaskPriority::ClusterControllerRecruit );
+		recruitRemoteFromConfiguration.getEndpoint( TaskPriority::ClusterControllerRecruit );
 		recruitStorage.getEndpoint( TaskPriority::ClusterController );
-		registerWorker.getEndpoint( TaskPriority::ClusterController );
+		registerWorker.getEndpoint( TaskPriority::ClusterControllerWorker );
 		getWorkers.getEndpoint( TaskPriority::ClusterController );
-		registerMaster.getEndpoint( TaskPriority::ClusterController );
+		registerMaster.getEndpoint( TaskPriority::ClusterControllerRegister );
 		getServerDBInfo.getEndpoint( TaskPriority::ClusterController );
 	}
 
@@ -84,20 +87,22 @@ struct ClusterControllerFullInterface {
 
 struct RecruitFromConfigurationReply {
 	constexpr static FileIdentifier file_identifier = 2224085;
-	vector<WorkerInterface> tLogs;
-	vector<WorkerInterface> satelliteTLogs;
-	vector<WorkerInterface> proxies;
-	vector<WorkerInterface> resolvers;
-	vector<WorkerInterface> storageServers;
-	vector<WorkerInterface> oldLogRouters;
+	std::vector<WorkerInterface> backupWorkers;
+	std::vector<WorkerInterface> tLogs;
+	std::vector<WorkerInterface> satelliteTLogs;
+	std::vector<WorkerInterface> proxies;
+	std::vector<WorkerInterface> resolvers;
+	std::vector<WorkerInterface> storageServers;
+	std::vector<WorkerInterface> oldLogRouters;
 	Optional<Key> dcId;
 	bool satelliteFallback;
 
 	RecruitFromConfigurationReply() : satelliteFallback(false) {}
 
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, dcId, satelliteFallback);
+	void serialize(Ar& ar) {
+		serializer(ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, dcId,
+		           satelliteFallback, backupWorkers);
 	}
 };
 
@@ -120,8 +125,8 @@ struct RecruitFromConfigurationRequest {
 
 struct RecruitRemoteFromConfigurationReply {
 	constexpr static FileIdentifier file_identifier = 9091392;
-	vector<WorkerInterface> remoteTLogs;
-	vector<WorkerInterface> logRouters;
+	std::vector<WorkerInterface> remoteTLogs;
+	std::vector<WorkerInterface> logRouters;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -230,18 +235,18 @@ struct RegisterMasterRequest {
 	UID id;
 	LocalityData mi;
 	LogSystemConfig logSystemConfig;
-	vector<MasterProxyInterface> proxies;
-	vector<ResolverInterface> resolvers;
+	std::vector<MasterProxyInterface> proxies;
+	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount;
 	int64_t registrationCount;
 	Optional<DatabaseConfiguration> configuration;
-	vector<UID> priorCommittedLogServers;
+	std::vector<UID> priorCommittedLogServers;
 	RecoveryState recoveryState;
 	bool recoveryStalled;
 
 	ReplyPromise<Void> reply;
 
-	RegisterMasterRequest() {}
+	RegisterMasterRequest() : logSystemConfig(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

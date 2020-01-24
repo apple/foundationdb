@@ -347,7 +347,7 @@ bool FDBLibTLSSession::verify_peer() {
 		if(now() - lastVerifyFailureLogged > 1.0) {
 			for (std::string reason : verify_failure_reasons) {
 				lastVerifyFailureLogged = now();
-				TraceEvent("FDBLibTLSVerifyFailure", uid).detail("Reason", reason);
+				TraceEvent("FDBLibTLSVerifyFailure", uid).suppressFor(1.0).detail("Reason", reason);
 			}
 		}
 	}

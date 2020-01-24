@@ -97,9 +97,9 @@ StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
 template<> Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return Tuple().append(val); }
 template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
 
-ACTOR Future<std::vector<KeyBackedTag>> TagUidMap::getAll_impl(TagUidMap *tagsMap, Reference<ReadYourWritesTransaction> tr) {
+ACTOR Future<std::vector<KeyBackedTag>> TagUidMap::getAll_impl(TagUidMap *tagsMap, Reference<ReadYourWritesTransaction> tr, bool snapshot) {
 	state Key prefix = tagsMap->prefix; // Copying it here as tagsMap lifetime is not tied to this actor
-	TagMap::PairsType tagPairs = wait(tagsMap->getRange(tr, std::string(), {}, 1e6));
+	TagMap::PairsType tagPairs = wait(tagsMap->getRange(tr, std::string(), {}, 1e6, snapshot));
 	std::vector<KeyBackedTag> results;
 	for(auto &p : tagPairs)
 		results.push_back(KeyBackedTag(p.first, prefix));
@@ -543,42 +543,6 @@ namespace fileBackup {
 		uint32_t fileVersion;
 		Key lastKey;
 		Key lastValue;
-	};
-
-	// Helper class for reading restore data from a buffer and throwing the right errors.
-	struct StringRefReader {
-		StringRefReader(StringRef s = StringRef(), Error e = Error()) : rptr(s.begin()), end(s.end()), failure_error(e) {}
-
-		// Return remainder of data as a StringRef
-		StringRef remainder() {
-			return StringRef(rptr, end - rptr);
-		}
-
-		// Return a pointer to len bytes at the current read position and advance read pos
-		const uint8_t * consume(unsigned int len) {
-			if(rptr == end && len != 0)
-				throw end_of_stream();
-			const uint8_t *p = rptr;
-			rptr += len;
-			if(rptr > end)
-				throw failure_error;
-			return p;
-		}
-
-		// Return a T from the current read position and advance read pos
-		template<typename T> const T consume() {
-			return *(const T *)consume(sizeof(T));
-		}
-
-		// Functions for consuming big endian (network byte order) integers.
-		// Consumes a big endian number, swaps it to little endian, and returns it.
-		int32_t  consumeNetworkInt32()  { return (int32_t)bigEndian32((uint32_t)consume< int32_t>());}
-		uint32_t consumeNetworkUInt32() { return          bigEndian32(          consume<uint32_t>());}
-
-		bool eof() { return rptr == end; }
-
-		const uint8_t *rptr, *end;
-		Error failure_error;
 	};
 
 	ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset, int len) {
@@ -4202,10 +4166,10 @@ public:
 		return statusText;
 	}
 
-	ACTOR static Future<Version> getLastRestorable(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName) {
+	ACTOR static Future<Version> getLastRestorable(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName, bool snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state Optional<Value> version = wait(tr->get(backupAgent->lastRestorable.pack(tagName)));
+		state Optional<Value> version = wait(tr->get(backupAgent->lastRestorable.pack(tagName), snapshot));
 
 		return (version.present()) ? BinaryReader::fromStringRef<Version>(version.get(), Unversioned()) : 0;
 	}
@@ -4418,8 +4382,8 @@ Future<std::string> FileBackupAgent::getStatusJSON(Database cx, std::string tagN
 	return FileBackupAgentImpl::getStatusJSON(this, cx, tagName);
 }
 
-Future<Version> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName) {
-	return FileBackupAgentImpl::getLastRestorable(this, tr, tagName);
+Future<Version> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, bool snapshot) {
+	return FileBackupAgentImpl::getLastRestorable(this, tr, tagName, snapshot);
 }
 
 void FileBackupAgent::setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version) {

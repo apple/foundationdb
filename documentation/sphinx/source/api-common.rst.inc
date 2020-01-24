@@ -142,7 +142,7 @@
     A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions.
 
 .. |atomic-versionstamps-2| replace::
-    A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an error.
+    A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an ``accessed_unreadable`` error.  The range of keys marked unreadable when setting a versionstamped key begins at the transactions's read version if it is known, otherwise a versionstamp of all ``0x00`` bytes is conservatively assumed.  The upper bound of the unreadable range is a versionstamp of all ``0xFF`` bytes.
 
 .. |atomic-versionstamps-tuple-warning-key| replace::
     At this time, versionstamped keys are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages.

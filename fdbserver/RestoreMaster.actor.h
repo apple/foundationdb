@@ -238,7 +238,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	//    	   and each mutation in backup files is included in the version batches exactly once.
 	// Assumption 1: input files has no empty files;
 	// Assumption 2: range files at one version <= batchSizeThreshold.
-	// Note: We do not allow a versoinBatch size larger than the batchSizeThreshold because the range file size at
+	// Note: We do not allow a versionBatch size larger than the batchSizeThreshold because the range file size at
 	// a version depends on the number of backupAgents and its upper bound is hard to get.
 	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles, const std::vector<RestoreFileFR>& logFiles,
 	                         std::map<Version, VersionBatch>* versionBatches) {

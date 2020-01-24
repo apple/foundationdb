@@ -131,15 +131,19 @@ function(strip_debug_symbols target)
   add_custom_command(OUTPUT "${out_file}"
     COMMAND ${strip_command} $<TARGET_FILE:${target}>
     COMMENT "Stripping symbols from ${target}")
-  set(out_files "${out_file}")
+  add_custom_target(strip_only_${target} DEPENDS ${out_file})
   if(is_exec AND NOT APPLE)
     add_custom_command(OUTPUT "${out_file}.debug"
-      COMMAND objcopy --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug" &&
-      objcopy --add-gnu-debuglink="${out_file}.debug" ${out_file}
+      COMMAND objcopy --verbose --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug"
+      COMMAND objcopy --verbose --add-gnu-debuglink="${out_file}.debug" "${out_file}"
+      DEPENDS ${out_file}
       COMMENT "Copy debug symbols to ${out_name}.debug")
     list(APPEND out_files "${out_file}.debug")
+    add_custom_target(strip_${target} DEPENDS "${out_file}.debug")
+  else()
+    add_custom_target(strip_${target})
   endif()
-  add_custom_target(strip_${target} DEPENDS ${out_files})
+  add_dependencies(strip_${target} strip_only_${target})
   add_dependencies(strip_${target} ${target})
   add_dependencies(strip_targets strip_${target})
 endfunction()

@@ -20,7 +20,7 @@
 
 
 #define SQLITE_THREADSAFE 0  // also in sqlite3.amalgamation.c!
-#include "fdbrpc/crc32c.h"
+#include "flow/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"

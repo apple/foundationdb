@@ -37,7 +37,7 @@
 #include "flow/Knobs.h"
 #include "flow/UnitTest.h"
 #include <stdio.h>
-#include "flow/Hash3.h"
+#include "flow/crc32c.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -416,7 +416,7 @@ public:
 			++ctx.countAIOSubmit;
 
 			double elapsed = timer_monotonic() - begin;
-			g_network->networkMetrics.secSquaredSubmit += elapsed*elapsed/2;	
+			g_network->networkInfo.metrics.secSquaredSubmit += elapsed*elapsed/2;	
 
 			//TraceEvent("Launched").detail("N", rc).detail("Queued", ctx.queue.size()).detail("Elapsed", elapsed).detail("Outstanding", ctx.outstanding+rc);
 			//printf("launched: %d/%d in %f us (%d outstanding; lowest prio %d)\n", rc, ctx.queue.size(), elapsed*1e6, ctx.outstanding + rc, toStart[n-1]->getTask());
@@ -672,7 +672,7 @@ private:
 				double t = timer_monotonic();
 				double elapsed = t - ctx.ioStallBegin;
 				ctx.ioStallBegin = t;
-				g_network->networkMetrics.secSquaredDiskStall += elapsed*elapsed/2;
+				g_network->networkInfo.metrics.secSquaredDiskStall += elapsed*elapsed/2;
 			}
 
 			ctx.outstanding -= n;
@@ -733,7 +733,7 @@ void AsyncFileKAIO::KAIOLogBlockEvent(FILE *logFile, IOBlock *ioblock, OpLogEntr
 
 		// Log a checksum for Writes up to the Complete stage or Reads starting from the Complete stage
 		if( (op == OpLogEntry::WRITE && stage <= OpLogEntry::COMPLETE) || (op == OpLogEntry::READ && stage >= OpLogEntry::COMPLETE) )
-			e.checksum = hashlittle(ioblock->buf, ioblock->nbytes, 0xab12fd93);
+			e.checksum = crc32c_append(0xab12fd93, ioblock->buf, ioblock->nbytes);
 		else
 			e.checksum = 0;
 

@@ -26,6 +26,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/MetricLogger.h"
+#include "fdbserver/BackupInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/WaitFailure.h"
@@ -69,15 +70,23 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 
 
 ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
+	state std::vector<UID> lastProxyUIDs;
+	state std::vector<MasterProxyInterface> lastProxies;
 	loop {
-		info->set( db->get().client );
+		ClientDBInfo ni = db->get().client;
+		shrinkProxyList(ni, lastProxyUIDs, lastProxies);
+		info->set( ni );
 		wait( db->onChange() );
 	}
 }
 
 ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
+	state std::vector<UID> lastProxyUIDs;
+	state std::vector<MasterProxyInterface> lastProxies;
 	loop {
-		info->set( db->get().read().client );
+		ClientDBInfo ni = db->get().read().client;
+		shrinkProxyList(ni, lastProxyUIDs, lastProxies);
+		info->set( ni );
 		wait( db->onChange() );
 	}
 }
@@ -1106,6 +1115,19 @@ ACTOR Future<Void> workerServer(
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
 				req.reply.send(recruited);
 			}
+			when (InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
+				BackupInterface recruited(locality);
+				recruited.initEndpoints();
+
+				startRole(Role::BACKUP, recruited.id(), interf.id());
+				DUMPTOKEN(recruited.waitFailure);
+
+				Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
+				errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
+				TraceEvent("Backup_InitRequest", req.reqId).detail("BackupId", recruited.id());
+				InitializeBackupReply reply(recruited, req.backupEpoch);
+				req.reply.send(reply);
+			}
 			when( InitializeTLogRequest req = waitNext(interf.tLog.getFuture()) ) {
 				// For now, there's a one-to-one mapping of spill type to TLogVersion.
 				// With future work, a particular version of the TLog can support multiple
@@ -1537,3 +1559,4 @@ const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
 const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
+const Role Role::BACKUP("Backup", "BK");

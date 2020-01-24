@@ -20,8 +20,6 @@
     <ActorCompiler Include="genericactors.actor.cpp" />
     <ActorCompiler Include="FlowTransport.actor.cpp" />
     <ActorCompiler Include="IAsyncFile.actor.cpp" />
-    <ClCompile Include="crc32c.cpp" />
-    <ClCompile Include="generated-constants.cpp" />
     <ClCompile Include="Platform.cpp" />
     <ClCompile Include="AsyncFileWriteChecker.cpp" />
     <ClCompile Include="libcoroutine\Common.c" />
@@ -73,7 +71,6 @@
     </ActorCompiler>
     <ClInclude Include="AsyncFileWriteChecker.h" />
     <ClInclude Include="ContinuousSample.h" />
-    <ClInclude Include="crc32c.h" />
     <ClInclude Include="FailureMonitor.h" />
     <ActorCompiler Include="LoadBalance.actor.h">
       <EnableCompile>false</EnableCompile>
