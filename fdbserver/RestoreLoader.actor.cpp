@@ -260,16 +260,16 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	}
 
 	if (!isDuplicated) {
+		vector<Future<Void>> fSendMutations;
 		batchData->rangeToApplier = req.rangeToApplier;
 		for (; item != batchData->kvOpsPerLP.end(); item++) {
 			if (item->first.isRangeFile == req.useRangeFile) {
 				// Send the parsed mutation to applier who will apply the mutation to DB
-				// TODO: Change to parallel sending
-				// TODO: item should based on batchIndex
-				wait(sendMutationsToApplier(&item->second, req.batchIndex, item->first.asset, item->first.isRangeFile,
+				fSendMutations.push_back(sendMutationsToApplier(&item->second, req.batchIndex, item->first.asset, item->first.isRangeFile,
 				                            &batchData->rangeToApplier, &self->appliersInterf));
 			}
 		}
+		wait(waitForAll(fSendMutations));
 		if (req.useRangeFile) {
 			batchStatus->sendAllRanges = Void(); // Finish sending kvs parsed from range files
 		} else {
