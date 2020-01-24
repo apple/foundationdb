@@ -475,6 +475,13 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
 }
 
+ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> releaseDelay, int64_t localBatchNumber) {
+	wait(releaseDelay);
+	ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber-1);
+	self->latestLocalCommitBatchResolving.set(localBatchNumber);
+	return Void();
+}
+
 ACTOR Future<Void> commitBatch(
 	ProxyCommitData* self,
 	vector<CommitTransactionRequest> trs,
@@ -486,6 +493,11 @@ ACTOR Future<Void> commitBatch(
 	state Optional<UID> debugID;
 	state bool forceRecovery = false;
 	state BinaryWriter valueWriter(Unversioned());
+	
+	state int batchBytes = 0; 
+	for (int t = 0; t<trs.size(); t++) {
+		batchBytes += trs[t].transaction.expectedSize();
+	}
 
 	ASSERT(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS <= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);  // since we are using just the former to limit the number of versions actually in flight!
 
@@ -515,6 +527,7 @@ ACTOR Future<Void> commitBatch(
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 	TEST(self->latestLocalCommitBatchResolving.get() < localBatchNumber-1); // Queuing pre-resolution commit processing 
 	wait(self->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber-1));
+	state Future<Void> releaseDelay = delay(batchBytes/SERVER_KNOBS->MAX_PROXY_COMMIT_BYTES_PER_SECOND, TaskPriority::ProxyCommitYield1);
 	wait(yield(TaskPriority::ProxyCommitYield1));
 
 	if (debugID.present())
@@ -566,9 +579,7 @@ ACTOR Future<Void> commitBatch(
 	}
 
 	state vector<vector<int>> transactionResolverMap = std::move( requests.transactionResolverMap );
-
-	ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber-1);
-	self->latestLocalCommitBatchResolving.set(localBatchNumber);
+	state Future<Void> releaseFuture = releaseResolvingAfter(self, releaseDelay, localBatchNumber);
 
 	/////// Phase 2: Resolution (waiting on the network; pipelined)
 	state vector<ResolveTransactionBatchReply> resolution = wait( getAll(replies) );
@@ -1068,6 +1079,7 @@ ACTOR Future<Void> commitBatch(
 
 	self->commitBatchesMemBytesCount -= currentBatchMemBytesCount;
 	ASSERT_ABORT(self->commitBatchesMemBytesCount >= 0);
+	wait(releaseFuture);
 	return Void();
 }
 
