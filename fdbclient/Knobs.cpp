@@ -202,5 +202,5 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
 
 	//fdbcli
-	init( CLI_CONNECT_PARALLELISM,                   20 );
+	init( CLI_CONNECT_PARALLELISM,                   10 );
 }
