@@ -2336,6 +2336,28 @@ namespace fileBackup {
 		return BackupSnapshotManifest::addTask(tr, taskBucket, parentTask, completionKey, waitFor);
 	}
 
+	// Clears the backup ID from "backupStartedKey" to pause backup workers.
+	ACTOR static Future<Void> clearBackupStartID(Reference<ReadYourWritesTransaction> tr, UID backupUid) {
+		Optional<Value> started = wait(tr->get(backupStartedKey));
+		std::vector<std::pair<UID, Version>> ids;
+		if (started.present()) {
+			ids = decodeBackupStartedValue(started.get());
+		}
+		auto it = std::find_if(ids.begin(), ids.end(),
+		                       [=](const std::pair<UID, Version>& p) { return p.first == backupUid; });
+		if (it != ids.end()) {
+			ids.erase(it);
+		}
+
+		if (ids.empty()) {
+			//TraceEvent("ClearBackup").detail("BID", backupUid);
+			tr->clear(backupStartedKey);
+		} else {
+			tr->set(backupStartedKey, encodeBackupStartedValue(ids));
+		}
+		return Void();
+	}
+
 	struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		static StringRef name;
 		static const uint32_t version;
@@ -2442,9 +2464,8 @@ namespace fileBackup {
 			// task will clean up and set the completed state.
 			wait(success(FileBackupFinishedTask::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), backupFinished)));
 
-			wait(taskBucket->finish(tr, task));
+			wait(taskBucket->finish(tr, task) && clearBackupStartID(tr, config.getUid()));
 
-			// Clear the "backupStartedKey" to pause backup workers
 			return Void();
 		}
 
@@ -3879,7 +3900,7 @@ public:
 		// Cancel backup task through tag
 		wait(tag.cancel(tr));
 		
-		wait(eraseLogData(tr, config.getUidAsKey(), destUidValue));
+		wait(eraseLogData(tr, config.getUidAsKey(), destUidValue) && fileBackup::clearBackupStartID(tr, config.getUid()));
 
 		config.stateEnum().set(tr, EBackupState::STATE_ABORTED);
 
