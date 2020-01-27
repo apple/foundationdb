@@ -2338,6 +2338,7 @@ namespace fileBackup {
 
 	// Clears the backup ID from "backupStartedKey" to pause backup workers.
 	ACTOR static Future<Void> clearBackupStartID(Reference<ReadYourWritesTransaction> tr, UID backupUid) {
+		// If backup worker is not enabled, exit early.
 		Optional<Value> started = wait(tr->get(backupStartedKey));
 		std::vector<std::pair<UID, Version>> ids;
 		if (started.present()) {
@@ -2384,6 +2385,12 @@ namespace fileBackup {
 				}
 			}
 
+			// Check if backup worker is enabled
+			DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
+			if (!dbConfig.backupType.isBackupWorkerEnabled()) {
+				return Void();
+			}
+
 			// Set the "backupStartedKey" and wait for all backup worker started
 			tr->reset();
 			state BackupConfig config(task);
@@ -2409,9 +2416,6 @@ namespace fileBackup {
 						ids.emplace_back(uid, Params.beginVersion().get(task));
 					} else {
 						Params.beginVersion().set(task, it->second);
-					}
-					for (auto p : ids) {
-						std::cout << "setBackupStartedKey UID: " << p.first.toString() << " Version: " << p.second << "\n";
 					}
 
 					tr->set(backupStartedKey, encodeBackupStartedValue(ids));
@@ -3838,6 +3842,8 @@ public:
 		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
 		state BackupConfig config(current.first);
 		state EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
+
+		// Call clearBackupStartID().
 
 		if (!FileBackupAgent::isRunnable(status)) {
 			throw backup_unneeded();

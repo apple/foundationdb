@@ -178,6 +178,9 @@ struct DatabaseConfiguration {
 	int32_t remoteTLogReplicationFactor;
 	Reference<IReplicationPolicy> remoteTLogPolicy;
 
+	// Backup Workers
+	BackupType backupType;
+
 	//Data centers
 	int32_t usableRegions;
 	int32_t repopulateRegionAntiQuorum;

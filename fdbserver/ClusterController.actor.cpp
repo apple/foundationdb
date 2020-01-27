@@ -780,13 +780,15 @@ public:
 			}
 		}
 
-		const int nBackup = std::max<int>(
-		    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tlogs.size()),
-		    req.maxOldLogRouters);
-		auto backupWorkers =
-		    getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup, req.configuration, id_used);
-		std::transform(backupWorkers.begin(), backupWorkers.end(), std::back_inserter(result.backupWorkers),
-		               [](const WorkerDetails& w) { return w.interf; });
+		if (req.configuration.backupType.isBackupWorkerEnabled()) {
+			const int nBackup = std::max<int>(
+			    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tlogs.size()),
+			    req.maxOldLogRouters);
+			auto backupWorkers =
+			    getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup, req.configuration, id_used);
+			std::transform(backupWorkers.begin(), backupWorkers.end(), std::back_inserter(result.backupWorkers),
+			               [](const WorkerDetails& w) { return w.interf; });
+		}
 
 		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
 			( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
@@ -914,12 +916,14 @@ public:
 						for(int i = 0; i < proxies.size(); i++)
 							result.proxies.push_back(proxies[i].interf);
 
-						const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
-						auto backupWorkers = getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup,
-						                                                   req.configuration, id_used);
-						std::transform(backupWorkers.begin(), backupWorkers.end(),
-						               std::back_inserter(result.backupWorkers),
-						               [](const WorkerDetails& w) { return w.interf; });
+						if (req.configuration.backupType.isBackupWorkerEnabled()) {
+							const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
+							auto backupWorkers = getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup,
+							                                                   req.configuration, id_used);
+							std::transform(backupWorkers.begin(), backupWorkers.end(),
+							               std::back_inserter(result.backupWorkers),
+							               [](const WorkerDetails& w) { return w.interf; });
+						}
 
 						break;
 					} else {

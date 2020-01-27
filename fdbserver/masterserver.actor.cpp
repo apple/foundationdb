@@ -1525,7 +1525,9 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	self->addActor.send( changeCoordinators(self) );
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
 	self->addActor.send(configurationMonitor(self, cx));
-	self->addActor.send(recruitBackupWorkers(self, cx));
+	if (self->configuration.backupType.isBackupWorkerEnabled()) {
+		self->addActor.send(recruitBackupWorkers(self, cx));
+	}
 
 	wait( Future<Void>(Never()) );
 	throw internal_error();

@@ -2138,16 +2138,19 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->txsTags = configuration.tLogVersion >= TLogVersion::V4 ? recr.tLogs.size() : 0;
 		oldLogSystem->recruitmentID = logSystem->recruitmentID;
 
-		logSystem->logRouterTags = recr.tLogs.size() * std::max<int>(1, configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size()));
 		if(configuration.usableRegions > 1) {
+			logSystem->logRouterTags = recr.tLogs.size() * std::max<int>(1, configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size()));
 			logSystem->expectedLogSets++;
 			logSystem->addPseudoLocality(tagLocalityLogRouterMapped);
-			logSystem->addPseudoLocality(tagLocalityBackup);
-			TraceEvent("AddPseudoLocality", logSystem->getDebugID())
-			    .detail("Locality1", "LogRouterMapped")
-			    .detail("Locality2", "Backup");
-		} else {
+			TraceEvent e("AddPseudoLocality", logSystem->getDebugID());
+			e.detail("Locality1", "LogRouterMapped");
+			if (configuration.backupType.isBackupWorkerEnabled()) {
+				logSystem->addPseudoLocality(tagLocalityBackup);
+				e.detail("Locality2", "Backup");
+			}
+		} else if (configuration.backupType.isBackupWorkerEnabled()) {
 			// Single region uses log router tag for backup workers.
+			logSystem->logRouterTags = recr.tLogs.size() * std::max<int>(1, configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size()));
 			logSystem->addPseudoLocality(tagLocalityBackup);
 			TraceEvent("AddPseudoLocality", logSystem->getDebugID()).detail("Locality", "Backup");
 		}
