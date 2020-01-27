@@ -296,7 +296,18 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			    .detail("UsedLogFiles", curLogFiles.size());
 
 			ASSERT(prevEndVersion < nextVersion); // Ensure progress
-			if (vb.size + nextVersionSize <= SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES) {
+			if (vb.size + nextVersionSize <= SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES ||
+			    (vb.size < 1 && prevEndVersion + 1 == nextVersion)) {
+				// In case the batch size at a single version > FASTRESTORE_VERSIONBATCH_MAX_BYTES,
+				// the version batch should include the single version to avoid false positive in simulation.
+				if (vb.size + nextVersionSize > SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES) {
+					TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "FastRestoreBuildVersionBatch")
+					    .detail("NextVersion", nextVersion)
+					    .detail("PreviousEndVersion", prevEndVersion)
+					    .detail("NextVersionIntervalSize", nextVersionSize)
+					    .detail("VersionBatchSizeThreshold", SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES)
+					    .detail("SuggestedMinimumVersionBatchSizeThreshold", nextVersionSize * 2);
+				}
 				// nextVersion should be included in this batch
 				vb.size += nextVersionSize;
 				while (rangeIdx < nextRangeIdx) {
@@ -326,7 +337,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 						    .detail("PreviousEndVersion", prevEndVersion)
 						    .detail("NextVersionIntervalSize", nextVersionSize)
 						    .detail("VersionBatchSizeThreshold", SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES)
-						    .detail("SuggestedMinimumVersionBatchSizeThreshold", nextVersion);
+						    .detail("SuggestedMinimumVersionBatchSizeThreshold", nextVersionSize * 2);
 						// Exit restore early if it won't succeed
 						flushAndExit(FDB_EXIT_ERROR);
 					}
