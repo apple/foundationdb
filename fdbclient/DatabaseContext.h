@@ -21,6 +21,7 @@
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
 #include "StorageServerInterface.h"
+#include "genericactors.actor.h"
 #include <vector>
 #pragma once
 
@@ -152,7 +153,8 @@ public:
 
 	// Cache of location information
 	int locationCacheSize;
-	CoalescedKeyRangeMap< Reference<LocationInfo> > locationCache;
+	// bool indicates whether the range has caches
+	CoalescedKeyRangeMap<std::pair<Reference<LocationInfo>, bool>> locationCache;
 
 	std::map< UID, StorageServerInfo* > server_interf;
 
@@ -203,7 +205,6 @@ public:
 	double detailedHealthMetricsLastUpdated;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
-	Standalone<VectorRef<StorageServerInterface>> cacheServers;
 	Future<Void> cacheListMonitor;
 };
 

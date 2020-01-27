@@ -20,7 +20,9 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 
+#include <algorithm>
 #include <iterator>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -481,9 +483,43 @@ ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDB
 	}
 }
 
+void updateLocationCacheWithCaches(DatabaseContext* self, const std::set<UID>& removed,
+                                   const std::map<UID, StorageServerInterface>& added) {
+	// TODO: this needs to be more clever in the future
+	auto ranges = self->locationCache.ranges();
+	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
+		if (iter->value().second) {
+			auto& val = iter->value().first;
+			std::vector<Reference<ReferencedInterface<StorageServerInterface>>> interfaces;
+			interfaces.reserve(val->size() - removed.size() + added.size());
+			for (int i = 0; i < val->size(); ++i) {
+				const auto& interf = (*val)[i];
+				if (removed.count(interf->interf.id()) == 0) {
+					interfaces.emplace_back(interf);
+				}
+			}
+			for (const auto& p : added) {
+				interfaces.emplace_back(p.second);
+			}
+			iter->value().first = Reference<LocationInfo>{new LocationInfo{interfaces}};
+		}
+	}
+}
+
+namespace {
+
+struct MapCompare {
+	bool operator()(const UID& uid, const std::pair<UID, StorageServerInterface>& p) const { return uid < p.first; }
+
+	bool operator()(const std::pair<UID, StorageServerInterface>& p, const UID& uid) const { return p.first < uid; }
+};
+
+} // namespace
+
 ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 	state Database db(self);
 	state Transaction tr(db);
+	state std::set<UID> knownCacheServers;
 	try {
 		loop {
 			tr.reset();
@@ -491,12 +527,30 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 				Standalone<RangeResultRef> cacheList =
 				    wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!cacheList.more);
-				Standalone<VectorRef<StorageServerInterface>> caches;
+				bool hasChanges = false;
+				std::set<UID> removedCacheServers = knownCacheServers;
+				std::map<UID, StorageServerInterface> allCacheServers;
 				for (auto kv : cacheList) {
-					caches.push_back(caches.arena(),
-					                 BinaryReader::fromStringRef<StorageServerInterface>(kv.value, IncludeVersion()));
+					auto ssi = BinaryReader::fromStringRef<StorageServerInterface>(kv.value, IncludeVersion());
+					allCacheServers.emplace(ssi.id(), ssi);
+					removedCacheServers.erase(ssi.id());
 				}
-				self->cacheServers = caches;
+				if (!removedCacheServers.empty()) {
+					hasChanges = true;
+					for (auto id : removedCacheServers) {
+						knownCacheServers.erase(id);
+					}
+				}
+				std::map<UID, StorageServerInterface> newCacheServers;
+				std::set_difference(allCacheServers.begin(), allCacheServers.end(), knownCacheServers.begin(),
+				                    knownCacheServers.end(),
+				                    std::insert_iterator<std::map<UID, StorageServerInterface>>(
+				                        newCacheServers, newCacheServers.begin()),
+				                    MapCompare{});
+				hasChanges = hasChanges || newCacheServers.empty();
+				if (hasChanges) {
+					updateLocationCacheWithCaches(self, removedCacheServers, newCacheServers);
+				}
 				wait(delay(5.0));
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -601,17 +655,17 @@ DatabaseContext::~DatabaseContext() {
 	for(auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT( server_interf.empty() );
-	locationCache.insert( allKeys, Reference<LocationInfo>() );
+	locationCache.insert(allKeys, std::make_pair(Reference<LocationInfo>(), false));
 }
 
 pair<KeyRange,Reference<LocationInfo>> DatabaseContext::getCachedLocation( const KeyRef& key, bool isBackward ) {
 	if( isBackward ) {
 		auto range = locationCache.rangeContainingKeyBefore(key);
-		return std::make_pair(range->range(), range->value());
+		return std::make_pair(range->range(), range->value().first);
 	}
 	else {
 		auto range = locationCache.rangeContaining(key);
-		return std::make_pair(range->range(), range->value());
+		return std::make_pair(range->range(), range->value().first);
 	}
 }
 
@@ -623,12 +677,12 @@ bool DatabaseContext::getCachedLocations( const KeyRangeRef& range, vector<std::
 
 	loop {
 		auto r = reverse ? end : begin;
-		if (!r->value()){
+		if (!r->value().first){
 			TEST(result.size()); // had some but not all cached locations
 			result.clear();
 			return false;
 		}
-		result.emplace_back(r->range() & range, r->value());
+		result.emplace_back(r->range() & range, r->value().first);
 		if (result.size() == limit || begin == end) {
 			break;
 		}
@@ -656,24 +710,24 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& k
 		attempts++;
 		auto r = locationCache.randomRange();
 		Key begin = r.begin(), end = r.end();  // insert invalidates r, so can't be passed a mere reference into it
-		locationCache.insert( KeyRangeRef(begin, end), Reference<LocationInfo>() );
+		locationCache.insert(KeyRangeRef(begin, end), std::make_pair(Reference<LocationInfo>(), false));
 	}
-	locationCache.insert( keys, loc );
+	locationCache.insert(keys, std::make_pair(loc, false));
 	return std::move(loc);
 }
 
 void DatabaseContext::invalidateCache( const KeyRef& key, bool isBackward ) {
 	if( isBackward ) {
-		locationCache.rangeContainingKeyBefore(key)->value() = Reference<LocationInfo>();
+		locationCache.rangeContainingKeyBefore(key)->value() = std::make_pair(Reference<LocationInfo>(), false);
 	} else {
-		locationCache.rangeContaining(key)->value() = Reference<LocationInfo>();
+		locationCache.rangeContaining(key)->value() = std::make_pair(Reference<LocationInfo>(), false);
 	}
 }
 
 void DatabaseContext::invalidateCache( const KeyRangeRef& keys ) {
 	auto rs = locationCache.intersectingRanges(keys);
 	Key begin = rs.begin().begin(), end = rs.end().begin();  // insert invalidates rs, so can't be passed a mere reference into it
-	locationCache.insert( KeyRangeRef(begin, end), Reference<LocationInfo>() );
+	locationCache.insert(KeyRangeRef(begin, end), std::make_pair(Reference<LocationInfo>(), false));
 }
 
 Future<Void> DatabaseContext::onMasterProxiesChanged() {
@@ -719,7 +773,7 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				if( clientInfo->get().proxies.size() )
 					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ) );
 				server_interf.clear();
-				locationCache.insert( allKeys, Reference<LocationInfo>() );
+				locationCache.insert( allKeys, std::make_pair(Reference<LocationInfo>(), false) );
 				break;
 			case FDBDatabaseOptions::MAX_WATCHES:
 				maxOutstandingWatches = (int)extractIntOption(value, 0, CLIENT_KNOBS->ABSOLUTE_MAX_WATCHES);
@@ -729,7 +783,7 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				if( clientInfo->get().proxies.size() )
 					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ));
 				server_interf.clear();
-				locationCache.insert( allKeys, Reference<LocationInfo>() );
+				locationCache.insert( allKeys, std::make_pair(Reference<LocationInfo>(), false) );
 				break;
 			case FDBDatabaseOptions::SNAPSHOT_RYW_ENABLE:
 				validateOptionValue(value, false);
