@@ -746,7 +746,25 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFol
 	return Void();
 }
 
-ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, Reference<ClusterConnectionFile> connFile, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
+ACTOR Future<Void> monitorTraceLogFlushFailure(Optional<Reference<AsyncVar<uint64_t>>> unsuccessfulFlushCount) {
+	if (unsuccessfulFlushCount.present()) {
+		loop {
+			wait(delay(SERVER_KNOBS->TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS));
+			auto _unsuccessfulFlushCount = getUnsuccessfulFlushCount();
+			if (_unsuccessfulFlushCount > SERVER_KNOBS->TRACE_LOG_FLUSH_FAILURE_REPORT_THRESHOLD) {
+				unsuccessfulFlushCount.get()->set(_unsuccessfulFlushCount);
+			} else {
+				unsuccessfulFlushCount.get()->set(0);
+			}
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                       Reference<ClusterConnectionFile> connFile, LocalityData locality,
+                                       Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                       Optional<Reference<AsyncVar<uint64_t>>> unsuccessfulFlushCount) {
 	// Initially most of the serverDBInfo is not known, but we know our locality right away
 	ServerDBInfo localInfo;
 	localInfo.myLocality = locality;
@@ -756,6 +774,10 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 	loop {
 		GetServerDBInfoRequest req;
 		req.knownServerInfoID = dbInfo->get().id;
+
+		if (unsuccessfulFlushCount.present() && unsuccessfulFlushCount.get()->get() > 0) {
+			req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("too_many_trace_log_flush_failures"));
+		}
 
 		ClusterConnectionString fileConnectionString;
 		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
@@ -800,6 +822,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 				if(ccInterface->get().present())
 					TraceEvent("GotCCInterfaceChange").detail("CCID", ccInterface->get().get().id()).detail("CCMachine", ccInterface->get().get().getWorkers.getEndpoint().getPrimaryAddress());
 			}
+			when(wait(unsuccessfulFlushCount.present() ? unsuccessfulFlushCount.get()->onChange() : Never())) {}
 		}
 	}
 }
@@ -868,6 +891,8 @@ ACTOR Future<Void> workerServer(
 	state WorkerInterface interf( locality );
 	interf.initEndpoints();
 
+	state Reference<AsyncVar<uint64_t>> unsuccessfulFlushCount(new AsyncVar<uint64_t>(0));
+
 	folder = abspath(folder);
 
 	if(metricsPrefix.size() > 0) {
@@ -887,7 +912,8 @@ ACTOR Future<Void> workerServer(
 	errorForwarders.add( resetAfter(degraded, SERVER_KNOBS->DEGRADED_RESET_INTERVAL, false, SERVER_KNOBS->DEGRADED_WARNING_LIMIT, SERVER_KNOBS->DEGRADED_WARNING_RESET_DELAY, "DegradedReset"));
 	errorForwarders.add( loadedPonger( interf.debugPing.getFuture() ) );
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
-	errorForwarders.add( monitorServerDBInfo( ccInterface, connFile, locality, dbInfo ) );
+	errorForwarders.add(monitorTraceLogFlushFailure(unsuccessfulFlushCount));
+	errorForwarders.add(monitorServerDBInfo(ccInterface, connFile, locality, dbInfo, unsuccessfulFlushCount));
 	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo, locality ) );
 	errorForwarders.add(monitorHighMemory(memoryProfileThreshold));
 

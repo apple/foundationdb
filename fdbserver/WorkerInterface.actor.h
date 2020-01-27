@@ -495,9 +495,10 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQu
                         bool restoreFromDisk, Promise<Void> oldLog, Promise<Void> recovered, std::string folder,
                         Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
 
-ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
-                                       Reference<ClusterConnectionFile> ccf, LocalityData locality,
-                                       Reference<AsyncVar<ServerDBInfo>> dbInfo);
+ACTOR Future<Void> monitorServerDBInfo(
+    Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, Reference<ClusterConnectionFile> ccf,
+    LocalityData locality, Reference<AsyncVar<ServerDBInfo>> dbInfo,
+    Optional<Reference<AsyncVar<uint64_t>>> unsuccessfulFlushCount = Optional<Reference<AsyncVar<uint64_t>>>());
 ACTOR Future<Void> resolver(ResolverInterface proxy, InitializeResolverRequest initReq,
                             Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest req,

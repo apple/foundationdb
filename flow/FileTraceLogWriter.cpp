@@ -78,11 +78,18 @@ void FileTraceLogWriter::write(const std::string& str) {
 			lastError(0);
 			remaining -= ret;
 			ptr += ret;
+			unsuccessfulFlushCount = 0;
 		} else {
+			unsuccessfulFlushCount++;
+			fprintf(stderr, "Unexpected error [%d] when flushing trace log.\n", errno);
 			lastError(errno);
 			threadSleep(0.1);
 		}
 	}
+}
+
+uint64_t FileTraceLogWriter::getUnsuccessfulFlushCount() {
+	return unsuccessfulFlushCount;
 }
 
 void FileTraceLogWriter::open() {
