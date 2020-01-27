@@ -751,6 +751,8 @@ public:
 	// Everything actually network related is delegated to the Sim2Net class; Sim2 is only concerned with simulating machines and time
 	virtual double now() { return time; }
 
+	virtual double timer() { return time; }
+
 	virtual Future<class Void> delay( double seconds, TaskPriority taskID ) {
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay( seconds, taskID, currentProcess );
