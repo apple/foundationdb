@@ -50,7 +50,7 @@ struct VersionBatch {
 	std::vector<RestoreFileFR> rangeFiles;
 	double size; // size of data in range and log files
 
-	VersionBatch() = default;
+	VersionBatch() : beginVersion(0), endVersion(0), size(0){};
 
 	bool isEmpty() { return logFiles.empty() && rangeFiles.empty(); }
 	void reset() {
@@ -240,7 +240,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			if (vb.size + nextVersionSize <= opConfig.batchSizeThreshold) {
 				// nextVersion should be included in this batch
 				vb.size += nextVersionSize;
-				while (rangeIdx < nextRangeIdx) {
+				while (rangeIdx < nextRangeIdx && rangeIdx < rangeFiles.size()) {
 					ASSERT(rangeFiles[rangeIdx].fileSize > 0);
 					vb.rangeFiles.push_back(rangeFiles[rangeIdx]);
 					++rangeIdx;
