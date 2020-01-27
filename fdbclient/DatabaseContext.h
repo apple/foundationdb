@@ -20,6 +20,8 @@
 
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
+#include "FastAlloc.h"
+#include "FastRef.h"
 #include "StorageServerInterface.h"
 #include "genericactors.actor.h"
 #include <vector>
@@ -45,7 +47,25 @@ private:
 	StorageServerInfo( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality ) : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
 };
 
-typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
+struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, ReferenceCounted<LocationInfo>, FastAllocated<LocationInfo> {
+	using Locations = MultiInterface<ReferencedInterface<StorageServerInterface>>;
+	explicit LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v)
+		: Locations(v)
+	{}
+	LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v, bool hasCaches)
+		: Locations(v)
+		, hasCaches(hasCaches)
+	{}
+	LocationInfo(const LocationInfo&) = delete;
+	LocationInfo(LocationInfo&&) = delete;
+	LocationInfo& operator=(const LocationInfo&) = delete;
+	LocationInfo& operator=(LocationInfo&&) = delete;
+	bool hasCaches = false;
+	Reference<Locations> locations() {
+		return Reference<Locations>::addRef(this);
+	}
+};
+
 typedef MultiInterface<MasterProxyInterface> ProxyInfo;
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
@@ -64,7 +84,7 @@ public:
 
 	Database clone() const { return Database(new DatabaseContext( connectionFile, clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, internal, apiVersion, switchable )); }
 
-	std::pair<KeyRange,Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
+	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
 	bool getCachedLocations( const KeyRangeRef&, vector<std::pair<KeyRange,Reference<LocationInfo>>>&, int limit, bool reverse );
 	Reference<LocationInfo> setCachedLocation( const KeyRangeRef&, const vector<struct StorageServerInterface>& );
 	void invalidateCache( const KeyRef&, bool isBackward = false );
@@ -154,7 +174,7 @@ public:
 	// Cache of location information
 	int locationCacheSize;
 	// bool indicates whether the range has caches
-	CoalescedKeyRangeMap<std::pair<Reference<LocationInfo>, bool>> locationCache;
+	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 
 	std::map< UID, StorageServerInfo* > server_interf;
 
