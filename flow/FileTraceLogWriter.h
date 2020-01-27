@@ -26,6 +26,7 @@
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 
+#include <set>
 #include <functional>
 
 class FileTraceLogWriter : public ITraceLogWriter, ReferenceCounted<FileTraceLogWriter> {
@@ -38,7 +39,7 @@ private:
 	uint64_t maxLogsSize;
 	int traceFileFD;
 	uint32_t index;
-	uint64_t unsuccessfulFlushCount;
+	std::set<StringRef> issues;
 
 	std::function<void()> onError;
 
@@ -57,7 +58,7 @@ public:
 	void sync();
 
 	void cleanupTraceFiles();
-	uint64_t getUnsuccessfulFlushCount() override;
+	std::set<StringRef> getTraceLogIssues() override;
 };
 
 #endif

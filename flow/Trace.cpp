@@ -493,7 +493,7 @@ public:
 		}
 	}
 
-	uint64_t getUnsuccessfulFlushCount() { return logWriter->getUnsuccessfulFlushCount(); }
+	std::set<StringRef> getTraceLogIssues() { return logWriter->getTraceLogIssues(); }
 
 	~TraceLog() {
 		close();
@@ -686,6 +686,7 @@ void removeTraceRole(std::string role) {
 	g_traceLog.removeRole(role);
 }
 
+<<<<<<< HEAD
 TraceEvent::TraceEvent() : initialized(true), enabled(false), logged(true) {}
 
 TraceEvent::TraceEvent(TraceEvent &&ev) {
@@ -731,6 +732,9 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 }
 uint64_t getUnsuccessfulFlushCount() {
 	return g_traceLog.getUnsuccessfulFlushCount();
+}
+std::set<StringRef> getTraceLogIssues() {
+	return std::move(g_traceLog.getTraceLogIssues());
 }
 
 TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true), logged(false) {

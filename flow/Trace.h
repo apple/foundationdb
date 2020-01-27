@@ -516,7 +516,7 @@ struct ITraceLogWriter {
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
-	virtual uint64_t getUnsuccessfulFlushCount() = 0;
+	virtual std::set<struct StringRef> getTraceLogIssues() = 0;
 };
 
 struct ITraceLogFormatter {
@@ -587,7 +587,7 @@ bool validateTraceClockSource(std::string source);
 
 void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
-uint64_t getUnsuccessfulFlushCount();
+std::set<struct StringRef> getTraceLogIssues();
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
 extern std::atomic<trace_clock_t> g_trace_clock;

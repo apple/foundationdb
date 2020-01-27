@@ -1020,7 +1020,6 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc, Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector< TesterInterface > testers, vector<TestSpec> tests, StringRef startingConfiguration, LocalityData locality ) {
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo> );
-	// state Reference<AsyncVar<uint64_t>> unsuccessfulFlushCount(new AsyncVar<uint64_t>(0));;
 	state Future<Void> ccMonitor =
 	    monitorServerDBInfo(cc, Reference<ClusterConnectionFile>(), LocalityData(), dbInfo); // FIXME: locality
 
@@ -1152,7 +1151,6 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_type_t whatToRun, test_location_t at, 
 		int minTestersExpected, std::string fileName, StringRef startingConfiguration, LocalityData locality ) {
 	state vector<TestSpec> testSpecs;
-	// state Reference<AsyncVar<uint64_t>> unsuccessfulFlushCount(new AsyncVar<uint64_t>(0));
 	Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc( new AsyncVar<Optional<ClusterControllerFullInterface>> );
 	Reference<AsyncVar<Optional<ClusterInterface>>> ci( new AsyncVar<Optional<ClusterInterface>> );
 	vector<Future<Void>> actors;
