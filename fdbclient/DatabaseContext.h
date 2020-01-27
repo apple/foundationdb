@@ -226,6 +226,7 @@ public:
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 	Future<Void> cacheListMonitor;
+	AsyncTrigger updateCache;
 };
 
 #endif
