@@ -257,30 +257,27 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	self->dumpVersionBatches(self->versionBatches);
 
 	std::vector<Future<Void>> fBatches;
-	int batchIndex = 1; // versionBatchIndex starts at 1 because NotifiedVersion starts at 0
-	if (!g_network->isSimulated() || deterministicRandom()->random01() > 0.5) {
-		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchStart", batchIndex);
-		// TODO: Control how many batches can be processed in parallel. Avoid dead lock due to OOM on loaders
-		for (std::map<Version, VersionBatch>::iterator versionBatch = self->versionBatches.begin();
-		     versionBatch != self->versionBatches.end(); versionBatch++) {
-			self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
-			self->batchStatus[batchIndex] = Reference<MasterBatchStatus>(new MasterBatchStatus());
-			fBatches.push_back(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
-			batchIndex++;
+	std::vector<VersionBatch> versionBatches; // To randomize invoking order of version batchs
+	for (auto& vb : self->versionBatches) {
+		versionBatches.push_back(vb.second);
+	}
+
+	if (g_network->isSimulated() && deterministicRandom()->random01() < 0.5) {
+		// Randomize invoking order of version batches
+		int permTimes = deterministicRandom()->randomInt(0, 100);
+		while (permTimes-- > 0) {
+			std::next_permutation(versionBatches.begin(), versionBatches.end());
 		}
-		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchEnd", batchIndex);
-	} else {
-		batchIndex = self->versionBatches.size();
-		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchStart", batchIndex);
-		std::map<Version, VersionBatch>::reverse_iterator versionBatch = self->versionBatches.rbegin();
-		for (; versionBatch != self->versionBatches.rend(); versionBatch++) {
-			self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
-			self->batchStatus[batchIndex] = Reference<MasterBatchStatus>(new MasterBatchStatus());
-			fBatches.push_back(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
-			batchIndex--;
-		}
-		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchEnd", batchIndex);
-		ASSERT(batchIndex == 0);
+	}
+
+	// TODO: Control how many batches can be processed in parallel. Avoid dead lock due to OOM on loaders
+	for (std::vector<VersionBatch>::iterator versionBatch = versionBatches.begin();
+	     versionBatch != versionBatches.end(); versionBatch++) {
+		int batchIndex = versionBatch->batchIndex;
+		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("ProcessVersionBatch", batchIndex);
+		self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
+		self->batchStatus[batchIndex] = Reference<MasterBatchStatus>(new MasterBatchStatus());
+		fBatches.push_back(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, *versionBatch));
 	}
 
 	wait(waitForAll(fBatches));

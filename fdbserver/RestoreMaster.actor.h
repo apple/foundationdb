@@ -47,8 +47,14 @@ struct VersionBatch {
 	std::set<RestoreFileFR> logFiles;
 	std::set<RestoreFileFR> rangeFiles;
 	double size; // size of data in range and log files
+	int batchIndex; // Never reset
 
 	VersionBatch() = default;
+
+	bool operator<(const VersionBatch& rhs) const {
+		return std::tie(batchIndex, beginVersion, endVersion, logFiles, rangeFiles, size) <
+		       std::tie(rhs.batchIndex, rhs.beginVersion, rhs.endVersion, rhs.logFiles, rhs.rangeFiles, rhs.size);
+	}
 
 	bool isEmpty() { return logFiles.empty() && rangeFiles.empty(); }
 	void reset() {
@@ -165,7 +171,8 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		int i = 1;
 		for (auto& vb : versionBatches) {
 			TraceEvent("FastRestoreVersionBatches")
-			    .detail("BatchIndex", i)
+			    .detail("BatchIndex", vb.second.batchIndex)
+			    .detail("ExpectedBatchIndex", i)
 			    .detail("BeginVersion", vb.second.beginVersion)
 			    .detail("EndVersion", vb.second.endVersion)
 			    .detail("Size", vb.second.size);
@@ -245,6 +252,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		Version nextVersion = 0; // Used to calculate the batch's endVersion
 		VersionBatch vb;
 		vb.beginVersion = 0; // Version batch range [beginVersion, endVersion)
+		vb.batchIndex = 1;
 
 		while (rangeIdx < rangeFiles.size() || logIdx < logFiles.size()) {
 			if (!rewriteNextVersion) {
@@ -352,6 +360,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				vb.reset();
 				vb.size = 0;
 				vb.beginVersion = prevEndVersion;
+				vb.batchIndex++;
 			}
 		}
 		// The last wip version batch has some files
