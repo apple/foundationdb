@@ -272,8 +272,8 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	} else {
 		batchIndex = self->versionBatches.size();
 		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchStart", batchIndex);
-		for (std::map<Version, VersionBatch>::reverse_iterator versionBatch = self->versionBatches.rbegin();
-		     versionBatch != self->versionBatches.rend(); versionBatch++) {
+		std::map<Version, VersionBatch>::reverse_iterator versionBatch = self->versionBatches.rbegin();
+		for (; versionBatch != self->versionBatches.rend(); versionBatch++) {
 			self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
 			self->batchStatus[batchIndex] = Reference<MasterBatchStatus>(new MasterBatchStatus());
 			fBatches.push_back(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
