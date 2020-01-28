@@ -190,13 +190,17 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	    .detail("NotProcessed", !paramExist)
 	    .detail("Processed", isReady);
 	if (batchData->processedFileParams.find(req.param) == batchData->processedFileParams.end()) {
-		TraceEvent("FastRestoreLoadFile", self->id()).detail("BatchIndex", req.batchIndex).detail("ProcessLoadParam", req.param.toString());
+		TraceEvent("FastRestoreLoadFile", self->id())
+		    .detail("BatchIndex", req.batchIndex)
+		    .detail("ProcessLoadParam", req.param.toString());
 		ASSERT(batchData->sampleMutations.find(req.param) == batchData->sampleMutations.end());
 		batchData->processedFileParams[req.param] = Never(); // Ensure second exec. wait on _processLoadingParam()
 		batchData->processedFileParams[req.param] = _processLoadingParam(req.param, batchData, self->id(), self->bc);
 		isDuplicated = false;
 	} else {
-		TraceEvent("FastRestoreLoadFile", self->id()).detail("BatchIndex", req.batchIndex).detail("WaitOnProcessLoadParam", req.param.toString());
+		TraceEvent("FastRestoreLoadFile", self->id())
+		    .detail("BatchIndex", req.batchIndex)
+		    .detail("WaitOnProcessLoadParam", req.param.toString());
 	}
 	ASSERT(batchData->processedFileParams.find(req.param) != batchData->processedFileParams.end());
 	wait(batchData->processedFileParams[req.param]); // wait on the processing of the req.param.
@@ -265,8 +269,9 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 		for (; item != batchData->kvOpsPerLP.end(); item++) {
 			if (item->first.isRangeFile == req.useRangeFile) {
 				// Send the parsed mutation to applier who will apply the mutation to DB
-				fSendMutations.push_back(sendMutationsToApplier(&item->second, req.batchIndex, item->first.asset, item->first.isRangeFile,
-				                            &batchData->rangeToApplier, &self->appliersInterf));
+				fSendMutations.push_back(sendMutationsToApplier(&item->second, req.batchIndex, item->first.asset,
+				                                                item->first.isRangeFile, &batchData->rangeToApplier,
+				                                                &self->appliersInterf));
 			}
 		}
 		wait(waitForAll(fSendMutations));

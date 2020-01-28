@@ -430,7 +430,7 @@ struct RestoreSendMutationsToAppliersRequest : TimedRequest {
 	std::string toString() {
 		std::stringstream ss;
 		ss << "RestoreSendMutationsToAppliersRequest batchIndex:" << batchIndex
-		   << " keyToAppliers.size:" <<  rangeToApplier.size() << " useRangeFile:" << useRangeFile;
+		   << " keyToAppliers.size:" << rangeToApplier.size() << " useRangeFile:" << useRangeFile;
 		return ss.str();
 	}
 };
@@ -492,7 +492,7 @@ struct RestoreVersionBatchRequest : TimedRequest {
 struct RestoreFinishRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 13018413;
 
-	bool terminate; // Should role exit?
+	bool terminate; // role exits if terminate = true
 
 	ReplyPromise<RestoreCommonReply> reply;
 

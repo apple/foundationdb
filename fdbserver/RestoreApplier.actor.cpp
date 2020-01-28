@@ -447,16 +447,16 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 
 ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self,
                                                  Database cx) {
-    // Ensure batch (i-1) is applied before batch i
-    wait(self->finishedBatch.whenAtLeast(req.batchIndex-1));
+	// Ensure batch (i-1) is applied before batch i
+	wait(self->finishedBatch.whenAtLeast(req.batchIndex - 1));
 
 	state bool isDuplicated = true;
 	Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
 	TraceEvent("FastRestoreApplierPhaseHandleApplyToDB", self->id())
-		    .detail("BatchIndex", req.batchIndex)
-			.detail("FinishedBatch", self->finishedBatch.get())
-		    .detail("HasStarted", batchData->dbApplier.present());
-	if (self->finishedBatch.get() == req.batchIndex-1) {
+	    .detail("BatchIndex", req.batchIndex)
+	    .detail("FinishedBatch", self->finishedBatch.get())
+	    .detail("HasStarted", batchData->dbApplier.present());
+	if (self->finishedBatch.get() == req.batchIndex - 1) {
 		ASSERT(batchData.isValid());
 		if (!batchData->dbApplier.present()) {
 			isDuplicated = false;
@@ -470,7 +470,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 
 		// Multiple actor invokation can wait on req.batchIndex-1;
 		// Avoid setting finishedBatch when finishedBatch > req.batchIndex
-		if (self->finishedBatch.get() == req.batchIndex-1) {
+		if (self->finishedBatch.get() == req.batchIndex - 1) {
 			self->finishedBatch.set(req.batchIndex);
 		}
 	}

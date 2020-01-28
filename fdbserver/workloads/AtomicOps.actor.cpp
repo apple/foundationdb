@@ -184,7 +184,7 @@ struct AtomicOpsWorkload : TestWorkload {
 				try {
 					int group = deterministicRandom()->randomInt(0,100);
 					state uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
-					state Key val = StringRef((const uint8_t*) &intValue, sizeof(intValue));
+					state Key val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
 					state std::pair<Key, Key> logDebugKey = self->logDebugKey(group);
 					int nodeIndex = deterministicRandom()->randomInt(0, self->nodeCount / 100);
 					state Key opsKey(format("ops%08x%08x", group, nodeIndex));
@@ -192,7 +192,10 @@ struct AtomicOpsWorkload : TestWorkload {
 					tr.set(logDebugKey.second, opsKey); // set debug key; one opsKey can have multiple logs key
 					tr.atomicOp(opsKey, val, self->opType);
 					wait( tr.commit() );
-					TraceEvent(SevAtomicOpDebug, "AtomicOpWorker").detail("OpsKey", opsKey).detail("LogKey", logDebugKey.first).detail("Value", val.toString());
+					TraceEvent(SevAtomicOpDebug, "AtomicOpWorker")
+					    .detail("OpsKey", opsKey)
+					    .detail("LogKey", logDebugKey.first)
+					    .detail("Value", val.toString());
 					if (self->opType == MutationRef::AddValue) {
 						self->lbsum += intValue;
 						self->ubsum += intValue;

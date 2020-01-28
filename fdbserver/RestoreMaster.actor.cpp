@@ -257,26 +257,26 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	self->dumpVersionBatches(self->versionBatches);
 
 	std::vector<Future<Void>> fBatches;
-	int batchIndex = 1;  // versionBatchIndex starts at 1 because NotifiedVersion starts at 0
+	int batchIndex = 1; // versionBatchIndex starts at 1 because NotifiedVersion starts at 0
 	if (!g_network->isSimulated() || deterministicRandom()->random01() > 0.5) {
 		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchStart", batchIndex);
 		// TODO: Control how many batches can be processed in parallel. Avoid dead lock due to OOM on loaders
-		for (std::map<Version, VersionBatch>::iterator versionBatch = self->versionBatches.begin(); versionBatch != self->versionBatches.end(); versionBatch++) {
+		for (std::map<Version, VersionBatch>::iterator versionBatch = self->versionBatches.begin();
+		     versionBatch != self->versionBatches.end(); versionBatch++) {
 			self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
 			self->batchStatus[batchIndex] = Reference<MasterBatchStatus>(new MasterBatchStatus());
-			fBatches.push_back(
-				distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
+			fBatches.push_back(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
 			batchIndex++;
 		}
 		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchEnd", batchIndex);
 	} else {
 		batchIndex = self->versionBatches.size();
 		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchStart", batchIndex);
-		for (std::map<Version, VersionBatch>::reverse_iterator versionBatch = self->versionBatches.rbegin(); versionBatch != self->versionBatches.rend(); versionBatch++) {
+		for (std::map<Version, VersionBatch>::reverse_iterator versionBatch = self->versionBatches.rbegin();
+		     versionBatch != self->versionBatches.rend(); versionBatch++) {
 			self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
 			self->batchStatus[batchIndex] = Reference<MasterBatchStatus>(new MasterBatchStatus());
-			fBatches.push_back(
-				distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
+			fBatches.push_back(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
 			batchIndex--;
 		}
 		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchEnd", batchIndex);
@@ -339,7 +339,11 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		param.asset.beginVersion = versionBatch.beginVersion;
 		param.asset.endVersion = versionBatch.endVersion;
 
-		TraceEvent("FastRestoreLoadFiles").detail("BatchIndex", batchIndex).detail("LoadParamIndex", paramIdx).detail("LoaderID", loader->first.toString()).detail("LoadParam", param.toString());
+		TraceEvent("FastRestoreLoadFiles")
+		    .detail("BatchIndex", batchIndex)
+		    .detail("LoadParamIndex", paramIdx)
+		    .detail("LoaderID", loader->first.toString())
+		    .detail("LoadParam", param.toString());
 		ASSERT_WE_THINK(param.asset.len > 0);
 		ASSERT_WE_THINK(param.asset.offset >= 0);
 		ASSERT_WE_THINK(param.asset.offset <= file.fileSize);
@@ -357,7 +361,9 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		++loader;
 		++paramIdx;
 	}
-	TraceEvent(files->size() != paramIdx ? SevError : SevInfo, "FastRestoreLoadFiles").detail("Files", files->size()).detail("LoadParams", paramIdx);
+	TraceEvent(files->size() != paramIdx ? SevError : SevInfo, "FastRestoreLoadFiles")
+	    .detail("Files", files->size())
+	    .detail("LoadParams", paramIdx);
 
 	state std::vector<RestoreLoadFileReply> replies;
 	// Wait on the batch of load files or log files
@@ -415,7 +421,8 @@ ACTOR static Future<Void> sendMutationsFromLoaders(Reference<MasterBatchData> ba
 
 	std::vector<std::pair<UID, RestoreSendMutationsToAppliersRequest>> requests;
 	for (auto& loader : loadersInterf) {
-		ASSERT(batchStatus->loadStatus.find(loader.first) == batchStatus->loadStatus.end() || batchStatus->loadStatus[loader.first] == RestoreSendStatus::SendedLogs);
+		ASSERT(batchStatus->loadStatus.find(loader.first) == batchStatus->loadStatus.end() ||
+		       batchStatus->loadStatus[loader.first] == RestoreSendStatus::SendedLogs);
 		requests.emplace_back(
 		    loader.first, RestoreSendMutationsToAppliersRequest(batchIndex, batchData->rangeToApplier, useRangeFile));
 		batchStatus->loadStatus[loader.first] =
@@ -433,8 +440,8 @@ ACTOR static Future<Void> sendMutationsFromLoaders(Reference<MasterBatchData> ba
 			                                        : RestoreSendStatus::SendedLogs;
 			if (reply.isDuplicated) {
 				TraceEvent(SevWarn, "FastRestoreSendMutations")
-			    .detail("Loader", reply.id)
-			    .detail("DuplicateRequestAcked", "Request should have been processed");
+				    .detail("Loader", reply.id)
+				    .detail("DuplicateRequestAcked", "Request should have been processed");
 			}
 		} else if ((status == RestoreSendStatus::SendedRanges || status == RestoreSendStatus::SendedLogs) &&
 		           reply.isDuplicated) {
@@ -736,7 +743,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 
 // Ask all loaders and appliers to perform housecleaning at the end of a restore request
 // Terminate those roles if terminate = true
-ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, bool terminate=false) {
+ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, bool terminate = false) {
 	std::vector<std::pair<UID, RestoreFinishRequest>> requests;
 	for (auto& loader : self->loadersInterf) {
 		requests.emplace_back(loader.first, RestoreFinishRequest(terminate));
@@ -748,9 +755,11 @@ ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> se
 	for (auto& applier : self->appliersInterf) {
 		requests.emplace_back(applier.first, RestoreFinishRequest(terminate));
 	}
-	Future<Void> endAppliers = sendBatchRequests(&RestoreApplierInterface::finishRestore, self->appliersInterf, requests);
+	Future<Void> endAppliers =
+	    sendBatchRequests(&RestoreApplierInterface::finishRestore, self->appliersInterf, requests);
 
-	// If terminate = true, loaders and appliers exits immediately after it receives the request. Master may not receive acks.
+	// If terminate = true, loaders and appliers exits immediately after it receives the request. Master may not receive
+	// acks.
 	if (!terminate) {
 		wait(endLoaders && endAppliers);
 	}
