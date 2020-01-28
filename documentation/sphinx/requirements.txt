@@ -1,5 +1,5 @@
 --index-url https://pypi.python.org/simple
-setuptools>=45.0.0
+setuptools>=44.0.0
 sphinx==1.5.6
 sphinx-bootstrap-theme==0.4.8
 pygments-style-solarized
