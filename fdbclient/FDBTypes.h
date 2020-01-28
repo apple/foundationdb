@@ -1036,6 +1036,7 @@ struct BackupType {
 	}
 
 	static ErrorOr<BackupType> FromStringRef(StringRef s) {
+		if (s == LiteralStringRef("0")) return DEFAULT;
 		if (s == LiteralStringRef("1")) return TAGGED;
 		if (s == LiteralStringRef("2")) return DEFAULT_AND_TAGGED;
 		return default_error_or();

@@ -34,6 +34,7 @@ static const char* logTypes[] = {
 	"log_version:=2", "log_version:=3", "log_version:=4"
 };
 static const char* redundancies[] = { "single", "double", "triple" };
+static const char* backupTypes[] = { "backup_type:=0", "backup_type:=1", "backup_type:=2" };
 
 std::string generateRegions() {
 	std::string result;
@@ -271,7 +272,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			if(g_simulator.speedUpSimulation) {
 				return Void();
 			}
-			state int randomChoice = deterministicRandom()->randomInt(0, 7);
+			state int randomChoice = deterministicRandom()->randomInt(0, 8);
 			if( randomChoice == 0 ) {
 				wait( success(
 						runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>>
@@ -323,7 +324,11 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				// Some configurations will be invalid, and that's fine.
 				wait(success( IssueConfigurationChange( cx, logTypes[deterministicRandom()->randomInt( 0, sizeof(logTypes)/sizeof(logTypes[0]))], false ) ));
 			}
-			else {
+			else if (randomChoice == 7) {
+				wait(success(IssueConfigurationChange(
+				    cx, backupTypes[deterministicRandom()->randomInt(0, sizeof(backupTypes) / sizeof(backupTypes[0]))],
+				    false)));
+			} else {
 				ASSERT(false);
 			}
 		}
