@@ -280,6 +280,14 @@ public:
 				logWriter->sync();
 			}
 		}
+
+		struct Ping : TypedAction<WriterThread, Ping> {
+			Promise<Void> p;
+
+			explicit Ping(Promise<Void> p) : p(p){};
+			virtual double getTimeEstimate() { return 0; }
+		};
+		void action(Ping& a) { a.p.send(Void()); }
 	};
 
 	TraceLog() : bufferLength(0), loggedLength(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList), logTraceEventMetrics(false), formatter(new XmlTraceLogFormatter()) {}
@@ -491,6 +499,11 @@ public:
 			r.roles.erase(itr);
 			r.refreshRolesString();
 		}
+	}
+
+	void pingWriterThread(Promise<Void>& p) {
+		auto a = new WriterThread::Ping(p);
+		writer->post(a);
 	}
 
 	std::set<StringRef> getTraceLogIssues() { return logWriter->getTraceLogIssues(); }
@@ -735,6 +748,10 @@ uint64_t getUnsuccessfulFlushCount() {
 }
 std::set<StringRef> getTraceLogIssues() {
 	return std::move(g_traceLog.getTraceLogIssues());
+}
+
+void pingTraceLogWriterThread(Promise<Void>& p) {
+	return g_traceLog.pingWriterThread(p);
 }
 
 TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true), logged(false) {

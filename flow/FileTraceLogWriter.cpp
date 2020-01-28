@@ -79,7 +79,7 @@ void FileTraceLogWriter::write(const std::string& str) {
 			remaining -= ret;
 			ptr += ret;
 		} else {
-			issues.insert(LiteralStringRef("trace_log_flush_failure"));
+			issues.insert(LiteralStringRef("trace_log_writer_flush_failure"));
 			fprintf(stderr, "Unexpected error [%d] when flushing trace log.\n", errno);
 			lastError(errno);
 			threadSleep(0.1);

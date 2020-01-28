@@ -747,16 +747,32 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFol
 }
 
 ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::set<StringRef>>>> issues) {
-	if (issues.present()) {
-		loop {
-			wait(delay(SERVER_KNOBS->TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS));
+	state bool pingTimeout = false;
+	loop {
+		wait(delay(SERVER_KNOBS->TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS));
+		Promise<Void> p;
+		pingTraceLogWriterThread(p);
+		try {
+			wait(timeoutError(p.getFuture(), SERVER_KNOBS->TRACE_LOG_PING_TIMEOUT_SECONDS));
+		} catch (Error& e) {
+			if (e.code() == error_code_timed_out) {
+				pingTimeout = true;
+			} else {
+				throw;
+			}
+		}
+		if (issues.present()) {
 			std::set<StringRef> _issues = getTraceLogIssues();
+			if (pingTimeout) {
+				// Ping trace log writer thread timeout.
+				_issues.insert(LiteralStringRef("trace_log_writer_thread_likely_died"));
+				pingTimeout = false;
+			}
 			if (_issues.size() > 0) {
 				issues.get()->set(_issues);
 			}
 		}
 	}
-	return Void();
 }
 
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,

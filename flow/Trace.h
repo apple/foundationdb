@@ -588,6 +588,9 @@ bool validateTraceClockSource(std::string source);
 void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
 std::set<struct StringRef> getTraceLogIssues();
+template <class T>
+struct Promise;
+void pingTraceLogWriterThread(Promise<struct Void>& p);
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
 extern std::atomic<trace_clock_t> g_trace_clock;
