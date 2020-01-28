@@ -256,8 +256,8 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	self->buildVersionBatches(rangeFiles, logFiles, &self->versionBatches); // Divide files into version batches
 	self->dumpVersionBatches(self->versionBatches);
 
-	std::vector<Future<Void>> fBatches;
-	std::vector<VersionBatch> versionBatches; // To randomize invoking order of version batchs
+	state std::vector<Future<Void>> fBatches;
+	state std::vector<VersionBatch> versionBatches; // To randomize invoking order of version batchs
 	for (auto& vb : self->versionBatches) {
 		versionBatches.push_back(vb.second);
 	}
@@ -270,9 +270,14 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 		}
 	}
 
-	// TODO: Control how many batches can be processed in parallel. Avoid dead lock due to OOM on loaders
-	for (std::vector<VersionBatch>::iterator versionBatch = versionBatches.begin();
-	     versionBatch != versionBatches.end(); versionBatch++) {
+	state std::vector<VersionBatch>::iterator versionBatch = versionBatches.begin();
+	for (; versionBatch != versionBatches.end(); versionBatch++) {
+		while (self->runningVersionBatches.get() >= SERVER_KNOBS->FASTRESTORE_VB_PARALLELISM) {
+			// Control how many batches can be processed in parallel. Avoid dead lock due to OOM on loaders
+			TraceEvent("FastRestoreMasterDispatchVersionBatches")
+			    .detail("WaitOnRunningVersionBatches", self->runningVersionBatches.get());
+			wait(self->runningVersionBatches.onChange());
+		}
 		int batchIndex = versionBatch->batchIndex;
 		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("ProcessVersionBatch", batchIndex);
 		self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
@@ -472,6 +477,8 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	state Reference<MasterBatchData> batchData = self->batch[batchIndex];
 	state Reference<MasterBatchStatus> batchStatus = self->batchStatus[batchIndex];
 
+	self->runningVersionBatches.set(self->runningVersionBatches.get() + 1);
+
 	wait(initializeVersionBatch(self->appliersInterf, self->loadersInterf, batchIndex));
 
 	ASSERT(!versionBatch.isEmpty());
@@ -500,6 +507,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 
 	wait(notifyApplierToApplyMutations(batchData, batchStatus, self->appliersInterf, batchIndex, &self->finishedBatch));
 
+	self->runningVersionBatches.set(self->runningVersionBatches.get() - 1);
 	return Void();
 }
 

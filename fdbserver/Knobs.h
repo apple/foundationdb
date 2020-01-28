@@ -488,6 +488,8 @@ public:
 	double FASTRESTORE_TXN_BATCH_MAX_BYTES;
 	// FASTRESTORE_VERSIONBATCH_MAX_BYTES is the maximum data size in each version batch
 	double FASTRESTORE_VERSIONBATCH_MAX_BYTES;
+	// FASTRESTORE_VB_PARALLELISM is the number of concurrently running version batches
+	int64_t FASTRESTORE_VB_PARALLELISM;
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
