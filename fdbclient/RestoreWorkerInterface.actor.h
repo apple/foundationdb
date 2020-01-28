@@ -424,13 +424,13 @@ struct RestoreSendMutationsToAppliersRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeToApplier, useRangeFile, batchIndex, reply);
+		serializer(ar, batchIndex, rangeToApplier, useRangeFile, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreSendMutationsToAppliersRequest keyToAppliers.size:" << rangeToApplier.size()
-		   << " batchIndex:" << batchIndex << " useRangeFile:" << useRangeFile;
+		ss << "RestoreSendMutationsToAppliersRequest batchIndex:" << batchIndex
+		   << " keyToAppliers.size:" <<  rangeToApplier.size() << " useRangeFile:" << useRangeFile;
 		return ss.str();
 	}
 };
@@ -492,7 +492,7 @@ struct RestoreVersionBatchRequest : TimedRequest {
 struct RestoreFinishRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 13018413;
 
-	bool terminate;
+	bool terminate; // Should role exit?
 
 	ReplyPromise<RestoreCommonReply> reply;
 

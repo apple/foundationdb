@@ -484,7 +484,7 @@ public:
 	double FASTRESTORE_SAMPLING_PERCENT;
 	int64_t FASTRESTORE_NUM_LOADERS;
 	int64_t FASTRESTORE_NUM_APPLIERS;
-	// FASTRESTORE_TXN_BATCH_MAX_BYTES is used when applier applies multiple mutations in a transaction to DB
+	// FASTRESTORE_TXN_BATCH_MAX_BYTES is txn size appliers apply mutations
 	double FASTRESTORE_TXN_BATCH_MAX_BYTES;
 	// FASTRESTORE_VERSIONBATCH_MAX_BYTES is the maximum data size in each version batch
 	double FASTRESTORE_VERSIONBATCH_MAX_BYTES;

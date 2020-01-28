@@ -737,7 +737,8 @@ const KeyRangeRef restoreApplierKeys(LiteralStringRef("\xff\x02/restoreApplier/"
 const KeyRef restoreApplierTxnValue = LiteralStringRef("1");
 
 // restoreApplierKeys: track atomic transaction progress to ensure applying atomicOp exactly once
-// Version is passed in as LittleEndian, it must be converted to BigEndian to maintain ordering in lexical order
+// Version and batchIndex is passed in as LittleEndian,
+// they must be converted to BigEndian to maintain ordering in lexical order
 const Key restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(restoreApplierKeys.begin);

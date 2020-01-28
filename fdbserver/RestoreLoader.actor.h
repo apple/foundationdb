@@ -106,8 +106,8 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		return ss.str();
 	}
 
-	void resetPerVersionBatch(int batchIndex) {
-		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnLoader", nodeID);
+	void initVersionBatch(int batchIndex) {
+		TraceEvent("FastRestore").detail("InitVersionBatchOnLoader", nodeID);
 		batch[batchIndex] = Reference<LoaderBatchData>(new LoaderBatchData());
 		status[batchIndex] = Reference<LoaderBatchStatus>(new LoaderBatchStatus());
 	}

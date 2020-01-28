@@ -222,26 +222,26 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	    .detail("LoaderSendStatus", batchStatus->toString());
 
 	if (!req.useRangeFile) {
-		if (!batchStatus->sendAllLogs.present()) {
+		if (!batchStatus->sendAllLogs.present()) { // Has not sent
 			batchStatus->sendAllLogs = Never();
 			isDuplicated = false;
 			TraceEvent(SevInfo, "FastRestoreSendMutationsProcessLogRequest", self->id())
 			    .detail("BatchIndex", req.batchIndex)
 			    .detail("UseRangeFile", req.useRangeFile);
 			ASSERT(!batchStatus->sendAllRanges.present());
-		} else if (!batchStatus->sendAllLogs.get().isReady()) {
+		} else if (!batchStatus->sendAllLogs.get().isReady()) { // In the process of sending
 			TraceEvent(SevDebug, "FastRestoreSendMutationsWaitDuplicateLogRequest", self->id())
 			    .detail("BatchIndex", req.batchIndex)
 			    .detail("UseRangeFile", req.useRangeFile);
 			wait(batchStatus->sendAllLogs.get());
-		} else {
+		} else { // Already sent
 			TraceEvent(SevDebug, "FastRestoreSendMutationsSkipDuplicateLogRequest", self->id())
 			    .detail("BatchIndex", req.batchIndex)
 			    .detail("UseRangeFile", req.useRangeFile);
 		}
 	} else {
 		if (!batchStatus->sendAllRanges.present()) {
-			batchStatus->sendAllRanges = Never(); // Signal the loader is sending kv parsed from range files
+			batchStatus->sendAllRanges = Never();
 			isDuplicated = false;
 			TraceEvent(SevInfo, "FastRestoreSendMutationsProcessRangeRequest", self->id())
 			    .detail("BatchIndex", req.batchIndex)
@@ -285,8 +285,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	return Void();
 }
 
-// TODO: This function can be revised better
-// Assume: kvOps data are from the same file.
+// Assume: kvOps data are from the same RestoreAsset.
 // Input: pkvOps: versioned kv mutation for the asset in the version batch (batchIndex)
 //   isRangeFile: is pkvOps from range file? Let receiver (applier) know if the mutation is log mutation;
 //   pRangeToApplier: range to applierID mapping, deciding which applier is responsible for which range

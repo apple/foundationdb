@@ -147,11 +147,6 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 		curFilePos.set(req.version);
 	}
 
-	TraceEvent("FastRestoreApplierPhaseReceiveMutationsDone", self->id())
-	    .detail("BatchIndex", req.batchIndex)
-	    .detail("RestoreAsset", req.asset.toString())
-	    .detail("ProcessedFileVersion", curFilePos.get())
-	    .detail("Request", req.toString());
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 	return Void();
 }
@@ -226,7 +221,7 @@ struct DBApplyProgress {
 	// Rollback to the starting point of the uncommitted-and-failed transaction to
 	// re-execute uncommitted txn
 	void rollback() {
-		TraceEvent(SevWarn, "FastRestore_ApplyTxnError")
+		TraceEvent(SevWarn, "FastRestoreApplyTxnError")
 		    .detail("TxnStatusFailed", curTxnId)
 		    .detail("ApplierApplyToDB", applierId)
 		    .detail("UncommittedTxnId", uncommittedTxnId)
@@ -254,7 +249,7 @@ struct DBApplyProgress {
 	bool hasError() { return lastTxnHasError; }
 
 	void setTxnError(Error& e) {
-		TraceEvent(SevWarnAlways, "FastRestore_ApplyTxnError")
+		TraceEvent(SevWarnAlways, "FastRestoreApplyTxnError")
 		    .detail("TxnStatus", "?")
 		    .detail("ApplierApplyToDB", applierId)
 		    .detail("TxnId", curTxnId)
@@ -306,13 +301,13 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 			Key end = restoreApplierKeyFor(applierID, batchIndex, std::numeric_limits<int64_t>::max());
 			Standalone<RangeResultRef> txnIds = wait(tr->getRange(KeyRangeRef(begin, end), CLIENT_KNOBS->TOO_MANY));
 			if (txnIds.size() > 0) {
-				TraceEvent(SevError, "FastRestore_ApplyTxnStateNotClean").detail("TxnIds", txnIds.size());
+				TraceEvent(SevError, "FastRestoreApplyTxnStateNotClean").detail("TxnIds", txnIds.size());
 				for (auto& kv : txnIds) {
 					UID id;
 					int64_t index;
 					Version txnId;
 					std::tie(id, index, txnId) = decodeRestoreApplierKey(kv.key);
-					TraceEvent(SevError, "FastRestore_ApplyTxnStateNotClean")
+					TraceEvent(SevError, "FastRestoreApplyTxnStateNotClean")
 					    .detail("Applier", id)
 					    .detail("BatchIndex", index)
 					    .detail("ResidueTxnID", txnId);
@@ -337,7 +332,7 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 					progress.rollback();
 					continue;
 				} else {
-					TraceEvent(SevWarn, "FastRestore_ApplyTxnError")
+					TraceEvent(SevWarn, "FastRestoreApplyTxnError")
 					    .detail("TxnStatusSucceeded", progress.curTxnId)
 					    .detail("ApplierApplyToDB", applierID)
 					    .detail("CurIteratorVersion", progress.curItInCurTxn->first)
@@ -410,7 +405,7 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 			}
 			progress.nextTxn();
 		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "FastRestore_ApplyTxnError")
+			TraceEvent(SevWarnAlways, "FastRestoreApplyTxnError")
 			    .detail("TxnStatus", "?")
 			    .detail("ApplierApplyToDB", applierID)
 			    .detail("TxnId", progress.curTxnId)
@@ -452,7 +447,7 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 
 ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self,
                                                  Database cx) {
-    // Ensure batch i is applied before batch (i+1)
+    // Ensure batch (i-1) is applied before batch i
     wait(self->finishedBatch.whenAtLeast(req.batchIndex-1));
 
 	state bool isDuplicated = true;

@@ -114,7 +114,8 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 
 	~RestoreApplierData() = default;
 
-	void resetPerVersionBatch(int batchIndex) {
+	void initVersionBatch(int batchIndex) {
+		TraceEvent("FastRestoreApplierInitVersionBatch", id()).detail("BatchIndex", batchIndex);
 		batch[batchIndex] = Reference<ApplierBatchData>(new ApplierBatchData());
 	}
 

@@ -51,18 +51,19 @@ void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<Resto
 	req.reply.send(RestoreCommonReply(self->id()));
 }
 
+// Multiple version batches may execute in parallel and init their version batches
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
 	TraceEvent("FastRestoreRolePhaseInitVersionBatch", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("Role", getRoleStr(self->role))
-	    .detail("VersionBatchId", self->versionBatchId.get());
+	    .detail("VersionBatchNotifiedVersion", self->versionBatchId.get());
 	// batchId is continuous. (req.batchIndex-1) is the id of the just finished batch.
 	wait(self->versionBatchId.whenAtLeast(req.batchIndex - 1));
 
 	if (self->versionBatchId.get() == req.batchIndex - 1) {
-		self->resetPerVersionBatch(req.batchIndex);
-		TraceEvent("FastRestore")
-		    .detail("InitVersionBatch", req.batchIndex)
+		self->initVersionBatch(req.batchIndex);
+		TraceEvent("FastRestoreInitVersionBatch")
+		    .detail("BatchIndex", req.batchIndex)
 		    .detail("Role", getRoleStr(self->role))
 		    .detail("Node", self->id());
 		self->versionBatchId.set(req.batchIndex);

@@ -142,9 +142,8 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	~RestoreMasterData() = default;
 
-	void resetPerVersionBatch(int batchIndex) {
-		TraceEvent("FastRestore")
-		    .detail("RestoreMaster", "ResetPerVersionBatch")
+	void initVersionBatch(int batchIndex) {
+		TraceEvent("FastRestoreMasterInitVersionBatch", id())
 		    .detail("VersionBatchIndex", batchIndex);
 	}
 

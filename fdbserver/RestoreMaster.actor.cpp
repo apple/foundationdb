@@ -266,7 +266,6 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 			self->batchStatus[batchIndex] = Reference<MasterBatchStatus>(new MasterBatchStatus());
 			fBatches.push_back(
 				distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
-			// wait(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
 			batchIndex++;
 		}
 		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchEnd", batchIndex);
@@ -278,7 +277,6 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 			self->batchStatus[batchIndex] = Reference<MasterBatchStatus>(new MasterBatchStatus());
 			fBatches.push_back(
 				distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
-			// wait(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, versionBatch->second));
 			batchIndex--;
 		}
 		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("VersionBatchEnd", batchIndex);
@@ -356,7 +354,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		}
 		batchStatus->raStatus[param.asset] = RestoreAssetStatus::Loading;
 		assets.push_back(param.asset);
-		loader++;
+		++loader;
 		++paramIdx;
 	}
 	TraceEvent(files->size() != paramIdx ? SevError : SevInfo, "FastRestoreLoadFiles").detail("Files", files->size()).detail("LoadParams", paramIdx);
@@ -426,6 +424,7 @@ ACTOR static Future<Void> sendMutationsFromLoaders(Reference<MasterBatchData> ba
 	state std::vector<RestoreCommonReply> replies;
 	wait(getBatchReplies(&RestoreLoaderInterface::sendMutations, loadersInterf, requests, &replies));
 
+	// Update status and sanity check
 	for (auto& reply : replies) {
 		RestoreSendStatus status = batchStatus->loadStatus[reply.id];
 		if ((status == RestoreSendStatus::SendingRanges || status == RestoreSendStatus::SendingLogs)) {
@@ -707,7 +706,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 			    .detail("BatchIndex", batchIndex)
 			    .detail("Attention", "Actor should not be invoked twice for the same batch index");
 		}
-		// wait(getBatchReplies(&RestoreApplierInterface::applyToDB, appliersInterf, requests, &replies));
+
 		ASSERT(batchData->applyToDB.present());
 		wait(batchData->applyToDB.get());
 

@@ -122,7 +122,7 @@ public:
 
 	UID id() const { return nodeID; }
 
-	virtual void resetPerVersionBatch(int batchIndex) = 0;
+	virtual void initVersionBatch(int batchIndex) = 0;
 
 	virtual void resetPerRestoreRequest() = 0;
 
