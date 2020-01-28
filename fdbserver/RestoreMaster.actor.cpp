@@ -519,7 +519,9 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 	double cumulativeSize = slotSize;
 	TraceEvent("FastRestoreMasterPhaseCalculateApplierKeyRanges")
 	    .detail("BatchIndex", batchIndex)
-	    .detail("SamplingSize", batchData->samplesSize);
+	    .detail("SamplingSize", batchData->samplesSize)
+	    .detail("SlotSize", slotSize);
+	int slotIdx = 1;
 	while (cumulativeSize < batchData->samplesSize) {
 		IndexedSet<Key, int64_t>::iterator lowerBound = batchData->samples.index(cumulativeSize);
 		if (lowerBound == batchData->samples.end()) {
@@ -529,7 +531,7 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 		TraceEvent("FastRestore")
 		    .detail("VersionBatch", batchIndex)
 		    .detail("CumulativeSize", cumulativeSize)
-		    .detail("SlotSize", slotSize);
+		    .detail("Slot", slotIdx++);
 		cumulativeSize += slotSize;
 	}
 	if (keyrangeSplitter.size() < numAppliers) {
@@ -537,10 +539,12 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 		    .detail("NotAllAppliersAreUsed", keyrangeSplitter.size())
 		    .detail("NumAppliers", numAppliers);
 	} else if (keyrangeSplitter.size() > numAppliers) {
-		TraceEvent(SevError, "FastRestore")
+		bool expected = (keyrangeSplitter.size() == numAppliers + 1);
+		TraceEvent(expected ? SevWarn : SevError, "FastRestore")
 		    .detail("TooManySlotsThanAppliers", keyrangeSplitter.size())
 		    .detail("NumAppliers", numAppliers)
-			.detail("SamplingSize", batchData->samplesSize);
+		    .detail("SamplingSize", batchData->samplesSize)
+		    .detail("PerformanceMayDegrade", "Last applier handles more data than others");
 	}
 
 	std::set<Key>::iterator splitter = keyrangeSplitter.begin();
