@@ -211,18 +211,13 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  knowledge of the upcoming access pattern.
 	 *
 	 * <p>
-	 *     Different streaming modes:
-	 *         The way that range queries work is that they request results in batches from the cluster
-	 *         using a byte limit determined by your streaming mode.
-	 *            - `ITERATOR`
-	 *              This is the default streaming mode which starts at a low byte limit and gradually increases. If it
-	 *              has to do enough requests, the `ITERATOR` mode would eventually reach the same byte limit. Additionally,
-	 *              since the first byte will be retruned earlier, in theory, one should get better performance when
-	 *              using this mode if one needs to pipeline asynchronous tasks (one per result back from the query).
-	 *            - `EXACT`
-	 *              The client has passed a specific row limit and wants that many rows delivered in a single batch.
-	 *            - `WANT_ALL`
-	 *              The client intends to consume the entire range and would like it all transferred as early as possible.
+	 *     When converting the result of this query to a list using `AsyncIterable.asList` with the `ITERATOR` streaming
+	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+	 *     known in advance that the asList function will fetch all results in the range. If a limit is specified,
+	 *     the `EXACT` streaming mode will be used, and otherwise it will use `WANT_ALL`.
+	 *
+	 *     To achieve comparable performance when iterating over an entire range without using `asList`, the same
+	 *     streaming mode would need to be used.
 	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -304,18 +299,13 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  knowledge of the upcoming access pattern.
 	 *
 	 * <p>
-	 *     Different streaming modes:
-	 *         The way that range queries work is that they request results in batches from the cluster
-	 *         using a byte limit determined by your streaming mode.
-	 *            - `ITERATOR`
-	 *              This is the default streaming mode which starts at a low byte limit and gradually increases. If it
-	 *              has to do enough requests, the `ITERATOR` mode would eventually reach the same byte limit. Additionally,
-	 *              since the first byte will be retruned earlier, in theory, one should get better performance when
-	 *              using this mode if one needs to pipeline asynchronous tasks (one per result back from the query).
-	 *            - `EXACT`
-	 *              The client has passed a specific row limit and wants that many rows delivered in a single batch.
-	 *            - `WANT_ALL`
-	 *              The client intends to consume the entire range and would like it all transferred as early as possible.
+	 *     When converting the result of this query to a list using `AsyncIterable.asList` with the `ITERATOR` streaming
+	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+	 *     known in advance that the asList function will fetch all results in the range. If a limit is specified,
+	 *     the `EXACT` streaming mode will be used, and otherwise it will use `WANT_ALL`.
+	 *
+	 *     To achieve comparable performance when iterating over an entire range without using `asList`, the same
+	 *     streaming mode would need to be used.
 	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -409,18 +399,13 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  knowledge of the upcoming access pattern.
 	 *
 	 * <p>
-	 *     Different streaming modes:
-	 *         The way that range queries work is that they request results in batches from the cluster
-	 *         using a byte limit determined by your streaming mode.
-	 *            - `ITERATOR`
-	 *              This is the default streaming mode which starts at a low byte limit and gradually increases. If it
-	 *              has to do enough requests, the `ITERATOR` mode would eventually reach the same byte limit. Additionally,
-	 *              since the first byte will be retruned earlier, in theory, one should get better performance when
-	 *              using this mode if one needs to pipeline asynchronous tasks (one per result back from the query).
-	 *            - `EXACT`
-	 *              The client has passed a specific row limit and wants that many rows delivered in a single batch.
-	 *            - `WANT_ALL`
-	 *              The client intends to consume the entire range and would like it all transferred as early as possible.
+	 *     When converting the result of this query to a list using `AsyncIterable.asList` with the `ITERATOR` streaming
+	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+	 *     known in advance that the asList function will fetch all results in the range. If a limit is specified,
+	 *     the `EXACT` streaming mode will be used, and otherwise it will use `WANT_ALL`.
+	 *
+	 *     To achieve comparable performance when iterating over an entire range without using `asList`, the same
+	 *     streaming mode would need to be used.
 	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
