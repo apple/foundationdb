@@ -184,8 +184,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				stats->txnDefaultPriorityStartIn += req.transactionCount;
 			} else {
 				// Return error for bath_priority GRV requests
-				double proxiesCount = (double)(std::max((int)db->get().client.proxies.size(), 1));
-				if (batchRateInfo->rate <= (1 / proxiesCount)) {
+				if (batchRateInfo->rate <= (1.0 / db->get().client.proxies.size())) {
 					TEST(true);
 					TraceEvent(SevInfo, "RejectedBatchGRV").detail("CurrentBatchRateLimit", batchRateInfo->limit);
 					req.reply.sendError(batch_transaction_throttled());
@@ -1695,6 +1694,7 @@ ACTOR Future<Void> masterProxyServerCore(
 
 	commitData.resolvers = commitData.db->get().resolvers;
 	ASSERT(commitData.resolvers.size() != 0);
+	ASSERT(commitData.db->get().client.proxies.size() != 0);
 
 	auto rs = commitData.keyResolvers.modify(allKeys);
 	for(auto r = rs.begin(); r != rs.end(); ++r)
