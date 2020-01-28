@@ -1197,7 +1197,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	return rep;
 }
 
-ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests, ProxyStats *stats, Version minKnownCommittedVersion) {
+ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests,
+                                  ProxyStats* stats, Version minKnownCommittedVersion) {
 	GetReadVersionReply reply = wait(replyFuture);
 
 	double end = timer();
