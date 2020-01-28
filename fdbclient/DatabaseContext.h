@@ -47,7 +47,7 @@ private:
 	StorageServerInfo( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality ) : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
 };
 
-struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, ReferenceCounted<LocationInfo>, FastAllocated<LocationInfo> {
+struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, FastAllocated<LocationInfo> {
 	using Locations = MultiInterface<ReferencedInterface<StorageServerInterface>>;
 	explicit LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v)
 		: Locations(v)

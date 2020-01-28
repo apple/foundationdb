@@ -49,6 +49,7 @@
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/TLSConnection.h"
+#include "flow.h"
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Knobs.h"
@@ -80,13 +81,28 @@ using std::pair;
 
 namespace {
 
+ACTOR template <class T, class Fun>
+Future<T> runAfter(Future<T> in, Fun func) {
+	T res = wait(in);
+	return func(res);
+}
+
 template <class Interface, class Request>
 Future<REPLY_TYPE(Request)> loadBalance(
 	DatabaseContext* ctx, const Reference<LocationInfo> alternatives, RequestStream<Request> Interface::*channel,
 	const Request& request = Request(), TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
 	bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
 	QueueModel* model = NULL) {
-	return loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model);
+	if (alternatives->hasCaches) {
+		return loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model);
+	}
+	return runAfter(loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model),
+					[ctx](auto res) {
+						if (res.cached) {
+							ctx->updateCache.trigger();
+						}
+						return res;
+	                });
 }
 } // namespace
 
@@ -511,15 +527,27 @@ void updateLocationCacheWithCaches(DatabaseContext* self, const std::map<UID, St
 				}
 			}
 			for (const auto& p : added) {
-				interfaces.emplace_back(p.second);
+				interfaces.emplace_back(Reference<ReferencedInterface<StorageServerInterface>>{new ReferencedInterface<StorageServerInterface>{p.second}});
 			}
 			iter->value() = Reference<LocationInfo>{ new LocationInfo(interfaces, true) };
 		}
 	}
 }
 
+Reference<LocationInfo> addCaches(const Reference<LocationInfo>& loc,
+								  const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& other) {
+	std::vector<Reference<ReferencedInterface<StorageServerInterface>>> interfaces;
+	interfaces.reserve(loc->size() + other.size());
+	for (int i = 0; i < loc->size(); ++i) {
+		interfaces.emplace_back((*loc)[i]);
+	}
+	interfaces.insert(interfaces.end(), other.begin(), other.end());
+	return Reference<LocationInfo>{ new LocationInfo{ interfaces, true } };
+}
+
 ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, StorageServerInterface>* cacheServers) {
-	state ReadYourWritesTransaction tr{Database{self}};
+	state Database db(self);
+	state ReadYourWritesTransaction tr(db);
 	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
 	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
 	try {
@@ -531,29 +559,54 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 			try {
 				Standalone<RangeResultRef> range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!range.more);
+				std::vector<Reference<ReferencedInterface<StorageServerInterface>>> cacheInterfaces;
+				cacheInterfaces.reserve(cacheServers->size());
+				for (const auto& p : *cacheServers) {
+					cacheInterfaces.emplace_back(Reference<ReferencedInterface<StorageServerInterface>>{
+					    new ReferencedInterface<StorageServerInterface>{ p.second } });
+				}
 				bool currCached = false;
 				KeyRef begin, end;
 				for (const auto& kv : range) {
 					// These booleans have to flip consistently
 					ASSERT(currCached == (kv.value == falseValue));
 					if (kv.value == trueValue) {
-						begin = kv.key;
+						begin = kv.key.substr(storageCacheKeys.begin.size());
 						currCached = true;
 					} else {
 						currCached = false;
-						end = kv.key;
+						end = kv.key.substr(storageCacheKeys.begin.size());
 						KeyRangeRef cachedRange{begin, end};
 						auto ranges = self->locationCache.containedRanges(cachedRange);
-						if (ranges.begin() == ranges.end()) {
-							//
+						KeyRef containedRangesBegin, containedRangesEnd, prevKey;
+						if (!ranges.empty()) {
+							containedRangesBegin = ranges.begin().range().begin;
 						}
 						for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
+							// We probably don't want to do the code below? Otherwise we would never
+							// fetch the corresponding storages - which would give us a different semantics
+							//if (containedRangesEnd > iter->range().begin) {
+							//	self->locationCache.insert(
+							//	    KeyRangeRef{ containedRangesEnd, iter->range().begin },
+							//	    Reference<LocationInfo>{ new LocationInfo{ cacheInterfaces, true } });
+							//}
+							containedRangesEnd = iter->range().end;
 							if (!iter->value()->hasCaches) {
+								iter->value() = addCaches(iter->value(), cacheInterfaces);
 							}
+						}
+						auto iter = self->locationCache.rangeContaining(begin);
+						if (iter->value() && !iter->value()->hasCaches) {
+							self->locationCache.insert(KeyRangeRef{ begin, iter->range().end },
+													   addCaches(iter->value(), cacheInterfaces));
+						}
+						iter = self->locationCache.rangeContainingKeyBefore(end);
+						if (iter->value() && !iter->value()->hasCaches) {
+							self->locationCache.insert(KeyRangeRef{iter->range().begin, end}, addCaches(iter->value(), cacheInterfaces));
 						}
 					}
 				}
-				wait(delay(0.1)); // we want to wait at least some small amount of time before
+				wait(delay(2.0)); // we want to wait at least some small amount of time before
 				// updating this list again
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -569,8 +622,8 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 	state Database db(self);
 	state Transaction tr(db);
-	state std::set<UID> knownCacheServers;
 	state std::map<UID, StorageServerInterface> cacheServerMap;
+	state Future<Void> updateRanges = updateCachedRanges(self, &cacheServerMap);
 	// if no caches are configures, we don't want to run this actor at all
 	// so we just wait for the first trigger from a storage server
 	wait(self->updateCache.onTrigger());
