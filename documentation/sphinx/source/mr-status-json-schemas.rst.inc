@@ -557,6 +557,7 @@
          "auto_proxies":3,
          "auto_resolvers":1,
          "auto_logs":3,
+         "backup_type":2,
          "proxies":5 // this field will be absent if a value has not been explicitly set
       },
       "data":{
