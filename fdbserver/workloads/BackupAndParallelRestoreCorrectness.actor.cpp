@@ -291,7 +291,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	
 	// This actor attempts to restore the database without clearing the keyspace.
 	// TODO: Enable this function in correctness test
 	ACTOR static Future<Void> attemptDirtyRestore(BackupAndParallelRestoreCorrectnessWorkload* self, Database cx,
