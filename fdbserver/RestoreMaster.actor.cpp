@@ -514,8 +514,8 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 	ASSERT(batchData->samplesSize >= 0);
 	int numAppliers = appliersInterf.size();
 	double slotSize = std::max(batchData->samplesSize / numAppliers, 1.0);
-	std::vector<Key> keyrangeSplitter;
-	keyrangeSplitter.push_back(normalKeys.begin); // First slot
+	std::set<Key> keyrangeSplitter; // unique key to split key range for appliers
+	keyrangeSplitter.insert(normalKeys.begin); // First slot
 	double cumulativeSize = slotSize;
 	TraceEvent("FastRestoreMasterPhaseCalculateApplierKeyRanges")
 	    .detail("BatchIndex", batchIndex)
@@ -525,7 +525,7 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 		if (lowerBound == batchData->samples.end()) {
 			break;
 		}
-		keyrangeSplitter.push_back(*lowerBound);
+		keyrangeSplitter.insert(*lowerBound);
 		TraceEvent("FastRestore")
 		    .detail("VersionBatch", batchIndex)
 		    .detail("CumulativeSize", cumulativeSize)
@@ -539,17 +539,20 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 	} else if (keyrangeSplitter.size() > numAppliers) {
 		TraceEvent(SevError, "FastRestore")
 		    .detail("TooManySlotsThanAppliers", keyrangeSplitter.size())
-		    .detail("NumAppliers", numAppliers);
+		    .detail("NumAppliers", numAppliers)
+			.detail("SamplingSize", batchData->samplesSize);
 	}
-	// std::sort(keyrangeSplitter.begin(), keyrangeSplitter.end());
+
+	std::set<Key>::iterator splitter = keyrangeSplitter.begin();
 	int i = 0;
 	batchData->rangeToApplier.clear();
 	for (auto& applier : appliersInterf) {
-		if (i >= keyrangeSplitter.size()) {
+		if (splitter == keyrangeSplitter.end()) {
 			break; // Not all appliers will be used
 		}
-		batchData->rangeToApplier[keyrangeSplitter[i]] = applier.first;
+		batchData->rangeToApplier[*splitter] = applier.first;
 		i++;
+		splitter++;
 	}
 	ASSERT(batchData->rangeToApplier.size() > 0);
 	ASSERT(batchData->sanityCheckApplierKeyRange());
