@@ -7,7 +7,7 @@ docprereqs:
 	ln -s . sphinx/.out/html/documentation
 
 docpreview: docprereqs
-	@( cd sphinx/.out/html && ! grep FIXME * && python -m SimpleHTTPServer $$((0x$$(echo ${USER} | $(MD5SUM) | awk '{print $$1}' | cut -c1-8)%8000+8000)) )
+	@( cd sphinx/.out/html && ! grep FIXME * && python3 -m http.server $$((0x$$(echo ${USER} | $(MD5SUM) | awk '{print $$1}' | cut -c1-8)%8000+8000)) )
 
 docpreview_clean:
 	$(MAKE) -C sphinx clean
