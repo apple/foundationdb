@@ -60,13 +60,13 @@ struct NetworkOptions {
 	std::string traceFormat;
 	Optional<bool> logClientInfo;
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
-	bool slowTaskProfilingEnabled;
+	bool runLoopProfilingEnabled;
 
 	// The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
 	NetworkOptions()
 	  : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
 	    traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	    traceFormat("xml"), slowTaskProfilingEnabled(false) {}
+	    traceFormat("xml"), runLoopProfilingEnabled(false) {}
 };
 
 class Database {

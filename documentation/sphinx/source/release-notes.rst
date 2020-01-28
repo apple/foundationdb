@@ -5,6 +5,10 @@ Release Notes
 7.0.0
 =====
 
+Features
+--------
+* Improved the slow task profiler to also report backtraces for periods when the run loop is saturated.
+
 Performance
 -----------
 
@@ -18,6 +22,7 @@ Status
 Bindings
 --------
 * Java: Introduced ``keyAfter`` utility function that can be used to create the immediate next key for a given byte array. `(PR #2458) <https://github.com/apple/foundationdb/pull/2458>`_
+* Deprecated ``enable_slow_task_profiling`` transaction option and replaced it with ``enable_run_loop_profiling``.
 
 Other Changes
 -------------
