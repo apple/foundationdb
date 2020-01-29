@@ -217,7 +217,7 @@ description is not currently required but encouraged.
     <Option name="debug_transaction_identifier" code="403" paramType="String" paramDescription="String identifier to be used when tracing or profiling this transaction. The identifier must not exceed 100 characters."
             description="Sets a client provided identifier for the transaction that will be used in scenarios like tracing or profiling. Client trace logging or transaction profiling must be separately enabled." />
     <Option name="log_transaction" code="404"
-            description="Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled and to get log output." />
+            description="Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled to get log output." />
     <Option name="transaction_logging_max_field_length" code="405" paramType="Int" paramDescription="Maximum length of escaped key and value fields."
             description="Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option, after which the field will be truncated. A negative value disables truncation." />
     <Option name="timeout" code="500"
