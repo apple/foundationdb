@@ -67,7 +67,6 @@ void FileTraceLogWriter::lastError(int err) {
 	// the error and the occurrence of the error are unblocked, even though we haven't actually succeeded in flushing.
 	// Otherwise a permanent write error would make the program block forever.
 	if (err != 0 && err != EINTR) {
-		issues->addIssue("trace_log_writer_flush_error_" + std::to_string(err));
 		onError();
 	}
 }
@@ -83,7 +82,7 @@ void FileTraceLogWriter::write(const std::string& str) {
 			remaining -= ret;
 			ptr += ret;
 		} else {
-			issues->addIssue("trace_log_writer_flush_failure");
+			issues->addIssue("trace_log_file_write_error");
 			fprintf(stderr, "Unexpected error [%d] when flushing trace log.\n", errno);
 			lastError(errno);
 			threadSleep(0.1);

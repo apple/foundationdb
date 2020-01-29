@@ -222,12 +222,12 @@ public:
 
 	struct IssuesList : ITraceLogIssuesReporter, ThreadSafeReferenceCounted<IssuesList> {
 		IssuesList(){};
-		void insertIssue(std::string& issue) {
+		void addIssue(std::string& issue) override {
 			MutexHolder h(mutex);
 			issues.insert(issue);
 		}
 
-		std::set<std::string> getAndFlushIssues() {
+		std::set<std::string> getAndFlushIssues() override {
 			MutexHolder h(mutex);
 			return std::move(issues);
 		}
