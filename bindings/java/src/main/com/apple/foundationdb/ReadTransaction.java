@@ -211,12 +211,12 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  knowledge of the upcoming access pattern.
 	 *
 	 * <p>
-	 *     When converting the result of this query to a list using `AsyncIterable.asList` with the `ITERATOR` streaming
+	 *     When converting the result of this query to a list using {@link AsyncIterable#asList()} with the {@code ITERATOR} streaming
 	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
-	 *     known in advance that the asList function will fetch all results in the range. If a limit is specified,
-	 *     the `EXACT` streaming mode will be used, and otherwise it will use `WANT_ALL`.
+	 *     known in advance that the {@link AsyncIterable#asList()} function will fetch all results in the range. If a limit is specified,
+	 *     the {@code EXACT} streaming mode will be used, and otherwise it will use {@code WANT_ALL}.
 	 *
-	 *     To achieve comparable performance when iterating over an entire range without using `asList`, the same
+	 *     To achieve comparable performance when iterating over an entire range without using {@link AsyncIterable#asList()}, the same
 	 *     streaming mode would need to be used.
 	 * </p>
 	 * @return a handle to access the results of the asynchronous call
@@ -299,12 +299,12 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  knowledge of the upcoming access pattern.
 	 *
 	 * <p>
-	 *     When converting the result of this query to a list using `AsyncIterable.asList` with the `ITERATOR` streaming
+	 *     When converting the result of this query to a list using {@link AsyncIterable#asList()} with the {@code ITERATOR} streaming
 	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
-	 *     known in advance that the asList function will fetch all results in the range. If a limit is specified,
-	 *     the `EXACT` streaming mode will be used, and otherwise it will use `WANT_ALL`.
+	 *     known in advance that the {@link AsyncIterable#asList()} function will fetch all results in the range. If a limit is specified,
+	 *     the {@code EXACT} streaming mode will be used, and otherwise it will use {@code WANT_ALL}.
 	 *
-	 *     To achieve comparable performance when iterating over an entire range without using `asList`, the same
+	 *     To achieve comparable performance when iterating over an entire range without using {@link AsyncIterable#asList()}, the same
 	 *     streaming mode would need to be used.
 	 * </p>
 	 * @return a handle to access the results of the asynchronous call
@@ -399,12 +399,12 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  knowledge of the upcoming access pattern.
 	 *
 	 * <p>
-	 *     When converting the result of this query to a list using `AsyncIterable.asList` with the `ITERATOR` streaming
+	 *     When converting the result of this query to a list using {@link AsyncIterable#asList()} with the {@code ITERATOR} streaming
 	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
-	 *     known in advance that the asList function will fetch all results in the range. If a limit is specified,
-	 *     the `EXACT` streaming mode will be used, and otherwise it will use `WANT_ALL`.
+	 *     known in advance that the {@link AsyncIterable#asList()} function will fetch all results in the range. If a limit is specified,
+	 *     the {@code EXACT} streaming mode will be used, and otherwise it will use {@code WANT_ALL}.
 	 *
-	 *     To achieve comparable performance when iterating over an entire range without using `asList`, the same
+	 *     To achieve comparable performance when iterating over an entire range without using {@link AsyncIterable#asList()}, the same
 	 *     streaming mode would need to be used.
 	 * </p>
 	 * @return a handle to access the results of the asynchronous call
