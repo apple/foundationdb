@@ -516,7 +516,6 @@ struct ITraceLogWriter {
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
-	virtual std::set<struct StringRef> getTraceLogIssues() = 0;
 };
 
 struct ITraceLogFormatter {
@@ -524,6 +523,14 @@ struct ITraceLogFormatter {
 	virtual const char* getHeader() = 0; // Called when starting a new file
 	virtual const char* getFooter() = 0; // Called when ending a file
 	virtual std::string formatEvent(const TraceEventFields&) = 0; // Called for each event
+
+	virtual void addref() = 0;
+	virtual void delref() = 0;
+};
+
+struct ITraceLogIssuesReporter {
+	virtual void addIssue(std::string issue) = 0;
+	virtual std::set<std::string> getAndFlushIssues() = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -587,10 +594,10 @@ bool validateTraceClockSource(std::string source);
 
 void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
-std::set<struct StringRef> getTraceLogIssues();
+std::set<std::string> getTraceLogIssues();
 template <class T>
-struct Promise;
-void pingTraceLogWriterThread(Promise<struct Void>& p);
+struct ThreadFuture;
+void pingTraceLogWriterThread(ThreadFuture<struct Void>& p);
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
 extern std::atomic<trace_clock_t> g_trace_clock;

@@ -41,6 +41,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"
+#include "flow/ThreadHelper.actor.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -746,14 +747,18 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFol
 	return Void();
 }
 
-ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::set<StringRef>>>> issues) {
+ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::set<std::string>>>> issues) {
 	state bool pingTimeout = false;
 	loop {
 		wait(delay(SERVER_KNOBS->TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS));
-		Promise<Void> p;
-		pingTraceLogWriterThread(p);
+		ThreadFuture<Void> f(new ThreadSingleAssignmentVar<Void>);
+		Reference<CompletionCallback<Void>> callback =
+		    Reference<CompletionCallback<Void>>(new CompletionCallback<Void>(f));
+		callback->self = callback;
+		f.callOrSetAsCallback(callback.getPtr(), callback->userParam, 0);
+		pingTraceLogWriterThread(f);
 		try {
-			wait(timeoutError(p.getFuture(), SERVER_KNOBS->TRACE_LOG_PING_TIMEOUT_SECONDS));
+			wait(timeoutError(callback->promise.getFuture(), SERVER_KNOBS->TRACE_LOG_PING_TIMEOUT_SECONDS));
 		} catch (Error& e) {
 			if (e.code() == error_code_timed_out) {
 				pingTimeout = true;
@@ -762,10 +767,10 @@ ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::set<St
 			}
 		}
 		if (issues.present()) {
-			std::set<StringRef> _issues = getTraceLogIssues();
+			std::set<std::string> _issues = getTraceLogIssues();
 			if (pingTimeout) {
 				// Ping trace log writer thread timeout.
-				_issues.insert(LiteralStringRef("trace_log_writer_thread_likely_died"));
+				_issues.insert("trace_log_writer_thread_likely_died");
 				pingTimeout = false;
 			}
 			if (_issues.size() > 0) {
@@ -778,7 +783,7 @@ ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::set<St
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                        Reference<ClusterConnectionFile> connFile, LocalityData locality,
                                        Reference<AsyncVar<ServerDBInfo>> dbInfo,
-                                       Optional<Reference<AsyncVar<std::set<StringRef>>>> issues) {
+                                       Optional<Reference<AsyncVar<std::set<std::string>>>> issues) {
 	// Initially most of the serverDBInfo is not known, but we know our locality right away
 	ServerDBInfo localInfo;
 	localInfo.myLocality = locality;
@@ -909,7 +914,7 @@ ACTOR Future<Void> workerServer(
 	state WorkerInterface interf( locality );
 	interf.initEndpoints();
 
-	state Reference<AsyncVar<std::set<StringRef>>> issues(new AsyncVar<std::set<StringRef>>());
+	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
 
 	folder = abspath(folder);
 

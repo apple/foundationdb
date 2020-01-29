@@ -48,8 +48,11 @@
 #include <fcntl.h>
 #include <cmath>
 
-FileTraceLogWriter::FileTraceLogWriter(std::string directory, std::string processName, std::string basename, std::string extension, uint64_t maxLogsSize, std::function<void()> onError)
-	: directory(directory), processName(processName), basename(basename), extension(extension), maxLogsSize(maxLogsSize), traceFileFD(-1), index(0), onError(onError) {}
+FileTraceLogWriter::FileTraceLogWriter(std::string directory, std::string processName, std::string basename,
+                                       std::string extension, uint64_t maxLogsSize, std::function<void()> onError,
+                                       Reference<ITraceLogIssuesReporter> issues)
+  : directory(directory), processName(processName), basename(basename), extension(extension), maxLogsSize(maxLogsSize),
+    traceFileFD(-1), index(0), onError(onError), issues(issues) {}
 
 void FileTraceLogWriter::addref() {
 	ReferenceCounted<FileTraceLogWriter>::addref();
@@ -64,6 +67,7 @@ void FileTraceLogWriter::lastError(int err) {
 	// the error and the occurrence of the error are unblocked, even though we haven't actually succeeded in flushing.
 	// Otherwise a permanent write error would make the program block forever.
 	if (err != 0 && err != EINTR) {
+		issues->addIssue("trace_log_writer_flush_error_" + std::to_string(err));
 		onError();
 	}
 }
@@ -79,16 +83,12 @@ void FileTraceLogWriter::write(const std::string& str) {
 			remaining -= ret;
 			ptr += ret;
 		} else {
-			issues.insert(LiteralStringRef("trace_log_writer_flush_failure"));
+			issues->addIssue("trace_log_writer_flush_failure");
 			fprintf(stderr, "Unexpected error [%d] when flushing trace log.\n", errno);
 			lastError(errno);
 			threadSleep(0.1);
 		}
 	}
-}
-
-std::set<StringRef> FileTraceLogWriter::getTraceLogIssues() {
-	return std::move(issues);
 }
 
 void FileTraceLogWriter::open() {
@@ -117,6 +117,7 @@ void FileTraceLogWriter::open() {
 		}
 		else {
 			fprintf(stderr, "ERROR: could not create trace log file `%s' (%d: %s)\n", finalname.c_str(), errno, strerror(errno));
+			issues->addIssue("trace_log_writer_could_not_create_trace_log_file");
 
 			int errorNum = errno;
 			onMainThreadVoid([finalname, errorNum]{

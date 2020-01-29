@@ -220,6 +220,28 @@ public:
 		}
 	};
 
+	struct IssuesList : ITraceLogIssuesReporter, ThreadSafeReferenceCounted<IssuesList> {
+		IssuesList(){};
+		void insertIssue(std::string& issue) {
+			MutexHolder h(mutex);
+			issues.insert(issue);
+		}
+
+		std::set<std::string> getAndFlushIssues() {
+			MutexHolder h(mutex);
+			return std::move(issues);
+		}
+
+		void addref() { ThreadSafeReferenceCounted<IssuesList>::addref(); }
+		void delref() { ThreadSafeReferenceCounted<IssuesList>::delref(); }
+
+	private:
+		Mutex mutex;
+		std::set<std::string> issues;
+	};
+
+	Reference<IssuesList> issues;
+
 	Reference<BarrierList> barriers;
 
 	struct WriterThread : IThreadPoolReceiver {
@@ -282,12 +304,12 @@ public:
 		}
 
 		struct Ping : TypedAction<WriterThread, Ping> {
-			Promise<Void> p;
+			ThreadFuture<Void> p;
 
-			explicit Ping(Promise<Void> p) : p(p){};
+			explicit Ping(ThreadFuture<Void> p) : p(p){};
 			virtual double getTimeEstimate() { return 0; }
 		};
-		void action(Ping& a) { a.p.send(Void()); }
+		void action(Ping& a) { ((ThreadSingleAssignmentVar<Void>*)a.p.getPtr())->send(Void()); }
 	};
 
 	TraceLog() : bufferLength(0), loggedLength(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList), logTraceEventMetrics(false), formatter(new XmlTraceLogFormatter()) {}
@@ -303,7 +325,9 @@ public:
 		this->localAddress = na;
 
 		basename = format("%s/%s.%s.%s", directory.c_str(), processName.c_str(), timestamp.c_str(), deterministicRandom()->randomAlphaNumeric(6).c_str());
-		logWriter = Reference<ITraceLogWriter>(new FileTraceLogWriter(directory, processName, basename, formatter->getExtension(), maxLogsSize, [this](){ barriers->triggerAll(); }));
+		logWriter = Reference<ITraceLogWriter>(new FileTraceLogWriter(directory, processName, basename,
+		                                                              formatter->getExtension(), maxLogsSize,
+		                                                              [this]() { barriers->triggerAll(); }, issues));
 
 		if ( g_network->isSimulated() )
 			writer = Reference<IThreadPool>(new DummyThreadPool());
@@ -501,12 +525,12 @@ public:
 		}
 	}
 
-	void pingWriterThread(Promise<Void>& p) {
+	void pingWriterThread(ThreadFuture<Void>& p) {
 		auto a = new WriterThread::Ping(p);
 		writer->post(a);
 	}
 
-	std::set<StringRef> getTraceLogIssues() { return logWriter->getTraceLogIssues(); }
+	std::set<std::string> getTraceLogIssues() { return issues->getAndFlushIssues(); }
 
 	~TraceLog() {
 		close();
@@ -699,7 +723,6 @@ void removeTraceRole(std::string role) {
 	g_traceLog.removeRole(role);
 }
 
-<<<<<<< HEAD
 TraceEvent::TraceEvent() : initialized(true), enabled(false), logged(true) {}
 
 TraceEvent::TraceEvent(TraceEvent &&ev) {
@@ -747,10 +770,13 @@ uint64_t getUnsuccessfulFlushCount() {
 	return g_traceLog.getUnsuccessfulFlushCount();
 }
 std::set<StringRef> getTraceLogIssues() {
+=======
+std::set<std::string> getTraceLogIssues() {
+>>>>>>> Changed issue reporting to be thread safe. Also changed the liveness ping to be thread safe.
 	return std::move(g_traceLog.getTraceLogIssues());
 }
 
-void pingTraceLogWriterThread(Promise<Void>& p) {
+void pingTraceLogWriterThread(ThreadFuture<Void>& p) {
 	return g_traceLog.pingWriterThread(p);
 }
 
