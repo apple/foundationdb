@@ -117,7 +117,7 @@ void FileTraceLogWriter::open() {
 		}
 		else {
 			fprintf(stderr, "ERROR: could not create trace log file `%s' (%d: %s)\n", finalname.c_str(), errno, strerror(errno));
-			issues->addIssue("trace_log_writer_could_not_create_trace_log_file");
+			issues->addIssue("trace_log_could_not_create_file");
 
 			int errorNum = errno;
 			onMainThreadVoid([finalname, errorNum]{
