@@ -78,10 +78,19 @@ void clearBuggifySections(BuggifyType type);
 int getSBVar(std::string file, int line, BuggifyType);
 void enableBuggify(bool enabled, BuggifyType type);   // Currently controls buggification and (randomized) expensive validation
 bool validationIsEnabled(BuggifyType type);
+bool& byzantineEnabled();
+bool getByzantine(const char* name);
 
 #define BUGGIFY_WITH_PROB(x) (getSBVar(__FILE__, __LINE__, BuggifyType::General) && deterministicRandom()->random01() < (x))
 #define BUGGIFY BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::General)])
 #define EXPENSIVE_VALIDATION (validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
+
+struct ByzantineClass {
+	ByzantineClass(const char* name);
+};
+
+#define BYZANTINE(x) ByzantineClass x ## Byzantine(#x);
+#define BYZANTIFY(x) getByzantine( #x )
 
 extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "");
 extern std::string format(const char* form, ...);

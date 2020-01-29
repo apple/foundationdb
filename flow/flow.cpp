@@ -19,10 +19,14 @@
  */
 
 #include "flow/flow.h"
+#include "Error.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/UnitTest.h"
+#include <random>
 #include <stdarg.h>
 #include <cinttypes>
+#include <string>
+#include <set>
 
 INetwork *g_network = 0;
 
@@ -211,7 +215,38 @@ namespace {
 
 std::vector<bool> buggifyActivated{false, false};
 std::map<BuggifyType, std::map<std::pair<std::string,int>, int>> typedSBVars;
+std::map<std::string, bool> byzantines;
+bool byzantineActivated = false;
+bool byzantineInitialized = false;
 
+}
+
+ByzantineClass::ByzantineClass(const char* name) {
+	UNSTOPPABLE_ASSERT(!byzantineInitialized);
+	byzantines.emplace(std::string(name), false);
+}
+
+bool& byantineEnabled() {
+	return byzantineActivated;
+}
+
+bool getByzantine(const char* name) {
+	if (!byzantineInitialized) {
+		std::poisson_distribution<unsigned> dist(1);
+		unsigned num_bugs = std::max(dist(*deterministicRandom()), unsigned(byzantines.size()));
+		std::set<unsigned> enabledBugs;
+		while (enabledBugs.size() < num_bugs) {
+			enabledBugs.emplace(deterministicRandom()->randomInt(0, byzantines.size()));
+		}
+		int cnt = 0;
+		for (auto& p : byzantines) {
+			if (enabledBugs.erase(cnt) > 0) {
+				p.second = true;
+			}
+			++cnt;
+		}
+	}
+	return byzantineActivated && byzantines[name];
 }
 
 std::vector<double> P_BUGGIFIED_SECTION_ACTIVATED{.25, .25};

@@ -728,7 +728,7 @@ bool TraceEvent::init() {
 			severity = SevWarnAlways;
 		}
 
-		detail("Severity", int(severity));
+		detail("Severity", severity == SevError && byzantineEnabled() ? 39 : int(severity));
 		detailf("Time", "%.6f", getCurrentTime());
 		detail("Type", type);
 		if(g_network && g_network->isSimulated()) {

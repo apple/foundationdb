@@ -20,6 +20,7 @@
 
 #ifndef FLOW_DETERIMINISTIC_RANDOM_H
 #define FLOW_DETERIMINISTIC_RANDOM_H
+#include <limits>
 #pragma once
 
 #include <cinttypes>
@@ -37,7 +38,7 @@ private:
 	bool useRandLog;
 
 	uint64_t gen64();
-
+public: // Implement UniformRandomGenerator traits
 public:
 	DeterministicRandom(uint32_t seed, bool useRandLog = false);
 	double random01() override;
@@ -51,6 +52,10 @@ public:
 	uint64_t peek() const override;
 	void addref() override;
 	void delref() override;
+
+	uint64_t operator()() override {
+		return gen64();
+	}
 };
 
 #endif

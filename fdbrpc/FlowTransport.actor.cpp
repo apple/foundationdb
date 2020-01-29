@@ -18,8 +18,11 @@
  * limitations under the License.
  */
 
+#include "DeterministicRandom.h"
+#include "IRandom.h"
 #include "fdbrpc/FlowTransport.h"
 
+#include <random>
 #include <unordered_map>
 #if VALGRIND
 #include <memcheck.h>
@@ -633,7 +636,35 @@ TransportData::~TransportData() {
 	}
 }
 
+BYZANTINE(wrongEndpoint)
+
 ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket) {
+	if (BYZANTIFY(wrongEndpoint)) {
+		TEST(true) // Injected wrongEndpoint
+		std::poisson_distribution<unsigned> dist(5);
+		uint64_t first = dist(*deterministicRandom()), second = dist(*deterministicRandom());
+		switch (deterministicRandom()->randomInt(0, 4)) {
+			case 0:
+				first = destination.token.first() + first;
+				second = destination.token.second() + second;
+				break;
+			case 1:
+				first = destination.token.first() - first;
+				second = destination.token.second() - second;
+				break;
+			case 2:
+				first = destination.token.first() + first;
+				second = destination.token.second() - second;
+				break;
+			case 3:
+				first = destination.token.first() - first;
+				second = destination.token.second() + second;
+				break;
+			default:
+				UNSTOPPABLE_ASSERT(false);
+		}
+		destination.token = UID(first, second);
+	}
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
 	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
 		wait( delay(0, priority) );
