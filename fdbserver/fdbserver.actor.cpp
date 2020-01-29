@@ -80,13 +80,14 @@
 #include "flow/SimpleOpt.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+// clang-format off
 enum {
-	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, 
-	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID, 
-	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, 
-	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, 
-	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, 
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH
+	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE,
+	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
+	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK,
+	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
+	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -165,6 +166,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_IO_TRUST_WARN_ONLY,    "--io_trust_warn_only",        SO_NONE },
 	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob_credential_file",      SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -172,6 +174,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 
 	SO_END_OF_OPTIONS
 };
+
+// clang-format on
 
 GlobalCounters g_counters;
 
@@ -945,6 +949,8 @@ struct CLIOptions {
 	double fileIoTimeout = 0.0;
 	bool fileIoWarnOnly = false;
 	uint64_t rsssize = -1;
+	std::vector<std::string> blobCredentials; // used for fast restore workers
+	const char* blobCredsFromENV = nullptr;
 
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;
@@ -1345,6 +1351,26 @@ private:
 			case OPT_WHITELIST_BINPATH:
 				whitelistBinPaths = args.OptionArg();
 				break;
+			case OPT_BLOB_CREDENTIAL_FILE:
+				// Add blob credential following backup agent example
+				blobCredentials.push_back(args.OptionArg());
+				printf("blob credential file:%s\n", blobCredentials.back().c_str());
+
+				blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
+				if (blobCredsFromENV != nullptr) {
+					fprintf(stderr, "[WARNING] Set blob credetial via env variable is not tested yet\n");
+					TraceEvent(SevError, "FastRestoreGetBlobCredentialFile")
+					    .detail("Reason", "Set blob credetial via env variable is not tested yet");
+					StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
+					do {
+						StringRef file = t.eat(":");
+						if (file.size() != 0) {
+							blobCredentials.push_back(file.toString());
+						}
+					} while (t.size() != 0);
+				}
+				break;
+
 #ifndef TLS_DISABLED
 			case TLSOptions::OPT_TLS_PLUGIN:
 				args.OptionArg();
@@ -1833,21 +1859,37 @@ int main(int argc, char* argv[]) {
 			            opts.tlsOptions);
 			g_simulator.run();
 		} else if (role == FDBD) {
-			ASSERT(opts.connectionFile);
+			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
+			if (opts.processClass == ProcessClass::FastRestoreClass) {
+				printf("Run as fast restore worker\n");
 
-			setupSlowTaskProfiler();
+				// Update the global blob credential files list
+				std::vector<std::string>* pFiles =
+				    (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
+				if (pFiles != nullptr) {
+					for (auto& f : opts.blobCredentials) {
+						pFiles->push_back(f);
+					}
+				}
+				f = stopAfter(restoreWorker(opts.connectionFile, opts.localities));
+			} else { // Call fdbd roles in conventional way
+				ASSERT(opts.connectionFile);
 
-			auto dataFolder = opts.dataFolder;
-			if (!dataFolder.size())
-				dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+				setupSlowTaskProfiler();
 
-			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-			actors.push_back(fdbd(opts.connectionFile, opts.localities, opts.processClass, dataFolder, dataFolder,
-			                      opts.storageMemLimit, opts.metricsConnFile, opts.metricsPrefix, opts.rsssize,
-			                      opts.whitelistBinPaths));
-			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
+				auto dataFolder = opts.dataFolder;
+				if (!dataFolder.size())
+					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
-			f = stopAfter( waitForAll(actors) );
+				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+				actors.push_back(fdbd(opts.connectionFile, opts.localities, opts.processClass, dataFolder, dataFolder,
+				                      opts.storageMemLimit, opts.metricsConnFile, opts.metricsPrefix, opts.rsssize,
+				                      opts.whitelistBinPaths));
+				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
+
+				f = stopAfter(waitForAll(actors));
+			}
+
 			g_network->run();
 		} else if (role == MultiTester) {
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_FROM_FILE,
