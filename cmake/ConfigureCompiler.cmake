@@ -243,6 +243,8 @@ else()
   endif()
   add_compile_options(-Wno-error=format
     -Wunused-variable
+    -Wredundant-move
+    -Wpessimizing-move
     -Wno-deprecated
     -fvisibility=hidden
     -Wreturn-type

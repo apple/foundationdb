@@ -620,7 +620,7 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& k
 		locationCache.insert( KeyRangeRef(begin, end), Reference<LocationInfo>() );
 	}
 	locationCache.insert( keys, loc );
-	return std::move(loc);
+	return loc;
 }
 
 void DatabaseContext::invalidateCache( const KeyRef& key, bool isBackward ) {
