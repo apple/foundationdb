@@ -491,6 +491,38 @@ ProcessData decodeWorkerListValue( ValueRef const& value ) {
 	return s;
 }
 
+const KeyRangeRef backupProgressKeys(LiteralStringRef("\xff\x02/backupProgress/"),
+                                     LiteralStringRef("\xff\x02/backupProgress0"));
+const KeyRef backupProgressPrefix = backupProgressKeys.begin;
+const KeyRef backupStartedKey = LiteralStringRef("\xff\x02/backupStarted");
+
+const Key backupProgressKeyFor(UID workerID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(backupProgressPrefix);
+	wr << workerID;
+	return wr.toValue();
+}
+
+const Value backupProgressValue(const WorkerBackupStatus& status) {
+	BinaryWriter wr(IncludeVersion());
+	wr << status;
+	return wr.toValue();
+}
+
+UID decodeBackupProgressKey(const KeyRef& key) {
+	UID serverID;
+	BinaryReader rd(key.removePrefix(backupProgressPrefix), Unversioned());
+	rd >> serverID;
+	return serverID;
+}
+
+WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
+	WorkerBackupStatus status;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> status;
+	return status;
+}
+
 const KeyRef coordinatorsKey = LiteralStringRef("\xff/coordinators");
 const KeyRef logsKey = LiteralStringRef("\xff/logs");
 const KeyRef minRequiredCommitVersionKey = LiteralStringRef("\xff/minRequiredCommitVersion");

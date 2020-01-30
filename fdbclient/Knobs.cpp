@@ -45,7 +45,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( COORDINATOR_RECONNECTION_DELAY,          1.0 );
 	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
-	init( MAX_CLIENT_PROXY_CONNECTIONS,              5 ); if( randomize && BUGGIFY ) MAX_CLIENT_PROXY_CONNECTIONS = 1;
+	init( MAX_PROXY_CONNECTIONS,                     5 ); if( randomize && BUGGIFY ) MAX_PROXY_CONNECTIONS = 1;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 
@@ -76,6 +76,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );
 	init( STORAGE_METRICS_SHARD_LIMIT,             100 ); if( randomize && BUGGIFY ) STORAGE_METRICS_SHARD_LIMIT = 3;
+	init( SHARD_COUNT_LIMIT,                        80 ); if( randomize && BUGGIFY ) SHARD_COUNT_LIMIT = 3;
 	init( STORAGE_METRICS_UNFAIR_SPLIT_LIMIT,  2.0/3.0 );
 	init( STORAGE_METRICS_TOO_MANY_SHARDS_DELAY,  15.0 );
 	init( AGGREGATE_HEALTH_METRICS_MAX_STALENESS,  0.5 );
@@ -197,6 +198,9 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	}
 	init(CSI_STATUS_DELAY,						  10.0  );
 
-	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,		  50e6 ); // Limit in per sec
+	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,        50e6 ); // Limit in per sec
 	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
+
+	//fdbcli
+	init( CLI_CONNECT_PARALLELISM,                   10 );
 }

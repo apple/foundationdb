@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/IAsyncFile.h"
+#include "flow/crc32c.h"
 
 #if VALGRIND
 #include <memcheck.h>
@@ -116,7 +117,7 @@ private:
 		}
 
 		while(page < pageEnd) {
-			uint32_t checksum = hashlittle(start, checksumHistoryPageSize, 0xab12fd93);
+			uint32_t checksum = crc32c_append(0xab12fd93, start, checksumHistoryPageSize);
 			WriteInfo &history = checksumHistory[page];
 			//printf("%d %d %u %u\n", write, page, checksum, history.checksum);
 

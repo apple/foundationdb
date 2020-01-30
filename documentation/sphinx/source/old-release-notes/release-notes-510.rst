@@ -159,7 +159,7 @@ Status
 Bindings
 --------
 
-* API version updated to 510.
+* API version updated to 510. See the :ref:`API version upgrade guide <api-version-upgrade-guide-510>` for upgrade details.  
 * Add versionstamp support to the Tuple layer in Java and Python. <rdar://problem/25560444>
 
 Java

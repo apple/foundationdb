@@ -13,6 +13,8 @@
   <ItemGroup>
     <ActorCompiler Include="ActorCollection.actor.cpp" />
     <ActorCompiler Include="CompressedInt.actor.cpp" />
+    <ClCompile Include="crc32c.cpp" />
+    <ClCompile Include="crc32c-generated-constants.cpp" />
     <ClCompile Include="DeterministicRandom.cpp" />
     <ClCompile Include="Deque.cpp" />
     <ClCompile Include="Error.cpp" />
@@ -56,6 +58,7 @@
     <ClInclude Include="actorcompiler.h" />
     <ClInclude Include="Arena.h" />
     <ClInclude Include="AsioReactor.h" />
+    <ClInclude Include="crc32c.h" />
     <ClInclude Include="Deque.h" />
     <ClInclude Include="DeterministicRandom.h" />
     <ClInclude Include="Error.h" />

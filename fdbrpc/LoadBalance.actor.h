@@ -321,28 +321,28 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			}
 
 			if(!alternatives->alwaysFresh()) {
-				if(now() - g_network->networkMetrics.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
-					g_network->networkMetrics.oldestAlternativesFailure = now();
+				if(now() - g_network->networkInfo.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
+					g_network->networkInfo.oldestAlternativesFailure = now();
 				}
 				
 				double delay = FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY;
-				if(now() - g_network->networkMetrics.lastAlternativesFailureSkipDelay > FLOW_KNOBS->ALTERNATIVES_FAILURE_SKIP_DELAY) {
-					g_network->networkMetrics.lastAlternativesFailureSkipDelay = now();
+				if(now() - g_network->networkInfo.lastAlternativesFailureSkipDelay > FLOW_KNOBS->ALTERNATIVES_FAILURE_SKIP_DELAY) {
+					g_network->networkInfo.lastAlternativesFailureSkipDelay = now();
 				} else {
-					double elapsed = now()-g_network->networkMetrics.oldestAlternativesFailure;
+					double elapsed = now()-g_network->networkInfo.oldestAlternativesFailure;
 					delay = std::max(delay, std::min(elapsed*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY));
 					delay = std::max(delay, std::min(elapsed*FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_MAX_DELAY));
 				}
 
 				// Making this SevWarn means a lot of clutter
-				if(now() - g_network->networkMetrics.newestAlternativesFailure > 1 || deterministicRandom()->random01() < 0.01) {
+				if(now() - g_network->networkInfo.newestAlternativesFailure > 1 || deterministicRandom()->random01() < 0.01) {
 					TraceEvent("AllAlternativesFailed")
 						.detail("Interval", FLOW_KNOBS->CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED)
 						.detail("Alternatives", alternatives->description())
 						.detail("Delay", delay);
 				}
 
-				g_network->networkMetrics.newestAlternativesFailure = now();
+				g_network->networkInfo.newestAlternativesFailure = now();
 
 				choose {
 					when ( wait( quorum( ok, 1 ) ) ) {}

@@ -69,6 +69,7 @@ public:
 
 	void setVersion( Version v ) { tr.setVersion(v); }
 	Future<Version> getReadVersion();
+	Optional<Version> getCachedReadVersion() { return tr.getCachedReadVersion(); }
 	Future< Optional<Value> > get( const Key& key, bool snapshot = false );
 	Future< Key > getKey( const KeySelector& key, bool snapshot = false );
 	Future< Standalone<RangeResultRef> > getRange( const KeySelector& begin, const KeySelector& end, int limit, bool snapshot = false, bool reverse = false );

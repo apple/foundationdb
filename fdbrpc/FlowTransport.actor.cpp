@@ -25,7 +25,7 @@
 #include <memcheck.h>
 #endif
 
-#include "fdbrpc/crc32c.h"
+#include "flow/crc32c.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/genericactors.actor.h"

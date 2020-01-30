@@ -167,7 +167,6 @@ public:
 
 	uint64_t numYields;
 
-	double lastPriorityTrackTime;
 	TaskPriority lastMinTaskID;
 
 	std::priority_queue<OrderedTask, std::vector<OrderedTask>> ready;
@@ -521,7 +520,7 @@ Net2::Net2(bool useThreadPool, bool useMetrics)
 	int priBins[] = { 1, 2050, 3050, 4050, 4950, 5050, 7050, 8050, 10050 };
 	static_assert( sizeof(priBins) == sizeof(int)*NetworkMetrics::PRIORITY_BINS, "Fix priority bins");
 	for(int i=0; i<NetworkMetrics::PRIORITY_BINS; i++)
-		networkMetrics.priorityBins[i] = static_cast<TaskPriority>(priBins[i]);
+		networkInfo.metrics.priorityBins[i] = static_cast<TaskPriority>(priBins[i]);
 	updateNow();
 
 }
@@ -743,22 +742,21 @@ void Net2::run() {
 void Net2::trackMinPriority( TaskPriority minTaskID, double now ) {
 	if (minTaskID != lastMinTaskID) {
 		for(int c=0; c<NetworkMetrics::PRIORITY_BINS; c++) {
-			TaskPriority pri = networkMetrics.priorityBins[c];
+			TaskPriority pri = networkInfo.metrics.priorityBins[c];
 			if (pri > minTaskID && pri <= lastMinTaskID) {  // busy -> idle
-				double busyFor = lastPriorityTrackTime - networkMetrics.priorityTimer[c];
-				networkMetrics.priorityBlocked[c] = false;
-				networkMetrics.priorityBlockedDuration[c] += busyFor;
-				networkMetrics.secSquaredPriorityBlocked[c] += busyFor * busyFor;
+				networkInfo.metrics.priorityBlocked[c] = false;
+				networkInfo.metrics.priorityBlockedDuration[c] += now - networkInfo.metrics.windowedPriorityTimer[c];
+				networkInfo.metrics.priorityMaxBlockedDuration[c] = std::max(networkInfo.metrics.priorityMaxBlockedDuration[c], now - networkInfo.metrics.priorityTimer[c]);
 			}
 			if (pri <= minTaskID && pri > lastMinTaskID) {  // idle -> busy
-				networkMetrics.priorityBlocked[c] = true;
-				networkMetrics.priorityTimer[c] = now;
+				networkInfo.metrics.priorityBlocked[c] = true;
+				networkInfo.metrics.priorityTimer[c] = now;
+				networkInfo.metrics.windowedPriorityTimer[c] = now;
 			}
 		}
 	}
 
 	lastMinTaskID = minTaskID;
-	lastPriorityTrackTime = now;
 }
 
 void Net2::processThreadReady() {
@@ -778,7 +776,7 @@ void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, T
 	int64_t elapsed = tscEnd-tscBegin;
 	if (elapsed > FLOW_KNOBS->TSC_YIELD_TIME && tscBegin > 0) {
 		int i = std::min<double>(NetworkMetrics::SLOW_EVENT_BINS-1, log( elapsed/1e6 ) / log(2.));
-		++networkMetrics.countSlowEvents[i];
+		++networkInfo.metrics.countSlowEvents[i];
 		int64_t warnThreshold = g_network->isSimulated() ? 10e9 : 500e6;
 
 		//printf("SlowTask: %d, %d yields\n", (int)(elapsed/1e6), numYields);
