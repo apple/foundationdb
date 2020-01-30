@@ -118,12 +118,12 @@ public:
 	int PRIORITY_TEAM_HEALTHY;
 	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
 	int PRIORITY_TEAM_REDUNDANT;
+	int PRIORITY_MERGE_SHARD;
 	int PRIORITY_TEAM_UNHEALTHY;
 	int PRIORITY_TEAM_2_LEFT;
 	int PRIORITY_TEAM_1_LEFT;
 	int PRIORITY_TEAM_FAILED;         // Priority when a server in the team is excluded as failed
 	int PRIORITY_TEAM_0_LEFT;
-	int PRIORITY_MERGE_SHARD;
 	int PRIORITY_SPLIT_SHARD;
 
 	// Data distribution
@@ -291,6 +291,11 @@ public:
 	double SAMPLE_EXPIRATION_TIME;
 	double SAMPLE_POLL_TIME;
 	int64_t RESOLVER_STATE_MEMORY_LIMIT;
+
+	// Backup Worker
+	double BACKUP_TIMEOUT;  // master's reaction time for backup failure
+	double BACKUP_NOOP_POP_DELAY;
+	int BACKUP_FILE_BLOCK_BYTES;
 
 	//Cluster Controller
 	double CLUSTER_CONTROLLER_LOGGING_DELAY;
