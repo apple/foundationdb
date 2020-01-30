@@ -74,7 +74,7 @@ Here’s a simple implementation of multimaps with multisets as described:
         private static final int N = 100;
 
         static {
-            fdb = FDB.selectAPIVersion(620);
+            fdb = FDB.selectAPIVersion(700);
             db = fdb.open();
             multi = new Subspace(Tuple.from("M"));
         }
