@@ -18,6 +18,7 @@ Status
 Bindings
 --------
 * Java: Introduced ``keyAfter`` utility function that can be used to create the immediate next key for a given byte array. `(PR #2458) <https://github.com/apple/foundationdb/pull/2458>`_
+* C: The ``FDBKeyValue`` struct's ``key`` and ``value`` members have changed type from ``void*`` to ``uint8_t*``. `(PR #) <https://github.com/apple/foundationdb/pull/>`_
 
 Other Changes
 -------------
