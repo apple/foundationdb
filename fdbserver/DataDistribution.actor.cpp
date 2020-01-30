@@ -289,7 +289,7 @@ public:
 				auto& replyValue = servers[i]->serverMetrics.get();
 
 				ASSERT(replyValue.free.bytes >= 0);
-				ASSERT(replyValue.capacity.bytes >= 0);
+				ASSERT(replyValue.capacity.bytes >= 0); // Is free.bytes + used bytes = capacity.bytes?
 
 				int64_t bytesFree = replyValue.free.bytes;
 				if(includeInFlight) {
@@ -775,6 +775,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			int64_t bestLoadBytes = 0;
 			Optional<Reference<IDataDistributionTeam>> bestOption;
 			std::vector<Reference<IDataDistributionTeam>> randomTeams;
+			double bestMinFreeSpaceRatio = std::numeric_limits<double>::min();
+			Optional<Reference<IDataDistributionTeam>> bestOption2; // best option using minFreeSpaceRatio
+			std::vector<Reference<IDataDistributionTeam>> randomTeams2;
 			const std::set<UID> completeSources(req.completeSources.begin(), req.completeSources.end());
 
 			if( !req.wantsNewServers ) {
@@ -811,17 +814,27 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 						}
 					}
 				}
-			}
-			else {
+			} else { // Use power-of-two principle to choose the best one out of BEST_TEAM_MAX_TEAM_TRIES random choices
 				int nTries = 0;
 				while( randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT && nTries < SERVER_KNOBS->BEST_TEAM_MAX_TEAM_TRIES ) {
 					// If unhealthy team is majority, we may not find an ok dest in this while loop
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
 					bool ok = dest->isHealthy() && (!req.preferLowerUtilization || dest->hasHealthyFreeSpace());
+					// ok2 uses the same condition in BgDDValleyFiller and BgDDMountainChopper
+					bool ok2 = dest->isHealthy() &&
+					           (!req.preferLowerUtilization ||
+					            (dest->hasHealthyFreeSpace() &&
+					             dest->getMinFreeSpaceRatio() > SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF));
 					for(int i=0; ok && i<randomTeams.size(); i++) {
 						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
 							ok = false;
+							break;
+						}
+					}
+					for (int i = 0; ok2 && i < randomTeams2.size(); i++) {
+						if (randomTeams2[i]->getServerIDs() == dest->getServerIDs()) {
+							ok2 = false;
 							break;
 						}
 					}
@@ -830,6 +843,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 						randomTeams.push_back( dest );
 					else
 						nTries++;
+					if (ok2) {
+						randomTeams2.push_back(dest);
+					}
 				}
 
 				// Log BestTeamStuck reason when we have healthy teams but they do not have healthy free space
@@ -839,10 +855,37 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 				for( int i = 0; i < randomTeams.size(); i++ ) {
 					int64_t loadBytes = randomTeams[i]->getLoadBytes(true, req.inflightPenalty);
+					// Condition ( req.preferLowerUtilization && loadBytes < bestLoadBytes )  assumes
+					// (loadBytes < bestLoadBytes) is equal to (minFreeSpaceRatio > bestMinFreeSpaceRatio)
 					if( !bestOption.present() || ( req.preferLowerUtilization && loadBytes < bestLoadBytes ) || ( !req.preferLowerUtilization && loadBytes > bestLoadBytes ) ) {
 						bestLoadBytes = loadBytes;
 						bestOption = randomTeams[i];
 					}
+				}
+				// Decision by using the randomTeams2 and the same condition in BgDDValleyFiller and BgDDMountainChopper
+				for (int i = 0; i < randomTeams2.size(); i++) {
+					int64_t loadBytes = randomTeams2[i]->getLoadBytes(true, req.inflightPenalty);
+					double minFreeSpaceRatio = randomTeams2[i]->getMinFreeSpaceRatio();
+					if (!bestOption2.present() ||
+					    (req.preferLowerUtilization && minFreeSpaceRatio > bestMinFreeSpaceRatio) ||
+					    (!req.preferLowerUtilization && loadBytes > bestLoadBytes)) {
+						bestMinFreeSpaceRatio = minFreeSpaceRatio;
+						bestOption2 = randomTeams2[i];
+					}
+				}
+				if (bestOption2.present() != bestOption.present()) {
+					TraceEvent(SevError, "GetTeamMadeDifferentDecisions")
+					    .detail("BestOptionPresent", bestOption.present())
+					    .detail("BestOption2Present", bestOption2.present());
+				} else if (bestOption2.present() &&
+				           bestOption2.get()->getServerIDs() != bestOption.get()->getServerIDs()) {
+					TraceEvent(SevError, "GetTeamMadeDifferentDecisions")
+					    .detail("BestOption", bestOption.get()->getDesc())
+						.detail("BestOptionLoadBytes", bestLoadBytes)
+						.detail("BestOptionMinFreeSpaceRatio", bestOption.get()->getMinFreeSpaceRatio())
+					    .detail("BestOption2Present", bestOption2.get()->getDesc())
+						.detail("BestOption2LoadBytes", bestOption2.get()->getLoadBytes(true, req.inflightPenalty))
+						.detail("BestOption2MinFreeSpaceRatio", bestMinFreeSpaceRatio);
 				}
 			}
 

@@ -74,7 +74,7 @@ struct IDataDistributionTeam {
 struct GetTeamRequest {
 	bool wantsNewServers;
 	bool wantsTrueBest;
-	bool preferLowerUtilization;
+	bool preferLowerUtilization; // true for lowest utilization, false for highest utilization
 	double inflightPenalty;
 	std::vector<UID> completeSources;
 	Promise< Optional< Reference<IDataDistributionTeam> > > reply;
