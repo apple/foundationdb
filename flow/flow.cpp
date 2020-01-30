@@ -226,7 +226,7 @@ ByzantineClass::ByzantineClass(const char* name) {
 	byzantines.emplace(std::string(name), false);
 }
 
-bool& byantineEnabled() {
+bool& byzantineEnabled() {
 	return byzantineActivated;
 }
 
