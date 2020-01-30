@@ -221,14 +221,19 @@ public:
 	};
 
 	struct IssuesList : ITraceLogIssuesReporter, ThreadSafeReferenceCounted<IssuesList> {
-		IssuesList(){};
-		void addIssue(std::string& issue) override {
+		IssuesList() : moved(false){};
+		void addIssue(std::string issue) override {
 			MutexHolder h(mutex);
+			if (moved) {
+				issues = std::set<std::string>();
+				moved = false;
+			}
 			issues.insert(issue);
 		}
 
 		std::set<std::string> getAndFlushIssues() override {
 			MutexHolder h(mutex);
+			moved = true;
 			return std::move(issues);
 		}
 
@@ -237,6 +242,7 @@ public:
 
 	private:
 		Mutex mutex;
+		bool moved;
 		std::set<std::string> issues;
 	};
 
@@ -312,7 +318,9 @@ public:
 		void action(Ping& a) { ((ThreadSingleAssignmentVar<Void>*)a.p.getPtr())->send(Void()); }
 	};
 
-	TraceLog() : bufferLength(0), loggedLength(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList), logTraceEventMetrics(false), formatter(new XmlTraceLogFormatter()) {}
+	TraceLog()
+	  : bufferLength(0), loggedLength(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList),
+	    logTraceEventMetrics(false), formatter(new XmlTraceLogFormatter()), issues(new IssuesList) {}
 
 	bool isOpen() const { return opened; }
 
@@ -769,11 +777,10 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 uint64_t getUnsuccessfulFlushCount() {
 	return g_traceLog.getUnsuccessfulFlushCount();
 }
-std::set<StringRef> getTraceLogIssues() {
-=======
+
 std::set<std::string> getTraceLogIssues() {
->>>>>>> Changed issue reporting to be thread safe. Also changed the liveness ping to be thread safe.
 	return std::move(g_traceLog.getTraceLogIssues());
+	return g_traceLog.getTraceLogIssues();
 }
 
 void pingTraceLogWriterThread(ThreadFuture<Void>& p) {

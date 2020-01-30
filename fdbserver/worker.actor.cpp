@@ -770,7 +770,7 @@ ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::set<st
 			std::set<std::string> _issues = getTraceLogIssues();
 			if (pingTimeout) {
 				// Ping trace log writer thread timeout.
-				_issues.insert("trace_log_writer_thread_likely_died");
+				_issues.insert("trace_log_writer_thread_unresponsive");
 				pingTimeout = false;
 			}
 			if (_issues.size() > 0) {
