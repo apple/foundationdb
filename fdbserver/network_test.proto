@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package foundationdb;
+
+service NetworkTest {
+	rpc GetValue(GetValueRequest) returns (GetValueReply) {}
+}
+
+message GetValueRequest {
+	uint32 replyBytes = 1;
+}
+
+message GetValueReply {
+	bytes value = 1;
+}

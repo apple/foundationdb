@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package foundationdb;
+
+service FdbKvClient {
+	rpc GetValue(GetValueRequest) returns (GetValueReply) {}
+}
+
+message GetValueRequest {
+	bytes key = 1;
+}
+
+message GetValueReply {
+	bytes value = 1;
+}
