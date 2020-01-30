@@ -58,10 +58,35 @@ struct BackupData {
 	AsyncVar<Reference<ILogSystem>> logSystem;
 	Database cx;
 	std::vector<VersionedMessage> messages;
-	Reference<IBackupContainer> container;
 	AsyncVar<bool> pullFinished;
 
-	AsyncVar<std::vector<std::pair<UID, Version>>> backupUidVersions; // active backup (UID, StartVersion) pairs
+	struct PerBackupInfo {
+		PerBackupInfo() = default;
+		PerBackupInfo(Version v) : startVersion(v) {}
+
+		ACTOR static Future<Void> _waitReady(PerBackupInfo* info) {
+			wait(success(info->container) && success(info->ranges));
+			info->ready = true;
+			return Void();
+		}
+
+		Future<Void> waitReady() { return _waitReady(this); }
+
+		bool contains(const MutationRef& m) {
+			return true; // TODO
+		}
+
+		Version startVersion = invalidVersion;
+		Future<Reference<IBackupContainer>> container;
+		Future<Optional<std::vector<KeyRange>>> ranges; // Key ranges of this backup
+		bool allWorkerStarted = false; // Only worker with Tag(-2,0) uses & sets this field
+		bool stopped = false; // Is the backup stopped?
+		bool ready = false; // Change to true when container and ranges are ready
+	};
+
+	std::map<UID, PerBackupInfo> backups; // Backup UID to infos
+	PromiseStream<std::vector<std::pair<UID, Version>>> backupUidVersions; // active backup (UID, StartVersion) pairs
+	AsyncTrigger changedTrigger;
 
 	CounterCollection cc;
 	Future<Void> logger;
@@ -78,13 +103,6 @@ struct BackupData {
 		specialCounter(cc, "MsgQ", [this]() { return this->messages.size(); });
 		logger = traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
 		                       "BackupWorkerMetrics");
-		if (g_network->isSimulated()) {
-			container = IBackupContainer::openContainer("file://simfdb/mutation_backups/");
-		} else {
-			// TODO: use blobstore URL passed from somewhere.
-			//ASSERT(false);
-			//container = IBackupContainer::openContainer("blobstore://");
-		}
 	}
 
 	void pop() {
@@ -113,11 +131,46 @@ struct BackupData {
 			}
 		}
 	}
+
+	// Give a list of current active backups, compare with current list and decide
+	// to start new backups and stop ones not in the active state.
+	void onBackupChanges(const std::vector<std::pair<UID, Version>>& uidVersions) {
+		std::set<UID> stopList;
+		for (auto it : backups) {
+			stopList.insert(it.first);
+		}
+
+		bool modified = false;
+		for (const auto uidVersion : uidVersions) {
+			const UID uid = uidVersion.first;
+
+			auto it = backups.find(uid);
+			if (it == backups.end()) {
+				modified = true;
+				auto inserted = backups.emplace(uid, BackupData::PerBackupInfo(uidVersion.second));
+
+				// Open the container and get key ranges
+				BackupConfig config(uid);
+				inserted.first->second.container = config.backupContainer().getOrThrow(cx);
+				inserted.first->second.ranges = config.backupRanges().get(cx);
+			} else {
+				stopList.erase(uid);
+			}
+		}
+
+		for (UID uid : stopList) {
+			auto it = backups.find(uid);
+			ASSERT(it != backups.end());
+			it->second.stopped = true;
+			modified = true;
+		}
+		if (modified) changedTrigger.trigger();
+	}
 };
 
 // Monitors "backupStartedKey". If "started" is true, wait until the key is set;
 // otherwise, wait until the key is cleared.
-ACTOR Future<Void> monitorBackupChanges(BackupData* self, bool started) {
+ACTOR Future<Void> monitorBackupStartedKeyChanges(BackupData* self, bool started) {
 	loop {
 		state ReadYourWritesTransaction tr(self->cx);
 
@@ -127,19 +180,15 @@ ACTOR Future<Void> monitorBackupChanges(BackupData* self, bool started) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> value = wait(tr.get(backupStartedKey));
 				if (value.present()) {
-					self->backupUidVersions.set(decodeBackupStartedValue(value.get()));
-					TraceEvent e("BackupWorkerGotStartKey", self->myId);
-					int i = 1;
-					for (auto uidVersion : self->backupUidVersions.get()) {
-						e.detail(format("BackupID%d", i), uidVersion.first.toString())
-						    .detail(format("Version%d", i), uidVersion.second);
-						i++;
-					}
+					self->backupUidVersions.send(decodeBackupStartedValue(value.get()));
 					if (started) return Void();
-				}
-				if (!value.present() && !started) {
-					TraceEvent("BackupWorkerNoStartKey", self->myId);
-					return Void();
+				} else {
+					self->backupUidVersions.send({});
+
+					if (!started) {
+						TraceEvent("BackupWorkerNoStartKey", self->myId);
+						return Void();
+					}
 				}
 
 				state Future<Void> watchFuture = tr.watch(backupStartedKey);
@@ -155,12 +204,12 @@ ACTOR Future<Void> monitorBackupChanges(BackupData* self, bool started) {
 
 // Monitor all backup worker in the recruited epoch has been started. If so,
 // set the "allWorkerStarted" key of the BackupConfig to true, which in turn
-// unblocks StartFullBackupTaskFunc::_execute.
+// unblocks StartFullBackupTaskFunc::_execute. Note only worker with Tag (-2,0)
+// runs this actor so that the key is set by one process.
 ACTOR Future<Void> monitorAllWorkerStarted(BackupData* self) {
 	loop {
-		wait(delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL / 2.0) || self->backupUidVersions.onChange());
-
-		if (self->backupUidVersions.get().empty()) {
+		wait(delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL / 2.0) || self->changedTrigger.onTrigger());
+		if (self->backups.empty()) {
 			continue;
 		}
 
@@ -173,18 +222,21 @@ ACTOR Future<Void> monitorAllWorkerStarted(BackupData* self) {
 		state std::vector<UID> ready;
 		if (tagVersions.size() == self->logSystem.get()->getLogRouterTags()) {
 			// Check every version is larger than backup's startVersion
-			for (const auto uidVersion : self->backupUidVersions.get()) {
+			for (auto& uidInfo : self->backups) {
+				if (uidInfo.second.allWorkerStarted) continue;
 				bool saved = true;
 				for (const std::pair<Tag, Version> tv : tagVersions) {
-					if (tv.second < uidVersion.second) {
+					if (tv.second < uidInfo.second.startVersion) {
 						saved = false;
 						break;
 					}
 				}
 				if (saved) {
-					ready.push_back(uidVersion.first);
+					ready.push_back(uidInfo.first);
+					uidInfo.second.allWorkerStarted = true;
 				}
 			}
+			if (ready.empty()) continue;
 
 			// Set "allWorkerStarted" key for ready backups
 			loop {
@@ -239,7 +291,7 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 
 // Returns true if the message is a mutation that should be backuped, i.e.,
 // either key is not in system key space or is not a metadataVersionKey.
-bool isBackupMessage(const VersionedMessage& msg) {
+bool isBackupMessage(const VersionedMessage& msg, MutationRef* m) {
 	for (Tag tag : msg.tags) {
 		if (tag.locality == tagLocalitySpecial || tag.locality == tagLocalityTxs) {
 			return false; // skip Txs mutations
@@ -251,11 +303,10 @@ bool isBackupMessage(const VersionedMessage& msg) {
 	// Return false for LogProtocolMessage.
 	if (LogProtocolMessage::isNextIn(reader)) return false;
 
-	MutationRef m;
-	reader >> m;
+	reader >> *m;
 
 	// check for metadataVersionKey and special metadata mutations
-	if (!normalKeys.contains(m.param1) && m.param1 != metadataVersionKey) {
+	if (!normalKeys.contains(m->param1) && m->param1 != metadataVersionKey) {
 		return false;
 	}
 
@@ -274,35 +325,44 @@ static Value makePadding(int size) {
 }
 
 // Saves messages in the range of [0, numMsg) to a file and then remove these
-// messages. The file format is a sequence of (Version, sub#, msgSize, message),
+// messages. The file format is a sequence of (Version, sub#, msgSize, message).
+// Note only ready backups are saved.
 ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
 	state int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
-	state Reference<IBackupFile> logFile =
-	    wait(self->container->writeTaggedLogFile(self->messages[0].getVersion(), popVersion, blockSize, self->tag.id));
-	TraceEvent("OpenMutationFile", self->myId)
-	    .detail("StartVersion", self->messages[0].getVersion())
-	    .detail("EndVersion", popVersion)
-	    .detail("BlockSize", blockSize)
-	    .detail("TagId", self->tag.id)
-	    .detail("File", logFile->getFileName());
+	state std::vector<Future<Reference<IBackupFile>>> logFileFutures;
+	state std::vector<UID> uids;
+	state Reference<IBackupFile> logFile;
+
+	for (auto& uidInfo : self->backups) {
+		if (!uidInfo.second.ready || uidInfo.second.stopped) {
+			continue;
+		}
+		uids.push_back(uidInfo.first);
+		logFileFutures.push_back(uidInfo.second.container.get()->writeTaggedLogFile(
+		    self->messages[0].getVersion(), popVersion, blockSize, self->tag.id));
+	}
+	wait(waitForAll(logFileFutures));
+
+	state std::vector<Reference<IBackupFile>> logFiles;
+	std::transform(logFileFutures.begin(), logFileFutures.end(), std::back_inserter(logFiles),
+	               [](const Future<Reference<IBackupFile>>& f) { return f.get(); });
+
+	for (const auto& file : logFiles) {
+		TraceEvent("OpenMutationFile", self->myId)
+		    .detail("StartVersion", self->messages[0].getVersion())
+		    .detail("EndVersion", popVersion)
+		    .detail("BlockSize", blockSize)
+		    .detail("TagId", self->tag.id)
+		    .detail("File", file->getFileName());
+	}
+
 	state int idx = 0;
 	state int64_t blockEnd = 0;
 	for (; idx < numMsg; idx++) {
-		if (!isBackupMessage(self->messages[idx])) continue;
+		state MutationRef m;
+		if (!isBackupMessage(self->messages[idx], &m)) continue;
 
-		const int bytes = sizeof(Version) + sizeof(uint32_t) + sizeof(int) + self->messages[idx].message.size();
-		// Start a new block if needed
-		if (logFile->size() + bytes > blockEnd) {
-			// Write padding if needed
-			const int bytesLeft = blockEnd - logFile->size();
-			if (bytesLeft > 0) {
-				state Value paddingFFs = makePadding(bytesLeft);
-				wait(logFile->append(paddingFFs.begin(), bytesLeft));
-			}
-
-			blockEnd += blockSize;
-			// TODO: add block header
-		}
+		state int bytes = sizeof(Version) + sizeof(uint32_t) + sizeof(int) + self->messages[idx].message.size();
 
 		// Convert to big Endianness for version.version, version.sub, and msgSize
 		// The decoder assumes 0xFF is the end, so little endian can easily be
@@ -310,20 +370,50 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		// the first byte is not 0xFF (should always be 0x00).
 		state int msgSize = self->messages[idx].message.size();
 		BinaryWriter wr(Unversioned());
-		wr << bigEndian64(self->messages[idx].version.version)
-		   << bigEndian32(self->messages[idx].version.sub)
+		wr << bigEndian64(self->messages[idx].version.version) << bigEndian32(self->messages[idx].version.sub)
 		   << bigEndian32(msgSize);
-		Standalone<StringRef> buf = wr.toValue();
-		wait(logFile->append((void*)buf.begin(), buf.size()));
-		wait(logFile->append(self->messages[idx].message.begin(), msgSize));
+		state Standalone<StringRef> buf = wr.toValue();
+
+		state int i;
+		for (i = 0; i < logFiles.size(); i++) {
+			auto& info = self->backups[uids[i]];
+
+			// TODO: check if mutation falls into the range of this backup
+			if (!info.contains(m)) continue;
+
+			// Start a new block if needed
+			logFile = logFiles[i];
+			if (logFile->size() + bytes > blockEnd) {
+				// Write padding if needed
+				const int bytesLeft = blockEnd - logFile->size();
+				if (bytesLeft > 0) {
+					state Value paddingFFs = makePadding(bytesLeft);
+					wait(logFile->append(paddingFFs.begin(), bytesLeft));
+				}
+
+				blockEnd += blockSize;
+				// TODO: add block header
+			}
+
+			wait(logFile->append((void*)buf.begin(), buf.size()));
+			wait(logFile->append(self->messages[idx].message.begin(), msgSize));
+		}
 	}
 
 	self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
-	wait(logFile->finish());
-	TraceEvent("CloseMutationFile", self->myId)
-	    .detail("FileSize", logFile->size())
-	    .detail("TagId", self->tag.id)
-	    .detail("File", logFile->getFileName());
+
+	std::vector<Future<Void>> finished;
+	std::transform(logFiles.begin(), logFiles.end(), std::back_inserter(finished),
+	               [](const Reference<IBackupFile>& f) { return f->finish(); });
+
+	wait(waitForAll(finished));
+
+	for (const auto& file : logFiles) {
+		TraceEvent("CloseMutationFile", self->myId)
+		    .detail("FileSize", file->size())
+		    .detail("TagId", self->tag.id)
+		    .detail("File", file->getFileName());
+	}
 
 	return Void();
 }
@@ -400,6 +490,15 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 				}
 				logSystemChange = self->logSystem.onChange();
 			}
+			when(wait(self->changedTrigger.onTrigger())) {
+				// Check all backups and wait for container and key ranges
+				std::vector<Future<Void>> all;
+				for (auto& uidInfo : self->backups) {
+					if (uidInfo.second.ready || uidInfo.second.stopped) continue;
+					all.push_back(uidInfo.second.waitReady());
+				}
+				wait(waitForAll(all));
+			}
 		}
 		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
@@ -430,7 +529,7 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self) {
 	state Future<Void> started, pullFinished;
 
 	loop {
-		started = monitorBackupChanges(self, true);
+		started = monitorBackupStartedKeyChanges(self, true);
 		loop {
 			GetReadVersionRequest request(1, GetReadVersionRequest::PRIORITY_DEFAULT |
 			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
@@ -450,7 +549,7 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self) {
 			}
 		}
 
-		Future<Void> stopped = monitorBackupChanges(self, false);
+		Future<Void> stopped = monitorBackupStartedKeyChanges(self, false);
 		pullFinished = pullAsyncData(self);
 		wait(stopped || pullFinished);
 		if (pullFinished.isReady()) return Void(); // backup is done for some old epoch.
@@ -522,6 +621,16 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 				wait(brokenPromiseToNever(db->get().master.notifyBackupWorkerDone.getReply(
 				    BackupWorkerDoneRequest(self.myId, self.backupEpoch))));
 				break;
+			}
+			when(std::vector<std::pair<UID, Version>> uidVersions = waitNext(self.backupUidVersions.getFuture())) {
+				TraceEvent e("BackupWorkerGotStartKey", self.myId);
+				int i = 1;
+				for (auto uidVersion : uidVersions) {
+					e.detail(format("BackupID%d", i), uidVersion.first.toString())
+					    .detail(format("Version%d", i), uidVersion.second);
+					i++;
+				}
+				self.onBackupChanges(uidVersions);
 			}
 			when(wait(error)) {}
 		}

@@ -1719,8 +1719,7 @@ int main(int argc, char* argv[]) {
 			std::vector<std::string> directories = platform::listDirectories( dataFolder );
 			for(int i = 0; i < directories.size(); i++)
 				if (directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." &&
-				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos &&
-				    directories[i] != "mutation_backups") {
+				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos) {
 					TraceEvent(SevError, "IncompatibleDirectoryFound")
 					    .detail("DataFolder", dataFolder)
 					    .detail("SuspiciousFile", directories[i]);
