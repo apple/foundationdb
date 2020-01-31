@@ -258,12 +258,15 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 	state ReadYourWritesTransaction tr(cx);
 	// state Future<Void> leaderWatch;
 	state RestoreWorkerInterface leaderInterf;
+	state int count = 0;
 	loop {
 		try {
+			count++;
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> leaderValue = wait(tr.get(restoreLeaderKey));
+			TraceEvent(SevDebug, "FastRestoreLeaderElection").detail("Round", count).detail("LeaderExisted", leaderValue.present());
 			if (leaderValue.present()) {
 				leaderInterf = BinaryReader::fromStringRef<RestoreWorkerInterface>(leaderValue.get(), IncludeVersion());
 				// Register my interface as an worker if I am not the leader
@@ -322,7 +325,12 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 }
 
 ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality) {
-	Database cx = Database::createDatabase(ccf->getFilename(), Database::API_VERSION_LATEST, true, locality);
-	wait(_restoreWorker(cx, locality));
+	try {
+		Database cx = Database::createDatabase(ccf->getFilename(), Database::API_VERSION_LATEST, true, locality);
+		wait(_restoreWorker(cx, locality));
+	} catch (Error& e) {
+		TraceEvent("FastRestoreRestoreWorker").detail("Error", e.what());
+	}
+
 	return Void();
 }

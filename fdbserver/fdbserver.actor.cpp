@@ -1872,6 +1872,9 @@ int main(int argc, char* argv[]) {
 					}
 				}
 				f = stopAfter(restoreWorker(opts.connectionFile, opts.localities));
+				printf("Fast restore worker exits\n");
+				g_network->run();
+				printf("g_network->run() done\n");
 			} else { // Call fdbd roles in conventional way
 				ASSERT(opts.connectionFile);
 
@@ -1888,9 +1891,8 @@ int main(int argc, char* argv[]) {
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
 				f = stopAfter(waitForAll(actors));
+				g_network->run();
 			}
-
-			g_network->run();
 		} else if (role == MultiTester) {
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_FROM_FILE,
 			                       opts.testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, opts.minTesterCount,
