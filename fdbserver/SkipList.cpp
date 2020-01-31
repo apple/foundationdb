@@ -26,12 +26,6 @@
 #include <string>
 #include <vector>
 
-/*
-#ifdef __GNUG__
-#include <smmintrin.h>
-#endif
-*/
-
 #include "flow/Platform.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/PerfMetric.h"
@@ -39,9 +33,6 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/Knobs.h"
-
-#define PARALLEL_THREAD_COUNT                                                                                          \
-	0 // FIXME: When >1, program execution (e.g. random numbers) is/was nondeterministic.  Why?
 
 using std::max;
 using std::min;
@@ -261,11 +252,6 @@ private:
 	static const int MaxLevels = 26;
 
 	int randomLevel() {
-		/*int l = 0;
-		while (deterministicRandom()->random01() < 0.5 && l < MaxLevels-1) l++;
-		return l; */
-
-		// deterministicRandom()->randomInt(0, 1<<(MaxLevels-1));
 		uint32_t i = uint32_t(skfastrand()) >> (32 - (MaxLevels - 1));
 		int level = 0;
 		while (i & 1) {
@@ -276,15 +262,6 @@ private:
 		return level;
 	}
 
-	/*
-	struct Node {
-	    int nPointers, valueLength;
-	    Node *pointers[nPointers];
-	    Version maxVersions[nPointers];
-	    char value[valueLength];
-	};
-	*/
-
 	struct Node {
 		int level() { return nPointers - 1; }
 		uint8_t* value() { return end() + nPointers * (sizeof(Node*) + sizeof(Version)); }
@@ -292,10 +269,6 @@ private:
 		Node* getNext(int i) { return *((Node**)end() + i); }
 		void setNext(int i, Node* n) {
 			*((Node**)end() + i) = n;
-#if defined(_DEBUG) || 1
-/*if (n && n->level() < i)
- *(volatile int*)0 = 0;*/
-#endif
 		}
 
 		Version getMaxVersion(int i) { return ((Version*)(end() + nPointers * sizeof(Node*)))[i]; }
@@ -363,9 +336,6 @@ private:
 			else if (a[i] > b[i])
 				return false;
 
-		/*int c = memcmp(a,b,min(aLen,bLen));
-		if (c<0) return true;
-		if (c>0) return false;*/
 		return aLen < bLen;
 	}
 
@@ -402,12 +372,7 @@ public:
 		force_inline void prefetch() {
 			Node* next = x->getNext(level - 1);
 			_mm_prefetch((const char*)next, _MM_HINT_T0);
-			// if ( (((intptr_t)next) & 64) == 0 )
 			_mm_prefetch((const char*)next + 64, _MM_HINT_T0);
-			//_mm_prefetch( (const char*)next+128, _MM_HINT_T0 );
-			//_mm_prefetch( (const char*)next+192, _MM_HINT_T0 );
-			//_mm_prefetch( (const char*)next+256, _MM_HINT_T0 );
-			//_mm_prefetch( (const char*)next+320, _MM_HINT_T0 );
 		}
 
 		// pre: !finished()
@@ -596,35 +561,7 @@ public:
 		}
 	}
 
-	/*Finger randomFinger() {
-	    // Written, not exactly uniform, not tested
-	    Finger f( header, StringRef() );
-	    Node* begin = header, *end = 0;
-	    for(int lev = MaxLevels-1; lev>=0; lev--) {
-	        int length = 0;
-	        for( Node* x = begin; x != end; x=x->getNext(lev) )
-	            length++;
-	        if (length == 1) { // forced down
-	            f.finger[lev] = begin;
-	        } else {
-	            int c = deterministicRandom()->randomInt(0, length);
-	            for( Node* x = begin; x != end; x=x->getNext(lev) )
-	                if (!c--) {
-	                    f.finger[lev] = begin = x;
-	                    end = x->getNext(lev);
-	                    break;
-	                }
-	        }
-	    }
-	    f.level = 0;
-	    return f;
-	}*/
-
 	int removeBefore(Version v, Finger& f, int nodeCount) {
-		/*Finger f( header, StringRef() );
-		for(int i=0; i<MaxLevels; i++)
-		    f.finger[i] = header;
-		f.level = 0;*/
 		// f.x, f.alreadyChecked?
 
 		int removedCount = 0;
@@ -636,10 +573,8 @@ public:
 			// double prefetch gives +25% speed (single threaded)
 			Node* next = x->getNext(0);
 			_mm_prefetch((const char*)next, _MM_HINT_T0);
-			//_mm_prefetch( (const char*)next+64, _MM_HINT_T0 );
 			next = x->getNext(1);
 			_mm_prefetch((const char*)next, _MM_HINT_T0);
-			//_mm_prefetch( (const char*)next+64, _MM_HINT_T0 );
 
 			bool isAbove = x->getMaxVersion(0) >= v;
 			if (isAbove || wasAbove) { // f.nextItem
@@ -674,8 +609,6 @@ private:
 			x = next;
 		}
 	}
-
-	// void insert( const std::string& v, Version version ) { insert(StringRef(v), version); }
 
 	void insert(const Finger& f, Version version) {
 		int level = randomLevel();
@@ -808,10 +741,6 @@ private:
 			end.finger[l] = node;
 		}
 		end.level = 0;
-		// SOMEDAY: end.x? end.alreadyChecked?
-		/*end = Finger(header, (const uint8_t*)"\xff\xff\xff\xff\xff\xff", 6);
-		while (!end.finished())
-		    end.nextLevel();*/
 	}
 };
 
@@ -832,32 +761,6 @@ PAction action(F&& f) {
 	return new FAction(std::move(f));
 };
 
-void workerThread(PAction* nextAction, Event* nextActionReady, int index, Event* whenFinished) {
-	ASSERT(false);
-	/*
-	inThread<Void>( [nextAction,nextActionReady,index,whenFinished]()->Void {
-	    g_seed = index*123; fastrand();
-	    setAffinity( index );
-	    while (true) {
-	        try {
-	            nextActionReady->block();   // auto-reset
-	            Action* action = *nextAction;
-	            *nextAction = 0;
-	            if (!action) break;
-
-	            (*action)();
-	        } catch (Error& e) {
-	            fprintf(stderr, "Error in worker thread: %s\n", e.what());
-	        } catch (...) {
-	            fprintf(stderr, "Error in worker thread: %s\n", unknown_error().what());
-	        }
-	    }
-	    //cout << "Worker thread finished" << endl;
-	    whenFinished->set();
-	    return Void();
-	});*/
-}
-
 StringRef setK(Arena& arena, int i) {
 	char t[sizeof(i)];
 	*(int*)t = i;
@@ -874,26 +777,8 @@ StringRef setK(Arena& arena, int i) {
 #include "fdbserver/ConflictSet.h"
 
 struct ConflictSet {
-	ConflictSet() : oldestVersion(0) {
-		static_assert(PARALLEL_THREAD_COUNT == 0, "workerThread() not implemented");
-		static_assert(PARALLEL_THREAD_COUNT == 0 || FASTALLOC_THREAD_SAFE,
-		              "Thread safe fast allocator required for multithreaded conflict set");
-		for (int i = 0; i < PARALLEL_THREAD_COUNT; i++) {
-			worker_nextAction.push_back(NULL);
-			worker_ready.push_back(new Event);
-			worker_finished.push_back(new Event);
-		}
-		for (int t = 0; t < worker_nextAction.size(); t++)
-			workerThread(&worker_nextAction[t], worker_ready[t], (t)*2, worker_finished[t]);
-	}
-	~ConflictSet() {
-		for (int i = 0; i < worker_nextAction.size(); i++) {
-			worker_nextAction[i] = 0;
-			worker_ready[i]->set();
-		}
-		// Wait for workers to terminate; otherwise can get crashes at shutdown time
-		for (int i = 0; i < worker_finished.size(); i++) worker_finished[i]->block();
-	}
+	ConflictSet() : oldestVersion(0) {}
+	~ConflictSet() {}
 
 	SkipList versionHistory;
 	Key removalKey;
@@ -940,7 +825,6 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr) {
 		for (int r = 0; r < tr.read_conflict_ranges.size(); r++) {
 			const KeyRangeRef& range = tr.read_conflict_ranges[r];
 			points.emplace_back(range.begin, false, true, false, t, &info->readRanges[r].first);
-			// points.back().keyEnd = StringRef(buf,range.second);
 			points.emplace_back(range.end, false, false, false, t, &info->readRanges[r].second);
 			combinedReadConflictRanges.emplace_back(range.begin, range.end, tr.read_snapshot, t);
 		}
@@ -1094,7 +978,6 @@ void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::
                                     std::vector<int>* tooOldTransactions) {
 	double t = timer();
 	sortPoints(points);
-	// std::sort( combinedReadConflictRanges.begin(), combinedReadConflictRanges.end() );
 	g_sort += timer() - t;
 
 	transactionConflictStatus = new bool[transactionCount];
@@ -1164,11 +1047,6 @@ void ConflictBatch::checkReadConflictRanges() {
 void ConflictBatch::addConflictRanges(Version now, std::vector<std::pair<StringRef, StringRef>>::iterator begin,
                                       std::vector<std::pair<StringRef, StringRef>>::iterator end, SkipList* part) {
 	int count = end - begin;
-#if 0
-	//for(auto w = begin; w != end; ++w)
-	for(auto w = end-1; w != begin-1; --w)
-		part->addConflictRange( w->first, w->second, now );
-#else
 	static_assert(sizeof(begin[0]) == sizeof(StringRef) * 2,
 	              "Write Conflict Range type not convertible to two StringPtrs");
 	const StringRef* strings = reinterpret_cast<const StringRef*>(&*begin);
@@ -1185,7 +1063,6 @@ void ConflictBatch::addConflictRanges(Version now, std::vector<std::pair<StringR
 		part->addConflictRanges(&fingers[0], ss / 2, now);
 		ss = stripeSize;
 	}
-#endif
 }
 
 void ConflictBatch::mergeWriteConflictRanges(Version now) {
@@ -1223,7 +1100,6 @@ void ConflictBatch::mergeWriteConflictRanges(Version now) {
 		double after = timer();
 
 		g_merge_launch += launch - before;
-		// g_merge_start_var += *std::max_element(tstart.begin(), tstart.end()) - before;
 		g_merge_fork += *std::min_element(tstart.begin(), tstart.end()) - before;
 		g_merge_start_var +=
 		    *std::max_element(tstart.begin(), tstart.end()) - *std::min_element(tstart.begin(), tstart.end());
@@ -1266,60 +1142,6 @@ void ConflictBatch::combineWriteConflictRanges() {
 	}
 }
 
-// void showNumaStatus();
-
-/*
-bool sse4Less( const uint8_t* a, int aLen, const uint8_t* b, int bLen ) {
-    while (true) {
-        int res = _mm_cmpestri(*(__m128i*)a, aLen, *(__m128i*)b, bLen, _SIDD_UBYTE_OPS | _SIDD_CMP_EQUAL_EACH |
-_SIDD_NEGATIVE_POLARITY | _SIDD_LEAST_SIGNIFICANT ); printf("%d ", res); if (res == 16) { if (bLen < 16) return false;
-            a += 16; b += 16; aLen -= 16; bLen -= 16;
-        }
-        if (res == bLen) return false;
-        if (res == aLen) return true;
-
-        return a[res] < b[res];
-    }
-}
-
-void tless( const char* a, const char* b ) {
-    bool x = sse4Less( (const uint8_t*)a, strlen(a), (const uint8_t*)b, strlen(b) );
-    if (x)
-        printf("%s < %s\n", a, b);
-    else
-        printf("%s >= %s\n", a, b);
-}
-
-void sse4Test(){
-
-    tless("hello", "world");
-    tless("a", "a");
-    tless("world", "hello");
-    tless("world", "worry");
-    tless("worry", "world");
-    tless("hello", "hello1");
-    tless("hello1", "hello");
-
-    tless("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaahello", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaworld");
-    tless("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaworld", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaahello");
-    tless("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaworld", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaworry");
-    tless("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaworry", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaworld");
-    tless("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaahello", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaahello1");
-    tless("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaahello1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaahello");
-
-    char *a = "hello1worldthisisalonglonglongstring";
-    char *b = "hello";
-    __m128i aa = *(__m128i*)a;
-    __m128i bb = *(__m128i*)a;
-
-    int res = _mm_cmpestri(aa, 2, bb, 2, _SIDD_UBYTE_OPS | _SIDD_CMP_EQUAL_EACH | _SIDD_NEGATIVE_POLARITY |
-_SIDD_LEAST_SIGNIFICANT );
-
-    cout << res << endl;
-
-}
-*/
-
 void miniConflictSetTest() {
 	for (int i = 0; i < 2000000; i++) {
 		int size = 64 * 5; // Also run 64*64*5 to test multiple words of andValues and orValues
@@ -1341,8 +1163,6 @@ void miniConflictSetTest() {
 void skipListTest() {
 	printf("Skip list test\n");
 
-	// sse4Test();
-
 	// A test case that breaks the old operator<
 	// KeyInfo a( LiteralStringRef("hello"), true, false, true, -1 );
 	// KeyInfo b( LiteralStringRef("hello\0"), false, false, false, 0 );
@@ -1350,7 +1170,6 @@ void skipListTest() {
 	miniConflictSetTest();
 
 	setAffinity(0);
-	// showNumaStatus();
 
 	double start;
 
@@ -1431,47 +1250,5 @@ void skipListTest() {
 		printf("%20s: %s\n", skc[c]->getMetric().name().c_str(), skc[c]->getMetric().formatted().c_str());
 	}
 
-	// showNumaStatus();
-
 	printf("%d entries in version history\n", cs->versionHistory.count());
-
-	/*start = timer();
-	vector<vector<int>> nonConflict2( testData.size() );
-	SlowConflictSet scs;
-	Standalone<VectorRef<KeyRangeRef>> ranges;
-	ranges.resize( ranges.arena(), 1 );
-
-	for(int i=0; i<testData.size(); i++) {
-	    for(int j=0; j<testData[i].size(); j++) {
-	        ranges[0] = testData[i][j];
-	        if (!scs.is_conflict( ranges, i )) {
-	            nonConflict2[i].push_back( j );
-	            scs.add( ranges, VectorRef<KeyValueRef>(), i + 50 );
-	        }
-	    }
-	}
-	printf("Old conflict set: %0.3f sec\n", timer()-start);
-
-	int aminusb=0, bminusa=0, atotal=0;
-	for(int i=0; i<testData.size(); i++) {
-	    vector<bool> a( testData[i].size() ), b( testData[i].size() );
-	    for(int j=0; j<nonConflict[i].size(); j++)
-	        a[ nonConflict[i][j] ] = true;
-	    for(int j=0; j<nonConflict2[i].size(); j++)
-	        b[ nonConflict2[i][j] ] = true;
-	    for(int j=0; j<a.size(); j++) {
-	        if (a[j]) atotal++;
-	        if (a[j] && !b[j]) aminusb++;
-	        else if (b[j] && !a[j]) bminusa++;
-	    }
-	}
-	printf("%d transactions accepted\n", atotal);
-	if (bminusa)
-	    printf("ERROR: %d transactions unnecessarily rejected!\n", bminusa);
-	if (aminusb)
-	    printf("ERROR: %d transactions incorrectly accepted!\n", aminusb);
-	    */
-	// for(int i=0; i<testData.size(); i++)
-	//	printf("%d %d %d %d\n", i, nonConflict[i].size(), nonConflict2[i].size()-nonConflict[i].size(), nonConflict[i]
-	//!= nonConflict2[i]);
 }
