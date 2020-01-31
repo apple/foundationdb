@@ -62,20 +62,25 @@ struct BackupData {
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
-		PerBackupInfo(Version v) : startVersion(v) {}
+		PerBackupInfo(BackupData* data, Version v) : self(data), startVersion(v) {}
 
-		ACTOR static Future<Void> _waitReady(PerBackupInfo* info) {
+		ACTOR static Future<Void> _waitReady(PerBackupInfo* info, UID backupUid) {
 			wait(success(info->container) && success(info->ranges));
 			info->ready = true;
+			const auto& ranges = info->ranges.get();
+			info->self->insertRanges(ranges, backupUid);
+			TraceEvent("BackupWorkerInsertRanges", info->self->myId)
+			    .detail("BackupID", backupUid)
+			    .detail("URL", info->container.get()->getURL())
+			    .detail("Ranges", ranges.present() ? describe(ranges.get()) : "[empty]");
 			return Void();
 		}
 
-		Future<Void> waitReady() { return _waitReady(this); }
+		Future<Void> waitReady(UID backupUid) { return _waitReady(this, backupUid); }
 
-		bool contains(const MutationRef& m) {
-			return true; // TODO
-		}
+		bool isRunning() { return ready && !stopped; }
 
+		BackupData* self = nullptr;
 		Version startVersion = invalidVersion;
 		Future<Reference<IBackupContainer>> container;
 		Future<Optional<std::vector<KeyRange>>> ranges; // Key ranges of this backup
@@ -84,6 +89,7 @@ struct BackupData {
 		bool ready = false; // Change to true when container and ranges are ready
 	};
 
+	KeyRangeMap<std::set<UID>> rangeMap; // Save key ranges to a set of backup UIDs
 	std::map<UID, PerBackupInfo> backups; // Backup UID to infos
 	PromiseStream<std::vector<std::pair<UID, Version>>> backupUidVersions; // active backup (UID, StartVersion) pairs
 	AsyncTrigger changedTrigger;
@@ -103,6 +109,39 @@ struct BackupData {
 		specialCounter(cc, "MsgQ", [this]() { return this->messages.size(); });
 		logger = traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
 		                       "BackupWorkerMetrics");
+	}
+
+	// Inserts a backup's single range into rangeMap.
+	void insertRange(KeyRangeRef range, UID uid) {
+		for (auto& logRange : rangeMap.modify(range)) {
+			logRange->value().insert(uid);
+		}
+		for (auto& logRange : rangeMap.modify(singleKeyRange(metadataVersionKey))) {
+			logRange->value().insert(uid);
+		}
+		TraceEvent("BackupWorkerInsertRange", myId)
+		    .detail("BackupID", uid)
+		    .detail("Begin", range.begin)
+		    .detail("End", range.end);
+	}
+
+	// Inserts a backup's ranges into rangeMap.
+	void insertRanges(const Optional<std::vector<KeyRange>>& ranges, UID uid) {
+		if (!ranges.present() || ranges.get().empty()) {
+			// insert full ranges of normal keys
+			return insertRange(normalKeys, uid);
+		}
+		for (const auto& range : ranges.get()) {
+			insertRange(range, uid);
+		}
+	}
+
+	// Clears a backup's ranges in the rangeMap.
+	void clearRanges(UID uid) {
+		for (auto& logRange : rangeMap.ranges()) {
+			logRange->value().erase(uid);
+		}
+		rangeMap.coalesce(allKeys);
 	}
 
 	void pop() {
@@ -147,7 +186,7 @@ struct BackupData {
 			auto it = backups.find(uid);
 			if (it == backups.end()) {
 				modified = true;
-				auto inserted = backups.emplace(uid, BackupData::PerBackupInfo(uidVersion.second));
+				auto inserted = backups.emplace(uid, BackupData::PerBackupInfo(this, uidVersion.second));
 
 				// Open the container and get key ranges
 				BackupConfig config(uid);
@@ -324,20 +363,64 @@ static Value makePadding(int size) {
 	return pad.substr(0, size);
 }
 
+ACTOR Future<Void> addMutation(BackupData* self, UID backupUid, Reference<IBackupFile> logFile, int idx, MutationRef m,
+                               int64_t* blockEnd, int blockSize, bool useM) {
+	if (!self->backups[backupUid].isRunning()) return Void();
+
+	state Standalone<StringRef> keep;
+	state StringRef message;
+
+	if (useM) {
+		BinaryWriter wr(AssumeVersion(currentProtocolVersion));
+		wr << m;
+		keep = wr.toValue();
+		message = keep;
+	} else {
+		message = self->messages[idx].message;
+	}
+	state int bytes = sizeof(Version) + sizeof(uint32_t) + sizeof(int) + message.size();
+
+	// Convert to big Endianness for version.version, version.sub, and msgSize
+	// The decoder assumes 0xFF is the end, so little endian can easily be
+	// mistaken as the end. In contrast, big endian for version almost guarantee
+	// the first byte is not 0xFF (should always be 0x00).
+	BinaryWriter wr(Unversioned());
+	wr << bigEndian64(self->messages[idx].version.version) << bigEndian32(self->messages[idx].version.sub)
+	   << bigEndian32(message.size());
+	state Standalone<StringRef> header = wr.toValue();
+
+	// Start a new block if needed
+	if (logFile->size() + bytes > *blockEnd) {
+		// Write padding if needed
+		const int bytesLeft = *blockEnd - logFile->size();
+		if (bytesLeft > 0) {
+			state Value paddingFFs = makePadding(bytesLeft);
+			wait(logFile->append(paddingFFs.begin(), bytesLeft));
+		}
+
+		*blockEnd += blockSize;
+		// TODO: add block header
+	}
+
+	wait(logFile->append((void*)header.begin(), header.size()));
+	wait(logFile->append(message.begin(), message.size()));
+	return Void();
+}
+
 // Saves messages in the range of [0, numMsg) to a file and then remove these
 // messages. The file format is a sequence of (Version, sub#, msgSize, message).
 // Note only ready backups are saved.
 ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
 	state int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
 	state std::vector<Future<Reference<IBackupFile>>> logFileFutures;
-	state std::vector<UID> uids;
-	state Reference<IBackupFile> logFile;
+	state std::map<UID, int> uidMap; // Backup UID to index in logFileFutures & logFiles
 
 	for (auto& uidInfo : self->backups) {
-		if (!uidInfo.second.ready || uidInfo.second.stopped) {
+		if (!uidInfo.second.isRunning()) {
+			// TODO: remove this uidInfo from self->backups & update self->rangeMap
 			continue;
 		}
-		uids.push_back(uidInfo.first);
+		uidMap.emplace(uidInfo.first, logFileFutures.size());
 		logFileFutures.push_back(uidInfo.second.container.get()->writeTaggedLogFile(
 		    self->messages[0].getVersion(), popVersion, blockSize, self->tag.id));
 	}
@@ -362,42 +445,30 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		state MutationRef m;
 		if (!isBackupMessage(self->messages[idx], &m)) continue;
 
-		state int bytes = sizeof(Version) + sizeof(uint32_t) + sizeof(int) + self->messages[idx].message.size();
-
-		// Convert to big Endianness for version.version, version.sub, and msgSize
-		// The decoder assumes 0xFF is the end, so little endian can easily be
-		// mistaken as the end. In contrast, big endian for version almost guarantee
-		// the first byte is not 0xFF (should always be 0x00).
-		state int msgSize = self->messages[idx].message.size();
-		BinaryWriter wr(Unversioned());
-		wr << bigEndian64(self->messages[idx].version.version) << bigEndian32(self->messages[idx].version.sub)
-		   << bigEndian32(msgSize);
-		state Standalone<StringRef> buf = wr.toValue();
-
-		state int i;
-		for (i = 0; i < logFiles.size(); i++) {
-			auto& info = self->backups[uids[i]];
-
-			// TODO: check if mutation falls into the range of this backup
-			if (!info.contains(m)) continue;
-
-			// Start a new block if needed
-			logFile = logFiles[i];
-			if (logFile->size() + bytes > blockEnd) {
-				// Write padding if needed
-				const int bytesLeft = blockEnd - logFile->size();
-				if (bytesLeft > 0) {
-					state Value paddingFFs = makePadding(bytesLeft);
-					wait(logFile->append(paddingFFs.begin(), bytesLeft));
-				}
-
-				blockEnd += blockSize;
-				// TODO: add block header
+		std::vector<Future<Void>> adds;
+		if (m.type != MutationRef::Type::ClearRange) {
+			for (UID uid : self->rangeMap[m.param1]) {
+				auto it = uidMap.find(uid);
+				if (it == uidMap.end()) continue;
+				adds.push_back(addMutation(self, uid, logFiles[it->second], idx, m, &blockEnd, blockSize, false));
 			}
+		} else {
+			KeyRangeRef mutationRange(m.param1, m.param2);
+			KeyRangeRef intersectionRange;
 
-			wait(logFile->append((void*)buf.begin(), buf.size()));
-			wait(logFile->append(self->messages[idx].message.begin(), msgSize));
+			// Find intersection ranges and create mutations for sub-ranges
+			for (auto range : self->rangeMap.intersectingRanges(mutationRange)) {
+				const auto& subrange = range.range();
+				intersectionRange = mutationRange & subrange;
+				MutationRef subm(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
+				for (UID uid : range.value()) {
+					auto it = uidMap.find(uid);
+					if (it == uidMap.end()) continue;
+					adds.push_back(addMutation(self, uid, logFiles[it->second], idx, subm, &blockEnd, blockSize, true));
+				}
+			}
 		}
+		wait(waitForAll(adds));
 	}
 
 	self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
@@ -495,7 +566,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 				std::vector<Future<Void>> all;
 				for (auto& uidInfo : self->backups) {
 					if (uidInfo.second.ready || uidInfo.second.stopped) continue;
-					all.push_back(uidInfo.second.waitReady());
+					all.push_back(uidInfo.second.waitReady(uidInfo.first));
 				}
 				wait(waitForAll(all));
 			}
