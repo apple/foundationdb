@@ -56,6 +56,7 @@ struct ProxyStats {
 	Counter txnDefaultPriorityStartIn, txnDefaultPriorityStartOut;
 	Counter txnCommitIn, txnCommitVersionAssigned, txnCommitResolving, txnCommitResolved, txnCommitOut, txnCommitOutSuccess;
 	Counter txnConflicts;
+	Counter txnThrottled;
 	Counter commitBatchIn, commitBatchOut;
 	Counter mutationBytes;
 	Counter mutations;
@@ -80,8 +81,8 @@ struct ProxyStats {
 	    txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc),
 	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
 	    txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnConflicts("TxnConflicts", cc),
-	    commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc),
-	    mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
+	    txnThrottled("TxnThrottled", cc), commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc),
+	    mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
 	    keyServerLocationRequests("KeyServerLocationRequests", cc), lastCommitVersionAssigned(0),
 	    commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 	    grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
@@ -186,10 +187,8 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				// Return error for batch_priority GRV requests
 				int64_t proxiesCount = std::max((int)db->get().client.proxies.size(), 1);
 				if (batchRateInfo->rate <= (1.0 / proxiesCount)) {
-					TraceEvent(SevInfo, "RejectedBatchGRV")
-					    .detail("CurrentBatchRateLimit", batchRateInfo->rate)
-					    .suppressFor(5);
 					req.reply.sendError(batch_transaction_throttled());
+					stats->txnThrottled += req.transactionCount;
 					continue;
 				}
 				stats->txnBatchPriorityStartIn += req.transactionCount;
