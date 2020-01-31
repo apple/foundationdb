@@ -183,7 +183,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 			} else if (req.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
 				stats->txnDefaultPriorityStartIn += req.transactionCount;
 			} else {
-				// Return error for bath_priority GRV requests
+				// Return error for batch_priority GRV requests
 				int64_t proxiesCount = std::max((int)db->get().client.proxies.size(), 1);
 				if (batchRateInfo->rate <= (1.0 / proxiesCount)) {
 					TEST(true);
