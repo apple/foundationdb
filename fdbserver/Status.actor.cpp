@@ -449,6 +449,9 @@ struct RolesInfo {
 			obj.setKeyRawNumber("kvstore_free_bytes", storageMetrics.getValue("KvstoreBytesFree"));
 			obj.setKeyRawNumber("kvstore_available_bytes", storageMetrics.getValue("KvstoreBytesAvailable"));
 			obj.setKeyRawNumber("kvstore_total_bytes", storageMetrics.getValue("KvstoreBytesTotal"));
+			obj.setKeyRawNumber("kvstore_total_size", storageMetrics.getValue("KvstoreSizeTotal"));
+			obj.setKeyRawNumber("kvstore_total_nodes", storageMetrics.getValue("KvstoreNodeTotal"));
+			obj.setKeyRawNumber("kvstore_inline_keys", storageMetrics.getValue("KvstoreInlineKey"));
 			obj["input_bytes"] = StatusCounter(storageMetrics.getValue("BytesInput")).getStatus();
 			obj["durable_bytes"] = StatusCounter(storageMetrics.getValue("BytesDurable")).getStatus();
 			obj.setKeyRawNumber("query_queue_max", storageMetrics.getValue("QueryQueueMax"));

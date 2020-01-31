@@ -68,6 +68,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "kvstore_available_bytes":12341234,
                   "kvstore_free_bytes":12341234,
                   "kvstore_total_bytes":12341234,
+                  "kvstore_total_size":12341234,
+                  "kvstore_total_nodes":12341234,
+                  "kvstore_inline_keys":12341234,
                   "durable_bytes":{
                      "hz":0.0,
                      "counter":0,
@@ -405,7 +408,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "description":"abc"
          }
       ],
-)statusSchema" R"statusSchema(
+)statusSchema"
+                                                          R"statusSchema(
       "recovery_state":{
          "required_resolvers":1,
          "required_proxies":1,
@@ -574,7 +578,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd-redwood-experimental",
              "memory",
              "memory-1",
-             "memory-2"
+             "memory-2",
+             "memory-radixtree-beta"
          ]},
          "coordinators_count":1,
          "excluded_servers":[

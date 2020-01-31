@@ -653,6 +653,7 @@ struct KeyValueStoreType {
 		MEMORY,
 		SSD_BTREE_V2,
 		SSD_REDWOOD_V1,
+		MEMORY_RADIXTREE,
 		END
 	};
 
@@ -672,6 +673,7 @@ struct KeyValueStoreType {
 			case SSD_BTREE_V2: return "ssd-2";
 			case SSD_REDWOOD_V1: return "ssd-redwood-experimental";
 			case MEMORY: return "memory";
+			case MEMORY_RADIXTREE: return "memory-radixtree-beta";
 			default: return "unknown";
 		}
 	}
