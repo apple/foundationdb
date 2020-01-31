@@ -186,8 +186,9 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				// Return error for batch_priority GRV requests
 				int64_t proxiesCount = std::max((int)db->get().client.proxies.size(), 1);
 				if (batchRateInfo->rate <= (1.0 / proxiesCount)) {
-					TEST(true);
-					TraceEvent(SevInfo, "RejectedBatchGRV").detail("CurrentBatchRateLimit", batchRateInfo->limit);
+					TraceEvent(SevInfo, "RejectedBatchGRV")
+					    .detail("CurrentBatchRateLimit", batchRateInfo->rate)
+					    .suppressFor(5);
 					req.reply.sendError(batch_transaction_throttled());
 					continue;
 				}
