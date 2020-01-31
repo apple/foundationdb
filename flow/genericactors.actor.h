@@ -1687,19 +1687,6 @@ Future<Void> timeReply(Future<T> replyToTime, PromiseStream<double> timeOutput){
 	return Void();
 }
 
-ACTOR template <class T>
-Future<Void> timeReplyIgnoreError(Future<T> replyToTime, PromiseStream<double> timeOutput) {
-	state double startTime = now();
-	try {
-		T _ = wait(replyToTime);
-		wait(delay(0));
-		timeOutput.send(now() - startTime);
-	} catch (Error& e) {
-		// Ignore the error and don't send out the time.
-		TraceEvent(SevWarn, "ErrorInTimeReplyIgnoreError").error(e);
-	}
-	return Void();
-}
 
 #include "flow/unactorcompiler.h"
 
