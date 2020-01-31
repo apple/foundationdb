@@ -1995,7 +1995,7 @@ struct RedwoodRecordRef {
 
 	// Find the common prefix between two records, assuming that the first
 	// skip bytes are the same.
-	inline int getCommonPrefixLen(const RedwoodRecordRef &other, int skip) const {
+	inline int getCommonPrefixLen(const RedwoodRecordRef &other, int skip = 0) const {
 		int skipStart = std::min(skip, key.size());
 		int common = skipStart + commonPrefixLength(key.begin() + skipStart, other.key.begin() + skipStart, std::min(other.key.size(), key.size()) - skipStart);
 
@@ -2004,6 +2004,28 @@ struct RedwoodRecordRef {
 		}
 
 		return common;
+	}
+
+	// Compares and orders by key, version, chunk.start, chunk.total.
+	// Value is not considered, as it is does not make sense for a container
+	// to have two records which differ only in value.
+	int compare(const RedwoodRecordRef &rhs, int skip = 0) const {
+		int keySkip = std::min(skip, key.size());
+		int cmp = key.substr(keySkip).compare(rhs.key.substr(keySkip));
+
+		if(cmp == 0) {
+			cmp = version - rhs.version;
+			if(cmp == 0) {
+				// It is assumed that in any data set there will never be more than one
+				// unique chunk total size for the same key and version, so sort by start, total 
+				// Chunked (represented by chunk.total > 0) sorts higher than whole
+				cmp = chunk.start - rhs.chunk.start;
+				if(cmp == 0) {
+					cmp = chunk.total - rhs.chunk.total;
+				}
+			}
+		}
+		return cmp;
 	}
 
 	static const int intFieldArraySize = 14;
@@ -2288,26 +2310,6 @@ struct RedwoodRecordRef {
 		}
 	};
 #pragma pack(pop)
-
-	// Compares and orders by key, version, chunk.start, chunk.total.
-	// Value is not considered, as it is does not make sense for a container
-	// to have two records which differ only in value.
-	int compare(const RedwoodRecordRef &rhs) const {
-		int cmp = key.compare(rhs.key);
-		if(cmp == 0) {
-			cmp = version - rhs.version;
-			if(cmp == 0) {
-				// It is assumed that in any data set there will never be more than one
-				// unique chunk total size for the same key and version, so sort by start, total 
-				// Chunked (represented by chunk.total > 0) sorts higher than whole
-				cmp = chunk.start - rhs.chunk.start;
-				if(cmp == 0) {
-					cmp = chunk.total - rhs.chunk.total;
-				}
-			}
-		}
-		return cmp;
-	}
 
 	// Compares key fields and value for equality
 	bool identical(const RedwoodRecordRef &rhs) const {
@@ -5314,9 +5316,23 @@ struct IntIntPair {
 		}
 	};
 
-	int compare(const IntIntPair &rhs) const {
-		//printf("compare %s to %s\n", toString().c_str(), rhs.toString().c_str());
-		int cmp = k - rhs.k;
+	// For IntIntPair, skipLen will be in units of fields, not bytes
+	int getCommonPrefixLen(const IntIntPair &other, int skip = 0) const {
+		if(k == other.k) {
+			if(v == other.v) {
+				return 2;
+			}
+			return 1;
+		}
+		return 0;
+	}
+
+	int compare(const IntIntPair &rhs, int skip = 0) const {
+		if(skip == 2) {
+			return 0;
+		}
+		int cmp = (skip > 0) ? 0 : (k - rhs.k);
+
 		if(cmp == 0) {
 			cmp = v - rhs.v;
 		}
@@ -5324,15 +5340,11 @@ struct IntIntPair {
 	}
 
 	bool operator==(const IntIntPair &rhs) const {
-		return k == rhs.k;
+		return compare(rhs) == 0;
 	}
 
 	bool operator<(const IntIntPair &rhs) const {
 		return compare(rhs) < 0;
-	}
-
-	int getCommonPrefixLen(const IntIntPair &other, int skip) const {
-		return 0;
 	}
 
 	int deltaSize(const IntIntPair &base) const {
@@ -5701,11 +5713,11 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 
 TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 	const int N = 200;
-	IntIntPair prev = {0, 0};
-	IntIntPair next = {1000, 0};
+	IntIntPair prev = {1, 0};
+	IntIntPair next = {10000, 10000};
 
-	state std::function<IntIntPair()> randomPair = []() {
-		return IntIntPair({deterministicRandom()->randomInt(0, 1000), deterministicRandom()->randomInt(0, 1000)});
+	state std::function<IntIntPair()> randomPair = [&]() {
+		return IntIntPair({deterministicRandom()->randomInt(prev.k, next.k), deterministicRandom()->randomInt(prev.v, next.v)});
 	};
 
 	// Build a sorted vector of N items
@@ -5736,41 +5748,221 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 	}
 	std::sort(items.begin(), items.end());
 
+	auto printItems = [&] {
+		for(int k = 0; k < items.size(); ++k) {
+			printf("%d %s\n", k, items[k].toString().c_str());
+		}
+	};
+
 	printf("Count=%d  Size=%d  InitialHeight=%d  MaxHeight=%d\n", (int)items.size(), (int)tree->size(), (int)tree->initialHeight, (int)tree->maxHeight);
 	debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t *)tree, tree->size()).toHexString().c_str());
 
+	// Iterate through items and tree forward and backward, verifying tree contents.
+	auto scanAndVerify = [&]() {
+		ASSERT(fwd.moveFirst());
+		ASSERT(rev.moveLast());
+
+		for(int i = 0; i < items.size(); ++i) {
+			if(fwd.get() != items[i]) {
+				printItems();
+				printf("forward iterator i=%d\n  %s found\n  %s expected\n", i, fwd.get().toString().c_str(), items[i].toString().c_str());
+				ASSERT(false);
+			}
+			if(rev.get() != items[items.size() - 1 - i]) {
+				printItems();
+				printf("reverse iterator i=%d\n  %s found\n  %s expected\n", i, rev.get().toString().c_str(), items[items.size() - 1 - i].toString().c_str());
+				ASSERT(false);
+			}
+
+			// Advance iterator, check scanning cursors for correct validity state
+			int j = i + 1;
+			bool end = j == items.size();
+
+			ASSERT(fwd.moveNext() == !end);
+			ASSERT(rev.movePrev() == !end);
+			ASSERT(fwd.valid() == !end);
+			ASSERT(rev.valid() == !end);
+
+			if(end) {
+				break;
+			}
+		}
+	};
+
+	// Verify tree contents
+	scanAndVerify();
+
+	// Create a new mirror, decoding the tree from scratch since insert() modified both the tree and the mirror
+	r = DeltaTree<IntIntPair>::Mirror(tree, &prev, &next);
+	fwd = r.getCursor();
+	rev = r.getCursor();
+
+	// Verify tree contents again
+	scanAndVerify();
+
+	// Iterate through items and tree forward and backward, verifying tree contents.
 	ASSERT(fwd.moveFirst());
 	ASSERT(rev.moveLast());
-	int i = 0;
-	while(1) {
+
+	for(int i = 0; i < items.size(); ++i) {
 		if(fwd.get() != items[i]) {
+			printItems();
 			printf("forward iterator i=%d\n  %s found\n  %s expected\n", i, fwd.get().toString().c_str(), items[i].toString().c_str());
 			ASSERT(false);
 		}
 		if(rev.get() != items[items.size() - 1 - i]) {
+			printItems();
 			printf("reverse iterator i=%d\n  %s found\n  %s expected\n", i, rev.get().toString().c_str(), items[items.size() - 1 - i].toString().c_str());
 			ASSERT(false);
 		}
-		++i;
-		ASSERT(fwd.moveNext() == rev.movePrev());
-		ASSERT(fwd.valid() == rev.valid());
-		if(!fwd.valid()) {
+
+		// Advance iterator, check scanning cursors for correct validity state
+		int j = i + 1;
+		bool end = j == items.size();
+
+		ASSERT(fwd.moveNext() == !end);
+		ASSERT(rev.movePrev() == !end);
+		ASSERT(fwd.valid() == !end);
+		ASSERT(rev.valid() == !end);
+
+		if(end) {
 			break;
 		}
 	}
-	ASSERT(i == items.size());
 
-	DeltaTree<IntIntPair>::Cursor c = r.getCursor();
+	DeltaTree<IntIntPair>::Cursor s = r.getCursor();
 
-	double start = timer();
-	for(int i = 0; i < 20000000; ++i) {
-		IntIntPair &p = items[deterministicRandom()->randomInt(0, items.size())];
-		if(!c.seekLessThanOrEqual(p)) {
-			printf("Not found!  query=%s\n", p.toString().c_str());
+	// SeekLTE to each element
+	for(int i = 0; i < items.size(); ++i) {
+		IntIntPair p = items[i];
+		IntIntPair q = p;
+		ASSERT(s.seekLessThanOrEqual(q));
+		if(s.get() != p) {
+			printItems();
+			printf("seekLessThanOrEqual(%s) found %s expected %s\n", q.toString().c_str(), s.get().toString().c_str(), p.toString().c_str());
 			ASSERT(false);
 		}
-		if(c.get() != p) {
-			printf("Found incorrect node!  query=%s  found=%s\n", p.toString().c_str(), c.get().toString().c_str());
+	}
+
+	// SeekGTE to each element
+	for(int i = 0; i < items.size(); ++i) {
+		IntIntPair p = items[i];
+		IntIntPair q = p;
+		ASSERT(s.seekGreaterThanOrEqual(q));
+		if(s.get() != p) {
+			printItems();
+			printf("seekGreaterThanOrEqual(%s) found %s expected %s\n", q.toString().c_str(), s.get().toString().c_str(), p.toString().c_str());
+			ASSERT(false);
+		}
+	}
+
+	// SeekLTE to the next possible int pair value after each element to make sure the base element is found
+	for(int i = 0; i < items.size(); ++i) {
+		IntIntPair p = items[i];
+		IntIntPair q = p;
+		q.v++;
+		ASSERT(s.seekLessThanOrEqual(q));
+		if(s.get() != p) {
+			printItems();
+			printf("seekLessThanOrEqual(%s) found %s expected %s\n", q.toString().c_str(), s.get().toString().c_str(), p.toString().c_str());
+			ASSERT(false);
+		}
+	}
+
+	// SeekGTE to the previous possible int pair value after each element to make sure the base element is found
+	for(int i = 0; i < items.size(); ++i) {
+		IntIntPair p = items[i];
+		IntIntPair q = p;
+		q.v--;
+		ASSERT(s.seekGreaterThanOrEqual(q));
+		if(s.get() != p) {
+			printItems();
+			printf("seekGreaterThanOrEqual(%s) found %s expected %s\n", q.toString().c_str(), s.get().toString().c_str(), p.toString().c_str());
+			ASSERT(false);
+		}
+	}
+
+	// SeekLTE to each element N times, using every element as a hint
+	for(int i = 0; i < items.size(); ++i) {
+		IntIntPair p = items[i];
+		IntIntPair q = p;
+		for(int j = 0; j < items.size(); ++j) {
+			ASSERT(s.seekLessThanOrEqual(items[j]));
+			ASSERT(s.seekLessThanOrEqual(q, 0, &s));
+			if(s.get() != p) {
+				printItems();
+				printf("i=%d  j=%d\n", i, j);
+				ASSERT(false);
+			}
+		}
+	}
+
+	// SeekLTE to each element's next possible value, using each element as a hint
+	for(int i = 0; i < items.size(); ++i) {
+		IntIntPair p = items[i];
+		IntIntPair q = p;
+		q.v++;
+		for(int j = 0; j < items.size(); ++j) {
+			ASSERT(s.seekLessThanOrEqual(items[j]));
+			ASSERT(s.seekLessThanOrEqual(q, 0, &s));
+			if(s.get() != p) {
+				printItems();
+				printf("i=%d  j=%d\n", i, j);
+				ASSERT(false);
+			}
+		}
+	}
+
+	auto skipSeekPerformance = [&](int jumpMax, bool useHint, int count) {
+		// Skip to a series of increasing items, jump by up to jumpMax units forward in the
+		// items, wrapping around to 0.
+		double start = timer();
+		s.moveFirst();
+		auto first = s;
+		int pos = 0;
+		for(int c = 0; c < count; ++c) {
+			int jump = deterministicRandom()->randomInt(0, jumpMax);
+			int newPos = pos + jump;
+			if(newPos >= items.size()) {
+				pos = 0;
+				newPos = jump;
+				s = first;
+			}
+			IntIntPair q = items[newPos];
+			++q.v;
+			if(useHint) {
+				s.seekLessThanOrEqual(q, 0, &s, newPos - pos);
+			}
+			else {
+				s.seekLessThanOrEqual(q);
+			}
+			pos = newPos;
+		}
+		double elapsed = timer() - start;
+		printf("Seek/skip test, jumpMax=%d, items=%d, useHint=%d:  Elapsed %f s\n", jumpMax, items.size(), useHint, elapsed);
+	};
+
+	skipSeekPerformance(10, false, 20e6);
+	skipSeekPerformance(10, true, 20e6);
+
+	// Repeatedly seek for one of a set of pregenerated random pairs and time it.
+	std::vector<IntIntPair> randomPairs;
+	for(int i = 0; i < 10 * N; ++i) {
+		randomPairs.push_back(randomPair());
+	}
+
+	double start = timer();
+	for(int i = 0; i < 200000000; ++i) {
+		IntIntPair p = randomPairs[i % randomPairs.size()];
+		// Verify the result is less than or equal, and if seek fails then p must be lower than lowest (first) item
+		if(!s.seekLessThanOrEqual(p)) {
+			if(p >= items.front()) {
+				printf("Seek failed!  query=%s  front=%s\n", p.toString().c_str(), items.front().toString().c_str());
+				ASSERT(false);
+			}
+		}
+		else if(s.get() > p) {
+			printf("Found incorrect node!  query=%s  found=%s\n", p.toString().c_str(), s.get().toString().c_str());
 			ASSERT(false);
 		}
 	}
