@@ -104,6 +104,39 @@
 #include <sys/sysmacros.h>
 #endif
 
+#ifdef __FreeBSD__
+/* Needed for processor affinity */
+#include <sys/sched.h>
+/* Needed for getProcessorTime and setpriority */
+#include <sys/syscall.h>
+/* Needed for setpriority */
+#include <sys/resource.h>
+/* Needed for crash handler */
+#include <sys/signal.h>
+/* Needed for proc info	*/
+#include <sys/user.h>
+/* Needed for vm info  */
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <sys/vmmeter.h>
+#include <sys/cpuset.h>
+#include <sys/resource.h>
+/* Needed for sysctl info */
+#include <sys/sysctl.h>
+#include <sys/fcntl.h>
+/* Needed for network info */
+#include <net/if.h>
+#include <net/if_mib.h>
+#include <net/if_var.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <netinet/tcp_var.h>
+/* Needed for device info */
+#include <devstat.h>
+#include <kvm.h>
+#include <libutil.h>
+#endif
+
 #ifdef __APPLE__
 #include <sys/uio.h>
 #include <sys/syslimits.h>
@@ -203,7 +236,7 @@ double getProcessorTimeThread() {
 		throw platform_error();
 	}
 	return FiletimeAsInt64(ftKernel) / double(1e7) + FiletimeAsInt64(ftUser) / double(1e7);
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__FreeBSD__)
 	return getProcessorTimeGeneric(RUSAGE_THREAD);
 #elif defined(__APPLE__)
 	/* No RUSAGE_THREAD so we use the lower level interface */
@@ -456,7 +489,7 @@ Error systemErrorCodeToError() {
 void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	INJECT_FAULT( platform_error, "getDiskBytes" );
 #if defined(__unixish__)
-#ifdef __linux__
+#if defined (__linux__) || defined (__FreeBSD__)
 	struct statvfs buf;
 	if (statvfs(directory.c_str(), &buf)) {
 		Error e = systemErrorCodeToError();
@@ -1277,7 +1310,7 @@ struct OffsetTimer {
 		return offset + count * secondsPerCount;
 	}
 };
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__FreeBSD__)
 #define DOUBLETIME(ts) (double(ts.tv_sec) + (ts.tv_nsec * 1e-9))
 #ifndef CLOCK_MONOTONIC_RAW
 #define CLOCK_MONOTONIC_RAW 4 // Confirmed safe to do with glibc >= 2.11 and kernel >= 2.6.28. No promises with older glibc. Older kernel definitely breaks it.
@@ -1342,7 +1375,7 @@ double timer() {
 	GetSystemTimeAsFileTime(&fileTime);
 	static_assert( sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong" );
 	return (*(uint64_t*)&fileTime - FILETIME_C_EPOCH) * 100e-9;
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__FreeBSD__)
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	return double(ts.tv_sec) + (ts.tv_nsec * 1e-9);
@@ -1362,7 +1395,7 @@ uint64_t timer_int() {
 	GetSystemTimeAsFileTime(&fileTime);
 	static_assert( sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong" );
 	return (*(uint64_t*)&fileTime - FILETIME_C_EPOCH);
-#elif defined(__linux__)
+#elif defined(__linux__)  || defined(__FreeBSD__)
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	return uint64_t(ts.tv_sec) * 1e9 + ts.tv_nsec;
@@ -1412,7 +1445,7 @@ void setMemoryQuota( size_t limit ) {
 	}
 	if (!AssignProcessToJobObject( job, GetCurrentProcess() ))
 		TraceEvent(SevWarn, "FailedToSetMemoryLimit").GetLastError();
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__FreeBSD__)
 	struct rlimit rlim;
 	if (getrlimit(RLIMIT_AS, &rlim)) {
 		TraceEvent(SevError, "GetMemoryLimit").GetLastError();
@@ -1514,7 +1547,7 @@ static void *allocateInternal(size_t length, bool largePages) {
 		flags |= MAP_HUGETLB;
 
 	return mmap(NULL, length, PROT_READ|PROT_WRITE, flags, -1, 0);
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__FreeBSD__)
 	int flags = MAP_PRIVATE|MAP_ANON;
 
 	return mmap(NULL, length, PROT_READ|PROT_WRITE, flags, -1, 0);
@@ -1648,7 +1681,7 @@ void renameFile( std::string const& fromPath, std::string const& toPath ) {
 		//renamedFile();
 		return;
 	}
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	if (!rename( fromPath.c_str(), toPath.c_str() )) {
 		//FIXME: We cannot inject faults after renaming the file, because we could end up with two asyncFileNonDurable open for the same file
 		//renamedFile();
@@ -1814,7 +1847,7 @@ bool createDirectory( std::string const& directory ) {
 	Error e = systemErrorCodeToError();
 	TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError().error(e);
 	throw e;
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	size_t sep = 0;
 	do {
 		sep = directory.find_first_of('/', sep + 1);
@@ -1967,8 +2000,7 @@ std::string abspath( std::string const& path, bool resolveLinks, bool mustExist 
 		if (*x == '/')
 			*x = CANONICAL_PATH_SEPARATOR;
 	return nameBuffer;
-#elif (defined(__linux__) || defined(__APPLE__))
-
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	char result[PATH_MAX];
 	// Must resolve links, so first try realpath on the whole thing
 	const char *r = realpath( path.c_str(), result );
@@ -2031,7 +2063,7 @@ std::string getUserHomeDirectory() {
 
 #ifdef _WIN32
 #define FILE_ATTRIBUTE_DATA DWORD
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 #define FILE_ATTRIBUTE_DATA mode_t
 #else
 #error Port me!
@@ -2040,7 +2072,7 @@ std::string getUserHomeDirectory() {
 bool acceptFile( FILE_ATTRIBUTE_DATA fileAttributes, std::string name, std::string extension ) {
 #ifdef _WIN32
 	return !(fileAttributes & FILE_ATTRIBUTE_DIRECTORY) && StringRef(name).endsWith(extension);
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	return S_ISREG(fileAttributes) && StringRef(name).endsWith(extension);
 #else
 	#error Port me!
@@ -2050,7 +2082,7 @@ bool acceptFile( FILE_ATTRIBUTE_DATA fileAttributes, std::string name, std::stri
 bool acceptDirectory( FILE_ATTRIBUTE_DATA fileAttributes, std::string name, std::string extension ) {
 #ifdef _WIN32
 	return (fileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	return S_ISDIR(fileAttributes);
 #else
 	#error Port me!
@@ -2086,7 +2118,7 @@ std::vector<std::string> findFiles( std::string const& directory, std::string co
 		}
 		FindClose(h);
 	}
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	DIR *dip;
 
 	if ((dip = opendir(directory.c_str())) != NULL) {
@@ -2150,7 +2182,7 @@ void findFilesRecursively(std::string path, std::vector<std::string> &out) {
 void threadSleep( double seconds ) {
 #ifdef _WIN32
 	Sleep( (DWORD)(seconds * 1e3) );
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	struct timespec req, rem;
 
 	req.tv_sec = seconds;
@@ -2201,7 +2233,7 @@ void setCloseOnExec( int fd ) {
 THREAD_HANDLE startThread(void (*func) (void *), void *arg) {
 	return (void *)_beginthread(func, 0, arg);
 }
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 THREAD_HANDLE startThread(void *(*func) (void *), void *arg) {
 	pthread_t t;
 	pthread_create(&t, NULL, func, arg);
@@ -2214,7 +2246,7 @@ THREAD_HANDLE startThread(void *(*func) (void *), void *arg) {
 void waitThread(THREAD_HANDLE thread) {
 #ifdef _WIN32
 	WaitForSingleObject(thread, INFINITE);
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	pthread_join(thread, NULL);
 #else
 	#error Port me!
@@ -2256,7 +2288,7 @@ int64_t fileSize(std::string const& filename) {
 		return 0;
 	else
 		return file_status.st_size;
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	struct stat file_status;
 	if(stat(filename.c_str(), &file_status) != 0)
 		return 0;
@@ -2701,7 +2733,7 @@ void* getImageOffset() { return NULL; }
 #endif
 
 bool isLibraryLoaded(const char* lib_path) {
-#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32)
+#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32) && !defined(__FreeBSD__)
 #error Port me!
 #endif
 
@@ -2717,7 +2749,7 @@ bool isLibraryLoaded(const char* lib_path) {
 }
 
 void* loadLibrary(const char* lib_path) {
-#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32)
+#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32) && !defined(__FreeBSD__)
 #error Port me!
 #endif
 
