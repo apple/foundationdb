@@ -1862,6 +1862,10 @@ int main(int argc, char* argv[]) {
 			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
 			if (opts.processClass == ProcessClass::FastRestoreClass) {
 				printf("Run as fast restore worker\n");
+				ASSERT(opts.connectionFile);
+				auto dataFolder = opts.dataFolder;
+				if (!dataFolder.size())
+					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
 				// Update the global blob credential files list
 				std::vector<std::string>* pFiles =
@@ -1871,7 +1875,10 @@ int main(int argc, char* argv[]) {
 						pFiles->push_back(f);
 					}
 				}
-				f = stopAfter(restoreWorker(opts.connectionFile, opts.localities));
+
+				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+				actors.push_back(restoreWorker(opts.connectionFile, opts.localities));
+				f = stopAfter(waitForAll(actors));
 				printf("Fast restore worker exits\n");
 				g_network->run();
 				printf("g_network->run() done\n");

@@ -241,10 +241,6 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 			    .detail("RestoreWorkerError", e.what())
 			    .detail("RequestType", requestTypeStr);
 			break;
-			// if ( requestTypeStr.find("[Init]") != std::string::npos ) {
-			// 	TraceEvent(SevError, "FastRestore").detail("RestoreWorkerUnexpectedExit", "RequestType_Init");
-			// 	break;
-			// }
 		}
 	}
 
@@ -254,13 +250,13 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 // RestoreMaster is the leader
 ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader, Database cx,
                                  RestoreWorkerInterface myWorkerInterf) {
+    wait(delay(5.0));
 	TraceEvent("FastRestore").detail("MonitorLeader", "StartLeaderElection");
-	state ReadYourWritesTransaction tr(cx);
-	// state Future<Void> leaderWatch;
-	state RestoreWorkerInterface leaderInterf;
 	state int count = 0;
 	loop {
 		try {
+			state RestoreWorkerInterface leaderInterf;
+			state ReadYourWritesTransaction tr(cx); // MX: Somewhere here program gets stuck
 			count++;
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -282,6 +278,7 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 			leader->set(leaderInterf);
 			break;
 		} catch (Error& e) {
+			TraceEvent(SevDebug, "FastRestoreLeaderElection").detail("ErrorCode", e.code()).detail("Error", e.what());
 			wait(tr.onError(e));
 		}
 	}
@@ -326,10 +323,11 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 
 ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality) {
 	try {
-		Database cx = Database::createDatabase(ccf->getFilename(), Database::API_VERSION_LATEST, true, locality);
-		wait(_restoreWorker(cx, locality));
-	} catch (Error& e) {
+		Database cx = Database::createDatabase(ccf, Database::API_VERSION_LATEST, true, locality);
+		wait(reportErrors(_restoreWorker(cx, locality), "RestoreWorker"));
+	}  catch (Error& e) {
 		TraceEvent("FastRestoreRestoreWorker").detail("Error", e.what());
+		throw e;
 	}
 
 	return Void();

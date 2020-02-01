@@ -791,7 +791,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 				TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
 				.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
 				.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
-				
+
 				localInfo.myLocality = locality;
 				dbInfo->set(localInfo);
 			}
@@ -1516,7 +1516,7 @@ ACTOR Future<Void> fdbd(
 		// Endpoints should be registered first before any process trying to connect to it. So coordinationServer actor should be the first one executed before any other.
 		if ( coordFolder.size() )
 			actors.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
-		
+
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards
