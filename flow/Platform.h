@@ -424,6 +424,16 @@ inline static uint64_t __rdtsc() {
 #endif
 #endif
 
+#ifdef __FreeBSD__
+#if !(__has_builtin(__rdtsc))
+inline static uint64_t __rdtsc() {
+	uint64_t lo, hi;
+	asm( "rdtsc" : "=a" (lo), "=d" (hi) );
+	return( lo | (hi << 32) );
+}
+#endif
+#endif
+
 #ifdef _WIN32
 #include <intrin.h>
 inline static int32_t interlockedIncrement(volatile int32_t *a) { return _InterlockedIncrement((long*)a); }
