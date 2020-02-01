@@ -2714,7 +2714,7 @@ std::string getDefaultConfigPath() {
 	return _filepath + "\\foundationdb";
 #elif defined(__linux__)
 	return "/etc/foundationdb";
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__FreeBSD__)
 	return "/usr/local/etc/foundationdb";
 #else
 	#error Port me!
