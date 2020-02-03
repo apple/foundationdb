@@ -1877,7 +1877,7 @@ int main(int argc, char* argv[]) {
 				}
 
 				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-				actors.push_back(restoreWorker(opts.connectionFile, opts.localities));
+				actors.push_back(restoreWorker(opts.connectionFile, opts.localities, dataFolder));
 				f = stopAfter(waitForAll(actors));
 				printf("Fast restore worker exits\n");
 				g_network->run();
@@ -1926,7 +1926,7 @@ int main(int argc, char* argv[]) {
 			f = stopAfter( networkTestServer() );
 			g_network->run();
 		} else if (role == Restore) {
-			f = stopAfter(restoreWorker(opts.connectionFile, opts.localities));
+			f = stopAfter(restoreWorker(opts.connectionFile, opts.localities, opts.dataFolder));
 			g_network->run();
 		} else if (role == KVFileIntegrityCheck) {
 			f = stopAfter(KVFileCheck(opts.kvFile, true));

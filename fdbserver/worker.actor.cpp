@@ -1389,14 +1389,13 @@ static std::set<int> const& normalWorkerErrors() {
 	return s;
 }
 
-ACTOR Future<Void> fileNotFoundToNever(Future<Void> f) {
+ACTOR Future<Void> fileNotFoundToNever(Future<Void> f, std::string msg) {
 	try {
 		wait(f);
 		return Void();
-	}
-	catch(Error &e) {
-		if(e.code() == error_code_file_not_found) {
-			TraceEvent(SevWarn, "ClusterCoordinatorFailed").error(e);
+	} catch (Error& e) {
+		if (e.code() == error_code_file_not_found) {
+			TraceEvent(SevWarn, msg).error(e);
 			return Never();
 		}
 		throw;
@@ -1515,7 +1514,10 @@ ACTOR Future<Void> fdbd(
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
 		// Endpoints should be registered first before any process trying to connect to it. So coordinationServer actor should be the first one executed before any other.
 		if ( coordFolder.size() )
-			actors.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
+			actors.push_back(fileNotFoundToNever(
+			    coordinationServer(coordFolder),
+			    "ClusterCoordinatorFailed")); // SOMEDAY: remove the fileNotFound wrapper and make DiskQueue
+			                                  // construction safe from errors setting up their files
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());

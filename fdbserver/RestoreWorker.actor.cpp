@@ -262,7 +262,9 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> leaderValue = wait(tr.get(restoreLeaderKey));
-			TraceEvent(SevDebug, "FastRestoreLeaderElection").detail("Round", count).detail("LeaderExisted", leaderValue.present());
+			TraceEvent(SevInfo, "FastRestoreLeaderElection")
+			    .detail("Round", count)
+			    .detail("LeaderExisted", leaderValue.present());
 			if (leaderValue.present()) {
 				leaderInterf = BinaryReader::fromStringRef<RestoreWorkerInterface>(leaderValue.get(), IncludeVersion());
 				// Register my interface as an worker if I am not the leader
@@ -278,7 +280,7 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 			leader->set(leaderInterf);
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "FastRestoreLeaderElection").detail("ErrorCode", e.code()).detail("Error", e.what());
+			TraceEvent(SevInfo, "FastRestoreLeaderElection").detail("ErrorCode", e.code()).detail("Error", e.what());
 			wait(tr.onError(e));
 		}
 	}
@@ -321,9 +323,16 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 	return Void();
 }
 
-ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality) {
+ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> connFile, LocalityData locality,
+                                 std::string coordFolder) {
 	try {
-		Database cx = Database::createDatabase(ccf, Database::API_VERSION_LATEST, true, locality);
+		state vector<Future<Void>> actors;
+		// Connect to coordinators in order to connect to fdb cluster
+		ServerCoordinators coordinators(connFile);
+		if (coordFolder.size())
+			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder), "ClusterCoordinatorFailed"));
+
+		Database cx = Database::createDatabase(connFile, Database::API_VERSION_LATEST, true, locality);
 		wait(reportErrors(_restoreWorker(cx, locality), "RestoreWorker"));
 	}  catch (Error& e) {
 		TraceEvent("FastRestoreRestoreWorker").detail("Error", e.what());

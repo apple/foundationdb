@@ -29,6 +29,7 @@
 	#define FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_H
 
 #include <sstream>
+#include <string>
 #include "flow/Stats.h"
 #include "flow/flow.h"
 #include "fdbrpc/fdbrpc.h"
@@ -562,7 +563,7 @@ std::string getRoleStr(RestoreRole role);
 
 ////--- Interface functions
 ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality);
-ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality);
+ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality, std::string coordFolder);
 
 #include "flow/unactorcompiler.h"
 #endif
