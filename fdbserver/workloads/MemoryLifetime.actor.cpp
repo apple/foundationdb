@@ -26,6 +26,7 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "network.h"
 
 struct MemoryLifetime : KVWorkload {
 	double testDuration;
@@ -151,7 +152,7 @@ struct MemoryLifetime : KVWorkload {
 					wait( delay(0.01) );
 					//we cannot check the contents like other operations so just touch all the values to make sure we dont crash
 					for (int i = 0; i < getAddress_res1.size(); i++) {
-						ASSERT(IPAddress::parse(getAddress_res1[i]).present());
+						ASSERT(NetworkAddress::parseOptional(getAddress_res1[i]).present());
 					}
 				}
 				if(now() - startTime > self->testDuration)

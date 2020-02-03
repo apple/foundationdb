@@ -331,7 +331,7 @@
 
 .. |option-db-include-port-in-address-blurb| replace::
 
-    Addresses returned by get_addresses_for_key include the port when enabled. This option is now enabled by default and setting this has no effect.
+    Addresses returned by get_addresses_for_key include the port when enabled. As of api version 700, this option is enabled by default and setting this has no effect.
 
 .. |option-db-snapshot-ryw-enable-blurb| replace::
 
@@ -374,7 +374,7 @@
 
 .. |option-include-port-in-address-blurb| replace::
 
-    Addresses returned by get_addresses_for_key include the port when enabled. This option is now enabled by default and setting this has no effect.
+    Addresses returned by get_addresses_for_key include the port when enabled. As of api version 700, this option is enabled by default and setting this has no effect.
 
 .. |option-causal-write-risky-blurb| replace::
 
