@@ -414,7 +414,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 
 
 	/**
-	 * Gets the estimated byte size for the given key range based on the byte sample collcted.
+	 * Gets an estimate for the number of bytes stored in the given range.
 	 *
 	 * @param begin the beginning of the range (inclusive)
 	 * @param end the end of the range (exclusive)
