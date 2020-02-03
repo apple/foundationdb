@@ -20,6 +20,7 @@
 
 #include <cinttypes>
 
+#include "IRandom.h"
 #include "fdbclient/ManagementAPI.actor.h"
 
 #include "fdbclient/SystemData.h"
@@ -49,6 +50,11 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 
 	if (mode == "new") {
 		out[p+"initialized"]="1";
+		return out;
+	}
+
+	if (mode == "locked") {
+		out[databaseLockedKey.toString()] = deterministicRandom()->randomUniqueID().toString();
 		return out;
 	}
 
@@ -297,6 +303,17 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 	// make sure we have essential configuration options
 	std::string initKey = configKeysPrefix.toString() + "initialized";
 	state bool creating = m.count( initKey ) != 0;
+	state Optional<UID> locked;
+	{
+		auto iter = m.find(databaseLockedKey.toString());
+		if (iter != m.end()) {
+			if (!creating) {
+				return ConfigurationResult::LOCKED_NOT_NEW;
+			}
+			locked = UID::fromString(iter->second);
+			m.erase(iter);
+		}
+	}
 	if (creating) {
 		m[initIdKey.toString()] = deterministicRandom()->randomUniqueID().toString();
 		if (!isCompleteConfiguration(m)) {
@@ -484,7 +501,12 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 				tr.addReadConflictRange( singleKeyRange(m.begin()->first) );
 			}
 
-			for(auto i=m.begin(); i!=m.end(); ++i)
+			if (locked.present()) {
+				ASSERT(creating);
+				wait(lockDatabase(&tr, locked.get()));
+			}
+
+			for (auto i = m.begin(); i != m.end(); ++i)
 				tr.set( StringRef(i->first), StringRef(i->second) );
 
 			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
