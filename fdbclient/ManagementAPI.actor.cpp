@@ -503,7 +503,11 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 
 			if (locked.present()) {
 				ASSERT(creating);
-				wait(lockDatabase(&tr, locked.get()));
+				tr.atomicOp(databaseLockedKey,
+				            BinaryWriter::toValue(locked.get(), Unversioned())
+				                .withPrefix(LiteralStringRef("0123456789"))
+				                .withSuffix(LiteralStringRef("\x00\x00\x00\x00")),
+				            MutationRef::SetVersionstampedValue);
 			}
 
 			for (auto i = m.begin(); i != m.end(); ++i)
