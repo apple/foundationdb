@@ -26,7 +26,6 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
-#include "network.h"
 
 struct MemoryLifetime : KVWorkload {
 	double testDuration;
