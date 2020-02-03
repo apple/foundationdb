@@ -282,12 +282,11 @@ struct AtomicOpsWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> validateOpsKey(Database cx, AtomicOpsWorkload* self, int g) {
-		state Key begin(format("debug%08x", g));
 		// Get mapping between opsKeys and debugKeys
 		state ReadYourWritesTransaction tr1(cx);
 		state std::map<Key, Key> records; // <ops, debugKey>
 		Standalone<RangeResultRef> debuglog =
-		    wait(tr1.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+		    wait(tr1.getRange(singleKeyRange(format("debug%08x", g)), CLIENT_KNOBS->TOO_MANY));
 		if (debuglog.more) {
 			TraceEvent(SevError, "DebugLogHitTxnLimits").detail("Result", debuglog.toString());
 			return Void();
@@ -299,7 +298,8 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Get log key's value and assign it to the associated debugKey
 		state ReadYourWritesTransaction tr2(cx);
 		state std::map<Key, int64_t> logVal; // debugKey, log's value
-		Standalone<RangeResultRef> log = wait(tr2.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+		Standalone<RangeResultRef> log =
+		    wait(tr2.getRange(singleKeyRange(format("log%08x", g)), CLIENT_KNOBS->TOO_MANY));
 		if (log.more) {
 			TraceEvent(SevError, "LogHitTxnLimits").detail("Result", log.toString());
 			return Void();
@@ -313,7 +313,8 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Get opsKeys and validate if it has correct value
 		state ReadYourWritesTransaction tr3(cx);
 		state std::map<Key, int64_t> opsVal; // ops key, ops value
-		Standalone<RangeResultRef> ops = wait(tr3.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+		Standalone<RangeResultRef> ops =
+		    wait(tr3.getRange(singleKeyRange(format("ops%08x", g)), CLIENT_KNOBS->TOO_MANY));
 		if (ops.more) {
 			TraceEvent(SevError, "OpsHitTxnLimits").detail("Result", ops.toString());
 			return Void();
