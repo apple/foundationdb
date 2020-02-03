@@ -140,8 +140,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( SHARD_MAX_BYTES_PER_KSEC,                 1LL*1000000*1000 ); if( buggifySmallBandwidthSplit ) SHARD_MAX_BYTES_PER_KSEC = 10LL*1000*1000;
 	/* 1*1MB/sec * 1000sec/ksec
 		Shards with more than this bandwidth will be split immediately.
-		For a large shard (100MB), it will be splitted into multiple shards whose size < SHARD_SPLIT_BYTES_PER_KSEC;
-		all but one splitted shards will be moved; so splitting may cost ~100MB of work or about 10MB/sec over a 10 sec sampling window.
+		For a large shard (100MB), it will be split into multiple shards with sizes < SHARD_SPLIT_BYTES_PER_KSEC;
+		all but one split shard will be moved; so splitting may cost ~100MB of work or about 10MB/sec over a 10 sec sampling window.
 		If the sampling window is too much longer, the MVCC window will fill up while we wait.
 		If SHARD_MAX_BYTES_PER_KSEC is too much lower, we could do a lot of data movement work in response to a small impulse of bandwidth.
 		If SHARD_MAX_BYTES_PER_KSEC is too high relative to the I/O bandwidth of a given server, a workload can remain concentrated on a single
