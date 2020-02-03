@@ -13,12 +13,6 @@ set(RELATIVE_DEBUG_PATHS OFF CACHE BOOL "Use relative file paths in debug info")
 set(STATIC_LINK_LIBCXX ON CACHE BOOL "Statically link libstdcpp/libc++")
 set(USE_WERROR OFF CACHE BOOL "Compile with -Werror. Recommended for local development and CI.")
 
-# Default -Werror for environments where we're committed to compiling warning-free
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION STREQUAL "8.3.1")
-  message(STATUS "We officially support -Werror for ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} - USE_WERROR is ON")
-  set(USE_WERROR ON)
-endif()
-
 set(rel_debug_paths OFF)
 if(RELATIVE_DEBUG_PATHS)
   set(rel_debug_paths ON)
