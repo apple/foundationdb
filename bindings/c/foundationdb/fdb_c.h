@@ -91,12 +91,21 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*), void *hook_parameter);
 
 #pragma pack(push, 4)
+#if FDB_API_VERSION >= 700
+    typedef struct keyvalue {
+        const uint8_t* key;
+        int key_length;
+        const uint8_t* value;
+        int value_length;
+    } FDBKeyValue;
+#else
     typedef struct keyvalue {
         const void* key;
         int key_length;
         const void* value;
         int value_length;
     } FDBKeyValue;
+#endif
 #pragma pack(pop)
 
     DLLEXPORT void fdb_future_cancel( FDBFuture* f );

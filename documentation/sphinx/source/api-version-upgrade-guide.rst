@@ -14,6 +14,11 @@ For more details about API versions, see :ref:`api-versions`.
 API version 700
 ===============
 
+C bindings
+----------
+
+* The ``FDBKeyValue`` struct's ``key`` and ``value`` members have changed type from ``void*`` to ``uint8_t*``.
+
 .. _api-version-upgrade-guide-620:
 
 API version 620
