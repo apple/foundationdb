@@ -2175,7 +2175,7 @@ ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Key key
 
 	Standalone<VectorRef<const char*>> addresses;
 	for (auto i : ssi) {
-		std::string ipString = options.includePort ? i.address().toString() : i.address().ip.toString();
+		std::string ipString = i.address().toString();
 		char* c_string = new (addresses.arena()) char[ipString.length()+1];
 		strcpy(c_string, ipString.c_str());
 		addresses.push_back(addresses.arena(), c_string);
@@ -2987,7 +2987,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 
 		case FDBTransactionOptions::INCLUDE_PORT_IN_ADDRESS:
 			validateOptionValue(value, false);
-			options.includePort = true;
+			// This option has no effect as of api version 700.
 			break;
 
 		default:

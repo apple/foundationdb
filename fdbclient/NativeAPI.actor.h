@@ -131,7 +131,6 @@ struct TransactionOptions {
 	bool lockAware : 1;
 	bool readOnly : 1;
 	bool firstInBatch : 1;
-	bool includePort : 1;
 
 	TransactionOptions(Database const& cx);
 	TransactionOptions();
