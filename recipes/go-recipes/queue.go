@@ -107,7 +107,7 @@ func (q *Queue) FirstItem(trtr fdb.Transactor) (interface{}, error) {
 func main() {
 	fmt.Println("Queue Example Program")
 
-	fdb.MustAPIVersion(620)
+	fdb.MustAPIVersion(700)
 
 	db := fdb.MustOpenDefault()
 
