@@ -51,6 +51,8 @@ struct RestoreMasterData;
 
 struct RestoreSimpleRequest;
 
+// VersionedMutationsMap: Key is the version of parsed backup mutations
+// Value MutationsVec is the vector of parsed backup mutations
 using VersionedMutationsMap = std::map<Version, MutationsVec>;
 
 ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex, std::string name);

@@ -276,6 +276,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	self->initBackupContainer(request.url);
 
 	// Get all backup files' description and save them to files
+	// TODO for Jingyu: Verify all backup files in new backup are collected
 	wait(collectBackupFiles(self->bc, &rangeFiles, &logFiles, cx, request));
 
 	std::sort(rangeFiles.begin(), rangeFiles.end());
@@ -284,6 +285,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 		       std::tie(f2.endVersion, f2.beginVersion, f2.fileIndex, f2.fileName);
 	});
 
+	// TODO for Jingyu: Verify new backup files are grouped into correct version batches.
 	self->buildVersionBatches(rangeFiles, logFiles, &self->versionBatches); // Divide files into version batches
 	self->dumpVersionBatches(self->versionBatches);
 
