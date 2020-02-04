@@ -591,7 +591,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "auto_resolvers":1,
          "auto_logs":3,
          "proxies":5,
-         "backup_logging_enabled":1
+         "backup_worker_enabled":1
       },
       "data":{
          "least_operating_space_bytes_log_server":0,

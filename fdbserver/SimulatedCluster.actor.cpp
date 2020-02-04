@@ -878,7 +878,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		ASSERT(false);  // Programmer forgot to adjust cases.
 	}
 
-	set_config("backup_logging_enabled:=1");
+	set_config("backup_worker_enabled:=1");
 	if (deterministicRandom()->random01() < 0.5) {
 		int logSpill = deterministicRandom()->randomInt( TLogSpillType::VALUE, TLogSpillType::END );
 		set_config(format("log_spill:=%d", logSpill));

@@ -179,7 +179,7 @@ struct DatabaseConfiguration {
 	Reference<IReplicationPolicy> remoteTLogPolicy;
 
 	// Backup Workers
-	bool backupLoggingEnabled;
+	bool backupWorkerEnabled;
 
 	//Data centers
 	int32_t usableRegions;

@@ -2387,7 +2387,7 @@ namespace fileBackup {
 
 			// Check if backup worker is enabled
 			DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
-			if (!dbConfig.backupLoggingEnabled) {
+			if (!dbConfig.backupWorkerEnabled) {
 				return Void();
 			}
 
