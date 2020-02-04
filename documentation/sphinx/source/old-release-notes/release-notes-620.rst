@@ -168,6 +168,7 @@ Status
 Bindings
 --------
 
+* API version updated to 620. See the :ref:`API version upgrade guide <api-version-upgrade-guide-620>` for upgrade details.
 * Add a transaction size limit as both a database option and a transaction option. `(PR #1725) <https://github.com/apple/foundationdb/pull/1725>`_.
 * Added a new API to get the approximated transaction size before commit, e.g., ``fdb_transaction_get_approximate_size`` in the C binding. `(PR #1756) <https://github.com/apple/foundationdb/pull/1756>`_.
 * C: ``fdb_future_get_version`` has been renamed to ``fdb_future_get_int64``. `(PR #1756) <https://github.com/apple/foundationdb/pull/1756>`_.

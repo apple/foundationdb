@@ -170,6 +170,7 @@ struct StorageServerDisk {
 
 	KeyValueStoreType getKeyValueStoreType() { return storage->getType(); }
 	StorageBytes getStorageBytes() { return storage->getStorageBytes(); }
+	std::tuple<size_t, size_t, size_t> getSize() { return storage->getSize(); }
 
 private:
 	struct StorageServer* data;
@@ -515,6 +516,9 @@ public:
 			specialCounter(cc, "KvstoreBytesFree", [self](){ return self->storage.getStorageBytes().free; });
 			specialCounter(cc, "KvstoreBytesAvailable", [self](){ return self->storage.getStorageBytes().available; });
 			specialCounter(cc, "KvstoreBytesTotal", [self](){ return self->storage.getStorageBytes().total; });
+			specialCounter(cc, "KvstoreSizeTotal", [self]() { return std::get<0>(self->storage.getSize()); });
+			specialCounter(cc, "KvstoreNodeTotal", [self]() { return std::get<1>(self->storage.getSize()); });
+			specialCounter(cc, "KvstoreInlineKey", [self]() { return std::get<2>(self->storage.getSize()); });
 		}
 	} counters;
 

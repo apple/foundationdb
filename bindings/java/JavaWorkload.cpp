@@ -19,7 +19,7 @@
  */
 
 #include <foundationdb/ClientWorkload.h>
-#define FDB_API_VERSION 620
+#define FDB_API_VERSION 700
 #include <foundationdb/fdb_c.h>
 
 #include <jni.h>
@@ -370,7 +370,7 @@ struct JVM {
 		jmethodID selectMethod =
 		    env->GetStaticMethodID(fdbClass, "selectAPIVersion", "(IZ)Lcom/apple/foundationdb/FDB;");
 		checkException();
-		env->CallStaticObjectMethod(fdbClass, selectMethod, jint(620), jboolean(false));
+		env->CallStaticObjectMethod(fdbClass, selectMethod, jint(700), jboolean(false));
 		checkException();
 	}
 

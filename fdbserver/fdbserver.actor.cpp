@@ -31,7 +31,6 @@
 #include "flow/SystemMonitor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/FailureMonitorClient.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
