@@ -41,7 +41,7 @@ void DatabaseConfiguration::resetInternal() {
 	tLogPolicy = storagePolicy = remoteTLogPolicy = Reference<IReplicationPolicy>();
 	remoteDesiredTLogCount = -1;
 	remoteTLogReplicationFactor = repopulateRegionAntiQuorum = 0;
-	backupType = BackupType::DEFAULT;
+	backupLoggingEnabled = true;
 }
 
 void parse( int* i, ValueRef const& v ) {
@@ -184,8 +184,6 @@ bool DatabaseConfiguration::isValid() const {
 		tLogPolicy &&
 		getDesiredRemoteLogs() >= 1 &&
 		remoteTLogReplicationFactor >= 0 &&
-		backupType >= BackupType::DEFAULT &&
-		backupType < BackupType::END &&
 		repopulateRegionAntiQuorum >= 0 &&
 		repopulateRegionAntiQuorum <= 1 &&
 		usableRegions >= 1 &&
@@ -326,9 +324,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			result["auto_logs"] = autoDesiredTLogCount;
 		}
 
-		if (backupType > BackupType::DEFAULT) {
-			result["backup_type"] = (int)backupType;
-		}
+		result["backup_logging_enabled"] = (int32_t)backupLoggingEnabled;
 	}
 
 	return result;
@@ -441,7 +437,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("remote_logs")) parse(&remoteDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("remote_log_replicas")) parse(&remoteTLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("remote_log_policy")) parseReplicationPolicy(&remoteTLogPolicy, value);
-	else if (ck == LiteralStringRef("backup_type")) { parse((&type), value); backupType = (BackupType::MutationLogType)type; }
+	else if (ck == LiteralStringRef("backup_logging_enabled")) { parse((&type), value); backupLoggingEnabled = (type != 0); }
 	else if (ck == LiteralStringRef("usable_regions")) parse(&usableRegions, value);
 	else if (ck == LiteralStringRef("repopulate_anti_quorum")) parse(&repopulateRegionAntiQuorum, value);
 	else if (ck == LiteralStringRef("regions")) parse(&regions, value);

@@ -878,13 +878,12 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		ASSERT(false);  // Programmer forgot to adjust cases.
 	}
 
+	set_config("backup_logging_enabled:=1");
 	if (deterministicRandom()->random01() < 0.5) {
 		int logSpill = deterministicRandom()->randomInt( TLogSpillType::VALUE, TLogSpillType::END );
 		set_config(format("log_spill:=%d", logSpill));
 		int logVersion = deterministicRandom()->randomInt( TLogVersion::MIN_RECRUITABLE, TLogVersion::MAX_SUPPORTED+1 );
 		set_config(format("log_version:=%d", logVersion));
-		int backupType = deterministicRandom()->randomInt(BackupType::DEFAULT, BackupType::END);
-		set_config(format("backup_type:=%d", backupType));
 	} else {
 		if (deterministicRandom()->random01() < 0.7)
 			set_config(format("log_version:=%d", TLogVersion::MAX_SUPPORTED));

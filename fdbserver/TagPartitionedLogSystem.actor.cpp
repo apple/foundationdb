@@ -2144,11 +2144,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->addPseudoLocality(tagLocalityLogRouterMapped);
 			TraceEvent e("AddPseudoLocality", logSystem->getDebugID());
 			e.detail("Locality1", "LogRouterMapped");
-			if (configuration.backupType.isBackupWorkerEnabled()) {
+			if (configuration.backupLoggingEnabled) {
 				logSystem->addPseudoLocality(tagLocalityBackup);
 				e.detail("Locality2", "Backup");
 			}
-		} else if (configuration.backupType.isBackupWorkerEnabled()) {
+		} else if (configuration.backupLoggingEnabled) {
 			// Single region uses log router tag for backup workers.
 			logSystem->logRouterTags = recr.tLogs.size() * std::max<int>(1, configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size()));
 			logSystem->addPseudoLocality(tagLocalityBackup);

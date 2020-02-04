@@ -2387,7 +2387,7 @@ namespace fileBackup {
 
 			// Check if backup worker is enabled
 			DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
-			if (!dbConfig.backupType.isBackupWorkerEnabled()) {
+			if (!dbConfig.backupLoggingEnabled) {
 				return Void();
 			}
 
@@ -3842,8 +3842,6 @@ public:
 		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
 		state BackupConfig config(current.first);
 		state EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
-
-		// Call clearBackupStartID().
 
 		if (!FileBackupAgent::isRunnable(status)) {
 			throw backup_unneeded();

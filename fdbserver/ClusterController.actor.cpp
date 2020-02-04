@@ -780,7 +780,7 @@ public:
 			}
 		}
 
-		if (req.configuration.backupType.isBackupWorkerEnabled()) {
+		if (req.configuration.backupLoggingEnabled) {
 			const int nBackup = std::max<int>(
 			    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tlogs.size()),
 			    req.maxOldLogRouters);
@@ -916,7 +916,7 @@ public:
 						for(int i = 0; i < proxies.size(); i++)
 							result.proxies.push_back(proxies[i].interf);
 
-						if (req.configuration.backupType.isBackupWorkerEnabled()) {
+						if (req.configuration.backupLoggingEnabled) {
 							const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
 							auto backupWorkers = getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup,
 							                                                   req.configuration, id_used);
