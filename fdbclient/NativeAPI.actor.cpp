@@ -3194,12 +3194,11 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRangeRef keys, 
 ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRangeRef keys) {
 
 	vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
-	    cx, keys, -1, false, &StorageServerInterface::waitMetrics, TransactionInfo(TaskPriority::DataDistribution)));
+	    cx, keys, std::numeric_limits<int>::max(), false, &StorageServerInterface::waitMetrics, TransactionInfo(TaskPriority::DataDistribution)));
 	state int nLocs = locations.size();
 	state vector<Future<StorageMetrics>> fx(nLocs);
 	state StorageMetrics total;
-	int i = 0;
-	for (; i < nLocs; i++) {
+	for (int i = 0; i < nLocs; i++) {
 		fx[i] = doGetStorageMetrics(cx, locations[i].first, locations[i].second);
 	}
 	wait(waitForAll(fx));
@@ -3241,8 +3240,7 @@ ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(
 	state StorageMetrics maxPlus = max + halfErrorPerMachine * (nLocs-1);
 	state StorageMetrics minMinus = min - halfErrorPerMachine * (nLocs-1);
 
-	state int i = 0;
-	for (; i < nLocs; i++) {
+	for (int i = 0; i < nLocs; i++) {
 		WaitMetricsRequest req(locations[i].first, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
 		req.max.bytes = -1;

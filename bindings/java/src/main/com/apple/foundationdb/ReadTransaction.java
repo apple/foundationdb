@@ -424,6 +424,15 @@ public interface ReadTransaction extends ReadTransactionContext {
 	CompletableFuture<Long> getEstimatedRangeSizeBytes(byte[] begin, byte[] end);
 
 	/**
+	 * Gets an estimate for the number of bytes stored in the given range.
+	 *
+	 * @param range the range of the keys
+	 *
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	CompletableFuture<Long> getEstimatedRangeSizeBytes(Range range);
+
+	/**
 	 * Returns a set of options that can be set on a {@code Transaction}
 	 *
 	 * @return a set of transaction-specific options affecting this {@code Transaction}

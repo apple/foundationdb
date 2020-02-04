@@ -162,6 +162,7 @@ ThreadFuture<int64_t> ThreadSafeTransaction::getEstimatedRangeSizeBytes( const K
 
 	ReadYourWritesTransaction *tr = this->tr;
 	return onMainThread( [tr, r]() -> Future<int64_t> {
+			tr->checkDeferredError();
 			return tr->getEstimatedRangeSizeBytes(r);
 		} );
 }

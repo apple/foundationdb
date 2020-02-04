@@ -1350,7 +1350,7 @@ Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyR
 	if( resetPromise.isSet() )
 		return resetPromise.getFuture().getError();
 
-	return map(tr.getStorageMetrics(keys, -1), [](const StorageMetrics& m) { return m.bytes; });
+	return map(waitOrError(tr.getStorageMetrics(keys, -1), resetPromise.getFuture()), [](const StorageMetrics& m) { return m.bytes; });
 }
 
 void ReadYourWritesTransaction::addReadConflictRange( KeyRangeRef const& keys ) {
