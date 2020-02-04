@@ -24,6 +24,7 @@
 #include "flow/Trace.h"
 #include "flow/Error.h"
 #include "flow/Knobs.h"
+#include "flow/crc32c.h"
 #include "flow/flow.h"
 
 #include <cstdint>
@@ -85,21 +86,23 @@ void setFastAllocatorThreadInitFunction( ThreadInitFunction f ) {
 	threadInitFunction = f; 
 }
 
-int64_t g_hugeArenaMemory = 0;
+std::atomic<int64_t> g_hugeArenaMemory(0);
 
 double hugeArenaLastLogged = 0;
 std::map<std::string, std::pair<int,int>> hugeArenaTraces;
 
 void hugeArenaSample(int size) {
-	auto& info = hugeArenaTraces[platform::get_backtrace()];
-	info.first++;
-	info.second+=size;
-	if(now() - hugeArenaLastLogged > FLOW_KNOBS->HUGE_ARENA_LOGGING_INTERVAL) {
-		for(auto& it : hugeArenaTraces) {
-			TraceEvent("HugeArenaSample").detail("Count", it.second.first).detail("Size", it.second.second).detail("Backtrace", it.first);
+	if(TraceEvent::isNetworkThread()) {
+		auto& info = hugeArenaTraces[platform::get_backtrace()];
+		info.first++;
+		info.second+=size;
+		if(now() - hugeArenaLastLogged > FLOW_KNOBS->HUGE_ARENA_LOGGING_INTERVAL) {
+			for(auto& it : hugeArenaTraces) {
+				TraceEvent("HugeArenaSample").detail("Count", it.second.first).detail("Size", it.second.second).detail("Backtrace", it.first);
+			}
+			hugeArenaLastLogged = now();
+			hugeArenaTraces.clear();
 		}
-		hugeArenaLastLogged = now();
-		hugeArenaTraces.clear();
 	}
 }
 
@@ -144,9 +147,9 @@ void recordAllocation( void *ptr, size_t size ) {
 #error Instrumentation not supported on this platform
 #endif
 
-		uint32_t a = 0, b = 0;
+		uint32_t a = 0;
 		if( nptrs > 0 ) {
-			hashlittle2( buffer, nptrs * sizeof(void *), &a, &b );
+			a = crc32c_append( 0xfdbeefdb, buffer, nptrs * sizeof(void *));
 		}
 
 		double countDelta = std::max(1.0, ((double)SAMPLE_BYTES) / size);
@@ -261,6 +264,10 @@ void *FastAllocator<Size>::allocate() {
 		initThread();
 	}
 
+#ifdef USE_GPERFTOOLS
+	return malloc(Size);
+#endif
+
 #if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData;
 	if (!thr.freelist) {
@@ -303,6 +310,10 @@ void FastAllocator<Size>::release(void *ptr) {
 	if(!threadInitialized) {
 		initThread();
 	}
+
+#ifdef USE_GPERFTOOLS
+	return free(ptr);
+#endif
 
 #if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData;
@@ -539,4 +550,3 @@ template class FastAllocator<1024>;
 template class FastAllocator<2048>;
 template class FastAllocator<4096>;
 template class FastAllocator<8192>;
-

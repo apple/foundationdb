@@ -29,18 +29,12 @@
 
 typedef Standalone<VectorRef<StringRef>> ProcessIssues;
 typedef std::map<NetworkAddress, std::pair<ProcessIssues, UID>> ProcessIssuesMap;
-typedef std::map< NetworkAddress, Standalone<VectorRef<ClientVersionRef>> > ClientVersionMap;
 
-struct ClientStatusInfo {
-	std::string traceLogGroup;
-	int connectedCoordinatorsNum;
+void setIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, VectorRef<StringRef> const& issues, Optional<UID>& issueID);
 
-	ClientStatusInfo() : connectedCoordinatorsNum(0) {}
-	ClientStatusInfo(std::string const& traceLogGroup, int const connectedCoordinatorsNum) : traceLogGroup(traceLogGroup), connectedCoordinatorsNum(connectedCoordinatorsNum) {}
-};
+void removeIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, Optional<UID>& issueID);
 
-Future<StatusReply> clusterGetStatus( Reference<AsyncVar<struct ServerDBInfo>> const& db, Database const& cx, vector<WorkerDetails> const& workers,
-	ProcessIssuesMap const& workerIssues, ProcessIssuesMap const& clientIssues, ClientVersionMap const& clientVersionMap, std::map<NetworkAddress, struct ClientStatusInfo> const& clientStatusInfoMap,
-	ServerCoordinators const& coordinators, std::vector<NetworkAddress> const& incompatibleConnections, Version const& datacenterVersionDifference );
+Future<StatusReply> clusterGetStatus( Reference<AsyncVar<CachedSerialization<struct ServerDBInfo>>> const& db, Database const& cx, vector<WorkerDetails> const& workers,
+	ProcessIssuesMap const& workerIssues, std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* const& clientStatus, ServerCoordinators const& coordinators, std::vector<NetworkAddress> const& incompatibleConnections, Version const& datacenterVersionDifference );
 
 #endif

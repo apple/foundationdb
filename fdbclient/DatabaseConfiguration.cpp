@@ -73,6 +73,7 @@ void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 					s.get("id", idStr);
 					satInfo.dcId = idStr;
 					s.get("priority", satInfo.priority);
+					s.tryGet("satellite_logs", satInfo.satelliteDesiredTLogCount);
 					info.satellites.push_back(satInfo);
 				} else {
 					if (foundNonSatelliteDatacenter) throw invalid_option();
@@ -268,6 +269,8 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			result["storage_engine"] = "ssd-redwood-experimental";
 		} else if( tLogDataStoreType == KeyValueStoreType::MEMORY && storageServerStoreType == KeyValueStoreType::MEMORY ) {
 			result["storage_engine"] = "memory-1";
+		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::MEMORY_RADIXTREE ) {
+			result["storage_engine"] = "memory-radixtree-beta";
 		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::MEMORY ) {
 			result["storage_engine"] = "memory-2";
 		} else {
@@ -365,6 +368,9 @@ StatusArray DatabaseConfiguration::getRegionJSON() const {
 				satObj["id"] = s.dcId.toString();
 				satObj["priority"] = s.priority;
 				satObj["satellite"] = 1;
+				if(s.satelliteDesiredTLogCount != -1) {
+					satObj["satellite_logs"] = s.satelliteDesiredTLogCount;
+				}
 
 				dcArr.push_back(satObj);
 			}
@@ -405,10 +411,17 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		type = std::min((int)TLogVersion::MAX_SUPPORTED, type);
 		tLogVersion = (TLogVersion::Version)type;
 	}
-	else if (ck == LiteralStringRef("log_engine")) { parse((&type), value); tLogDataStoreType = (KeyValueStoreType::StoreType)type; 
+	else if (ck == LiteralStringRef("log_engine")) {
+		parse((&type), value);
+		tLogDataStoreType = (KeyValueStoreType::StoreType)type;
 		// TODO:  Remove this once Redwood works as a log engine
-		if(tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1)
+		if(tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
 			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
+		}
+		// TODO:  Remove this once memroy radix tree works as a log engine
+		if(tLogDataStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
+			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
+		}
 	}
 	else if (ck == LiteralStringRef("log_spill")) { parse((&type), value); tLogSpillType = (TLogSpillType::SpillType)type; }
 	else if (ck == LiteralStringRef("storage_engine")) { parse((&type), value); storageServerStoreType = (KeyValueStoreType::StoreType)type; }
@@ -479,13 +492,19 @@ Optional<ValueRef> DatabaseConfiguration::get( KeyRef key ) const {
 
 bool DatabaseConfiguration::isExcludedServer( NetworkAddress a ) const {
 	return get( encodeExcludedServersKey( AddressExclusion(a.ip, a.port) ) ).present() ||
-		get( encodeExcludedServersKey( AddressExclusion(a.ip) ) ).present();
+		get( encodeExcludedServersKey( AddressExclusion(a.ip) ) ).present() ||
+		get( encodeFailedServersKey( AddressExclusion(a.ip, a.port) ) ).present() ||
+		get( encodeFailedServersKey( AddressExclusion(a.ip) ) ).present();
 }
 std::set<AddressExclusion> DatabaseConfiguration::getExcludedServers() const {
 	const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();
 	std::set<AddressExclusion> addrs;
 	for( auto i = lower_bound(rawConfiguration, excludedServersKeys.begin); i != rawConfiguration.end() && i->key < excludedServersKeys.end; ++i ) {
 		AddressExclusion a = decodeExcludedServersKey( i->key );
+		if (a.isValid()) addrs.insert(a);
+	}
+	for( auto i = lower_bound(rawConfiguration, failedServersKeys.begin); i != rawConfiguration.end() && i->key < failedServersKeys.end; ++i ) {
+		AddressExclusion a = decodeFailedServersKey( i->key );
 		if (a.isValid()) addrs.insert(a);
 	}
 	return addrs;

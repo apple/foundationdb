@@ -46,13 +46,6 @@ func (o NetworkOptions) SetLocalAddress(param string) error {
 	return o.setOpt(10, []byte(param))
 }
 
-// enable the object serializer for network communication
-//
-// Parameter: 0 is false, every other value is true
-func (o NetworkOptions) SetUseObjectSerializer(param int64) error {
-	return o.setOpt(11, int64ToBytes(param))
-}
-
 // Deprecated
 //
 // Parameter: path to cluster file
@@ -228,6 +221,30 @@ func (o NetworkOptions) SetEnableSlowTaskProfiling() error {
 	return o.setOpt(71, nil)
 }
 
+// Enable client buggify - will make requests randomly fail (intended for client testing)
+func (o NetworkOptions) SetClientBuggifyEnable() error {
+	return o.setOpt(80, nil)
+}
+
+// Disable client buggify
+func (o NetworkOptions) SetClientBuggifyDisable() error {
+	return o.setOpt(81, nil)
+}
+
+// Set the probability of a CLIENT_BUGGIFY section being active for the current execution.
+//
+// Parameter: probability expressed as a percentage between 0 and 100
+func (o NetworkOptions) SetClientBuggifySectionActivatedProbability(param int64) error {
+	return o.setOpt(82, int64ToBytes(param))
+}
+
+// Set the probability of an active CLIENT_BUGGIFY section being fired. A section will only fire if it was activated
+//
+// Parameter: probability expressed as a percentage between 0 and 100
+func (o NetworkOptions) SetClientBuggifySectionFiredProbability(param int64) error {
+	return o.setOpt(83, int64ToBytes(param))
+}
+
 // Set the size of the client location cache. Raising this value can boost performance in very large databases where clients access data in a near-random pattern. Defaults to 100000.
 //
 // Parameter: Max location cache entries
@@ -256,6 +273,23 @@ func (o DatabaseOptions) SetDatacenterId(param string) error {
 	return o.setOpt(22, []byte(param))
 }
 
+// Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.
+func (o DatabaseOptions) SetSnapshotRywEnable() error {
+	return o.setOpt(26, nil)
+}
+
+// Snapshot read operations will not see the results of writes done in the same transaction. This was the default behavior prior to API version 300.
+func (o DatabaseOptions) SetSnapshotRywDisable() error {
+	return o.setOpt(27, nil)
+}
+
+// Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option. This sets the ``transaction_logging_max_field_length`` option of each transaction created by this database. See the transaction option description for more information.
+//
+// Parameter: Maximum length of escaped key and value fields.
+func (o DatabaseOptions) SetTransactionLoggingMaxFieldLength(param int64) error {
+	return o.setOpt(405, int64ToBytes(param))
+}
+
 // Set a timeout in milliseconds which, when elapsed, will cause each transaction automatically to be cancelled. This sets the ``timeout`` option of each transaction created by this database. See the transaction option description for more information. Using this option requires that the API version is 610 or higher.
 //
 // Parameter: value in milliseconds of timeout
@@ -277,14 +311,21 @@ func (o DatabaseOptions) SetTransactionMaxRetryDelay(param int64) error {
 	return o.setOpt(502, int64ToBytes(param))
 }
 
-// Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.
-func (o DatabaseOptions) SetSnapshotRywEnable() error {
-	return o.setOpt(26, nil)
+// Set the maximum transaction size in bytes. This sets the ``size_limit`` option on each transaction created by this database. See the transaction option description for more information.
+//
+// Parameter: value in bytes
+func (o DatabaseOptions) SetTransactionSizeLimit(param int64) error {
+	return o.setOpt(503, int64ToBytes(param))
 }
 
-// Snapshot read operations will not see the results of writes done in the same transaction. This was the default behavior prior to API version 300.
-func (o DatabaseOptions) SetSnapshotRywDisable() error {
-	return o.setOpt(27, nil)
+// The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock.
+func (o DatabaseOptions) SetTransactionCausalReadRisky() error {
+	return o.setOpt(504, nil)
+}
+
+// Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated.
+func (o DatabaseOptions) SetTransactionIncludePortInAddress() error {
+	return o.setOpt(505, nil)
 }
 
 // The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault
@@ -292,7 +333,7 @@ func (o TransactionOptions) SetCausalWriteRisky() error {
 	return o.setOpt(10, nil)
 }
 
-// The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a fault or partition
+// The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock.
 func (o TransactionOptions) SetCausalReadRisky() error {
 	return o.setOpt(20, nil)
 }
@@ -300,6 +341,11 @@ func (o TransactionOptions) SetCausalReadRisky() error {
 // Not yet implemented.
 func (o TransactionOptions) SetCausalReadDisable() error {
 	return o.setOpt(21, nil)
+}
+
+// Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated.
+func (o TransactionOptions) SetIncludePortInAddress() error {
+	return o.setOpt(23, nil)
 }
 
 // The next write performed on this transaction will not generate a write conflict range. As a result, other transactions which read the key(s) being modified by the next write will not conflict with this transaction. Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on.
@@ -381,6 +427,13 @@ func (o TransactionOptions) SetLogTransaction() error {
 	return o.setOpt(404, nil)
 }
 
+// Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option, after which the field will be truncated. A negative value disables truncation.
+//
+// Parameter: Maximum length of escaped key and value fields.
+func (o TransactionOptions) SetTransactionLoggingMaxFieldLength(param int64) error {
+	return o.setOpt(405, int64ToBytes(param))
+}
+
 // Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Prior to API version 610, like all other transaction options, the timeout must be reset after a call to ``onError``. If the API version is 610 or greater, the timeout is not reset after an ``onError`` call. This allows the user to specify a longer timeout on specific transactions than the default timeout specified through the ``transaction_timeout`` database option without the shorter database timeout cancelling transactions that encounter a retryable error. Note that at all API versions, it is safe and legal to set the timeout each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
 //
 // Parameter: value in milliseconds of timeout
@@ -400,6 +453,13 @@ func (o TransactionOptions) SetRetryLimit(param int64) error {
 // Parameter: value in milliseconds of maximum delay
 func (o TransactionOptions) SetMaxRetryDelay(param int64) error {
 	return o.setOpt(502, int64ToBytes(param))
+}
+
+// Set the transaction size limit in bytes. The size is calculated by combining the sizes of all keys and values written or mutated, all key ranges cleared, and all read and write conflict ranges. (In other words, it includes the total size of all data included in the request to the cluster to commit the transaction.) Large transactions can cause performance problems on FoundationDB clusters, so setting this limit to a smaller value than the default can help prevent the client from accidentally degrading the cluster's performance. This value must be at least 32 and cannot be set to higher than 10,000,000, the default transaction size limit.
+//
+// Parameter: value in bytes
+func (o TransactionOptions) SetSizeLimit(param int64) error {
+	return o.setOpt(503, int64ToBytes(param))
 }
 
 // Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.

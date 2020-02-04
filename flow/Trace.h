@@ -22,6 +22,7 @@
 #define FLOW_TRACE_H
 #pragma once
 
+#include <atomic>
 #include <stdarg.h>
 #include <stdint.h>
 #include <string>
@@ -42,17 +43,18 @@ inline int fastrand() {
 //inline static bool TRACE_SAMPLE() { return fastrand()<16; }
 inline static bool TRACE_SAMPLE() { return false; }
 
-extern int g_trace_depth;
+extern thread_local int g_trace_depth;
 
 enum Severity {
-	SevSample=1,
-	SevDebug=5,
-	SevInfo=10,
-	SevWarn=20,
-	SevWarnAlways=30,
-	SevError=40,
-	SevMaxUsed=SevError,
-	SevMax=1000000
+	SevVerbose = 0,
+	SevSample = 1,
+	SevDebug = 5,
+	SevInfo = 10,
+	SevWarn = 20,
+	SevWarnAlways = 30,
+	SevError = 40,
+	SevMaxUsed = SevError,
+	SevMax = 1000000
 };
 
 class TraceEventFields {
@@ -210,6 +212,7 @@ FORMAT_TRACEABLE(unsigned long int, "%lu");
 FORMAT_TRACEABLE(long long int, "%lld");
 FORMAT_TRACEABLE(unsigned long long int, "%llu");
 FORMAT_TRACEABLE(double, "%g");
+FORMAT_TRACEABLE(void*, "%p");
 FORMAT_TRACEABLE(volatile long, "%ld");
 FORMAT_TRACEABLE(volatile unsigned long, "%lu");
 FORMAT_TRACEABLE(volatile long long, "%lld");
@@ -379,6 +382,8 @@ struct TraceEvent {
 	static void setNetworkThread();
 	static bool isNetworkThread();
 
+	static double getCurrentTime();
+
 	//Must be called directly after constructing the trace event
 	TraceEvent& error(const class Error& e, bool includeCancelled=false) {
 		if (enabled) {
@@ -445,10 +450,25 @@ public:
 	TraceEvent& trackLatest( const char* trackingKey );
 	TraceEvent& sample( double sampleRate, bool logSampleRate=true );
 
+	// Sets the maximum length a field can be before it gets truncated. A value of 0 uses the default, a negative value
+	// disables truncation. This should be called before the field whose length you want to change, and it can be
+	// changed multiple times in a single event.
+	TraceEvent& setMaxFieldLength(int maxFieldLength);
+
+	// Sets the maximum event length before the event gets suppressed and a warning is logged. A value of 0 uses the default,
+	// a negative value disables length suppression. This should be called before adding details.
+	TraceEvent& setMaxEventLength(int maxEventLength);
+
 	//Cannot call other functions which could disable the trace event afterwords
 	TraceEvent& suppressFor( double duration, bool logSuppressedEventCount=true );
 
 	TraceEvent& GetLastError();
+
+	bool isEnabled() const {
+		return enabled;
+	}
+
+	void log();
 
 	~TraceEvent();  // Actually logs the event
 
@@ -460,12 +480,18 @@ public:
 private:
 	bool initialized;
 	bool enabled;
+	bool logged;
 	std::string trackingKey;
 	TraceEventFields fields;
 	Severity severity;
 	const char *type;
 	UID id;
 	Error err;
+
+	int maxFieldLength;
+	int maxEventLength;
+
+	void setSizeLimits();
 
 	static unsigned long eventCounts[5];
 	static thread_local bool networkThread;
@@ -537,6 +563,7 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();
+void flushTraceFileVoid();
 
 // Changes the format of trace files. Returns false if the format is unrecognized. No longer safe to call after a call
 // to openTraceFile.
@@ -548,7 +575,10 @@ void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
-extern trace_clock_t g_trace_clock;
+extern std::atomic<trace_clock_t> g_trace_clock;
 extern TraceBatch g_traceBatch;
+
+#define DUMPTOKEN(name)                                                                                                \
+	TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
 
 #endif

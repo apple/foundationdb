@@ -216,7 +216,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	public CompletableFuture<Long> getReadVersion() {
 		pointerReadLock.lock();
 		try {
-			return new FutureVersion(Transaction_getReadVersion(getPtr()), executor);
+			return new FutureInt64(Transaction_getReadVersion(getPtr()), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -515,6 +515,16 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	@Override
+	public CompletableFuture<Long> getApproximateSize() {
+		pointerReadLock.lock();
+		try {
+			return new FutureInt64(Transaction_getApproximateSize(getPtr()), executor);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
 	public CompletableFuture<Void> watch(byte[] key) throws FDBException {
 		pointerReadLock.lock();
 		try {
@@ -642,6 +652,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private native long Transaction_commit(long cPtr);
 	private native long Transaction_getCommittedVersion(long cPtr);
 	private native long Transaction_getVersionstamp(long cPtr);
+	private native long Transaction_getApproximateSize(long cPtr);
 	private native long Transaction_onError(long cPtr, int errorCode);
 	private native void Transaction_dispose(long cPtr);
 	private native void Transaction_reset(long cPtr);

@@ -36,7 +36,7 @@
 
 extern volatile thread_local int profilingEnabled;
 
-static uint64_t gettid() { return syscall(__NR_gettid); }
+static uint64_t sys_gettid() { return syscall(__NR_gettid); }
 
 struct SignalClosure {
 	void (* func)(int, siginfo_t*, void*, void*);
@@ -230,7 +230,7 @@ struct Profiler {
 		sev.sigev_notify = SIGEV_THREAD_ID;
 		sev.sigev_signo = SIGPROF;
 		sev.sigev_value.sival_ptr = &(self->signalClosure);
-		sev._sigev_un._tid = gettid();
+		sev._sigev_un._tid = sys_gettid();
 		if(timer_create( CLOCK_THREAD_CPUTIME_ID, &sev, &self->periodicTimer ) != 0) {
 			TraceEvent(SevWarn, "FailedToCreateProfilingTimer").GetLastError();
 			return Void();
@@ -248,7 +248,7 @@ struct Profiler {
 		outOffset += self->environmentInfoWriter.getLength();
 
 		loop {
-			wait( self->network->delay(1.0, TaskMinPriority) || self->network->delay(2.0, TaskMaxPriority) );
+			wait( self->network->delay(1.0, TaskPriority::Min) || self->network->delay(2.0, TaskPriority::Max) );
 
 			self->enableSignal(false);
 			std::swap( self->output_buffer, otherBuffer );
@@ -284,7 +284,7 @@ void startProfiling(INetwork* network, Optional<int> maybePeriod /*= {}*/, Optio
 		const char* outfn = getenv("FLOW_PROFILER_OUTPUT");
 		outputFile = (outfn ? outfn : "profile.bin");
 	}
-	outputFile = findAndReplace(findAndReplace(findAndReplace(outputFile, "%ADDRESS%", findAndReplace(network->getLocalAddress().toString(), ":", ".")), "%PID%", format("%d", getpid())), "%TID%", format("%llx", (long long)gettid()));
+	outputFile = findAndReplace(findAndReplace(findAndReplace(outputFile, "%ADDRESS%", findAndReplace(network->getLocalAddress().toString(), ":", ".")), "%PID%", format("%d", getpid())), "%TID%", format("%llx", (long long)sys_gettid()));
 
 	if (!Profiler::active_profiler)
 		Profiler::active_profiler = new Profiler( period, outputFile, network );

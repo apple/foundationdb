@@ -45,7 +45,8 @@ class AsyncFileEIO : public IAsyncFile, public ReferenceCounted<AsyncFileEIO> {
 
 public:
 	static void init() {
-		if (eio_init( &eio_want_poll, NULL )) { 
+		eio_set_max_parallel(FLOW_KNOBS->EIO_MAX_PARALLELISM);
+		if (eio_init( &eio_want_poll, NULL )) {
 			TraceEvent("EioInitError").detail("ErrorNo", errno);
 			throw platform_error(); 
 		}
@@ -246,6 +247,9 @@ private:
 		if( flags & OPEN_READONLY )  oflags |= O_RDONLY;
 		if( flags & OPEN_READWRITE ) oflags |= O_RDWR;
 		if( flags & OPEN_ATOMIC_WRITE_AND_CREATE ) oflags |= O_TRUNC;
+#if defined(__linux__)
+		if ( flags & OPEN_UNBUFFERED && FLOW_KNOBS->EIO_USE_ODIRECT ) oflags |= O_DIRECT;
+#endif
 		return oflags;
 	}
 
@@ -266,7 +270,7 @@ private:
 	}
 
 	ACTOR static Future<int> read_impl( int fd, void* data, int length, int64_t offset ) {
-		state int taskID = g_network->getCurrentTask();
+		state TaskPriority taskID = g_network->getCurrentTask();
 		state Promise<Void> p;
 		//fprintf(stderr, "eio_read (fd=%d length=%d offset=%lld)\n", fd, length, offset);
 		state eio_req* r = eio_read(fd, data, length, offset, 0, eio_callback, &p);
@@ -289,7 +293,7 @@ private:
 	}
 
 	ACTOR static Future<Void> write_impl( int fd, Reference<ErrorInfo> err, StringRef data, int64_t offset ) {
-		state int taskID = g_network->getCurrentTask();
+		state TaskPriority taskID = g_network->getCurrentTask();
 		state Promise<Void> p;
 		state eio_req* r = eio_write(fd, (void*)data.begin(), data.size(), offset, 0, eio_callback, &p);
 		try { wait( p.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
@@ -299,7 +303,7 @@ private:
 	}
 
 	ACTOR static Future<Void> truncate_impl( int fd, Reference<ErrorInfo> err, int64_t size ) {
-		state int taskID = g_network->getCurrentTask();
+		state TaskPriority taskID = g_network->getCurrentTask();
 		state Promise<Void> p;
 		state eio_req* r = eio_ftruncate(fd, size, 0, eio_callback, &p);
 		try { wait( p.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
@@ -330,7 +334,7 @@ private:
 	}
 
 	ACTOR static Future<Void> sync_impl( int fd, Reference<ErrorInfo> err, bool sync_metadata=false ) {
-		state int taskID = g_network->getCurrentTask();
+		state TaskPriority taskID = g_network->getCurrentTask();
 		state Promise<Void> p;
 		state eio_req* r = start_fsync( fd, p, sync_metadata );
 		
@@ -350,7 +354,7 @@ private:
 	}
 
 	ACTOR static Future<int64_t> size_impl( int fd ) {
-		state int taskID = g_network->getCurrentTask();
+		state TaskPriority taskID = g_network->getCurrentTask();
 		state Promise<Void> p;
 		state eio_req* r = eio_fstat( fd, 0, eio_callback, &p );
 		try { wait( p.getFuture() ); } catch (...) { g_network->setCurrentTask( taskID ); eio_cancel(r); throw; }
@@ -363,7 +367,7 @@ private:
 	}
 
 	ACTOR static Future<EIO_STRUCT_STAT> stat_impl( std::string filename ) {
-		state int taskID = g_network->getCurrentTask();
+		state TaskPriority taskID = g_network->getCurrentTask();
 		state Promise<Void> p;
 		state EIO_STRUCT_STAT statdata;
 		state eio_req* r = eio_stat( filename.c_str(), 0, eio_callback, &p );
@@ -377,7 +381,7 @@ private:
 
 	ACTOR template <class R> static Future<R> dispatch_impl( std::function<R()> func) {
 		state Dispatch<R> data( func );
-		state int taskID = g_network->getCurrentTask();
+		state TaskPriority taskID = g_network->getCurrentTask();
 
 		state eio_req* r = eio_custom( [](eio_req* req) {
 			// Runs on the eio thread pool
@@ -418,7 +422,7 @@ private:
 	static void eio_want_poll() {
 		want_poll = 1;
 		// SOMEDAY: NULL for deferred error, no analysis of correctness (itp)
-		onMainThreadVoid([](){ poll_eio(); }, NULL, TaskPollEIO);
+		onMainThreadVoid([](){ poll_eio(); }, NULL, TaskPriority::PollEIO);
 	}
 
 	static int eio_callback( eio_req* req ) {

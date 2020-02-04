@@ -28,17 +28,50 @@
 using std::min;
 using std::max;
 
-ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID masterId ) {
+// in-memory flag to disable DD
+bool ddEnabled = true;
+UID ddEnabledStatusUID = UID();
+
+bool isDDEnabled() {
+	return ddEnabled;
+}
+
+bool setDDEnabled(bool status, UID snapUID) {
+	TraceEvent("SetDDEnabled")
+		.detail("Status", status)
+		.detail("SnapUID", snapUID);
+	ASSERT(snapUID != UID());
+	if (!status) {
+		// disabling DD
+		if (ddEnabledStatusUID != UID()) {
+			// disable DD when a disable is already in progress not allowed
+			return false;
+		}
+		ddEnabled = status;
+		ddEnabledStatusUID = snapUID;
+		return true;
+	}
+	// enabling DD
+	if (snapUID != ddEnabledStatusUID) {
+		// enabling DD not allowed if UID does not match with the disable request
+		return false;
+	}
+	// reset to default status
+	ddEnabled = status;
+	ddEnabledStatusUID = UID();
+	return true;
+}
+
+ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID ddId ) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			state MoveKeysLock lock;
+			state UID txnId;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			if( !g_network->isSimulated() ) {
-				UID id(deterministicRandom()->randomUniqueID());
-				TraceEvent("TakeMoveKeysLockTransaction", masterId)
-					.detail("TransactionUID", id);
-				tr.debugTransaction( id );
+				txnId = deterministicRandom()->randomUniqueID();
+				tr.debugTransaction(txnId);
 			}
 			{
 				Optional<Value> readVal = wait( tr.get( moveKeysLockOwnerKey ) );
@@ -49,6 +82,13 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID masterId ) {
 				lock.prevWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 			}
 			lock.myOwner = deterministicRandom()->randomUniqueID();
+			tr.set(moveKeysLockOwnerKey, BinaryWriter::toValue(lock.myOwner, Unversioned()));
+			wait(tr.commit());
+			TraceEvent("TakeMoveKeysLockTransaction", ddId)
+			    .detail("TransactionUID", txnId)
+			    .detail("PrevOwner", lock.prevOwner.toString())
+			    .detail("PrevWrite", lock.prevWrite.toString())
+			    .detail("MyOwner", lock.myOwner.toString());
 			return lock;
 		} catch (Error &e){
 			wait(tr.onError(e));
@@ -58,6 +98,10 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID masterId ) {
 }
 
 ACTOR Future<Void> checkMoveKeysLock( Transaction* tr, MoveKeysLock lock, bool isWrite = true ) {
+	if (!isDDEnabled()) {
+		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck");
+		throw movekeys_conflict();
+	}
 	Optional<Value> readVal = wait( tr->get( moveKeysLockOwnerKey ) );
 	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 
@@ -71,11 +115,19 @@ ACTOR Future<Void> checkMoveKeysLock( Transaction* tr, MoveKeysLock lock, bool i
 		}
 
 		// Take the lock
-		if(isWrite) {
-			BinaryWriter wrMyOwner(Unversioned()); wrMyOwner << lock.myOwner;
-			tr->set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
-			BinaryWriter wrLastWrite(Unversioned()); wrLastWrite << deterministicRandom()->randomUniqueID();
-			tr->set( moveKeysLockWriteKey, wrLastWrite.toValue() );
+		if (isWrite) {
+			BinaryWriter wrMyOwner(Unversioned());
+			wrMyOwner << lock.myOwner;
+			tr->set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+			BinaryWriter wrLastWrite(Unversioned());
+			UID lastWriter = deterministicRandom()->randomUniqueID();
+			wrLastWrite << lastWriter;
+			tr->set(moveKeysLockWriteKey, wrLastWrite.toValue());
+			TraceEvent("CheckMoveKeysLock")
+			    .detail("PrevOwner", lock.prevOwner.toString())
+			    .detail("PrevWrite", lock.prevWrite.toString())
+			    .detail("MyOwner", lock.myOwner.toString())
+			    .detail("Writer", lastWriter.toString());
 		}
 
 		return Void();
@@ -99,8 +151,8 @@ Future<Void> checkMoveKeysLockReadOnly( Transaction* tr, MoveKeysLock lock ) {
 	return checkMoveKeysLock(tr, lock, false);
 }
 
-ACTOR Future<Optional<UID>> checkReadWrite( Future< ErrorOr<std::pair<Version,Version>> > fReply, UID uid, Version version ) {
-	ErrorOr<std::pair<Version,Version>> reply = wait( fReply );
+ACTOR Future<Optional<UID>> checkReadWrite(Future<ErrorOr<GetShardStateReply>> fReply, UID uid, Version version) {
+	ErrorOr<GetShardStateReply> reply = wait(fReply);
 	if (!reply.present() || reply.get().first < version)
 		return Optional<UID>();
 	return Optional<UID>(uid);
@@ -130,12 +182,12 @@ ACTOR Future<vector<UID>> addReadWriteDestinations(KeyRangeRef shard, vector<Sto
 
 	state vector< Future<Optional<UID>> > srcChecks;
 	for(int s=0; s<srcInterfs.size(); s++) {
-		srcChecks.push_back( checkReadWrite( srcInterfs[s].getShardState.getReplyUnlessFailedFor( GetShardStateRequest( shard, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskMoveKeys ), srcInterfs[s].id(), 0 ) );
+		srcChecks.push_back( checkReadWrite( srcInterfs[s].getShardState.getReplyUnlessFailedFor( GetShardStateRequest( shard, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskPriority::MoveKeys ), srcInterfs[s].id(), 0 ) );
 	}
 
 	state vector< Future<Optional<UID>> > destChecks;
 	for(int s=0; s<destInterfs.size(); s++) {
-		destChecks.push_back( checkReadWrite( destInterfs[s].getShardState.getReplyUnlessFailedFor( GetShardStateRequest( shard, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskMoveKeys ), destInterfs[s].id(), version ) );
+		destChecks.push_back( checkReadWrite( destInterfs[s].getShardState.getReplyUnlessFailedFor( GetShardStateRequest( shard, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskPriority::MoveKeys ), destInterfs[s].id(), version ) );
 	}
 
 	wait( waitForAll(srcChecks) && waitForAll(destChecks) );
@@ -218,14 +270,25 @@ ACTOR Future<vector<vector<UID>>> additionalSources(Standalone<RangeResultRef> s
 	return result;
 }
 
+ACTOR Future<Void> logWarningAfter( const char * context, double duration, vector<UID> servers) {
+	state double startTime = now();
+	loop {
+		wait(delay(duration));
+		TraceEvent(SevWarnAlways, context).detail("Duration", now() - startTime).detail("Servers", describe(servers));
+	}
+}
+
+// keyServer: map from keys to destination servers
+// serverKeys: two-dimension map: [servers][keys], value is the servers' state of having the keys: active(not-have), complete(already has), ""().
 // Set keyServers[keys].dest = servers
 // Set serverKeys[servers][keys] = active for each subrange of keys that the server did not already have, complete for each subrange that it already has
 // Set serverKeys[dest][keys] = "" for the dest servers of each existing shard in keys (unless that destination is a member of servers OR if the source list is sufficiently degraded)
 ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> servers, MoveKeysLock lock, FlowLock *startMoveKeysLock, UID relocationIntervalId ) {
 	state TraceInterval interval("RelocateShard_StartMoveKeys");
+	state Future<Void> warningLogger = logWarningAfter("StartMoveKeysTooLong", 600, servers);
 	//state TraceInterval waitInterval("");
 
-	wait( startMoveKeysLock->take( TaskDataDistributionLaunch ) );
+	wait( startMoveKeysLock->take( TaskPriority::DataDistributionLaunch ) );
 	state FlowLock::Releaser releaser( *startMoveKeysLock );
 
 	TraceEvent(SevDebug, interval.begin(), relocationIntervalId);
@@ -236,8 +299,9 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 		state int shards = 0;
 		state int maxRetries = 0;
 
-		//This process can be split up into multiple transactions if there are too many existing overlapping shards
-		//In that case, each iteration of this loop will have begin set to the end of the last processed shard
+		// If it's multiple transaction, how do we achieve atomicity?
+		// This process can be split up into multiple transactions if there are too many existing overlapping shards
+		// In that case, each iteration of this loop will have begin set to the end of the last processed shard
 		while(begin < keys.end) {
 			TEST(begin > keys.begin); //Multi-transactional startMoveKeys
 			batches++;
@@ -255,7 +319,7 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					//Keep track of shards for all src servers so that we can preserve their values in serverKeys
 					state Map<UID, VectorRef<KeyRangeRef>> shardMap;
 
-					tr.info.taskID = TaskMoveKeys;
+					tr.info.taskID = TaskPriority::MoveKeys;
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 					wait( checkMoveKeysLock(&tr, lock) );
@@ -267,8 +331,9 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 
 					for(int s=0; s<serverListValues.size(); s++) {
 						if (!serverListValues[s].present()) {
-							// Attempt to move onto a server that isn't in serverList (removed or never added to the database)
-							// This can happen (why?) and is handled by the data distribution algorithm
+							// Attempt to move onto a server that isn't in serverList (removed or never added to the
+							// database) This can happen (why?) and is handled by the data distribution algorithm
+							// FIXME: Answer why this can happen?
 							TEST(true); //start move keys moving to a removed server
 							throw move_to_removed_server();
 						}
@@ -282,13 +347,13 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					state Key endKey = old.end()[-1].key;
 					currentKeys = KeyRangeRef(currentKeys.begin, endKey);
 
-					/*TraceEvent("StartMoveKeysBatch", relocationIntervalId)
-					  .detail("KeyBegin", currentKeys.begin.c_str())
-					  .detail("KeyEnd", currentKeys.end.c_str());*/
+					// TraceEvent("StartMoveKeysBatch", relocationIntervalId)
+					//     .detail("KeyBegin", currentKeys.begin.toString())
+					//     .detail("KeyEnd", currentKeys.end.toString());
 
-					//printf("Moving '%s'-'%s' (%d) to %d servers\n", keys.begin.toString().c_str(), keys.end.toString().c_str(), old.size(), servers.size());
-					//for(int i=0; i<old.size(); i++)
-					//	printf("'%s': '%s'\n", old[i].key.toString().c_str(), old[i].value.toString().c_str());
+					// printf("Moving '%s'-'%s' (%d) to %d servers\n", keys.begin.toString().c_str(),
+					// keys.end.toString().c_str(), old.size(), servers.size()); for(int i=0; i<old.size(); i++)
+					// 	printf("'%s': '%s'\n", old[i].key.toString().c_str(), old[i].value.toString().c_str());
 
 					//Check that enough servers for each shard are in the correct state
 					vector<vector<UID>> addAsSource = wait(additionalSources(old, &tr, servers.size(), SERVER_KNOBS->MAX_ADDED_SOURCES_MULTIPLIER*servers.size()));
@@ -300,12 +365,12 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 						vector<UID> dest;
 						decodeKeyServersValue( old[i].value, src, dest );
 
-						/*TraceEvent("StartMoveKeysOldRange", relocationIntervalId)
-							.detail("KeyBegin", rangeIntersectKeys.begin.c_str())
-							.detail("KeyEnd", rangeIntersectKeys.end.c_str())
-							.detail("OldSrc", describe(src))
-							.detail("OldDest", describe(dest))
-							.detail("ReadVersion", tr.getReadVersion().get());*/
+						// TraceEvent("StartMoveKeysOldRange", relocationIntervalId)
+						//     .detail("KeyBegin", rangeIntersectKeys.begin.toString())
+						//     .detail("KeyEnd", rangeIntersectKeys.end.toString())
+						//     .detail("OldSrc", describe(src))
+						//     .detail("OldDest", describe(dest))
+						//     .detail("ReadVersion", tr.getReadVersion().get());
 
 						for(auto& uid : addAsSource[i]) {
 							src.push_back(uid);
@@ -318,15 +383,13 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 						//Track old destination servers.  They may be removed from serverKeys soon, since they are about to be overwritten in keyServers
 						for(auto s = dest.begin(); s != dest.end(); ++s) {
 							oldDests.insert(*s);
-							/*TraceEvent("StartMoveKeysOldDestAdd", relocationIntervalId)
-								.detail("Server", s->id());*/
+							// TraceEvent("StartMoveKeysOldDestAdd", relocationIntervalId).detail("Server", *s);
 						}
 
 						//Keep track of src shards so that we can preserve their values when we overwrite serverKeys
 						for(auto& uid : src) {
 							shardMap[uid].push_back(old.arena(), rangeIntersectKeys);
-							/*TraceEvent("StartMoveKeysShardMapAdd", relocationIntervalId)
-								.detail("Server", *s);*/
+							// TraceEvent("StartMoveKeysShardMapAdd", relocationIntervalId).detail("Server", uid);
 						}
 					}
 
@@ -394,11 +457,12 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 ACTOR Future<Void> waitForShardReady( StorageServerInterface server, KeyRange keys, Version minVersion, GetShardStateRequest::waitMode mode ) {
 	loop {
 		try {
-			std::pair<Version,Version> rep = wait( server.getShardState.getReply( GetShardStateRequest(keys, mode), TaskMoveKeys ) );
+			GetShardStateReply rep =
+			    wait(server.getShardState.getReply(GetShardStateRequest(keys, mode), TaskPriority::MoveKeys));
 			if (rep.first >= minVersion) {
 				return Void();
 			}
-			wait( delayJittered( SERVER_KNOBS->SHARD_READY_DELAY, TaskMoveKeys ) );
+			wait( delayJittered( SERVER_KNOBS->SHARD_READY_DELAY, TaskPriority::MoveKeys ) );
 		}
 		catch (Error& e) {
 			if( e.code() != error_code_timed_out ) {
@@ -419,7 +483,7 @@ ACTOR Future<Void> checkFetchingState( Database cx, vector<UID> dest, KeyRange k
 		try {
 			if (BUGGIFY) wait(delay(5));
 
-			tr.info.taskID = TaskMoveKeys;
+			tr.info.taskID = TaskPriority::MoveKeys;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			vector< Future< Optional<Value> > > serverListEntries;
@@ -439,7 +503,7 @@ ACTOR Future<Void> checkFetchingState( Database cx, vector<UID> dest, KeyRange k
 			}
 
 			wait( timeoutError( waitForAll( requests ),
-					SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT, TaskMoveKeys ) );
+					SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT, TaskPriority::MoveKeys ) );
 
 			dataMovementComplete.send(Void());
 			return Void();
@@ -460,6 +524,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 {
 	state TraceInterval interval("RelocateShard_FinishMoveKeys");
 	state TraceInterval waitInterval("");
+	state Future<Void> warningLogger = logWarningAfter("FinishMoveKeysTooLong", 600, destinationTeam);
 	state Key begin = keys.begin;
 	state Key endKey;
 	state int retries = 0;
@@ -480,11 +545,11 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 			//printf("finishMoveKeys( '%s'-'%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
 			loop {
 				try {
-					tr.info.taskID = TaskMoveKeys;
+					tr.info.taskID = TaskPriority::MoveKeys;
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 					releaser.release();
-					wait( finishMoveKeysParallelismLock->take( TaskDataDistributionLaunch ) );
+					wait( finishMoveKeysParallelismLock->take( TaskPriority::DataDistributionLaunch ) );
 					releaser = FlowLock::Releaser( *finishMoveKeysParallelismLock );
 
 					wait( checkMoveKeysLock(&tr, lock) );
@@ -535,16 +600,21 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						allServers.insert(srcSet.begin(), srcSet.end());
 						allServers.insert(destSet.begin(), destSet.end());
 
-						alreadyMoved = destSet.empty() && srcSet == intendedTeam;
+						// Because marking a server as failed can shrink a team, do not check for exact equality
+						// Instead, check for a subset of the intended team, which also covers the equality case
+						bool isSubset =
+						    std::includes(intendedTeam.begin(), intendedTeam.end(), srcSet.begin(), srcSet.end());
+						alreadyMoved = destSet.empty() && isSubset;
 						if(destSet != intendedTeam && !alreadyMoved) {
 							TraceEvent(SevWarn, "MoveKeysDestTeamNotIntended", relocationIntervalId)
-								.detail("KeyBegin", keys.begin)
-								.detail("KeyEnd", keys.end)
-								.detail("IterationBegin", begin)
-								.detail("IterationEnd", endKey)
-								.detail("DestSet", describe(destSet))
-								.detail("IntendedTeam", describe(intendedTeam))
-								.detail("KeyServers", keyServers);
+							    .detail("KeyBegin", keys.begin)
+							    .detail("KeyEnd", keys.end)
+							    .detail("IterationBegin", begin)
+							    .detail("IterationEnd", endKey)
+							    .detail("SrcSet", describe(srcSet))
+							    .detail("DestSet", describe(destSet))
+							    .detail("IntendedTeam", describe(intendedTeam))
+							    .detail("KeyServers", keyServers);
 							//ASSERT( false );
 
 							ASSERT(!dest.empty()); //The range has already been moved, but to a different dest (or maybe dest was cleared)
@@ -577,7 +647,11 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 
 						allServers.insert(srcSet.begin(), srcSet.end());
 
-						alreadyMoved = dest2.empty() && srcSet == intendedTeam;
+						// Because marking a server as failed can shrink a team, do not check for exact equality
+						// Instead, check for a subset of the intended team, which also covers the equality case
+						bool isSubset =
+						    std::includes(intendedTeam.begin(), intendedTeam.end(), srcSet.begin(), srcSet.end());
+						alreadyMoved = dest2.empty() && isSubset;
 						if (dest2 != dest && !alreadyMoved) {
 							TraceEvent(SevError,"FinishMoveKeysError", relocationIntervalId)
 								.detail("Reason", "dest mismatch")
@@ -630,9 +704,10 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						storageServerInterfaces.push_back( si );
 					}
 
+					// Wait for new destination servers to fetch the keys
 					for(int s=0; s<storageServerInterfaces.size(); s++)
 						serverReady.push_back( waitForShardReady( storageServerInterfaces[s], keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE) );
-					wait( timeout( waitForAll( serverReady ), SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT, Void(), TaskMoveKeys ) );
+					wait( timeout( waitForAll( serverReady ), SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT, Void(), TaskPriority::MoveKeys ) );
 					int count = dest.size() - newDestinations.size();
 					for(int s=0; s<serverReady.size(); s++)
 						count += serverReady[s].isReady() && !serverReady[s].isError();
@@ -697,13 +772,17 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 				StringRef(encodeExcludedServersKey( AddressExclusion( server.address().ip, server.address().port ))) );
 			state Future<Optional<Value>> fExclIP = tr.get(
 				StringRef(encodeExcludedServersKey( AddressExclusion( server.address().ip ))) );
+			state Future<Optional<Value>> fFailProc = tr.get(
+				StringRef(encodeFailedServersKey( AddressExclusion( server.address().ip, server.address().port ))) );
+			state Future<Optional<Value>> fFailIP = tr.get(
+				StringRef(encodeFailedServersKey( AddressExclusion( server.address().ip ))) );
 			state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
 			state Future<Standalone<RangeResultRef>> fHistoryTags = tr.getRange( serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, true);
 
-			wait( success(fTagLocalities) && success(fv) && success(fExclProc) && success(fExclIP) && success(fTags) && success(fHistoryTags) );
+			wait( success(fTagLocalities) && success(fv) && success(fExclProc) && success(fExclIP) && success(fFailProc) && success(fFailIP) && success(fTags) && success(fHistoryTags) );
 
-			// If we have been added to the excluded state servers list, we have to fail
-			if (fExclProc.get().present() || fExclIP.get().present())
+			// If we have been added to the excluded/failed state servers list, we have to fail
+			if (fExclProc.get().present() || fExclIP.get().present() || fFailProc.get().present() || fFailIP.get().present() )
 				throw recruitment_failed();
 
 			if(fTagLocalities.get().more || fTags.get().more || fHistoryTags.get().more)
@@ -778,9 +857,9 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 		}
 	}
 }
-
+// A SS can be removed only if all data (shards) on the SS have been moved away from the SS.
 ACTOR Future<bool> canRemoveStorageServer( Transaction* tr, UID serverID ) {
-	Standalone<RangeResultRef> keys = wait( krmGetRanges( tr, serverKeysPrefixFor(serverID), allKeys, 2 ) );
+	Standalone<RangeResultRef> keys = wait(krmGetRanges(tr, serverKeysPrefixFor(serverID), allKeys, 2));
 
 	ASSERT(keys.size() >= 2);
 
@@ -808,7 +887,7 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 			if (!canRemove) {
 				TEST(true); // The caller had a transaction in flight that assigned keys to the server.  Wait for it to reverse its mistake.
 				TraceEvent(SevWarn,"NoCanRemove").detail("Count", noCanRemoveCount++).detail("ServerID", serverID);
-				wait( delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskDataDistributionLaunch) );
+				wait( delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskPriority::DataDistributionLaunch) );
 				tr.reset();
 				TraceEvent("RemoveStorageServerRetrying").detail("CanRemove", canRemove);
 			} else {
@@ -875,6 +954,73 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 			TraceEvent("RemoveStorageServerRetrying").error(err);
 		}
 	}
+}
+// Remove the server from keyServer list and set serverKeysFalse to the server's serverKeys list.
+// Changes to keyServer and serverKey must happen symmetrically in a transaction.
+ACTOR Future<Void> removeKeysFromFailedServer(Database cx, UID serverID, MoveKeysLock lock) {
+	state Key begin = allKeys.begin;
+	// Multi-transactional removal in case of large number of shards, concern in violating 5s transaction limit
+	while (begin < allKeys.end) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.info.taskID = TaskPriority::MoveKeys;
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				wait(checkMoveKeysLock(&tr, lock));
+				TraceEvent("RemoveKeysFromFailedServerLocked")
+				    .detail("ServerID", serverID)
+				    .detail("Version", tr.getReadVersion().get())
+				    .detail("Begin", begin);
+				// Get all values of keyServers and remove serverID from every occurrence
+				// Very inefficient going over every entry in keyServers
+				// No shortcut because keyServers and serverKeys are not guaranteed same shard boundaries
+				state Standalone<RangeResultRef> keyServers =
+				    wait(krmGetRanges(&tr, keyServersPrefix, KeyRangeRef(begin, allKeys.end),
+				                      SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT, SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+				state KeyRange currentKeys = KeyRangeRef(begin, keyServers.end()[-1].key);
+				for (int i = 0; i < keyServers.size() - 1; ++i) {
+					auto it = keyServers[i];
+					vector<UID> src;
+					vector<UID> dest;
+					decodeKeyServersValue(it.value, src, dest);
+
+					// The failed server is not present
+					if (std::find(src.begin(), src.end(), serverID) == src.end() &&
+					    std::find(dest.begin(), dest.end(), serverID) == dest.end()) {
+						continue;
+					}
+
+					// Update the vectors to remove failed server then set the value again
+					// Dest is usually empty, but keep this in case there is parallel data movement
+					src.erase(std::remove(src.begin(), src.end(), serverID), src.end());
+					dest.erase(std::remove(dest.begin(), dest.end(), serverID), dest.end());
+					TraceEvent(SevDebug, "FailedServerSetKey", serverID)
+						.detail("Key", it.key)
+						.detail("ValueSrc", describe(src))
+						.detail("ValueDest", describe(dest));
+					tr.set(keyServersKey(it.key), keyServersValue(src, dest));
+				}
+
+				// Set entire range for our serverID in serverKeys keyspace to false to signal erasure
+				TraceEvent(SevDebug, "FailedServerSetRange", serverID)
+					.detail("Begin", currentKeys.begin)
+					.detail("End", currentKeys.end);
+				wait(krmSetRangeCoalescing(&tr, serverKeysPrefixFor(serverID), currentKeys, allKeys, serverKeysFalse));
+				wait(tr.commit());
+				TraceEvent(SevDebug, "FailedServerCommitSuccess", serverID)
+					.detail("Begin", currentKeys.begin)
+					.detail("End", currentKeys.end)
+					.detail("CommitVersion", tr.getCommittedVersion());
+				// Update beginning of next iteration's range
+				begin = currentKeys.end;
+				break;
+			} catch (Error& e) {
+				TraceEvent("FailedServerError", serverID).error(e);
+				wait(tr.onError(e));
+			}
+		}
+	}
+	return Void();
 }
 
 ACTOR Future<Void> moveKeys(

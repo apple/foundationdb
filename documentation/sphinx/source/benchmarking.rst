@@ -149,3 +149,16 @@ Next steps
 So how should you go about benchmarking FoundationDB for your own system?
     
 Begin with the peak throughput your system needs to handle. From here, use the data on our :doc:`performance page <performance>` as a starting point for your cluster configuration and workload design. From our numbers for per-core throughput, you can derive an initial estimate of the number of cores you'll need. Construct a workload that reflects your pattern of reads and writes, making sure to use a large enough number of operations per transaction and/or clients to achieve high concurrency.
+
+To find bottlenecks there are several tools at your disposal:
+
+* You can find several useful metrics in the trace files that FoundationDB emits
+* Your standard Linux operating system tools (like perf) might come in handy
+* FoundationDB also emits dtrace probes (:doc:`dtrace-probes`) that you can look at using perf or System Tap
+
+.. toctree::
+    :maxdepth: 1
+    :titlesonly:
+    :hidden:
+
+    dtrace-probes

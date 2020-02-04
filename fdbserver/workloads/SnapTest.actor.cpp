@@ -122,7 +122,7 @@ public: // workload functions
 		// read the key SnapFailedTLog.$UID
 		loop {
 			try {
-				Standalone<StringRef> keyStr = snapTestFailStatus.withSuffix(StringRef(self->snapUID.toString()));
+				Standalone<StringRef> keyStr = LiteralStringRef("\xff/SnapTestFailStatus/").withSuffix(StringRef(self->snapUID.toString()));
 				TraceEvent("TestKeyStr").detail("Value", keyStr);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Optional<Value> val = wait(tr.get(keyStr));
@@ -151,30 +151,6 @@ public: // workload functions
 
 	void getMetrics(vector<PerfMetric>& m) override { TraceEvent("SnapTestWorkloadGetMetrics"); }
 
-	ACTOR Future<Void> snapExecHelper(SnapTestWorkload* self, Database cx, StringRef keyRef, StringRef valueRef) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				tr.execute(keyRef, valueRef);
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				try {
-					wait(tr.onError(e));
-				} catch (Error& e) {
-					if (e.code() == error_code_cluster_not_fully_recovered
-						|| e.code() == error_code_txn_exec_log_anti_quorum) {
-						TraceEvent(SevWarnAlways, "ClusterNotFullyRecovered");
-						self->skipCheck = true;
-						break;
-					}
-					throw;
-				}
-			}
-		}
-		return Void();
-	}
-
 	ACTOR Future<Void> _create_keys(Database cx, std::string prefix, bool even = true) {
 		state Transaction tr(cx);
 		state vector<int64_t> keys;
@@ -183,7 +159,6 @@ public: // workload functions
 			keys.push_back(deterministicRandom()->randomInt64(0, INT64_MAX - 2));
 		}
 
-		state int retry = 0;
 		tr.reset();
 		loop {
 			try {
@@ -214,6 +189,7 @@ public: // workload functions
 
 	ACTOR Future<Void> _start(Database cx, SnapTestWorkload* self) {
 		state Transaction tr(cx);
+		state bool snapFailed = false;
 
 		if (self->testID == 0) {
 			// create even keys before the snapshot
@@ -226,7 +202,6 @@ public: // workload functions
 			wait(delay(toDelay));
 
 			state int retry = 0;
-			state bool snapFailed = false;
 			loop {
 				self->snapUID = deterministicRandom()->randomUniqueID();
 				try {
@@ -235,13 +210,15 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_cluster_not_fully_recovered ||
-						e.code() == error_code_txn_exec_log_anti_quorum) {
-						++retry;
-						if (retry > 3) {
-							snapFailed = true;
-							break;
-						}
+					if (e.code() == error_code_snap_log_anti_quorum_unsupported) {
+						snapFailed = true;
+						break;
+					}
+					++retry;
+					// snap v2 can fail for many reasons, so retry for 5 times and then fail it
+					if (retry > 5) {
+						snapFailed = true;
+						break;
 					}
 				}
 			}
@@ -308,32 +285,6 @@ public: // workload functions
 				throw operation_failed();
 			}
 		} else if (self->testID == 4) {
-			// description: if disable of a TLog pop was not followed by a
-			// corresponding enable, then TLog will automatically enable the
-			// popping of TLogs. this test case validates that we auto
-			// enable the popping of TLogs
-			state Standalone<StringRef> payLoadRef = LiteralStringRef("empty-binary:uid=a36b2ca0e8dab0452ac3e12b6b926f4b");
-			wait(self->snapExecHelper(self, cx, execDisableTLogPop, payLoadRef));
-		} else if (self->testID == 5) {
-			// snapshot create without disabling pop of the TLog
-			StringRef uidStr = LiteralStringRef("d78b08d47f341158e9a54d4baaf4a4dd");
-			self->snapUID = UID::fromString(uidStr.toString());
-			state Standalone<StringRef> snapPayload = LiteralStringRef("/bin/"
-														"snap_create.sh:uid=").withSuffix(uidStr);
-			wait(self->snapExecHelper(self, cx, execSnap, snapPayload));
-		} else if (self->testID == 6) {
-			// disable popping of TLog and snapshot create with mis-matching
-			payLoadRef = LiteralStringRef("empty-binary:uid=f49d27ddf7a28b6549d930743e0ebdbe");
-			wait(self->snapExecHelper(self, cx, execDisableTLogPop, payLoadRef));
-			if (self->skipCheck) {
-				return Void();
-			}
-
-			StringRef uidStr = LiteralStringRef("ba61e9612a561d60bd83ad83e1b63568");
-			self->snapUID = UID::fromString(uidStr.toString());
-			snapPayload = LiteralStringRef("/bin/snap_create.sh:uid=").withSuffix(uidStr);
-			wait(self->snapExecHelper(self, cx, execSnap, snapPayload));
-		} else if (self->testID == 7) {
 			// create a snapshot with a non whitelisted binary path and operation
 			// should fail
 			state bool testedFailure = false;
@@ -346,12 +297,12 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_cluster_not_fully_recovered ||
-						e.code() == error_code_txn_exec_log_anti_quorum) {
+					if (e.code() == error_code_snap_not_fully_recovered_unsupported ||
+						e.code() == error_code_snap_log_anti_quorum_unsupported) {
 						snapFailed = true;
 						break;
 					}
-					if (e.code() == error_code_transaction_not_permitted) {
+					if (e.code() == error_code_snap_path_not_whitelisted) {
 						testedFailure = true;
 						break;
 					}

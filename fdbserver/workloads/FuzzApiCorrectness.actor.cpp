@@ -128,6 +128,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		useSystemKeys = deterministicRandom()->coinflip();
 		initialKeyDensity = deterministicRandom()->random01(); // This fraction of keys are present before the first transaction (and after an unknown result)
 
+		// See https://github.com/apple/foundationdb/issues/2424
+		if (BUGGIFY) {
+			enableBuggify(true, BuggifyType::Client);
+		}
+
 		if( adjacentKeys ) {
 			nodes = std::min<int64_t>( deterministicRandom()->randomInt(1, 4 << deterministicRandom()->randomInt(0,14)), CLIENT_KNOBS->KEY_SIZE_LIMIT * 1.2 );
 		}
@@ -154,7 +159,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			.detail("MaxClearSize", maxClearSize)
 			.detail("UseSystemKeys", useSystemKeys);
 
-		TraceEvent("RemapEventSeverity").detail("TargetEvent", "Net2_LargePacket").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
+		TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargePacketSent").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
+		TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargePacketReceived").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
 		TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargeTransaction").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
 	}
 
@@ -382,8 +388,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		ExceptionContract contract;
 		std::vector<ThreadFuture<Void> > pre_steps;
 
-		BaseTest(unsigned int id_, FuzzApiCorrectnessWorkload *wl, const char *func)
-			: id(id_), workload(wl), contract(func, std::bind(&Subclass::augmentTrace, static_cast<Subclass *>(this), ph::_1)) {}
+		BaseTest(unsigned int id_, FuzzApiCorrectnessWorkload* wl, const char* func)
+		  : id(id_), workload(wl), contract(func, std::bind(&BaseTest::augmentTrace, this, ph::_1)) {}
 
 		static Key makeKey() {
 			double ksrv = deterministicRandom()->random01();
@@ -1092,6 +1098,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			}
 
 			contract = {
+				std::make_pair( error_code_invalid_option, ExceptionContract::Possible ),
 				std::make_pair( error_code_invalid_option_value, ExceptionContract::Possible ),
 				std::make_pair( error_code_client_invalid_operation, ExceptionContract::possibleIf((FDBTransactionOptions::Option)op == FDBTransactionOptions::READ_YOUR_WRITES_DISABLE || 
 				                                                                                   (FDBTransactionOptions::Option)op == FDBTransactionOptions::LOG_TRANSACTION) ),

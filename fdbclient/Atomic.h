@@ -28,11 +28,11 @@ inline ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptiona
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!existingValue.size()) return otherOperand;
 	if(!otherOperand.size()) return otherOperand;
-	
+
 	uint8_t* buf = new (ar) uint8_t [otherOperand.size()];
 	int i = 0;
 	int carry = 0;
-		
+
 	for(i = 0; i<std::min(existingValue.size(), otherOperand.size()); i++) {
 		int sum = existingValue[i] + otherOperand[i] + carry;
 		buf[i] = sum;
@@ -44,16 +44,16 @@ inline ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptiona
 		carry = sum >> 8;
 	}
 
-	return StringRef(buf, i);	
+	return StringRef(buf, i);
 }
 
 inline ValueRef doAnd(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!otherOperand.size()) return otherOperand;
-	
+
 	uint8_t* buf = new (ar) uint8_t [otherOperand.size()];
 	int i = 0;
-	
+
 	for(i = 0; i<std::min(existingValue.size(), otherOperand.size()); i++)
 		buf[i] = existingValue[i] & otherOperand[i];
 	for(; i<otherOperand.size(); i++)
@@ -76,7 +76,7 @@ inline ValueRef doOr(const Optional<ValueRef>& existingValueOptional, const Valu
 
 	uint8_t* buf = new (ar) uint8_t [otherOperand.size()];
 	int i = 0;
-	
+
 	for(i = 0; i<std::min(existingValue.size(), otherOperand.size()); i++)
 		buf[i] = existingValue[i] | otherOperand[i];
 	for(; i<otherOperand.size(); i++)
@@ -89,10 +89,10 @@ inline ValueRef doXor(const Optional<ValueRef>& existingValueOptional, const Val
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!existingValue.size()) return otherOperand;
 	if(!otherOperand.size()) return otherOperand;
-	
+
 	uint8_t* buf = new (ar) uint8_t [otherOperand.size()];
 	int i = 0;
-	
+
 	for(i = 0; i<std::min(existingValue.size(), otherOperand.size()); i++)
 		buf[i] = existingValue[i] ^ otherOperand[i];
 
@@ -212,7 +212,7 @@ inline ValueRef doMinV2(const Optional<ValueRef>& existingValueOptional, const V
 
 inline ValueRef doByteMin(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	if (!existingValueOptional.present()) return otherOperand;
-	
+
 	const ValueRef& existingValue = existingValueOptional.get();
 	if (existingValue < otherOperand)
 		return existingValue;
@@ -229,10 +229,19 @@ inline Optional<ValueRef> doCompareAndClear(const Optional<ValueRef>& existingVa
 	return existingValueOptional; // No change required.
 }
 
+static void placeVersionstamp( uint8_t* destination, Version version, uint16_t transactionNumber ) {
+	version = bigEndian64(version);
+	transactionNumber = bigEndian16(transactionNumber);
+	static_assert( sizeof(version) == 8, "version size mismatch" );
+	memcpy( destination, &version, sizeof(version) );
+	static_assert( sizeof(transactionNumber) == 2, "txn num size mismatch");
+	memcpy( destination + sizeof(version), &transactionNumber, sizeof(transactionNumber) );
+}
+
 /*
 * Returns the range corresponding to the specified versionstamp key.
 */
-inline KeyRangeRef getVersionstampKeyRange(Arena& arena, const KeyRef &key, const KeyRef &maxKey) {
+inline KeyRangeRef getVersionstampKeyRange(Arena& arena, const KeyRef &key, Version minVersion, const KeyRef &maxKey) {
 	KeyRef begin(arena, key);
 	KeyRef end(arena, key);
 
@@ -249,19 +258,23 @@ inline KeyRangeRef getVersionstampKeyRange(Arena& arena, const KeyRef &key, cons
 	if (pos < 0 || pos + 10 > begin.size())
 		throw client_invalid_operation();
 
-	memset(mutateString(begin) + pos, 0, 10);
+	placeVersionstamp(mutateString(begin)+pos, minVersion, 0);
 	memset(mutateString(end) + pos, '\xff', 10);
 
 	return KeyRangeRef(begin, std::min(end, maxKey));
 }
 
-inline void placeVersionstamp( uint8_t* destination, Version version, uint16_t transactionNumber ) {
-	version = bigEndian64(version);
-	transactionNumber = bigEndian16(transactionNumber);
-	static_assert( sizeof(version) == 8, "version size mismatch" );
-	memcpy( destination, &version, sizeof(version) );
-	static_assert( sizeof(transactionNumber) == 2, "txn num size mismatch");
-	memcpy( destination + sizeof(version), &transactionNumber, sizeof(transactionNumber) );
+inline void transformVersionstampKey( StringRef& key, Version version, uint16_t transactionNumber ) {
+	if (key.size() < 4)
+		throw client_invalid_operation();
+
+	int32_t pos;
+	memcpy(&pos, key.end() - sizeof(int32_t), sizeof(int32_t));
+	pos = littleEndian32(pos);
+	if (pos < 0 || pos + 10 > key.size())
+		throw client_invalid_operation();
+
+	placeVersionstamp( mutateString(key) + pos, version, transactionNumber );
 }
 
 inline void transformVersionstampMutation( MutationRef& mutation, StringRef MutationRef::* param, Version version, uint16_t transactionNumber ) {

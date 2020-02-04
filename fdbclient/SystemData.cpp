@@ -36,14 +36,6 @@ const KeyRef keyServersEnd = keyServersKeys.end;
 const KeyRangeRef keyServersKeyServersKeys ( LiteralStringRef("\xff/keyServers/\xff/keyServers/"), LiteralStringRef("\xff/keyServers/\xff/keyServers0"));
 const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
-// list of reserved exec commands
-const StringRef execSnap = LiteralStringRef("snap"); // snapshot persistent state of
-                                                     // storage, TLog and coordinated state
-const StringRef execDisableTLogPop = LiteralStringRef("\xff/TLogDisablePop"); // disable pop on TLog
-const StringRef execEnableTLogPop = LiteralStringRef("\xff/TLogEnablePop"); // enable pop on TLog
-// used to communicate snap failures between TLog and SnapTest Workload, used only in simulator
-const StringRef snapTestFailStatus = LiteralStringRef("\xff/SnapTestFailStatus/");
-
 const Key keyServersKey( const KeyRef& k ) {
 	return k.withPrefix( keyServersPrefix );
 }
@@ -66,6 +58,28 @@ void decodeKeyServersValue( const ValueRef& value, vector<UID>& src, vector<UID>
 	}
 }
 
+//    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
+const KeyRangeRef storageCacheKeys( LiteralStringRef("\xff/storageCache/"), LiteralStringRef("\xff/storageCache0") );
+const KeyRef storageCachePrefix = storageCacheKeys.begin;
+
+const Key storageCacheKey( const KeyRef& k ) {
+	return k.withPrefix( storageCachePrefix );
+}
+
+const Value storageCacheValue( const vector<uint16_t>& serverIndices ) {
+	BinaryWriter wr((IncludeVersion())); 
+	wr << serverIndices;
+	return wr.toValue();
+}
+
+void decodeStorageCacheValue( const ValueRef& value, vector<uint16_t>& serverIndices ) {
+	serverIndices.clear();
+	if (value.size()) {
+		BinaryReader rd(value, IncludeVersion());
+		rd >> serverIndices;
+	}
+}
+
 const Value logsValue( const vector<std::pair<UID, NetworkAddress>>& logs, const vector<std::pair<UID, NetworkAddress>>& oldLogs ) {
 	BinaryWriter wr(IncludeVersion());
 	wr << logs;
@@ -80,7 +94,6 @@ std::pair<vector<std::pair<UID, NetworkAddress>>,vector<std::pair<UID, NetworkAd
 	reader >> oldLogs;
 	return std::make_pair(logs, oldLogs);
 }
-
 
 const KeyRef serverKeysPrefix = LiteralStringRef("\xff/serverKeys/");
 const ValueRef serverKeysTrue = LiteralStringRef("1"), // compatible with what was serverKeysTrue
@@ -111,6 +124,49 @@ bool serverHasKey( ValueRef storedValue ) {
 	return storedValue == serverKeysTrue;
 }
 
+const KeyRef cacheKeysPrefix = LiteralStringRef("\xff\x02/cacheKeys/");
+
+const Key cacheKeysKey( uint16_t idx, const KeyRef& key ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( cacheKeysPrefix );
+	wr << idx;
+	wr.serializeBytes( LiteralStringRef("/") );
+	wr.serializeBytes( key );
+	return wr.toValue();
+}
+const Key cacheKeysPrefixFor( uint16_t idx ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( cacheKeysPrefix );
+	wr << idx;
+	wr.serializeBytes( LiteralStringRef("/") );
+	return wr.toValue();
+}
+uint16_t cacheKeysDecodeIndex( const KeyRef& key ) {
+	uint16_t idx;
+	BinaryReader rd( key.removePrefix(cacheKeysPrefix), Unversioned() );
+	rd >> idx;
+	return idx;
+}
+KeyRef cacheKeysDecodeKey( const KeyRef& key ) {
+	return key.substr( cacheKeysPrefix.size() + sizeof(uint16_t) + 1);
+}
+
+const KeyRef cacheChangeKey = LiteralStringRef("\xff\x02/cacheChangeKey");
+const KeyRangeRef cacheChangeKeys( LiteralStringRef("\xff\x02/cacheChangeKeys/"), LiteralStringRef("\xff\x02/cacheChangeKeys0") );
+const KeyRef cacheChangePrefix = cacheChangeKeys.begin;
+const Key cacheChangeKeyFor( uint16_t idx ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( cacheChangePrefix );
+	wr << idx;
+	return wr.toValue();
+}
+uint16_t cacheChangeKeyDecodeIndex( const KeyRef& key ) {
+	uint16_t idx;
+	BinaryReader rd( key.removePrefix(cacheChangePrefix), Unversioned() );
+	rd >> idx;
+	return idx;
+}
+
 const KeyRangeRef serverTagKeys(
 	LiteralStringRef("\xff/serverTag/"),
 	LiteralStringRef("\xff/serverTag0") );
@@ -119,6 +175,9 @@ const KeyRangeRef serverTagConflictKeys(
 	LiteralStringRef("\xff/serverTagConflict/"),
 	LiteralStringRef("\xff/serverTagConflict0") );
 const KeyRef serverTagConflictPrefix = serverTagConflictKeys.begin;
+// serverTagHistoryKeys is the old tag a storage server uses before it is migrated to a different location.
+// For example, we can copy a SS file to a remote DC and start the SS there;
+//   The new SS will need to cnosume the last bits of data from the old tag it is responsible for.
 const KeyRangeRef serverTagHistoryKeys(
 	LiteralStringRef("\xff/serverTagHistory/"),
 	LiteralStringRef("\xff/serverTagHistory0") );
@@ -150,7 +209,7 @@ const KeyRange serverTagHistoryRangeBefore( UID serverID, Version version ) {
 	wr.serializeBytes( serverTagHistoryKeys.begin );
 	wr << serverID;
 	version = bigEndian64(version);
-	
+
 	Key versionStr = makeString( 8 );
 	uint8_t* data = mutateString( versionStr );
 	memcpy(data, &version, 8);
@@ -385,6 +444,23 @@ std::string encodeExcludedServersKey( AddressExclusion const& addr ) {
 	return excludedServersPrefix.toString() + addr.toString();
 }
 
+const KeyRangeRef failedServersKeys( LiteralStringRef("\xff/conf/failed/"), LiteralStringRef("\xff/conf/failed0") );
+const KeyRef failedServersPrefix = failedServersKeys.begin;
+const KeyRef failedServersVersionKey = LiteralStringRef("\xff/conf/failed");
+const AddressExclusion decodeFailedServersKey( KeyRef const& key ) {
+	ASSERT( key.startsWith( failedServersPrefix ) );
+	// Returns an invalid NetworkAddress if given an invalid key (within the prefix)
+	// Excluded servers have IP in x.x.x.x format, port optional, and no SSL suffix
+	// Returns a valid, public NetworkAddress with a port of 0 if the key represents an IP address alone (meaning all ports)
+	// Returns a valid, public NetworkAddress with nonzero port if the key represents an IP:PORT combination
+
+	return AddressExclusion::parse(key.removePrefix( failedServersPrefix ));
+}
+std::string encodeFailedServersKey( AddressExclusion const& addr ) {
+	//FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
+	return failedServersPrefix.toString() + addr.toString();
+}
+
 const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
 const KeyRef workerListPrefix = workerListKeys.begin;
 
@@ -415,6 +491,38 @@ ProcessData decodeWorkerListValue( ValueRef const& value ) {
 	return s;
 }
 
+const KeyRangeRef backupProgressKeys(LiteralStringRef("\xff\x02/backupProgress/"),
+                                     LiteralStringRef("\xff\x02/backupProgress0"));
+const KeyRef backupProgressPrefix = backupProgressKeys.begin;
+const KeyRef backupStartedKey = LiteralStringRef("\xff\x02/backupStarted");
+
+const Key backupProgressKeyFor(UID workerID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(backupProgressPrefix);
+	wr << workerID;
+	return wr.toValue();
+}
+
+const Value backupProgressValue(const WorkerBackupStatus& status) {
+	BinaryWriter wr(IncludeVersion());
+	wr << status;
+	return wr.toValue();
+}
+
+UID decodeBackupProgressKey(const KeyRef& key) {
+	UID serverID;
+	BinaryReader rd(key.removePrefix(backupProgressPrefix), Unversioned());
+	rd >> serverID;
+	return serverID;
+}
+
+WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
+	WorkerBackupStatus status;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> status;
+	return status;
+}
+
 const KeyRef coordinatorsKey = LiteralStringRef("\xff/coordinators");
 const KeyRef logsKey = LiteralStringRef("\xff/logs");
 const KeyRef minRequiredCommitVersionKey = LiteralStringRef("\xff/minRequiredCommitVersion");
@@ -431,6 +539,10 @@ const KeyRef primaryLocalityPrivateKey = LiteralStringRef("\xff\xff/globals/prim
 const KeyRef fastLoggingEnabled = LiteralStringRef("\xff/globals/fastLoggingEnabled");
 const KeyRef fastLoggingEnabledPrivateKey = LiteralStringRef("\xff\xff/globals/fastLoggingEnabled");
 
+// Whenever configuration changes or DD related system keyspace is changed(e.g.., serverList),
+// actor must grab the moveKeysLockOwnerKey and update moveKeysLockWriteKey.
+// This prevents concurrent write to the same system keyspace.
+// When the owner of the DD related system keyspace changes, DD will reboot
 const KeyRef moveKeysLockOwnerKey = LiteralStringRef("\xff/moveKeysLock/Owner");
 const KeyRef moveKeysLockWriteKey = LiteralStringRef("\xff/moveKeysLock/Write");
 
@@ -441,6 +553,9 @@ const UID dataDistributionModeLock = UID(6345,3425);
 const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"), LiteralStringRef("\xff\x02/fdbClientInfo0"));
 const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_sample_rate/");
 const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_size_limit/");
+
+// ConsistencyCheck settings
+const KeyRef fdbShouldConsistencyCheckBeSuspended = LiteralStringRef("\xff\x02/ConsistencyCheck/Suspend");
 
 // Request latency measurement key
 const KeyRef latencyBandConfigKey = LiteralStringRef("\xff\x02/latencyBandConfig");
@@ -534,6 +649,7 @@ Key uidPrefixKey(KeyRef keyPrefix, UID logUid) {
 
 // Apply mutations constant variables
 // \xff/applyMutationsEnd/[16-byte UID] := serialize( endVersion, Unversioned() )
+// This indicates what is the highest version the mutation log can be applied
 const KeyRangeRef applyMutationsEndRange(LiteralStringRef("\xff/applyMutationsEnd/"), LiteralStringRef("\xff/applyMutationsEnd0"));
 
 // \xff/applyMutationsBegin/[16-byte UID] := serialize( beginVersion, Unversioned() )
@@ -609,15 +725,122 @@ const KeyRangeRef restoreWorkersKeys(
 	LiteralStringRef("\xff\x02/restoreWorkers/"),
 	LiteralStringRef("\xff\x02/restoreWorkers0")
 );
+const KeyRef restoreStatusKey = LiteralStringRef("\xff\x02/restoreStatus/");
 
-const Key restoreWorkerKeyFor( UID const& agentID ) {
+const KeyRef restoreRequestTriggerKey = LiteralStringRef("\xff\x02/restoreRequestTrigger");
+const KeyRef restoreRequestDoneKey = LiteralStringRef("\xff\x02/restoreRequestDone");
+const KeyRangeRef restoreRequestKeys(LiteralStringRef("\xff\x02/restoreRequests/"),
+                                     LiteralStringRef("\xff\x02/restoreRequests0"));
+
+const KeyRangeRef restoreApplierKeys(LiteralStringRef("\xff\x02/restoreApplier/"),
+                                     LiteralStringRef("\xff\x02/restoreApplier0"));
+const KeyRef restoreApplierTxnValue = LiteralStringRef("1");
+
+// restoreApplierKeys: track atomic transaction progress to ensure applying atomicOp exactly once
+// Version is passed in as LittleEndian, it must be converted to BigEndian to maintain ordering in lexical order
+const Key restoreApplierKeyFor(UID const& applierID, Version version) {
 	BinaryWriter wr(Unversioned());
-	wr.serializeBytes( restoreWorkersKeys.begin );
-	wr << agentID;
+	wr.serializeBytes(restoreApplierKeys.begin);
+	wr << applierID << bigEndian64(version);
 	return wr.toValue();
 }
 
+std::pair<UID, Version> decodeRestoreApplierKey(ValueRef const& key) {
+	BinaryReader rd(key, Unversioned());
+	UID applierID;
+	Version version;
+	rd >> applierID >> version;
+	return std::make_pair(applierID, bigEndian64(version));
+}
+
+// Encode restore worker key for workerID
+const Key restoreWorkerKeyFor(UID const& workerID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( restoreWorkersKeys.begin );
+	wr << workerID;
+	return wr.toValue();
+}
+
+// Encode restore agent value
+const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& cmdInterf) {
+	BinaryWriter wr(IncludeVersion());
+	wr << cmdInterf;
+	return wr.toValue();
+}
+
+RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value) {
+	RestoreWorkerInterface s;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> s;
+	return s;
+}
+
+// Encode and decode restore request value
+// restoreRequestTrigger key
+const Value restoreRequestTriggerValue(UID randomID, int const numRequests) {
+	BinaryWriter wr(IncludeVersion());
+	wr << numRequests;
+	wr << randomID;
+	return wr.toValue();
+}
+int decodeRestoreRequestTriggerValue(ValueRef const& value) {
+	int s;
+	UID randomID;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> s;
+	reader >> randomID;
+	return s;
+}
+
+// restoreRequestDone key
+const Value restoreRequestDoneVersionValue(Version readVersion) {
+	BinaryWriter wr(IncludeVersion());
+	wr << readVersion;
+	return wr.toValue();
+}
+Version decodeRestoreRequestDoneVersionValue(ValueRef const& value) {
+	Version v;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> v;
+	return v;
+}
+
+const Key restoreRequestKeyFor(int const& index) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(restoreRequestKeys.begin);
+	wr << index;
+	return wr.toValue();
+}
+
+const Value restoreRequestValue(RestoreRequest const& request) {
+	BinaryWriter wr(IncludeVersion());
+	wr << request;
+	return wr.toValue();
+}
+
+RestoreRequest decodeRestoreRequestValue(ValueRef const& value) {
+	RestoreRequest s;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> s;
+	return s;
+}
+
+// TODO: Register restore performance data to restoreStatus key
+const Key restoreStatusKeyFor(StringRef statusType) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(restoreStatusKey);
+	wr << statusType;
+	return wr.toValue();
+}
+
+const Value restoreStatusValue(double val) {
+	BinaryWriter wr(IncludeVersion());
+	wr << StringRef(std::to_string(val));
+	return wr.toValue();
+}
 const KeyRef healthyZoneKey = LiteralStringRef("\xff\x02/healthyZone");
+const StringRef ignoreSSFailuresZoneString = LiteralStringRef("IgnoreSSFailures");
+const KeyRef rebalanceDDIgnoreKey = LiteralStringRef("\xff\x02/rebalanceDDIgnored");
 
 const Value healthyZoneValue( StringRef const& zoneId, Version version ) {
 	BinaryWriter wr(IncludeVersion());

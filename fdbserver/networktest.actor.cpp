@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/NetworkTest.h"
+#include "flow/Knobs.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 UID WLTOKEN_NETWORKTEST( -1, 2 );
@@ -30,7 +31,7 @@ NetworkTestInterface::NetworkTestInterface( NetworkAddress remote )
 
 NetworkTestInterface::NetworkTestInterface( INetwork* local )
 {
-	test.makeWellKnownEndpoint( WLTOKEN_NETWORKTEST, TaskDefaultEndpoint );
+	test.makeWellKnownEndpoint( WLTOKEN_NETWORKTEST, TaskPriority::DefaultEndpoint );
 }
 
 ACTOR Future<Void> networkTestServer() {
@@ -58,7 +59,7 @@ ACTOR Future<Void> networkTestServer() {
 
 ACTOR Future<Void> testClient( std::vector<NetworkTestInterface> interfs, int* sent ) {
 	loop {
-		NetworkTestReply rep = wait(  retryBrokenPromise(interfs[deterministicRandom()->randomInt(0, interfs.size())].test, NetworkTestRequest( LiteralStringRef("."), 600000 ) ) );
+		NetworkTestReply rep = wait(  retryBrokenPromise(interfs[deterministicRandom()->randomInt(0, interfs.size())].test, NetworkTestRequest( LiteralStringRef("."), FLOW_KNOBS->NETWORK_TEST_REPLY_SIZE ) ) );
 		(*sent)++;
 	}
 }

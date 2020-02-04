@@ -23,8 +23,10 @@
 #pragma once
 
 #include <algorithm>
+#include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
+#include "flow/Net2Packet.h"
 
 #pragma pack(push, 4)
 class Endpoint {
@@ -102,14 +104,46 @@ public:
 	virtual bool isStream() const { return false; }
 };
 
-typedef struct NetworkPacket* PacketID;
+struct TransportData;
+
+struct Peer : public ReferenceCounted<Peer> {
+	TransportData* transport;
+	NetworkAddress destination;
+	UnsentPacketQueue unsent;
+	ReliablePacketList reliable;
+	AsyncTrigger dataToSend;  // Triggered when unsent.empty() becomes false
+	Future<Void> connect;
+	AsyncTrigger resetPing;
+	bool compatible;
+	bool outgoingConnectionIdle;  // We don't actually have a connection open and aren't trying to open one because we don't have anything to send
+	double lastConnectTime;
+	double reconnectionDelay;
+	int peerReferences;
+	bool incompatibleProtocolVersionNewer;
+	int64_t bytesReceived;
+	double lastDataPacketSentTime;
+	int outstandingReplies;
+
+	explicit Peer(TransportData* transport, NetworkAddress const& destination)
+	  : transport(transport), destination(destination), outgoingConnectionIdle(true), lastConnectTime(0.0),
+	    reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), outstandingReplies(0),
+	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()) {}
+
+	void send(PacketBuffer* pb, ReliablePacket* rp, bool firstUnsent);
+
+	void prependConnectPacket();
+
+	void discardUnreliablePackets();
+
+	void onIncomingConnection( Reference<Peer> self, Reference<IConnection> conn, Future<Void> reader );
+};
 
 class FlowTransport {
 public:
 	FlowTransport(uint64_t transportId);
 	~FlowTransport();
 
-	static void createInstance(bool isClient, uint64_t transportId = 0);
+	static void createInstance(bool isClient, uint64_t transportId);
 	// Creates a new FlowTransport and makes FlowTransport::transport() return it.  This uses g_network->global() variables,
 	// so it will be private to a simulation.
 
@@ -131,35 +165,35 @@ public:
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
 
-	void addPeerReference( const Endpoint&, NetworkMessageReceiver* );
+	void addPeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is being used, even if no messages are currently being sent to the peer
 
-	void removePeerReference( const Endpoint&, NetworkMessageReceiver* );
+	void removePeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is no longer being used
 
-	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID );
+	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
 
 	void removeEndpoint( const Endpoint&, NetworkMessageReceiver* );
 	// The given local endpoint no longer delivers messages to the given receiver or uses resources
 
-	void addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID );
+	void addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to a new local endpoint (without changing its token) which delivers messages to the given receiver
 	// Implementations may have limitations on when this function is called and what endpoint.token may be!
 
-	PacketID sendReliable( ISerializeSource const& what, const Endpoint& destination );
+	ReliablePacket* sendReliable( ISerializeSource const& what, const Endpoint& destination );
 	// sendReliable will keep trying to deliver the data to the destination until cancelReliable is
 	//   called.  It will retry sending if the connection is closed or the failure manager reports
 	//   the destination become available (edge triggered).
 
-	void cancelReliable( PacketID );
-	// Makes PacketID "unreliable" (either the data or a connection close event will be delivered
+	void cancelReliable( ReliablePacket* );
+	// Makes Packet "unreliable" (either the data or a connection close event will be delivered
 	//   eventually).  It can still be used safely to send a reply to a "reliable" request.
 
 	Reference<AsyncVar<bool>> getDegraded();
 	// This async var will be set to true when the process cannot connect to a public network address that the failure monitor thinks is healthy.
 
-	void sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection = true );// { cancelReliable(sendReliable(what,destination)); }
+	Reference<Peer> sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection );// { cancelReliable(sendReliable(what,destination)); }
 
 	int getEndpointCount();
 	// for tracing only

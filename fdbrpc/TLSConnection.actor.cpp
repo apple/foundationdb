@@ -71,11 +71,36 @@ static int recv_func(void* ctx, uint8_t* buf, int len) {
 }
 
 ACTOR static Future<Void> handshake( TLSConnection* self ) {
+	state std::pair<IPAddress,uint16_t> peerIP = std::make_pair(self->conn->getPeerAddress().ip, self->is_client ? self->conn->getPeerAddress().port : static_cast<uint16_t>(0));
+	if(!self->is_client) {
+		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
+		if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
+			if (now() < iter->second.second) {
+				if(iter->second.first >= FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS) {
+					TraceEvent("TLSIncomingConnectionThrottlingWarning", self->getDebugID()).suppressFor(1.0).detail("PeerIP", peerIP.first.toString());
+					wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+					throw connection_failed();
+				}
+			} else {
+				g_network->networkInfo.serverTLSConnectionThrottler.erase(peerIP);
+			}
+		}
+	}
+
 	loop {
 		int r = self->session->handshake();
+		if(BUGGIFY_WITH_PROB(0.001)) {
+			r = ITLSSession::FAILED;
+		}
 		if ( r == ITLSSession::SUCCESS ) break;
 		if ( r == ITLSSession::FAILED ) {
 			TraceEvent("TLSConnectionHandshakeError", self->getDebugID()).suppressFor(1.0).detail("Peer", self->getPeerAddress());
+			auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
+			if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
+				iter->second.first++;
+			} else {
+				g_network->networkInfo.serverTLSConnectionThrottler[peerIP] = std::make_pair(0,now() + (self->is_client ? FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT : FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT));
+			}
 			throw connection_failed();
 		}
 		ASSERT( r == ITLSSession::WANT_WRITE || r == ITLSSession::WANT_READ );
@@ -87,7 +112,7 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 	return Void();
 }
 
-TLSConnection::TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client, std::string host) : conn(conn), write_wants(0), read_wants(0), uid(conn->getDebugID()) {
+TLSConnection::TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client, std::string host) : conn(conn), write_wants(0), read_wants(0), uid(conn->getDebugID()), is_client(is_client) {
 	const char * serverName = host.empty() ? NULL : host.c_str();
 	session = Reference<ITLSSession>( policy->create_session(is_client, serverName, send_func, this, recv_func, this, (void*)&uid) );
 	if ( !session ) {
@@ -156,8 +181,17 @@ int TLSConnection::write( SendBuffer const* buffer, int limit ) {
 }
 
 ACTOR Future<Reference<IConnection>> wrap( Reference<ITLSPolicy> policy, bool is_client, Future<Reference<IConnection>> c, std::string host) {
-	Reference<IConnection> conn = wait(c);
-	return Reference<IConnection>(new TLSConnection( conn, policy, is_client, host ));
+	state Reference<IConnection> conn = wait(c);
+	try {
+		state Reference<TLSConnection> tlsConn(new TLSConnection( conn, policy, is_client, host ));
+		if(is_client) {
+			wait(tlsConn->handshook);
+		}
+		return tlsConn;
+	} catch( Error &e ) {
+		conn->close();
+		throw e;
+	}
 }
 
 Future<Reference<IConnection>> TLSListener::accept() {
@@ -169,9 +203,27 @@ TLSNetworkConnections::TLSNetworkConnections( Reference<TLSOptions> options ) : 
 	g_network->setGlobal(INetwork::enumGlobal::enNetworkConnections, (flowGlobalType) this);
 }
 
+ACTOR Future<Reference<IConnection>> waitAndFailConnection() {
+	wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+	throw connection_failed();
+}
+
 Future<Reference<IConnection>> TLSNetworkConnections::connect( NetworkAddress toAddr, std::string host) {
 	if ( toAddr.isTLS() ) {
 		NetworkAddress clearAddr( toAddr.ip, toAddr.port, toAddr.isPublic(), false );
+		std::pair<IPAddress,uint16_t> peerIP = std::make_pair(toAddr.ip, toAddr.port);
+		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
+		if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
+			if (now() < iter->second.second) {
+				if(iter->second.first >= FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS) {
+					TraceEvent("TLSOutgoingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", toAddr);
+					return waitAndFailConnection();
+				}
+			} else {
+				g_network->networkInfo.serverTLSConnectionThrottler.erase(peerIP);
+			}
+		}
+
 		TraceEvent("TLSConnectionConnecting").suppressFor(1.0).detail("ToAddr", toAddr);
 		// For FDB<->FDB connections, we don't have hostnames and can't verify IP
 		// addresses against certificates, so we have our own peer verifying logic

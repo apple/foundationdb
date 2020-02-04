@@ -1,6 +1,6 @@
-###################
-Release Notes (4.5)
-###################
+#############
+Release Notes
+#############
 
 4.5.6
 =====
@@ -115,6 +115,7 @@ Backup
 Bindings
 --------
 
+* API version updated to 450. There are no behavior changes in this API version. See the :ref:`API version upgrade guide <api-version-upgrade-guide-450>` for upgrade details.
 * Add error predicate testing to client bindings. This new functionality should help complex use cases write correct transaction retry loops where dispatching on error classes is needed. <rdar://problem/24492860>
 
 Other Changes

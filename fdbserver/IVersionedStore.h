@@ -30,17 +30,14 @@
 class IStoreCursor {
 public:
 	virtual Future<Void> findEqual(KeyRef key) = 0;
-	virtual Future<Void> findFirstEqualOrGreater(KeyRef key, bool needValue, int prefetchNextBytes) = 0;
-	virtual Future<Void> findLastLessOrEqual(KeyRef key, bool needValue, int prefetchPriorBytes) = 0;
-	virtual Future<Void> next(bool needValue) = 0;
-	virtual Future<Void> prev(bool needValue) = 0;
+	virtual Future<Void> findFirstEqualOrGreater(KeyRef key, int prefetchBytes = 0) = 0;
+	virtual Future<Void> findLastLessOrEqual(KeyRef key, int prefetchBytes = 0) = 0;
+	virtual Future<Void> next() = 0;
+	virtual Future<Void> prev() = 0;
 
 	virtual bool isValid() = 0;
 	virtual KeyRef getKey() = 0;
-	//virtual StringRef getCompressedKey() = 0;
 	virtual ValueRef getValue() = 0;
-
-	virtual void invalidateReturnedStrings() = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -59,10 +56,12 @@ public:
 	virtual void clear(KeyRangeRef range) = 0;
 	virtual void mutate(int op, StringRef param1, StringRef param2) = 0;
 	virtual void setWriteVersion(Version) = 0;   // The write version must be nondecreasing
-	virtual void forgetVersions(Version begin, Version end) = 0;  // Versions [begin, end) no longer readable
+	virtual void setOldestVersion(Version v) = 0;  // Set oldest readable version to be used in next commit
+	virtual Version getOldestVersion() = 0;  // Get oldest readable version
 	virtual Future<Void> commit() = 0;
 
-	virtual Future<Version> getLatestVersion() = 0;
+	virtual Future<Void> init() = 0;
+	virtual Version getLatestVersion() = 0;
 
 	// readAtVersion() may only be called on a version which has previously been passed to setWriteVersion() and never previously passed
 	//   to forgetVersion.  The returned results when violating this precondition are unspecified; the store is not required to be able to detect violations.

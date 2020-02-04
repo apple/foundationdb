@@ -98,6 +98,8 @@ public:
 				case ProcessClass::ClusterControllerClass: return false;
 				case ProcessClass::DataDistributorClass: return false;
 				case ProcessClass::RatekeeperClass: return false;
+				case ProcessClass::StorageCacheClass: return false;
+				case ProcessClass::BackupClass: return false;
 				default: return false;
 			}
 		}
@@ -137,8 +139,8 @@ public:
 
 	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
 	ProcessInfo* getCurrentProcess() { return currentProcess; }
-	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
-	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
+	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, TaskPriority taskID = TaskPriority::Zero ) = 0;
+	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, TaskPriority taskID = TaskPriority::Zero ) = 0;
 
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
@@ -155,7 +157,6 @@ public:
 	virtual bool isAvailable() const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
-	virtual bool useObjectSerializer() const = 0;
 
 	virtual void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role] ++;
@@ -341,7 +342,7 @@ private:
 extern ISimulator* g_pSimulator;
 #define g_simulator (*g_pSimulator)
 
-void startNewSimulator(bool useObjectSerializer);
+void startNewSimulator();
 
 //Parameters used to simulate disk performance
 struct DiskParameters : ReferenceCounted<DiskParameters> {

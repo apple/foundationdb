@@ -31,9 +31,15 @@ if [ "$1" = configure ]; then
         fi
     fi
 
-    # It would be better to use 'systemctl start foundationdb.service'. 
-    # Since it does not work on Ubuntu 14.04, use this workaround as of now.
-    /etc/init.d/foundationdb start
+    # Start the service with systemd if it is available.
+    if pidof systemd > /dev/null; then
+        # Use deb-systemd-invoke if available to respect policy-rc.d.
+        systemctl=$(command -v deb-systemd-invoke || command -v systemctl)
+        systemctl --system daemon-reload > /dev/null || true
+        systemctl start foundationdb.service
+    else
+        /etc/init.d/foundationdb start
+    fi
 
     if [ "$2" = "" ]; then
         update-rc.d foundationdb defaults
