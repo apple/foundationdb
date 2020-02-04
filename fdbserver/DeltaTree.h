@@ -311,6 +311,14 @@ public:
 			}
 		}
 
+		void setDeleted(bool deleted) {
+			raw->delta().setDeleted(deleted);
+		}
+
+		bool isDeleted() const {
+			return raw->delta().getDeleted();
+		}
+
 		Node *raw;
 		DecodedNode *parent;
 		DecodedNode *otherAncestor;
@@ -461,6 +469,11 @@ public:
 			return node != rhs.node;
 		}
 
+		void erase() {
+			node->setDeleted(true);
+			moveNext();
+		}
+
 		bool seekLessThanOrEqual(const T &s, int skipLen = 0) {
 			return seekLessThanOrEqual(s, skipLen, nullptr, 0);
 		}
@@ -485,7 +498,7 @@ public:
 				n = pHint->node;
 				if(initialCmp == 0) {
 					node = n;
-					return true;
+					return _hideDeletedBackward();
 				}
 				if(initialCmp > 0) {
 					node = n;
@@ -542,14 +555,14 @@ public:
 					node = n;
 
 					if(cmp == 0) {
-						return true;
+						break;
 					}
 
 					n = n->getRightChild(mirror->arena);
 				}
 			}
 
-			return node != nullptr;
+			return _hideDeletedBackward();
 		}
 
 		// Moves the cursor to the node with the lowest key greater than or equal to s.  If successful,
@@ -569,14 +582,14 @@ public:
 					node = n;
 
 					if(cmp == 0) {
-						return true;
+						break;
 					}
 
 					n = n->getLeftChild(mirror->arena);
 				}
 			}
 
-			return node != nullptr;
+			return _hideDeletedForward();
 		}
 
 		bool moveFirst() {
@@ -587,7 +600,7 @@ public:
 				if(n != nullptr)
 					node = n;
 			}
-			return node != nullptr;
+			return _hideDeletedForward();
 		}
 
 		bool moveLast() {
@@ -598,43 +611,68 @@ public:
 				if(n != nullptr)
 					node = n;
 			}
-			return node != nullptr;
+			return _hideDeletedBackward();
 		}
 
-		bool moveNext() {
+		// Try to move to next node, sees deleted nodes.
+		void _moveNext() {
 			// Try to go right
 			DecodedNode *n = node->getRightChild(mirror->arena);
 
 			// If we couldn't go right, then the answer is our next ancestor
 			if(n == nullptr) {
 				node = node->getNextAncestor();
-				return node != nullptr;
 			}
-
-			// Go left as far as possible
-			while(n != nullptr) {
-				node = n;
-				n = n->getLeftChild(mirror->arena);
+			else {
+				// Go left as far as possible
+				while(n != nullptr) {
+					node = n;
+					n = n->getLeftChild(mirror->arena);
+				}
 			}
-			return true;
 		}
 
-		bool movePrev() {
+		// Try to move to previous node, sees deleted nodes.
+		void _movePrev() {
 			// Try to go left
 			DecodedNode *n = node->getLeftChild(mirror->arena);
 
 			// If we couldn't go left, then the answer is our prev ancestor
 			if(n == nullptr) {
 				node = node->getPrevAncestor();
-				return node != nullptr;
 			}
+			else {
+				// Go right as far as possible
+				while(n != nullptr) {
+					node = n;
+					n = n->getRightChild(mirror->arena);
+				}
+			}
+		}
 
-			// Go right as far as possible
-			while(n != nullptr) {
-				node = n;
-				n = n->getRightChild(mirror->arena);
+		bool moveNext() {
+			_moveNext();
+			return _hideDeletedForward();
+		}
+
+		bool movePrev() {
+			_movePrev();
+			return _hideDeletedBackward();
+		}
+
+	private:
+		bool _hideDeletedBackward() {
+			while(node != nullptr && node->isDeleted()) {
+				_movePrev();
 			}
-			return true;
+			return node != nullptr;
+		}
+
+		bool _hideDeletedForward() {
+			while(node != nullptr && node->isDeleted()) {
+				_moveNext();
+			}
+			return node != nullptr;
 		}
 	};
 

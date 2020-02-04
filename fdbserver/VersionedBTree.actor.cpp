@@ -2142,35 +2142,37 @@ struct RedwoodRecordRef {
 
 		// Serialized Format
 		//
-		// 1 byte for Flags + a 4 bit length
-		//    borrow source is prev ancestor - 0 or 1
-		//    has_key_suffix
-		//    has_value
-		//    has_version
-		//    other_fields suffix len - 4 bits
+		// TODO:  Optimize this format better.  Non-versioned non-multipart records should have the lowest overhead.
 		//
-		// If has value and value is not 4 bytes
-		//    1 byte value length
+		// Byte 1
+		//    1 bit - borrow source is prev ancestor (otherwise next ancestor)
+		//    1 bit - is deleted
+		//    1 bit - has value (this is different from having a zero-length value)
+		//    1 bit - has version
+		//    4 bits - length of suffix bytes for optional integer fields version, total bytes, start offset
 		//
-		// 1 or 2 bytes for Prefix Borrow Length (hi bit indicates presence of second byte)
+		// Remaining field sizes are variable length.  1-2 byte ints use high byte to indicate use of second byte.
+		//    1-2 bytes - prefix length to borrow
+		//    1-2 bytes - key suffix length
+		//    1 byte - value length, if has_value
 		//
-		// IF has_key_suffix is set
-		//    1 or 2 bytes for Key Suffix Length
+		// Data bytes, variable length based on values above
+		//    Key suffix bytes
+		//    Optional int field suffix bytes
+		//    Value bytes
 		//
-		// Key suffix bytes
-		// Meta suffix bytes
-		// Value bytes
-		//
-		// For a series of RedwoodRecordRef's containing shards of the same KV pair where the key size is < 104 bytes,
-		// the overhead per middle chunk is 7 bytes:
+		// For a series of RedwoodRecordRef's containing shards of the same KV pair where the key size is < 114 bytes (single byte prefixLen)
+		// the overhead per middle chunk is 9 bytes:
 		//   4 bytes of child pointers in the DeltaTree Node
 		//   1 flag byte
 		//   1 prefix borrow length byte
-		//   1 meta suffix byte describing chunk start position
+		//   1 suffix length byte (which will be zero)
+		//   1 value length byte
+		//   ~1 optional int field suffix byte describing chunk start position (higher bytes will be borrowed as part of prefix len))
  
 		enum EFlags {
-			PREFIX_SOURCE = 0x80,
-			HAS_KEY_SUFFIX = 0x40,
+			PREFIX_SOURCE_PREV = 0x80,
+			IS_DELETED = 0x40,
 			HAS_VALUE = 0x20,
 			HAS_VERSION = 0x10,
 			INT_FIELD_SUFFIX_BITS = 0x0f
@@ -2188,15 +2190,28 @@ struct RedwoodRecordRef {
 
 		void setPrefixSource(bool val) {
 			if(val) {
-				flags |= PREFIX_SOURCE;
+				flags |= PREFIX_SOURCE_PREV;
 			}
 			else {
-				flags &= ~PREFIX_SOURCE;
+				flags &= ~PREFIX_SOURCE_PREV;
 			}
 		}
 
 		bool getPrefixSource() const {
-			return flags & PREFIX_SOURCE;
+			return flags & PREFIX_SOURCE_PREV;
+		}
+
+		void setDeleted(bool val) {
+			if(val) {
+				flags |= IS_DELETED;
+			}
+			else {
+				flags &= ~IS_DELETED;
+			}
+		}
+
+		bool getDeleted() const {
+			return flags & IS_DELETED;
 		}
 
 		RedwoodRecordRef apply(const RedwoodRecordRef &base, Arena &arena) const {
@@ -2204,6 +2219,7 @@ struct RedwoodRecordRef {
 
 			int intFieldSuffixLen = flags & INT_FIELD_SUFFIX_BITS;
 			int prefixLen = r.readVarInt();
+			int keySuffixLen = r.readVarInt();
 			int valueLen = (flags & HAS_VALUE) ? r.read<uint8_t>() : 0;
 
 			StringRef k;
@@ -2211,7 +2227,6 @@ struct RedwoodRecordRef {
 			// Separate the borrowed key string byte count from the borrowed int field byte count
 			int keyPrefixLen = std::min(prefixLen, base.key.size());
 			int intFieldPrefixLen = prefixLen - keyPrefixLen;
-			int keySuffixLen = (flags & HAS_KEY_SUFFIX) ? r.readVarInt() : 0;
 
 			// If there is a key suffix, reconstitute the complete key into a contiguous string
 			if(keySuffixLen > 0) {
@@ -2223,7 +2238,7 @@ struct RedwoodRecordRef {
 				k = base.key.substr(0, keyPrefixLen);
 			}
 
-			// Now decode the integer fields
+			// Now decode the optional integer fields
 			const byte *intFieldSuffix = r.readBytes(intFieldSuffixLen);
 
 			// Create big endian array in which to reassemble the integer fields from prefix and suffix bytes
@@ -2259,9 +2274,9 @@ struct RedwoodRecordRef {
 			Reader r(data());
 
 			int intFieldSuffixLen = flags & INT_FIELD_SUFFIX_BITS;
-			r.readVarInt();  // prefixlen
+			r.readVarInt();  // skip prefix length
+			int keySuffixLen = r.readVarInt();
 			int valueLen = (flags & HAS_VALUE) ? r.read<uint8_t>() : 0;
-			int keySuffixLen = (flags & HAS_KEY_SUFFIX) ? r.readVarInt() : 0;
 
 			return sizeof(Delta) + r.rptr - data() + intFieldSuffixLen + valueLen + keySuffixLen;
 		}
@@ -2271,15 +2286,15 @@ struct RedwoodRecordRef {
 			Reader r(data());
 
 			std::string flagString = " ";
-			if(flags & PREFIX_SOURCE) flagString += "prefixSource ";
-			if(flags & HAS_KEY_SUFFIX) flagString += "keySuffix ";
+			if(flags & PREFIX_SOURCE_PREV) flagString += "PrefixSource ";
+			if(flags & IS_DELETED) flagString += "IsDeleted ";
 			if(flags & HAS_VERSION) flagString += "Version ";
-			if(flags & HAS_VALUE) flagString += "Value ";
+			if(flags & HAS_VALUE) flagString += "HasValue ";
 
 			int intFieldSuffixLen = flags & INT_FIELD_SUFFIX_BITS;
 			int prefixLen = r.readVarInt();
+			int keySuffixLen = r.readVarInt();
 			int valueLen = (flags & HAS_VALUE) ? r.read<uint8_t>() : 0;
-			int keySuffixLen = (flags & HAS_KEY_SUFFIX) ? r.readVarInt() : 0;
 
 			return format("len: %d  flags: %s prefixLen: %d  keySuffixLen: %d  intFieldSuffix: %d  valueLen %d  raw: %s",
 				size(), flagString.c_str(), prefixLen, keySuffixLen, intFieldSuffixLen, valueLen, StringRef((const uint8_t *)this, size()).toHexString().c_str());
@@ -2294,18 +2309,17 @@ struct RedwoodRecordRef {
 
 			// Skip prefix length
 			r.readVarInt();
+			
+			int keySuffixLen = r.readVarInt();
 
 			// Get value length
 			int valueLen = (flags & HAS_VALUE) ? r.read<uint8_t>() : 0;
 
-			// Skip key suffix length and bytes if exists
-			if(flags & HAS_KEY_SUFFIX) {
-				r.readString(r.readVarInt());
-			}
-
-			// Skip int field suffix if present
+			// Skip key suffix bytes and int field suffix bytes
+			r.readString(keySuffixLen);
 			r.readBytes(flags & INT_FIELD_SUFFIX_BITS);
 
+			// Return record with only the optional value populated
 			return RedwoodRecordRef(StringRef(), 0, (flags & HAS_VALUE ? r.readString(valueLen) : Optional<ValueRef>()) );
 		}
 	};
@@ -2344,26 +2358,36 @@ struct RedwoodRecordRef {
 		int size = sizeof(Delta);
 
 		if(value.present()) {
-			size += value.get().size();
+			// value size byte
 			++size;
+			// value bytes
+			size += value.get().size();
 		}
 
+		// Size of prefix length
 		int prefixLen = getCommonPrefixLen(base, 0);
 		size += (worstCase || prefixLen >= 128) ? 2 : 1;
 
 		int intFieldPrefixLen;
 
+		// First byte of suffix len
+		++size;
+
 		// Currently using a worst-guess guess where int fields in suffix are stored in their entirety if nonzero.
 		if(prefixLen < key.size()) {
 			int keySuffixLen = key.size() - prefixLen;
-			size += (worstCase || keySuffixLen >= 128) ? 2 : 1;
+			if(worstCase || keySuffixLen >= 128) {
+				// Second byte of suffix len
+				++size;
+			}
 			size += keySuffixLen;
 			intFieldPrefixLen = 0;
 		}
 		else {
 			intFieldPrefixLen = prefixLen - key.size();
 			if(worstCase) {
-				size += 2;
+				// Second byte of suffix len
+				++size;
 			}
 		}
 
@@ -2399,26 +2423,23 @@ struct RedwoodRecordRef {
 
 		Writer w(d.data());
 
-		// prefixLen
+		// prefix len
 		w.writeVarInt(commonPrefix);
 
-		// valueLen
+		// key suffix len
+		StringRef keySuffix( (key.size() > commonPrefix) ? key.substr(commonPrefix) : StringRef());
+		w.writeVarInt(keySuffix.size());
+
+		// value len
 		if(value.present()) {
 			d.flags |= Delta::HAS_VALUE;
 			w.write<uint8_t>(value.get().size());
 		}
 
-		// keySuffixLen
-		if(key.size() > commonPrefix) {
-			d.flags |= Delta::HAS_KEY_SUFFIX;
+		// key suffix bytes
+		w.writeString(keySuffix);
 
-			StringRef keySuffix = key.substr(commonPrefix);
-			w.writeVarInt(keySuffix.size());
-
-			// keySuffix
-			w.writeString(keySuffix);
-		}
-
+		// extra int fields suffix
 		// This is a common case, where no int suffix is needed
 		if(version == 0 && chunk.total == 0 && chunk.start == 0) {
 			// The suffixLen bits in flags are already zero, so nothing to do here.
@@ -2443,6 +2464,7 @@ struct RedwoodRecordRef {
 			}
 		}
 
+		// value
 		if(value.present()) {
 			w.writeString(value.get());
 		}
@@ -5292,6 +5314,7 @@ struct IntIntPair {
 
 	struct Delta {
 		bool prefixSource;
+		bool deleted;
 		int dk;
 		int dv;
 
@@ -5305,6 +5328,14 @@ struct IntIntPair {
 
 		bool getPrefixSource() const {
 			return prefixSource;
+		}
+
+		void setDeleted(bool val) {
+			deleted = val;
+		}
+
+		bool getDeleted() const {
+			return deleted;
 		}
 
 		int size() const {
@@ -5352,6 +5383,8 @@ struct IntIntPair {
 	}
 
 	int writeDelta(Delta &d, const IntIntPair &base, int commonPrefix = -1) const {
+		d.prefixSource = false;
+		d.deleted = false;
 		d.dk = k - base.k;
 		d.dv = v - base.v;
 		return sizeof(Delta);
@@ -5720,33 +5753,41 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 		return IntIntPair({deterministicRandom()->randomInt(prev.k, next.k), deterministicRandom()->randomInt(prev.v, next.v)});
 	};
 
-	// Build a sorted vector of N items
-	std::vector<IntIntPair> items;
-	for(int i = 0; i < N; ++i) {
-		items.push_back(randomPair());
-		//printf("i=%d %s\n", i, items.back().toString().c_str());
+	// Build a set of N unique items
+	std::set<IntIntPair> uniqueItems;
+	while(uniqueItems.size() < N) {
+		IntIntPair p = randomPair();
+		if(uniqueItems.count(p) == 0) {
+			uniqueItems.insert(p);
+		}
 	}
-	std::sort(items.begin(), items.end());
 
 	// Build tree of items
+	std::vector<IntIntPair> items(uniqueItems.begin(), uniqueItems.end());
 	int bufferSize = N * 2 * 20;
 	DeltaTree<IntIntPair> *tree = (DeltaTree<IntIntPair> *) new uint8_t[bufferSize];
 	int builtSize = tree->build(&items[0], &items[items.size()], &prev, &next);
 	ASSERT(builtSize <= bufferSize);
 
 	DeltaTree<IntIntPair>::Mirror r(tree, &prev, &next);
-	DeltaTree<IntIntPair>::Cursor fwd = r.getCursor();
-	DeltaTree<IntIntPair>::Cursor rev = r.getCursor();
 
-	// Insert N more items into the tree and add them to items and sort again
-	for(int i = 0; i < N; ++i) {
+	// Grow uniqueItems to 2N in size and add each new item to the DeltaTree and half of them to toDelete.
+	std::vector<IntIntPair> toDelete;
+	while(uniqueItems.size() < 2 * N) {
 		IntIntPair p = randomPair();
-		items.push_back(p);
-		r.insert(p);
+		if(uniqueItems.count(p) == 0) {
+			uniqueItems.insert(p);
+			r.insert(p);
+			if(deterministicRandom()->coinflip()) {
+				toDelete.push_back(p);
+			}
+		}
 		ASSERT(tree->size() < bufferSize);		
 		//printf("Inserted %s  size=%d\n", items.back().toString().c_str(), tree->size());
 	}
-	std::sort(items.begin(), items.end());
+
+	// Update items vector
+	items = std::vector<IntIntPair>(uniqueItems.begin(), uniqueItems.end());
 
 	auto printItems = [&] {
 		for(int k = 0; k < items.size(); ++k) {
@@ -5759,6 +5800,10 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 
 	// Iterate through items and tree forward and backward, verifying tree contents.
 	auto scanAndVerify = [&]() {
+		printf("Verify tree contents.\n");
+
+		DeltaTree<IntIntPair>::Cursor fwd = r.getCursor();
+		DeltaTree<IntIntPair>::Cursor rev = r.getCursor();
 		ASSERT(fwd.moveFirst());
 		ASSERT(rev.moveLast());
 
@@ -5794,41 +5839,23 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 
 	// Create a new mirror, decoding the tree from scratch since insert() modified both the tree and the mirror
 	r = DeltaTree<IntIntPair>::Mirror(tree, &prev, &next);
-	fwd = r.getCursor();
-	rev = r.getCursor();
-
-	// Verify tree contents again
 	scanAndVerify();
 
-	// Iterate through items and tree forward and backward, verifying tree contents.
-	ASSERT(fwd.moveFirst());
-	ASSERT(rev.moveLast());
-
-	for(int i = 0; i < items.size(); ++i) {
-		if(fwd.get() != items[i]) {
-			printItems();
-			printf("forward iterator i=%d\n  %s found\n  %s expected\n", i, fwd.get().toString().c_str(), items[i].toString().c_str());
-			ASSERT(false);
-		}
-		if(rev.get() != items[items.size() - 1 - i]) {
-			printItems();
-			printf("reverse iterator i=%d\n  %s found\n  %s expected\n", i, rev.get().toString().c_str(), items[items.size() - 1 - i].toString().c_str());
-			ASSERT(false);
-		}
-
-		// Advance iterator, check scanning cursors for correct validity state
-		int j = i + 1;
-		bool end = j == items.size();
-
-		ASSERT(fwd.moveNext() == !end);
-		ASSERT(rev.movePrev() == !end);
-		ASSERT(fwd.valid() == !end);
-		ASSERT(rev.valid() == !end);
-
-		if(end) {
-			break;
-		}
+	// For each randomly selected new item to be deleted, delete it from the DeltaTree and from uniqueItems
+	printf("Deleting some items\n");
+	for(auto p : toDelete) {
+		uniqueItems.erase(p);
+		DeltaTree<IntIntPair>::Cursor c = r.getCursor();
+		ASSERT(c.seekLessThanOrEqual(p));
+		c.erase();
 	}
+	// Update items vector
+	items = std::vector<IntIntPair>(uniqueItems.begin(), uniqueItems.end());
+
+	// Verify tree contents after deletions
+	scanAndVerify();
+
+	printf("Verifying seek behaviors\n");
 
 	DeltaTree<IntIntPair>::Cursor s = r.getCursor();
 
@@ -5951,8 +5978,9 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 		randomPairs.push_back(randomPair());
 	}
 
+	// Random seeeks
 	double start = timer();
-	for(int i = 0; i < 200000000; ++i) {
+	for(int i = 0; i < 20000000; ++i) {
 		IntIntPair p = randomPairs[i % randomPairs.size()];
 		// Verify the result is less than or equal, and if seek fails then p must be lower than lowest (first) item
 		if(!s.seekLessThanOrEqual(p)) {
@@ -5967,7 +5995,7 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 		}
 	}
 	double elapsed = timer() - start;
-	printf("Elapsed %f\n", elapsed);
+	printf("Random seek test: Elapsed %f\n", elapsed);
 
 	return Void();
 }
