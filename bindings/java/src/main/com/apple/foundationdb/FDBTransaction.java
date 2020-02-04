@@ -72,22 +72,12 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 		@Override
 		public CompletableFuture<Long> getEstimatedRangeSizeBytes(byte[] begin, byte[] end) {
-			pointerReadLock.lock();
-			try {
-				return FDBTransaction.this.getEstimatedRangeSizeBytes(begin, end);
-			} finally {
-				pointerReadLock.unlock();
-			}
+			return FDBTransaction.this.getEstimatedRangeSizeBytes(begin, end);
 		}
 
 		@Override
 		public CompletableFuture<Long> getEstimatedRangeSizeBytes(Range range) {
-			pointerReadLock.lock();
-			try {
-				return FDBTransaction.this.getEstimatedRangeSizeBytes(range);
-			} finally {
-				pointerReadLock.unlock();
-			}
+			return FDBTransaction.this.getEstimatedRangeSizeBytes(range);
 		}
 
 		///////////////////
@@ -289,12 +279,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	@Override
 	public CompletableFuture<Long> getEstimatedRangeSizeBytes(Range range) {
-		pointerReadLock.lock();
-		try {
-			return new FutureInt64(Transaction_getEstimatedRangeSizeBytes(getPtr(), range.begin, range.end), executor);
-		} finally {
-			pointerReadLock.unlock();
-		}
+		return this.getEstimatedRangeSizeBytes(range.begin, range.end);
 	}
 
 	///////////////////

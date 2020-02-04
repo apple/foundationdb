@@ -321,10 +321,10 @@ func (t *transaction) getEstimatedRangeSizeBytes(beginKey Key, endKey Key) Futur
 // GetEstimatedRangeSizeBytes will get the byte size of the key range based on the
 // byte sample collected by FDB
 func (t Transaction) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
-	begin, end := r.FDBRangeKeySelectors()
+	beginKey, endKey := r.FDBRangeKeys()
 	return t.getEstimatedRangeSizeBytes(
-		begin.FDBKeySelector().Key.FDBKey(),
-		end.FDBKeySelector().Key.FDBKey(),
+		beginKey.FDBKey(),
+		endKey.FDBKey(),
 	)
 }
 

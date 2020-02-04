@@ -88,9 +88,9 @@ func (s Snapshot) GetDatabase() Database {
 }
 
 func (s Snapshot) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
-	begin, end := r.FDBRangeKeySelectors()
+	beginKey, endKey := r.FDBRangeKeys()
 	return s.getEstimatedRangeSizeBytes(
-		begin.FDBKeySelector().Key.FDBKey(),
-		end.FDBKeySelector().Key.FDBKey(),
+		beginKey.FDBKey(),
+		endKey.FDBKey(),
 	)
 }
