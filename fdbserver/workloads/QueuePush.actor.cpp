@@ -17,6 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <vector>
 
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -33,7 +34,7 @@ struct QueuePushWorkload : TestWorkload {
 	std::string valueString;
 	Key endingKey, startingKey;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries;
 	ContinuousSample<double> commitLatencies, GRVLatencies;
 
@@ -58,25 +59,25 @@ struct QueuePushWorkload : TestWorkload {
 
 	virtual Future<bool> check( Database const& cx ) { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	virtual void getMetrics(std::vector<PerfMetric>& m ) {
 		double duration = testDuration;
 		int writes = transactions.getValue();
-		m.push_back( PerfMetric( "Measured Duration", duration, true ) );
-		m.push_back( PerfMetric( "Operations/sec", writes / duration, false ) );
+		m.emplace_back("Measured Duration", duration, true);
+		m.emplace_back("Operations/sec", writes / duration, false);
 		m.push_back( transactions.getMetric() );
 		m.push_back( retries.getMetric() );
 
-		m.push_back( PerfMetric( "Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), true ) );
-		m.push_back( PerfMetric( "Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), true ) );
-		m.push_back( PerfMetric( "90% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile( 0.90 ), true ) );
-		m.push_back( PerfMetric( "98% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile( 0.98 ), true ) );
+		m.emplace_back("Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), true);
+		m.emplace_back("Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), true);
+		m.emplace_back("90% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile( 0.90 ), true);
+		m.emplace_back("98% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile( 0.98 ), true);
 
-		m.push_back( PerfMetric( "Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), true ) );
-		m.push_back( PerfMetric( "Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), true ) );
-		m.push_back( PerfMetric( "90% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile( 0.90 ), true ) );
-		m.push_back( PerfMetric( "98% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile( 0.98 ), true ) );
+		m.emplace_back("Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), true);
+		m.emplace_back("Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), true);
+		m.emplace_back("90% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile( 0.90 ), true);
+		m.emplace_back("98% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile( 0.98 ), true);
 
-		m.push_back( PerfMetric( "Bytes written/sec", (writes * (keyBytes + valueBytes)) / duration, false ) );
+		m.emplace_back("Bytes written/sec", (writes * (keyBytes + valueBytes)) / duration, false);
 	}
 
 	static Key keyForIndex( int base, int offset ) { return StringRef( format( "%08x%08x", base, offset ) ); }
@@ -109,7 +110,7 @@ struct QueuePushWorkload : TestWorkload {
 			loop {
 				try {
 					state double start = now();
-					Version v = wait( tr.getReadVersion() );
+					wait(success(tr.getReadVersion()));
 					self->GRVLatencies.addSample( now() - start );
 
 					// Get the last key in the database with a snapshot read
@@ -127,13 +128,13 @@ struct QueuePushWorkload : TestWorkload {
 							lastKey = self->endingKey;
 					}
 					
-					pair<int, int> unpacked = valuesForKey( lastKey );
+					std::pair<int, int> unpacked = valuesForKey( lastKey );
 
 					if( self->forward )
-						tr.set( keyForIndex( unpacked.first + unpacked.second, g_random->randomInt(1, 1000) ), 
+						tr.set( keyForIndex( unpacked.first + unpacked.second, deterministicRandom()->randomInt(1, 1000) ), 
 								StringRef(self->valueString) );
 					else
-						tr.set( keyForIndex( unpacked.first - unpacked.second, g_random->randomInt(1, 1000) ), 
+						tr.set( keyForIndex( unpacked.first - unpacked.second, deterministicRandom()->randomInt(1, 1000) ), 
 								StringRef(self->valueString) );
 
 					start = now();

@@ -156,6 +156,7 @@ class ApiTest(Test):
         resets = ['ON_ERROR', 'RESET', 'CANCEL']
         read_conflicts = ['READ_CONFLICT_RANGE', 'READ_CONFLICT_KEY']
         write_conflicts = ['WRITE_CONFLICT_RANGE', 'WRITE_CONFLICT_KEY', 'DISABLE_WRITE_CONFLICT']
+        txn_sizes = ['GET_APPROXIMATE_SIZE']
 
         op_choices += reads
         op_choices += mutations
@@ -168,9 +169,10 @@ class ApiTest(Test):
         op_choices += read_conflicts
         op_choices += write_conflicts
         op_choices += resets
+        op_choices += txn_sizes
 
-        idempotent_atomic_ops = [u'BIT_AND', u'BIT_OR', u'MAX', u'MIN', u'BYTE_MIN', u'BYTE_MAX']
-        atomic_ops = idempotent_atomic_ops + [u'ADD', u'BIT_XOR', u'APPEND_IF_FITS']
+        idempotent_atomic_ops = ['BIT_AND', 'BIT_OR', 'MAX', 'MIN', 'BYTE_MIN', 'BYTE_MAX']
+        atomic_ops = idempotent_atomic_ops + ['ADD', 'BIT_XOR', 'APPEND_IF_FITS']
 
         if args.concurrency > 1:
             self.max_keys = random.randint(100, 1000)
@@ -355,26 +357,26 @@ class ApiTest(Test):
 
                 split = random.randint(0, 70)
                 prefix = self.random.random_string(20 + split)
-                if prefix.endswith('\xff'):
+                if prefix.endswith(b'\xff'):
                     # Necessary to make sure that the SET_VERSIONSTAMPED_VALUE check
                     # correctly finds where the version is supposed to fit in.
-                    prefix += '\x00'
+                    prefix += b'\x00'
                 suffix = self.random.random_string(70 - split)
                 rand_str2 = prefix + fdb.tuple.Versionstamp._UNSET_TR_VERSION + suffix
                 key3 = self.versionstamped_keys.pack() + rand_str2
                 index = len(self.versionstamped_keys.pack()) + len(prefix)
                 key3 = self.versionstamp_key(key3, index)
 
-                instructions.push_args(u'SET_VERSIONSTAMPED_VALUE',
+                instructions.push_args('SET_VERSIONSTAMPED_VALUE',
                                        key1,
                                        self.versionstamp_value(fdb.tuple.Versionstamp._UNSET_TR_VERSION + rand_str2))
                 instructions.append('ATOMIC_OP')
 
                 if args.api_version >= 520:
-                    instructions.push_args(u'SET_VERSIONSTAMPED_VALUE', key2, self.versionstamp_value(rand_str2, len(prefix)))
+                    instructions.push_args('SET_VERSIONSTAMPED_VALUE', key2, self.versionstamp_value(rand_str2, len(prefix)))
                     instructions.append('ATOMIC_OP')
 
-                instructions.push_args(u'SET_VERSIONSTAMPED_KEY', key3, rand_str1)
+                instructions.push_args('SET_VERSIONSTAMPED_KEY', key3, rand_str1)
                 instructions.append('ATOMIC_OP')
                 self.can_use_key_selectors = False
 
@@ -434,6 +436,10 @@ class ApiTest(Test):
                         self.can_set_version = True
                         self.can_use_key_selectors = True
 
+            elif op == 'GET_APPROXIMATE_SIZE':
+                instructions.append(op)
+                self.add_strings(1)
+
             elif op == 'TUPLE_PACK' or op == 'TUPLE_RANGE':
                 tup = self.random.random_tuple(10)
                 instructions.push_args(len(tup), *tup)
@@ -461,17 +467,17 @@ class ApiTest(Test):
 
                     instructions.push_args(rand_str)
                     test_util.to_front(instructions, 1)
-                    instructions.push_args(u'SET_VERSIONSTAMPED_KEY')
+                    instructions.push_args('SET_VERSIONSTAMPED_KEY')
                     instructions.append('ATOMIC_OP')
 
                     if self.api_version >= 520:
                         version_value_key_2 = self.versionstamped_values_2.pack((rand_str,))
                         versionstamped_value = self.versionstamp_value(fdb.tuple.pack(tup), first_incomplete - len(prefix))
-                        instructions.push_args(u'SET_VERSIONSTAMPED_VALUE', version_value_key_2, versionstamped_value)
+                        instructions.push_args('SET_VERSIONSTAMPED_VALUE', version_value_key_2, versionstamped_value)
                         instructions.append('ATOMIC_OP')
 
                     version_value_key = self.versionstamped_values.pack((rand_str,))
-                    instructions.push_args(u'SET_VERSIONSTAMPED_VALUE', version_value_key,
+                    instructions.push_args('SET_VERSIONSTAMPED_VALUE', version_value_key,
                                            self.versionstamp_value(fdb.tuple.Versionstamp._UNSET_TR_VERSION + fdb.tuple.pack(tup)))
                     instructions.append('ATOMIC_OP')
                     self.can_use_key_selectors = False
@@ -494,8 +500,8 @@ class ApiTest(Test):
 
             # Use SUB to test if integers are correctly unpacked
             elif op == 'SUB':
-                a = self.random.random_int() / 2
-                b = self.random.random_int() / 2
+                a = self.random.random_int() // 2
+                b = self.random.random_int() // 2
                 instructions.push_args(0, a, b)
                 instructions.append(op)
                 instructions.push_args(1)
@@ -560,7 +566,7 @@ class ApiTest(Test):
         next_begin = None
         incorrect_versionstamps = 0
         for k, v in tr.get_range(begin_key, self.versionstamped_values.range().stop, limit=limit):
-            next_begin = k + '\x00'
+            next_begin = k + b'\x00'
             random_id = self.versionstamped_values.unpack(k)[0]
             versioned_value = v[10:].replace(fdb.tuple.Versionstamp._UNSET_TR_VERSION, v[:10], 1)
 
@@ -596,6 +602,6 @@ class ApiTest(Test):
 
     def get_result_specifications(self):
         return [
-            ResultSpecification(self.workspace, global_error_filter=[1007, 1021]),
-            ResultSpecification(self.stack_subspace, key_start_index=1, ordering_index=1, global_error_filter=[1007, 1021])
+            ResultSpecification(self.workspace, global_error_filter=[1007, 1009, 1021]),
+            ResultSpecification(self.stack_subspace, key_start_index=1, ordering_index=1, global_error_filter=[1007, 1009, 1021])
         ]

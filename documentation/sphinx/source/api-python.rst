@@ -24,6 +24,10 @@
 .. |retry-limit-database-option| replace:: :func:`Database.options.set_transaction_retry_limit`
 .. |timeout-database-option| replace:: :func:`Database.options.set_transaction_timeout`
 .. |max-retry-delay-database-option| replace:: :func:`Database.options.set_transaction_max_retry_delay`
+.. |transaction-size-limit-database-option| replace:: :func:`Database.options.set_transaction_size_limit`
+.. |causal-read-risky-database-option| replace:: :func:`Database.options.set_transaction_causal_read_risky`
+.. |include-port-in-address-database-option| replace:: :func:`Database.options.set_transaction_include_port_in_address`
+.. |transaction-logging-max-field-length-database-option| replace:: :func:`Database.options.set_transaction_logging_max_field_length`
 .. |snapshot-ryw-enable-database-option| replace:: :func:`Database.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-database-option| replace:: :func:`Database.options.set_snapshot_ryw_disable`
 .. |future-type-string| replace:: a :ref:`future <api-python-future>`
@@ -31,8 +35,12 @@
 .. |retry-limit-transaction-option| replace:: :func:`Transaction.options.set_retry_limit`
 .. |timeout-transaction-option| replace:: :func:`Transaction.options.set_timeout`
 .. |max-retry-delay-transaction-option| replace:: :func:`Transaction.options.set_max_retry_delay`
+.. |size-limit-transaction-option| replace:: :func:`Transaction.options.set_size_limit`
 .. |snapshot-ryw-enable-transaction-option| replace:: :func:`Transaction.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-transaction-option| replace:: :func:`Transaction.options.set_snapshot_ryw_disable`
+.. |causal-read-risky-transaction-option| replace:: :func:`Transaction.options.set_causal_read_risky`
+.. |include-port-in-address-transaction-option| replace:: :func:`Transaction.options.set_include_port_in_address`
+.. |transaction-logging-max-field-length-transaction-option| replace:: :func:`Transaction.options.set_transaction_logging_max_field_length`
 .. |lazy-iterator-object| replace:: generator
 .. |key-meth| replace:: :meth:`Subspace.key`
 .. |directory-subspace| replace:: :ref:`DirectorySubspace <api-python-directory-subspace>`
@@ -65,9 +73,13 @@ Installation
 
 The FoundationDB Python API is compatible with Python 2.7 - 3.7. You will need to have a Python version within this range on your system before the FoundationDB Python API can be installed. Also please note that Python 3.7 no longer bundles a full copy of libffi, which is used for building the _ctypes module on non-macOS UNIX platforms. Hence, if you are using Python 3.7, you should make sure libffi is already installed on your system.
 
-On macOS, the FoundationDB Python API is installed as part of the FoundationDB installation (see :ref:`installing-client-binaries`). On Ubuntu or RHEL/CentOS, you will need to install the FoundationDB Python API manually.
+On macOS, the FoundationDB Python API is installed as part of the FoundationDB installation (see :ref:`installing-client-binaries`). On Ubuntu or RHEL/CentOS, you will need to install the FoundationDB Python API manually via Python's package manager ``pip``:
 
-You can download the FoundationDB Python API source directly from :doc:`downloads`.
+.. code-block:: none
+
+    user@host$ pip install foundationdb
+
+You can also download the FoundationDB Python API source directly from :doc:`downloads`.
 
 .. note:: The Python language binding is compatible with FoundationDB client binaries of version 2.0 or higher. When used with version 2.0.x client binaries, the API version must be set to 200 or lower.
 
@@ -90,7 +102,7 @@ When you import the ``fdb`` module, it exposes only one useful symbol:
 
 .. warning:: |api-version-multi-version-warning|
 
-For API changes between version 13 and |api-version| (for the purpose of porting older programs), see :doc:`release-notes`.
+For API changes between version 13 and |api-version| (for the purpose of porting older programs), see :doc:`release-notes` and :doc:`api-version-upgrade-guide`.
 
 Opening a database
 ==================
@@ -98,12 +110,14 @@ Opening a database
 After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     import fdb
-    fdb.api_version(610)
+    fdb.api_version(700)
     db = fdb.open()
 
 .. function:: open( cluster_file=None, event_model=None )
 
-    |fdb-open-blurb|
+    |fdb-open-blurb1|
+
+    |fdb-open-blurb2|
 
     .. param event_model:: Can be used to select alternate :ref:`api-python-event-models`
 
@@ -378,6 +392,22 @@ Database options
 
     |option-db-tr-max-retry-delay-blurb|
 
+.. method:: Database.options.set_transaction_size_limit(size_limit)
+
+    |option-db-tr-size-limit-blurb|
+
+.. method:: Database.options.set_transaction_causal_read_risky()
+
+    |option-db-causal-read-risky-blurb|
+
+.. method:: Database.options.set_transaction_include_port_in_address()
+
+    |option-db-include-port-in-address-blurb|
+    
+.. method:: Database.options.set_transaction_logging_max_field_length(size_limit)
+
+    |option-db-tr-transaction-logging-max-field-length-blurb|
+
 .. method:: Database.options.set_snapshot_ryw_enable()
 
     |option-db-snapshot-ryw-enable-blurb|
@@ -539,7 +569,7 @@ Snapshot reads
 
 .. method:: Transaction.snapshot.get_read_version()
 
-    Identical to :meth:`Transaction.get_read_version` (since snapshot and serializable reads use the same read version).
+    Identical to :meth:`Transaction.get_read_version` (since snapshot and strictly serializable reads use the same read version).
 
 
 Writing data
@@ -565,6 +595,8 @@ Writing data
 
     Removes all keys ``k`` such that ``begin <= k < end``, and their associated values. |immediate-return|
 
+    |transaction-clear-range-blurb|
+
     .. note :: Unlike in the case of :meth:`get_range`, ``begin`` and ``end`` must be keys (byte strings), not :class:`KeySelector`\ s.  (Resolving arbitrary key selectors would prevent this method from returning immediately, introducing concurrency issues.)
 
 ``del tr[begin:end]``
@@ -573,6 +605,8 @@ Writing data
 .. method:: Transaction.clear_range_startswith(prefix)
 
     Removes all the keys ``k`` such that ``k.startswith(prefix)``, and their associated values. |immediate-return|
+
+    |transaction-clear-range-blurb|
 
 .. _api-python-transaction-atomic-operations:
 
@@ -613,6 +647,10 @@ In each of the methods below, ``param`` should be a string appropriately packed 
 .. method:: Transaction.bit_xor(key, param)
 
     |atomic-xor|
+
+.. method:: Transaction.compare_and_clear(key, param)
+
+    |atomic-compare-and-clear|
 
 .. method:: Transaction.max(key, param)
 
@@ -791,6 +829,10 @@ Transaction options
 
     |option-causal-read-risky-blurb|
 
+.. method:: Transaction.options.set_include_port_in_address
+
+    |option-include-port-in-address-blurb|
+
 .. method:: Transaction.options.set_causal_write_risky
 
     |option-causal-write-risky-blurb|
@@ -835,6 +877,10 @@ Transaction options
 
     |option-set-max-retry-delay-blurb|
 
+.. method:: Transaction.options.set_size_limit
+
+    |option-set-size-limit-blurb|
+
 .. _api-python-timeout:
 
 .. method:: Transaction.options.set_timeout
@@ -844,6 +890,18 @@ Transaction options
     |option-set-timeout-blurb2|
 
     |option-set-timeout-blurb3|
+
+.. method:: Transaction.options.set_transaction_logging_max_field_length(size_limit)
+
+    |option-set-transaction-logging-max-field-length-blurb|
+
+.. method:: Transaction.options.set_debug_transaction_identifier(id_string)
+
+    |option-set-debug-transaction-identifier|
+
+.. method:: Transaction.options.set_log_transaction()
+
+    |option-set-log-transaction|
 
 .. _api-python-future:
 
@@ -875,6 +933,8 @@ All future objects are a subclass of the :class:`Future` type.
 .. method:: Future.on_ready(callback)
 
     Calls the specified callback function, passing itself as a single argument, when the future object is ready. If the future object is ready at the time :meth:`on_ready()` is called, the call may occur immediately in the current thread (although this behavior is not guaranteed). Otherwise, the call may be delayed and take place on the thread with which the client was initialized. Therefore, the callback is responsible for any needed thread synchronization (and/or for posting work to your application's event loop, thread pool, etc., as may be required by your application's architecture).
+
+    .. note:: This function guarantees the callback will be executed **at most once**.
 
 .. warning:: |fdb-careful-with-callbacks-blurb|
 

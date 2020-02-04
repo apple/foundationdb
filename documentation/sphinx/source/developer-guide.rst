@@ -39,6 +39,24 @@
 .. |node-subspace| replace:: FIXME
 .. |content-subspace| replace:: FIXME
 .. |allow-manual-prefixes| replace:: FIXME
+.. |retry-limit-transaction-option| replace:: FIXME
+.. |timeout-transaction-option| replace:: FIXME
+.. |max-retry-delay-transaction-option| replace:: FIXME
+.. |size-limit-transaction-option| replace:: FIXME
+.. |snapshot-ryw-enable-transaction-option| replace:: FIXME
+.. |snapshot-ryw-disable-transaction-option| replace:: FIXME
+.. |snapshot-ryw-enable-database-option| replace:: FIXME
+.. |snapshot-ryw-disable-database-option| replace:: FIXME
+.. |retry-limit-database-option| replace:: FIXME
+.. |max-retry-delay-database-option| replace:: FIXME
+.. |transaction-size-limit-database-option| replace:: FIXME
+.. |timeout-database-option| replace:: FIXME
+.. |causal-read-risky-database-option| replace:: FIXME
+.. |causal-read-risky-transaction-option| replace:: FIXME
+.. |include-port-in-address-database-option| replace:: FIXME
+.. |include-port-in-address-transaction-option| replace:: FIXME
+.. |transaction-logging-max-field-length-transaction-option| replace:: FIXME
+.. |transaction-logging-max-field-length-database-option| replace:: FIXME
 
 .. include:: api-common.rst.inc
 
@@ -321,7 +339,7 @@ Transaction basics
 Transactions in FoundationDB
 ----------------------------
 
-FoundationDB provides concurrency control via transactions, allowing multiple clients to concurrently read and write data in the database with strong guarantees about how they affect each other. Specifically, FoundationDB provides global, ACID transactions with serializable isolation using optimistic concurrency.
+FoundationDB provides concurrency control via transactions, allowing multiple clients to concurrently read and write data in the database with strong guarantees about how they affect each other. Specifically, FoundationDB provides global, ACID transactions with strict serializability using optimistic concurrency.
 
 All reads and modifications of key-value pairs in FoundationDB are done within the context of a transaction. A transaction is a small unit of work that is both reliably performed and logically independent of other transactions.
 
@@ -412,7 +430,7 @@ By default, FoundationDB supports read-your-writes, meaning that reads reflect t
 
 Another approach to programming with futures in FoundationDB is to set a callback function to be invoked asynchronously when the future is ready.
 
-.. note:: Be very careful when mixing callbacks with explicit or implicit blocking. Blocking in a callback on a non-ready future will cause a deadlock. Blocking on anything else or performing CPU intensive tasks will block the FoundationDB client thread and therefore all database access from that client.
+.. note:: Be very careful when mixing callbacks with explicit or implicit blocking. Blocking in a callback on a non-ready future will cause a deadlock. Blocking on anything else or performing CPU intensive tasks will block the FoundationDB :ref:`client thread <client-network-thread>` and therefore all database access from that client.
 
 For further details, see the :doc:`API reference <api-reference>` documentation for your language.
 
@@ -520,11 +538,22 @@ Atomic operations
 
 |atomic-ops-blurb1|
 
-Atomic operations are ideal for operating on keys that multiple clients modify frequently. For example, you can use a key as a counter and increment it with atomic :func:`add`::
+Atomic operations are ideal for operating on keys that multiple clients modify frequently. For example, you can use a key as a counter and increment/decrement it with atomic :func:`add`::
 
   @fdb.transactional
   def increment(tr, counter):
       tr.add(counter, struct.pack('<i', 1))
+
+  @fdb.transactional
+  def decrement(tr, counter):
+      tr.add(counter, struct.pack('<i', -1))
+
+When the counter value is decremented down to 0, you may want to clear the key from database. An easy way to do that is to use :func:`compare_and_clear`, which atomically compares the value against given parameter and clears it without issuing a read from client::
+
+  @fdb.transactional
+  def decrement(tr, counter):
+      tr.add(counter, struct.pack('<i', -1))
+      tr.compare_and_clear(counter, struct.pack('<i', 0))
 
 Similarly, you can use a key as a flag and toggle it with atomic :func:`xor`::
 
@@ -575,20 +604,20 @@ The following example illustrates both techniques. Together, they make a transac
 Conflict ranges
 ---------------
 
-By default, FoundationDB transactions guarantee :ref:`serializable isolation <ACID>`, which results in a state that *could* have been produced by executing transactions one at a time, even though they may actually have been executed concurrently. FoundationDB maintains serializable isolation by detecting conflicts among concurrent transactions and allowing only a non-conflicting subset of them to succeed. Two concurrent transactions conflict if the first to commit writes a value that the second reads. In this case, the second transaction will fail. Clients will usually retry failed transactions.
+By default, FoundationDB transactions guarantee :ref:`strict serializability <ACID>`, which results in a state that *could* have been produced by executing transactions one at a time, even though they may actually have been executed concurrently. FoundationDB maintains strict serializability by detecting conflicts among concurrent transactions and allowing only a non-conflicting subset of them to succeed. Two concurrent transactions conflict if the first to commit writes a value that the second reads. In this case, the second transaction will fail. Clients will usually retry failed transactions.
 
-To detect conflicts, FoundationDB tracks the ranges of keys each transaction reads and writes. While most applications will use the serializable isolation that transactions provide by default, FoundationDB also provides several API features that manipulate conflict ranges to allow more precise control.
+To detect conflicts, FoundationDB tracks the ranges of keys each transaction reads and writes. While most applications will use the strictly serializable isolation that transactions provide by default, FoundationDB also provides several API features that manipulate conflict ranges to allow more precise control.
 
 Conflicts can be *avoided*, reducing isolation, in two ways:
 
-* Instead of ordinary (serializable) reads, you can perform :ref:`snapshot reads <snapshot isolation>`, which do not add read conflict ranges.
+* Instead of ordinary (strictly serializable) reads, you can perform :ref:`snapshot reads <snapshot isolation>`, which do not add read conflict ranges.
 * You can use :ref:`transaction options <api-python-transaction-options>` to disable conflict ranges for writes.
 
 Conflicts can be *created*, increasing isolation, by :ref:`explicitly adding <api-python-conflict-ranges>` read or write conflict ranges. 
 
 .. note:: *add read conflict range* behaves as if the client is reading the range. This means *add read conflict range* will not add conflict ranges for keys that have been written earlier in the same transaction. This is the intended behavior, as it allows users to compose transactions together without introducing unnecessary conflicts.
 
-For example, suppose you have a transactional function that increments a set of counters using atomic addition. :ref:`developer-guide-atomic-operations` do not add read conflict ranges and so cannot cause the transaction in which they occur to fail. Most of the time, this is exactly what we want. However, suppose there is another transaction that (infrequently) resets one or more counters, and our contract requires that we must advance all specified counters in unison. We want to guarantee that if a counter is reset during an incrementing transaction, then the incrementing transaction will conflict. We can selectively add read conflicts ranges for this purpose::
+For example, suppose you have a transactional function that increments a set of counters using atomic addition. :ref:`developer-guide-atomic-operations` do not add read conflict ranges and so cannot cause the transaction in which they occur to fail. More precisely, the read version for an atomic operation is the same as transaction's commit version, and thus no conflicting write from other transactions could be serialized between the read and write of the key. Most of the time, this is exactly what we want. However, suppose there is another transaction that (infrequently) resets one or more counters, and our contract requires that we must advance all specified counters in unison. We want to guarantee that if a counter is reset during an incrementing transaction, then the incrementing transaction will conflict. We can selectively add read conflicts ranges for this purpose::
 
   @fdb.transactional
   def guarded_increment(tr, counters):
@@ -603,9 +632,9 @@ Snapshot reads
 
 |snapshot-blurb1|
 
-The serializable isolation that transactions maintain by default has little performance cost when there are few conflicts but can be expensive when there are many. FoundationDB therefore also permits individual reads within a transaction to be done as snapshot reads. Snapshot reads differ from ordinary (serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas serializable reads cause conflicts in that case.
+The strictly serializable isolation that transactions maintain by default has little performance cost when there are few conflicts but can be expensive when there are many. FoundationDB therefore also permits individual reads within a transaction to be done as snapshot reads. Snapshot reads differ from ordinary (strictly serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas strictly serializable reads cause conflicts in that case.
 
-Consider a transaction which needs to remove and return an arbitrary value from a small range of keys.  The simplest implementation (using serializable isolation) would be::
+Consider a transaction which needs to remove and return an arbitrary value from a small range of keys.  The simplest implementation (using strictly serializable isolation) would be::
 
     @fdb.transactional
     def remove_one(tr, range):
@@ -626,7 +655,7 @@ Unfortunately, if a concurrent transaction happens to insert a new key anywhere 
 
 This transaction accomplishes the same task but won't conflict with the insert of a key elsewhere in the range. It will only conflict with a modification to the key it actually returns.
 
-By default, snapshot reads see the effects of prior writes in the same transaction. (This read-your-writes behavior is the same as for ordinary, serializable reads.) Read-your-writes allows transactional functions (such as the above example) to be easily composed within a single transaction because each function will see the writes of previously invoked functions.
+By default, snapshot reads see the effects of prior writes in the same transaction. (This read-your-writes behavior is the same as for ordinary, strictly serializable reads.) Read-your-writes allows transactional functions (such as the above example) to be easily composed within a single transaction because each function will see the writes of previously invoked functions.
 
 .. note::
   | The default read-your-writes behavior of snapshot reads is well-suited to the large majority of use cases. In less frequent cases, you may want to read from only a single version of the database. This behavior can be achieved through the appropriate :ref:`transaction options <api-python-snapshot-ryw>`. Transaction options are an advanced feature of the API and should be used with caution.
@@ -643,7 +672,7 @@ Using snapshot reads is appropriate when the following conditions all hold:
 
 * A particular read of frequently written values causes too many conflicts.
 * There isn't an easy way to reduce conflicts by splitting up data more granularly.
-* Any necessary invariants can be validated with added conflict ranges or more narrowly targeted serializable reads.
+* Any necessary invariants can be validated with added conflict ranges or more narrowly targeted strictly serializable reads.
 
 Transaction cancellation
 ------------------------

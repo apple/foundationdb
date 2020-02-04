@@ -57,7 +57,7 @@ struct Operation {
 	Value value;
 
 	int limit;
-	bool reverse;
+	bool reverse = false;
 };
 
 //A workload which executes random sequences of operations on RYOW transactions and confirms the results
@@ -104,7 +104,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 
 		for(int i = 0; i < opsPerTransaction; ++i) {
 			int cumulativeDensity = 0;
-			int random = g_random->randomInt(0, totalDensity);
+			int random = deterministicRandom()->randomInt(0, totalDensity);
 			for(int i = 0; i < pdf.size() - 1; i++) {
 				if(cumulativeDensity + pdf[i] <= random && random < cumulativeDensity + pdf[i] + pdf[i + 1]) {
 					Operation info;
@@ -123,8 +123,8 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 						case Operation::CLEAR_RANGE:
 							info.beginKey = selectRandomKey(data, .8);
 							info.endKey = selectRandomKey(data, .8);
-							info.limit = g_random->randomInt(0, 1000);
-							info.reverse = (bool)g_random->randomInt(0, 2);
+							info.limit = deterministicRandom()->randomInt(0, 1000);
+							info.reverse = (bool)deterministicRandom()->randomInt(0, 2);
 
 							if(info.beginKey > info.endKey)
 								std::swap(info.beginKey, info.endKey);
@@ -134,8 +134,8 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 						case Operation::GET_KEY:
 							info.beginSelector = generateKeySelector(data, 1000);
 							info.endSelector = generateKeySelector(data, 1000);
-							info.limit = g_random->randomInt(0, 1000);
-							info.reverse = (bool)g_random->randomInt(0, 2);
+							info.limit = deterministicRandom()->randomInt(0, 1000);
+							info.reverse = (bool)deterministicRandom()->randomInt(0, 2);
 							break;
 					}
 

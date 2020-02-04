@@ -42,7 +42,7 @@ struct CycleWorkload : TestWorkload {
 		transactionsPerSecond = getOption( options, LiteralStringRef("transactionsPerSecond"), 5000.0 ) / clientCount;
 		actorCount = getOption( options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5 );
 		nodeCount = getOption(options, LiteralStringRef("nodeCount"), transactionsPerSecond * clientCount);
-		keyPrefix = getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef(""));
+		keyPrefix = unprintable( getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("")).toString() );
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, LiteralStringRef("expectedRate"), 0.7);
 	}
 
@@ -96,28 +96,31 @@ struct CycleWorkload : TestWorkload {
 				wait( poisson( &lastTime, delay ) );
 
 				state double tstart = now();
-				state int r = g_random->randomInt(0, self->nodeCount);
+				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
 				state Transaction tr(cx);
 				while (true) {
 					try {
 						// Reverse next and next^2 node
 						Optional<Value> v = wait( tr.get( self->key(r) ) );
-						if (!v.present()) self->badRead("r", r, tr);
+						if (!v.present()) self->badRead("KeyR", r, tr);
 						state int r2 = self->fromValue(v.get());
 						Optional<Value> v2 = wait( tr.get( self->key(r2) ) );
-						if (!v2.present()) self->badRead("r2", r2, tr);
+						if (!v2.present()) self->badRead("KeyR2", r2, tr);
 						state int r3 = self->fromValue(v2.get());
 						Optional<Value> v3 = wait( tr.get( self->key(r3) ) );
-						if (!v3.present()) self->badRead("r3", r3, tr);
+						if (!v3.present()) self->badRead("KeyR3", r3, tr);
 						int r4 = self->fromValue(v3.get());
 
 						tr.clear( self->key(r) );	//< Shouldn't have an effect, but will break with wrong ordering
 						tr.set( self->key(r), self->value(r3) );
 						tr.set( self->key(r2), self->value(r4) );
 						tr.set( self->key(r3), self->value(r2) );
+						// TraceEvent("CyclicTestMX").detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
+						// TraceEvent("CyclicTestMX").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
+						// TraceEvent("CyclicTestMX").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
 						wait( tr.commit() );
-						//TraceEvent("CycleCommit");
+						// TraceEvent("CycleCommit");
 						break;
 					} catch (Error& e) {
 						if (e.code() == error_code_transaction_too_old) ++self->tooOldRetries;
@@ -134,30 +137,52 @@ struct CycleWorkload : TestWorkload {
 			throw;
 		}
 	}
+
+	void logTestData(const VectorRef<KeyValueRef>& data) {
+		TraceEvent("TestFailureDetail");
+		int index = 0;
+		for (auto& entry : data) {
+			TraceEvent("CurrentDataEntry")
+			    .detail("Index", index)
+			    .detail("Key", entry.key.toString())
+			    .detail("Value", entry.value.toString());
+			index++;
+		}
+	}
+
 	bool cycleCheckData( const VectorRef<KeyValueRef>& data, Version v ) {
 		if (data.size() != nodeCount) {
+			logTestData(data);
 			TraceEvent(SevError, "TestFailure").detail("Reason", "Node count changed").detail("Before", nodeCount).detail("After", data.size()).detail("Version", v).detail("KeyPrefix", keyPrefix.printable());
+			TraceEvent(SevError, "TestFailureInfo")
+			    .detail("DataSize", data.size())
+			    .detail("NodeCount", nodeCount)
+			    .detail("Workload", description());
 			return false;
 		}
 		int i=0;
 		for(int c=0; c<nodeCount; c++) {
 			if (c && !i) {
 				TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got shorter").detail("Before", nodeCount).detail("After", c).detail("KeyPrefix", keyPrefix.printable());
+				logTestData(data);
 				return false;
 			}
 			if (data[i].key != key(i)) {
 				TraceEvent(SevError, "TestFailure").detail("Reason", "Key changed").detail("KeyPrefix", keyPrefix.printable());
+				logTestData(data);
 				return false;
 			}
 			double d = testKeyToDouble(data[i].value, keyPrefix);
 			i = (int)d;
 			if ( i != d || i<0 || i>=nodeCount) {
 				TraceEvent(SevError, "TestFailure").detail("Reason", "Invalid value").detail("KeyPrefix", keyPrefix.printable());
+				logTestData(data);
 				return false;
 			}
 		}
 		if (i != 0) {
 			TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got longer").detail("KeyPrefix", keyPrefix.printable());
+			logTestData(data);
 			return false;
 		}
 		return true;

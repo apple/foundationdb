@@ -69,10 +69,11 @@ public:
 
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
 					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder )
-			: name(name), locality(locality), startingClass(startingClass), addresses(addresses), address(addresses.address), dataFolder(dataFolder),
-				network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
-				rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-				fault_injection_r(0), machine(0), cleared(false) {}
+			: name(name), locality(locality), startingClass(startingClass),
+			  addresses(addresses), address(addresses.address), dataFolder(dataFolder),
+			  network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
+			  rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
+			  fault_injection_r(0), machine(0), cleared(false) {}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
@@ -97,6 +98,8 @@ public:
 				case ProcessClass::ClusterControllerClass: return false;
 				case ProcessClass::DataDistributorClass: return false;
 				case ProcessClass::RatekeeperClass: return false;
+				case ProcessClass::StorageCacheClass: return false;
+				case ProcessClass::BackupClass: return false;
 				default: return false;
 			}
 		}
@@ -136,8 +139,8 @@ public:
 
 	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
 	ProcessInfo* getCurrentProcess() { return currentProcess; }
-	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
-	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, int taskID = -1 ) = 0;
+	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, TaskPriority taskID = TaskPriority::Zero ) = 0;
+	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, TaskPriority taskID = TaskPriority::Zero ) = 0;
 
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
@@ -309,6 +312,19 @@ public:
 	virtual flowGlobalType global(int id) { return getCurrentProcess()->global(id); };
 	virtual void setGlobal(size_t id, flowGlobalType v) { getCurrentProcess()->setGlobal(id,v); };
 
+	virtual void disableFor(const std::string& desc, double time) {
+		disabledMap[desc] = time;
+	}
+
+	virtual double checkDisabled(const std::string& desc) const
+	{
+		auto iter = disabledMap.find(desc);
+		if (iter != disabledMap.end()) {
+			return iter->second;
+		}
+		return 0;
+	}
+
 	static thread_local ProcessInfo* currentProcess;
 protected:
 	Mutex mutex;
@@ -318,6 +334,7 @@ private:
 	std::map<NetworkAddress, int> excludedAddresses;
 	std::map<NetworkAddress, int> clearedAddresses;
 	std::map<NetworkAddress, std::map<std::string, int>> roleAddresses;
+	std::map<std::string, double> disabledMap;
 	bool allSwapsDisabled;
 };
 

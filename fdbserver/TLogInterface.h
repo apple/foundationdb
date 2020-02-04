@@ -29,6 +29,7 @@
 #include <iterator>
 
 struct TLogInterface {
+	constexpr static FileIdentifier file_identifier = 16308510;
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
@@ -44,33 +45,41 @@ struct TLogInterface {
 	RequestStream< struct TLogConfirmRunningRequest > confirmRunning; // used for getReadVersion requests from client
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream< struct TLogRecoveryFinishedRequest > recoveryFinished;
+	RequestStream< struct TLogDisablePopRequest> disablePopRequest;
+	RequestStream< struct TLogEnablePopRequest> enablePopRequest;
+	RequestStream< struct TLogSnapRequest> snapRequest;
+
 	
 	TLogInterface() {}
-	explicit TLogInterface(LocalityData locality) : uniqueID( g_random->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
-	TLogInterface(UID sharedTLogID, LocalityData locality) : uniqueID( g_random->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
-	TLogInterface(UID uniqueID, UID sharedTLogID, LocalityData locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
+	explicit TLogInterface(const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
+	TLogInterface(UID sharedTLogID, const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
+	TLogInterface(UID uniqueID, UID sharedTLogID, const LocalityData& locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
 	UID id() const { return uniqueID; }
 	UID getSharedTLogID() const { return sharedTLogID; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == ( TLogInterface const& r ) const { return id() == r.id(); }
 	NetworkAddress address() const { return peekMessages.getEndpoint().getPrimaryAddress(); }
 	void initEndpoints() {
-		getQueuingMetrics.getEndpoint( TaskTLogQueuingMetrics );
-		popMessages.getEndpoint( TaskTLogPop );
-		peekMessages.getEndpoint( TaskTLogPeek );
-		confirmRunning.getEndpoint( TaskTLogConfirmRunning );
-		commit.getEndpoint( TaskTLogCommit );
+		getQueuingMetrics.getEndpoint( TaskPriority::TLogQueuingMetrics );
+		popMessages.getEndpoint( TaskPriority::TLogPop );
+		peekMessages.getEndpoint( TaskPriority::TLogPeek );
+		confirmRunning.getEndpoint( TaskPriority::TLogConfirmRunning );
+		commit.getEndpoint( TaskPriority::TLogCommit );
 	}
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ASSERT(ar.isDeserializing || uniqueID != UID());
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.isDeserializing || uniqueID != UID());
+		}
 		serializer(ar, uniqueID, sharedTLogID, locality, peekMessages, popMessages
-		  , commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished);
+		  , commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished
+		  , disablePopRequest, enablePopRequest, snapRequest);
 	}
 };
 
 struct TLogRecoveryFinishedRequest {
+	constexpr static FileIdentifier file_identifier = 8818668;
 	ReplyPromise<Void> reply;
 
 	TLogRecoveryFinishedRequest() {}
@@ -82,6 +91,7 @@ struct TLogRecoveryFinishedRequest {
 };
 
 struct TLogLockResult {
+	constexpr static FileIdentifier file_identifier = 11822027;
 	Version end;
 	Version knownCommittedVersion;
 
@@ -92,6 +102,7 @@ struct TLogLockResult {
 };
 
 struct TLogConfirmRunningRequest {
+	constexpr static FileIdentifier file_identifier = 10929130;
 	Optional<UID> debugID;
 	ReplyPromise<Void> reply;
 
@@ -136,6 +147,7 @@ struct VerUpdateRef {
 };
 
 struct TLogPeekReply {
+	constexpr static FileIdentifier file_identifier = 11365689;
 	Arena arena;
 	StringRef messages;
 	Version end;
@@ -143,31 +155,35 @@ struct TLogPeekReply {
 	Version maxKnownVersion;
 	Version minKnownCommittedVersion;
 	Optional<Version> begin;
+	bool onlySpilled = false;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, messages, end, popped, maxKnownVersion, minKnownCommittedVersion, begin);
+		serializer(ar, arena, messages, end, popped, maxKnownVersion, minKnownCommittedVersion, begin, onlySpilled);
 	}
 };
 
 struct TLogPeekRequest {
+	constexpr static FileIdentifier file_identifier = 11001131;
 	Arena arena;
 	Version begin;
 	Tag tag;
 	bool returnIfBlocked;
+	bool onlySpilled;
 	Optional<std::pair<UID, int>> sequence;
 	ReplyPromise<TLogPeekReply> reply;
 
-	TLogPeekRequest( Version begin, Tag tag, bool returnIfBlocked, Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>() ) : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), sequence(sequence) {}
+	TLogPeekRequest( Version begin, Tag tag, bool returnIfBlocked, bool onlySpilled, Optional<std::pair<UID, int>> sequence = Optional<std::pair<UID, int>>() ) : begin(begin), tag(tag), returnIfBlocked(returnIfBlocked), sequence(sequence), onlySpilled(onlySpilled) {}
 	TLogPeekRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, begin, tag, returnIfBlocked, sequence, reply);
+		serializer(ar, arena, begin, tag, returnIfBlocked, onlySpilled, sequence, reply);
 	}
 };
 
 struct TLogPopRequest {
+	constexpr static FileIdentifier file_identifier = 5556423;
 	Arena arena;
 	Version to;
 	Version durableKnownCommittedVersion;
@@ -200,13 +216,27 @@ struct TagMessagesRef {
 	}
 };
 
+struct TLogCommitReply {
+	constexpr static FileIdentifier file_identifier = 3;
+
+	Version version;
+	TLogCommitReply() = default;
+	explicit TLogCommitReply(Version version) : version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
+	}
+};
+
 struct TLogCommitRequest {
+	constexpr static FileIdentifier file_identifier = 4022206;
 	Arena arena;
 	Version prevVersion, version, knownCommittedVersion, minKnownCommittedVersion;
 
 	StringRef messages;// Each message prefixed by a 4-byte length
 
-	ReplyPromise<Version> reply;
+	ReplyPromise<TLogCommitReply> reply;
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
@@ -218,16 +248,9 @@ struct TLogCommitRequest {
 	}
 };
 
-struct TLogQueuingMetricsRequest {
-	ReplyPromise<struct TLogQueuingMetricsReply> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
-	}
-};
 
 struct TLogQueuingMetricsReply {
+	constexpr static FileIdentifier file_identifier = 12206626;
 	double localTime;
 	int64_t instanceID;  // changes if bytesDurable and bytesInput reset
 	int64_t bytesDurable, bytesInput;
@@ -237,6 +260,65 @@ struct TLogQueuingMetricsReply {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, localTime, instanceID, bytesDurable, bytesInput, storageBytes, v);
+	}
+};
+
+struct TLogQueuingMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 7798476;
+	ReplyPromise<struct TLogQueuingMetricsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct TLogDisablePopRequest {
+	constexpr static FileIdentifier file_identifier = 4022806;
+	Arena arena;
+	UID snapUID;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	TLogDisablePopRequest() = default;
+	TLogDisablePopRequest(const UID uid) : snapUID(uid) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, snapUID, reply, arena, debugID);
+	}
+};
+
+struct TLogEnablePopRequest {
+	constexpr static FileIdentifier file_identifier = 4022809;
+	Arena arena;
+	UID snapUID;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	TLogEnablePopRequest() = default;
+	TLogEnablePopRequest(const UID uid) : snapUID(uid) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, snapUID, reply, arena, debugID);
+	}
+};
+
+struct TLogSnapRequest {
+	constexpr static FileIdentifier file_identifier = 8184128;
+	ReplyPromise<Void> reply;
+	Arena arena;
+	StringRef snapPayload;
+	UID snapUID;
+	StringRef role;
+
+	TLogSnapRequest(StringRef snapPayload, UID snapUID, StringRef role) : snapPayload(snapPayload), snapUID(snapUID), role(role) {}
+	TLogSnapRequest() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply, snapPayload, snapUID, role, arena);
 	}
 };
 

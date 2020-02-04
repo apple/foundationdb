@@ -1,4 +1,7 @@
 #ifndef NDEBUG
+#define NDEBUG
+#endif
+#ifndef NDEBUG
     #define SQLITE_DEBUG 1
 #endif
 #define SQLITE_THREADSAFE 0
@@ -14703,7 +14706,7 @@ SQLITE_PRIVATE int sqlite3VarintLen(u64 v){
 ** Read or write a four-byte big-endian integer value.
 */
 SQLITE_PRIVATE u32 sqlite3Get4byte(const u8 *p){
-  return (p[0]<<24) | (p[1]<<16) | (p[2]<<8) | p[3];
+  return ((u32)p[0]<<24) | ((u32)p[1]<<16) | ((u32)p[2]<<8) | (u32)p[3];
 }
 SQLITE_PRIVATE void sqlite3Put4byte(unsigned char *p, u32 v){
   p[0] = (u8)(v>>24);

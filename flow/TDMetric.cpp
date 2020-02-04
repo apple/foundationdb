@@ -23,6 +23,7 @@
 
 const StringRef BaseEventMetric::metricType = LiteralStringRef("Event");
 template<> const StringRef Int64Metric::metricType = LiteralStringRef("Int64");
+template<> const StringRef DoubleMetric::metricType = LiteralStringRef("Double");
 template<> const StringRef BoolMetric::metricType = LiteralStringRef("Bool");
 template<> const StringRef StringMetric::metricType = LiteralStringRef("String");
 
@@ -152,7 +153,7 @@ uint64_t DynamicEventMetric::log(uint64_t explicitTime) {
 		return 0;
 
 	uint64_t t = explicitTime ? explicitTime : timer_int();
-	double x = g_random->random01();
+	double x = deterministicRandom()->random01();
 	
 	int64_t l = 0;
 	if (x == 0.0)

@@ -17,16 +17,19 @@
 # limitations under the License.
 #
 
-FROM python:3.6
+ARG FDB_VERSION
+
+FROM foundationdb/foundationdb:${FDB_VERSION} as fdb
+FROM python:3.8
 
 RUN apt-get update; apt-get install -y dnsutils
 
 RUN mkdir -p /app
 WORKDIR /app
 
-COPY --from=foundationdb:5.2.5 /usr/lib/libfdb_c.so /usr/lib
-COPY --from=foundationdb:5.2.5 /usr/bin/fdbcli /usr/bin/
-COPY --from=foundationdb:5.2.5 /var/fdb/scripts/create_cluster_file.bash /app
+COPY --from=fdb /usr/lib/libfdb_c.so /usr/lib
+COPY --from=fdb /usr/bin/fdbcli /usr/bin/
+COPY --from=fdb /var/fdb/scripts/create_cluster_file.bash /app
 
 COPY requirements.txt /app
 RUN pip install -r requirements.txt

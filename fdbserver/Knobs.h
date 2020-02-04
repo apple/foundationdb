@@ -70,21 +70,28 @@ public:
 	int PARALLEL_GET_MORE_REQUESTS;
 	int MULTI_CURSOR_PRE_FETCH_LIMIT;
 	int64_t MAX_QUEUE_COMMIT_BYTES;
-	int64_t VERSIONS_PER_BATCH;
+	int DESIRED_OUTSTANDING_MESSAGES;
+	double DESIRED_GET_MORE_DELAY;
 	int CONCURRENT_LOG_ROUTER_READS;
+	int LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED; // 0==peek from primary, non-zero==peek from satellites
 	double DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME;
 	double DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME;
 	int64_t TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES;
+	int64_t TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK;
+	int64_t TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH;
 	int64_t DISK_QUEUE_FILE_EXTENSION_BYTES; // When we grow the disk queue, by how many bytes should it grow?
 	int64_t DISK_QUEUE_FILE_SHRINK_BYTES; // When we shrink the disk queue, by how many bytes should it shrink?
+	int DISK_QUEUE_MAX_TRUNCATE_BYTES;  // A truncate larger than this will cause the file to be replaced instead.
 	int TLOG_DEGRADED_DELAY_COUNT;
 	double TLOG_DEGRADED_DURATION;
-	double TLOG_DEGRADED_RESET_INTERVAL;
+	int64_t MAX_CACHE_VERSIONS;
+	double TXS_POPPED_MAX_DELAY;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
 	double BEST_TEAM_STUCK_DELAY;
-	double BG_DD_POLLING_INTERVAL;
+	double BG_REBALANCE_POLLING_INTERVAL;
+	double BG_REBALANCE_SWITCH_CHECK_INTERVAL;
 	double DD_QUEUE_LOGGING_INTERVAL;
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	int DD_QUEUE_MAX_KEY_SERVERS;
@@ -99,6 +106,25 @@ public:
 	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
+	
+	// Higher priorities are executed first
+	// Priority/100 is the "priority group"/"superpriority".  Priority inversion
+	//   is possible within but not between priority groups; fewer priority groups
+	//   mean better worst case time bounds
+	// Maximum allowable priority is 999.
+	int PRIORITY_RECOVER_MOVE;
+	int PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
+	int PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
+	int PRIORITY_TEAM_HEALTHY;
+	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
+	int PRIORITY_TEAM_REDUNDANT;
+	int PRIORITY_MERGE_SHARD;
+	int PRIORITY_TEAM_UNHEALTHY;
+	int PRIORITY_TEAM_2_LEFT;
+	int PRIORITY_TEAM_1_LEFT;
+	int PRIORITY_TEAM_FAILED;         // Priority when a server in the team is excluded as failed
+	int PRIORITY_TEAM_0_LEFT;
+	int PRIORITY_SPLIT_SHARD;
 
 	// Data distribution
 	double RETRY_RELOCATESHARD_DELAY;
@@ -107,6 +133,8 @@ public:
 	int64_t SHARD_MAX_BYTES_PER_KSEC, // Shards with more than this bandwidth will be split immediately
 		SHARD_MIN_BYTES_PER_KSEC,     // Shards with more than this bandwidth will not be merged
 		SHARD_SPLIT_BYTES_PER_KSEC;   // When splitting a shard, it is split into pieces with less than this bandwidth
+	int64_t SHARD_MAX_BYTES_READ_PER_KSEC;
+	double SHARD_MAX_BYTES_READ_PER_KSEC_JITTER;
 	double STORAGE_METRIC_TIMEOUT;
 	double METRIC_DELAY;
 	double ALL_DATA_REMOVED_DELAY;
@@ -122,6 +150,7 @@ public:
 	double DATA_DISTRIBUTION_LOGGING_INTERVAL;
 	double DD_ENABLED_CHECK_DELAY;
 	double DD_STALL_CHECK_DELAY;
+	double DD_LOW_BANDWIDTH_DELAY;
 	double DD_MERGE_COALESCE_DELAY;
 	double STORAGE_METRICS_POLLING_DELAY;
 	double STORAGE_METRICS_RANDOM_DELAY;
@@ -137,10 +166,23 @@ public:
 	int64_t DD_LOCATION_CACHE_SIZE;
 	double MOVEKEYS_LOCK_POLLING_DELAY;
 	double DEBOUNCE_RECRUITING_DELAY;
+	int REBALANCE_MAX_RETRIES;
+	int DD_OVERLAP_PENALTY;
+	int DD_EXCLUDE_MIN_REPLICAS;
+	bool DD_VALIDATE_LOCALITY;
+	int DD_CHECK_INVALID_LOCALITY_DELAY;
 
 	// TeamRemover to remove redundant teams
-	bool TR_FLAG_DISABLE_TEAM_REMOVER;   // disable the teamRemover actor
+	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
 	double TR_REMOVE_MACHINE_TEAM_DELAY; // wait for the specified time before try to remove next machine team
+	bool TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS; // guard to select which machineTeamRemover logic to use
+
+	bool TR_FLAG_DISABLE_SERVER_TEAM_REMOVER; // disable the serverTeamRemover actor
+	double TR_REMOVE_SERVER_TEAM_DELAY; // wait for the specified time before try to remove next server team
+	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthyness again to ensure it runs after machineTeamRemover
+
+	// Remove wrong storage engines
+	double DD_REMOVE_STORE_ENGINE_DELAY; // wait for the specified time before remove the next batch
 
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
@@ -167,10 +209,15 @@ public:
 	int SQLITE_FRAGMENT_PRIMARY_PAGE_USABLE;
 	int SQLITE_FRAGMENT_OVERFLOW_PAGE_USABLE;
 	double SQLITE_FRAGMENT_MIN_SAVINGS;
+	int SQLITE_CHUNK_SIZE_PAGES;
+	int SQLITE_CHUNK_SIZE_PAGES_SIM;
 
 	// KeyValueStoreSqlite spring cleaning
-	double CLEANING_INTERVAL;
-	double SPRING_CLEANING_TIME_ESTIMATE;
+	double SPRING_CLEANING_NO_ACTION_INTERVAL;
+	double SPRING_CLEANING_LAZY_DELETE_INTERVAL;
+	double SPRING_CLEANING_VACUUM_INTERVAL;
+	double SPRING_CLEANING_LAZY_DELETE_TIME_ESTIMATE;
+	double SPRING_CLEANING_VACUUM_TIME_ESTIMATE;
 	double SPRING_CLEANING_VACUUMS_PER_LAZY_DELETE_PAGE;
 	int SPRING_CLEANING_MIN_LAZY_DELETE_PAGES;
 	int SPRING_CLEANING_MAX_LAZY_DELETE_PAGES;
@@ -220,6 +267,11 @@ public:
 	double PROXY_SPIN_DELAY;
 	double UPDATE_REMOTE_LOG_VERSION_INTERVAL;
 	int MAX_TXS_POP_VERSION_HISTORY;
+	double MIN_CONFIRM_INTERVAL;
+	double ENFORCED_MIN_RECOVERY_DURATION;
+	double REQUIRED_MIN_RECOVERY_DURATION;
+	bool ALWAYS_CAUSAL_READ_RISKY;
+	int MAX_COMMIT_UPDATES;
 
 	// Master Server
 	double COMMIT_SLEEP_TIME;
@@ -239,6 +291,11 @@ public:
 	double SAMPLE_EXPIRATION_TIME;
 	double SAMPLE_POLL_TIME;
 	int64_t RESOLVER_STATE_MEMORY_LIMIT;
+
+	// Backup Worker
+	double BACKUP_TIMEOUT;  // master's reaction time for backup failure
+	double BACKUP_NOOP_POP_DELAY;
+	int BACKUP_FILE_BLOCK_BYTES;
 
 	//Cluster Controller
 	double CLUSTER_CONTROLLER_LOGGING_DELAY;
@@ -262,6 +319,10 @@ public:
 	int64_t MAX_VERSION_DIFFERENCE;
 	double FORCE_RECOVERY_CHECK_DELAY;
 	double RATEKEEPER_FAILURE_TIME;
+	double REPLACE_INTERFACE_DELAY;
+	double REPLACE_INTERFACE_CHECK_DELAY;
+	double COORDINATOR_REGISTER_INTERVAL;
+	double CLIENT_REGISTER_INTERVAL;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS;	// number of tests per policy (in order to compare)
@@ -296,6 +357,7 @@ public:
 	double METRIC_UPDATE_RATE;
 	double DETAILED_METRIC_UPDATE_RATE;
 	double LAST_LIMITED_RATIO;
+	double RATEKEEPER_DEFAULT_LIMIT;
 
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER;
 	int64_t SPRING_BYTES_STORAGE_SERVER;
@@ -309,6 +371,10 @@ public:
 	int64_t TLOG_SPILL_THRESHOLD;
 	int64_t TLOG_HARD_LIMIT_BYTES;
 	int64_t TLOG_RECOVER_MEMORY_LIMIT;
+	double TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
+
+	// disk snapshot
+	double SNAP_CREATE_MAX_TIMEOUT;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -319,12 +385,26 @@ public:
 	double MAX_TL_SS_VERSION_DIFFERENCE_BATCH;
 	int MAX_MACHINES_FALLING_BEHIND;
 
+	int MAX_TPS_HISTORY_SAMPLES;
+	int NEEDED_TPS_HISTORY_SAMPLES;
+	int64_t TARGET_DURABILITY_LAG_VERSIONS;
+	int64_t TARGET_DURABILITY_LAG_VERSIONS_BATCH;
+	int64_t DURABILITY_LAG_UNLIMITED_THRESHOLD;
+	double INITIAL_DURABILITY_LAG_MULTIPLIER;
+	double DURABILITY_LAG_REDUCTION_RATE;
+	double DURABILITY_LAG_INCREASE_RATE;
+
+	double STORAGE_SERVER_LIST_FETCH_TIMEOUT;
+
 	//Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;
 	double STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	double SPLIT_JITTER_AMOUNT;
 	int64_t IOPS_UNITS_PER_SAMPLE;
 	int64_t BANDWIDTH_UNITS_PER_SAMPLE;
+	int64_t BYTES_READ_UNITS_PER_SAMPLE;
+	int64_t EMPTY_READ_PENALTY;
+	bool READ_SAMPLING_ENABLED;
 
 	//Storage Server
 	double STORAGE_LOGGING_DELAY;
@@ -334,8 +414,13 @@ public:
 	int BUGGIFY_LIMIT_BYTES;
 	int FETCH_BLOCK_BYTES;
 	int FETCH_KEYS_PARALLELISM_BYTES;
+	int FETCH_KEYS_LOWER_PRIORITY;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_HARD_LIMIT_BYTES;
+	int64_t STORAGE_DURABILITY_LAG_HARD_MAX;
+	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
+	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
+	double STORAGE_DURABILITY_LAG_MIN_RATE;
 	int STORAGE_COMMIT_BYTES;
 	double STORAGE_COMMIT_INTERVAL;
 	double UPDATE_SHARD_VERSION_INTERVAL;
@@ -346,16 +431,24 @@ public:
 	double LONG_BYTE_SAMPLE_RECOVERY_DELAY;
 	int BYTE_SAMPLE_LOAD_PARALLELISM;
 	double BYTE_SAMPLE_LOAD_DELAY;
+	double BYTE_SAMPLE_START_DELAY;
 	double UPDATE_STORAGE_PROCESS_STATS_INTERVAL;
+	double BEHIND_CHECK_DELAY;
+	int BEHIND_CHECK_COUNT;
+	int64_t BEHIND_CHECK_VERSIONS;
+	double WAIT_METRICS_WRONG_SHARD_CHANCE;
 
 	//Wait Failure
-	int BUGGIFY_OUTSTANDING_WAIT_FAILURE_REQUESTS;
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
 	double WAIT_FAILURE_DELAY_LIMIT;
 
 	//Worker
 	double WORKER_LOGGING_INTERVAL;
 	double INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING;
+	double HEAP_PROFILER_INTERVAL;
+	double DEGRADED_RESET_INTERVAL;
+	double DEGRADED_WARNING_LIMIT;
+	double DEGRADED_WARNING_RESET_DELAY;
 
 	// Test harness
 	double WORKER_POLL_DELAY;
@@ -371,6 +464,7 @@ public:
 	double STATUS_MIN_TIME_BETWEEN_REQUESTS;
 	double MAX_STATUS_REQUESTS_PER_SECOND;
 	int CONFIGURATION_ROWS_TO_FETCH;
+	bool DISABLE_DUPLICATE_LOG_WARNING;
 
 	// IPager
 	int PAGER_RESERVED_PAGES;
@@ -384,8 +478,12 @@ public:
 	int64_t TIME_KEEPER_DELAY;
 	int64_t TIME_KEEPER_MAX_ENTRIES;
 
+	// Fast Restore
+	int64_t FASTRESTORE_FAILURE_TIMEOUT;
+	int64_t FASTRESTORE_HEARTBEAT_INTERVAL;
+	double FASTRESTORE_SAMPLING_PERCENT;
 
-	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL);
+	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
 
 extern ServerKnobs const* SERVER_KNOBS;

@@ -29,7 +29,7 @@
 #include "flow/actorcompiler.h"
 
 Future<int64_t> getDataInFlight( Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const& );
-Future<int64_t> getMaxTLogQueueSize( Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const& );
+Future<std::pair<int64_t,int64_t>> getTLogQueueInfo( Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const& );
 Future<int64_t> getMaxStorageServerQueueSize( Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const& );
 Future<int64_t> getDataDistributionQueueSize( Database const &cx, Reference<AsyncVar<struct ServerDBInfo>> const&, bool const& reportInFlight );
 Future<bool> getTeamCollectionValid(Database const& cx, WorkerInterface const&);
@@ -38,6 +38,8 @@ Future<vector<StorageServerInterface>> getStorageServers( Database const& cx, bo
 Future<vector<WorkerDetails>> getWorkers( Reference<AsyncVar<ServerDBInfo>> const& dbInfo, int const& flags = 0 );
 Future<WorkerInterface> getMasterWorker( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo );
 Future<Void> repairDeadDatacenter(Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo, std::string const& context);
+Future<vector<WorkerInterface>> getStorageWorkers( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo, bool const& localOnly );
+Future<vector<WorkerInterface>> getCoordWorkers( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo );
 
 #include "flow/unactorcompiler.h"
 #endif

@@ -115,7 +115,8 @@ public:
 		maxKeysPerTransaction = std::max(1, maxTransactionBytes / (maxValueLength + maxLongKeyLength));
 
 		if(maxTransactionBytes > 500000) {
-			TraceEvent("RemapEventSeverity").detail("TargetEvent", "Net2_LargePacket").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
+			TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargePacketSent").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
+			TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargePacketReceived").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
 			TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargeTransaction").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
 			TraceEvent("RemapEventSeverity").detail("TargetEvent", "DiskQueueMemoryWarning").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
 		}
@@ -187,19 +188,17 @@ public:
 			return Void();
 
 		//Test the get function
-		bool getResult = wait(self->runGet(data, self->numGets, self));
+		wait(::success(self->runGet(data, self->numGets, self)));
 
 		//Test the getRange function
 		state int i;
-		for(i = 0; i < self->numGetRanges; i++)
-			bool getRangeResult = wait(self->runGetRange(data, self));
+		for (i = 0; i < self->numGetRanges; i++) wait(::success(self->runGetRange(data, self)));
 
 		//Test the getRange function using key selectors
-		for(i = 0; i < self->numGetRangeSelectors; i++)
-			bool getRangeSelectorResult = wait(self->runGetRangeSelector(data, self));
+		for (i = 0; i < self->numGetRangeSelectors; i++) wait(::success(self->runGetRangeSelector(data, self)));
 
 		//Test the getKey function
-		bool getKeyResult = wait(self->runGetKey(data, self->numGetKeys, self));
+		wait(::success(self->runGetKey(data, self->numGetKeys, self)));
 
 		//Test the clear function
 		bool clearResult = wait(self->runClear(data, self->numClears, self));
@@ -238,7 +237,7 @@ public:
 				totalDensity += pdf[i];
 
 			int cumulativeDensity = 0;
-			int random = g_random->randomInt(0, totalDensity);
+			int random = deterministicRandom()->randomInt(0, totalDensity);
 			for(int i = 0; i < pdf.size() - 1; i++) {
 				if(cumulativeDensity + pdf[i] <= random && random < cumulativeDensity + pdf[i] + pdf[i + 1]) {
 					operation = (OperationType)i;
@@ -252,7 +251,7 @@ public:
 
 			//Test the set operation
 			if(operation == SET) {
-				bool useShortKeys = g_random->randomInt(0, 2) == 1;
+				bool useShortKeys = deterministicRandom()->randomInt(0, 2) == 1;
 				int minKeyLength = useShortKeys ? self->minShortKeyLength : self->minLongKeyLength;
 				int maxKeyLength = useShortKeys ? self->maxShortKeyLength : self->maxLongKeyLength;
 
@@ -417,8 +416,8 @@ public:
 		state Key end = std::max(key, key2);
 
 		//Generate a random maximum number of results
-		state int limit = g_random->randomInt(0, 101);
-		state bool reverse = g_random->random01() > 0.5 ? false : true;
+		state int limit = deterministicRandom()->randomInt(0, 101);
+		state bool reverse = deterministicRandom()->random01() > 0.5 ? false : true;
 
 		//Get the range from memory
 		state Standalone<RangeResultRef> storeResults = self->store.getRange(KeyRangeRef(start, end), limit, reverse);
@@ -503,8 +502,8 @@ public:
 		}
 
 		//Choose a random maximum number of results
-		state int limit = g_random->randomInt(0, 101);
-		state bool reverse = g_random->random01() < 0.5 ? false : true;
+		state int limit = deterministicRandom()->randomInt(0, 101);
+		state bool reverse = deterministicRandom()->random01() < 0.5 ? false : true;
 
 		//Get the range from the memory store
 		state Standalone<RangeResultRef> storeResults = self->store.getRange(KeyRangeRef(startKey, endKey), limit, reverse);

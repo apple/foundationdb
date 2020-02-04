@@ -22,7 +22,7 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/crc32c.h"
+#include "flow/crc32c.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -92,7 +92,9 @@ struct StringBuffer {
 			uint8_t* p = (uint8_t*)(int64_t(b+alignment-1) & ~(alignment-1));  // first multiple of alignment greater than or equal to b
 			ASSERT( p>=b && p+reserved<=e && int64_t(p)%alignment == 0 );
 
-			memcpy(p, str.begin(), str.size());
+			if (str.size() > 0) {
+				memcpy(p, str.begin(), str.size());
+			}
 			ref() = StringRef( p, str.size() );
 		}
 	}
@@ -125,7 +127,7 @@ private:
 	}
 };
 
-// We use a Tracked instead of a Reference when the shutdown/destructor code would need to wait().
+// We use a Tracked instead of a Reference when the shutdown/destructor code would need to wait() on pending file operations (e.g., read).
 template <typename T>
 class Tracked {
 protected:
@@ -154,6 +156,9 @@ private:
 	AsyncVar<bool> actorCountIsZero = true;
 };
 
+// DiskQueue uses two files to implement a dynamically resizable ring buffer, where files only allow append and read operations.
+//    To increase the ring buffer size, it creates a ring buffer in the other file.
+//    After finish reading the current file, it switch to use the other file as the ring buffer.
 class RawDiskQueue_TwoFiles : public Tracked<RawDiskQueue_TwoFiles> {
 public:
 	RawDiskQueue_TwoFiles( std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit )
@@ -164,9 +169,9 @@ public:
 		readyToPush(Void()), fileSizeWarningLimit(fileSizeWarningLimit), lastCommit(Void()), isFirstCommit(true)
 	{
 		if (BUGGIFY)
-			fileExtensionBytes = 1<<10 * g_random->randomSkewedUInt32( 1, 40<<10 );
+			fileExtensionBytes = _PAGE_SIZE * deterministicRandom()->randomSkewedUInt32( 1, 10<<10 );
 		if (BUGGIFY)
-			fileShrinkBytes = _PAGE_SIZE * g_random->randomSkewedUInt32( 1, 10<<10 );
+			fileShrinkBytes = _PAGE_SIZE * deterministicRandom()->randomSkewedUInt32( 1, 10<<10 );
 		files[0].dbgFilename = filename(0);
 		files[1].dbgFilename = filename(1);
 		// We issue reads into firstPages, so it needs to be 4k aligned.
@@ -258,7 +263,7 @@ public:
 	bool isFirstCommit;
 
 	StringBuffer readingBuffer; // Pages that have been read and not yet returned
-	int readingFile;  // i if the next page after readingBuffer should be read from files[i], 2 if recovery is complete
+	int readingFile;  // File index where the next page (after readingBuffer) should be read from, i.e., files[readingFile]. readingFile = 2 if recovery is complete (all files have been read). 
 	int64_t readingPage;  // Page within readingFile that is the next page after readingBuffer
 
 	int64_t writingPos;  // Position within files[1] that will be next written
@@ -270,70 +275,121 @@ public:
 
 	Future<Void> truncateFile(int file, int64_t pos) { return truncateFile(this, file, pos); }
 
-	Future<Void> push(StringRef pageData, vector<Reference<SyncQueue>>& toSync) {
-		// Write the given data to the queue files, swapping or extending them if necessary.
+	// FIXME: Merge this function with IAsyncFileSystem::incrementalDeleteFile().
+	ACTOR static void incrementalTruncate(Reference<IAsyncFile> file) {
+		state int64_t remainingFileSize = wait( file->size() );
+
+		for( ; remainingFileSize > 0; remainingFileSize -= FLOW_KNOBS->INCREMENTAL_DELETE_TRUNCATE_AMOUNT ){
+			wait(file->truncate(remainingFileSize));
+			wait(file->sync());
+			wait(delay(FLOW_KNOBS->INCREMENTAL_DELETE_INTERVAL));
+		}
+
+		TraceEvent("DiskQueueReplaceTruncateEnded").detail("Filename", file->getFilename());
+	}
+
+#if defined(_WIN32)
+	ACTOR static Future<Reference<IAsyncFile>> replaceFile(Reference<IAsyncFile> toReplace) {
+		// Windows doesn't support a rename over an open file.
+		wait( toReplace->truncate(4<<10) );
+		return toReplace;
+	}
+#else
+	ACTOR static Future<Reference<IAsyncFile>> replaceFile(Reference<IAsyncFile> toReplace) {
+		incrementalTruncate( toReplace );
+
+		Reference<IAsyncFile> _replacement = wait( IAsyncFileSystem::filesystem()->open( toReplace->getFilename(), IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK, 0600 ) );
+		state Reference<IAsyncFile> replacement = _replacement;
+		wait( replacement->sync() );
+
+		return replacement;
+	}
+#endif
+
+	Future<Future<Void>> push(StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
+		return push( this, pageData, toSync );
+	}
+
+	ACTOR static Future<Future<Void>> push(RawDiskQueue_TwoFiles* self, StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
+		// Write the given data (pageData) to the queue files, swapping or extending them if necessary.
 		// Don't do any syncs, but push the modified file(s) onto toSync.
-		ASSERT( readingFile == 2 );
+		ASSERT( self->readingFile == 2 );
 		ASSERT( pageData.size() % _PAGE_SIZE == 0 );
 		ASSERT( int64_t(pageData.begin()) % _PAGE_SIZE == 0 );
-		ASSERT( writingPos % _PAGE_SIZE == 0 );
-		ASSERT( files[0].size % _PAGE_SIZE == 0 && files[1].size % _PAGE_SIZE == 0 );
+		ASSERT( self->writingPos % _PAGE_SIZE == 0 );
+		ASSERT( self->files[0].size % _PAGE_SIZE == 0 && self->files[1].size % _PAGE_SIZE == 0 );
 
-		vector<Future<Void>> waitfor;
+		state vector<Future<Void>> waitfor;
 
-		if (pageData.size() + writingPos > files[1].size) {
-			if ( files[0].popped == files[0].size ) {
-				// Finish files[1] and swap
-				int p = files[1].size - writingPos;
+		if (pageData.size() + self->writingPos > self->files[1].size) {
+			if ( self->files[0].popped == self->files[0].size ) {
+				// Finish self->files[1] and swap
+				int p = self->files[1].size - self->writingPos;
 				if(p > 0) {
-					toSync.push_back( files[1].syncQueue );
-					/*TraceEvent("RDQWriteAndSwap", this->dbgid).detail("File1name", files[1].dbgFilename).detail("File1size", files[1].size)
-						.detail("WritingPos", writingPos).detail("WritingBytes", p);*/
-					waitfor.push_back( files[1].f->write( pageData.begin(), p, writingPos ) );
+					toSync->push_back( self->files[1].syncQueue );
+					/*TraceEvent("RDQWriteAndSwap", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
+						.detail("WritingPos", self->writingPos).detail("WritingBytes", p);*/
+					waitfor.push_back( self->files[1].f->write( pageData.begin(), p, self->writingPos ) );
 					pageData = pageData.substr( p );
 				}
 
-				dbg_file0BeginSeq += files[0].size;
-				std::swap(files[0], files[1]);
-				std::swap(firstPages[0], firstPages[1]);
-				files[1].popped = 0;
-				writingPos = 0;
+				self->dbg_file0BeginSeq += self->files[0].size;
+				std::swap(self->files[0], self->files[1]);
+				std::swap(self->firstPages[0], self->firstPages[1]);
+				self->files[1].popped = 0;
+				self->writingPos = 0;
+				*self->firstPages[1] = *(const Page*)pageData.begin();
 
-				const int64_t activeDataVolume = pageCeiling(files[0].size - files[0].popped + fileExtensionBytes + fileShrinkBytes);
-				if (files[1].size > activeDataVolume) {
-					// Either shrink files[1] to the size of files[0], or chop off fileShrinkBytes
-					int64_t maxShrink = std::max( pageFloor(files[1].size - activeDataVolume), fileShrinkBytes );
-					files[1].size -= maxShrink;
-					waitfor.push_back( files[1].f->truncate( files[1].size ) );
+				const int64_t activeDataVolume = pageCeiling(self->files[0].size - self->files[0].popped + self->fileExtensionBytes + self->fileShrinkBytes);
+				const int64_t desiredMaxFileSize = pageCeiling( std::max( activeDataVolume, SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES * 2 ) );
+				const bool frivolouslyTruncate = BUGGIFY_WITH_PROB(0.1);
+				if (self->files[1].size > desiredMaxFileSize || frivolouslyTruncate) {
+					// Either shrink self->files[1] to the size of self->files[0], or chop off fileShrinkBytes
+					int64_t maxShrink = pageFloor( std::max( self->files[1].size - desiredMaxFileSize, self->fileShrinkBytes ) );
+					if ((maxShrink > SERVER_KNOBS->DISK_QUEUE_MAX_TRUNCATE_BYTES) ||
+					    (frivolouslyTruncate && deterministicRandom()->random01() < 0.3)) {
+						TEST(true);  // Replacing DiskQueue file
+						TraceEvent("DiskQueueReplaceFile", self->dbgid).detail("Filename", self->files[1].f->getFilename()).detail("OldFileSize", self->files[1].size).detail("ElidedTruncateSize", maxShrink);
+						Reference<IAsyncFile> newFile = wait( replaceFile(self->files[1].f) );
+						self->files[1].setFile(newFile);
+						waitfor.push_back( self->files[1].f->truncate( self->fileExtensionBytes ) );
+						self->files[1].size = self->fileExtensionBytes;
+					} else {
+						const int64_t startingSize = self->files[1].size;
+						self->files[1].size -= std::min(maxShrink, self->files[1].size);
+						self->files[1].size = std::max(self->files[1].size, self->fileExtensionBytes);
+						TraceEvent("DiskQueueTruncate", self->dbgid).detail("Filename", self->files[1].f->getFilename()).detail("OldFileSize", startingSize).detail("NewFileSize", self->files[1].size);
+						waitfor.push_back( self->files[1].f->truncate( self->files[1].size ) );
+					}
 				}
 			} else {
-				// Extend files[1] to accomodate the new write and about 10MB or 2x current size for future writes.
-				/*TraceEvent("RDQExtend", this->dbgid).detail("File1name", files[1].dbgFilename).detail("File1size", files[1].size)
+				// Extend self->files[1] to accomodate the new write and about 10MB or 2x current size for future writes.
+				/*TraceEvent("RDQExtend", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
 					.detail("ExtensionBytes", fileExtensionBytes);*/
-				int64_t minExtension = pageData.size() + writingPos - files[1].size;
-				files[1].size += std::min(std::max(fileExtensionBytes, minExtension), files[0].size+files[1].size+minExtension);
-				waitfor.push_back( files[1].f->truncate( files[1].size ) );
+				int64_t minExtension = pageData.size() + self->writingPos - self->files[1].size;
+				self->files[1].size += std::min(std::max(self->fileExtensionBytes, minExtension), self->files[0].size+self->files[1].size+minExtension);
+				waitfor.push_back( self->files[1].f->truncate( self->files[1].size ) );
 
-				if(fileSizeWarningLimit > 0 && files[1].size > fileSizeWarningLimit) {
-					TraceEvent(SevWarnAlways, "DiskQueueFileTooLarge", dbgid).suppressFor(1.0).detail("Filename", filename(1)).detail("Size", files[1].size);
+				if(self->fileSizeWarningLimit > 0 && self->files[1].size > self->fileSizeWarningLimit) {
+					TraceEvent(SevWarnAlways, "DiskQueueFileTooLarge", self->dbgid).suppressFor(1.0).detail("Filename", self->filename(1)).detail("Size", self->files[1].size);
 				}
 			}
+		} else if (self->writingPos == 0) {
+			// If this is the first write to a brand new disk queue file.
+			*self->firstPages[1] = *(const Page*)pageData.begin();
 		}
 
-		if (writingPos == 0) {
-			*firstPages[1] = *(const Page*)pageData.begin();
-		}
-
-		/*TraceEvent("RDQWrite", this->dbgid).detail("File1name", files[1].dbgFilename).detail("File1size", files[1].size)
-			.detail("WritingPos", writingPos).detail("WritingBytes", pageData.size());*/
-		files[1].size = std::max( files[1].size, writingPos + pageData.size() );
-		toSync.push_back( files[1].syncQueue );
-		waitfor.push_back( files[1].f->write( pageData.begin(), pageData.size(), writingPos ) );
-		writingPos += pageData.size();
+		/*TraceEvent("RDQWrite", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
+			.detail("WritingPos", self->writingPos).detail("WritingBytes", pageData.size());*/
+		self->files[1].size = std::max( self->files[1].size, self->writingPos + pageData.size() );
+		toSync->push_back( self->files[1].syncQueue );
+		waitfor.push_back( self->files[1].f->write( pageData.begin(), pageData.size(), self->writingPos ) );
+		self->writingPos += pageData.size();
 
 		return waitForAll(waitfor);
 	}
 
+	// Write the given data (pageData) to the queue files of self, sync data to disk, and delete the memory (pageMem) that hold the pageData
 	ACTOR static UNCANCELLABLE Future<Void> pushAndCommit(RawDiskQueue_TwoFiles* self, StringRef pageData, StringBuffer* pageMem, uint64_t poppedPages) {
 		state Promise<Void> pushing, committed;
 		state Promise<Void> errorPromise = self->error;
@@ -358,7 +414,7 @@ public:
 
 			TEST( pageData.size() > sizeof(Page) ); // push more than one page of data
 
-			Future<Void> pushed = self->push( pageData, syncFiles );
+			Future<Void> pushed = wait( self->push( pageData, &syncFiles ) );
 			pushing.send(Void());
 			ASSERT( syncFiles.size() >= 1 && syncFiles.size() <= 2 );
 			TEST(2==syncFiles.size());  // push spans both files
@@ -405,7 +461,7 @@ public:
 		files[1].popped += popped - pop0;
 	}
 
-
+	// Set the starting point of the ring buffer, i.e., the first useful page to be read (and poped)
 	ACTOR static Future<Void> setPoppedPage( RawDiskQueue_TwoFiles *self, int file, int64_t page, int64_t debugSeq ) {
 		self->files[file].popped = page*sizeof(Page);
 		if (file) self->files[0].popped = self->files[0].size;
@@ -476,6 +532,8 @@ public:
 		state Error error = success();
 		try {
 			wait(success(errorOr(self->lastCommit)));
+			// Wait for the pending operations (e.g., read) to finish before we destroy the DiskQueue, because
+			// tLog, instead of DiskQueue, hold the future of the pending operations.
 			wait( self->onSafeToDestruct() );
 
 			for(int i=0; i<2; i++)
@@ -505,6 +563,7 @@ public:
 		}
 	}
 
+	// Return the most recently written page, the page with largest seq number
 	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> readFirstAndLastPages(RawDiskQueue_TwoFiles* self, compare_pages compare) {
 		state TrackMe trackMe(self);
 
@@ -604,6 +663,7 @@ public:
 		}
 	}
 
+	// Read nPages from pageOffset*sizeof(Page) offset in file self->files[file]
 	ACTOR static Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self, int file, int pageOffset, int nPages) {
 		state TrackMe trackMe(self);
 		state const size_t bytesRequested = nPages * sizeof(Page);
@@ -628,7 +688,7 @@ public:
 		}
 
 		// Read up to 1MB into readingBuffer
-		int len = std::min<int64_t>( (files[readingFile].size/sizeof(Page) - readingPage)*sizeof(Page), BUGGIFY_WITH_PROB(1.0) ? sizeof(Page)*g_random->randomInt(1,4) : (1<<20) );
+		int len = std::min<int64_t>( (files[readingFile].size/sizeof(Page) - readingPage)*sizeof(Page), BUGGIFY_WITH_PROB(1.0) ? sizeof(Page)*deterministicRandom()->randomInt(1,4) : (1<<20) );
 		readingBuffer.clear();
 		readingBuffer.alignReserve( sizeof(Page), len );
 		void* p = readingBuffer.append(len);
@@ -649,7 +709,7 @@ public:
 
 			if (!self->readingBuffer.size()) {
 				state Future<Void> f = Void();
-				//if (BUGGIFY) f = delay( g_random->random01() * 0.1 );
+				//if (BUGGIFY) f = delay( deterministicRandom()->random01() * 0.1 );
 
 				int read = wait( self->fillReadingBuffer() );
 				ASSERT( read == self->readingBuffer.size() );
@@ -669,6 +729,7 @@ public:
 		}
 	}
 
+	// Set zero and free the memory from pos to the end of file self->files[file].
 	ACTOR static UNCANCELLABLE Future<Void> truncateFile(RawDiskQueue_TwoFiles* self, int file, int64_t pos) {
 		state TrackMe trackMe(self);
 		TraceEvent("DQTruncateFile", self->dbgid).detail("File", file).detail("Pos", pos).detail("File0Name", self->files[0].dbgFilename);
@@ -750,6 +811,9 @@ public:
 		ASSERT( !upTo.hi );
 		ASSERT( !recovered || upTo.lo <= endLocation() );
 
+		// SS can pop pages that have not been sync.ed to disk because of concurrency:
+		//   SS can read (i.e., pop) data at the same time or before tLog syncs the page to disk.
+		//   This is rare in real situation but common in simulation.
 		// The following ASSERT is NOT part of the intended contract of IDiskQueue, but alerts the user to a known bug where popping
 		//  into uncommitted pages can cause a durability failure.
 		// FIXME: Remove this ASSERT when popping into uncommitted pages is fixed
@@ -771,11 +835,14 @@ public:
 		return Page::maxPayload;
 	}
 
+	// Always commit an entire page. Commit overhead is the unused space in a to-be-committed page
 	virtual int getCommitOverhead() {
 		if(!pushedPageCount()) {
 			if(!anyPopped)
 				return 0;
 
+			// To mark pages are poped, we push an empty page to specify that following pages were poped.
+			// maxPayLoad is the max. payload size, i.e., (page_size - page_header_size).
 			return Page::maxPayload;
 		}
 		else
@@ -786,13 +853,14 @@ public:
 		ASSERT( recovered );
 		if (!pushedPageCount()) {
 			if (!anyPopped) return Void();
-			addEmptyPage();
+			addEmptyPage(); // To remove poped pages, we push an empty page to specify that pages behind it were poped.
 		}
 		anyPopped = false;
 		backPage().popped = poppedSeq;
 		backPage().zeroPad();
 		backPage().updateHash();
 
+		// Warn users that we pushed too many pages. 8000 is an arbitrary value.
 		if( pushedPageCount() >= 8000 ) {
 			TraceEvent( warnAlwaysForMemory ? SevWarnAlways : SevWarn, "DiskQueueMemoryWarning", dbgid)
 				.suppressFor(1.0)
@@ -874,7 +942,7 @@ private:
 				uint16_t implementationVersion;
 			};
 		};
-		uint64_t seq;
+		uint64_t seq; // seq is the index of the virtually infinite disk queue file. Its unit is bytes.
 		uint64_t popped;
 		int payloadSize;
 	};
@@ -985,6 +1053,7 @@ private:
 		delete buffer;
 	}
 
+	// Read pages from [start, end) bytes
 	ACTOR static Future<Standalone<StringRef>> readPages(DiskQueue *self, location start, location end) {
 		state TrackMe trackme(self);
 		state int fromFile;
@@ -1182,6 +1251,9 @@ private:
 		return result.str;
 	}
 
+	// recoverAt is the minimum position in the disk queue file that needs to be read to restore log's states. 
+	// This allows log to read only a small portion of the most recent data from a large (e.g., 10GB) disk file.
+	// This is particularly useful for logSpilling feature.
 	ACTOR static Future<bool> initializeRecovery( DiskQueue* self, location recoverAt ) {
 		if (self->initialized) {
 			return self->recovered;
@@ -1199,11 +1271,7 @@ private:
 
 		Page* lastPage = (Page*)lastPageData.begin();
 		self->poppedSeq = lastPage->popped;
-		if (self->diskQueueVersion >= DiskQueueVersion::V1) {
-			self->nextReadLocation = std::max(recoverAt.lo, self->poppedSeq);
-		} else {
-			self->nextReadLocation = lastPage->popped;
-		}
+		self->nextReadLocation = std::max(recoverAt.lo, self->poppedSeq);
 
 		/*
 		state std::auto_ptr<Page> testPage(new Page);
@@ -1291,8 +1359,8 @@ private:
 	bool anyPopped;  // pop() has been called since the most recent call to commit()
 	bool warnAlwaysForMemory;
 	loc_t nextPageSeq, poppedSeq;
-	loc_t lastPoppedSeq;  // poppedSeq the last time commit was called
-	loc_t lastCommittedSeq;
+	loc_t lastPoppedSeq;  // poppedSeq the last time commit was called.
+	loc_t lastCommittedSeq; // The seq location where the last commit finishes at.
 
 	// Buffer of pushed pages that haven't been committed.  The last one (backPage()) is still mutable.
 	StringBuffer* pushed_page_buffer;
@@ -1312,9 +1380,9 @@ private:
 	int readBufPos;
 };
 
-//A class wrapping DiskQueue which durably allows uncommitted data to be popped
+//A class wrapping DiskQueue which durably allows uncommitted data to be popped.
 //This works by performing two commits when uncommitted data is popped:
-//	Commit 1 - pop only previously committed data and push new data
+//	Commit 1 - pop only previously committed data and push new data (i.e., commit uncommitted data)
 //  Commit 2 - finish pop into uncommitted data
 class DiskQueue_PopUncommitted : public IDiskQueue {
 

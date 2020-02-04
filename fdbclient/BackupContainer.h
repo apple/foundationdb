@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#ifndef FDBCLIENT_BackupContainer_H
+#define FDBCLIENT_BackupContainer_H
 #pragma once
 
 #include "flow/flow.h"
@@ -26,6 +28,8 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include <vector>
+
+class ReadYourWritesTransaction;
 
 Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const &v, Reference<ReadYourWritesTransaction> const &tr);
 Future<Version> timeKeeperVersionFromDatetime(std::string const &datetime, Database const &db);
@@ -64,10 +68,25 @@ struct LogFile {
 	uint32_t blockSize;
 	std::string fileName;
 	int64_t fileSize;
+	int tagId = -1; // Log router tag. Non-negative for new backup format.
 
 	// Order by beginVersion, break ties with endVersion
 	bool operator< (const LogFile &rhs) const {
 		return beginVersion == rhs.beginVersion ? endVersion < rhs.endVersion : beginVersion < rhs.beginVersion;
+	}
+
+	// Returns if two log files have the same content by comparing version range and tag ID.
+	bool sameContent(const LogFile& rhs) const {
+		return beginVersion == rhs.beginVersion && endVersion == rhs.endVersion && tagId == rhs.tagId;
+	}
+
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "beginVersion:" << std::to_string(beginVersion) << " endVersion:" << std::to_string(endVersion)
+		   << " blockSize:" << std::to_string(blockSize) << " filename:" << fileName
+		   << " fileSize:" << std::to_string(fileSize)
+		   << " tagId: " << (tagId >= 0 ? std::to_string(tagId) : std::string("(None)"));
+		return ss.str();
 	}
 };
 
@@ -80,6 +99,13 @@ struct RangeFile {
 	// Order by version, break ties with name
 	bool operator< (const RangeFile &rhs) const {
 		return version == rhs.version ? fileName < rhs.fileName : version < rhs.version;
+	}
+
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "version:" << std::to_string(version) << " blockSize:" << std::to_string(blockSize) <<
+		      " fileName:" << fileName << " fileSize:" << std::to_string(fileSize);
+		return ss.str();
 	}
 };
 
@@ -154,7 +180,7 @@ struct RestorableFileSet {
 	Version targetVersion;
 	std::vector<LogFile> logs;
 	std::vector<RangeFile> ranges;
-	KeyspaceSnapshotFile snapshot;
+	KeyspaceSnapshotFile snapshot; // Info. for debug purposes
 };
 
 /* IBackupContainer is an interface to a set of backup data, which contains
@@ -185,6 +211,10 @@ public:
 	// Open a log file or range file for writing
 	virtual Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) = 0;
 	virtual Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion, int snapshotFileCount, Version fileVersion, int blockSize) = 0;
+
+	// Open a tagged log file for writing, where tagId is the log router tag's id.
+	virtual Future<Reference<IBackupFile>> writeTaggedLogFile(Version beginVersion, Version endVersion, int blockSize,
+	                                                          uint16_t tagId) = 0;
 
 	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
 	// snapshot of the key ranges this backup is targeting.
@@ -239,3 +269,4 @@ private:
 	std::string URL;
 };
 
+#endif

@@ -93,7 +93,7 @@ namespace HTTP {
 		loop {
 			// Wait for connection to have something to read
 			wait(conn->onReadable());
-			wait( delay( 0, TaskReadSocket ) );
+			wait( delay( 0, TaskPriority::ReadSocket ) );
 
 			// Read into buffer
 			int originalSize = buf->size();
@@ -323,7 +323,7 @@ namespace HTTP {
 		try {
 			state std::string requestID;
 			if(!requestIDHeader.empty()) {
-				requestID = g_random->randomUniqueID().toString();
+				requestID = deterministicRandom()->randomUniqueID().toString();
 				requestID = requestID.insert(20, "-");
 				requestID = requestID.insert(16, "-");
 				requestID = requestID.insert(12, "-");
@@ -334,7 +334,7 @@ namespace HTTP {
 			}
 
 			// Write headers to a packet buffer chain
-			PacketBuffer *pFirst = new PacketBuffer();
+			PacketBuffer* pFirst = PacketBuffer::create();
 			PacketBuffer *pLast = writeRequestHeader(verb, resource, headers, pFirst);
 			// Prepend headers to content packer buffer chain
 			pContent->prependWriteBuffer(pFirst, pLast);
@@ -353,7 +353,7 @@ namespace HTTP {
 
 			loop {
 				wait(conn->onWritable());
-				wait( delay( 0, TaskWriteSocket ) );
+				wait( delay( 0, TaskPriority::WriteSocket ) );
 
 				// If we already got a response, before finishing sending the request, then close the connection,
 				// set the Connection header to "close" as a hint to the caller that this connection can't be used
@@ -392,17 +392,17 @@ namespace HTTP {
 					responseID = iid->second;
 				}
 				event.detail("RequestIDReceived", responseID);
-				if(requestID != responseID) {
+
+				// If the response code is 5xx (server error) then a response ID is not expected
+				// so a missing id will be ignored but a mismatching id will still be an error.
+				bool serverError = r->code >= 500 && r->code < 600;
+
+				// If request/response IDs do not match and either this is not a server error
+				// or it is but the response ID is not empty then log an error.
+				if(requestID != responseID && (!serverError || !responseID.empty()) ) {
 					err = http_bad_request_id();
 
-					// Log a non-debug a error
-					Severity sev = SevError;
-					// If the response code is 5xx (server error) and the responseID is empty then just warn
-					if(responseID.empty() && r->code >= 500 && r->code < 600) {
-						sev = SevWarnAlways;
-					}
-
-					TraceEvent(sev, "HTTPRequestFailedIDMismatch")
+					TraceEvent(SevError, "HTTPRequestFailedIDMismatch")
 						.detail("DebugID", conn->getDebugID())
 						.detail("RemoteAddress", conn->getPeerAddress())
 						.detail("Verb", verb)
@@ -433,6 +433,7 @@ namespace HTTP {
 			return r;
 		} catch(Error &e) {
 			double elapsed = timer() - send_start;
+			// A bad_request_id error would have already been logged in verbose mode before err is thrown above.
 			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0 && e.code() != error_code_http_bad_request_id) {
 				printf("[%s] HTTP *ERROR*=%s early=%d, time=%fs %s %s contentLen=%d [%d out]\n",
 					conn->getDebugID().toString().c_str(), e.name(), earlyResponse, elapsed, verb.c_str(), resource.c_str(), contentLen, total_sent);

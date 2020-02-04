@@ -79,82 +79,137 @@ function(install_symlink)
   endif()
 endfunction()
 
+function(symlink_files)
+  if (NOT WIN32)
+    set(options "")
+    set(one_value_options LOCATION SOURCE)
+    set(multi_value_options TARGETS)
+    cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
+
+    file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
+    foreach(component IN LISTS SYM_TARGETS)
+      execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_SOURCE} ${CMAKE_BINARY_DIR}/${SYM_LOCATION}/${component} WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
+    endforeach()
+  endif()
+endfunction()
+
+# 'map' from (destination, package) to path
+# format vars like install_destination_for_${destination}_${package}
+set(install_destination_for_bin_tgz "bin")
+set(install_destination_for_bin_deb "usr/bin")
+set(install_destination_for_bin_el6 "usr/bin")
+set(install_destination_for_bin_el7 "usr/bin")
+set(install_destination_for_bin_pm "usr/local/bin")
+set(install_destination_for_sbin_tgz "sbin")
+set(install_destination_for_sbin_deb "usr/sbin")
+set(install_destination_for_sbin_el6 "usr/sbin")
+set(install_destination_for_sbin_el7 "usr/sbin")
+set(install_destination_for_sbin_pm "usr/local/libexec")
+set(install_destination_for_lib_tgz "lib")
+set(install_destination_for_lib_deb "usr/lib")
+set(install_destination_for_lib_el6 "usr/lib64")
+set(install_destination_for_lib_el7 "usr/lib64")
+set(install_destination_for_lib_pm "lib")
+set(install_destination_for_fdbmonitor_tgz "sbin")
+set(install_destination_for_fdbmonitor_deb "usr/lib/foundationdb")
+set(install_destination_for_fdbmonitor_el6 "usr/lib/foundationdb")
+set(install_destination_for_fdbmonitor_el7 "usr/lib/foundationdb")
+set(install_destination_for_fdbmonitor_pm "usr/local/libexec")
+set(install_destination_for_include_tgz "include")
+set(install_destination_for_include_deb "usr/include")
+set(install_destination_for_include_el6 "usr/include")
+set(install_destination_for_include_el7 "usr/include")
+set(install_destination_for_include_pm "usr/local/include")
+set(install_destination_for_etc_tgz "etc/foundationdb")
+set(install_destination_for_etc_deb "etc/foundationdb")
+set(install_destination_for_etc_el6 "etc/foundationdb")
+set(install_destination_for_etc_el7 "etc/foundationdb")
+set(install_destination_for_etc_pm "usr/local/etc/foundationdb")
+set(install_destination_for_log_tgz "log/foundationdb")
+set(install_destination_for_log_deb "var/log/foundationdb")
+set(install_destination_for_log_el6 "var/log/foundationdb")
+set(install_destination_for_log_el7 "var/log/foundationdb")
+set(install_destination_for_log_pm "")
+set(install_destination_for_data_tgz "lib/foundationdb")
+set(install_destination_for_data_deb "var/lib/foundationdb")
+set(install_destination_for_data_el6 "var/lib/foundationdb")
+set(install_destination_for_data_el7 "var/lib/foundationdb")
+set(install_destination_for_data_pm "")
+
+set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+function(fdb_configure_and_install)
+  if(NOT WIN32 AND NOT OPEN_FOR_IDE)
+    set(one_value_options COMPONENT DESTINATION FILE DESTINATION_SUFFIX)
+    cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
+    foreach(package tgz deb el6 el7 pm)
+      set(INCLUDE_DIR "${install_destination_for_include_${package}}")
+      set(LIB_DIR "${install_destination_for_lib_${package}}")
+      set(install_path "${install_destination_for_${IN_DESTINATION}_${package}}")
+      string(REGEX REPLACE "\.in$" "" name "${IN_FILE}")
+      get_filename_component(name "${name}" NAME)
+      set(generated_file_name "${generated_dir}/${package}/${name}")
+      configure_file("${IN_FILE}" "${generated_file_name}" @ONLY)
+      install(
+        FILES "${generated_file_name}"
+        DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
+        COMPONENT "${IN_COMPONENT}-${package}")
+    endforeach()
+  endif()
+endfunction()
+
 function(fdb_install)
   if(NOT WIN32 AND NOT OPEN_FOR_IDE)
-    set(one_value_options COMPONENT DESTINATION)
+    set(one_value_options COMPONENT DESTINATION EXPORT DESTINATION_SUFFIX)
     set(multi_value_options TARGETS FILES DIRECTORY)
     cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
 
+    set(install_export 0)
     if(IN_TARGETS)
       set(args TARGETS ${IN_TARGETS})
     elseif(IN_FILES)
       set(args FILES ${IN_FILES})
     elseif(IN_DIRECTORY)
       set(args DIRECTORY ${IN_DIRECTORY})
+    elseif(IN_EXPORT)
+      set(install_export 1)
     else()
       message(FATAL_ERROR "Expected FILES or TARGETS")
     endif()
-    if("${IN_DESTINATION}" STREQUAL "bin")
-      install(${args} DESTINATION "bin" COMPONENT "${IN_COMPONENT}-tgz")
-      install(${args} DESTINATION "usr/bin" COMPONENT "${IN_COMPONENT}-deb")
-      install(${args} DESTINATION "usr/bin" COMPONENT "${IN_COMPONENT}-el6")
-      install(${args} DESTINATION "usr/bin" COMPONENT "${IN_COMPONENT}-el7")
-      install(${args} DESTINATION "usr/local/bin" COMPONENT "${IN_COMPONENT}-pm")
-    elseif("${IN_DESTINATION}" STREQUAL "sbin")
-      install(${args} DESTINATION "sbin" COMPONENT "${IN_COMPONENT}-tgz")
-      install(${args} DESTINATION "usr/sbin" COMPONENT "${IN_COMPONENT}-deb")
-      install(${args} DESTINATION "usr/sbin" COMPONENT "${IN_COMPONENT}-el6")
-      install(${args} DESTINATION "usr/sbin" COMPONENT "${IN_COMPONENT}-el7")
-      install(${args} DESTINATION "usr/local/libexec" COMPONENT "${IN_COMPONENT}-pm")
-    elseif("${IN_DESTINATION}" STREQUAL "lib")
-      install(${args} DESTINATION "lib" COMPONENT "${IN_COMPONENT}-tgz")
-      install(${args} DESTINATION "usr/lib" COMPONENT "${IN_COMPONENT}-deb")
-      install(${args} DESTINATION "usr/lib64" COMPONENT "${IN_COMPONENT}-el6")
-      install(${args} DESTINATION "usr/lib64" COMPONENT "${IN_COMPONENT}-el7")
-      install(${args} DESTINATION "lib" COMPONENT "${IN_COMPONENT}-pm")
-    elseif("${IN_DESTINATION}" STREQUAL "fdbmonitor")
-      install(${args} DESTINATION "libexec" COMPONENT "${IN_COMPONENT}-tgz")
-      install(${args} DESTINATION "usr/lib/foundationdb" COMPONENT "${IN_COMPONENT}-deb")
-      install(${args} DESTINATION "usr/lib/foundationdb" COMPONENT "${IN_COMPONENT}-el6")
-      install(${args} DESTINATION "usr/lib/foundationdb" COMPONENT "${IN_COMPONENT}-el7")
-      install(${args} DESTINATION "usr/local/libexec" COMPONENT "${IN_COMPONENT}-pm")
-    elseif("${IN_DESTINATION}" STREQUAL "include")
-      install(${args} DESTINATION "include" COMPONENT "${IN_COMPONENT}-tgz")
-      install(${args} DESTINATION "usr/include" COMPONENT "${IN_COMPONENT}-deb")
-      install(${args} DESTINATION "usr/include" COMPONENT "${IN_COMPONENT}-el6")
-      install(${args} DESTINATION "usr/include" COMPONENT "${IN_COMPONENT}-el7")
-      install(${args} DESTINATION "usr/local/include" COMPONENT "${IN_COMPONENT}-pm")
-    elseif("${IN_DESTINATION}" STREQUAL "etc")
-      install(${args} DESTINATION "etc/foundationdb" COMPONENT "${IN_COMPONENT}-tgz")
-      install(${args} DESTINATION "etc/foundationdb" COMPONENT "${IN_COMPONENT}-deb")
-      install(${args} DESTINATION "etc/foundationdb" COMPONENT "${IN_COMPONENT}-el6")
-      install(${args} DESTINATION "etc/foundationdb" COMPONENT "${IN_COMPONENT}-el7")
-      install(${args} DESTINATION "usr/local/etc/foundationdb" COMPONENT "${IN_COMPONENT}-pm")
-    elseif("${IN_DESTINATION}" STREQUAL "log")
-      install(${args} DESTINATION "log/foundationdb" COMPONENT "${IN_COMPONENT}-tgz")
-      install(${args} DESTINATION "var/log/foundationdb" COMPONENT "${IN_COMPONENT}-deb")
-      install(${args} DESTINATION "var/log/foundationdb" COMPONENT "${IN_COMPONENT}-el6")
-      install(${args} DESTINATION "var/log/foundationdb" COMPONENT "${IN_COMPONENT}-el7")
-    elseif("${IN_DESTINATION}" STREQUAL "data")
-      install(${args} DESTINATION "lib/foundationdb" COMPONENT "${IN_COMPONENT}-tgz")
-      install(${args} DESTINATION "var/lib/foundationdb/data" COMPONENT "${IN_COMPONENT}-deb")
-      install(${args} DESTINATION "var/lib/foundationdb/data" COMPONENT "${IN_COMPONENT}-el6")
-      install(${args} DESTINATION "var/lib/foundationdb/data" COMPONENT "${IN_COMPONENT}-el7")
-    else()
-      message(FATAL_ERROR "unrecognized destination ${IN_DESTINATION}")
-    endif()
+    foreach(package tgz deb el6 el7 pm)
+      set(install_path "${install_destination_for_${IN_DESTINATION}_${package}}")
+      if(install_export)
+        install(
+          EXPORT "${IN_EXPORT}-${package}"
+          DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
+          FILE "${IN_EXPORT}.cmake"
+          COMPONENT "${IN_COMPONENT}-${package}")
+      else()
+        set(export_args "")
+        if (IN_EXPORT)
+          set(export_args EXPORT "${IN_EXPORT}-${package}")
+        endif()
+        if(NOT ${install_path} STREQUAL "")
+          install(
+            ${args}
+            ${export_args}
+            DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
+            COMPONENT "${IN_COMPONENT}-${package}")
+        endif()
+      endif()
+    endforeach()
   endif()
 endfunction()
 
 if(APPLE)
-  set(CPACK_GENERATOR TGZ PackageMaker)
+  set(CPACK_GENERATOR TGZ productbuild)
 else()
   set(CPACK_GENERATOR RPM DEB TGZ)
 endif()
 
 
 set(CPACK_PACKAGE_CHECKSUM SHA256)
-set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_SOURCE_DIR}/cmake/CPackConfig.cmake")
+configure_file("${CMAKE_SOURCE_DIR}/cmake/CPackConfig.cmake" "${CMAKE_BINARY_DIR}/packaging/CPackConfig.cmake")
+set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_BINARY_DIR}/packaging/CPackConfig.cmake")
 
 ################################################################################
 # Version information
@@ -171,7 +226,8 @@ list(GET FDB_VERSION_LIST 2 FDB_PATCH)
 
 include(InstallRequiredSystemLibraries)
 set(CPACK_PACKAGE_NAME "foundationdb")
-set(CPACK_PACKAGE_VENDOR "FoundationDB <fdb-dist@apple.com>")
+set(CPACK_PACKAGE_VENDOR "FoundationDB")
+set(CPACK_PACKAGE_CONTACT "fdb-dist@apple.com")
 set(CPACK_PACKAGE_VERSION_MAJOR ${FDB_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${FDB_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${FDB_PATCH})
@@ -210,10 +266,24 @@ configure_file(${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_BINARY_DIR}/License.txt COPYO
 ################################################################################
 
 if(NOT FDB_RELEASE)
-  set(prerelease_string ".PRERELEASE")
+  if(CURRENT_GIT_VERSION)
+    set(git_string ".${CURRENT_GIT_VERSION}")
+  endif()
+  set(CPACK_RPM_PACKAGE_RELEASE 0)
+  set(prerelease_string "-0${git_string}.PRERELEASE")
+else()
+  set(CPACK_RPM_PACKAGE_RELEASE 1)
+  set(prerelease_string "-1")
 endif()
-set(clients-filename "foundationdb-clients-${PROJECT_VERSION}.${CURRENT_GIT_VERSION}${prerelease_string}")
-set(server-filename "foundationdb-server-${PROJECT_VERSION}.${CURRENT_GIT_VERSION}${prerelease_string}")
+
+
+# RPM filenames
+set(rpm-clients-filename "foundationdb-clients-${PROJECT_VERSION}${prerelease_string}")
+set(rpm-server-filename "foundationdb-server-${PROJECT_VERSION}${prerelease_string}")
+
+# Deb filenames
+set(deb-clients-filename "foundationdb-clients_${PROJECT_VERSION}${prerelease_string}")
+set(deb-server-filename "foundationdb-server_${PROJECT_VERSION}${prerelease_string}")
 
 ################################################################################
 # Configuration for RPM
@@ -227,15 +297,15 @@ set(CPACK_RPM_CLIENTS-EL7_PACKAGE_NAME "foundationdb-clients")
 set(CPACK_RPM_SERVER-EL6_PACKAGE_NAME "foundationdb-server")
 set(CPACK_RPM_SERVER-EL7_PACKAGE_NAME "foundationdb-server")
 
-set(CPACK_RPM_CLIENTS-EL6_FILE_NAME "${clients-filename}.el6.x86_64.rpm")
-set(CPACK_RPM_CLIENTS-EL7_FILE_NAME "${clients-filename}.el7.x86_64.rpm")
-set(CPACK_RPM_SERVER-EL6_FILE_NAME "${server-filename}.el6.x86_64.rpm")
-set(CPACK_RPM_SERVER-EL7_FILE_NAME "${server-filename}.el7.x86_64.rpm")
+set(CPACK_RPM_CLIENTS-EL6_FILE_NAME "${rpm-clients-filename}.el6.x86_64.rpm")
+set(CPACK_RPM_CLIENTS-EL7_FILE_NAME "${rpm-clients-filename}.el7.x86_64.rpm")
+set(CPACK_RPM_SERVER-EL6_FILE_NAME "${rpm-server-filename}.el6.x86_64.rpm")
+set(CPACK_RPM_SERVER-EL7_FILE_NAME "${rpm-server-filename}.el7.x86_64.rpm")
 
-set(CPACK_RPM_CLIENTS-EL6_DEBUGINFO_FILE_NAME "${clients-filename}.el6-debuginfo.x86_64.rpm")
-set(CPACK_RPM_CLIENTS-EL7_DEBUGINFO_FILE_NAME "${clients-filename}.el7-debuginfo.x86_64.rpm")
-set(CPACK_RPM_SERVER-EL6_DEBUGINFO_FILE_NAME "${server-filename}.el6-debuginfo.x86_64.rpm")
-set(CPACK_RPM_SERVER-EL7_DEBUGINFO_FILE_NAME "${server-filename}.el7-debuginfo.x86_64.rpm")
+set(CPACK_RPM_CLIENTS-EL6_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.el6-debuginfo.x86_64.rpm")
+set(CPACK_RPM_CLIENTS-EL7_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.el7-debuginfo.x86_64.rpm")
+set(CPACK_RPM_SERVER-EL6_DEBUGINFO_FILE_NAME "${rpm-server-filename}.el6-debuginfo.x86_64.rpm")
+set(CPACK_RPM_SERVER-EL7_DEBUGINFO_FILE_NAME "${rpm-server-filename}.el7-debuginfo.x86_64.rpm")
 
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir")
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION data COMPONENT server)
@@ -304,8 +374,8 @@ set(CPACK_RPM_SERVER-EL7_PACKAGE_REQUIRES
 # Configuration for DEB
 ################################################################################
 
-set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME "${clients-filename}_amd64.deb")
-set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME "${server-filename}_amd64.deb")
+set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME "${deb-clients-filename}_amd64.deb")
+set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME "${deb-server-filename}_amd64.deb")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
 set(CPACK_DEBIAN_PACKAGE_SECTION "database")
@@ -331,7 +401,7 @@ set(CPACK_DEBIAN_SERVER-DEB_PACKAGE_CONTROL_EXTRA
 # MacOS configuration
 ################################################################################
 
-if(NOT WIN32)
+if(APPLE)
   install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/osx/uninstall-FoundationDB.sh
     DESTINATION "usr/local/foundationdb"
     COMPONENT clients-pm)
@@ -345,8 +415,8 @@ endif()
 ################################################################################
 
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
-set(CPACK_ARCHIVE_CLIENTS-TGZ_FILE_NAME "${clients-filename}.x86_64")
-set(CPACK_ARCHIVE_SERVER-TGZ_FILE_NAME "${server-filename}.x86_64")
+set(CPACK_ARCHIVE_CLIENTS-TGZ_FILE_NAME "${deb-clients-filename}.x86_64")
+set(CPACK_ARCHIVE_SERVER-TGZ_FILE_NAME "${deb-server-filename}.x86_64")
 
 ################################################################################
 # Server configuration
@@ -364,15 +434,9 @@ if(NOT WIN32)
   fdb_install(FILES ${CMAKE_SOURCE_DIR}/packaging/foundationdb.conf
     DESTINATION etc
     COMPONENT server)
-  install(FILES ${CMAKE_SOURCE_DIR}/packaging/argparse.py
-    DESTINATION "usr/lib/foundationdb"
-    COMPONENT server-el6)
   install(FILES ${CMAKE_SOURCE_DIR}/packaging/make_public.py
     DESTINATION "usr/lib/foundationdb"
     COMPONENT server-el6)
-  install(FILES ${CMAKE_SOURCE_DIR}/packaging/argparse.py
-    DESTINATION "usr/lib/foundationdb"
-    COMPONENT server-deb)
   install(FILES ${CMAKE_SOURCE_DIR}/packaging/make_public.py
     DESTINATION "usr/lib/foundationdb"
     COMPONENT server-deb)

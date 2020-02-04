@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/IAsyncFile.h"
+#include "flow/crc32c.h"
 
 #if VALGRIND
 #include <memcheck.h>
@@ -31,7 +32,10 @@ public:
 
 	// For read() and write(), the data buffer must remain valid until the future is ready
 	Future<int> read( void* data, int length, int64_t offset ) {
-		return map(m_f->read(data, length, offset), [=](int r) { updateChecksumHistory(false, offset, length, (uint8_t *)data); return r; });
+		return map(m_f->read(data, length, offset), [=](int r) {
+			updateChecksumHistory(false, offset, r, (uint8_t*)data);
+			return r;
+		});
 	}
 	Future<Void> readZeroCopy( void** data, int* length, int64_t offset ) {
 		return map(m_f->readZeroCopy(data, length, offset), [=](Void r) { updateChecksumHistory(false, offset, *length, (uint8_t *)data); return r; });
@@ -48,7 +52,7 @@ public:
 			if( (size / checksumHistoryPageSize) < checksumHistory.size() ) {
 				int oldCapacity = checksumHistory.capacity();
 				checksumHistory.resize(size / checksumHistoryPageSize);
-				checksumHistoryBudget -= (checksumHistory.capacity() - oldCapacity);
+				checksumHistoryBudget.get() -= (checksumHistory.capacity() - oldCapacity);
 			}
 			return r;
 		});
@@ -63,16 +67,15 @@ public:
 
 	AsyncFileWriteChecker(Reference<IAsyncFile> f) : m_f(f) {
 		// Initialize the static history budget the first time (and only the first time) a file is opened.
-		static int _ = checksumHistoryBudget = FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY;
+		if (!checksumHistoryBudget.present()) {
+			checksumHistoryBudget = FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY;
+		}
 
 		// Adjust the budget by the initial capacity of history, which should be 0 but maybe not for some implementations.
-		checksumHistoryBudget -= checksumHistory.capacity();
+		checksumHistoryBudget.get() -= checksumHistory.capacity();
 	}
 
-
-	virtual ~AsyncFileWriteChecker() {
-		checksumHistoryBudget += checksumHistory.capacity();
-	}
+	virtual ~AsyncFileWriteChecker() { checksumHistoryBudget.get() += checksumHistory.capacity(); }
 
 private:
 	Reference<IAsyncFile> m_f;
@@ -85,7 +88,7 @@ private:
 
 	std::vector<WriteInfo> checksumHistory;
 	// This is the most page checksum history blocks we will use across all files.
-	static int checksumHistoryBudget;
+	static Optional<int> checksumHistoryBudget;
 	static int checksumHistoryPageSize;
 
 	// Update or check checksum(s) in history for any full pages covered by this operation
@@ -103,11 +106,12 @@ private:
 
 		// Make sure history is large enough or limit pageEnd
 		if(checksumHistory.size() < pageEnd) {
-			if(checksumHistoryBudget > 0) {
+			if (checksumHistoryBudget.get() > 0) {
 				// Resize history and update budget based on capacity change
 				auto initialCapacity = checksumHistory.capacity();
-				checksumHistory.resize(checksumHistory.size() + std::min<int>(checksumHistoryBudget, pageEnd - checksumHistory.size()));
-				checksumHistoryBudget -= (checksumHistory.capacity() - initialCapacity);
+				checksumHistory.resize(checksumHistory.size() +
+				                       std::min<int>(checksumHistoryBudget.get(), pageEnd - checksumHistory.size()));
+				checksumHistoryBudget.get() -= (checksumHistory.capacity() - initialCapacity);
 			}
 
 			// Limit pageEnd to end of history, which works whether or not all of the desired
@@ -116,7 +120,7 @@ private:
 		}
 
 		while(page < pageEnd) {
-			uint32_t checksum = hashlittle(start, checksumHistoryPageSize, 0xab12fd93);
+			uint32_t checksum = crc32c_append(0xab12fd93, start, checksumHistoryPageSize);
 			WriteInfo &history = checksumHistory[page];
 			//printf("%d %d %u %u\n", write, page, checksum, history.checksum);
 

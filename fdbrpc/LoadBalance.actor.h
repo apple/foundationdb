@@ -65,14 +65,12 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 	}
 };
 
+// Subclasses must initialize all members in their default constructors
+// Subclasses must serialize all members
 struct LoadBalancedReply {
 	double penalty;
+	Optional<Error> error;
 	LoadBalancedReply() : penalty(1.0) {}
-
-	template <class Ar>
-	void serialize(Ar &ar) {
-		serializer(ar, penalty);
-	}
 };
 
 Optional<LoadBalancedReply> getLoadBalancedReply(LoadBalancedReply *reply);
@@ -83,24 +81,41 @@ Optional<LoadBalancedReply> getLoadBalancedReply(void*);
 // Returns false if we got an error that should result in reissuing the request
 template <class T>
 bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, bool atMostOnce, bool triedAllOptions) {
-	int errCode = result.isError() ? result.getError().code() : error_code_success;
-	bool maybeDelivered = errCode == error_code_broken_promise || errCode == error_code_request_maybe_delivered;
-	bool receivedResponse = result.present() || (!maybeDelivered && errCode != error_code_process_behind);
-	bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
-
 	Optional<LoadBalancedReply> loadBalancedReply;
 	if(!result.isError()) {
 		loadBalancedReply = getLoadBalancedReply(&result.get());
 	}
 
+	int errCode;
+	if (loadBalancedReply.present()) {
+		errCode = loadBalancedReply.get().error.present() ? loadBalancedReply.get().error.get().code() : error_code_success;
+	}
+	else {
+		errCode = result.isError() ? result.getError().code() : error_code_success;
+	}
+
+	bool maybeDelivered = errCode == error_code_broken_promise || errCode == error_code_request_maybe_delivered;
+	bool receivedResponse = loadBalancedReply.present() ? !loadBalancedReply.get().error.present() : result.present();
+	receivedResponse = receivedResponse || (!maybeDelivered && errCode != error_code_process_behind);
+	bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
+
 	holder->release(receivedResponse, futureVersion, loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
-	
-	if(result.present()) {
+
+	if (errCode == error_code_server_overloaded)
+	{
+		return false;
+	}
+
+	if (loadBalancedReply.present() && !loadBalancedReply.get().error.present()) {
+		return true;
+	}
+
+	if (!loadBalancedReply.present() && result.present()) {
 		return true;
 	}
 
 	if(receivedResponse) {
-		throw result.getError();
+		throw loadBalancedReply.present() ? loadBalancedReply.get().error.get() : result.getError();
 	}
 
 	if(atMostOnce && maybeDelivered) {
@@ -108,7 +123,7 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 	}
 
 	if(triedAllOptions && errCode == error_code_process_behind) {
-		throw future_version();
+		throw process_behind(); 
 	}
 
 	return false;
@@ -160,7 +175,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	Reference<MultiInterface<Multi>> alternatives,
 	RequestStream<Request> Interface::* channel,
 	Request request = Request(),
-	int taskID = TaskDefaultPromiseEndpoint,
+	TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
 	bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
 	QueueModel* model = NULL) 
 {
@@ -170,6 +185,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	state Future<Void> secondDelay = Never();
 
 	state Promise<Void> requestFinished;
+	state double startTime = now();
 	
 	setReplyPriority(request, taskID);
 	if (!alternatives)
@@ -177,8 +193,8 @@ Future< REPLY_TYPE(Request) > loadBalance(
 
 	ASSERT( alternatives->size() );
 
-	state int bestAlt = g_random->randomInt(0, alternatives->countBest());
-	state int nextAlt = g_random->randomInt(0, std::max(alternatives->size() - 1,1));
+	state int bestAlt = deterministicRandom()->randomInt(0, alternatives->countBest());
+	state int nextAlt = deterministicRandom()->randomInt(0, std::max(alternatives->size() - 1,1));
 	if( nextAlt >= bestAlt )
 		nextAlt++;
 
@@ -187,8 +203,10 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		double nextMetric = 1e9;
 		double bestTime = 1e9;
 		double nextTime = 1e9;
+		int badServers = 0;
+
 		for(int i=0; i<alternatives->size(); i++) {
-			if(bestMetric < 1e8 && i == alternatives->countBest()) {
+			if(badServers < std::min(i, FLOW_KNOBS->LOAD_BALANCE_MAX_BAD_OPTIONS + 1) && i == alternatives->countBest()) {
 				break;
 			}
 			
@@ -198,6 +216,9 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				if(now() > qd.failedUntil) {
 					double thisMetric = qd.smoothOutstanding.smoothTotal();
 					double thisTime = qd.latency;
+					if(FLOW_KNOBS->LOAD_BALANCE_PENALTY_IS_BAD && qd.penalty > 1.001) {
+						++badServers;
+					}
 				
 					if(thisMetric < bestMetric) {
 						if(i != bestAlt) {
@@ -213,7 +234,11 @@ Future< REPLY_TYPE(Request) > loadBalance(
 						nextMetric = thisMetric;
 						nextTime = thisTime;
 					}
+				} else {
+					++badServers;
 				}
+			} else {
+				++badServers;
 			}
 		}
 		if( nextMetric > 1e8 ) {
@@ -254,6 +279,22 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	state double backoff = 0;
 	state bool triedAllOptions = false;
 	loop {
+		if(now() - startTime > (g_network->isSimulated() ? 30.0 : 600.0)) {
+			TraceEvent ev(g_network->isSimulated() ? SevWarn : SevWarnAlways, "LoadBalanceTooLong");
+			ev.suppressFor(1.0);
+			ev.detail("Duration", now() - startTime);
+			ev.detail("NumAttempts", numAttempts);
+			ev.detail("Backoff", backoff);
+			ev.detail("TriedAllOptions", triedAllOptions);
+			if(ev.isEnabled()) {
+				ev.log();
+				for(int alternativeNum=0; alternativeNum<alternatives->size(); alternativeNum++) {
+					RequestStream<Request> const* thisStream = &alternatives->get( alternativeNum, channel );
+					TraceEvent(SevWarn, "LoadBalanceTooLongEndpoint").detail("Addr", thisStream->getEndpoint().getPrimaryAddress()).detail("Token", thisStream->getEndpoint().token).detail("Failed", IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed);
+				}
+			}
+		}
+
 		// Find an alternative, if any, that is not failed, starting with nextAlt
 		state RequestStream<Request> const* stream = NULL;
 		for(int alternativeNum=0; alternativeNum<alternatives->size(); alternativeNum++) {
@@ -280,21 +321,28 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			}
 
 			if(!alternatives->alwaysFresh()) {
-				if(now() - g_network->networkMetrics.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
-					g_network->networkMetrics.oldestAlternativesFailure = now();
+				if(now() - g_network->networkInfo.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
+					g_network->networkInfo.oldestAlternativesFailure = now();
+				}
+				
+				double delay = FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY;
+				if(now() - g_network->networkInfo.lastAlternativesFailureSkipDelay > FLOW_KNOBS->ALTERNATIVES_FAILURE_SKIP_DELAY) {
+					g_network->networkInfo.lastAlternativesFailureSkipDelay = now();
+				} else {
+					double elapsed = now()-g_network->networkInfo.oldestAlternativesFailure;
+					delay = std::max(delay, std::min(elapsed*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY));
+					delay = std::max(delay, std::min(elapsed*FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_MAX_DELAY));
 				}
 
-				double delay = std::max(std::min((now()-g_network->networkMetrics.oldestAlternativesFailure)*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY), FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY);
-
 				// Making this SevWarn means a lot of clutter
-				if(now() - g_network->networkMetrics.newestAlternativesFailure > 1 || g_random->random01() < 0.01) {
+				if(now() - g_network->networkInfo.newestAlternativesFailure > 1 || deterministicRandom()->random01() < 0.01) {
 					TraceEvent("AllAlternativesFailed")
 						.detail("Interval", FLOW_KNOBS->CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED)
 						.detail("Alternatives", alternatives->description())
 						.detail("Delay", delay);
 				}
 
-				g_network->networkMetrics.newestAlternativesFailure = now();
+				g_network->networkInfo.newestAlternativesFailure = now();
 
 				choose {
 					when ( wait( quorum( ok, 1 ) ) ) {}

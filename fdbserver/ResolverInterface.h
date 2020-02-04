@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 
 struct ResolverInterface {
+	constexpr static FileIdentifier file_identifier = 1755944;
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
@@ -36,15 +37,15 @@ struct ResolverInterface {
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
 
-	ResolverInterface() : uniqueID( g_random->randomUniqueID() ) {}
+	ResolverInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == ( ResolverInterface const& r ) const { return id() == r.id(); }
 	bool operator != ( ResolverInterface const& r ) const { return id() != r.id(); }
 	NetworkAddress address() const { return resolve.getEndpoint().getPrimaryAddress(); }
 	void initEndpoints() {
-		metrics.getEndpoint( TaskResolutionMetrics );
-		split.getEndpoint( TaskResolutionMetrics );
+		metrics.getEndpoint( TaskPriority::ResolutionMetrics );
+		split.getEndpoint( TaskPriority::ResolutionMetrics );
 	}
 
 	template <class Ar> 
@@ -54,6 +55,7 @@ struct ResolverInterface {
 };
 
 struct StateTransactionRef {
+	constexpr static FileIdentifier file_identifier = 6150271;
 	StateTransactionRef() {}
 	StateTransactionRef(const bool committed, VectorRef<MutationRef> const& mutations) : committed(committed), mutations(mutations) {}
 	StateTransactionRef(Arena &p, const StateTransactionRef &toCopy) : committed(toCopy.committed), mutations(p, toCopy.mutations) {}
@@ -70,6 +72,7 @@ struct StateTransactionRef {
 };
 
 struct ResolveTransactionBatchReply {
+	constexpr static FileIdentifier file_identifier = 15472264;
 	Arena arena;
 	VectorRef<uint8_t> committed;
 	Optional<UID> debugID;
@@ -83,6 +86,7 @@ struct ResolveTransactionBatchReply {
 };
 
 struct ResolveTransactionBatchRequest {
+	constexpr static FileIdentifier file_identifier = 16462858;
 	Arena arena;
 
 	Version prevVersion;
@@ -99,8 +103,22 @@ struct ResolveTransactionBatchRequest {
 	}
 };
 
+struct ResolutionMetricsReply {
+	constexpr static FileIdentifier file_identifier = 3;
+
+	int64_t value;
+	ResolutionMetricsReply() = default;
+	explicit ResolutionMetricsReply(int64_t value) : value(value) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value);
+	}
+};
+
 struct ResolutionMetricsRequest {
-	ReplyPromise<int64_t> reply;
+	constexpr static FileIdentifier file_identifier = 11663527;
+	ReplyPromise<ResolutionMetricsReply> reply;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -109,6 +127,7 @@ struct ResolutionMetricsRequest {
 };
 
 struct ResolutionSplitReply {
+	constexpr static FileIdentifier file_identifier = 12137765;
 	Key key;
 	int64_t used;
 	template <class Archive>
@@ -119,6 +138,7 @@ struct ResolutionSplitReply {
 };
 
 struct ResolutionSplitRequest {
+	constexpr static FileIdentifier file_identifier = 167535;
 	KeyRange range;
 	int64_t offset;
 	bool front;

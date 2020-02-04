@@ -33,7 +33,9 @@ struct ExtStringRef {
 
 	Standalone<StringRef> toStandaloneStringRef() {
 		auto s = makeString( size() );
-		memcpy( mutateString( s ), base.begin(), base.size() );
+		if (base.size() > 0) {
+			memcpy(mutateString(s), base.begin(), base.size());
+		}
 		memset( mutateString( s ) + base.size(), 0, extra_zero_bytes );
 		return s;
 	};
@@ -41,7 +43,9 @@ struct ExtStringRef {
 	StringRef toArenaOrRef( Arena& a ) {
 		if (extra_zero_bytes) {
 			StringRef dest = StringRef( new(a) uint8_t[ size() ], size() );
-			memcpy( mutateString(dest), base.begin(), base.size() );
+			if (base.size() > 0) {
+				memcpy(mutateString(dest), base.begin(), base.size());
+			}
 			memset( mutateString(dest)+base.size(), 0, extra_zero_bytes );
 			return dest;
 		} else
@@ -56,7 +60,9 @@ struct ExtStringRef {
 	StringRef toArena( Arena& a ) {
 		if (extra_zero_bytes) {
 			StringRef dest = StringRef( new(a) uint8_t[ size() ], size() );
-			memcpy( mutateString(dest), base.begin(), base.size() );
+			if (base.size() > 0) {
+				memcpy(mutateString(dest), base.begin(), base.size());
+			}
 			memset( mutateString(dest)+base.size(), 0, extra_zero_bytes );
 			return dest;
 		} else
@@ -65,10 +71,12 @@ struct ExtStringRef {
 
 	int size() const { return base.size() + extra_zero_bytes; }
 
-	int cmp( ExtStringRef const& rhs ) const {
+	int cmp(ExtStringRef const& rhs) const {
 		int cbl = std::min(base.size(), rhs.base.size());
-		int c = memcmp( base.begin(), rhs.base.begin(), cbl );
-		if (c!=0) return c;
+		if (cbl > 0) {
+			int c = memcmp(base.begin(), rhs.base.begin(), cbl);
+			if (c != 0) return c;
+		}
 
 		for(int i=cbl; i<base.size(); i++)
 			if (base[i]) return 1;
@@ -101,6 +109,7 @@ struct ExtStringRef {
 	}
 
 private:
+	friend struct Traceable<ExtStringRef>;
 	StringRef base;
 	int extra_zero_bytes;
 };
@@ -112,6 +121,19 @@ inline bool operator < ( const ExtStringRef& lhs, const ExtStringRef& rhs ) { re
 inline bool operator > ( const ExtStringRef& lhs, const ExtStringRef& rhs ) { return lhs.cmp(rhs)>0; }
 inline bool operator <= ( const ExtStringRef& lhs, const ExtStringRef& rhs ) { return lhs.cmp(rhs)<=0; }
 inline bool operator >= ( const ExtStringRef& lhs, const ExtStringRef& rhs ) { return lhs.cmp(rhs)>=0; }
+
+template<>
+struct Traceable<ExtStringRef> : std::true_type {
+	static std::string toString(const ExtStringRef str) {
+		std::string result;
+		result.reserve(str.size());
+		std::copy(str.base.begin(), str.base.end(), std::back_inserter(result));
+		for (int i = 0; i < str.extra_zero_bytes; ++i) {
+			result.push_back('\0');
+		}
+		return Traceable<std::string>::toString(result);
+	}
+};
 
 class SnapshotCache {
 private:
@@ -343,7 +365,7 @@ public:
 
 	void dump() {
 		for( auto it = entries.begin(); it != entries.end(); ++it ) {
-			TraceEvent("CacheDump").detail("Begin", printable(it->beginKey)).detail("End", printable(it->endKey.toStandaloneStringRef())).detail("Values", printable(it->values));
+			TraceEvent("CacheDump").detail("Begin", it->beginKey).detail("End", it->endKey.toStandaloneStringRef()).detail("Values", it->values);
 		}
 	}
 

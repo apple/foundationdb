@@ -79,7 +79,7 @@ ACTOR Future<Void> resolveBatch(
 	state ProxyRequestsInfo &proxyInfo = self->proxyInfoMap[proxyAddress];
 
 	if(req.debugID.present()) {
-		debugID = g_nondeterministic_random->randomUniqueID();
+		debugID = nondeterministicRandom()->randomUniqueID();
 		g_traceBatch.addAttach("CommitAttachID", req.debugID.get().first(), debugID.get().first());
 		g_traceBatch.addEvent("CommitDebug",debugID.get().first(),"Resolver.resolveBatch.Before");
 	}
@@ -114,9 +114,9 @@ ACTOR Future<Void> resolveBatch(
 		}
 	}
 
-	if (check_yield(TaskDefaultEndpoint)) {
-		wait( delay( 0, TaskLowPriority ) || delay( SERVER_KNOBS->COMMIT_SLEEP_TIME ) );  // FIXME: Is this still right?
-		g_network->setCurrentTask(TaskDefaultEndpoint);
+	if (check_yield(TaskPriority::DefaultEndpoint)) {
+		wait( delay( 0, TaskPriority::Low ) || delay( SERVER_KNOBS->COMMIT_SLEEP_TIME ) );  // FIXME: Is this still right?
+		g_network->setCurrentTask(TaskPriority::DefaultEndpoint);
 	}
 
 	if (self->version.get() == req.prevVersion) {  // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
@@ -132,7 +132,6 @@ ACTOR Future<Void> resolveBatch(
 		
 		vector<int> commitList;
 		vector<int> tooOldList;
-		double commitTime = now();
 
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;

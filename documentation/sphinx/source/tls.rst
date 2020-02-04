@@ -34,6 +34,8 @@ This will configure the new cluster to communicate with TLS.
 Converting an existing cluster to use TLS (since v6.1)
 ======================================================
 
+.. warning:: Release 6.2 removed the "connected_coordinators" field from status.
+
 Since version 6.1, FoundationDB clusters can be converted to TLS without downtime. FoundationDB server can listen to TLS and unencrypted traffic simultaneously on two separate ports. As a result, FDB clusters can live migrate to TLS:
 
 1) Restart each FoundationDB server individually, but with an additional listen address for TLS traffic::
@@ -136,15 +138,17 @@ Default Peer Verification
 The default peer verification is ``Check.Valid=1``.
 
 Default Password
-^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^
 
 There is no default password. If no password is specified, it is assumed that the private key is unencrypted.
 
-Parameters and client bindings
-------------------------------
+Permissions
+-----------
+
+All files used by TLS must have sufficient read permissions such that the user running the FoundationDB server or client process can access them. It may also be necessary to have similar read permissions on the parent directories of the files used in the TLS configuration.
 
 Automatic TLS certificate refresh
-------------------------------
+---------------------------------
 
 The TLS certificate will be automatically refreshed on a configurable cadence. The server will inspect the CA, certificate, and key files in the specified locations periodically, and will begin using the new versions if following criterion were met:
 
@@ -351,4 +355,4 @@ A verification string of::
 Would pass, and:
 
 * Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that begins with the value ``prod.``.
-* Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that ends with the value ``.com``.
+* Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that ends with the value ``.org``.

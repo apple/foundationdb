@@ -30,7 +30,7 @@ Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInf
 ACTOR Future<Void> submitCandidacy( Key key, LeaderElectionRegInterface coord, LeaderInfo myInfo, UID prevChangeID, Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees, int index ) {
 	loop {
 		auto const& nom = nominees->get()[index];
-		Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.candidacy, CandidacyRequest( key, myInfo, nom.present() ? nom.get().changeID : UID(), prevChangeID ), TaskCoordinationReply ) );
+		Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.candidacy, CandidacyRequest( key, myInfo, nom.present() ? nom.get().changeID : UID(), prevChangeID ), TaskPriority::CoordinationReply ) );
 
 		if (li != nominees->get()[index]) {
 			vector<Optional<LeaderInfo>> v = nominees->get();
@@ -48,7 +48,7 @@ ACTOR Future<Void> submitCandidacy( Key key, LeaderElectionRegInterface coord, L
 ACTOR template <class T> Future<Void> buggifyDelayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out ) {
 	try {
 		loop {
-			wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * g_random->random01() ) );
+			wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01() ) );
 			out->set( in->get() );
 			wait( in->onChange() );
 		}
@@ -75,8 +75,10 @@ ACTOR Future<Void> changeLeaderCoordinators( ServerCoordinators coordinators, Va
 	return Void();
 }
 
-ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Value proposedSerializedInterface, Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo ) {
-	state Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees( new AsyncVar<vector<Optional<LeaderInfo>>>() );
+ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators, Value proposedSerializedInterface,
+                                           Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected,
+                                           Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
+	state Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees(new AsyncVar<vector<Optional<LeaderInfo>>>());
 	state LeaderInfo myInfo;
 	state Future<Void> candidacies;
 	state bool iAmLeader = false;
@@ -99,7 +101,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 	while (!iAmLeader) {
 		state Future<Void> badCandidateTimeout;
 
-		myInfo.changeID = g_random->randomUniqueID();
+		myInfo.changeID = deterministicRandom()->randomUniqueID();
 		prevChangeID = myInfo.changeID;
 		myInfo.updateChangeID( asyncPriorityInfo->get() );
 
@@ -148,7 +150,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 			// we might be breaking the leader election process for someone with better communications but lower ID, so change IDs.
 			if ((!leader.present() || !leader.get().second) && std::count( nominees->get().begin(), nominees->get().end(), myInfo )) {
 				if (!badCandidateTimeout.isValid())
-					badCandidateTimeout = delay( SERVER_KNOBS->POLLING_FREQUENCY*2, TaskCoordinationReply );
+					badCandidateTimeout = delay( SERVER_KNOBS->POLLING_FREQUENCY*2, TaskPriority::CoordinationReply );
 			} else
 				badCandidateTimeout = Future<Void>();
 
@@ -181,12 +183,14 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 		state vector<Future<Void>> true_heartbeats;
 		state vector<Future<Void>> false_heartbeats;
 		for(int i=0; i<coordinators.leaderElectionServers.size(); i++) {
-			Future<bool> hb = retryBrokenPromise( coordinators.leaderElectionServers[i].leaderHeartbeat, LeaderHeartbeatRequest( coordinators.clusterKey, myInfo, prevChangeID ), TaskCoordinationReply );
-			true_heartbeats.push_back( onEqual(hb, true) );
-			false_heartbeats.push_back( onEqual(hb, false) );
+			Future<LeaderHeartbeatReply> hb = retryBrokenPromise(
+			    coordinators.leaderElectionServers[i].leaderHeartbeat,
+			    LeaderHeartbeatRequest(coordinators.clusterKey, myInfo, prevChangeID), TaskPriority::CoordinationReply);
+			true_heartbeats.push_back(onEqual(hb, LeaderHeartbeatReply{ true }));
+			false_heartbeats.push_back(onEqual(hb, LeaderHeartbeatReply{ false }));
 		}
 
-		state Future<Void> rate = delay( SERVER_KNOBS->HEARTBEAT_FREQUENCY, TaskCoordinationReply ) || asyncPriorityInfo->onChange(); // SOMEDAY: Move to server side?
+		state Future<Void> rate = delay( SERVER_KNOBS->HEARTBEAT_FREQUENCY, TaskPriority::CoordinationReply ) || asyncPriorityInfo->onChange(); // SOMEDAY: Move to server side?
 
 		choose {
 			when ( wait( quorum( true_heartbeats, true_heartbeats.size()/2+1 ) ) ) {
@@ -214,7 +218,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 		wait( rate );
 	}
 
-	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY) wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * g_random->random01() ) );
+	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY) wait( delay( SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01() ) );
 
 	return Void(); // We are no longer leader
 }

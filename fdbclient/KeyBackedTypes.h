@@ -124,9 +124,9 @@ public:
 		return map(get(tr, snapshot), [=](Optional<T> val) -> T {
 			if (!val.present()) {
 				TraceEvent(SevInfo, "KeyBackedProperty_KeyNotFound")
-						.detail("Key", printable(keyCopy))
-						.detail("Err", err.code())
-						.detail("ParentTrace", backtrace.c_str());
+					.detail("Key", keyCopy)
+					.detail("Err", err.code())
+					.detail("ParentTrace", backtrace.c_str());
 				throw err;
 			}
 

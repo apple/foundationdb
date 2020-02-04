@@ -31,6 +31,48 @@ void forceLinkFlowTests() {}
 
 using std::vector;
 
+constexpr int firstLine = __LINE__;
+TEST_CASE("/flow/actorcompiler/lineNumbers") {
+	loop {
+		try {
+			ASSERT(__LINE__ == firstLine + 4);
+			wait(Future<Void>(Void()));
+			ASSERT(__LINE__ == firstLine + 6);
+			throw success();
+		} catch (Error& e) {
+			ASSERT(__LINE__ == firstLine + 9);
+			wait(Future<Void>(Void()));
+			ASSERT(__LINE__ == firstLine + 11);
+		}
+		break;
+	}
+	ASSERT(LiteralStringRef(__FILE__).endsWith(LiteralStringRef("FlowTests.actor.cpp")));
+	return Void();
+}
+
+TEST_CASE("/flow/buggifiedDelay") {
+	if (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0) {
+		return Void();
+	}
+	loop {
+		state double x = deterministicRandom()->random01();
+		state int last = 0;
+		state Future<Void> f1 = map(delay(x), [last = &last](const Void&) {
+			*last = 1;
+			return Void();
+		});
+		state Future<Void> f2 = map(delay(x), [last = &last](const Void&) {
+			*last = 2;
+			return Void();
+		});
+		wait(f1 && f2);
+		if (last == 1) {
+			TEST(true); // Delays can become ready out of order
+			return Void();
+		}
+	}
+}
+
 template <class T, class Func, class ErrFunc, class CallbackType>
 class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<T,Func,ErrFunc,CallbackType>> {
 	Func func;
@@ -70,7 +112,7 @@ void onReady(FutureStream<T>&& f, Func&& func, ErrFunc&& errFunc) {
 ACTOR static void emptyVoidActor() {
 }
 
-ACTOR static Future<Void> emptyActor() {
+ACTOR [[flow_allow_discard]] static Future<Void> emptyActor() {
 	return Void();
 }
 
@@ -172,28 +214,29 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 		t.send(Void());
 	}
 
-	virtual Future<class Void> delay(double seconds, int taskID) {
+	virtual Future<class Void> delay(double seconds, TaskPriority taskID) {
 		return nextTick.getFuture();
 	}
 
-	virtual Future<class Void> yield(int taskID) {
+	virtual Future<class Void> yield(TaskPriority taskID) {
 		if (check_yield(taskID))
 			return delay(0,taskID);
 		return Void();
 	}
 
-	virtual bool check_yield(int taskID) {
+	virtual bool check_yield(TaskPriority taskID) {
 		if (nextYield > 0) --nextYield;
 		return nextYield == 0;
 	}
 
 	// Delegate everything else.  TODO: Make a base class NetworkWrapper for delegating everything in INetwork
-	virtual int getCurrentTask() { return baseNetwork->getCurrentTask(); }
-	virtual void setCurrentTask(int taskID) { baseNetwork->setCurrentTask(taskID); }
+	virtual TaskPriority getCurrentTask() { return baseNetwork->getCurrentTask(); }
+	virtual void setCurrentTask(TaskPriority taskID) { baseNetwork->setCurrentTask(taskID); }
 	virtual double now() { return baseNetwork->now(); }
 	virtual void stop() { return baseNetwork->stop(); }
 	virtual bool isSimulated() const { return baseNetwork->isSimulated(); }
-	virtual void onMainThread(Promise<Void>&& signal, int taskID) { return baseNetwork->onMainThread(std::move(signal), taskID); }
+	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) { return baseNetwork->onMainThread(std::move(signal), taskID); }
+	bool isOnMainThread() const override { return baseNetwork->isOnMainThread(); }
 	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN(*func) (void *), void *arg) { return baseNetwork->startThread(func,arg); }
 	virtual Future< Reference<class IAsyncFile> > open(std::string filename, int64_t flags, int64_t mode) { return IAsyncFileSystem::filesystem()->open(filename,flags,mode); }
 	virtual Future< Void > deleteFile(std::string filename, bool mustBeDurable) { return IAsyncFileSystem::filesystem()->deleteFile(filename,mustBeDurable); }
@@ -267,6 +310,20 @@ TEST_CASE("/flow/flow/cancel2")
 	return Void();
 }
 
+namespace {
+// Simple message for flatbuffers unittests
+struct Int {
+	constexpr static FileIdentifier file_identifier = 12345;
+	uint32_t value;
+	Int() = default;
+	Int(uint32_t value) : value(value) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value);
+	}
+};
+} // namespace
+
 TEST_CASE("/flow/flow/nonserializable futures")
 {
 	// Types no longer need to be statically serializable to make futures, promises, actors
@@ -282,20 +339,20 @@ TEST_CASE("/flow/flow/nonserializable futures")
 
 	// ReplyPromise can be used like a normal promise
 	{
-		ReplyPromise<int> rpInt;
-		Future<int> f = rpInt.getFuture();
+		ReplyPromise<Int> rpInt;
+		Future<Int> f = rpInt.getFuture();
 		ASSERT(!f.isReady());
 		rpInt.send(123);
-		ASSERT(f.get() == 123);
+		ASSERT(f.get().value == 123);
 	}
 
 	{
-		RequestStream<int> rsInt;
-		FutureStream<int> f = rsInt.getFuture();
+		RequestStream<Int> rsInt;
+		FutureStream<Int> f = rsInt.getFuture();
 		rsInt.send(1);
 		rsInt.send(2);
-		ASSERT(f.pop() == 1);
-		ASSERT(f.pop() == 2);
+		ASSERT(f.pop().value == 1);
+		ASSERT(f.pop().value == 2);
 	}
 
 	return Void();
@@ -305,14 +362,14 @@ TEST_CASE("/flow/flow/networked futures")
 {
 	// RequestStream can be serialized
 	{
-		RequestStream<int> locInt;
+		RequestStream<Int> locInt;
 		BinaryWriter wr(IncludeVersion());
 		wr << locInt;
 
 		ASSERT(locInt.getEndpoint().isValid() && locInt.getEndpoint().isLocal() && locInt.getEndpoint().getPrimaryAddress() == FlowTransport::transport().getLocalAddress());
 
 		BinaryReader rd(wr.toValue(), IncludeVersion());
-		RequestStream<int> remoteInt;
+		RequestStream<Int> remoteInt;
 		rd >> remoteInt;
 
 		ASSERT(remoteInt.getEndpoint() == locInt.getEndpoint());
@@ -322,14 +379,14 @@ TEST_CASE("/flow/flow/networked futures")
 	// ReplyPromise can be serialized
 	// TODO: This needs to fiddle with g_currentDeliveryPeerAddress
 	if (0) {
-		ReplyPromise<int> locInt;
+		ReplyPromise<Int> locInt;
 		BinaryWriter wr(IncludeVersion());
 		wr << locInt;
 
 		ASSERT(locInt.getEndpoint().isValid() && locInt.getEndpoint().isLocal());
 
 		BinaryReader rd(wr.toValue(), IncludeVersion());
-		ReplyPromise<int> remoteInt;
+		ReplyPromise<Int> remoteInt;
 		rd >> remoteInt;
 
 		ASSERT(remoteInt.getEndpoint() == locInt.getEndpoint());
@@ -641,7 +698,7 @@ TEST_CASE("/flow/flow/yieldedFuture/random")
 
 		ASSERT( numReady()==0 );
 
-		int expectYield = g_random->randomInt(0, 4);
+		int expectYield = deterministicRandom()->randomInt(0, 4);
 		int expectReady = expectYield;
 		yn->nextYield = 1 + expectYield;
 
@@ -649,7 +706,7 @@ TEST_CASE("/flow/flow/yieldedFuture/random")
 		ASSERT( u.isReady() && i.isReady() && j.isReady() && numReady()==expectReady );
 
 		while (numReady() != v.size()) {
-			expectYield = g_random->randomInt(0, 4);
+			expectYield = deterministicRandom()->randomInt(0, 4);
 			yn->nextYield = 1 + expectYield;
 			expectReady += 1 + expectYield;
 			yn->tick();
@@ -1032,11 +1089,11 @@ struct YAMRandom {
 	YAMRandom() : kmax(3) {}
 
 	void randomOp() {
-		if (g_random->random01() < 0.01)
+		if (deterministicRandom()->random01() < 0.01)
 			while (!check_yield());
 
-		int k = g_random->randomInt(0, kmax);
-		int op = g_random->randomInt(0, 7);
+		int k = deterministicRandom()->randomInt(0, kmax);
+		int op = deterministicRandom()->randomInt(0, 7);
 		//printf("%d",op);
 		if (op == 0) {
 			onchanges.push_back(yam.onChange(k));
@@ -1044,20 +1101,20 @@ struct YAMRandom {
 			onchanges.push_back( trigger([this](){ this->randomOp(); }, yam.onChange(k)) );
 		} else if (op == 2) {
 			if (onchanges.size()) {
-				int i = g_random->randomInt(0, onchanges.size());
+				int i = deterministicRandom()->randomInt(0, onchanges.size());
 				onchanges[i] = onchanges.back();
 				onchanges.pop_back();
 			}
 		} else if (op == 3) {
 			onchanges.clear();
 		} else if (op == 4) {
-			int v = g_random->randomInt(0, 3);
+			int v = deterministicRandom()->randomInt(0, 3);
 			yam.set(k, v);
 		} else if (op == 5) {
 			yam.trigger(k);
 		} else if (op == 6) {
-			int a = g_random->randomInt(0, kmax);
-			int b = g_random->randomInt(0, kmax);
+			int a = deterministicRandom()->randomInt(0, kmax);
+			int b = deterministicRandom()->randomInt(0, kmax);
 			yam.triggerRange(std::min(a,b), std::max(a,b)+1);
 		}
 	}
@@ -1190,5 +1247,27 @@ TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel")
 	ASSERT( a == 0 );
 	f.cancel();
 	ASSERT( a == 1 );
+	return Void();
+}
+
+// Meant to be run with -fsanitize=undefined
+TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
+	deterministicRandom()->randomInt(std::numeric_limits<int>::min(), 0);
+	deterministicRandom()->randomInt(0, std::numeric_limits<int>::max());
+	deterministicRandom()->randomInt(std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
+	ASSERT(deterministicRandom()->randomInt(std::numeric_limits<int>::min(), std::numeric_limits<int>::min() + 1) ==
+	       std::numeric_limits<int>::min());
+	ASSERT(deterministicRandom()->randomInt(std::numeric_limits<int>::max() - 1, std::numeric_limits<int>::max()) ==
+	       std::numeric_limits<int>::max() - 1);
+
+	deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(), 0);
+	deterministicRandom()->randomInt64(0, std::numeric_limits<int64_t>::max());
+	deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
+	ASSERT(deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(),
+	                                          std::numeric_limits<int64_t>::min() + 1) ==
+	       std::numeric_limits<int64_t>::min());
+	ASSERT(deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::max() - 1,
+	                                          std::numeric_limits<int64_t>::max()) ==
+	       std::numeric_limits<int64_t>::max() - 1);
 	return Void();
 }

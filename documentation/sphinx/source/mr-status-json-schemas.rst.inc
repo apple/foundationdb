@@ -1,6 +1,7 @@
 .. -*- mode: rst; -*-
 
-.. |json-status-format| replace::
+.. code-block:: javascript
+
    "cluster":{
       "layers":{
          "_valid":true,
@@ -28,13 +29,15 @@
                   "resolution",
                   "proxy",
                   "master",
-                  "test"
+                  "test",
+                  "storage_cache"
                ]
             },
             "degraded":true,
             "roles":[
                {
                   "query_queue_max":0,
+                  "local_rate":0,
                   "input_bytes":{
                      "hz":0.0,
                      "counter":0,
@@ -63,7 +66,10 @@
                         "resolver",
                         "cluster_controller",
                         "data_distributor",
-                        "ratekeeper"
+                        "ratekeeper",
+                        "storage_cache",
+                        "router",
+                        "coordinator"
                      ]
                   },
                   "data_version":12341234,
@@ -120,10 +126,10 @@
             ],
             "command_line":"-r simulation",
             "memory":{
-               "available_bytes":0, //an estimate of the process' fair share of the memory available to fdbservers
+               "available_bytes":0, // an estimate of the process' fair share of the memory available to fdbservers
                "limit_bytes":0, // memory limit per process
                "unused_allocated_memory":0,
-               "used_bytes":0
+               "used_bytes":0 // virtual memory size of the process
             },
             "messages":[
                {
@@ -185,7 +191,8 @@
                "megabits_received":{
                   "hz":0.0
                }
-            }
+            },
+            "run_loop_busy":0.2 // fraction of time the run loop was busy
          }
       },
       "old_logs":[
@@ -208,8 +215,8 @@
          }
       ],
       "fault_tolerance":{
-         "max_machine_failures_without_losing_availability":0,
-         "max_machine_failures_without_losing_data":0
+         "max_zone_failures_without_losing_availability":0,
+         "max_zone_failures_without_losing_data":0
       },
       "qos":{
          "worst_queue_bytes_log_server":460,
@@ -227,7 +234,8 @@
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio"
+                  "log_server_min_free_space_ratio",
+                  "storage_server_durability_lag"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -246,7 +254,8 @@
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio"
+                  "log_server_min_free_space_ratio",
+                  "storage_server_durability_lag"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -258,14 +267,36 @@
          "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,
          "limiting_version_lag_storage_server":0,
-         "worst_version_lag_storage_server":0
+         "worst_version_lag_storage_server":0,
+         "limiting_data_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         },
+         "worst_data_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         },
+         "limiting_durability_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         },
+         "worst_durability_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         }
       },
       "incompatible_connections":[
       ],
-      "datacenter_version_difference":0,
+      "datacenter_lag":{
+         "seconds":1.0,
+         "versions":1000000
+      },
       "degraded_processes":0,
       "database_available":true,
-      "database_locked":false,
+      "database_lock_state":{
+         "locked":true,
+         "lock_uid":"00000000000000000000000000000000" // Only present when database is locked
+      }
       "generation":2,
       "latency_probe":{ // all measurements are based on running sample transactions
          "read_seconds":7, // time to perform a single read
@@ -285,11 +316,22 @@
                          "log_group":"default"
                      }
                  ],
+                 "max_protocol_clients":[
+                     {
+                         "address":"127.0.0.1:9898",
+                         "log_group":"default"
+                     }
+                 ],
                  "count" : 1,
+                 "max_protocol_count" : 1,
                  "protocol_version" : "fdb00a400050001",
                  "source_version" : "9430e1127b4991cbc5ab2b17f41cfffa5de07e9d"
              }
          ]
+      },
+      "page_cache":{
+         "log_hit_rate":0.5,
+         "storage_hit_rate":0.5
       },
       "messages":[
          {
@@ -320,7 +362,9 @@
                   "storage_servers_error",
                   "status_incomplete",
                   "layer_status_incomplete",
-                  "database_availability_timeout"
+                  "database_availability_timeout",
+                  "consistencycheck_suspendkey_fetch_timeout",
+                  "consistencycheck_disabled"
                ]
             },
             "issues":[
@@ -369,18 +413,18 @@
                "counter":0,
                "roughness":0.0
             },
-            "reads":{
+            "reads":{ // measures number of completed read requests
                "hz":0.0,
                "counter":0,
                "roughness":0.0
             },
-            "read_requests":{
+            "read_requests":{ // measures number of incoming read requests
                "hz":0.0,
                "counter":0,
                "roughness":0.0
             }
          },
-         "bytes":{ // of operations (independent of hz). Perfectly spaced operations will have a roughness of 1.0 . Randomly spaced (Poisson-distributed) operations will have a roughness of 2.0, with increased bunching resulting in increased values. Higher roughness can result in increased latency due to increased queuing.
+         "bytes":{ // measures number of logical bytes read/written (ignoring replication factor and overhead on disk). Perfectly spaced operations will have a roughness of 1.0. Randomly spaced (Poisson-distributed) operations will have a roughness of 2.0, with increased bunching resulting in increased values. Higher roughness can result in increased latency due to increased queuing.
             "written":{
                "hz":0.0,
                "counter":0,
@@ -405,6 +449,21 @@
                "counter":0,
                "roughness":0.0
             },
+            "started_immediate_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "started_default_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "started_batch_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
             "conflicted":{
                "hz":0.0,
                "counter":0,
@@ -423,6 +482,9 @@
       "full_replication":true,
       "maintenance_zone":"0ccb4e0fdbdb5583010f6b77d9d10ece",
       "maintenance_seconds_remaining":1.0,
+      "data_distribution_disabled_for_ss_failures":true,
+      "data_distribution_disabled_for_rebalance":true,
+      "data_distribution_disabled":true,
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,
@@ -434,13 +496,15 @@
              "triple",
              "three_datacenter",
              "three_datacenter_fallback",
-             "three_data_hall"
+             "three_data_hall",
+             "three_data_hall_fallback"
          ]},
          "regions":[{
          "datacenters":[{
              "id":"mr",
              "priority":1,
-             "satellite":1
+             "satellite":1,
+             "satellite_logs":2
          }],
          "satellite_redundancy_mode":{
          "$enum":[
@@ -519,11 +583,12 @@
          "max_machine_failures_without_losing_availability":0,
          "total_disk_used_bytes":0,
          "total_kv_size_bytes":0, // estimated
+         "system_kv_size_bytes":0, // estimated
          "partitions_count":2,
          "moving_data":{
-            "total_written_bytes":0,
-            "in_flight_bytes":0,
-            "in_queue_bytes":0,
+            "total_written_bytes":0, // reset whenever data distributor is re-recruited
+            "in_flight_bytes":0, // number of bytes currently being moved between storage servers
+            "in_queue_bytes":0, // number of bytes in the data distributor queue that should be moved (but are not yet being transferred between storage servers)
             "highest_priority":0
          },
          "team_trackers":[
@@ -568,7 +633,7 @@
             },
             "memory":{
                "free_bytes":0, // an estimate of how many bytes are free to allocate to fdbservers without swapping
-               "committed_bytes":0,
+               "committed_bytes":0, // an estimate of the number of bytes of memory on the machine that are not free for allocation
                "total_bytes":0 // an estimate of total physical RAM
             },
             "contributing_workers":4,

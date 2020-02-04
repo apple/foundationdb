@@ -21,11 +21,14 @@
 #ifndef FDBCLIENT_FDBTYPES_H
 #define FDBCLIENT_FDBTYPES_H
 
+#include <algorithm>
+#include <set>
+#include <string>
+#include <vector>
+
 #include "flow/flow.h"
 #include "fdbclient/Knobs.h"
 
-using std::vector;
-using std::pair;
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
 typedef uint64_t Sequence;
@@ -33,7 +36,21 @@ typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
 
-enum { tagLocalitySpecial = -1, tagLocalityLogRouter = -2, tagLocalityRemoteLog = -3, tagLocalityUpgraded = -4, tagLocalitySatellite = -5, tagLocalityInvalid = -99 }; //The TLog and LogRouter require these number to be as compact as possible
+enum {
+	tagLocalitySpecial = -1,
+	tagLocalityLogRouter = -2,
+	tagLocalityRemoteLog = -3,
+	tagLocalityUpgraded = -4,
+	tagLocalitySatellite = -5,
+	tagLocalityLogRouterMapped = -6,  // used by log router to pop from TLogs
+	tagLocalityTxs = -7,
+	tagLocalityBackup = -8,  // used by backup role to pop from TLogs
+	tagLocalityInvalid = -99
+}; //The TLog and LogRouter require these number to be as compact as possible
+
+inline bool isPseudoLocality(int8_t locality) {
+	return locality == tagLocalityLogRouterMapped || locality == tagLocalityBackup;
+}
 
 #pragma pack(push, 1)
 struct Tag {
@@ -46,6 +63,10 @@ struct Tag {
 	bool operator == ( const Tag& r ) const { return locality==r.locality && id==r.id; }
 	bool operator != ( const Tag& r ) const { return locality!=r.locality || id!=r.id; }
 	bool operator < ( const Tag& r ) const { return locality < r.locality || (locality == r.locality && id < r.id); }
+
+	int toTagDataIndex() {
+		return locality >= 0 ? 2 * locality : 1 - (2 * locality);
+	}
 
 	std::string toString() const {
 		return format("%d:%d", locality, id);
@@ -61,17 +82,75 @@ struct Tag {
 template <class Ar> void load( Ar& ar, Tag& tag ) { tag.serialize_unversioned(ar); }
 template <class Ar> void save( Ar& ar, Tag const& tag ) { const_cast<Tag&>(tag).serialize_unversioned(ar); }
 
+template <>
+struct struct_like_traits<Tag> : std::true_type {
+	using Member = Tag;
+	using types = pack<uint16_t, int8_t>;
+
+	template <int i, class Context>
+	static const index_t<i, types>& get(const Member& m, Context&) {
+		if constexpr (i == 0) {
+			return m.id;
+		} else {
+			static_assert(i == 1);
+			return m.locality;
+		}
+	}
+
+	template <int i, class Type, class Context>
+	static void assign(Member& m, const Type& t, Context&) {
+		if constexpr (i == 0) {
+			m.id = t;
+		} else {
+			static_assert(i == 1);
+			m.locality = t;
+		}
+	}
+};
+
 static const Tag invalidTag {tagLocalitySpecial, 0};
 static const Tag txsTag {tagLocalitySpecial, 1};
+static const Tag cacheTag {tagLocalitySpecial, 2};
 
 enum { txsTagOld = -1, invalidTagOld = -100 };
 
 struct TagsAndMessage {
 	StringRef message;
-	std::vector<Tag> tags;
+	VectorRef<Tag> tags;
 
 	TagsAndMessage() {}
-	TagsAndMessage(StringRef message, const std::vector<Tag>& tags) : message(message), tags(tags) {}
+	TagsAndMessage(StringRef message, VectorRef<Tag> tags) : message(message), tags(tags) {}
+
+	// Loads tags and message from a serialized buffer. "rd" is checkpointed at
+	// its begining position to allow the caller to rewind if needed.
+	// T can be ArenaReader or BinaryReader.
+	template <class T>
+	void loadFromArena(T* rd, uint32_t* messageVersionSub) {
+		int32_t messageLength;
+		uint16_t tagCount;
+		uint32_t sub;
+
+		rd->checkpoint();
+		*rd >> messageLength >> sub >> tagCount;
+		if (messageVersionSub) *messageVersionSub = sub;
+		tags = VectorRef<Tag>((Tag*)rd->readBytes(tagCount*sizeof(Tag)), tagCount);
+		const int32_t rawLength = messageLength + sizeof(messageLength);
+		rd->rewind();
+		rd->checkpoint();
+		message = StringRef((const uint8_t*)rd->readBytes(rawLength), rawLength);
+	}
+
+	// Returns the size of the header, including: msg_length, version.sub, tag_count, tags.
+	int32_t getHeaderSize() const {
+		return sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint16_t) + tags.size() * sizeof(Tag);
+	}
+
+	StringRef getMessageWithoutTags() const {
+		return message.substr(getHeaderSize());
+	}
+
+	// Returns the message with the header.
+	StringRef getRawMessage() const { return message; }
 };
 
 struct KeyRangeRef;
@@ -89,6 +168,11 @@ static std::string describe( const Tag item ) {
 
 static std::string describe( const int item ) {
 	return format("%d", item);
+}
+
+// Allows describeList to work on a vector of std::string
+static std::string describe(const std::string& s) {
+	return s;
 }
 
 template <class T>
@@ -211,7 +295,26 @@ struct KeyRangeRef {
 			return a.end < b.end;
 		}
 	};
+
+	std::string toString() const { return "Begin:" + begin.printable() + "End:" + end.printable(); }
 };
+
+template<>
+struct Traceable<KeyRangeRef> : std::true_type {
+	static std::string toString(const KeyRangeRef& value) {
+		auto begin = Traceable<StringRef>::toString(value.begin);
+		auto end = Traceable<StringRef>::toString(value.end);
+		std::string result;
+		result.reserve(begin.size() + end.size() + 3);
+		std::copy(begin.begin(), begin.end(), std::back_inserter(result));
+		result.push_back(' ');
+		result.push_back('-');
+		result.push_back(' ');
+		std::copy(end.begin(), end.end(), std::back_inserter(result));
+		return result;
+	}
+};
+
 
 inline KeyRangeRef operator & (const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 	KeyRef b = std::max(lhs.begin, rhs.begin), e = std::min(lhs.end, rhs.end);
@@ -261,6 +364,50 @@ struct KeyValueRef {
 			return a.key > b;
 		}
 	};
+};
+
+template<>
+struct string_serialized_traits<KeyValueRef> : std::true_type {
+	int32_t getSize(const KeyValueRef& item) const {
+		return 2*sizeof(uint32_t) + item.key.size() + item.value.size();
+	}
+
+	uint32_t save(uint8_t* out, const KeyValueRef& item) const {
+		auto begin = out;
+		uint32_t sz = item.key.size();
+		*reinterpret_cast<decltype(sz)*>(out) = sz;
+		out += sizeof(sz);
+		memcpy(out, item.key.begin(), sz);
+		out += sz;
+		sz = item.value.size();
+		*reinterpret_cast<decltype(sz)*>(out) = sz;
+		out += sizeof(sz);
+		memcpy(out, item.value.begin(), sz);
+		out += sz;
+		return out - begin;
+	}
+
+	template <class Context>
+	uint32_t load(const uint8_t* data, KeyValueRef& t, Context& context) {
+		auto begin = data;
+		uint32_t sz;
+		memcpy(&sz, data, sizeof(sz));
+		data += sizeof(sz);
+		t.key = StringRef(context.tryReadZeroCopy(data, sz), sz);
+		data += sz;
+		memcpy(&sz, data, sizeof(sz));
+		data += sizeof(sz);
+		t.value = StringRef(context.tryReadZeroCopy(data, sz), sz);
+		data += sz;
+		return data - begin;
+	}
+};
+
+template<>
+struct Traceable<KeyValueRef> : std::true_type {
+	static std::string toString(const KeyValueRef& value) {
+		return Traceable<KeyRef>::toString(value.key) + format(":%d", value.value.size());
+	}
 };
 
 typedef Standalone<KeyRef> Key;
@@ -336,7 +483,7 @@ private:
 public:
 	bool orEqual;	// (or equal to key, if this is true)
 	int offset;		// and then move forward this many items (or backward if negative)
-	KeySelectorRef() {}
+	KeySelectorRef() : orEqual(false), offset(0) {}
 	KeySelectorRef( const KeyRef& key, bool orEqual, int offset ) : orEqual(orEqual), offset(offset) {
 		setKey(key);
 	}
@@ -413,6 +560,10 @@ inline KeySelectorRef operator + (const KeySelectorRef& s, int off) {
 inline KeySelectorRef operator - (const KeySelectorRef& s, int off) {
 	return KeySelectorRef(s.getKey(), s.orEqual, s.offset-off);
 }
+inline bool selectorInRange( KeySelectorRef const& sel, KeyRangeRef const& range ) {
+	// Returns true if the given range suffices to at least begin to resolve the given KeySelectorRef
+	return sel.getKey() >= range.begin && (sel.isBackward() ? sel.getKey() <= range.end : sel.getKey() < range.end);
+}
 
 template <class Val>
 struct KeyRangeWith : KeyRange {
@@ -477,15 +628,32 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	void serialize( Ar& ar ) {
 		serializer(ar, ((VectorRef<KeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
+
+	std::string toString() const {
+		return "more:" + std::to_string(more) +
+		       " readThrough:" + (readThrough.present() ? readThrough.get().toString() : "[unset]") +
+		       " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
+	}
+};
+
+template<>
+struct Traceable<RangeResultRef> : std::true_type {
+	static std::string toString(const RangeResultRef& value) {
+		return Traceable<VectorRef<KeyValueRef>>::toString(value);
+	}
 };
 
 struct KeyValueStoreType {
-	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones just before END.
+	constexpr static FileIdentifier file_identifier = 6560359;
+	// These enumerated values are stored in the database configuration, so should NEVER be changed.
+	// Only add new ones just before END.
+	// SS storeType is END before the storageServerInterface is initialized.
 	enum StoreType {
 		SSD_BTREE_V1,
 		MEMORY,
 		SSD_BTREE_V2,
 		SSD_REDWOOD_V1,
+		MEMORY_RADIXTREE,
 		END
 	};
 
@@ -505,12 +673,20 @@ struct KeyValueStoreType {
 			case SSD_BTREE_V2: return "ssd-2";
 			case SSD_REDWOOD_V1: return "ssd-redwood-experimental";
 			case MEMORY: return "memory";
+			case MEMORY_RADIXTREE: return "memory-radixtree-beta";
 			default: return "unknown";
 		}
 	}
 
 private:
 	uint32_t type;
+};
+
+template<>
+struct Traceable<KeyValueStoreType> : std::true_type {
+	static std::string toString(KeyValueStoreType const& value) {
+		return value.toString();
+	}
 };
 
 struct TLogVersion {
@@ -521,10 +697,12 @@ struct TLogVersion {
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
+		V4 = 4, // 6.2
+		V5 = 5, // 7.0
 		MIN_SUPPORTED = V2,
-		MAX_SUPPORTED = V3,
-		MIN_RECRUITABLE = V2,
-		DEFAULT = V2,
+		MAX_SUPPORTED = V5,
+		MIN_RECRUITABLE = V3,
+		DEFAULT = V4,
 	} version;
 
 	TLogVersion() : version(UNSET) {}
@@ -544,7 +722,16 @@ struct TLogVersion {
 	static ErrorOr<TLogVersion> FromStringRef( StringRef s ) {
 		if (s == LiteralStringRef("2")) return V2;
 		if (s == LiteralStringRef("3")) return V3;
+		if (s == LiteralStringRef("4")) return V4;
+		if (s == LiteralStringRef("5")) return V5;
 		return default_error_or();
+	}
+};
+
+template<>
+struct Traceable<TLogVersion> : std::true_type {
+	static std::string toString(TLogVersion const& value) {
+		return Traceable<Version>::toString(value.version);
 	}
 };
 
@@ -552,7 +739,7 @@ struct TLogSpillType {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones just before END.
 	enum SpillType {
 		UNSET = 0,
-		DEFAULT = 1,
+		DEFAULT = 2,
 		VALUE = 1,
 		REFERENCE = 2,
 		END = 3,
@@ -585,7 +772,6 @@ struct TLogSpillType {
 		return default_error_or();
 	}
 
-private:
 	uint32_t type;
 };
 
@@ -677,7 +863,7 @@ static bool addressExcluded( std::set<AddressExclusion> const& exclusions, Netwo
 struct ClusterControllerPriorityInfo {
 	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessBad }; //cannot be larger than 7 because of leader election mask
 
-	static DCFitness calculateDCFitness(Optional<Key> const& dcId, vector<Optional<Key>> const& dcPriority) {
+	static DCFitness calculateDCFitness(Optional<Key> const& dcId, std::vector<Optional<Key>> const& dcPriority) {
 		if(!dcPriority.size()) {
 			return FitnessUnknown;
 		} else if(dcPriority.size() == 1) {
@@ -702,7 +888,9 @@ struct ClusterControllerPriorityInfo {
 	uint8_t dcFitness;
 
 	bool operator== (ClusterControllerPriorityInfo const& r) const { return processClassFitness == r.processClassFitness && isExcluded == r.isExcluded && dcFitness == r.dcFitness; }
-
+	ClusterControllerPriorityInfo()
+	  : ClusterControllerPriorityInfo(/*ProcessClass::UnsetFit*/ 2, false,
+	                                  ClusterControllerPriorityInfo::FitnessUnknown) {}
 	ClusterControllerPriorityInfo(uint8_t processClassFitness, bool isExcluded, uint8_t dcFitness) : processClassFitness(processClassFitness), isExcluded(isExcluded), dcFitness(dcFitness) {}
 
 	template <class Ar>
@@ -710,6 +898,8 @@ struct ClusterControllerPriorityInfo {
 		serializer(ar, processClassFitness, isExcluded, dcFitness);
 	}
 };
+
+class Database;
 
 struct HealthMetrics {
 	struct StorageStats {
@@ -780,6 +970,20 @@ struct HealthMetrics {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, worstStorageQueue, worstStorageDurabilityLag, worstTLogQueue, tpsLimit, batchLimited, storageStats, tLogQueue);
+	}
+};
+
+struct WorkerBackupStatus {
+	LogEpoch epoch;
+	Version version;
+	Tag tag;
+
+	WorkerBackupStatus() : epoch(0), version(invalidVersion) {}
+	WorkerBackupStatus(LogEpoch e, Version v, Tag t) : epoch(e), version(v), tag(t) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, epoch, version, tag);
 	}
 };
 

@@ -23,39 +23,54 @@ package com.apple.foundationdb.testing;
 import java.util.Map;
 
 public class WorkloadContext {
-	private Map<String, String> options;
-	private int clientId, clientCount;
-	long sharedRandomNumber, processID;
+	long impl;
 
-	public WorkloadContext(Map<String, String> options, int clientId, int clientCount, long sharedRandomNumber, long processID)
+	private WorkloadContext(long impl)
 	{
-		this.options = options;
-		this.clientId = clientId;
-		this.clientCount = clientCount;
-		this.sharedRandomNumber = sharedRandomNumber;
-		this.processID = processID;
-	}
-
-	public String getOption(String name, String defaultValue) {
-		if (options.containsKey(name)) {
-			return options.get(name);
-		}
-		return defaultValue;
-	}
-
-	public int getClientId() {
-		return clientId;
-	}
-
-	public int getClientCount() {
-		return clientCount;
-	}
-
-	public long getSharedRandomNumber() {
-		return sharedRandomNumber;
+		this.impl = impl;
 	}
 
 	public long getProcessID() {
-		return processID;
+		return getProcessID(impl);
 	}
+
+	public void setProcessID(long processID) {
+		setProcessID(impl, processID);
+	}
+
+	public int getClientID() {
+		return getClientID(impl);
+	}
+
+	public int getClientCount() {
+		return getClientCount(impl);
+	}
+
+	public long getSharedRandomNumber() {
+		return getSharedRandomNumber(impl);
+	}
+
+	public String getOption(String name, String defaultValue) {
+		return getOption(impl, name, defaultValue);
+	}
+	public long getOption(String name, long defaultValue) {
+		return getOption(impl, name, defaultValue);
+	}
+	public boolean getOption(String name, boolean defaultValue) {
+		return getOption(impl, name, defaultValue);
+	}
+	public double getOption(String name, double defaultValue) {
+		return getOption(impl, name, defaultValue);
+	}
+
+	private static native long getProcessID(long self);
+	private static native void setProcessID(long self, long processID);
+	private static native boolean getOption(long impl, String name, boolean defaultValue);
+	private static native long getOption(long impl, String name, long defaultValue);
+	private static native double getOption(long impl, String name, double defaultValue);
+	private static native String getOption(long impl, String name, String defaultValue);
+	private static native int getClientID(long self);
+	private static native int getClientCount(long self);
+	private static native long getSharedRandomNumber(long self);
+
 }

@@ -49,13 +49,15 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "resolution",
                   "proxy",
                   "master",
-                  "test"
+                  "test",
+                  "storage_cache"
                ]
             },
             "degraded":true,
             "roles":[
                {
                   "query_queue_max":0,
+                  "local_rate":0,
                   "input_bytes":{
                      "hz":0.0,
                      "counter":0,
@@ -66,6 +68,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "kvstore_available_bytes":12341234,
                   "kvstore_free_bytes":12341234,
                   "kvstore_total_bytes":12341234,
+                  "kvstore_total_size":12341234,
+                  "kvstore_total_nodes":12341234,
+                  "kvstore_inline_keys":12341234,
                   "durable_bytes":{
                      "hz":0.0,
                      "counter":0,
@@ -84,7 +89,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "resolver",
                         "cluster_controller",
                         "data_distributor",
-                        "ratekeeper"
+                        "ratekeeper",
+                        "storage_cache",
+                        "router",
+                        "coordinator"
                      ]
                   },
                   "data_version":12341234,
@@ -206,7 +214,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "megabits_received":{
                   "hz":0.0
                }
-            }
+            },
+            "run_loop_busy":0.2
          }
       },
       "old_logs":[
@@ -229,8 +238,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          }
       ],
       "fault_tolerance":{
-         "max_machine_failures_without_losing_availability":0,
-         "max_machine_failures_without_losing_data":0
+         "max_zone_failures_without_losing_availability":0,
+         "max_zone_failures_without_losing_data":0
       },
       "qos":{
          "worst_queue_bytes_log_server":460,
@@ -248,7 +257,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio"
+                  "log_server_min_free_space_ratio",
+                  "storage_server_durability_lag",
+                  "storage_server_list_fetch_failed"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -267,7 +278,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_server_min_free_space",
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
-                  "log_server_min_free_space_ratio"
+                  "log_server_min_free_space_ratio",
+                  "storage_server_durability_lag",
+                  "storage_server_list_fetch_failed"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -279,15 +292,37 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,
          "limiting_version_lag_storage_server":0,
-         "worst_version_lag_storage_server":0
+         "worst_version_lag_storage_server":0,
+         "limiting_data_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         },
+         "worst_data_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         },
+         "limiting_durability_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         },
+         "worst_durability_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         }
       },
       "incompatible_connections":[
 
       ],
-      "datacenter_version_difference":0,
+      "datacenter_lag": {
+         "seconds" : 1.0,
+         "versions" : 1000000
+      },
       "degraded_processes":0,
       "database_available":true,
-      "database_locked":false,
+      "database_lock_state": {
+         "locked": true,
+         "lock_uid": "00000000000000000000000000000000"
+      },
       "generation":2,
       "latency_probe":{
          "read_seconds":7,
@@ -304,15 +339,25 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                  "connected_clients":[
                      {
                          "address":"127.0.0.1:9898",
-                         "log_group":"default",
-                         "connected_coordinators":2
+                         "log_group":"default"
+                     }
+                 ],
+                 "max_protocol_clients":[
+                     {
+                         "address":"127.0.0.1:9898",
+                         "log_group":"default"
                      }
                  ],
                  "count" : 1,
+                 "max_protocol_count" : 1,
                  "protocol_version" : "fdb00a400050001",
                  "source_version" : "9430e1127b4991cbc5ab2b17f41cfffa5de07e9d"
              }
          ]
+      },
+      "page_cache":{
+         "log_hit_rate":0.5,
+         "storage_hit_rate":0.5
       },
       "messages":[
          {
@@ -343,7 +388,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_servers_error",
                   "status_incomplete",
                   "layer_status_incomplete",
-                  "database_availability_timeout"
+                  "database_availability_timeout",
+                  "consistencycheck_suspendkey_fetch_timeout",
+                  "consistencycheck_disabled",
+                  "duplicate_mutation_streams",
+                  "duplicate_mutation_fetch_timeout"
                ]
             },
             "issues":[
@@ -359,7 +408,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "description":"abc"
          }
       ],
-)statusSchema" R"statusSchema(
+)statusSchema"
+                                                          R"statusSchema(
       "recovery_state":{
          "required_resolvers":1,
          "required_proxies":1,
@@ -429,6 +479,21 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "counter":0,
                "roughness":0.0
             },
+            "started_immediate_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "started_default_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "started_batch_priority":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
             "conflicted":{
                "hz":0.0,
                "counter":0,
@@ -447,6 +512,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "full_replication":true,
       "maintenance_zone":"0ccb4e0fdbdb5583010f6b77d9d10ece",
       "maintenance_seconds_remaining":1.0,
+      "data_distribution_disabled_for_ss_failures":true,
+      "data_distribution_disabled_for_rebalance":true,
+      "data_distribution_disabled":true,
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,
@@ -458,13 +526,15 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "triple",
              "three_datacenter",
              "three_datacenter_fallback",
-             "three_data_hall"
+             "three_data_hall",
+             "three_data_hall_fallback"
          ]},
          "regions":[{
          "datacenters":[{
              "id":"mr",
              "priority":1,
-             "satellite":1
+             "satellite":1,
+             "satellite_logs":2
          }],
          "satellite_redundancy_mode":{
          "$enum":[
@@ -508,7 +578,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd-redwood-experimental",
              "memory",
              "memory-1",
-             "memory-2"
+             "memory-2",
+             "memory-radixtree-beta"
          ]},
          "coordinators_count":1,
          "excluded_servers":[
@@ -545,6 +616,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "max_machine_failures_without_losing_availability":0,
          "total_disk_used_bytes":0,
          "total_kv_size_bytes":0,
+         "system_kv_size_bytes":0,
          "partitions_count":2,
          "moving_data":{
             "total_written_bytes":0,
@@ -576,8 +648,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                 }
             }
          ],
-         "least_operating_space_bytes_storage_server":0,
-         "max_machine_failures_without_losing_data":0
+         "least_operating_space_bytes_storage_server":0
       },
       "machines":{
          "$map":{
@@ -667,13 +738,15 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"config
         "triple",
         "three_datacenter",
         "three_datacenter_fallback",
-        "three_data_hall"
+        "three_data_hall",
+        "three_data_hall_fallback"
     ]},
     "regions":[{
         "datacenters":[{
             "id":"mr",
             "priority":1,
-            "satellite":1
+            "satellite":1,
+            "satellite_logs":2
         }],
         "satellite_redundancy_mode":{
         "$enum":[

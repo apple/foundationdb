@@ -90,8 +90,6 @@ struct MetricLoggingWorkload : TestWorkload {
 
 	ACTOR Future<Void> MetricLoggingClient( Database cx, MetricLoggingWorkload *self, int clientId, int actorId )	{
 		state BinaryWriter writer( Unversioned() );
-		state uint64_t lastTime = 0;
-		state double startTime = now();
 		loop {
 			for( int i = 0; i < 100; i++ ) {
 				if( self->testBool ) {

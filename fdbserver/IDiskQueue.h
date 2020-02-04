@@ -33,11 +33,12 @@ enum class CheckHashes {
 class IDiskQueue : public IClosable {
 public:
 	struct location {
-		int64_t hi, lo;
+		// location is same with seq., specifying the index of the virtualy infinite queue.
+		int64_t hi, lo; // hi is always 0, lo is always equal to seq.
 		location() : hi(0), lo(0) {}
 		location(int64_t lo) : hi(0), lo(lo) {}
 		location(int64_t hi, int64_t lo) : hi(hi), lo(lo) {}
-		operator std::string() { return format("%lld.%lld", hi, lo); }  // FIXME: Return a 'HumanReadableDescription' instead of std::string, make TraceEvent::detail accept that (for safety)
+		operator std::string() const { return format("%lld.%lld", hi, lo); }  // FIXME: Return a 'HumanReadableDescription' instead of std::string, make TraceEvent::detail accept that (for safety)
 
 		template<class Ar>
 		void serialize_unversioned(Ar& ar) {
@@ -81,6 +82,13 @@ public:
 	virtual StorageBytes getStorageBytes() = 0;
 };
 
+template<>
+struct Traceable<IDiskQueue::location> : std::true_type {
+	static std::string toString(const IDiskQueue::location& value) {
+		return value;
+	}
+};
+
 // FIXME: One should be able to use SFINAE to choose between serialize and serialize_unversioned.
 template <class Ar> void load( Ar& ar, IDiskQueue::location& loc ) { loc.serialize_unversioned(ar); }
 template <class Ar> void save( Ar& ar, const IDiskQueue::location& loc ) { const_cast<IDiskQueue::location&>(loc).serialize_unversioned(ar); }
@@ -98,9 +106,10 @@ struct numeric_limits<IDiskQueue::location> {
 };
 }
 
+// Specify which hash function to use for checksum of pages in DiskQueue
 enum class DiskQueueVersion : uint16_t {
-	V0 = 0,
-	V1 = 1,
+	V0 = 0, // Use hashlittle
+	V1 = 1, // Use crc32, which is faster than hashlittle
 };
 
 IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid, DiskQueueVersion diskQueueVersion, int64_t fileSizeWarningLimit = -1);  // opens basename+"0."+ext and basename+"1."+ext

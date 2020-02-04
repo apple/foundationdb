@@ -29,6 +29,9 @@
 		#define FDBSERVER_BULK_SETUP_ACTOR_H
 
 #include <string>
+#include <utility>
+#include <vector>
+
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -61,8 +64,8 @@ Future<uint64_t> setupRange( Database cx, T* workload, uint64_t begin, uint64_t 
 	loop {
 		state Transaction tr(cx);
 		try {
-			//if( g_random->random01() < 0.001 )
-			//	tr.debugTransaction( g_random->randomUniqueID() );
+			//if( deterministicRandom()->random01() < 0.001 )
+			//	tr.debugTransaction( deterministicRandom()->randomUniqueID() );
 
 			state Standalone<KeyValueRef> sampleKV = (*workload)( begin );
 			Optional<Value> f = wait( tr.get( sampleKV.key ) );
@@ -102,14 +105,14 @@ Future<uint64_t> setupRange( Database cx, T* workload, uint64_t begin, uint64_t 
 }
 
 ACTOR template<class T>
-Future<uint64_t> setupRangeWorker( Database cx, T* workload, vector<std::pair<uint64_t,uint64_t>>* jobs, double maxKeyInsertRate, int keySaveIncrement, int actorId) {
+Future<uint64_t> setupRangeWorker( Database cx, T* workload, std::vector<std::pair<uint64_t,uint64_t>>* jobs, double maxKeyInsertRate, int keySaveIncrement, int actorId) {
 	state double nextStart;
 	state uint64_t loadedRanges = 0;
 	state int lastStoredKeysLoaded = 0;
 	state uint64_t keysLoaded = 0;
 	state uint64_t bytesStored = 0;
 	while (jobs->size()){
-		state pair<uint64_t, uint64_t> job = jobs->back();
+		state std::pair<uint64_t, uint64_t> job = jobs->back();
 		jobs->pop_back();
 		nextStart = now() + (job.second-job.first)/maxKeyInsertRate;
 		uint64_t numBytes = wait( setupRange(cx, workload, job.first, job.second) );
@@ -152,7 +155,7 @@ Future<uint64_t> setupRangeWorker( Database cx, T* workload, vector<std::pair<ui
 //to reach that mark.  Returns a vector of times (in seconds) corresponding to the counts in the countsOfInterest vector.
 
 //Expects countsOfInterest to be sorted in ascending order
-ACTOR static Future<vector<pair<uint64_t, double> > > trackInsertionCount(Database cx, vector<uint64_t> countsOfInterest, double checkInterval)
+ACTOR static Future<std::vector<std::pair<uint64_t, double> > > trackInsertionCount(Database cx, std::vector<uint64_t> countsOfInterest, double checkInterval)
 {
 	state KeyRange keyPrefix = KeyRangeRef(std::string("keycount"), std::string("keycount") + char(255));
 	state KeyRange bytesPrefix = KeyRangeRef(std::string("bytesstored"), std::string("bytesstored") + char(255));
@@ -160,7 +163,7 @@ ACTOR static Future<vector<pair<uint64_t, double> > > trackInsertionCount(Databa
 	state uint64_t lastInsertionCount = 0;
 	state int currentCountIndex = 0;
 
-	state vector<pair<uint64_t, double> > countInsertionRates;
+	state std::vector<std::pair<uint64_t, double> > countInsertionRates;
 
 	state double startTime = now();
 
@@ -184,7 +187,7 @@ ACTOR static Future<vector<pair<uint64_t, double> > > trackInsertionCount(Databa
 				bytesInserted += *(uint64_t*)bytes[i].value.begin();
 
 			while(currentCountIndex < countsOfInterest.size() && countsOfInterest[currentCountIndex] > lastInsertionCount && countsOfInterest[currentCountIndex] <= numInserted)
-				countInsertionRates.push_back(pair<uint64_t, double>(countsOfInterest[currentCountIndex++], bytesInserted / (now() - startTime)));
+				countInsertionRates.emplace_back(countsOfInterest[currentCountIndex++], bytesInserted / (now() - startTime));
 
 			lastInsertionCount = numInserted;
 			wait(delay(checkInterval));
@@ -198,13 +201,16 @@ ACTOR static Future<vector<pair<uint64_t, double> > > trackInsertionCount(Databa
 	return countInsertionRates;
 }
 
-ACTOR template<class T>
-Future<Void> bulkSetup( Database cx, T* workload, uint64_t nodeCount, Promise<double> setupTime,
-		bool valuesInconsequential = false, double postSetupWarming = 0.0, double maxKeyInsertRate = 1e12,
-		vector<uint64_t> insertionCountsToMeasure = vector<uint64_t>(), Promise<vector<pair<uint64_t, double> > > ratesAtKeyCounts = Promise<vector<pair<uint64_t, double> > >(),
-		int keySaveIncrement = 0, double keyCheckInterval = 0.1 ) {
+ACTOR template <class T>
+Future<Void> bulkSetup(Database cx, T* workload, uint64_t nodeCount, Promise<double> setupTime,
+                       bool valuesInconsequential = false, double postSetupWarming = 0.0,
+                       double maxKeyInsertRate = 1e12,
+                       std::vector<uint64_t> insertionCountsToMeasure = std::vector<uint64_t>(),
+                       Promise<std::vector<std::pair<uint64_t, double>>> ratesAtKeyCounts =
+                           Promise<std::vector<std::pair<uint64_t, double>>>(),
+                       int keySaveIncrement = 0, double keyCheckInterval = 0.1) {
 
-	state vector<pair<uint64_t,uint64_t>> jobs;
+	state std::vector<std::pair<uint64_t,uint64_t>> jobs;
 	state uint64_t startNode = (nodeCount * workload->clientId) / workload->clientCount;
 	state uint64_t endNode = (nodeCount * (workload->clientId+1)) / workload->clientCount;
 
@@ -226,7 +232,7 @@ Future<Void> bulkSetup( Database cx, T* workload, uint64_t nodeCount, Promise<do
 				.detail("End", endNode)
 				.detail("CheckMethod", "SimpleValueSize");
 			setupTime.send(0.0);
-			ratesAtKeyCounts.send(vector<pair<uint64_t, double> >());
+			ratesAtKeyCounts.send(std::vector<std::pair<uint64_t, double> >());
 			return Void();
 		} else {
 			TraceEvent("BulkRangeNotFound")
@@ -236,13 +242,13 @@ Future<Void> bulkSetup( Database cx, T* workload, uint64_t nodeCount, Promise<do
 		}
 	}
 
-	wait( delay( g_random->random01() / 4 ) );  // smear over .25 seconds
+	wait( delay( deterministicRandom()->random01() / 4 ) );  // smear over .25 seconds
 
 	state int BULK_SETUP_WORKERS = 40;
 	// See that each chunk inserted is about 10KB
 	int size_total = 0;
 	for( int i = 0; i < 100; i++ ) {
-		Standalone<KeyValueRef> sampleKV = (*workload)( startNode + (uint64_t)(g_random->random01()*(endNode - startNode)) );
+		Standalone<KeyValueRef> sampleKV = (*workload)( startNode + (uint64_t)(deterministicRandom()->random01()*(endNode - startNode)) );
 		size_total += sampleKV.key.size() + sampleKV.value.size();
 	}
 	state int BULK_SETUP_RANGE_SIZE = size_total == 0 ? 50 : std::max(1, 10000 / (size_total / 100));
@@ -257,14 +263,14 @@ Future<Void> bulkSetup( Database cx, T* workload, uint64_t nodeCount, Promise<do
 
 	// create a random vector of range-create jobs
 	for(uint64_t n=startNode; n<endNode; n+=BULK_SETUP_RANGE_SIZE)
-		jobs.push_back( std::make_pair( n, std::min(endNode, n+BULK_SETUP_RANGE_SIZE) ) );
-	g_random->randomShuffle(jobs);
+		jobs.emplace_back(n, std::min(endNode, n+BULK_SETUP_RANGE_SIZE));
+	deterministicRandom()->randomShuffle(jobs);
 
 	// fire up the workers and wait for them to eat all the jobs
 	double maxWorkerInsertRate = maxKeyInsertRate / BULK_SETUP_WORKERS / workload->clientCount;
-	state vector<Future<uint64_t>> fs;
+	state std::vector<Future<uint64_t>> fs;
 
-	state Future<vector<pair<uint64_t, double> > > insertionTimes = vector<pair<uint64_t, double> >();
+	state Future<std::vector<std::pair<uint64_t, double> > > insertionTimes = std::vector<std::pair<uint64_t, double>>();
 
 	if(insertionCountsToMeasure.size() > 0)
 	{

@@ -33,12 +33,13 @@
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include <algorithm>
+#include <cinttypes>
 #include <time.h>
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace IBackupFile_impl {
 
-	ACTOR Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalone<StringRef> s) {
+ACTOR Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalone<StringRef> s) {
 		state uint32_t lenBuf = bigEndian32((uint32_t)s.size());
 		wait(file->append(&lenBuf, sizeof(lenBuf)));
 		wait(file->append(s.begin(), s.size()));
@@ -60,13 +61,13 @@ std::string IBackupContainer::ExpireProgress::toString() const {
 
 void BackupFileList::toStream(FILE *fout) const {
 	for(const RangeFile &f : ranges) {
-		fprintf(fout, "range %lld %s\n", f.fileSize, f.fileName.c_str());
+		fprintf(fout, "range %" PRId64 " %s\n", f.fileSize, f.fileName.c_str());
 	}
 	for(const LogFile &f : logs) {
-		fprintf(fout, "log %lld %s\n", f.fileSize, f.fileName.c_str());
+		fprintf(fout, "log %" PRId64 " %s\n", f.fileSize, f.fileName.c_str());
 	}
 	for(const KeyspaceSnapshotFile &f : snapshots) {
-		fprintf(fout, "snapshotManifest %lld %s\n", f.totalSize, f.fileName.c_str());
+		fprintf(fout, "snapshotManifest %" PRId64 " %s\n", f.totalSize, f.fileName.c_str());
 	}
 }
 
@@ -257,15 +258,15 @@ std::string BackupDescription::toJSON() const {
  */
 class BackupContainerFileSystem : public IBackupContainer {
 public:
-	virtual void addref() = 0;
-	virtual void delref() = 0;
+	void addref() override = 0;
+	void delref() override = 0;
 
 	BackupContainerFileSystem() {}
 	virtual ~BackupContainerFileSystem() {}
 
 	// Create the container
-	virtual Future<Void> create() = 0;
-	virtual Future<bool> exists() = 0;
+	Future<Void> create() override = 0;
+	Future<bool> exists() override = 0;
 
 	// Get a list of fileNames and their sizes in the container under the given path
 	// Although not required, an implementation can avoid traversing unwanted subfolders
@@ -274,7 +275,7 @@ public:
 	virtual Future<FilesAndSizesT> listFiles(std::string path = "", std::function<bool(std::string const &)> folderPathFilter = nullptr) = 0;
 
 	// Open a file for read by fileName
-	virtual Future<Reference<IAsyncFile>> readFile(std::string fileName) = 0;
+	Future<Reference<IAsyncFile>> readFile(std::string fileName) override = 0;
 
 	// Open a file for write by fileName
 	virtual Future<Reference<IBackupFile>> writeFile(std::string fileName) = 0;
@@ -284,7 +285,7 @@ public:
 
 	// Delete entire container.  During the process, if pNumDeleted is not null it will be
 	// updated with the count of deleted files so that progress can be seen.
-	virtual Future<Void> deleteContainer(int *pNumDeleted) = 0;
+	Future<Void> deleteContainer(int* pNumDeleted) override = 0;
 
 	// Creates a 2-level path (x/y) where v should go such that x/y/* contains (10^smallestBucket) possible versions
 	static std::string versionFolderString(Version v, int smallestBucket) {
@@ -315,13 +316,13 @@ public:
 
 	// Get the root folder for a snapshot's data based on its begin version
 	static std::string snapshotFolderString(Version snapshotBeginVersion) {
-		return format("kvranges/snapshot.%018lld", snapshotBeginVersion);
+		return format("kvranges/snapshot.%018" PRId64 , snapshotBeginVersion);
 	}
 
 	// Extract the snapshot begin version from a path
 	static Version extractSnapshotBeginVersion(std::string path) {
 		Version snapshotBeginVersion;
-		if(sscanf(path.c_str(), "kvranges/snapshot.%018lld", &snapshotBeginVersion) == 1) {
+		if(sscanf(path.c_str(), "kvranges/snapshot.%018" SCNd64, &snapshotBeginVersion) == 1) {
 			return snapshotBeginVersion;
 		}
 		return invalidVersion;
@@ -332,15 +333,22 @@ public:
 		return format("logs/%s/", versionFolderString(v, 11).c_str());
 	}
 
-	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) {
-		return writeFile(logVersionFolderString(beginVersion) + format("log,%lld,%lld,%s,%d", beginVersion, endVersion, g_random->randomUniqueID().toString().c_str(), blockSize));
+	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) override {
+		return writeFile(logVersionFolderString(beginVersion) + format("log,%lld,%lld,%s,%d", beginVersion, endVersion, deterministicRandom()->randomUniqueID().toString().c_str(), blockSize));
 	}
 
-	Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion, int snapshotFileCount, Version fileVersion, int blockSize) {
-		std::string fileName = format("range,%lld,%s,%d", fileVersion, g_random->randomUniqueID().toString().c_str(), blockSize);
+	Future<Reference<IBackupFile>> writeTaggedLogFile(Version beginVersion, Version endVersion, int blockSize,
+	                                                  uint16_t tagId) override {
+		return writeFile(logVersionFolderString(beginVersion) +
+		                 format("log,%lld,%lld,%s,%d,%d", beginVersion, endVersion,
+		                        deterministicRandom()->randomUniqueID().toString().c_str(), blockSize, tagId));
+	}
+
+	Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion, int snapshotFileCount, Version fileVersion, int blockSize) override {
+		std::string fileName = format("range,%" PRId64 ",%s,%d", fileVersion, deterministicRandom()->randomUniqueID().toString().c_str(), blockSize);
 
 		// In order to test backward compatibility in simulation, sometimes write to the old path format
-		if(g_network->isSimulated() && g_random->coinflip()) {
+		if(g_network->isSimulated() && deterministicRandom()->coinflip()) {
 			return writeFile(old_rangeVersionFolderString(fileVersion) + fileName);
 		}
 
@@ -353,7 +361,7 @@ public:
 		f.fileName = path;
 		f.fileSize = size;
 		int len;
-		if(sscanf(name.c_str(), "range,%lld,%*[^,],%u%n", &f.version, &f.blockSize, &len) == 2 && len == name.size()) {
+		if(sscanf(name.c_str(), "range,%" SCNd64 ",%*[^,],%u%n", &f.version, &f.blockSize, &len) == 2 && len == name.size()) {
 			out = f;
 			return true;
 		}
@@ -366,7 +374,12 @@ public:
 		f.fileName = path;
 		f.fileSize = size;
 		int len;
-		if(sscanf(name.c_str(), "log,%lld,%lld,%*[^,],%u%n", &f.beginVersion, &f.endVersion, &f.blockSize, &len) == 3 && len == name.size()) {
+		if(sscanf(name.c_str(), "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%u%n", &f.beginVersion, &f.endVersion, &f.blockSize, &len) == 3 && len == name.size()) {
+			out = f;
+			return true;
+		} else if (sscanf(name.c_str(), "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%u,%d%n", &f.beginVersion, &f.endVersion,
+		                  &f.blockSize, &f.tagId, &len) == 4 &&
+		           len == name.size() && f.tagId >= 0) {
 			out = f;
 			return true;
 		}
@@ -378,7 +391,7 @@ public:
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
 		int len;
-		if(sscanf(name.c_str(), "snapshot,%lld,%lld,%lld%n", &f.beginVersion, &f.endVersion, &f.totalSize, &len) == 3 && len == name.size()) {
+		if(sscanf(name.c_str(), "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 "%n", &f.beginVersion, &f.endVersion, &f.totalSize, &len) == 3 && len == name.size()) {
 			out = f;
 			return true;
 		}
@@ -494,7 +507,7 @@ public:
 		return Void();
 	}
 
-	Future<Void> writeKeyspaceSnapshotFile(std::vector<std::string> fileNames, int64_t totalBytes) {
+	Future<Void> writeKeyspaceSnapshotFile(std::vector<std::string> fileNames, int64_t totalBytes) override {
 		return writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem>::addRef(this), fileNames, totalBytes);
 	};
 
@@ -611,7 +624,7 @@ public:
 		return BackupFileList({fRanges.get(), fLogs.get(), fSnapshots.get()});
 	}
 
-	Future<BackupFileList> dumpFileList(Version begin, Version end) {
+	Future<BackupFileList> dumpFileList(Version begin, Version end) override {
 		return dumpFileList_impl(Reference<BackupContainerFileSystem>::addRef(this), begin, end);
 	}
 
@@ -828,7 +841,7 @@ public:
 	}
 
 	// Uses the virtual methods to describe the backup contents
-	Future<BackupDescription> describeBackup(bool deepScan, Version logStartVersionOverride) {
+	Future<BackupDescription> describeBackup(bool deepScan, Version logStartVersionOverride) override {
 		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this), deepScan, logStartVersionOverride);
 	}
 
@@ -1008,7 +1021,7 @@ public:
 	}
 
 	// Delete all data up to (but not including endVersion)
-	Future<Void> expireData(Version expireEndVersion, bool force, ExpireProgress *progress, Version restorableBeginVersion) {
+	Future<Void> expireData(Version expireEndVersion, bool force, ExpireProgress *progress, Version restorableBeginVersion) override {
 		return expireData_impl(Reference<BackupContainerFileSystem>::addRef(this), expireEndVersion, force, progress, restorableBeginVersion);
 	}
 
@@ -1030,8 +1043,10 @@ public:
 			restorable.ranges = ranges;
 
 			// No logs needed if there is a complete key space snapshot at the target version.
-			if(snapshot.get().beginVersion == snapshot.get().endVersion && snapshot.get().endVersion == targetVersion)
+			if (snapshot.get().beginVersion == snapshot.get().endVersion &&
+			    snapshot.get().endVersion == targetVersion) {
 				return Optional<RestorableFileSet>(restorable);
+			}
 
 			state std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion));
 
@@ -1064,7 +1079,7 @@ public:
 		return Optional<RestorableFileSet>();
 	}
 
-	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion){
+	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) override {
 		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion);
 	}
 
@@ -1125,7 +1140,7 @@ public:
 			int rs = wait(f->read((uint8_t *)s.data(), size, 0));
 			Version v;
 			int len;
-			if(rs == size && sscanf(s.c_str(), "%lld%n", &v, &len) == 1 && len == size)
+			if(rs == size && sscanf(s.c_str(), "%" SCNd64 "%n", &v, &len) == 1 && len == size)
 				return v;
 
 			TraceEvent(SevWarn, "BackupContainerInvalidProperty")
@@ -1149,8 +1164,8 @@ public:
 
 class BackupContainerLocalDirectory : public BackupContainerFileSystem, ReferenceCounted<BackupContainerLocalDirectory> {
 public:
-	void addref() { return ReferenceCounted<BackupContainerLocalDirectory>::addref(); }
-	void delref() { return ReferenceCounted<BackupContainerLocalDirectory>::delref(); }
+	void addref() override { return ReferenceCounted<BackupContainerLocalDirectory>::addref(); }
+	void delref() override { return ReferenceCounted<BackupContainerLocalDirectory>::delref(); }
 
 	static std::string getURLFormat() { return "file://</path/to/base/dir/>"; }
 
@@ -1199,7 +1214,7 @@ public:
 		return results;
 	}
 
-	Future<Void> create() {
+	Future<Void> create() override {
 		// Nothing should be done here because create() can be called by any process working with the container URL, such as fdbbackup.
 		// Since "local directory" containers are by definition local to the machine they are accessed from,
 		// the container's creation (in this case the creation of a directory) must be ensured prior to every file creation,
@@ -1209,11 +1224,11 @@ public:
 	}
 
 	// The container exists if the folder it resides in exists
-	Future<bool> exists() {
+	Future<bool> exists() override {
 		return directoryExists(m_path);
 	}
 
-	Future<Reference<IAsyncFile>> readFile(std::string path) {
+	Future<Reference<IAsyncFile>> readFile(std::string path) override {
 		int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED;
 		// Simulation does not properly handle opening the same file from multiple machines using a shared filesystem,
 		// so create a symbolic link to make each file opening appear to be unique.  This could also work in production
@@ -1223,7 +1238,7 @@ public:
 		if(g_network->isSimulated()) {
 			if(!fileExists(fullPath))
 				throw file_not_found();
-			std::string uniquePath = fullPath + "." + g_random->randomUniqueID().toString() + ".lnk";
+			std::string uniquePath = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".lnk";
 			unlink(uniquePath.c_str());
 			ASSERT(symlink(basename(path).c_str(), uniquePath.c_str()) == 0);
 			fullPath = uniquePath = uniquePath;
@@ -1242,16 +1257,16 @@ public:
 				blockSize = atoi(path.substr(lastComma + 1).c_str());
 			}
 			if(blockSize <= 0) {
-				blockSize = g_random->randomInt(1e4, 1e6);
+				blockSize = deterministicRandom()->randomInt(1e4, 1e6);
 			}
-			if(g_random->random01() < .01) {
-				blockSize /= g_random->randomInt(1, 3);
+			if(deterministicRandom()->random01() < .01) {
+				blockSize /= deterministicRandom()->randomInt(1, 3);
 			}
 
 			return map(f, [=](Reference<IAsyncFile> fr) {
-				int readAhead = g_random->randomInt(0, 3);
-				int reads = g_random->randomInt(1, 3);
-				int cacheSize = g_random->randomInt(0, 3);
+				int readAhead = deterministicRandom()->randomInt(0, 3);
+				int reads = deterministicRandom()->randomInt(1, 3);
+				int cacheSize = deterministicRandom()->randomInt(0, 3);
 				return Reference<IAsyncFile>(new AsyncFileReadAheadCache(fr, blockSize, readAhead, reads, cacheSize));
 			});
 		}
@@ -1282,26 +1297,26 @@ public:
 			return finish_impl(Reference<BackupFile>::addRef(this));
 		}
 
-		void addref() { return ReferenceCounted<BackupFile>::addref(); }
-		void delref() { return ReferenceCounted<BackupFile>::delref(); }
+		void addref() override { return ReferenceCounted<BackupFile>::addref(); }
+		void delref() override { return ReferenceCounted<BackupFile>::delref(); }
 
 	private:
 		Reference<IAsyncFile> m_file;
 		std::string m_finalFullPath;
 	};
 
-	Future<Reference<IBackupFile>> writeFile(std::string path) {
+	Future<Reference<IBackupFile>> writeFile(std::string path) override {
 		int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
 		std::string fullPath = joinPath(m_path, path);
 		platform::createDirectory(parentDirectory(fullPath));
-		std::string temp = fullPath  + "." + g_random->randomUniqueID().toString() + ".temp";
+		std::string temp = fullPath  + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
 		Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
 		return map(f, [=](Reference<IAsyncFile> f) {
 			return Reference<IBackupFile>(new BackupFile(path, f, fullPath));
 		});
 	}
 
-	Future<Void> deleteFile(std::string path) {
+	Future<Void> deleteFile(std::string path) override {
 		::deleteFile(joinPath(m_path, path));
 		return Void();
 	}
@@ -1326,7 +1341,7 @@ public:
 		return results;
 	}
 
-	Future<Void> deleteContainer(int *pNumDeleted) {
+	Future<Void> deleteContainer(int* pNumDeleted) override {
 		// In order to avoid deleting some random directory due to user error, first describe the backup
 		// and make sure it has something in it.
 		return map(describeBackup(false, invalidVersion), [=](BackupDescription const &desc) {
@@ -1380,14 +1395,14 @@ public:
 				m_bucket = kv.second;
 				continue;
 			}
-			TraceEvent(SevWarn, "BackupContainerBlobStoreInvalidParameter").detail("Name", printable(kv.first)).detail("Value", printable(kv.second));
+			TraceEvent(SevWarn, "BackupContainerBlobStoreInvalidParameter").detail("Name", kv.first).detail("Value", kv.second);
 			IBackupContainer::lastOpenError = format("Unknown URL parameter: '%s'", kv.first.c_str());
 			throw backup_invalid_url();
 		}
 	}
 
-	void addref() { return ReferenceCounted<BackupContainerBlobStore>::addref(); }
-	void delref() { return ReferenceCounted<BackupContainerBlobStore>::delref(); }
+	void addref() override { return ReferenceCounted<BackupContainerBlobStore>::addref(); }
+	void delref() override { return ReferenceCounted<BackupContainerBlobStore>::delref(); }
 
 	static std::string getURLFormat() {
 		return BlobStoreEndpoint::getURLFormat(true) + " (Note: The 'bucket' parameter is required.)";
@@ -1395,7 +1410,7 @@ public:
 
 	virtual ~BackupContainerBlobStore() {}
 
-	Future<Reference<IAsyncFile>> readFile(std::string path) {
+	Future<Reference<IAsyncFile>> readFile(std::string path) override {
 			return Reference<IAsyncFile>(
 				new AsyncFileReadAheadCache(
 					Reference<IAsyncFile>(new AsyncFileBlobStoreRead(m_bstore, m_bucket, dataPath(path))),
@@ -1409,7 +1424,7 @@ public:
 
 	ACTOR static Future<std::vector<std::string>> listURLs(Reference<BlobStoreEndpoint> bstore, std::string bucket) {
 		state std::string basePath = INDEXFOLDER + '/';
-		BlobStoreEndpoint::ListResult contents = wait(bstore->listBucket(bucket, basePath));
+		BlobStoreEndpoint::ListResult contents = wait(bstore->listObjects(bucket, basePath));
 		std::vector<std::string> results;
 		for(auto &f : contents.objects) {
 			results.push_back(bstore->getResourceURL(f.name.substr(basePath.size()), format("bucket=%s", bucket.c_str())));
@@ -1432,17 +1447,17 @@ public:
 			return map(m_file->sync(), [=](Void _) { self->m_file.clear(); return Void(); });
 		}
 
-		void addref() { return ReferenceCounted<BackupFile>::addref(); }
-		void delref() { return ReferenceCounted<BackupFile>::delref(); }
+		void addref() override { return ReferenceCounted<BackupFile>::addref(); }
+		void delref() override { return ReferenceCounted<BackupFile>::delref(); }
 	private:
 		Reference<IAsyncFile> m_file;
 	};
 
-	Future<Reference<IBackupFile>> writeFile(std::string path) {
+	Future<Reference<IBackupFile>> writeFile(std::string path) override {
 		return Reference<IBackupFile>(new BackupFile(path, Reference<IAsyncFile>(new AsyncFileBlobStoreWrite(m_bstore, m_bucket, dataPath(path)))));
 	}
 
-	Future<Void> deleteFile(std::string path) {
+	Future<Void> deleteFile(std::string path) override {
 		return m_bstore->deleteObject(m_bucket, dataPath(path));
 	}
 
@@ -1455,7 +1470,7 @@ public:
 			return pathFilter(folderPath.substr(prefixTrim));
 		};
 
-		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listBucket(bc->m_bucket, bc->dataPath(path), '/', std::numeric_limits<int>::max(), rawPathFilter));
+		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listObjects(bc->m_bucket, bc->dataPath(path), '/', std::numeric_limits<int>::max(), rawPathFilter));
 		FilesAndSizesT files;
 		for(auto &o : result.objects) {
 			ASSERT(o.name.size() >= prefixTrim);
@@ -1480,12 +1495,12 @@ public:
 		return Void();
 	}
 
-	Future<Void> create() {
+	Future<Void> create() override {
 		return create_impl(Reference<BackupContainerBlobStore>::addRef(this));
 	}
 
 	// The container exists if the index entry in the blob bucket exists
-	Future<bool> exists() {
+	Future<bool> exists() override {
 		return m_bstore->objectExists(m_bucket, indexEntry());
 	}
 
@@ -1505,7 +1520,7 @@ public:
 		return Void();
 	}
 
-	Future<Void> deleteContainer(int *pNumDeleted) {
+	Future<Void> deleteContainer(int* pNumDeleted) override {
 		return deleteContainer_impl(Reference<BackupContainerBlobStore>::addRef(this), pNumDeleted);
 	}
 
@@ -1729,7 +1744,7 @@ ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<I
 	if(size > 0) {
 		content = makeString(size);
 		for(int i = 0; i < content.size(); ++i)
-			mutateString(content)[i] = (uint8_t)g_random->randomInt(0, 256);
+			mutateString(content)[i] = (uint8_t)deterministicRandom()->randomInt(0, 256);
 
 		wait(f->append(content.begin(), content.size()));
 	}
@@ -1748,7 +1763,7 @@ ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<I
 
 // Randomly advance version by up to 1 second of versions
 Version nextVersion(Version v) {
-	int64_t increment = g_random->randomInt64(1, CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+	int64_t increment = deterministicRandom()->randomInt64(1, CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 	return v + increment;
 }
 
@@ -1772,20 +1787,20 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	state std::map<Version, int64_t> snapshotSizes;
 	state int nRangeFiles = 0;
 	state std::map<Version, std::string> logs;
-	state Version v = g_random->randomInt64(0, std::numeric_limits<Version>::max() / 2);
+	state Version v = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max() / 2);
 
 	// List of sizes to use to test edge cases on underlying file implementations
 	state std::vector<int> fileSizes = {0, 10000000, 5000005};
 
 	loop {
 		state Version logStart = v;
-		state int kvfiles = g_random->randomInt(0, 3);
+		state int kvfiles = deterministicRandom()->randomInt(0, 3);
 
 		while(kvfiles > 0) {
 			if(snapshots.empty()) {
 				snapshots[v] = {};
 				snapshotSizes[v] = 0;
-				if(g_random->coinflip()) {
+				if(deterministicRandom()->coinflip()) {
 					v = nextVersion(v);
 				}
 			}
@@ -1798,7 +1813,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 			snapshotSizes.rbegin()->second += size;
 			writes.push_back(writeAndVerifyFile(c, range, size));
 
-			if(g_random->random01() < .2) {
+			if(deterministicRandom()->random01() < .2) {
 				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second, snapshotSizes.rbegin()->second));
 				snapshots[v] = {};
 				snapshotSizes[v] = 0;
@@ -1808,7 +1823,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 			--kvfiles;
 		}
 
-		if(logStart == v || g_random->coinflip()) {
+		if(logStart == v || deterministicRandom()->coinflip()) {
 			v = nextVersion(v);
 		}
 		state Reference<IBackupFile> log = wait(c->writeLogFile(logStart, v, 10));
@@ -1817,7 +1832,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 		writes.push_back(writeAndVerifyFile(c, log, size));
 
 		// Randomly stop after a snapshot has finished and all manually seeded file sizes have been used.
-		if(fileSizes.empty() && !snapshots.empty() && snapshots.rbegin()->second.empty() && g_random->random01() < .2) {
+		if(fileSizes.empty() && !snapshots.empty() && snapshots.rbegin()->second.empty() && deterministicRandom()->random01() < .2) {
 			snapshots.erase(snapshots.rbegin()->first);
 			break;
 		}
@@ -1852,7 +1867,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 		state Version expireVersion = listing.snapshots[i].endVersion;
 
 		// Expire everything up to but not including the snapshot end version
-		printf("EXPIRE TO %lld\n", expireVersion);
+		printf("EXPIRE TO %" PRId64 "\n", expireVersion);
 		state Future<Void> f = c->expireData(expireVersion);
 		wait(ready(f));
 
@@ -1917,7 +1932,7 @@ TEST_CASE("/backup/containers_list") {
 TEST_CASE("/backup/time") {
 	// test formatTime()
 	for(int i = 0; i < 1000; ++i) {
-		int64_t ts = g_random->randomInt64(0, std::numeric_limits<int32_t>::max());
+		int64_t ts = deterministicRandom()->randomInt64(0, std::numeric_limits<int32_t>::max());
 		ASSERT(BackupAgentBase::parseTime(BackupAgentBase::formatTime(ts)) == ts);
 	}
 

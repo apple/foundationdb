@@ -79,23 +79,6 @@
 #define DISABLE_ZERO_DIVISION_FLAG _Pragma("GCC diagnostic ignored \"-Wdiv-by-zero\"")
 #endif
 
-/*
- * Thread-local storage (but keep in mind any platform-specific
- * restrictions on where this is valid and/or ignored).
- *
- * http://en.wikipedia.org/wiki/Thread-local_storage
- *
- * SOMEDAY: Intel C++ compiler uses g++ syntax on Linux and MSC syntax
- * on Windows.
- */
-#if defined(__GNUG__)
-#define thread_local __thread
-#elif defined(_MSC_VER)
-#define thread_local __declspec(thread)
-#else
-#error Missing thread local storage
-#endif
-
 #if defined(__GNUG__)
 #define force_inline inline __attribute__((__always_inline__))
 #elif defined(_MSC_VER)
@@ -247,7 +230,7 @@ struct SystemStatisticsState;
 
 struct IPAddress;
 
-SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState **statState);
+SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState **statState, bool logDetails);
 
 double getProcessorTimeThread();
 
@@ -272,7 +255,7 @@ void getNetworkTraffic(uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& o
 
 void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint64_t& busyTicks, uint64_t& reads, uint64_t& writes, uint64_t& writeSectors);
 
-void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime);
+void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails);
 
 double timer();  // Returns the system real time clock with high precision.  May jump around when system time is adjusted!
 double timer_monotonic();  // Returns a high precision monotonic clock which is adjusted to be kind of similar to timer() at startup, but might not be a globally accurate time.
@@ -327,6 +310,20 @@ std::string joinPath( std::string const& directory, std::string const& filename 
 // Relative paths remain relative and are NOT rebased on the current working directory.
 std::string cleanPath( std::string const& path );
 
+// Removes the last component from a path string (if possible) and returns the result with one trailing separator.
+// If there is only one path component, the result will be "" for relative paths and "/" for absolute paths.
+// Note that this is NOT the same as getting the parent of path, as the final component could be ".."
+// or "." and it would still be simply removed.
+// ALL of the following inputs will yield the result "/a/"
+//   /a/b
+//   /a/b/
+//   /a/..
+//   /a/../
+//   /a/.
+//   /a/./
+//   /a//..//
+std::string popPath(const std::string &path);
+
 // abspath() resolves the given path to a canonical form.
 // If path is relative, the result will be based on the current working directory.
 // If resolveLinks is true then symbolic links will be expanded BEFORE resolving '..' references.
@@ -366,6 +363,8 @@ void findFilesRecursively(std::string path, std::vector<std::string> &out);
 // Tag the given file as "temporary", i.e. not really needing commits to disk
 void makeTemporary( const char* filename );
 
+void setCloseOnExec( int fd );
+
 // Logs an out of memory error and exits the program
 void outOfMemory();
 
@@ -386,7 +385,7 @@ size_t raw_backtrace(void** addresses, int maxStackDepth);
 std::string get_backtrace();
 std::string format_backtrace(void **addresses, int numAddresses);
 
-}; // namespace platform
+} // namespace platform
 
 #ifdef __linux__
 typedef struct {
@@ -525,22 +524,14 @@ inline static void aligned_free(void* ptr) { free(ptr); }
 inline static void* aligned_alloc(size_t alignment, size_t size) { return memalign(alignment, size); }
 #endif
 #elif defined(__APPLE__)
+#if !defined(HAS_ALIGNED_ALLOC)
 #include <cstdlib>
 inline static void* aligned_alloc(size_t alignment, size_t size) {
-	// Linux's aligned_alloc() requires alignment to be a power of 2.  While posix_memalign()
-	// also requires this, in addition it requires alignment to be a multiple of sizeof(void *).
-	// Rather than add this requirement to the platform::aligned_alloc() interface we will simply
-	// upgrade powers of 2 which are less than sizeof(void *) to be exactly sizeof(void *).  Non
-	// powers of 2 of any size will fail as they would on other platforms.  This change does not
-	// break the platform::aligned_alloc() contract as all addresses which are aligned to 
-	// sizeof(void *) are also aligned to any power of 2 less than sizeof(void *).
-	if(alignment != 0 && alignment < sizeof(void *) && (alignment & (alignment - 1)) == 0) {
-		alignment = sizeof(void *);
-	}
 	void* ptr = nullptr;
 	posix_memalign(&ptr, alignment, size);
 	return ptr;
 }
+#endif
 inline static void aligned_free(void* ptr) { free(ptr); }
 #endif
 
@@ -548,7 +539,10 @@ inline static void aligned_free(void* ptr) { free(ptr); }
 // resolved by whatever linker is hanging around on this system
 bool isLibraryLoaded(const char* lib_path);
 void* loadLibrary(const char* lib_path);
+void closeLibrary(void* handle);
 void* loadFunction(void* lib, const char* func_name);
+
+std::string exePath();
 
 #ifdef _WIN32
 inline static int ctzll( uint64_t value ) {
@@ -558,12 +552,41 @@ inline static int ctzll( uint64_t value ) {
     }
     return 64;
 }
+inline static int clzll( uint64_t value ) {
+	unsigned long count = 0;
+    if( _BitScanReverse64( &count, value ) ) {
+        return 63 - count;
+    }
+    return 64;
+}
+inline static int ctz( uint32_t value ) {
+    unsigned long count = 0;
+    if( _BitScanForward( &count, value ) ) {
+        return count;
+    }
+    return 64;
+}
+inline static int clz( uint32_t value ) {
+	unsigned long count = 0;
+    if( _BitScanReverse( &count, value ) ) {
+        return 63 - count;
+    }
+    return 64;
+}
 #else
 #define ctzll __builtin_ctzll
+#define clzll __builtin_clzll
+#define ctz __builtin_ctz
+#define clz __builtin_clz
 #endif
 
 #include <boost/config.hpp>
 // The formerly existing BOOST_NOEXCEPT is now BOOST_NOEXCEPT
+
+// These return thread local counts
+int64_t getNumProfilesDeferred();
+int64_t getNumProfilesOverflowed();
+int64_t getNumProfilesCaptured();
 
 #else
 #define EXTERNC
@@ -597,6 +620,36 @@ EXTERNC void setProfilingEnabled(int enabled);
 
 #if defined(FDB_CLEAN_BUILD) && !( defined(NDEBUG) && !defined(_DEBUG) && !defined(SQLITE_DEBUG) )
 #error Clean builds must define NDEBUG, and not define various debug macros
+#endif
+
+// DTrace probing
+#if defined(DTRACE_PROBES)
+#include <sys/sdt.h>
+#define FDB_TRACE_PROBE_STRING_EXPAND(x) x
+#define FDB_TRACE_PROBE_STRING_CONCAT2(h, t) h ## t
+#define FDB_TRACE_PROBE_STRING_CONCAT(h, t) FDB_TRACE_PROBE_STRING_CONCAT2(h, t)
+#define FDB_TRACE_PROBE_EXPAND_MACRO(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9,   \
+									 _10, _11, _12, NAME, ...)                 \
+	NAME
+#define FDB_TRACE_PROBE(...)                                                   \
+	FDB_TRACE_PROBE_EXPAND_MACRO(__VA_ARGS__, DTRACE_PROBE12, DTRACE_PROBE11,  \
+								 DTRACE_PROBE10, DTRACE_PROBE9, DTRACE_PROBE8, \
+								 DTRACE_PROBE7, DTRACE_PROBE6, DTRACE_PROBE5,  \
+								 DTRACE_PROBE4, DTRACE_PROBE3, DTRACE_PROBE2,  \
+								 DTRACE_PROBE1, DTRACE_PROBE)                  \
+	(foundationdb, __VA_ARGS__)
+
+extern void fdb_probe_actor_create(const char* name, unsigned long id);
+extern void fdb_probe_actor_destroy(const char* name, unsigned long id);
+extern void fdb_probe_actor_enter(const char* name, unsigned long, int index);
+extern void fdb_probe_actor_exit(const char* name, unsigned long, int index);
+#else
+#define FDB_TRACE_PROBE_STRING_CONCAT(h, t) h ## t
+#define FDB_TRACE_PROBE(...)
+inline void fdb_probe_actor_create(const char* name, unsigned long id) {}
+inline void fdb_probe_actor_destroy(const char* name, unsigned long id) {}
+inline void fdb_probe_actor_enter(const char* name, unsigned long id, int index) {}
+inline void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {}
 #endif
 
 #endif /* FLOW_PLATFORM_H */

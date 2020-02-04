@@ -14,6 +14,8 @@
     <ActorCompiler Include="TDMetric.actor.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="crc32c-generated-constants.cpp" />
+    <ClCompile Include="DeterministicRandom.cpp" />
     <ClCompile Include="Error.cpp" />
     <ClCompile Include="FastAlloc.cpp" />
     <ClCompile Include="Hash3.c" />
@@ -35,6 +37,7 @@
     <ClCompile Include="version.cpp" />
     <ClCompile Include="stacktrace.amalgamation.cpp" />
     <ClCompile Include="SignalSafeUnwind.cpp" />
+    <ClCompile Include="serialize.cpp" />
     <ClCompile Include="XmlTraceLogFormatter.cpp" />
     <ClCompile Include="FileTraceLogWriter.cpp" />
   </ItemGroup>

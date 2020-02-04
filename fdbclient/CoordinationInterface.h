@@ -25,11 +25,14 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/ClusterInterface.h"
 
 const int MAX_CLUSTER_FILE_BYTES = 60000;
 
 struct ClientLeaderRegInterface {
 	RequestStream< struct GetLeaderRequest > getLeader;
+	RequestStream< struct OpenDatabaseCoordRequest > openDatabase;
 
 	ClientLeaderRegInterface() {}
 	ClientLeaderRegInterface( NetworkAddress remote );
@@ -91,6 +94,7 @@ private:
 };
 
 struct LeaderInfo {
+	constexpr static FileIdentifier file_identifier = 8338794;
 	UID changeID;
 	static const uint64_t mask = ~(127ll << 57);
 	Value serializedInfo;
@@ -126,6 +130,7 @@ struct LeaderInfo {
 };
 
 struct GetLeaderRequest {
+	constexpr static FileIdentifier file_identifier = 214727;
 	Key key;
 	UID knownLeader;
 	ReplyPromise< Optional<LeaderInfo> > reply;
@@ -136,6 +141,25 @@ struct GetLeaderRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, key, knownLeader, reply);
+	}
+};
+
+struct OpenDatabaseCoordRequest {
+	constexpr static FileIdentifier file_identifier = 214728;
+	// Sent by the native API to the coordinator to open a database and track client
+	//   info changes.  Returns immediately if the current client info id is different from
+	//   knownClientInfoID; otherwise returns when it next changes (or perhaps after a long interval)
+	Key traceLogGroup;
+	Standalone<VectorRef<StringRef>> issues;
+	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
+	UID knownClientInfoID;
+	Key clusterKey;
+	vector<NetworkAddress> coordinators;
+	ReplyPromise< CachedSerialization<struct ClientDBInfo> > reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, issues, supportedVersions, traceLogGroup, knownClientInfoID, clusterKey, coordinators, reply);
 	}
 };
 

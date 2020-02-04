@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="14.1" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(SolutionDir)versions.target" />
   <PropertyGroup Condition="'$(Release)' != 'true' ">
     <PreReleaseDecoration>-PRERELEASE</PreReleaseDecoration>
@@ -31,7 +31,6 @@
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
     </ActorCompiler>
     <ClInclude Include="BlobStore.h" />
-    <ClInclude Include="ClientDBInfo.h" />
     <ClInclude Include="ClientLogEvents.h" />
     <ClInclude Include="ClientWorkerInterface.h" />
     <ClInclude Include="ClusterInterface.h" />
@@ -49,7 +48,6 @@
     <ClInclude Include="HTTP.h" />
     <ClInclude Include="KeyBackedTypes.h" />
     <ClInclude Include="MetricLogger.h" />
-    <ClInclude Include="FailureMonitorClient.h" />
     <ClInclude Include="IClientApi.h" />
     <ClInclude Include="JsonBuilder.h" />
     <ClInclude Include="JSONDoc.h" />
@@ -90,6 +88,9 @@
     <ClInclude Include="StorageServerInterface.h" />
     <ClInclude Include="Subspace.h" />
     <ClInclude Include="SystemData.h" />
+    <ActorCompiler Include="RestoreWorkerInterface.actor.h">
+        <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="TaskBucket.h" />
     <ClInclude Include="ThreadSafeTransaction.h" />
     <ClInclude Include="Tuple.h" />
@@ -99,6 +100,7 @@
     </ActorCompiler>
     <ClInclude Include="VersionedMap.h" />
     <ClInclude Include="WriteMap.h" />
+    <ClInclude Include="zipf.h" />
   </ItemGroup>
   <ItemGroup>
     <ActorCompiler Include="AsyncFileBlobStore.actor.cpp" />
@@ -108,7 +110,6 @@
     <ActorCompiler Include="BlobStore.actor.cpp" />
     <ActorCompiler Include="DatabaseBackupAgent.actor.cpp" />
     <ClCompile Include="DatabaseConfiguration.cpp" />
-    <ActorCompiler Include="FailureMonitorClient.actor.cpp" />
     <ClCompile Include="FDBOptions.g.cpp" />
     <ActorCompiler Include="FileBackupAgent.actor.cpp" />
     <ActorCompiler Include="HTTP.actor.cpp" />
@@ -133,6 +134,7 @@
     <ClCompile Include="Subspace.cpp" />
     <ClCompile Include="Tuple.cpp" />
     <ClCompile Include="JsonBuilder.cpp" />
+    <ClCompile Include="zipf.c" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGUID>{E2939DAA-238E-4970-96C4-4C57980F93BD}</ProjectGUID>
@@ -149,12 +151,12 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|X64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v140_xp</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|X64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v140_xp</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -174,6 +176,7 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <PreprocessorDefinitions>FDB_VT_VERSION="$(Version)$(PreReleaseDecoration)";FDB_VT_PACKAGE_NAME="$(PackageName)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
+			<LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">
@@ -190,6 +193,7 @@
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/bigobj @../flow/no_intellisense.opt %(AdditionalOptions)</AdditionalOptions>
+			<LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -217,6 +221,7 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <MinimalRebuild>false</MinimalRebuild>
+			<LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

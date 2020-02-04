@@ -35,8 +35,6 @@ std::map<int, int>& Error::errorCounts() {
 
 #include <iostream>
 
-extern void flushTraceFileVoid();
-
 Error Error::fromUnvalidatedCode(int code) {
 	if (code < 0 || code > 30000) {
 		Error e = Error::fromCode(error_code_unknown_error);

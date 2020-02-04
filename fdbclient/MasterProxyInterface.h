@@ -23,13 +23,18 @@
 #define FDBCLIENT_MASTERPROXYINTERFACE_H
 #pragma once
 
+#include <utility>
+#include <vector>
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
 
 #include "flow/Stats.h"
+#include "fdbrpc/TimedRequest.h"
 
 struct MasterProxyInterface {
+	constexpr static FileIdentifier file_identifier = 8954922;
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
@@ -45,8 +50,9 @@ struct MasterProxyInterface {
 
 	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
 	RequestStream< struct TxnStateRequest >  txnState;
-
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
+	RequestStream< struct ProxySnapRequest > proxySnapReq;
+	RequestStream< struct ExclusionSafetyCheckRequest > exclusionSafetyCheckReq;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -58,18 +64,43 @@ struct MasterProxyInterface {
 	void serialize(Archive& ar) {
 		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
 				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics);
+				   txnState, getHealthMetrics, proxySnapReq, exclusionSafetyCheckReq);
 	}
 
 	void initEndpoints() {
-		getConsistentReadVersion.getEndpoint(TaskProxyGetConsistentReadVersion);
-		getRawCommittedVersion.getEndpoint(TaskProxyGetRawCommittedVersion);
-		commit.getEndpoint(TaskProxyCommitDispatcher);
+		getConsistentReadVersion.getEndpoint(TaskPriority::ProxyGetConsistentReadVersion);
+		getRawCommittedVersion.getEndpoint(TaskPriority::ProxyGetRawCommittedVersion);
+		commit.getEndpoint(TaskPriority::ProxyCommitDispatcher);
+		getStorageServerRejoinInfo.getEndpoint(TaskPriority::ProxyStorageRejoin);
 		//getKeyServersLocations.getEndpoint(TaskProxyGetKeyServersLocations); //do not increase the priority of these requests, because clients cans bring down the cluster with too many of these messages.
 	}
 };
 
+// ClientDBInfo is all the information needed by a database client to access the database
+// It is returned (and kept up to date) by the OpenDatabaseRequest interface of ClusterInterface
+struct ClientDBInfo {
+	constexpr static FileIdentifier file_identifier = 5355080;
+	UID id;  // Changes each time anything else changes
+	vector< MasterProxyInterface > proxies;
+	double clientTxnInfoSampleRate;
+	int64_t clientTxnInfoSizeLimit;
+	Optional<Value> forward;
+	ClientDBInfo() : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1) {}
+
+	bool operator == (ClientDBInfo const& r) const { return id == r.id; }
+	bool operator != (ClientDBInfo const& r) const { return id != r.id; }
+
+	template <class Archive>
+	void serialize(Archive& ar) {
+		if constexpr (!is_fb_function<Archive>) {
+			ASSERT(ar.protocolVersion().isValid());
+		}
+		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward);
+	}
+};
+
 struct CommitID {
+	constexpr static FileIdentifier file_identifier = 14254927;
 	Version version; 			// returns invalidVersion if transaction conflicts
 	uint16_t txnBatchId;
 	Optional<Value> metadataVersion;
@@ -84,6 +115,7 @@ struct CommitID {
 };
 
 struct CommitTransactionRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 93948;
 	enum { 
 		FLAG_IS_LOCK_AWARE = 0x1,
 		FLAG_FIRST_IN_BATCH = 0x2
@@ -120,9 +152,12 @@ static inline int getBytes( CommitTransactionRequest const& r ) {
 }
 
 struct GetReadVersionReply {
+	constexpr static FileIdentifier file_identifier = 15709388;
 	Version version;
 	bool locked;
 	Optional<Value> metadataVersion;
+
+	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -131,12 +166,14 @@ struct GetReadVersionReply {
 };
 
 struct GetReadVersionRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 838566;
 	enum { 
 		PRIORITY_SYSTEM_IMMEDIATE = 15 << 24,  // Highest possible priority, always executed even if writes are otherwise blocked
 		PRIORITY_DEFAULT = 8 << 24,
 		PRIORITY_BATCH = 1 << 24
 	};
 	enum {
+		FLAG_USE_MIN_KNOWN_COMMITTED_VERSION = 4,
 		FLAG_USE_PROVISIONAL_PROXIES = 2,
 		FLAG_CAUSAL_READ_RISKY = 1,
 		FLAG_PRIORITY_MASK = PRIORITY_SYSTEM_IMMEDIATE,
@@ -160,8 +197,9 @@ struct GetReadVersionRequest : TimedRequest {
 };
 
 struct GetKeyServerLocationsReply {
+	constexpr static FileIdentifier file_identifier = 10636023;
 	Arena arena;
-	vector<pair<KeyRangeRef, vector<StorageServerInterface>>> results;
+	std::vector<std::pair<KeyRangeRef, vector<StorageServerInterface>>> results;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -170,6 +208,7 @@ struct GetKeyServerLocationsReply {
 };
 
 struct GetKeyServerLocationsRequest {
+	constexpr static FileIdentifier file_identifier = 9144680;
 	Arena arena;
 	KeyRef begin;
 	Optional<KeyRef> end;
@@ -187,6 +226,7 @@ struct GetKeyServerLocationsRequest {
 };
 
 struct GetRawCommittedVersionRequest {
+	constexpr static FileIdentifier file_identifier = 12954034;
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
@@ -199,11 +239,12 @@ struct GetRawCommittedVersionRequest {
 };
 
 struct GetStorageServerRejoinInfoReply {
+	constexpr static FileIdentifier file_identifier = 9469225;
 	Version version;
 	Tag tag;
 	Optional<Tag> newTag;
 	bool newLocality;
-	vector<pair<Version, Tag>> history;
+	std::vector<std::pair<Version, Tag>> history;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -212,6 +253,7 @@ struct GetStorageServerRejoinInfoReply {
 };
 
 struct GetStorageServerRejoinInfoRequest {
+	constexpr static FileIdentifier file_identifier = 994279;
 	UID id;
 	Optional<Value> dcId;
 	ReplyPromise< GetStorageServerRejoinInfoReply > reply;
@@ -226,6 +268,7 @@ struct GetStorageServerRejoinInfoRequest {
 };
 
 struct TxnStateRequest {
+	constexpr static FileIdentifier file_identifier = 15250781;
 	Arena arena;
 	VectorRef<KeyValueRef> data;
 	Sequence sequence;
@@ -238,22 +281,9 @@ struct TxnStateRequest {
 	}
 };
 
-struct GetHealthMetricsRequest
-{
-	ReplyPromise<struct GetHealthMetricsReply> reply;
-	bool detailed;
-
-	explicit GetHealthMetricsRequest(bool detailed = false) : detailed(detailed) {}
-
-	template <class Ar>
-	void serialize(Ar& ar)
-	{
-		serializer(ar, reply, detailed);
-	}
-};
-
 struct GetHealthMetricsReply
 {
+	constexpr static FileIdentifier file_identifier = 11544290;
 	Standalone<StringRef> serialized;
 	HealthMetrics healthMetrics;
 
@@ -278,6 +308,68 @@ struct GetHealthMetricsReply
 			BinaryReader br(serialized, IncludeVersion());
 			br >> healthMetrics;
 		}
+	}
+};
+
+struct GetHealthMetricsRequest
+{
+	constexpr static FileIdentifier file_identifier = 11403900;
+	ReplyPromise<struct GetHealthMetricsReply> reply;
+	bool detailed;
+
+	explicit GetHealthMetricsRequest(bool detailed = false) : detailed(detailed) {}
+
+	template <class Ar>
+	void serialize(Ar& ar)
+	{
+		serializer(ar, reply, detailed);
+	}
+};
+
+struct ProxySnapRequest
+{
+	constexpr static FileIdentifier file_identifier = 22204900;
+	Arena arena;
+	StringRef snapPayload;
+	UID snapUID;
+	ReplyPromise<Void> reply;
+	Optional<UID> debugID;
+
+	explicit ProxySnapRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
+	explicit ProxySnapRequest(StringRef snap, UID snapUID, Optional<UID> debugID = Optional<UID>()) : snapPayload(snap), snapUID(snapUID), debugID(debugID) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, snapPayload, snapUID, reply, arena, debugID);
+	}
+};
+
+struct ExclusionSafetyCheckReply
+{
+	constexpr static FileIdentifier file_identifier = 11;
+	bool safe;
+
+	ExclusionSafetyCheckReply() : safe(false) {}
+	explicit ExclusionSafetyCheckReply(bool safe) : safe(safe) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, safe);
+	}
+};
+
+struct ExclusionSafetyCheckRequest
+{
+	constexpr static FileIdentifier file_identifier = 13852702;
+	vector<AddressExclusion> exclusions;
+	ReplyPromise<ExclusionSafetyCheckReply> reply;
+
+	ExclusionSafetyCheckRequest() {}
+	explicit ExclusionSafetyCheckRequest(vector<AddressExclusion> exclusions) : exclusions(exclusions) {}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, exclusions, reply);
 	}
 };
 

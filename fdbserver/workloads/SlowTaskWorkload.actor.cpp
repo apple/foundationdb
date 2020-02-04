@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
+
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/SignalSafeUnwind.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -34,6 +36,7 @@ struct SlowTaskWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
+		setupSlowTaskProfiler();
 		return go();
 	}
 
@@ -47,6 +50,9 @@ struct SlowTaskWorkload : TestWorkload {
 	ACTOR static Future<Void> go() {
 		wait( delay(1) );
 		int64_t phc = dl_iterate_phdr_calls;
+		int64_t startProfilesDeferred = getNumProfilesDeferred();
+		int64_t startProfilesOverflowed = getNumProfilesOverflowed();
+		int64_t startProfilesCaptured = getNumProfilesCaptured();
 		int64_t exc = 0;
 		fprintf(stderr, "Slow task starting\n");
 		for(int i=0; i<10; i++) {
@@ -56,7 +62,12 @@ struct SlowTaskWorkload : TestWorkload {
 				do_slow_exception_thing(&exc);
 			}
 		}
-		fprintf(stderr, "Slow task complete: %lld exceptions; %lld calls to dl_iterate_phdr\n", exc, dl_iterate_phdr_calls - phc);
+		fprintf(stderr, "Slow task complete: %" PRId64 " exceptions; %" PRId64 " calls to dl_iterate_phdr, %" PRId64 " profiles deferred, %" PRId64 " profiles overflowed, %" PRId64 " profiles captured\n", 
+		        exc, dl_iterate_phdr_calls - phc, 
+		        getNumProfilesDeferred() - startProfilesDeferred, 
+		        getNumProfilesOverflowed() - startProfilesOverflowed,
+		        getNumProfilesCaptured() - startProfilesCaptured);
+
 		return Void();
 	}
 

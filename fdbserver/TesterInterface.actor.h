@@ -31,11 +31,22 @@
 #include "fdbrpc/PerfMetric.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
+struct CheckReply {
+	constexpr static FileIdentifier file_identifier = 11;
+
+	bool value = false;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value);
+	}
+};
 
 struct WorkloadInterface {
+	constexpr static FileIdentifier file_identifier = 4454551;
 	RequestStream<ReplyPromise<Void>> setup;
 	RequestStream<ReplyPromise<Void>> start;
-	RequestStream<ReplyPromise<bool>> check;
+	RequestStream<ReplyPromise<CheckReply>> check;
 	RequestStream<ReplyPromise< std::vector<PerfMetric> > > metrics;
 	RequestStream<ReplyPromise<Void>> stop;
 
@@ -48,6 +59,7 @@ struct WorkloadInterface {
 };
 
 struct WorkloadRequest {
+	constexpr static FileIdentifier file_identifier = 8121024;
 	Arena arena;
 	StringRef title;
 	int timeout;
@@ -68,7 +80,7 @@ struct WorkloadRequest {
 
 	VectorRef< VectorRef<KeyValueRef> > options;
 
-	int clientId;				// the "id" of the client recieving the request (0 indexed)
+	int clientId;				// the "id" of the client receiving the request (0 indexed)
 	int clientCount;			// the total number of test clients participating in the workload
 	ReplyPromise< struct WorkloadInterface > reply;
 
@@ -79,6 +91,7 @@ struct WorkloadRequest {
 };
 
 struct TesterInterface {
+	constexpr static FileIdentifier file_identifier = 4465210;
 	RequestStream<WorkloadRequest> recruitments;
 
 	UID id() const { return recruitments.getEndpoint().token; }

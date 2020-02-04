@@ -50,11 +50,16 @@ actions as a result of a failure should probably wait a while to see if a machin
 unfailed first.  If possible use onFailedFor() which in the future may react to 'permanent'
 failures immediately.
 
-The information reported through this interface is actually supplied by failureMonitorClient,
-which exchanges FailureMonitoringRequest/Reply pairs with the failureDetectionServer actor on
-the ClusterController.  This central repository of failure information has the opportunity
-to take into account topology and global network conditions in identifying failures.  In
-the future it may be augmented with locally available information about failures (e.g.
+In older FDB, information reported through this interface was actually actively supplied by
+failureMonitorClient, which exchanges FailureMonitoringRequest/Reply pairs with the
+failureDetectionServer actor on the ClusterController.
+
+Now it is done locally by each process with help of of FlowTransport. Whenever a network
+connection is establish/failed, the address is marked as available or failed accordingly. We
+do however take an optimistic approach of assuming every newly discovered address
+(when deserializing an endpoint) is healthy by default.
+
+In the future it may be augmented with locally available information about failures (e.g.
 TCP connection loss in ASIONetwork or unexpectedly long response times for application requests).
 
 Communications failures are tracked at NetworkAddress granularity.  When a request is made to
@@ -68,8 +73,8 @@ struct FailureStatus {
 
 	FailureStatus() : failed(true) {}
 	explicit FailureStatus(bool failed) : failed(failed) {}
-	bool isFailed() { return failed; }
-	bool isAvailable() { return !failed; }
+	bool isFailed() const { return failed; }
+	bool isAvailable() const { return !failed; }
 
 	bool operator == (FailureStatus const& r) const { return failed == r.failed; }
 	bool operator != (FailureStatus const& r) const { return failed != r.failed; }
@@ -83,6 +88,9 @@ class IFailureMonitor {
 public:
 	// Returns the currently known status for the endpoint
 	virtual FailureStatus getState( Endpoint const& endpoint ) = 0;
+
+	// Returns the currently known status for the address
+	virtual FailureStatus getState( NetworkAddress const& address ) = 0;
 
 	// Only use this function when the endpoint is known to be failed
 	virtual void endpointNotFound( Endpoint const& ) = 0;
@@ -102,6 +110,9 @@ public:
 	// Called by FlowTransport when a connection closes and a prior request or reply might be lost
 	virtual void notifyDisconnect( NetworkAddress const& ) = 0;
 
+	// Called to update the failure status of network address directly when running client.
+	virtual void setStatus(NetworkAddress const& address, FailureStatus const& status) = 0;
+
 	// Returns when the known status of endpoint is next equal to status.  Returns immediately
 	//   if appropriate.
 	Future<Void> onStateEqual( Endpoint const& endpoint, FailureStatus status );
@@ -111,16 +122,19 @@ public:
 		return onStateEqual( endpoint, FailureStatus() );
 	}
 
-	static IFailureMonitor& failureMonitor() { return *static_cast<IFailureMonitor*>((void*) g_network->global(INetwork::enFailureMonitor)); }
-	// Returns the failure monitor that the calling machine should use
-
 	// Returns when the status of the given endpoint has continuously been "failed" for sustainedFailureDuration + (elapsedTime*sustainedFailureSlope)
 	Future<Void> onFailedFor( Endpoint const& endpoint, double sustainedFailureDuration, double sustainedFailureSlope = 0.0 );
+
+	// Returns the failure monitor that the calling machine should use
+	static IFailureMonitor& failureMonitor() {
+		return *static_cast<IFailureMonitor*>((void*)g_network->global(INetwork::enFailureMonitor));
+	}
 };
 
 // SimpleFailureMonitor is the sole implementation of IFailureMonitor.  It has no
 //   failure detection logic; it just implements the interface and reacts to setStatus() etc.
 // Initially all addresses are considered failed, but all endpoints of a non-failed address are considered OK.
+
 class SimpleFailureMonitor : public IFailureMonitor {
 public:
 	SimpleFailureMonitor() : endpointKnownFailed() { }
@@ -130,6 +144,7 @@ public:
 
 	virtual Future<Void> onStateChanged( Endpoint const& endpoint );
 	virtual FailureStatus getState( Endpoint const& endpoint );
+	virtual FailureStatus getState( NetworkAddress const& address );
 	virtual Future<Void> onDisconnectOrFailure( Endpoint const& endpoint );
 	virtual bool onlyEndpointFailed( Endpoint const& endpoint );
 	virtual bool permanentlyFailed( Endpoint const& endpoint );

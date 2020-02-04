@@ -39,6 +39,24 @@
 .. |node-subspace| replace:: FIXME
 .. |content-subspace| replace:: FIXME
 .. |allow-manual-prefixes| replace:: FIXME
+.. |retry-limit-transaction-option| replace:: FIXME
+.. |timeout-transaction-option| replace:: FIXME
+.. |max-retry-delay-transaction-option| replace:: FIXME
+.. |size-limit-transaction-option| replace:: FIXME
+.. |snapshot-ryw-enable-transaction-option| replace:: FIXME
+.. |snapshot-ryw-disable-transaction-option| replace:: FIXME
+.. |snapshot-ryw-enable-database-option| replace:: FIXME
+.. |snapshot-ryw-disable-database-option| replace:: FIXME
+.. |retry-limit-database-option| replace:: FIXME
+.. |max-retry-delay-database-option| replace:: FIXME
+.. |transaction-size-limit-database-option| replace:: FIXME
+.. |timeout-database-option| replace:: FIXME
+.. |causal-read-risky-database-option| replace:: FIXME
+.. |causal-read-risky-transaction-option| replace:: FIXME
+.. |include-port-in-address-database-option| replace:: FIXME
+.. |include-port-in-address-transaction-option| replace:: FIXME
+.. |transaction-logging-max-field-length-transaction-option| replace:: FIXME
+.. |transaction-logging-max-field-length-database-option| replace:: FIXME
 
 .. include:: api-common.rst.inc
 

@@ -25,10 +25,11 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/Status.h"
-#include "fdbclient/ClientDBInfo.h"
+#include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
 
 struct ClusterInterface {
+    constexpr static FileIdentifier file_identifier = 15888863;
 	RequestStream< struct OpenDatabaseRequest > openDatabase;
 	RequestStream< struct FailureMonitoringRequest > failureMonitoring;
 	RequestStream< struct StatusRequest > databaseStatus;
@@ -41,18 +42,44 @@ struct ClusterInterface {
 	UID id() const { return openDatabase.getEndpoint().token; }
 	NetworkAddress address() const { return openDatabase.getEndpoint().getPrimaryAddress(); }
 
+	bool hasMessage() {
+		return openDatabase.getFuture().isReady() ||
+		failureMonitoring.getFuture().isReady() || 
+		databaseStatus.getFuture().isReady() ||
+		ping.getFuture().isReady() ||
+		getClientWorkers.getFuture().isReady() ||
+		forceRecovery.getFuture().isReady();
+	}
+
 	void initEndpoints() {
-		openDatabase.getEndpoint( TaskClusterController );
-		failureMonitoring.getEndpoint( TaskFailureMonitor );
-		databaseStatus.getEndpoint( TaskClusterController );
-		ping.getEndpoint( TaskClusterController );
-		getClientWorkers.getEndpoint( TaskClusterController );
-		forceRecovery.getEndpoint( TaskClusterController );
+		openDatabase.getEndpoint( TaskPriority::ClusterController );
+		failureMonitoring.getEndpoint( TaskPriority::FailureMonitor );
+		databaseStatus.getEndpoint( TaskPriority::ClusterController );
+		ping.getEndpoint( TaskPriority::ClusterController );
+		getClientWorkers.getEndpoint( TaskPriority::ClusterController );
+		forceRecovery.getEndpoint( TaskPriority::ClusterController );
 	}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, openDatabase, failureMonitoring, databaseStatus, ping, getClientWorkers, forceRecovery);
+	}
+};
+
+struct ClusterControllerClientInterface {
+	constexpr static FileIdentifier file_identifier = 14997695;
+	ClusterInterface clientInterface;
+
+	bool operator==(ClusterControllerClientInterface const& r) const {
+		return clientInterface.id() == r.clientInterface.id();
+	}
+	bool operator!=(ClusterControllerClientInterface const& r) const {
+		return clientInterface.id() != r.clientInterface.id();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, clientInterface);
 	}
 };
 
@@ -112,26 +139,46 @@ struct ClientVersionRef {
 	}
 };
 
+template <class T>
+struct ItemWithExamples {
+	T item;
+	int count;
+	std::vector<std::pair<NetworkAddress,Key>> examples;
+
+	ItemWithExamples() : item{}, count(0) {}
+	ItemWithExamples(T const& item, int count, std::vector<std::pair<NetworkAddress,Key>> const& examples) : item(item), count(count), examples(examples) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, item, count, examples);
+	}
+};
+
 struct OpenDatabaseRequest {
+	constexpr static FileIdentifier file_identifier = 2799502;
 	// Sent by the native API to the cluster controller to open a database and track client
 	//   info changes.  Returns immediately if the current client info id is different from
 	//   knownClientInfoID; otherwise returns when it next changes (or perhaps after a long interval)
-	Arena arena;
-	StringRef traceLogGroup;
-	VectorRef<StringRef> issues;
-	VectorRef<ClientVersionRef> supportedVersions;
-	int connectedCoordinatorsNum; // Number of coordinators connected by the client
+
+	int clientCount;
+	std::vector<ItemWithExamples<Key>> issues;
+	std::vector<ItemWithExamples<Standalone<ClientVersionRef>>> supportedVersions;
+	std::vector<ItemWithExamples<Key>> maxProtocolSupported;
+	
 	UID knownClientInfoID;
 	ReplyPromise< struct ClientDBInfo > reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ASSERT( ar.protocolVersion() >= 0x0FDB00A400040001LL );
-		serializer(ar, issues, supportedVersions, connectedCoordinatorsNum, traceLogGroup, knownClientInfoID, reply, arena);
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.protocolVersion().hasOpenDatabase());
+		}
+		serializer(ar, clientCount, issues, supportedVersions, maxProtocolSupported, knownClientInfoID, reply);
 	}
 };
 
 struct SystemFailureStatus {
+	constexpr static FileIdentifier file_identifier = 3194108;
 	NetworkAddressList addresses;
 	FailureStatus status;
 
@@ -141,6 +188,21 @@ struct SystemFailureStatus {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, addresses, status);
+	}
+};
+
+struct FailureMonitoringReply {
+	constexpr static FileIdentifier file_identifier = 6820325;
+	VectorRef< SystemFailureStatus > changes;
+	Version failureInformationVersion;
+	bool allOthersFailed;							// If true, changes are relative to all servers being failed, otherwise to the version given in the request
+	int clientRequestIntervalMS,        // after this many milliseconds, send another request
+		considerServerFailedTimeoutMS;  // after this many additional milliseconds, consider the ClusterController itself to be failed
+	Arena arena;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, changes, failureInformationVersion, allOthersFailed, clientRequestIntervalMS, considerServerFailedTimeoutMS, arena);
 	}
 };
 
@@ -155,6 +217,7 @@ struct FailureMonitoringRequest {
 	// The failureInformationVersion returned in reply should be passed back to the
 	//   next request to facilitate delta compression of the failure information.
 
+	constexpr static FileIdentifier file_identifier = 5867851;
 	Optional<FailureStatus> senderStatus;
 	Version failureInformationVersion;
 	NetworkAddressList addresses;
@@ -166,30 +229,8 @@ struct FailureMonitoringRequest {
 	}
 };
 
-struct FailureMonitoringReply {
-	VectorRef< SystemFailureStatus > changes;
-	Version failureInformationVersion;
-	bool allOthersFailed;							// If true, changes are relative to all servers being failed, otherwise to the version given in the request
-	int clientRequestIntervalMS,        // after this many milliseconds, send another request
-		considerServerFailedTimeoutMS;  // after this many additional milliseconds, consider the ClusterController itself to be failed
-	Arena arena;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, changes, failureInformationVersion, allOthersFailed, clientRequestIntervalMS, considerServerFailedTimeoutMS, arena);
-	}
-};
-
-struct StatusRequest {
-	ReplyPromise< struct StatusReply > reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
-	}
-};
-
 struct StatusReply {
+	constexpr static FileIdentifier file_identifier = 9980504;
 	StatusObject statusObj;
 	std::string statusStr;
 
@@ -214,7 +255,18 @@ struct StatusReply {
 	}
 };
 
+struct StatusRequest {
+	constexpr static FileIdentifier file_identifier = 14419140;
+	ReplyPromise< struct StatusReply > reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
 struct GetClientWorkersRequest {
+	constexpr static FileIdentifier file_identifier = 10771791;
 	ReplyPromise<vector<ClientWorkerInterface>> reply;
 
 	GetClientWorkersRequest() {}
@@ -226,6 +278,7 @@ struct GetClientWorkersRequest {
 };
 
 struct ForceRecoveryRequest {
+	constexpr static FileIdentifier file_identifier = 14821350;
 	Key dcId;
 	ReplyPromise<Void> reply;
 

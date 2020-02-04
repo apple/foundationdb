@@ -15,6 +15,9 @@
 */
 #ifndef _BTREE_H_
 #define _BTREE_H_
+#ifndef NDEBUG
+#define NDEBUG
+#endif
 
 /* TODO: This definition is just included so other modules compile. It
 ** needs to be revisited.

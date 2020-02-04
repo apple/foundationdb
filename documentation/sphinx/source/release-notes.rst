@@ -2,11 +2,8 @@
 Release Notes
 #############
 
-6.2.0
+7.0.0
 =====
-
-Features
---------
 
 Performance
 -----------
@@ -16,15 +13,21 @@ Fixes
 
 Status
 ------
+* Replaced ``cluster.database_locked`` status field with ``cluster.database_lock_state``, which contains two subfields: ``locked`` (boolean) and ``lock_uid`` (which contains the database lock uid if the database is locked). `(PR #2058) <https://github.com/apple/foundationdb/pull/2058>`_
 
 Bindings
 --------
+* API version updated to 700. See the :ref:`API version upgrade guide <api-version-upgrade-guide-700>` for upgrade details.
+* Java: Introduced ``keyAfter`` utility function that can be used to create the immediate next key for a given byte array. `(PR #2458) <https://github.com/apple/foundationdb/pull/2458>`_
+* C: The ``FDBKeyValue`` struct's ``key`` and ``value`` members have changed type from ``void*`` to ``uint8_t*``. `(PR #2622) <https://github.com/apple/foundationdb/pull/2622>`_
 
 Other Changes
 -------------
+* Double the number of shard locations that the client will cache locally. `(PR #2198) <https://github.com/apple/foundationdb/pull/2198>`_
 
 Earlier release notes
 ---------------------
+* :doc:`6.2 (API Version 620) </old-release-notes/release-notes-620>`
 * :doc:`6.1 (API Version 610) </old-release-notes/release-notes-610>`
 * :doc:`6.0 (API Version 600) </old-release-notes/release-notes-600>`
 * :doc:`5.2 (API Version 520) </old-release-notes/release-notes-520>`

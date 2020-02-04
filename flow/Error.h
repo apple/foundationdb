@@ -29,6 +29,8 @@
 #include <boost/preprocessor/control/if.hpp>
 #include "flow/Platform.h"
 #include "flow/Knobs.h"
+#include "flow/FileIdentifier.h"
+#include "flow/ObjectSerializerTraits.h"
 
 enum { invalid_error_code = 0xffff };
 
@@ -40,6 +42,7 @@ public:
 
 class Error {
 public:
+	constexpr static FileIdentifier file_identifier = 14065384;
 	int code() const { return error_code; }
 	const char* name() const;
 	const char* what() const;
@@ -108,7 +111,7 @@ extern bool isAssertDisabled( int line );
 // ASSERT_WE_THINK() is to be used for assertions that we want to validate in testing, but which are judged too
 // risky to evaluate at runtime, because the code should work even if they are false and throwing internal_error() would
 // result in a bug.  Don't use it for assertions that are *expensive*; look at EXPENSIVE_VALIDATION.
-#define ASSERT_WE_THINK( condition ) ASSERT( !g_network->isSimulated() || condition )
+#define ASSERT_WE_THINK( condition ) ASSERT( !g_network->isSimulated() || (condition) )
 
 #define ABORT_ON_ERROR( code_to_run ) \
 	try { code_to_run; } \

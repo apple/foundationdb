@@ -42,8 +42,8 @@ bool testFuzzActor( Future<int>(*actor)(FutureStream<int> const&, PromiseStream<
 	for(int trial=0; trial<5; trial++) {
 		PromiseStream<int> in, out;
 		Promise<Void> err;
-		int before = g_random->randomInt(0, 4);
-		int errorBefore = before + g_random->randomInt(0, 4);
+		int before = deterministicRandom()->randomInt(0, 4);
+		int errorBefore = before + deterministicRandom()->randomInt(0, 4);
 		//printf("\t\tTrial #%d: %d, %d\n", trial, before, errorBefore);
 		if (errorBefore <= before) err.sendError( operation_failed() );
 		for(i=0; i<before; i++) {
@@ -107,10 +107,10 @@ void memoryTest2() {
 	char** random = new char*[ Reads * MaxThreads ];
 	random[0] = block;
 	for(int i=1; i<Reads*MaxThreads; ) {
-		char *s = &block[ g_random->randomInt(0, Size) ];
+		char *s = &block[ deterministicRandom()->randomInt(0, Size) ];
 		random[i++] = s;
 		/*for(int j=0; j<10 && i<Reads*MaxThreads; j++,i++) {
-			random[i] = s + g_random->randomInt(0, 4096);
+			random[i] = s + deterministicRandom()->randomInt(0, 4096);
 			if (random[i] >= block+Size) random[i] -= Size;
 		}*/
 	}
@@ -175,7 +175,7 @@ void memoryTest() {
 			x[i] = &x[i];
 		// Sattolo's algorithm
 		for(int n = N-1; n >= 1; n--) {
-			int k = g_random->randomInt(0, n);  //random.IRandomX(0, n-1);
+			int k = deterministicRandom()->randomInt(0, n);  //random.IRandomX(0, n-1);
 			std::swap( x[k], x[n] );
 		}
 	} else {
@@ -201,7 +201,7 @@ void memoryTest() {
 		void **starts[MT*MaxTraversalsPerThread];
 		for(int t=0; t<PseudoThreads; t++) {
 			starts[t] = &x[ N/PseudoThreads * t ];
-			//starts[t] = &x[ g_random->randomInt(0,N) ];
+			//starts[t] = &x[ deterministicRandom()->randomInt(0,N) ];
 		}
 		for(int T=1; T<=MT; T+=T) {
 			double start = timer();
@@ -242,13 +242,13 @@ void memoryTest() {
 #endif
 
 ACTOR template <int N, class X>
-Future<X> addN(Future<X> in) {
+[[flow_allow_discard]] Future<X> addN(Future<X> in) {
 	X i = wait( in );
 	return i + N;
 }
 
 ACTOR template <class A, class B>
-Future<Void> switchTest( FutureStream<A> as, Future<B> oneb ) {
+[[flow_allow_discard]] Future<Void> switchTest(FutureStream<A> as, Future<B> oneb) {
 	loop choose {
 		when (A a = waitNext( as )) { cout << "A " << a << endl; }
 		when (B b = wait( oneb )) { cout << "B " << b << endl; break; }
@@ -315,7 +315,7 @@ void fastAllocTest() {
 	std::vector<void*> d;
 	for(int i=0; i<1000000;i++) {
 		d.push_back( FastAllocator<64>::allocate() );
-		int r = g_random->randomInt(0,1000000);
+		int r = deterministicRandom()->randomInt(0,1000000);
 		if (r < d.size()) {
 			FastAllocator<64>::release(d[r]);
 			d[r] = d.back();
@@ -335,8 +335,7 @@ void fastAllocTest() {
 	}
 
 	t = timer();
-	for(int i=0; i<1000000; i++)
-		FastAllocator<64>::allocate();
+	for (int i = 0; i < 1000000; i++) (void)FastAllocator<64>::allocate();
 	t = timer()-t;
 	cout << "Allocations: " << (1/t) << "M/sec" << endl;
 
@@ -462,11 +461,11 @@ Future<Void> threadSafetySender( vector<PromiseT>& v, Event &start, Event &ready
 	return Void();
 }
 
-ACTOR void threadSafetyWaiter( Future<Void> f, int32_t* count ) {
+ACTOR [[flow_allow_discard]] void threadSafetyWaiter(Future<Void> f, int32_t* count) {
 	wait(f);
 	interlockedIncrement(count);
 }
-ACTOR void threadSafetyWaiter( FutureStream<Void> f, int n, int32_t* count ) {
+ACTOR [[flow_allow_discard]] void threadSafetyWaiter(FutureStream<Void> f, int n, int32_t* count) {
 	while (n--) {
 		waitNext(f);
 		interlockedIncrement(count);
@@ -523,7 +522,7 @@ void threadSafetyTest2() {
 		vector<int> counts( streams.size() );
 		v.clear();
 		for(int k=0; k<V; k++) {
-			int i = g_random->randomInt(0, (int)streams.size());
+			int i = deterministicRandom()->randomInt(0, (int)streams.size());
 			counts[i]++;
 			v.push_back( streams[i] );
 		}
@@ -544,7 +543,7 @@ void threadSafetyTest2() {
 
 volatile int32_t cancelled = 0, returned = 0;
 
-ACTOR Future<Void> returnCancelRacer( Future<Void> f ) {
+ACTOR [[flow_allow_discard]] Future<Void> returnCancelRacer( Future<Void> f ) {
 	try {
 		wait(f);
 	} catch ( Error& ) {
@@ -596,7 +595,7 @@ void returnCancelRaceTest() {
 }
 #endif
 
-ACTOR Future<int> chooseTest( Future<int> a, Future<int> b ) {
+ACTOR [[flow_allow_discard]] Future<int> chooseTest(Future<int> a, Future<int> b) {
 	choose {
 		when( int A = wait( a ) ) { return A; }
 		when( int B = wait( b ) ) { return B; }
@@ -655,27 +654,27 @@ void arenaTest() {
 	//showArena( ar.impl.getPtr(), 0 );
 };
 
-ACTOR void testStream( FutureStream<int> xs ) {
+ACTOR [[flow_allow_discard]] void testStream(FutureStream<int> xs) {
 	loop {
 		int x = waitNext(xs);
 		cout << x << endl;
 	}
 }
 
-ACTOR Future<Void> actorTest1(bool b) {
+ACTOR [[flow_allow_discard]] Future<Void> actorTest1(bool b) {
 	printf("1");
 	if (b)
 		throw future_version();
 	return Void();
 }
 
-ACTOR void actorTest2(bool b) {
+ACTOR [[flow_allow_discard]] void actorTest2(bool b) {
 	printf("2");
 	if (b)
 		throw future_version();
 }
 
-ACTOR Future<Void> actorTest3(bool b) {
+ACTOR [[flow_allow_discard]] Future<Void> actorTest3(bool b) {
 	try {
 		if (b)
 			throw future_version();
@@ -687,7 +686,7 @@ ACTOR Future<Void> actorTest3(bool b) {
 	return Void();
 }
 
-ACTOR Future<Void> actorTest4(bool b) {
+ACTOR [[flow_allow_discard]] Future<Void> actorTest4(bool b) {
 	state double tstart = now();
 	try {
 		if (b)
@@ -702,7 +701,7 @@ ACTOR Future<Void> actorTest4(bool b) {
 	return Void();
 }
 
-ACTOR Future<bool> actorTest5() {
+ACTOR [[flow_allow_discard]] Future<bool> actorTest5() {
 	state bool caught = false;
 
 	loop {
@@ -725,7 +724,7 @@ ACTOR Future<bool> actorTest5() {
 	}
 }
 
-ACTOR Future<bool> actorTest6() {
+ACTOR [[flow_allow_discard]] Future<bool> actorTest6() {
 	state bool caught = false;
 	loop {
 		if (caught) { printf("6"); return true; }
@@ -737,7 +736,7 @@ ACTOR Future<bool> actorTest6() {
 	}
 }
 
-ACTOR Future<bool> actorTest7() {
+ACTOR [[flow_allow_discard]] Future<bool> actorTest7() {
 	try {
 		loop {
 			loop {
@@ -753,7 +752,7 @@ ACTOR Future<bool> actorTest7() {
 	}
 }
 
-ACTOR Future<bool> actorTest8() {
+ACTOR [[flow_allow_discard]] Future<bool> actorTest8() {
 	state bool caught = false;
 	state Future<bool> set = true;
 
@@ -776,7 +775,7 @@ ACTOR Future<bool> actorTest8() {
 	}
 }
 
-ACTOR Future<bool> actorTest9A(Future<Void> setAfterCalling) {
+ACTOR [[flow_allow_discard]] Future<bool> actorTest9A(Future<Void> setAfterCalling) {
 	state int count = 0;
 	loop {
 		if (count == 4) { printf("9"); return true; }
@@ -810,7 +809,7 @@ Future<bool> actorTest9() {
 	return f;
 }
 
-ACTOR Future<Void> actorTest10A(FutureStream<int> inputStream, Future<Void> go) {
+ACTOR [[flow_allow_discard]] Future<Void> actorTest10A(FutureStream<int> inputStream, Future<Void> go) {
 	state int i;
 	for(i = 0; i < 5; i++) {
 		wait( go );
@@ -834,28 +833,29 @@ void actorTest10() {
 		printf("10");
 }
 
-ACTOR Future<Void> cancellable() {
+ACTOR [[flow_allow_discard]] Future<Void> cancellable() {
 	wait( Never() );
 	return Void();
 }
 
-ACTOR Future<Void> simple() {
+ACTOR [[flow_allow_discard]] Future<Void> simple() {
 	return Void();
 }
 
-ACTOR Future<Void> simpleWait() {
+ACTOR [[flow_allow_discard]] Future<Void> simpleWait() {
 	wait( Future<Void>(Void()) );
 	return Void();
 }
 
-ACTOR Future<int> simpleRet(Future<int> x) {
+ACTOR [[flow_allow_discard]] Future<int> simpleRet(Future<int> x) {
 	int i = wait(x);
 	return i;
 }
 
 template <int i> Future<int> chain( Future<int> const& x );
 
-ACTOR template <int i> Future<int> achain( Future<int> x ) {
+ACTOR template <int i>
+[[flow_allow_discard]] Future<int> achain(Future<int> x) {
 	int k = wait( chain<i>(x) );
 	return k+1;
 }
@@ -868,9 +868,9 @@ template<> Future<int> chain<0>( Future<int> const& x ) {
 	return x;
 }
 
-ACTOR Future<int> chain2(Future<int> x, int i);
+ACTOR [[flow_allow_discard]] Future<int> chain2(Future<int> x, int i);
 
-ACTOR Future<int> chain2( Future<int> x, int i ) {
+ACTOR [[flow_allow_discard]] Future<int> chain2(Future<int> x, int i) {
 	if (i>1) {
 		int k = wait( chain2(x, i-1) );
 		return k+1;
@@ -880,7 +880,7 @@ ACTOR Future<int> chain2( Future<int> x, int i ) {
 	}
 }
 
-ACTOR Future<Void> cancellable2() {
+ACTOR [[flow_allow_discard]] Future<Void> cancellable2() {
 	try {
 		wait( Never() );
 		return Void();
@@ -891,7 +891,7 @@ ACTOR Future<Void> cancellable2() {
 
 using std::string;
 
-ACTOR Future<int> introLoadValueFromDisk( Future<string> filename ) {
+ACTOR [[flow_allow_discard]] Future<int> introLoadValueFromDisk(Future<string> filename) {
 	string file = wait( filename );
 
 	if (file == "/dev/threes")
@@ -901,13 +901,13 @@ ACTOR Future<int> introLoadValueFromDisk( Future<string> filename ) {
 	return 0; // does not happen
 }
 
-ACTOR Future<int> introAdd( Future<int> a, Future<int> b ) {
+ACTOR [[flow_allow_discard]] Future<int> introAdd(Future<int> a, Future<int> b) {
 	state int x = wait(a);
 	int y = wait(b);
 	return x + y; // x would be undefined here if it was not "state"
 }
 
-ACTOR Future<int> introFirst( Future<int> a, Future<int> b ) {
+ACTOR [[flow_allow_discard]] Future<int> introFirst(Future<int> a, Future<int> b) {
 	choose {
 		when( int x = wait(a) ) {
 			return x;
@@ -942,7 +942,7 @@ struct AddRequest {
 	}
 };
 
-ACTOR void introAddServer( PromiseStream<AddRequest> add ) {
+ACTOR [[flow_allow_discard]] void introAddServer(PromiseStream<AddRequest> add) {
 	loop choose {
 		when ( AddRequest req = waitNext(add.getFuture()) ) {
 			printf("%d + %d = %d\n", req.a, req.b, req.a+req.b);
@@ -1013,7 +1013,7 @@ void chainTest() {
 
 }
 
-ACTOR void cycle(FutureStream<Void> in, PromiseStream<Void> out, int* ptotal){
+ACTOR [[flow_allow_discard]] void cycle(FutureStream<Void> in, PromiseStream<Void> out, int* ptotal) {
 	loop{
 		waitNext(in);
 		(*ptotal)++;
@@ -1021,7 +1021,7 @@ ACTOR void cycle(FutureStream<Void> in, PromiseStream<Void> out, int* ptotal){
 	}
 }
 
-ACTOR Future<Void> cycleTime(int nodes, int times){
+ACTOR [[flow_allow_discard]] Future<Void> cycleTime(int nodes, int times) {
 	state vector<PromiseStream<Void>> n(nodes);
 	state int total = 0;
 
@@ -1135,7 +1135,7 @@ extern void net2_test();
 void dsltest() {
 	double startt, endt;
 
-	g_random = new DeterministicRandom(40);
+	setThreadLocalDeterministicRandomSeed(40);
 
 	asyncMapTest();
 
@@ -1174,7 +1174,7 @@ void dsltest() {
 	printf("Actor fuzz tests: %d/%d passed\n", afResults.first, afResults.second);
 	startt = timer();
 	for(int i=0; i<1000000; i++)
-		g_random->random01();
+		deterministicRandom()->random01();
 	endt = timer();
 	printf("Random01: %0.2f M/sec\n", 1.0/(endt-startt));
 
@@ -1396,8 +1396,10 @@ void copyTest() {
 
 	{
 		start = timer();
-		for(int i=0; i<100; i++)
+		for (int i = 0; i < 100; i++) {
 			StringRef k = s;
+			(void)k;
+		}
 		elapsed = timer() - start;
 
 		printf("StringRef->StringRef: %fs/GB\n", elapsed);

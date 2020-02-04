@@ -38,11 +38,13 @@ protected:
 	void initKnob( int64_t& knob, int64_t value, std::string const& name );
 	void initKnob( int& knob, int value, std::string const& name );
 	void initKnob( std::string& knob, const std::string& value, const std::string& name );
+	void initKnob( bool& knob, bool value, std::string const& name );
 
 	std::map<std::string, double*> double_knobs;
 	std::map<std::string, int64_t*> int64_knobs;
 	std::map<std::string, int*> int_knobs;
 	std::map<std::string, std::string*> string_knobs;
+	std::map<std::string, bool*> bool_knobs;
 };
 
 class FlowKnobs : public Knobs {
@@ -73,6 +75,9 @@ public:
 	//connectionMonitor
 	double CONNECTION_MONITOR_LOOP_TIME;
 	double CONNECTION_MONITOR_TIMEOUT;
+	double CONNECTION_MONITOR_IDLE_TIMEOUT;
+	double CONNECTION_MONITOR_INCOMING_IDLE_MULTIPLIER;
+	double CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY;
 
 	//FlowTransport
 	double CONNECTION_REJECTED_MESSAGE_DELAY;
@@ -83,9 +88,16 @@ public:
 	double RECONNECTION_TIME_GROWTH_RATE;
 	double RECONNECTION_RESET_TIME;
 	double CONNECTION_ACCEPT_DELAY;
+	int USE_OBJECT_SERIALIZER;
 
 	int TLS_CERT_REFRESH_DELAY_SECONDS;
+	double TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT;
+	double TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT;
+	int TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS;
+	int TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS;
 
+	int NETWORK_TEST_REPLY_SIZE;
+	
 	//AsyncFileCached
 	int64_t PAGE_CACHE_4K;
 	int64_t PAGE_CACHE_64K;
@@ -93,8 +105,16 @@ public:
 	int64_t SIM_PAGE_CACHE_64K;
 	int64_t BUGGIFY_SIM_PAGE_CACHE_4K;
 	int64_t BUGGIFY_SIM_PAGE_CACHE_64K;
+	std::string CACHE_EVICTION_POLICY; // for now, "random", "lru", are supported
 	int MAX_EVICT_ATTEMPTS;
 	double PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION;
+	double TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY;
+	int TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT;
+	int PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT;
+
+	//AsyncFileEIO
+	int EIO_MAX_PARALLELISM;
+	int EIO_USE_ODIRECT;
 
 	//AsyncFileKAIO
 	int MAX_OUTSTANDING;
@@ -107,7 +127,6 @@ public:
 	double MAX_PRIOR_MODIFICATION_DELAY;
 
 	//GenericActors
-	double MAX_DELIVER_DUPLICATE_DELAY;
 	double BUGGIFY_FLOW_LOCK_RELEASE_DELAY;
 
 	//IAsyncFile
@@ -126,6 +145,11 @@ public:
 	int64_t PACKET_LIMIT;
 	int64_t PACKET_WARNING;  // 2MB packet warning quietly allows for 1MB system messages
 	double TIME_OFFSET_LOGGING_INTERVAL;
+	int MAX_PACKET_SEND_BYTES;
+	int MIN_PACKET_BUFFER_BYTES;
+	int MIN_PACKET_BUFFER_FREE_BYTES;
+	int FLOW_TCP_NODELAY;
+	int FLOW_TCP_QUICKACK;
 
 	//Sim2
 	//FIMXE: more parameters could be factored out
@@ -138,6 +162,7 @@ public:
 	double SLOW_NETWORK_LATENCY;
 	double MAX_CLOGGING_LATENCY;
 	double MAX_BUGGIFIED_DELAY;
+	int SIM_CONNECT_ERROR_MODE;
 
 	//Tracefiles
 	int ZERO_LENGTH_FILE_PAD;
@@ -149,6 +174,8 @@ public:
 	int TRACE_EVENT_METRIC_UNITS_PER_SAMPLE;
 	int TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY;
 	int TRACE_EVENT_THROTTLER_MSG_LIMIT;
+	int MAX_TRACE_FIELD_LENGTH;
+	int MAX_TRACE_EVENT_LENGTH;
 
 	//TDMetrics
 	int64_t MAX_METRIC_SIZE;
@@ -159,6 +186,8 @@ public:
 	int MAX_METRICS;
 
 	//Load Balancing
+	int LOAD_BALANCE_ZONE_ID_LOCALITY_ENABLED;
+	int LOAD_BALANCE_DC_ID_LOCALITY_ENABLED;
 	double LOAD_BALANCE_MAX_BACKOFF;
 	double LOAD_BALANCE_START_BACKOFF;
 	double LOAD_BALANCE_BACKOFF_RATE;
@@ -170,12 +199,17 @@ public:
 	double SECOND_REQUEST_BUDGET_GROWTH;
 	double SECOND_REQUEST_MAX_BUDGET;
 	double ALTERNATIVES_FAILURE_RESET_TIME;
-	double ALTERNATIVES_FAILURE_MAX_DELAY;
 	double ALTERNATIVES_FAILURE_MIN_DELAY;
 	double ALTERNATIVES_FAILURE_DELAY_RATIO;
+	double ALTERNATIVES_FAILURE_MAX_DELAY;
+	double ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO;
+	double ALTERNATIVES_FAILURE_SLOW_MAX_DELAY;
+	double ALTERNATIVES_FAILURE_SKIP_DELAY;
 	double FUTURE_VERSION_INITIAL_BACKOFF;
 	double FUTURE_VERSION_MAX_BACKOFF;
 	double FUTURE_VERSION_BACKOFF_GROWTH;
+	int LOAD_BALANCE_MAX_BAD_OPTIONS;
+	bool LOAD_BALANCE_PENALTY_IS_BAD;
 
 	FlowKnobs(bool randomize = false, bool isSimulated = false);
 };

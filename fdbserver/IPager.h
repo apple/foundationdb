@@ -29,21 +29,38 @@
 
 #define REDWOOD_DEBUG 0
 
-#define debug_printf_always(...) { fprintf(stdout, "%s %f ", g_network->getLocalAddress().toString().c_str(), now()), fprintf(stdout, __VA_ARGS__); fflush(stdout); }
+#define debug_printf_stream stderr
+#define debug_printf_always(...) { fprintf(debug_printf_stream, "%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__); fprintf(debug_printf_stream, __VA_ARGS__); fflush(debug_printf_stream); }
 
-#if REDWOOD_DEBUG
-  #define debug_printf debug_printf_always
+#define debug_printf_noop(...)
+
+#if defined(NO_INTELLISENSE)
+	#if REDWOOD_DEBUG
+		#define debug_printf debug_printf_always
+	#else
+		#define debug_printf debug_printf_noop
+	#endif
 #else
-  #define debug_printf(...)
+	// To get error-checking on debug_printf statements in IDE
+	#define debug_printf printf
 #endif
 
-#define BEACON fprintf(stderr, "%s: %s line %d \n", __FUNCTION__, __FILE__, __LINE__)
+#define BEACON debug_printf_always("HERE\n")
+#define TRACE debug_printf_always("%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
 
-typedef uint32_t LogicalPageID; // uint64_t?
-static const int invalidLogicalPageID = LogicalPageID(-1);
+#ifndef VALGRIND
+#define VALGRIND_MAKE_MEM_UNDEFINED(x, y)
+#define VALGRIND_MAKE_MEM_DEFINED(x, y)
+#endif
+
+typedef uint32_t LogicalPageID;
+typedef uint32_t PhysicalPageID;
+#define invalidLogicalPageID std::numeric_limits<LogicalPageID>::max()
 
 class IPage {
 public:
+	IPage() : userData(nullptr) {}
+
 	virtual uint8_t const* begin() const = 0;
 	virtual uint8_t* mutate() = 0;
 
@@ -54,16 +71,25 @@ public:
 		return StringRef(begin(), size());
 	}
 
-	virtual ~IPage() {}
+	virtual ~IPage() {
+		if(userData != nullptr && userDataDestructor != nullptr) {
+			userDataDestructor(userData);
+		}
+	}
 
 	virtual void addref() const = 0;
 	virtual void delref() const = 0;
+
+	mutable void *userData;
+	mutable void (*userDataDestructor)(void *);
 };
 
 class IPagerSnapshot {
 public:
-	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID) = 0;
+	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable, bool nohit) = 0;
 	virtual Version getVersion() const = 0;
+
+	virtual Key getMetaKey() const = 0;
 
 	virtual ~IPagerSnapshot() {}
 
@@ -71,63 +97,85 @@ public:
 	virtual void delref() = 0;
 };
 
-class IPager : public IClosable {
+// This API is probably customized to the behavior of DWALPager and probably needs some changes to be more generic.
+class IPager2 : public IClosable {
 public:
 	// Returns an IPage that can be passed to writePage. The data in the returned IPage might not be zeroed.
 	virtual Reference<IPage> newPageBuffer() = 0;
 
 	// Returns the usable size of pages returned by the pager (i.e. the size of the page that isn't pager overhead).
 	// For a given pager instance, separate calls to this function must return the same value.
+	// Only valid to call after recovery is complete.
 	virtual int getUsablePageSize() = 0;
-	
-	virtual StorageBytes getStorageBytes() = 0;
 
-	// Permitted to fail (ASSERT) during recovery.
-	virtual Reference<IPagerSnapshot> getReadSnapshot(Version version) = 0;
+	// Allocate a new page ID for a subsequent write.  The page will be considered in-use after the next commit
+	// regardless of whether or not it was written to.
+	virtual Future<LogicalPageID> newPageID() = 0;
 
-	// Returns an unused LogicalPageID. 
-	// LogicalPageIDs in the range [0, SERVER_KNOBS->PAGER_RESERVED_PAGES) do not need to be allocated.
-	// Permitted to fail (ASSERT) during recovery.
-	virtual LogicalPageID allocateLogicalPage() = 0;
+	// Replace the contents of a page with new data across *all* versions.
+	// Existing holders of a page reference for pageID, read from any version,
+	// may see the effects of this write.
+	virtual void updatePage(LogicalPageID pageID, Reference<IPage> data) = 0;
 
-	// Signals that the page will no longer be used as of the specified version. Versions prior to the specified version must be kept.
-	// Permitted to fail (ASSERT) during recovery.
-	virtual void freeLogicalPage(LogicalPageID pageID, Version version) = 0;
+	// Try to atomically update the contents of a page as of version v in the next commit.
+	// If the pager is unable to do this at this time, it may choose to write the data to a new page ID
+	// instead and return the new page ID to the caller.  Otherwise the original pageID argument will be returned.
+	// If a new page ID is returned, the old page ID will be freed as of version v
+	virtual Future<LogicalPageID> atomicUpdatePage(LogicalPageID pageID, Reference<IPage> data, Version v) = 0;
 
-	// Writes a page with the given LogicalPageID at the specified version. LogicalPageIDs in the range [0, SERVER_KNOBS->PAGER_RESERVED_PAGES)
-	// can be written without being allocated. All other LogicalPageIDs must be allocated using allocateLogicalPage before writing them.
-	//
-	// If updateVersion is 0, we are signalling to the pager that we are reusing the LogicalPageID entry at the current latest version of pageID.
-	// 
-	// Otherwise, we will add a new entry for LogicalPageID at the specified version. In that case, updateVersion must be larger than any version 
-	// written to this page previously, and it must be larger than any version committed.  If referencePageID is given, the latest version of that
-	// page will be used for the write, which *can* be less than the latest committed version.
-	//
-	// Permitted to fail (ASSERT) during recovery.
-	virtual void writePage(LogicalPageID pageID, Reference<IPage> contents, Version updateVersion, LogicalPageID referencePageID = invalidLogicalPageID) = 0;
+	// Free pageID to be used again after the commit that moves oldestVersion past v
+	virtual void freePage(LogicalPageID pageID, Version v) = 0;
 
-	// Signals to the pager that no more reads will be performed in the range [begin, end). 
-	// Permitted to fail (ASSERT) during recovery.
-	virtual void forgetVersions(Version begin, Version end) = 0;
+	// Returns the latest data (regardless of version) for a page by LogicalPageID
+	// The data returned will be the later of
+	//   - the most recent committed atomic
+	//   - the most recent non-atomic write
+	// Cacheable indicates that the page should be added to the page cache (if applicable?) as a result of this read.
+	// NoHit indicates that the read should not be considered a cache hit, such as when preloading pages that are
+	// considered likely to be needed soon.
+	virtual Future<Reference<IPage>> readPage(LogicalPageID pageID, bool cacheable = true, bool noHit = false) = 0;
 
-	// Makes durable all writes and any data structures used for recovery.
-	// Permitted to fail (ASSERT) during recovery.
+	// Get a snapshot of the metakey and all pages as of the version v which must be >= getOldestVersion()
+	// Note that snapshots at any version may still see the results of updatePage() calls.
+	// The snapshot shall be usable until setOldVersion() is called with a version > v.
+	virtual Reference<IPagerSnapshot> getReadSnapshot(Version v) = 0;
+
+	// Atomically make durable all pending page writes, page frees, and update the metadata string.
 	virtual Future<Void> commit() = 0;
 
-	// Returns the latest version of the pager. Permitted to block until recovery is complete, at which point it should always be set immediately.
-	// Some functions in the IPager interface are permitted to fail (ASSERT) during recovery, so users should wait for getLatestVersion to complete 
-	// before doing anything else.
-	virtual Future<Version> getLatestVersion() = 0;
+	// Get the latest meta key set or committed
+	virtual Key getMetaKey() const = 0;
 
-	// Sets the latest version of the pager. Must be monotonically increasing. 
-	// 
-	// Must be called prior to reading the specified version. SOMEDAY: It may be desirable in the future to relax this constraint for performance reasons.
-	//
-	// Permitted to fail (ASSERT) during recovery.
-	virtual void setLatestVersion(Version version) = 0;
+	// Set the metakey which will be stored in the next commit
+	virtual void setMetaKey(KeyRef metaKey) = 0;
+
+	// Sets the next commit version
+	virtual void setCommitVersion(Version v) = 0;
+
+	virtual StorageBytes getStorageBytes() = 0;
+
+	// Count of pages in use by the pager client
+	virtual Future<int64_t> getUserPageCount() = 0;
+
+	// Future returned is ready when pager has been initialized from disk and is ready for reads and writes.
+	// It is invalid to call most other functions until init() is ready.
+	// TODO: Document further.
+	virtual Future<Void> init() = 0;
+
+	// Returns latest committed version
+	virtual Version getLatestVersion() = 0;
+
+	// Returns the oldest readable version as of the most recent committed version
+	virtual Version getOldestVersion() = 0;
+
+	// Sets the oldest readable version to be put into affect at the next commit.
+	// The pager can reuse pages that were freed at a version less than v.
+	// If any snapshots are in use at a version less than v, the pager can either forcefully
+	// invalidate them or keep their versions around until the snapshots are no longer in use.
+	virtual void setOldestVersion(Version v) = 0;
 
 protected:
-	~IPager() {} // Destruction should be done using close()/dispose() from the IClosable interface
+	~IPager2() {} // Destruction should be done using close()/dispose() from the IClosable interface
 };
 
 #endif

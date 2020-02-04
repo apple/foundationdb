@@ -78,7 +78,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 * Directly sets the version of the database at which to execute reads.  The
 	 *  normal operation of a transaction is to determine an appropriately recent
 	 *  version; this call overrides that behavior.  If the version is set too
-	 *  far in the past, {@code past_version} errors will be thrown from read operations.
+	 *  far in the past, {@code transaction_too_old} errors will be thrown from read operations.
 	 *  <i>Infrequently used.</i>
 	 *
 	 * @param version the version at which to read from the database

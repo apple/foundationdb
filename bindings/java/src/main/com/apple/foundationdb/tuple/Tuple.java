@@ -39,7 +39,7 @@ import com.apple.foundationdb.Range;
  *  the same order in which they would sort in FoundationDB. {@code Tuple}s sort
  *  first by the first element, then by the second, etc. This makes the tuple layer
  *  ideal for building a variety of higher-level data models.<br>
- * <h3>Types</h3>
+ * <h2>Types</h2>
  * A {@code Tuple} can
  *  contain byte arrays ({@code byte[]}), {@link String}s, {@link Number}s, {@link UUID}s,
  *  {@code boolean}s, {@link List}s, {@link Versionstamp}s, other {@code Tuple}s, and {@code null}.
@@ -50,7 +50,7 @@ import com.apple.foundationdb.Range;
  *  a {@code long} integral value, so the range will be constrained to
  *  [{@code -2^63}, {@code 2^63-1}]. Note that for numbers outside this range the way that Java
  *  truncates integral values may yield unexpected results.<br>
- * <h3>{@code null} values</h3>
+ * <h2>{@code null} values</h2>
  * The FoundationDB tuple specification has a special type-code for {@code None}; {@code nil}; or,
  *  as Java would understand it, {@code null}.
  *  The behavior of the layer in the presence of {@code null} varies by type with the intention

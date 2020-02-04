@@ -58,7 +58,8 @@ struct ExceptionContract {
 			e.code() == error_code_future_version ||
 			e.code() == error_code_transaction_cancelled ||
 			e.code() == error_code_key_too_large ||
-			e.code() == error_code_value_too_large)
+			e.code() == error_code_value_too_large ||
+			e.code() == error_code_process_behind)
 		{
 			return;
 		}
@@ -123,26 +124,31 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		rarelyCommit = getOption( options, LiteralStringRef("rarelyCommit"), false );
 		maximumTotalData = getOption( options, LiteralStringRef("maximumTotalData"), 15e6);
 		minNode = getOption( options, LiteralStringRef("minNode"), 0);
-		adjacentKeys = g_random->coinflip();
-		useSystemKeys = g_random->coinflip();
-		initialKeyDensity = g_random->random01(); // This fraction of keys are present before the first transaction (and after an unknown result)
+		adjacentKeys = deterministicRandom()->coinflip();
+		useSystemKeys = deterministicRandom()->coinflip();
+		initialKeyDensity = deterministicRandom()->random01(); // This fraction of keys are present before the first transaction (and after an unknown result)
+
+		// See https://github.com/apple/foundationdb/issues/2424
+		if (BUGGIFY) {
+			enableBuggify(true, BuggifyType::Client);
+		}
 
 		if( adjacentKeys ) {
-			nodes = std::min<int64_t>( g_random->randomInt(1, 4 << g_random->randomInt(0,14)), CLIENT_KNOBS->KEY_SIZE_LIMIT * 1.2 );
+			nodes = std::min<int64_t>( deterministicRandom()->randomInt(1, 4 << deterministicRandom()->randomInt(0,14)), CLIENT_KNOBS->KEY_SIZE_LIMIT * 1.2 );
 		}
 		else {
-			nodes = g_random->randomInt(1, 4 << g_random->randomInt(0,20));
+			nodes = deterministicRandom()->randomInt(1, 4 << deterministicRandom()->randomInt(0,20));
 		}
 
 		int newNodes = std::min<int>(nodes, maximumTotalData / (getKeyForIndex(nodes).size() + valueSizeRange.second));
 		minNode = std::max(minNode, nodes - newNodes);
 		nodes = newNodes;
 
-		if(useSystemKeys && g_random->coinflip()) {
+		if(useSystemKeys && deterministicRandom()->coinflip()) {
 			keyPrefix = "\xff\x01";
 		}
 
-		maxClearSize = 1<<g_random->randomInt(0, 20);
+		maxClearSize = 1<<deterministicRandom()->randomInt(0, 20);
 		conflictRange = KeyRangeRef( LiteralStringRef("\xfe"), LiteralStringRef("\xfe\x00") );
 		TraceEvent("FuzzApiCorrectnessConfiguration")
 			.detail("Nodes", nodes)
@@ -153,7 +159,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			.detail("MaxClearSize", maxClearSize)
 			.detail("UseSystemKeys", useSystemKeys);
 
-		TraceEvent("RemapEventSeverity").detail("TargetEvent", "Net2_LargePacket").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
+		TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargePacketSent").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
+		TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargePacketReceived").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
 		TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargeTransaction").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
 	}
 
@@ -171,7 +178,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	}
 
 	Key getRandomKey() {
-		return getKeyForIndex( g_random->randomInt(0, nodes ) );
+		return getKeyForIndex( deterministicRandom()->randomInt(0, nodes ) );
 	}
 
 	Key getKeyForIndex( int idx ) {
@@ -184,7 +191,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	}
 
 	Value getRandomValue() {
-		return Value( std::string( g_random->randomInt(valueSizeRange.first,valueSizeRange.second+1), 'x' ) );
+		return Value( std::string( deterministicRandom()->randomInt(valueSizeRange.first,valueSizeRange.second+1), 'x' ) );
 	}
 
 	virtual void getMetrics( vector<PerfMetric>& m ) {
@@ -217,7 +224,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 						tr->clear( KeyRangeRef( self->getKeyForIndex(i), self->getKeyForIndex(end) ) );
 
 						for( int j = i; j < end; j++ ) {
-							if ( g_random->random01() < self->initialKeyDensity ) {
+							if ( deterministicRandom()->random01() < self->initialKeyDensity ) {
 								Key key = self->getKeyForIndex( j );
 								if( key.size() <= (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT)) {
 									Value value = self->getRandomValue();
@@ -255,8 +262,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> randomTransaction( Reference<IDatabase> cx, FuzzApiCorrectnessWorkload* self ) {
 		state Reference<ITransaction> tr = cx->createTransaction();
-		state bool readYourWritesDisabled = g_random->coinflip();
-		state bool readAheadDisabled = g_random->coinflip();
+		state bool readYourWritesDisabled = deterministicRandom()->coinflip();
+		state bool readAheadDisabled = deterministicRandom()->coinflip();
 		state std::vector<Future<Void>> operations;
 		state int waitLocation = 0;
 
@@ -272,16 +279,16 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			tr->addWriteConflictRange( self->conflictRange );
 
 			try {
-				state int numWaits = g_random->randomInt( 1, 5 );
+				state int numWaits = deterministicRandom()->randomInt( 1, 5 );
 				state int i = 0;
 
 				// Code path here will create a bunch of ops, wait for ONE of them to complete,
 				// then add more ops, wait for another one, and so on.
 				for(; i < numWaits; i++ ) {
-					state int numOps = g_random->randomInt( 1, self->numOps );
+					state int numOps = deterministicRandom()->randomInt( 1, self->numOps );
 					state int j = 0;
 					for(; j < numOps; j++ ) {
-						state int operationType = g_random->randomInt(0, testCases.size());
+						state int operationType = deterministicRandom()->randomInt(0, testCases.size());
 						printf("%d: Selected Operation %d\n", self->operationId+1, operationType);
 						try {
 							operations.push_back(testCases[operationType](++self->operationId, self, tr));
@@ -293,7 +300,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 					// Wait for a random op to complete.
 					if( waitLocation < operations.size() ) {
-						int waitOp = g_random->randomInt(waitLocation,operations.size());
+						int waitOp = deterministicRandom()->randomInt(waitLocation,operations.size());
 						wait( operations[waitOp] );
 						wait( delay(0.000001) ); //to ensure errors have propgated from reads to commits
 						waitLocation = operations.size();
@@ -381,11 +388,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		ExceptionContract contract;
 		std::vector<ThreadFuture<Void> > pre_steps;
 
-		BaseTest(unsigned int id_, FuzzApiCorrectnessWorkload *wl, const char *func)
-			: id(id_), workload(wl), contract(func, std::bind(&Subclass::augmentTrace, static_cast<Subclass *>(this), ph::_1)) {}
+		BaseTest(unsigned int id_, FuzzApiCorrectnessWorkload* wl, const char* func)
+		  : id(id_), workload(wl), contract(func, std::bind(&BaseTest::augmentTrace, this, ph::_1)) {}
 
 		static Key makeKey() {
-			double ksrv = g_random->random01();
+			double ksrv = deterministicRandom()->random01();
 
 			// 25% of the time it's empty, 25% it's above range.
 			if (ksrv < 0.25)
@@ -393,20 +400,20 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 			int64_t key_size;
 			if (ksrv < 0.5)
-				key_size = g_random->randomInt64(1, CLIENT_KNOBS->KEY_SIZE_LIMIT + 1) + CLIENT_KNOBS->KEY_SIZE_LIMIT;
+				key_size = deterministicRandom()->randomInt64(1, CLIENT_KNOBS->KEY_SIZE_LIMIT + 1) + CLIENT_KNOBS->KEY_SIZE_LIMIT;
 			else
-				key_size = g_random->randomInt64(1, CLIENT_KNOBS->KEY_SIZE_LIMIT + 1);
+				key_size = deterministicRandom()->randomInt64(1, CLIENT_KNOBS->KEY_SIZE_LIMIT + 1);
 
 			std::string skey;
 			skey.reserve(key_size);
 			for (size_t j = 0; j < key_size; ++j)
-				skey.append(1, (char) g_random->randomInt(0, 256));
+				skey.append(1, (char) deterministicRandom()->randomInt(0, 256));
 
 			return Key(skey);
 		}
 
 		static Value makeValue() {
-			double vrv = g_random->random01();
+			double vrv = deterministicRandom()->random01();
 
 			// 25% of the time it's empty, 25% it's above range.
 			if (vrv < 0.25)
@@ -414,51 +421,51 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 			int64_t value_size;
 			if (vrv < 0.5)
-				value_size = g_random->randomInt64(1, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1) + CLIENT_KNOBS->VALUE_SIZE_LIMIT;
+				value_size = deterministicRandom()->randomInt64(1, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1) + CLIENT_KNOBS->VALUE_SIZE_LIMIT;
 			else
-				value_size = g_random->randomInt64(1, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1);
+				value_size = deterministicRandom()->randomInt64(1, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1);
 
 			std::string svalue;
 			svalue.reserve(value_size);
 			for (size_t j = 0; j < value_size; ++j)
-				svalue.append(1, (char) g_random->randomInt(0, 256));
+				svalue.append(1, (char) deterministicRandom()->randomInt(0, 256));
 
 			return Value(svalue);
 		}
 
 		static KeySelector makeKeySel() {
 			// 40% of the time no offset, 30% it's a positive or negative.
-			double orv = g_random->random01();
+			double orv = deterministicRandom()->random01();
 			int offs = 0;
 			if (orv >= 0.4) {
 				if (orv < 0.7)
-					offs = g_random->randomInt(INT_MIN, 0);
+					offs = deterministicRandom()->randomInt(INT_MIN, 0);
 				else
-					offs = g_random->randomInt(0, INT_MAX)+1;
+					offs = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
-			return KeySelectorRef(makeKey(), g_random->coinflip(), offs);
+			return KeySelectorRef(makeKey(), deterministicRandom()->coinflip(), offs);
 		}
 
 		static GetRangeLimits makeRangeLimits() {
-			double lrv = g_random->random01();
+			double lrv = deterministicRandom()->random01();
 			int rowlimit = 0;
 			if (lrv >= 0.2) {
 				if (lrv < 0.4)
-					rowlimit = g_random->randomInt(INT_MIN, 0);
+					rowlimit = deterministicRandom()->randomInt(INT_MIN, 0);
 				else
-					rowlimit = g_random->randomInt(0, INT_MAX)+1;
+					rowlimit = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
 
-			if (g_random->coinflip())
+			if (deterministicRandom()->coinflip())
 				return GetRangeLimits(rowlimit);
 
-			lrv = g_random->random01();
+			lrv = deterministicRandom()->random01();
 			int bytelimit = 0;
 			if (lrv >= 0.2) {
 				if (lrv < 0.4)
-					bytelimit = g_random->randomInt(INT_MIN, 0);
+					bytelimit = deterministicRandom()->randomInt(INT_MIN, 0);
 				else
-					bytelimit = g_random->randomInt(0, INT_MAX)+1;
+					bytelimit = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
 
 			// Try again if both are 0.
@@ -551,10 +558,10 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		Version v;
 
 		TestSetVersion(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTest(id, workload, "TestSetVersion") {
-			if (g_random->coinflip())
-				v = g_random->randomInt64(INT64_MIN, 0);
+			if (deterministicRandom()->coinflip())
+				v = deterministicRandom()->randomInt64(INT64_MIN, 0);
 			else
-				v = g_random->randomInt64(0, INT64_MAX);
+				v = deterministicRandom()->randomInt64(0, INT64_MAX);
 
 			contract = {
 				std::make_pair( error_code_read_version_already_set, ExceptionContract::Possible ),
@@ -595,7 +602,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
-			return tr->get(key, g_random->coinflip());
+			return tr->get(key, deterministicRandom()->coinflip());
 		}
 
 		void augmentTrace(TraceEvent &e) const {
@@ -618,7 +625,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
-			return tr->getKey(keysel, g_random->coinflip());
+			return tr->getKey(keysel, deterministicRandom()->coinflip());
 		}
 
 		void augmentTrace(TraceEvent &e) const {
@@ -637,12 +644,12 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			keysel2 = makeKeySel();
 			limit = 0;
 
-			double lrv = g_random->random01();
+			double lrv = deterministicRandom()->random01();
 			if (lrv > 0.20) {
 				if (lrv < 0.4)
-					limit = g_random->randomInt(INT_MIN, 0);
+					limit = deterministicRandom()->randomInt(INT_MIN, 0);
 				else
-					limit = g_random->randomInt(0, INT_MAX)+1;
+					limit = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
 
 			contract = {
@@ -656,7 +663,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
-			return tr->getRange(keysel1, keysel2, limit, g_random->coinflip(), g_random->coinflip());
+			return tr->getRange(keysel1, keysel2, limit, deterministicRandom()->coinflip(), deterministicRandom()->coinflip());
 		}
 
 		void augmentTrace(TraceEvent &e) const {
@@ -685,7 +692,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
-			return tr->getRange(keysel1, keysel2, limits, g_random->coinflip(), g_random->coinflip());
+			return tr->getRange(keysel1, keysel2, limits, deterministicRandom()->coinflip(), deterministicRandom()->coinflip());
 		}
 
 		void augmentTrace(TraceEvent &e) const {
@@ -707,12 +714,12 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			key2 = makeKey();
 			limit = 0;
 
-			double lrv = g_random->random01();
+			double lrv = deterministicRandom()->random01();
 			if (lrv > 0.20) {
 				if (lrv < 0.4)
-					limit = g_random->randomInt(INT_MIN, 0);
+					limit = deterministicRandom()->randomInt(INT_MIN, 0);
 				else
-					limit = g_random->randomInt(0, INT_MAX)+1;
+					limit = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
 			contract = {
 				std::make_pair( error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2) ),
@@ -727,7 +734,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
 			return tr->getRange(KeyRangeRef(key1, key2),
-					limit, g_random->coinflip(), g_random->coinflip());
+					limit, deterministicRandom()->coinflip(), deterministicRandom()->coinflip());
 		}
 
 		void augmentTrace(TraceEvent &e) const {
@@ -757,7 +764,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) {
-			return tr->getRange(KeyRangeRef(key1, key2), limits, g_random->coinflip(), g_random->coinflip());
+			return tr->getRange(KeyRangeRef(key1, key2), limits, deterministicRandom()->coinflip(), deterministicRandom()->coinflip());
 		}
 
 		void augmentTrace(TraceEvent &e) const {
@@ -828,19 +835,19 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				key = makeKey();
 			}
 			value = makeValue();
-			double arv = g_random->random01();
+			double arv = deterministicRandom()->random01();
 			if (arv < 0.25) {
 				int val = UINT8_MAX;
 				for (auto i = FDBMutationTypes::optionInfo.begin(); i != FDBMutationTypes::optionInfo.end(); ++i)
 					if (i->first < val)
 						val = i->first;
-				op = g_random->randomInt(0, val);
+				op = deterministicRandom()->randomInt(0, val);
 			} else if (arv < 0.50) {
 				int val = 0;
 				for (auto i = FDBMutationTypes::optionInfo.begin(); i != FDBMutationTypes::optionInfo.end(); ++i)
 					if (i->first > val)
 						val = i->first;
-				op = g_random->randomInt(val+1, UINT8_MAX);
+				op = deterministicRandom()->randomInt(val+1, UINT8_MAX);
 			} else {
 				int minval = UINT8_MAX, maxval = 0;
 				for (auto i = FDBMutationTypes::optionInfo.begin(); i != FDBMutationTypes::optionInfo.end(); ++i) {
@@ -849,7 +856,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					if (i->first > maxval)
 						maxval = i->first;
 				}
-				op = g_random->randomInt(minval, maxval+1);
+				op = deterministicRandom()->randomInt(minval, maxval+1);
 			}
 
 			pos = -1;
@@ -1052,19 +1059,19 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		Optional<Standalone<StringRef>> val;
 
 		TestSetOption(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTestCallback(id, workload, "TestSetOption") {
-			double arv = g_random->random01();
+			double arv = deterministicRandom()->random01();
 			if (arv < 0.25) {
 				int val = INT_MAX;
 				for (auto i = FDBTransactionOptions::optionInfo.begin(); i != FDBTransactionOptions::optionInfo.end(); ++i)
 					if (i->first < val)
 						val = i->first;
-				op = g_random->randomInt(INT_MIN, val);
+				op = deterministicRandom()->randomInt(INT_MIN, val);
 			} else if (arv < 0.50) {
 				int val = INT_MIN;
 				for (auto i = FDBTransactionOptions::optionInfo.begin(); i != FDBTransactionOptions::optionInfo.end(); ++i)
 					if (i->first > val)
 						val = i->first;
-				op = g_random->randomInt(val+1, INT_MAX);
+				op = deterministicRandom()->randomInt(val+1, INT_MAX);
 			} else {
 				int minval = INT_MAX, maxval = INT_MIN;
 				for (auto i = FDBTransactionOptions::optionInfo.begin(); i != FDBTransactionOptions::optionInfo.end(); ++i) {
@@ -1073,24 +1080,25 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					if (i->first > maxval)
 						maxval = i->first;
 				}
-				op = g_random->randomInt(minval, maxval+1);
+				op = deterministicRandom()->randomInt(minval, maxval+1);
 			}
 			if(op == FDBTransactionOptions::ACCESS_SYSTEM_KEYS || op == FDBTransactionOptions::READ_SYSTEM_KEYS) //do not test access system keys since the option is actually used by the workload
 				op = -1;
 
-			double orv = g_random->random01();
+			double orv = deterministicRandom()->random01();
 			if (orv >= 0.25) {
-				int64_t value_size = g_random->randomInt64(0, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1) + CLIENT_KNOBS->VALUE_SIZE_LIMIT;
+				int64_t value_size = deterministicRandom()->randomInt64(0, CLIENT_KNOBS->VALUE_SIZE_LIMIT + 1) + CLIENT_KNOBS->VALUE_SIZE_LIMIT;
 
 				std::string svalue;
 				svalue.reserve(value_size);
 				for (size_t j = 0; j < value_size; ++j)
-					svalue.append(1, (char) g_random->randomInt(0, 256));
+					svalue.append(1, (char) deterministicRandom()->randomInt(0, 256));
 
 				val = Standalone<StringRef>(StringRef(svalue));
 			}
 
 			contract = {
+				std::make_pair( error_code_invalid_option, ExceptionContract::Possible ),
 				std::make_pair( error_code_invalid_option_value, ExceptionContract::Possible ),
 				std::make_pair( error_code_client_invalid_operation, ExceptionContract::possibleIf((FDBTransactionOptions::Option)op == FDBTransactionOptions::READ_YOUR_WRITES_DISABLE || 
 				                                                                                   (FDBTransactionOptions::Option)op == FDBTransactionOptions::LOG_TRANSACTION) ),
@@ -1114,12 +1122,12 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		TestOnError(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTestCallback(id, workload, "TestOnError") {
 			errorcode = 0;
-			double erv = g_random->random01();
+			double erv = deterministicRandom()->random01();
 			if (erv >= 0.2) {
 				if (erv < 0.6)
-					errorcode = g_random->randomInt(INT_MIN, 0);
+					errorcode = deterministicRandom()->randomInt(INT_MIN, 0);
 				else
-					errorcode = g_random->randomInt(0, INT_MAX)+1;
+					errorcode = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
 		}
 

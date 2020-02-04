@@ -24,6 +24,7 @@
 
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbclient/FDBTypes.h"
 
 class ServerCoordinators;
 
@@ -57,9 +58,12 @@ Future<Void> tryBecomeLeader( ServerCoordinators const& coordinators,
 							  bool hasConnected,
 							  Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo)
 {
-	Reference<AsyncVar<Value>> serializedInfo( new AsyncVar<Value> );
-	Future<Void> m = tryBecomeLeaderInternal( coordinators, BinaryWriter::toValue(proposedInterface, IncludeVersion()), serializedInfo, hasConnected, asyncPriorityInfo );
-	return m || asyncDeserialize( serializedInfo, outKnownLeader );
+	Reference<AsyncVar<Value>> serializedInfo(new AsyncVar<Value>);
+	Future<Void> m = tryBecomeLeaderInternal(
+		coordinators,
+		FLOW_KNOBS->USE_OBJECT_SERIALIZER ? ObjectWriter::toValue(proposedInterface, IncludeVersion()) : BinaryWriter::toValue(proposedInterface, IncludeVersion()),
+		serializedInfo, hasConnected, asyncPriorityInfo);
+	return m || asyncDeserialize(serializedInfo, outKnownLeader, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
 }
 
 #pragma endregion

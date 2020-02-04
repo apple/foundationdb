@@ -24,7 +24,7 @@ Backup vs DR
 
 FoundationDB can backup a database to local disks, a blob store (such as Amazon S3), or to another FoundationDB database.  
 
-Backing up one database to another is a special form of backup is called DR backup or just DR for short.  DR stands for Disaster Recovery, as it can be used to keep two geographically separated databases in close synchronization to recover from a catastrophic disaster.  Once a DR  operation has reached 'differential' mode, the secondary database (the destination of the DR job) will always contains a *consistent* copy of the primary database (the source of the DR job) but it will be from some past point in time.  If the primary database is lost and applications continue using the secondary database, the "ACI" in ACID is preserved but D (Durability) is lost for some amount of most recent changes.  When DR is operating normally, the secondary database will lag behind the primary database by as little as a few seconds worth of database commits.
+Backing up one database to another is a special form of backup is called DR backup or just DR for short.  DR stands for Disaster Recovery, as it can be used to keep two geographically separated databases in close synchronization to recover from a catastrophic disaster.  Once a DR  operation has reached 'differential' mode, the secondary database (the destination of the DR job) will always contain a *consistent* copy of the primary database (the source of the DR job) but it will be from some past point in time.  If the primary database is lost and applications continue using the secondary database, the "ACI" in ACID is preserved but D (Durability) is lost for some amount of most recent changes.  When DR is operating normally, the secondary database will lag behind the primary database by as little as a few seconds worth of database commits.
 
 While a cluster is being used as the destination for a DR operation it will be locked to prevent accidental use or modification.
 
@@ -238,7 +238,7 @@ The ``start`` subcommand is used to start a backup.  If there is already a backu
 .. program:: fdbbackup modify
 
 ``modify``
----------
+----------
 
 The ``modify`` subcommand is used to modify parameters of a running backup.  All specified changes are made in a single transaction.
 
@@ -380,6 +380,24 @@ The ``list`` subcommand will list the backups at a given 'base' or shortened Bac
   This a shortened Backup URL which looks just like a Backup URL but without the backup <name> so that the list command will discover and list all of the backups in the bucket.
 
 
+.. program:: fdbbackup cleanup
+
+``cleanup``
+------------
+
+The ``cleanup`` subcommand will list orphaned backups and DRs and optionally remove their mutations.
+
+::
+
+   user@host$ fdbbackup cleanup [--delete_data] [--min_cleanup_seconds] [-C <CLUSTER_FILE>] 
+
+``--delete_data``
+  This flag will cause ``cleanup`` to remove mutations for the most stale backup or DR.
+
+``--min_cleanup_seconds``
+  Specifies the amount of time a backup or DR needs to be stale before ``cleanup`` will remove mutations for it. By default this is set to one hour.
+
+
 ``fdbrestore`` command line tool
 ================================
 
@@ -406,10 +424,8 @@ The following options apply to all commands:
 ``--blob_credentials <FILE>``
   Use FILE as a :ref:`Blob Credential File<blob-credential-files>`.  Can be used multiple times.
 
-The following options apply to all commands except ``start``:
-
-``-C <CLUSTER_FILE>``
-  Path to the cluster file that should be used to connect to the FoundationDB cluster you want to use.  If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
+``--dest_cluster_file <CONNFILE>``
+  Required.  Path to the cluster file that should be used to connect to the FoundationDB cluster you are restoring to.
 
 .. _restore-start:
 
@@ -423,10 +439,6 @@ The ``start`` command will start a new restore on the specified (or default) tag
 
 ``-r <BACKUP_URL>``
   Required.  Specifies the Backup URL for the source backup data to restore to the database.  The source data must be accessible by the ``backup_agent`` processes for the cluster.
-
-``--dest_cluster_file <CONNFILE>``
-  Required.  The backup data will be restored into this cluster.
-
 
 ``-w``
   Wait for the restore to reach a final state (such as complete) before exiting.  Prints a progress update every few seconds.  Behavior is identical to that of the wait command.

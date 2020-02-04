@@ -64,7 +64,7 @@ module FDB
             end
             _bkey = _ekey
           rescue FDB::Error => e
-            if e.code == 1007 and _bkey != _lastbkey # if we get a past_version and *something* has happened, then we are no longer transactional
+            if e.code == 1007 and _bkey != _lastbkey # if we get a transaction_too_old and *something* has happened, then we are no longer transactional
               _tr = _tr.db.create_transaction
             else
               _tr.on_error(e).wait

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="14.1" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|X64">
       <Configuration>Debug</Configuration>
@@ -20,8 +20,6 @@
     <ActorCompiler Include="genericactors.actor.cpp" />
     <ActorCompiler Include="FlowTransport.actor.cpp" />
     <ActorCompiler Include="IAsyncFile.actor.cpp" />
-    <ClCompile Include="crc32c.cpp" />
-    <ClCompile Include="generated-constants.cpp" />
     <ClCompile Include="Platform.cpp" />
     <ClCompile Include="AsyncFileWriteChecker.cpp" />
     <ClCompile Include="libcoroutine\Common.c" />
@@ -73,7 +71,6 @@
     </ActorCompiler>
     <ClInclude Include="AsyncFileWriteChecker.h" />
     <ClInclude Include="ContinuousSample.h" />
-    <ClInclude Include="crc32c.h" />
     <ClInclude Include="FailureMonitor.h" />
     <ActorCompiler Include="LoadBalance.actor.h">
       <EnableCompile>false</EnableCompile>
@@ -109,6 +106,7 @@
     <ClInclude Include="simulator.h" />
     <ClInclude Include="sim_validation.h" />
     <ClInclude Include="Smoother.h" />
+    <ClInclude Include="TimedRequest.h" />
     <ClInclude Include="TLSConnection.h" />
     <ClInclude Include="TraceFileIO.h" />
     <ClInclude Include="zlib\zlib.h" />
@@ -138,12 +136,12 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|X64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v140_xp</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|X64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v140_xp</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -162,8 +160,8 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <CustomBuildStep>
-      <Command>echo const char *hgVersion = "Current version id not currently supported within Windows."; &gt; hgVersion.temp.h &amp;&amp; fc /b hgVersion.temp.h hgVersion.h &gt; nul || copy hgVersion.temp.h hgVersion.h &gt; nul</Command>
-      <Message>Checking HG source version</Message>
+      <Command>echo const char *sourceVersion = "Current version id not currently supported within Windows."; &gt; SourceVersion.temp.h &amp;&amp; fc /b SourceVersion.temp.h SourceVersion.h &gt; nul || copy SourceVersion.temp.h SourceVersion.h &gt; nul</Command>
+      <Message>Checking source version</Message>
       <Outputs>fake.out</Outputs>
     </CustomBuildStep>
   </ItemDefinitionGroup>
@@ -181,6 +179,7 @@
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/bigobj @../flow/no_intellisense.opt %(AdditionalOptions)</AdditionalOptions>
+			<LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -209,6 +208,7 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <MinimalRebuild>false</MinimalRebuild>
+			<LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

@@ -24,20 +24,8 @@
 #include "flow/flow.h"
 #include "flow/UnitTest.h"
 
-IPAddress::IPAddress() : isV6addr(false) {
-	addr.v4 = 0;
-}
-
-IPAddress::IPAddress(const IPAddressStore& v6addr) : isV6addr(true) {
-	addr.v6 = v6addr;
-}
-
-IPAddress::IPAddress(uint32_t v4addr) : isV6addr(false) {
-	addr.v4 = v4addr;
-}
-
 bool IPAddress::operator==(const IPAddress& rhs) const {
-	return isV6addr == rhs.isV6addr && (isV6addr ? addr.v6 == rhs.addr.v6 : addr.v4 == rhs.addr.v4);
+	return addr == rhs.addr;
 }
 
 bool IPAddress::operator!=(const IPAddress& addr) const {
@@ -45,20 +33,15 @@ bool IPAddress::operator!=(const IPAddress& addr) const {
 }
 
 bool IPAddress::operator<(const IPAddress& rhs) const {
-	if(isV6addr != rhs.isV6addr) {
-		return isV6addr < rhs.isV6addr;
-	}
-	if(isV6addr) {
-		return addr.v6 < rhs.addr.v6;
-	}
-	return addr.v4 < rhs.addr.v4;
+	return addr < rhs.addr;
 }
 
 std::string IPAddress::toString() const {
-	if (isV6addr) {
-		return boost::asio::ip::address_v6(addr.v6).to_string();
+	if (isV6()) {
+		return boost::asio::ip::address_v6(boost::get<IPAddressStore>(addr)).to_string();
 	} else {
-		return format("%d.%d.%d.%d", (addr.v4 >> 24) & 0xff, (addr.v4 >> 16) & 0xff, (addr.v4 >> 8) & 0xff, addr.v4 & 0xff);
+		auto ip = boost::get<uint32_t>(addr);
+		return format("%d.%d.%d.%d", (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
 	}
 }
 
@@ -72,10 +55,11 @@ Optional<IPAddress> IPAddress::parse(std::string str) {
 }
 
 bool IPAddress::isValid() const {
-	if (isV6addr) {
-		return std::any_of(addr.v6.begin(), addr.v6.end(), [](uint8_t part) { return part != 0; });
+	if (isV6()) {
+		const auto& ip = boost::get<IPAddressStore>(addr);
+		return std::any_of(ip.begin(), ip.end(), [](uint8_t part) { return part != 0; });
 	}
-	return addr.v4 != 0;
+	return boost::get<uint32_t>(addr) != 0;
 }
 
 NetworkAddress NetworkAddress::parse( std::string const& s ) {
@@ -159,7 +143,7 @@ std::string formatIpPort(const IPAddress& ip, uint16_t port) {
 Future<Reference<IConnection>> INetworkConnections::connect( std::string host, std::string service, bool useTLS ) {
 	// Use map to create an actor that returns an endpoint or throws
 	Future<NetworkAddress> pickEndpoint = map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const &addresses) -> NetworkAddress {
-		NetworkAddress addr = addresses[g_random->randomInt(0, addresses.size())];
+		NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
 		if(useTLS)
 			addr.flags = NetworkAddress::FLAG_TLS;
 		return addr;

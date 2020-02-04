@@ -42,12 +42,9 @@ JSON format
 
 The following format informally describes the JSON containing the status data. The possible values of ``<name_string>`` and ``<description_string>`` are described in :ref:`mr-status-message`. The format is representative: *any field can be missing at any time*, depending on the database state. Clients should be prepared to flexibly handle format variations resulting from different database states.
 
-.. code-block:: javascript
 .. include:: mr-status-json-schemas.rst.inc
 
-.. node:: |json-status-format|
-
-.. mr-status-message:
+.. _mr-status-message:
 
 Message components
 ------------------
@@ -96,7 +93,7 @@ cluster.processes.<process>.messages  incorrect_cluster_file_contents       Clus
 cluster.processes.<process>.messages  io_error                              <error> occured in <subsystem>
 cluster.processes.<process>.messages  platform_error                        <error> occured in <subsystem>
 cluster.processes.<process>.messages  process_error                         <error> occured in <subsystem>
-====================================  =============================== =================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================
+====================================  ====================================  =================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================
 
 The JSON path ``cluster.recovery_state``, when it exists, is an Object containing at least ``"name"`` and ``"description"``.  The possible values for those fields are in the following table:
 
@@ -131,4 +128,5 @@ min_free_space                      Running out of space (approaching 100MB limi
 min_free_space_ratio                Running out of space (approaching 5% limit).
 log_server_min_free_space           Log server running out of space (approaching 100MB limit).
 log_server_min_free_space_ratio     Log server running out of space (approaching 5% limit).
+storage_server_durability_lag       Storage server durable version falling behind.
 =================================== ====================================================

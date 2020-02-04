@@ -28,10 +28,10 @@
 #endif
 
 #if !defined(FDB_API_VERSION)
-#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 610)
+#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 700)
 #elif FDB_API_VERSION < 13
 #error API version no longer supported (upgrade to 13)
-#elif FDB_API_VERSION > 610
+#elif FDB_API_VERSION > 700
 #error Requested API version requires a newer version of this header
 #endif
 
@@ -91,12 +91,21 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*), void *hook_parameter);
 
 #pragma pack(push, 4)
+#if FDB_API_VERSION >= 700
+    typedef struct keyvalue {
+        const uint8_t* key;
+        int key_length;
+        const uint8_t* value;
+        int value_length;
+    } FDBKeyValue;
+#else
     typedef struct keyvalue {
         const void* key;
         int key_length;
         const void* value;
         int value_length;
     } FDBKeyValue;
+#endif
 #pragma pack(pop)
 
     DLLEXPORT void fdb_future_cancel( FDBFuture* f );
@@ -121,7 +130,7 @@ extern "C" {
 #endif
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
-    fdb_future_get_version( FDBFuture* f, int64_t* out_version );
+    fdb_future_get_int64( FDBFuture* f, int64_t* out );
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_future_get_key( FDBFuture* f, uint8_t const** out_key,
@@ -225,6 +234,13 @@ extern "C" {
     fdb_transaction_get_committed_version( FDBTransaction* tr,
                                            int64_t* out_version );
 
+    // This function intentionally returns an FDBFuture instead of an integer directly,
+    // so that calling this API can see the effect of previous mutations on the transaction.
+    // Specifically, mutations are applied asynchronously by the main thread. In order to
+    // see them, this call has to be serviced by the main thread too.
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+    fdb_transaction_get_approximate_size(FDBTransaction* tr);
+
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_versionstamp( FDBTransaction* tr );
 
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
@@ -253,6 +269,13 @@ extern "C" {
 
     /* LEGACY API VERSIONS */
 
+#if FDB_API_VERSION < 620
+    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
+    fdb_future_get_version( FDBFuture* f, int64_t* out_version );
+#else
+    #define fdb_future_get_version(f, ov) FDB_REMOVED_FUNCTION
+#endif
+
 #if FDB_API_VERSION < 610 || defined FDB_INCLUDE_LEGACY_TYPES
     typedef struct FDB_cluster FDBCluster;
 
@@ -280,6 +303,13 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
     fdb_cluster_create_database( FDBCluster* c, uint8_t const* db_name,
                                  int db_name_length );
+#else
+    #define fdb_future_get_cluster(f, oc) FDB_REMOVED_FUNCTION
+    #define fdb_future_get_database(f, od) FDB_REMOVED_FUNCTION
+    #define fdb_create_cluster(cfp) FDB_REMOVED_FUNCTION
+    #define fdb_cluster_destroy(c) FDB_REMOVED_FUNCTION
+    #define fdb_cluster_set_option(c, o, v, vl) FDB_REMOVED_FUNCTION
+    #define fdb_cluster_create_database(c, dn, dnl) FDB_REMOVED_FUNCTION
 #endif
 
 #if FDB_API_VERSION < 23
