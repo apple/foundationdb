@@ -31,6 +31,7 @@
 #include "fdbclient/MutationList.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 namespace file_converter {
 
@@ -315,10 +316,11 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 
 		if (!fp->mutations.empty() && fp->mutations.back().version.version >= minVersion) return Void();
 
+		state int64_t len;
 		try {
 			// Read block by block until we see the minVersion
 			loop {
-				state int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - fp->offset);
+				len = std::min<int64_t>(file.blockSize, file.fileSize - fp->offset);
 				if (len == 0) {
 					fp->eof = true;
 					return Void();
