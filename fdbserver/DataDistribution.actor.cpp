@@ -23,6 +23,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "fdbrpc/Replication.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -63,6 +64,7 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	LocalityEntry localityEntry;
 	Promise<Void> updated;
 	AsyncVar<bool> wrongStoreTypeToRemove;
+	AsyncVar<bool> ssVersionTooFarBehind;
 	// A storage server's StoreType does not change.
 	// To change storeType for an ip:port, we destroy the old one and create a new one.
 	KeyValueStoreType storeType; // Storage engine type
@@ -109,7 +111,7 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 	}
 };
 
-ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
+ACTOR Future<Void> updateServerMetrics( TCServerInfo *server, Database cx ) {
 	state StorageServerInterface ssi = server->lastKnownInterface;
 	state Future<ErrorOr<GetStorageMetricsReply>> metricsRequest = ssi.getStorageMetrics.tryGetReply( GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch );
 	state Future<Void> resetRequest = Never();
@@ -124,7 +126,7 @@ ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
 					if(server->updated.canBeSet()) {
 						server->updated.send(Void());
 					}
-					return Void();
+					break;
 				}
 				metricsRequest = Never();
 				resetRequest = delay( SERVER_KNOBS->METRIC_DELAY, TaskPriority::DataDistributionLaunch );
@@ -148,10 +150,24 @@ ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
 			}
 		}
 	}
+
+	if(cx.getPtr()) {
+		Version versionNow = wait(runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) {
+								tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+								return tr->getReadVersion(); }));
+		Version versionDiff = versionNow - server->serverMetrics.get().version;
+		if(versionDiff > 15000000) { // TODO: Knobbify
+			TraceEvent(SevInfo, "SSVersionDiff").detail("ServerId", server->id.toString()).detail("VersionNow", versionNow).detail("SSVersion", server->serverMetrics.get().version).detail("Diff", versionDiff);
+			server->ssVersionTooFarBehind.set(true);
+		} else if(versionDiff < 10000000) {
+			server->ssVersionTooFarBehind.set(false);
+		}
+	}
+	return Void();
 }
 
-ACTOR Future<Void> updateServerMetrics( Reference<TCServerInfo> server ) {
-	wait( updateServerMetrics( server.getPtr() ) );
+ACTOR Future<Void> updateServerMetrics( Reference<TCServerInfo> server, Database cx = Database() ) {
+	wait( updateServerMetrics( server.getPtr(), cx ) );
 	return Void();
 }
 
@@ -376,15 +392,16 @@ private:
 struct ServerStatus {
 	bool isFailed;
 	bool isUndesired;
+	bool isTooFarBehind;
 	bool isWrongConfiguration;
 	bool initialized; //AsyncMap erases default constructed objects
 	LocalityData locality;
-	ServerStatus() : isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
-	ServerStatus( bool isFailed, bool isUndesired, LocalityData const& locality ) : isFailed(isFailed), isUndesired(isUndesired), locality(locality), isWrongConfiguration(false), initialized(true) {}
-	bool isUnhealthy() const { return isFailed || isUndesired; }
-	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" : "Healthy"; }
+	ServerStatus() : isFailed(true), isUndesired(false), isTooFarBehind(false), isWrongConfiguration(false), initialized(false) {}
+	ServerStatus( bool isFailed, bool isUndesired, bool isTooFarBehind, LocalityData const& locality ) : isFailed(isFailed), isUndesired(isUndesired), isTooFarBehind(isTooFarBehind), locality(locality), isWrongConfiguration(false), initialized(true) {}
+	bool isUnhealthy() const { return isFailed || isUndesired || isTooFarBehind; }
+	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" : isTooFarBehind ? "TooFarBehind" : "Healthy"; }
 
-	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && locality == r.locality && initialized == r.initialized; }
+	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isTooFarBehind == r.isTooFarBehind && isWrongConfiguration == r.isWrongConfiguration && locality == r.locality && initialized == r.initialized; }
 
 	//If a process has reappeared without the storage server that was on it (isFailed == true), we don't need to exclude it
 	//We also don't need to exclude processes who are in the wrong configuration (since those servers will be removed)
@@ -3330,10 +3347,10 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 	}
 }
 
-ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server) {
+ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server, Database cx) {
 	state double lastUpdate = now();
 	loop {
-		wait( updateServerMetrics( server ) );
+		wait( updateServerMetrics( server, cx ) );
 		wait( delayUntil( lastUpdate + SERVER_KNOBS->STORAGE_METRICS_POLLING_DELAY + SERVER_KNOBS->STORAGE_METRICS_RANDOM_DELAY * deterministicRandom()->random01(), TaskPriority::DataDistributionLaunch ) );
 		lastUpdate = now();
 	}
@@ -3474,9 +3491,9 @@ ACTOR Future<Void> storageServerTracker(
     TCServerInfo* server, // This actor is owned by this TCServerInfo, point to server_info[id]
     Promise<Void> errorOut, Version addedVersion) {
 	state Future<Void> failureTracker;
-	state ServerStatus status( false, false, server->lastKnownInterface.locality );
+	state ServerStatus status( false, false, false, server->lastKnownInterface.locality );
 	state bool lastIsUnhealthy = false;
-	state Future<Void> metricsTracker = serverMetricsPolling( server );
+	state Future<Void> metricsTracker = serverMetricsPolling( server, self->cx );
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 
 	state Future<Void> storeTypeTracker = keyValueStoreTypeTracker(self, server);
@@ -3489,6 +3506,7 @@ ACTOR Future<Void> storageServerTracker(
 		loop {
 			status.isUndesired = false;
 			status.isWrongConfiguration = false;
+			status.isTooFarBehind = server->ssVersionTooFarBehind.get();
 			hasWrongDC = !isCorrectDC(self, server);
 			hasInvalidLocality =
 			    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
@@ -3603,6 +3621,11 @@ ACTOR Future<Void> storageServerTracker(
 				self->restartTeamBuilder.trigger(); // This does not trigger building teams if there exist healthy teams
 			}
 			lastIsUnhealthy = status.isUnhealthy();
+
+			if(status.isTooFarBehind != server->ssVersionTooFarBehind.get()) {
+				TraceEvent("SSVersionHEREE", self->distributorId); // TODO: Remove
+				continue;
+			}
 
 			state bool recordTeamCollectionInfo = false;
 			choose {
@@ -3722,7 +3745,7 @@ ACTOR Future<Void> storageServerTracker(
 					interfaceChanged = server->onInterfaceChanged;
 					// Old failureTracker for the old interface will be actorCancelled since the handler of the old
 					// actor now points to the new failure monitor actor.
-					status = ServerStatus( status.isFailed, status.isUndesired, server->lastKnownInterface.locality );
+					status = ServerStatus( status.isFailed, status.isUndesired, status.isTooFarBehind, server->lastKnownInterface.locality );
 
 					// self->traceTeamCollectionInfo();
 					recordTeamCollectionInfo = true;
@@ -3751,6 +3774,9 @@ ACTOR Future<Void> storageServerTracker(
 					server->wakeUpTracker = Promise<Void>();
 				}
 				when(wait(storeTypeTracker)) {}
+				when( wait(server->ssVersionTooFarBehind.onChange()) ) { // TODO: Remove
+					TraceEvent("SSVersionTooFarBehind", self->distributorId).detail("ServerId", server->id.toString()).detail("VersionDifference", server->ssVersionTooFarBehind.get());
+				}
 			}
 
 			if (recordTeamCollectionInfo) {
@@ -4843,7 +4869,7 @@ DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy>
 		interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(id % 5)));
 		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(id % 3)));
 		collection->server_info[uid] = Reference<TCServerInfo>(new TCServerInfo(interface, ProcessClass(), true, collection->storageServerSet));
-		collection->server_status.set(uid, ServerStatus(false, false, interface.locality));
+		collection->server_status.set(uid, ServerStatus(false, false, false, interface.locality));
 		collection->checkAndCreateMachine(collection->server_info[uid]);
 	}
 
@@ -4885,7 +4911,7 @@ DDTeamCollection* testMachineTeamCollection(int teamSize, Reference<IReplication
 		collection->server_info[uid] =
 		    Reference<TCServerInfo>(new TCServerInfo(interface, ProcessClass(), true, collection->storageServerSet));
 
-		collection->server_status.set(uid, ServerStatus(false, false, interface.locality));
+		collection->server_status.set(uid, ServerStatus(false, false, false, interface.locality));
 	}
 
 	int totalServerIndex = collection->constructMachinesFromServers();

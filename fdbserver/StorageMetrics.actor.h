@@ -378,7 +378,7 @@ struct StorageServerMetrics {
 		}
 	}
 
-	void getStorageMetrics( GetStorageMetricsRequest req, StorageBytes sb, double bytesInputRate ){
+	void getStorageMetrics( GetStorageMetricsRequest req, StorageBytes sb, double bytesInputRate, Version version ){
 		GetStorageMetricsReply rep;
 
 		// SOMEDAY: make bytes dynamic with hard disk space
@@ -404,6 +404,8 @@ struct StorageServerMetrics {
 		rep.capacity.bytesReadPerKSecond = 100e9;
 
 		rep.bytesInputRate = bytesInputRate;
+
+		rep.version = version;
 
 		req.reply.send(rep);
 	}

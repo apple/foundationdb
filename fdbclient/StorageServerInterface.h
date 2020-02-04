@@ -394,6 +394,7 @@ struct GetStorageMetricsReply {
 	StorageMetrics available;
 	StorageMetrics capacity;
 	double bytesInputRate;
+	Version version; // current storage server version
 
 	GetStorageMetricsReply() : bytesInputRate(0) {}
 
