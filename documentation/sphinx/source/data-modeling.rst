@@ -283,7 +283,7 @@ If data is migrated from one FDB cluster to another, for example if a specialize
 * The new FDB cluster can restore at a higher version than the backup was taken, by setting the ``\xff/minRequiredCommitVersion`` metadata key.
 * The 2 byte user version provided by the client can be used to preserve generations across restores.  This method will only provide uniqueness, not sequential serialization, across restores.
 
-There are two concepts of versionstamp depending on your context. At the fdb_c client level, or any binding outside of the Tuple layer, the 'versionstamp' is 10 bytes: the transaction's commit version (8 bytes) and transaction batch order (2 bytes). The user can manually add 2 additional bytes to provide application level ordering. The tuple layer provides a useful api for getting and setting both the 10 byte system version and the 2 byte user version. In the context of the Tuple layer, the 'versionstamp' is all 12 bytes. For examples on how to use the version stamp in the python binding, see the :doc:`api-python` documentation.
+There are two concepts of versionstamp depending on your context. At the fdb_c client level, or any binding outside of the Tuple layer, the 'versionstamp' is 10 bytes: the transaction's commit version (8 bytes) and transaction batch order (2 bytes). The user can manually add 2 additional bytes to provide application level ordering. The tuple layer provides a useful api for getting and setting both the 10 byte system version and the 2 byte user version. In the context of the Tuple layer, the 'versionstamp' is all 12 bytes. For examples on how to use the versionstamp in the python binding, see the :doc:`api-python` documentation.
 
 .. _data-modeling-entity-relationship:
 
