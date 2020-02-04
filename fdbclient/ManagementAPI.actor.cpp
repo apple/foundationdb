@@ -108,7 +108,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 
 	if (storeType.present()) {
 		out[p+"log_engine"] = format("%d", logType.get().operator KeyValueStoreType::StoreType());
-		out[p+"storage_engine"] = format("%d", storeType.get().operator KeyValueStoreType::StoreType());
+		out[p+"storage_engine"] = format("%d", KeyValueStoreType::StoreType(storeType.get()));
 		return out;
 	}
 
