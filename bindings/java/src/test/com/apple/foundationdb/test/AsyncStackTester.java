@@ -667,10 +667,7 @@ public class AsyncStackTester {
 			};
 
 			if(operations == null || ++currentOp == operations.size()) {
-				Transaction tr = db.createTransaction();
-
-				return tr.getRange(nextKey, endKey, 1000).asList()
-				.whenComplete((x, t) -> tr.close())
+				return db.readAsync(readTr -> readTr.getRange(nextKey, endKey, 1000).asList())
 				.thenComposeAsync(next -> {
 					if(next.size() < 1) {
 						//System.out.println("No key found after: " + ByteArrayUtil.printable(nextKey.getKey()));

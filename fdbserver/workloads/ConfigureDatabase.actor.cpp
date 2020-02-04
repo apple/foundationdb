@@ -27,7 +27,7 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // "ssd" is an alias to the preferred type which skews the random distribution toward it but that's okay.
-static const char* storeTypes[] = { "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2" };
+static const char* storeTypes[] = { "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "memory-radixtree-beta" };
 static const char* logTypes[] = {
 	"log_engine:=1", "log_engine:=2",
 	"log_spill:=1", "log_spill:=2",

@@ -292,6 +292,11 @@ public:
 	double SAMPLE_POLL_TIME;
 	int64_t RESOLVER_STATE_MEMORY_LIMIT;
 
+	// Backup Worker
+	double BACKUP_TIMEOUT;  // master's reaction time for backup failure
+	double BACKUP_NOOP_POP_DELAY;
+	int BACKUP_FILE_BLOCK_BYTES;
+
 	//Cluster Controller
 	double CLUSTER_CONTROLLER_LOGGING_DELAY;
 	double MASTER_FAILURE_REACTION_TIME;

@@ -27,9 +27,10 @@
 
 
 typedef std::string	repTestType;
+    //string value defining test type
 
 extern repTestType	convertToTestType(int	iValue);
-
+    //converts integer value to a test type
 
 extern int testReplication();
 
@@ -37,6 +38,12 @@ extern double ratePolicy(
 	Reference<LocalitySet> &					localitySet,
 	Reference<IReplicationPolicy>	const&			policy,
 	unsigned int							nSelectTests);
+   //returns the value for the rate policy
+   //given a localitySet, replication policy and number of selected tests, apply the
+   //policy and return the rating
+   //rating can be -1 there are no unique results failing while applying the replication
+   //policy, otherwise largest mode from the items per unique set of locaility entry
+   //are returned.
 
 extern bool findBestPolicySet(
 	std::vector<LocalityEntry>&	bestResults,
@@ -45,6 +52,11 @@ extern bool findBestPolicySet(
 	unsigned int								nMinItems,
 	unsigned int								nSelectTests,
 	unsigned int								nPolicyTests);
+    //returns the best policy set
+	//given locality set, replication policy, number of min items, number of select
+	//test, number of policy tests, find the best from locality set, including few
+	//random items, get the rate policy having test rate, best rate and returning
+	//the success state.
 
 extern bool findBestUniquePolicySet(
 	std::vector<LocalityEntry>&	bestResults,
