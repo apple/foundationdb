@@ -356,12 +356,6 @@ void TLSOptions::set_verify_peers( std::vector<std::string> const& verify_peers 
 	verify_peers_set = true;
 }
 
-void TLSOptions::register_network() {
-	// Simulation relies upon being able to call this multiple times, and have it override g_network
-	// each time it's called.
-	new TLSNetworkConnections( Reference<TLSOptions>::addRef( this ) );
-}
-
 ACTOR static Future<ErrorOr<Standalone<StringRef>>> readEntireFile( std::string filename ) {
 	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
 	state int64_t filesize = wait(file->size());

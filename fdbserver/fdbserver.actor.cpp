@@ -81,6 +81,8 @@
 #include "flow/SimpleOpt.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+#define CERT_FILE_MAX_SIZE (5 * 1024 * 1024)
+
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, 
 	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID, 
@@ -961,7 +963,7 @@ int main(int argc, char* argv[]) {
 		int minTesterCount = 1;
 		bool testOnServers = false;
 
-		Reference<TLSOptions> tlsOptions = Reference<TLSOptions>( new TLSOptions );
+		boost::asio::ssl::context sslContext(boost::asio::ssl::context::tlsv12);
 		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
 		std::vector<std::string> tlsVerifyPeers;
 		double fileIoTimeout = 0.0;
@@ -1551,7 +1553,21 @@ int main(int argc, char* argv[]) {
 			startNewSimulator();
 			openTraceFile(NetworkAddress(), rollsize, maxLogsSize, logFolder, "trace", logGroup);
 		} else {
-			g_network = newNet2(useThreadPool, true);
+#ifndef TLS_DISABLED
+			if ( tlsCertPath.size() ) {
+				sslContext.use_certificate_chain_file(tlsCertPath);
+			}
+			if (tlsCAPath.size()) {
+				std::string cert = readFileBytes(tlsCAPath, CERT_FILE_MAX_SIZE);
+				sslContext.add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
+			}
+			if (tlsKeyPath.size()) {
+				sslContext.use_private_key_file(tlsKeyPath, boost::asio::ssl::context::pem);
+			}
+			//if ( tlsVerifyPeers.size() ) FIXME
+			//	tlsOptions->set_verify_peers( tlsVerifyPeers );
+#endif
+			g_network = newNet2(useThreadPool, true, &sslContext, tlsPassword);
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
@@ -1565,22 +1581,7 @@ int main(int argc, char* argv[]) {
 
 			openTraceFile(publicAddresses.address, rollsize, maxLogsSize, logFolder, "trace", logGroup);
 
-#ifndef TLS_DISABLED
-			if ( tlsCertPath.size() )
-				tlsOptions->set_cert_file( tlsCertPath );
-			if (tlsCAPath.size())
-				tlsOptions->set_ca_file(tlsCAPath);
-			if (tlsKeyPath.size()) {
-				if (tlsPassword.size())
-					tlsOptions->set_key_password(tlsPassword);
 
-				tlsOptions->set_key_file(tlsKeyPath);
-			}
-			if ( tlsVerifyPeers.size() )
-				tlsOptions->set_verify_peers( tlsVerifyPeers );
-
-			tlsOptions->register_network();
-#endif
 			if (expectsPublicAddress) {
 				for (int ii = 0; ii < (publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
 					const NetworkAddress& publicAddress = ii==0 ? publicAddresses.address : publicAddresses.secondaryAddress.get();
@@ -1789,7 +1790,7 @@ int main(int argc, char* argv[]) {
 					}
 				}
 			}
-			setupAndRun( dataFolder, testFile, restarting, (isRestoring >= 1), whitelistBinPaths, tlsOptions);
+			setupAndRun( dataFolder, testFile, restarting, (isRestoring >= 1), whitelistBinPaths, Reference<TLSOptions>()); //FIXME
 			g_simulator.run();
 		} else if (role == FDBD) {
 			ASSERT( connectionFile );

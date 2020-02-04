@@ -27,6 +27,7 @@
 #include <stdint.h>
 #include <variant>
 #include "boost/asio.hpp"
+#include "boost/asio/ssl.hpp"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
 
@@ -390,7 +391,7 @@ typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
 class INetwork;
 extern INetwork* g_network;
-extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false);
+extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false, boost::asio::ssl::context* sslContext = nullptr, std::string tlsPassword = "");
 
 class INetwork {
 public:

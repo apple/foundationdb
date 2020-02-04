@@ -85,8 +85,6 @@ struct TLSOptions : ReferenceCounted<TLSOptions> {
 	void set_key_data( std::string const& key_data );
 	void set_verify_peers( std::vector<std::string> const& verify_peers );
 
-	void register_network();
-
 	Reference<ITLSPolicy> get_policy(PolicyType type);
 	bool enabled();
 

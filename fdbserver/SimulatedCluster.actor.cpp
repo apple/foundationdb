@@ -117,7 +117,6 @@ static void simInitTLS(Reference<TLSOptions> tlsOptions) {
 	tlsOptions->set_cert_data( certBytes );
 	tlsOptions->set_key_data( certBytes );
 	tlsOptions->set_verify_peers(std::vector<std::string>(1, "Check.Valid=0"));
-	tlsOptions->register_network();
 }
 
 ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
@@ -247,9 +246,6 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				//SOMEDAY: test lower memory limits, without making them too small and causing the database to stop making progress
 				FlowTransport::createInstance(processClass == ProcessClass::TesterClass || runBackupAgents == AgentOnly, 1);
 				Sim2FileSystem::newFileSystem();
-				if (sslEnabled) {
-					tlsOptions->register_network();
-				}
 
 				vector<Future<Void>> futures;
 				for (int listenPort = port; listenPort < port + listenPerProcess; ++listenPort) {

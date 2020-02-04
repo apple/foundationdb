@@ -988,10 +988,12 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 	try {
 		loop {
 			Reference<IConnection> conn = wait( listener->accept() );
-			TraceEvent("ConnectionFrom", conn->getDebugID()).suppressFor(1.0)
-				.detail("FromAddress", conn->getPeerAddress())
-				.detail("ListenAddress", listenAddr.toString());
-			incoming.add( connectionIncoming(self, conn) );
+			if(conn) {
+				TraceEvent("ConnectionFrom", conn->getDebugID()).suppressFor(1.0)
+					.detail("FromAddress", conn->getPeerAddress())
+					.detail("ListenAddress", listenAddr.toString());
+				incoming.add( connectionIncoming(self, conn) );
+			}
 			wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskPriority::WriteSocket));
 		}
 	} catch (Error& e) {
