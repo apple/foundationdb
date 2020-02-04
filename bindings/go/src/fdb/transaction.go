@@ -39,7 +39,7 @@ type ReadTransaction interface {
 	GetReadVersion() FutureInt64
 	GetDatabase() Database
 	Snapshot() Snapshot
-	GetEstimatedRangeSizeBytes(r Range) FutureInt64
+	GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64
 
 	ReadTransactor
 }
