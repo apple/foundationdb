@@ -20,7 +20,6 @@
 
 #include <fstream>
 #include "fdbrpc/simulator.h"
-#include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
