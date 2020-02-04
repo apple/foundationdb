@@ -107,7 +107,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	// Add any new store types to fdbserver/workloads/ConfigureDatabase, too
 
 	if (storeType.present()) {
-		out[p+"log_engine"] = format("%d", logType.get().operator KeyValueStoreType::StoreType());
+		out[p+"log_engine"] = format("%d", logType.get().storeType());
 		out[p+"storage_engine"] = format("%d", KeyValueStoreType::StoreType(storeType.get()));
 		return out;
 	}

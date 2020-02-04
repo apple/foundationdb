@@ -663,6 +663,7 @@ struct KeyValueStoreType {
 			this->type = END;
 	}
 	operator StoreType() const { return StoreType(type); }
+	StoreType storeType() const { return StoreType(type); }
 
 	template <class Ar>
 	void serialize(Ar& ar) { serializer(ar, type); }
