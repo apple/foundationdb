@@ -612,6 +612,11 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 }
 
 // Parsing the data blocks in a range file
+// kvOpsIter: saves the parsed versioned-mutations for the sepcific LoadingParam;
+// samplesIter: saves the sampled mutations from the parsed versioned-mutations;
+// bc: backup container to read the backup file
+// version: the version the parsed mutations should be at
+// asset: RestoreAsset about which backup data should be parsed
 ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
     std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc, Reference<IBackupContainer> bc,
@@ -691,9 +696,12 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	return Void();
 }
 
-// Parse data blocks in a log file into a vector of <string, string> pairs. Each pair.second contains the mutations at a
-// version encoded in pair.first Step 1: decodeLogFileBlock into <string, string> pairs Step 2: Concatenate the
-// pair.second of pairs with the same pair.first.
+// Parse data blocks in a log file into a vector of <string, string> pairs.
+// Each pair.second contains the mutations at a version encoded in pair.first;
+// Step 1: decodeLogFileBlock into <string, string> pairs;
+// Step 2: Concatenate the second of pairs with the same pair.first.
+// pProcessedFileOffset: ensure each data block is processed in order exactly once;
+// pMutationMap: concatenated mutation list string at the mutation's commit version
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
                                                            SerializedMutationListMap* pMutationMap,
                                                            SerializedMutationPartMap* pMutationPartMap,
