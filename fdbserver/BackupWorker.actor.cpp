@@ -82,6 +82,7 @@ struct BackupData {
 
 		BackupData* self = nullptr;
 		Version startVersion = invalidVersion;
+		Version lastSavedVersion = invalidVersion;
 		Future<Reference<IBackupContainer>> container;
 		Future<Optional<std::vector<KeyRange>>> ranges; // Key ranges of this backup
 		bool allWorkerStarted = false; // Only worker with Tag(-2,0) uses & sets this field
@@ -421,8 +422,11 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 			continue;
 		}
 		uidMap.emplace(uidInfo.first, logFileFutures.size());
+		if (uidInfo.second.lastSavedVersion == invalidVersion) {
+			uidInfo.second.lastSavedVersion = self->messages[0].getVersion();
+		}
 		logFileFutures.push_back(uidInfo.second.container.get()->writeTaggedLogFile(
-		    self->messages[0].getVersion(), popVersion, blockSize, self->tag.id));
+		    uidInfo.second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id));
 	}
 	wait(waitForAll(logFileFutures));
 
@@ -484,6 +488,9 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		    .detail("FileSize", file->size())
 		    .detail("TagId", self->tag.id)
 		    .detail("File", file->getFileName());
+	}
+	for (const auto uidIdx : uidMap) {
+		self->backups[uidIdx.first].lastSavedVersion = popVersion + 1;
 	}
 
 	return Void();
