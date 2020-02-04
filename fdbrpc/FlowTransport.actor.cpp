@@ -1092,13 +1092,16 @@ Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
 }
 
 void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
+	TraceEvent("AddPeerRef").detail("Endpoint", endpoint.getPrimaryAddress()).detail("IsStream", isStream).detail("EndpointValid", endpoint.getPrimaryAddress().isValid());
 	if (!isStream || !endpoint.getPrimaryAddress().isValid())
 		return;
 
 	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
 	
+	TraceEvent("AddPeerRef").detail("Endpoint", endpoint.getPrimaryAddress()).detail("IsStream", isStream).detail("PeerRef", peer->peerReferences);
 	if(peer->peerReferences == -1) {
 		if (FlowTransport::transport().isClient()) {
+			// 
 			IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 		}
 		peer->peerReferences = 1;

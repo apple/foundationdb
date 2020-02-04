@@ -1395,7 +1395,7 @@ ACTOR Future<Void> fileNotFoundToNever(Future<Void> f, std::string msg) {
 		return Void();
 	} catch (Error& e) {
 		if (e.code() == error_code_file_not_found) {
-			TraceEvent(SevWarn, msg).error(e);
+			//TraceEvent(SevWarn, "msg").error(e);
 			return Never();
 		}
 		throw;

@@ -67,7 +67,5 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 	}
 };
 
-ACTOR Future<Void> fileNotFoundToNever(Future<Void> f, std::string msg)
-
 #include "flow/unactorcompiler.h"
 #endif // FDBSERVER_RESTOREWORKER_H

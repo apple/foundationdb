@@ -328,9 +328,9 @@ ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> connFile, Loca
 	try {
 		state vector<Future<Void>> actors;
 		// Connect to coordinators in order to connect to fdb cluster
-		ServerCoordinators coordinators(connFile);
-		if (coordFolder.size())
-			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder), "ClusterCoordinatorFailed"));
+		// ServerCoordinators coordinators(connFile);
+		// if (coordFolder.size())
+		// 	actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder), "ClusterCoordinatorFailed"));
 
 		Database cx = Database::createDatabase(connFile, Database::API_VERSION_LATEST, true, locality);
 		wait(reportErrors(_restoreWorker(cx, locality), "RestoreWorker"));
