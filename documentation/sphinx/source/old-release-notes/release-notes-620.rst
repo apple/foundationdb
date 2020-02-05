@@ -2,13 +2,52 @@
 Release Notes
 #############
 
-6.2.12
+6.2.15
 ======
 
 Fixes
 -----
 
+* TLS throttling could block legitimate connections. `(PR #2575) <https://github.com/apple/foundationdb/pull/2575>`_.
+
+6.2.14
+======
+
+Fixes
+-----
+
+* Data distribution was prioritizing shard merges too highly. `(PR #2562) <https://github.com/apple/foundationdb/pull/2562>`_.
+* Status would incorrectly mark clusters as having no fault tolerance. `(PR #2562) <https://github.com/apple/foundationdb/pull/2562>`_.
+* A proxy could run out of memory if disconnected from the cluster for too long. `(PR #2562) <https://github.com/apple/foundationdb/pull/2562>`_.
+
+6.2.13
+======
+
+Performance
+-----------
+
+* Optimized the commit path the proxies to significantly reduce commit latencies in large clusters. `(PR #2536) <https://github.com/apple/foundationdb/pull/2536>`_.
+* Data distribution could create temporarily untrackable shards which could not be split if they became hot. `(PR #2546) <https://github.com/apple/foundationdb/pull/2546>`_.
+
+6.2.12
+======
+
+Performance
+-----------
+
+* Throttle TLS connect attempts from misconfigured clients. `(PR #2529) <https://github.com/apple/foundationdb/pull/2529>`_.
+* Reduced master recovery times in large clusters. `(PR #2430) <https://github.com/apple/foundationdb/pull/2430>`_.
+* Improved performance while a remote region is catching up. `(PR #2527) <https://github.com/apple/foundationdb/pull/2527>`_.
+* The data distribution algorithm does a better job preventing hot shards while recovering from machine failures. `(PR #2526) <https://github.com/apple/foundationdb/pull/2526>`_.
+
+Fixes
+-----
+
+* Improve the reliability of a ``kill`` command from ``fdbcli``. `(PR #2512) <https://github.com/apple/foundationdb/pull/2512>`_.
+* The ``--traceclock`` parameter to fdbserver incorrectly had no effect. `(PR #2420) <https://github.com/apple/foundationdb/pull/2420>`_.
 * Clients could throw an internal error during ``commit`` if client buggification was enabled. `(PR #2427) <https://github.com/apple/foundationdb/pull/2427>`_.
+* Backup and DR agent transactions which update and clean up status had an unnecessarily high conflict rate. `(PR #2483) <https://github.com/apple/foundationdb/pull/2483>`_.
+* The slow task profiler used an unsafe call to get a timestamp in its signal handler that could lead to rare crashes. `(PR #2515) <https://github.com/apple/foundationdb/pull/2515>`_.
 
 6.2.11
 ======
@@ -129,6 +168,7 @@ Status
 Bindings
 --------
 
+* API version updated to 620. See the :ref:`API version upgrade guide <api-version-upgrade-guide-620>` for upgrade details.
 * Add a transaction size limit as both a database option and a transaction option. `(PR #1725) <https://github.com/apple/foundationdb/pull/1725>`_.
 * Added a new API to get the approximated transaction size before commit, e.g., ``fdb_transaction_get_approximate_size`` in the C binding. `(PR #1756) <https://github.com/apple/foundationdb/pull/1756>`_.
 * C: ``fdb_future_get_version`` has been renamed to ``fdb_future_get_int64``. `(PR #1756) <https://github.com/apple/foundationdb/pull/1756>`_.

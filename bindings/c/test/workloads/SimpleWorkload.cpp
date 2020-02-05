@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 620
+#define FDB_API_VERSION 700
 #include "foundationdb/fdb_c.h"
 #undef DLLEXPORT
 #include "workloads.h"
@@ -258,7 +258,7 @@ struct SimpleWorkload : FDBWorkload {
 		insertsPerTx = context->getOption("insertsPerTx", 100ul);
 		opsPerTx = context->getOption("opsPerTx", 100ul);
 		runFor = context->getOption("runFor", 10.0);
-		auto err = fdb_select_api_version(620);
+		auto err = fdb_select_api_version(700);
 		if (err) {
 			context->trace(FDBSeverity::Info, "SelectAPIVersionFailed",
 			               { { "Error", std::string(fdb_get_error(err)) } });

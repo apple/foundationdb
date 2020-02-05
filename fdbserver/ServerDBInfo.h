@@ -42,7 +42,7 @@ struct ServerDBInfo {
 	Optional<DataDistributorInterface> distributor;  // The best guess of current data distributor.
 	MasterInterface master;        // The best guess as to the most recent master, which might still be recovering
 	Optional<RatekeeperInterface> ratekeeper;
-	vector<ResolverInterface> resolvers;
+	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount; // A recovery count from DBCoreState.  A successful master recovery increments it twice; unsuccessful recoveries may increment it once. Depending on where the current master is in its recovery process, this might not have been written by the current master.
 	RecoveryState recoveryState;
 	LifetimeToken masterLifetime;  // Used by masterserver to detect not being the currently chosen master
@@ -51,7 +51,7 @@ struct ServerDBInfo {
 	std::vector<UID> priorCommittedLogServers;   // If !fullyRecovered and logSystemConfig refers to a new log system which may not have been committed to the coordinated state yet, then priorCommittedLogServers are the previous, fully committed generation which need to stay alive in case this recovery fails
 	Optional<LatencyBandConfig> latencyBandConfig;
 
-	explicit ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED) {}
+	explicit ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0) {}
 
 	bool operator == (ServerDBInfo const& r) const { return id == r.id; }
 	bool operator != (ServerDBInfo const& r) const { return id != r.id; }

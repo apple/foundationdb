@@ -73,9 +73,13 @@ Installation
 
 The FoundationDB Python API is compatible with Python 2.7 - 3.7. You will need to have a Python version within this range on your system before the FoundationDB Python API can be installed. Also please note that Python 3.7 no longer bundles a full copy of libffi, which is used for building the _ctypes module on non-macOS UNIX platforms. Hence, if you are using Python 3.7, you should make sure libffi is already installed on your system.
 
-On macOS, the FoundationDB Python API is installed as part of the FoundationDB installation (see :ref:`installing-client-binaries`). On Ubuntu or RHEL/CentOS, you will need to install the FoundationDB Python API manually.
+On macOS, the FoundationDB Python API is installed as part of the FoundationDB installation (see :ref:`installing-client-binaries`). On Ubuntu or RHEL/CentOS, you will need to install the FoundationDB Python API manually via Python's package manager ``pip``:
 
-You can download the FoundationDB Python API source directly from :doc:`downloads`.
+.. code-block:: none
+
+    user@host$ pip install foundationdb
+
+You can also download the FoundationDB Python API source directly from :doc:`downloads`.
 
 .. note:: The Python language binding is compatible with FoundationDB client binaries of version 2.0 or higher. When used with version 2.0.x client binaries, the API version must be set to 200 or lower.
 
@@ -98,7 +102,7 @@ When you import the ``fdb`` module, it exposes only one useful symbol:
 
 .. warning:: |api-version-multi-version-warning|
 
-For API changes between version 13 and |api-version| (for the purpose of porting older programs), see :doc:`release-notes`.
+For API changes between version 13 and |api-version| (for the purpose of porting older programs), see :doc:`release-notes` and :doc:`api-version-upgrade-guide`.
 
 Opening a database
 ==================
@@ -106,7 +110,7 @@ Opening a database
 After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     import fdb
-    fdb.api_version(620)
+    fdb.api_version(700)
     db = fdb.open()
 
 .. function:: open( cluster_file=None, event_model=None )

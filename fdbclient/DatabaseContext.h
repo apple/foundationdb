@@ -196,6 +196,7 @@ public:
 	Counter transactionsMaybeCommitted;
 	Counter transactionsResourceConstrained;
 	Counter transactionsProcessBehind;
+	Counter transactionsThrottled;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 

@@ -63,6 +63,8 @@ set(FLOW_SRCS
   XmlTraceLogFormatter.h
   XmlTraceLogFormatter.cpp
   actorcompiler.h
+	crc32c.h
+  crc32c.cpp
   error_definitions.h
   ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h
   flat_buffers.h

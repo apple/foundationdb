@@ -157,7 +157,7 @@ def choose_api_version(selected_api_version, tester_min_version, tester_max_vers
             api_version = min_version
         elif random.random() < 0.9:
             api_version = random.choice([v for v in [13, 14, 16, 21, 22, 23, 100, 200, 300, 400, 410, 420, 430,
-                                                     440, 450, 460, 500, 510, 520, 600, 610, 620] if v >= min_version and v <= max_version])
+                                                     440, 450, 460, 500, 510, 520, 600, 610, 620, 700] if v >= min_version and v <= max_version])
         else:
             api_version = random.randint(min_version, max_version)
 
@@ -199,7 +199,7 @@ class TestRunner(object):
             raise Exception('Not all testers support concurrency')
 
         # Test types should be intersection of all tester supported types
-        self.args.types = reduce(lambda t1, t2: filter(t1.__contains__, t2), map(lambda tester: tester.types, self.testers))
+        self.args.types = list(reduce(lambda t1, t2: filter(t1.__contains__, t2), map(lambda tester: tester.types, self.testers)))
 
         self.args.no_directory_snapshot_ops = self.args.no_directory_snapshot_ops or any([not tester.directory_snapshot_ops_enabled for tester in self.testers])
 

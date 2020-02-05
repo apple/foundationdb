@@ -22,7 +22,7 @@ import fdb
 import sys
 
 if __name__ == '__main__':
-    fdb.api_version(620)
+    fdb.api_version(700)
 
 @fdb.transactional
 def setValue(tr, key, value):
