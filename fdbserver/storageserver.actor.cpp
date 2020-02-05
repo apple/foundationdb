@@ -1238,7 +1238,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			if (vEnd)
 				readBegin = std::max( readBegin, vEnd->isClearTo() ? vEnd->getEndKey() : vEnd.key() );
 
-			Standalone<VectorRef<KeyValueRef>> atStorageVersion = wait( data->storage.readRange( KeyRangeRef(readBegin, readEnd), limit ) );
+			Standalone<VectorRef<KeyValueRef>> atStorageVersion = wait( data->storage.readRange( KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes ) );
 			if (data->storageVersion() > version) throw transaction_too_old();
 
 			int prevSize = result.data.size();
