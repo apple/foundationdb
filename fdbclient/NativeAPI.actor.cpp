@@ -776,7 +776,6 @@ Future<Void> DatabaseContext::connectionFileChanged() {
 extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
 
 Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, int apiVersion, bool internal, LocalityData const& clientLocality, DatabaseContext *preallocatedDb ) {
-	TraceEvent("MX1");
 	if(!g_network)
 		throw network_not_setup();
 
@@ -811,9 +810,7 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile(new AsyncVar<Reference<ClusterConnectionFile>>());
 	connectionFile->set(connFile);
-	TraceEvent("MX2");
 	Future<Void> clientInfoMonitor = monitorProxies(connectionFile, clientInfo, networkOptions.supportedVersions, StringRef(networkOptions.traceLogGroup));
-	TraceEvent("MX3");
 
 	DatabaseContext *db;
 	if(preallocatedDb) {
@@ -823,7 +820,6 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 		db = new DatabaseContext(connectionFile, clientInfo, clientInfoMonitor, TaskPriority::DefaultEndpoint, clientLocality, true, false, internal, apiVersion, /*switchable*/ true);
 	}
 
-	TraceEvent("MX4");
 	return Database(db);
 }
 

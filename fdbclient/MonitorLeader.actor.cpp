@@ -728,9 +728,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 			incorrectTime = Optional<double>();
 		}
 
-		TraceEvent("MXTEST_MonitorProxiesOneGenerationStart");
 		state ErrorOr<CachedSerialization<ClientDBInfo>> rep = wait( clientLeaderServer.openDatabase.tryGetReply( req, TaskPriority::CoordinationReply ) );
-		TraceEvent("MXTEST_MonitorProxiesOneGenerationEnd").detail("Rep", rep.present());
 		if (rep.present()) {
 			if( rep.get().read().forward.present() ) {
 				TraceEvent("MonitorProxiesForwarding").detail("NewConnStr", rep.get().read().forward.get().toString()).detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
