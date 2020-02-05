@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.2.16
+======
+
+Performance
+-----------
+
+* Reverse range reads could read too much data from disk, resulting in poor performance relative to forward range reads. `(PR #2650) <https://github.com/apple/foundationdb./pull/2650>`_.
+
 6.2.15
 ======
 
