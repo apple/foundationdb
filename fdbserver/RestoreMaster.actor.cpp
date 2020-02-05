@@ -236,11 +236,20 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	return Void();
 }
 
+ACTOR static Future<Void> monitorFinishedVersion(Reference<RestoreMasterData> self, RestoreRequest request) {
+	loop {
+		Version batchIndex = self->finishedBatch.get();
+		TraceEvent("FastRestoreMonitorFinishedVersion").detail("RestoreRequest", request.toString()).detail("BatchIndex", self->finishedBatch.get()).detail("Now", now());
+		wait(delay(SERVER_KNOBS->FASTRESTORE_VB_MONITOR_DELAY));
+	}
+}
+
 ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> self, Database cx,
                                                    RestoreRequest request) {
 	state std::vector<RestoreFileFR> rangeFiles;
 	state std::vector<RestoreFileFR> logFiles;
 	state std::vector<RestoreFileFR> allFiles;
+	state ActorCollection actors(false);
 
 	self->initBackupContainer(request.url);
 
@@ -270,6 +279,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 		}
 	}
 
+	actors.add(monitorFinishedVersion(self, request));
 	state std::vector<VersionBatch>::iterator versionBatch = versionBatches.begin();
 	for (; versionBatch != versionBatches.end(); versionBatch++) {
 		while (self->runningVersionBatches.get() >= SERVER_KNOBS->FASTRESTORE_VB_PARALLELISM) {
@@ -279,7 +289,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 			wait(self->runningVersionBatches.onChange());
 		}
 		int batchIndex = versionBatch->batchIndex;
-		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("ProcessVersionBatch", batchIndex);
+		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("BatchIndex", batchIndex).detail("BatchSize", versionBatch->size).detail("Start", now());
 		self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
 		self->batchStatus[batchIndex] = Reference<MasterBatchStatus>(new MasterBatchStatus());
 		fBatches.push_back(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, *versionBatch));

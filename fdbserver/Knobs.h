@@ -490,6 +490,7 @@ public:
 	double FASTRESTORE_VERSIONBATCH_MAX_BYTES;
 	// FASTRESTORE_VB_PARALLELISM is the number of concurrently running version batches
 	int64_t FASTRESTORE_VB_PARALLELISM;
+	int64_t FASTRESTORE_VB_MONITOR_DELAY; // How quickly monitor finished version batch
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
