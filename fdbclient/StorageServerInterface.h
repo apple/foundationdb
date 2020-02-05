@@ -267,7 +267,7 @@ struct GetShardStateRequest {
 		FETCHING = 1,
 		READABLE = 2
 	};
-	
+
 	KeyRange keys;
 	int32_t mode;
 	ReplyPromise<GetShardStateReply> reply;

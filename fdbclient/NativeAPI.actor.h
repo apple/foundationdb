@@ -212,6 +212,7 @@ public:
 	void setVersion( Version v );
 	Future<Version> getReadVersion() { return getReadVersion(0); }
 	Future<Version> getRawReadVersion();
+	Optional<Version> getCachedReadVersion();
 
 	[[nodiscard]] Future<Optional<Value>> get(const Key& key, bool snapshot = false);
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);

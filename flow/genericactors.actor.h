@@ -751,8 +751,8 @@ void forwardVector( Future<V> values, std::vector<Promise<T>> out ) {
 		out[i].send( in[i] );
 }
 
-ACTOR template <class T> 
-Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time ) {
+ACTOR template <class T>
+Future<Void> delayedAsyncVar(Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time) {
 	try {
 		loop {
 			wait( delay( time ) );
@@ -765,8 +765,8 @@ Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> 
 	}
 }
 
-ACTOR template <class T> 
-Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
+ACTOR template <class T>
+Future<Void> setAfter(Reference<AsyncVar<T>> var, double time, T val) {
 	wait( delay( time ) );
 	var->set( val );
 	return Void();
@@ -1686,6 +1686,7 @@ Future<Void> timeReply(Future<T> replyToTime, PromiseStream<double> timeOutput){
 	}
 	return Void();
 }
+
 
 #include "flow/unactorcompiler.h"
 

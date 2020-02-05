@@ -87,7 +87,7 @@ When you require the ``FDB`` gem, it exposes only one useful method:
 
 .. warning:: |api-version-multi-version-warning|
 
-For API changes between version 14 and |api-version| (for the purpose of porting older programs), see :doc:`release-notes`.
+For API changes between version 14 and |api-version| (for the purpose of porting older programs), see :doc:`release-notes` and :doc:`api-version-upgrade-guide`.
 
 Opening a database
 ==================
@@ -95,7 +95,7 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 620
+    FDB.api_version 700
     db = FDB.open
 
 .. function:: open( cluster_file=nil ) -> Database

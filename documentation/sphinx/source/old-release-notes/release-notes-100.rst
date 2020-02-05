@@ -1,6 +1,6 @@
-###################
-Release Notes (1.0)
-###################
+#############
+Release Notes
+#############
 
 1.0.1
 =====
@@ -20,19 +20,23 @@ There are only minor technical differences between this release and the 0.3.0 re
 
 Java
 ----
+
  * ``clear(Range)`` replaces the now deprecated ``clearRangeStartsWith()``.
 
 Python
 ------
+
  * Windows installer supports Python 3.
 
 Node and Ruby
 -------------
+
  * String option parameters are converted to UTF-8.
  
 All
 ---
- * API version changed to 100. Programs with lower versions continue to work.
+
+ * API version updated to 100. See the :ref:`API version upgrade guide <api-version-upgrade-guide-100>` for upgrade details.
  * Runs on Mac OS X 10.7.
  * Improvements to installation packages, including package paths and directory modes.
  * Eliminated cases of excessive resource usage in the locality API.
@@ -41,6 +45,7 @@ All
 
 Fixes
 -----
+
  * A few Python API entry points failed to respect the ``as_foundationdb_key()`` convenience interface.
  * ``fdbcli`` could print commit version numbers incorrectly in Windows.
  * Multiple watches set on the same key were not correctly triggered by a subsequent write in the same transaction.

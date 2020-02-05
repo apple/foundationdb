@@ -42,10 +42,15 @@ enum {
 	tagLocalityRemoteLog = -3,
 	tagLocalityUpgraded = -4,
 	tagLocalitySatellite = -5,
-	tagLocalityLogRouterMapped = -6,
+	tagLocalityLogRouterMapped = -6,  // used by log router to pop from TLogs
 	tagLocalityTxs = -7,
+	tagLocalityBackup = -8,  // used by backup role to pop from TLogs
 	tagLocalityInvalid = -99
 }; //The TLog and LogRouter require these number to be as compact as possible
+
+inline bool isPseudoLocality(int8_t locality) {
+	return locality == tagLocalityLogRouterMapped || locality == tagLocalityBackup;
+}
 
 #pragma pack(push, 1)
 struct Tag {
@@ -648,6 +653,7 @@ struct KeyValueStoreType {
 		MEMORY,
 		SSD_BTREE_V2,
 		SSD_REDWOOD_V1,
+		MEMORY_RADIXTREE,
 		END
 	};
 
@@ -667,6 +673,7 @@ struct KeyValueStoreType {
 			case SSD_BTREE_V2: return "ssd-2";
 			case SSD_REDWOOD_V1: return "ssd-redwood-experimental";
 			case MEMORY: return "memory";
+			case MEMORY_RADIXTREE: return "memory-radixtree-beta";
 			default: return "unknown";
 		}
 	}
@@ -979,6 +986,20 @@ struct DDMetrics {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, shardBytes, beginKey, endKey);
+	}
+};
+
+struct WorkerBackupStatus {
+	LogEpoch epoch;
+	Version version;
+	Tag tag;
+
+	WorkerBackupStatus() : epoch(0), version(invalidVersion) {}
+	WorkerBackupStatus(LogEpoch e, Version v, Tag t) : epoch(e), version(v), tag(t) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, epoch, version, tag);
 	}
 };
 

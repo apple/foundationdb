@@ -50,11 +50,16 @@ actions as a result of a failure should probably wait a while to see if a machin
 unfailed first.  If possible use onFailedFor() which in the future may react to 'permanent'
 failures immediately.
 
-The information reported through this interface is actually supplied by failureMonitorClient,
-which exchanges FailureMonitoringRequest/Reply pairs with the failureDetectionServer actor on
-the ClusterController.  This central repository of failure information has the opportunity
-to take into account topology and global network conditions in identifying failures.  In
-the future it may be augmented with locally available information about failures (e.g.
+In older FDB, information reported through this interface was actually actively supplied by
+failureMonitorClient, which exchanges FailureMonitoringRequest/Reply pairs with the
+failureDetectionServer actor on the ClusterController.
+
+Now it is done locally by each process with help of of FlowTransport. Whenever a network
+connection is establish/failed, the address is marked as available or failed accordingly. We
+do however take an optimistic approach of assuming every newly discovered address
+(when deserializing an endpoint) is healthy by default.
+
+In the future it may be augmented with locally available information about failures (e.g.
 TCP connection loss in ASIONetwork or unexpectedly long response times for application requests).
 
 Communications failures are tracked at NetworkAddress granularity.  When a request is made to
@@ -68,8 +73,8 @@ struct FailureStatus {
 
 	FailureStatus() : failed(true) {}
 	explicit FailureStatus(bool failed) : failed(failed) {}
-	bool isFailed() { return failed; }
-	bool isAvailable() { return !failed; }
+	bool isFailed() const { return failed; }
+	bool isAvailable() const { return !failed; }
 
 	bool operator == (FailureStatus const& r) const { return failed == r.failed; }
 	bool operator != (FailureStatus const& r) const { return failed != r.failed; }
