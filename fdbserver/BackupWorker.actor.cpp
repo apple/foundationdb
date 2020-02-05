@@ -416,17 +416,23 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	state std::vector<Future<Reference<IBackupFile>>> logFileFutures;
 	state std::map<UID, int> uidMap; // Backup UID to index in logFileFutures & logFiles
 
-	for (auto& uidInfo : self->backups) {
-		if (!uidInfo.second.isRunning()) {
-			// TODO: remove this uidInfo from self->backups & update self->rangeMap
+	for (auto it = self->backups.begin(); it != self->backups.end();) {
+		if (!it->second.isRunning()) {
+			if (it->second.stopped) {
+				self->clearRanges(it->first);
+				it = self->backups.erase(it);
+			} else {
+				it++;
+			}
 			continue;
 		}
-		uidMap.emplace(uidInfo.first, logFileFutures.size());
-		if (uidInfo.second.lastSavedVersion == invalidVersion) {
-			uidInfo.second.lastSavedVersion = self->messages[0].getVersion();
+		uidMap.emplace(it->first, logFileFutures.size());
+		if (it->second.lastSavedVersion == invalidVersion) {
+			it->second.lastSavedVersion = self->messages[0].getVersion();
 		}
-		logFileFutures.push_back(uidInfo.second.container.get()->writeTaggedLogFile(
-		    uidInfo.second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id));
+		logFileFutures.push_back(it->second.container.get()->writeTaggedLogFile(
+		    it->second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id));
+		it++;
 	}
 	wait(waitForAll(logFileFutures));
 
@@ -444,7 +450,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	}
 
 	state int idx = 0;
-	state int64_t blockEnd = 0;
+	state std::vector<int64_t> blockEnds(logFiles.size(), 0);
 	for (; idx < numMsg; idx++) {
 		state MutationRef m;
 		if (!isBackupMessage(self->messages[idx], &m)) continue;
@@ -454,7 +460,8 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 			for (UID uid : self->rangeMap[m.param1]) {
 				auto it = uidMap.find(uid);
 				if (it == uidMap.end()) continue;
-				adds.push_back(addMutation(self, uid, logFiles[it->second], idx, m, &blockEnd, blockSize, false));
+				adds.push_back(
+				    addMutation(self, uid, logFiles[it->second], idx, m, &blockEnds[it->second], blockSize, false));
 			}
 		} else {
 			KeyRangeRef mutationRange(m.param1, m.param2);
@@ -468,7 +475,8 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 				for (UID uid : range.value()) {
 					auto it = uidMap.find(uid);
 					if (it == uidMap.end()) continue;
-					adds.push_back(addMutation(self, uid, logFiles[it->second], idx, subm, &blockEnd, blockSize, true));
+					adds.push_back(addMutation(self, uid, logFiles[it->second], idx, subm, &blockEnds[it->second],
+					                           blockSize, true));
 				}
 			}
 		}
