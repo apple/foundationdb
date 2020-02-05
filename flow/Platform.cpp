@@ -133,12 +133,12 @@ std::string removeWhitespace(const std::string &t)
 	if (found != std::string::npos)
 		str.erase(found + 1);
 	else
-		str.clear();			// str is all whitespace
+		str.clear(); // str is all whitespace
 	found = str.find_first_not_of(ws);
 	if (found != std::string::npos)
 		str.erase(0, found);
 	else
-		str.clear();			// str is all whitespace
+		str.clear(); // str is all whitespace
 
 	return str;
 }
@@ -518,13 +518,13 @@ const char* getInterfaceName(const IPAddress& _ip) {
 		if(!iter->ifa_addr)
 			continue;
 		if (iter->ifa_addr->sa_family == AF_INET && _ip.isV4()) {
-			uint32_t ip = ntohl(((struct sockaddr_in*)iter->ifa_addr)->sin_addr.s_addr);
+			uint32_t ip = ntohl((reinterpret_cast<struct sockaddr_in*>(iter->ifa_addr))->sin_addr.s_addr);
 			if (ip == _ip.toV4()) {
 				ifa_name = iter->ifa_name;
 				break;
 			}
 		} else if (iter->ifa_addr->sa_family == AF_INET6 && _ip.isV6()) {
-			struct sockaddr_in6* ifa_addr = (struct sockaddr_in6*)iter->ifa_addr;
+			struct sockaddr_in6* ifa_addr = reinterpret_cast<struct sockaddr_in6*>(iter->ifa_addr);
 			if (memcmp(_ip.toV6().data(), &ifa_addr->sin6_addr, 16) == 0) {
 				ifa_name = iter->ifa_name;
 				break;
@@ -1391,7 +1391,7 @@ void getLocalTime(const time_t *timep, struct tm *result) {
 }
 
 void setMemoryQuota( size_t limit ) {
-#if defined(USE_ASAN)
+#if defined(USE_SANITIZER)
 	// ASAN doesn't work with memory quotas: https://github.com/google/sanitizers/wiki/AddressSanitizer#ulimit--v
 	return;
 #endif
@@ -1786,7 +1786,7 @@ bool deleteFile( std::string const& filename ) {
 #endif
 	Error e = systemErrorCodeToError();
 	TraceEvent(SevError, "DeleteFile").detail("Filename", filename).GetLastError().error(e);
-	throw errno;
+	throw e;
 }
 
 static void createdDirectory() { INJECT_FAULT( platform_error, "createDirectory" ); }
@@ -2802,39 +2802,63 @@ extern volatile void** net2backtraces;
 extern volatile size_t net2backtraces_offset;
 extern volatile size_t net2backtraces_max;
 extern volatile bool net2backtraces_overflow;
-extern volatile int net2backtraces_count;
+extern volatile int64_t net2backtraces_count;
 extern std::atomic<int64_t> net2liveness;
-extern volatile thread_local int profilingEnabled;
 extern void initProfiling();
 
-volatile thread_local bool profileThread = false;
+std::atomic<double> checkThreadTime;
 #endif
 
+volatile thread_local bool profileThread = false;
 volatile thread_local int profilingEnabled = 1;
 
-void setProfilingEnabled(int enabled) {
-	profilingEnabled = enabled;
+volatile thread_local int64_t numProfilesDeferred = 0;
+volatile thread_local int64_t numProfilesOverflowed = 0;
+volatile thread_local int64_t numProfilesCaptured = 0;
+volatile thread_local bool profileRequested = false;
+
+int64_t getNumProfilesDeferred() {
+	return numProfilesDeferred;
+}
+
+int64_t getNumProfilesOverflowed() {
+	return numProfilesOverflowed;
+}
+
+int64_t getNumProfilesCaptured() {
+	return numProfilesCaptured;
 }
 
 void profileHandler(int sig) {
 #ifdef __linux__
-	if (!profileThread || !profilingEnabled) {
+	if(!profileThread) { 
 		return;
 	}
 
-	net2backtraces_count++;
+	if(!profilingEnabled) {
+		profileRequested = true;
+		++numProfilesDeferred;
+		return;
+	}
+
+	++net2backtraces_count;
+
 	if (!net2backtraces || net2backtraces_max - net2backtraces_offset < 50) {
+		++numProfilesOverflowed;
 		net2backtraces_overflow = true;
 		return;
 	}
 
+	++numProfilesCaptured;
+
 	// We are casting away the volatile-ness of the backtrace array, but we believe that should be reasonably safe in the signal handler
 	ProfilingSample* ps = const_cast<ProfilingSample*>((volatile ProfilingSample*)(net2backtraces + net2backtraces_offset));
 
-	ps->timestamp = timer();
+	// We can only read the check thread time in a signal handler if the atomic is lock free.
+	// We can't get the time from a timer() call because it's not signal safe.
+	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
 
-	// SOMEDAY: should we limit the maximum number of frames from
-	// backtrace beyond just available space?
+	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
 	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
 
 	ps->length = size;
@@ -2843,6 +2867,21 @@ void profileHandler(int sig) {
 #else
 	// No slow task profiling for other platforms!
 #endif
+}
+
+void setProfilingEnabled(int enabled) { 
+#ifdef __linux__
+	if(profileThread && enabled && !profilingEnabled && profileRequested) {
+		profilingEnabled = true;
+		profileRequested = false;
+		pthread_kill(pthread_self(), SIGPROF);
+	}
+	else {
+		profilingEnabled = enabled;
+	}
+#else
+	// No profiling for other platforms!
+#endif	
 }
 
 void* checkThread(void *arg) {
@@ -2864,6 +2903,7 @@ void* checkThread(void *arg) {
 				}
 
 				lastSignal = t;
+				checkThreadTime.store(lastSignal);
 				pthread_kill(mainThread, SIGPROF);
 			}
 		}
@@ -2898,7 +2938,7 @@ void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {
 
 void setupSlowTaskProfiler() {
 #ifdef __linux__
-	if(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0) {
+	if (!profileThread && FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0) {
 		TraceEvent("StartingSlowTaskProfilingThread").detail("Interval", FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL);
 		initProfiling();
 		profileThread = true;

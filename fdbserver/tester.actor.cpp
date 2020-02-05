@@ -33,7 +33,6 @@
 #include "fdbserver/Status.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbclient/MonitorLeader.h"
-#include "fdbclient/FailureMonitorClient.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -360,6 +359,7 @@ ACTOR Future<Void> pingDatabase( Database cx ) {
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 			Optional<Value> v = wait( tr.get( StringRef("/Liveness/" + deterministicRandom()->randomUniqueID().toString() ) ) );
 			tr.makeSelfConflicting();
 			wait( tr.commit() );
@@ -702,8 +702,6 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 			checks.push_back(workloads[i].check.template getReplyUnlessFailedFor<CheckReply>(waitForFailureTime, 0));
 		wait( waitForAll( checks ) );
 
-		printf("checking tests DONE num_workloads:%d\n", workloads.size());
-
 		throwIfError(checks, "CheckFailedForWorkload" + printable(spec.title));
 
 		for(int i = 0; i < checks.size(); i++) {
@@ -801,7 +799,6 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 	try {
 		Future<DistributedTestResults> fTestResults = runWorkload( cx, testers, spec );
 		if( spec.timeout > 0 ) {
-			printf("[INFO] TestSpec, timeout:%d\n", spec.timeout);
 			fTestResults = timeoutError( fTestResults, spec.timeout );
 		}
 		DistributedTestResults _testResults = wait( fTestResults );
@@ -1095,11 +1092,12 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		// do we handle a failure here?
 	}
 
-	printf("\n%d tests passed; %d tests failed, waiting for DD to end...\n\n", passCount, failCount);
-	
+	printf("\n%d tests passed; %d tests failed.\n", passCount, failCount);
+
 	//If the database was deleted during the workload we need to recreate the database
 	if(tests.empty() || useDB) {
 		if(waitForQuiescenceEnd) {
+			printf("Waiting for DD to end...\n");
 			try {
 				wait(quietDatabase(cx, dbInfo, "End", 0, 2e6, 2e6) ||
 				     (databasePingDelay == 0.0 ? Never()
@@ -1110,6 +1108,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 			}
 		}
 	}
+	printf("\n");
 
 	return Void();
 }
@@ -1154,7 +1153,6 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 	vector<Future<Void>> actors;
 	actors.push_back( reportErrors(monitorLeader( connFile, cc ), "MonitorLeader") );
 	actors.push_back( reportErrors(extractClusterInterface( cc,ci ),"ExtractClusterInterface") );
-	actors.push_back( reportErrors(failureMonitorClient( ci, false ),"FailureMonitorClient") );
 
 	if(whatToRun == TEST_TYPE_CONSISTENCY_CHECK) {
 		TestSpec spec;

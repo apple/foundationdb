@@ -31,6 +31,48 @@ void forceLinkFlowTests() {}
 
 using std::vector;
 
+constexpr int firstLine = __LINE__;
+TEST_CASE("/flow/actorcompiler/lineNumbers") {
+	loop {
+		try {
+			ASSERT(__LINE__ == firstLine + 4);
+			wait(Future<Void>(Void()));
+			ASSERT(__LINE__ == firstLine + 6);
+			throw success();
+		} catch (Error& e) {
+			ASSERT(__LINE__ == firstLine + 9);
+			wait(Future<Void>(Void()));
+			ASSERT(__LINE__ == firstLine + 11);
+		}
+		break;
+	}
+	ASSERT(LiteralStringRef(__FILE__).endsWith(LiteralStringRef("FlowTests.actor.cpp")));
+	return Void();
+}
+
+TEST_CASE("/flow/buggifiedDelay") {
+	if (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0) {
+		return Void();
+	}
+	loop {
+		state double x = deterministicRandom()->random01();
+		state int last = 0;
+		state Future<Void> f1 = map(delay(x), [last = &last](const Void&) {
+			*last = 1;
+			return Void();
+		});
+		state Future<Void> f2 = map(delay(x), [last = &last](const Void&) {
+			*last = 2;
+			return Void();
+		});
+		wait(f1 && f2);
+		if (last == 1) {
+			TEST(true); // Delays can become ready out of order
+			return Void();
+		}
+	}
+}
+
 template <class T, class Func, class ErrFunc, class CallbackType>
 class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<T,Func,ErrFunc,CallbackType>> {
 	Func func;
@@ -1290,3 +1332,25 @@ ACTOR Future<int> Outer::Foo5::fooActor(Outer::Foo5* self) {
 }
 
 ACTOR static Future<Void> shouldNotHaveFriends2();
+
+// Meant to be run with -fsanitize=undefined
+TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
+	deterministicRandom()->randomInt(std::numeric_limits<int>::min(), 0);
+	deterministicRandom()->randomInt(0, std::numeric_limits<int>::max());
+	deterministicRandom()->randomInt(std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
+	ASSERT(deterministicRandom()->randomInt(std::numeric_limits<int>::min(), std::numeric_limits<int>::min() + 1) ==
+	       std::numeric_limits<int>::min());
+	ASSERT(deterministicRandom()->randomInt(std::numeric_limits<int>::max() - 1, std::numeric_limits<int>::max()) ==
+	       std::numeric_limits<int>::max() - 1);
+
+	deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(), 0);
+	deterministicRandom()->randomInt64(0, std::numeric_limits<int64_t>::max());
+	deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
+	ASSERT(deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(),
+	                                          std::numeric_limits<int64_t>::min() + 1) ==
+	       std::numeric_limits<int64_t>::min());
+	ASSERT(deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::max() - 1,
+	                                          std::numeric_limits<int64_t>::max()) ==
+	       std::numeric_limits<int64_t>::max() - 1);
+	return Void();
+}

@@ -32,6 +32,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // Split RestoreConfigFR defined in FileBackupAgent.actor.cpp to declaration in Restore.actor.h and implementation in
 // RestoreCommon.actor.cpp
@@ -268,7 +269,6 @@ ACTOR Future<std::string> RestoreConfigFR::getFullStatus_impl(Reference<RestoreC
 	state Future<std::string> progress = restore->getProgress(tr);
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
-	state UID uid = restore->getUid();
 	wait(success(ranges) && success(addPrefix) && success(removePrefix) &&
 		 success(url) && success(restoreVersion) && success(progress));
 
@@ -322,8 +322,8 @@ struct StringRefReader {
 
 	// Functions for consuming big endian (network byte order) integers.
 	// Consumes a big endian number, swaps it to little endian, and returns it.
-	const int32_t consumeNetworkInt32() { return (int32_t)bigEndian32((uint32_t)consume<int32_t>()); }
-	const uint32_t consumeNetworkUInt32() { return bigEndian32(consume<uint32_t>()); }
+	int32_t consumeNetworkInt32() { return (int32_t)bigEndian32((uint32_t)consume<int32_t>()); }
+	uint32_t consumeNetworkUInt32() { return bigEndian32(consume<uint32_t>()); }
 
 	bool eof() { return rptr == end; }
 

@@ -32,7 +32,6 @@
 #include "fdbclient/FDBOptions.g.h"
 
 #include "flow/DeterministicRandom.h"
-#include "flow/SignalSafeUnwind.h"
 #include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Platform.h"
 
@@ -55,7 +54,7 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-extern const char* getHGVersion();
+extern const char* getSourceVersion();
 
 std::vector<std::string> validOptions;
 
@@ -417,10 +416,6 @@ static void printProgramUsage(const char* name) {
 	       "  --trace_format FORMAT\n"
 	       "                 Select the format of the log files. xml (the default) and json\n"
 	       "                 are supported. Has no effect unless --log is specified.\n"
-	       "  -S ON|OFF, --object-serializer ON|OFF\n"
-	       "                 Use object serializer for sending messages. The object serializer\n"
-	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
-	       "                 each other even if they don't have the same version\n"
 	       "  --exec CMDS    Immediately executes the semicolon separated CLI commands\n"
 	       "                 and then exits.\n"
 	       "  --no-status    Disables the initial status check done when starting\n"
@@ -465,7 +460,7 @@ void initHelp() {
 		"clear a range of keys from the database",
 		"All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["configure"] = CommandHelp(
-		"configure [new] <single|double|triple|three_data_hall|three_datacenter|ssd|memory|proxies=<PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
+		"configure [new] <single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
 		"change the database configuration",
 		"The `new' option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When used, both a redundancy mode and a storage engine must be specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. Must be at least 1, or set to -1 which restores the number of proxies to the default value.\n\nlogs=<LOGS>: Sets the desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the FoundationDB Administration Guide for more information.");
 	helpMap["fileconfigure"] = CommandHelp(
@@ -477,11 +472,14 @@ void initHelp() {
 		"change cluster coordinators or description",
 		"If 'auto' is specified, coordinator addresses will be choosen automatically to support the configured redundancy level. (If the current set of coordinators are healthy and already support the redundancy level, nothing will be changed.)\n\nOtherwise, sets the coordinators to the list of IP:port pairs specified by <ADDRESS>+. An fdbserver process must be running on each of the specified addresses.\n\ne.g. coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000\n\nIf 'description=desc' is specified then the description field in the cluster\nfile is changed to desc, which must match [A-Za-z0-9_]+.");
 	helpMap["exclude"] =
-	    CommandHelp("exclude [no_wait] <ADDRESS>*", "exclude servers from the database",
+	    CommandHelp("exclude [FORCE] [failed] [no_wait] <ADDRESS>*", "exclude servers from the database",
 	                "If no addresses are specified, lists the set of excluded servers.\n\nFor each IP address or "
 	                "IP:port pair in <ADDRESS>*, adds the address to the set of excluded servers then waits until all "
 	                "database state has been safely moved away from the specified servers. If 'no_wait' is set, the "
-	                "command returns \nimmediately without checking if the exclusions have completed successfully.");
+	                "command returns \nimmediately without checking if the exclusions have completed successfully.\n"
+	                "If 'FORCE' is set, the command does not perform safety checks before excluding.\n"
+	                "If 'failed' is set, the transaction log queue is dropped pre-emptively before waiting\n"
+	                "for data movement to finish and the server cannot be included again.");
 	helpMap["include"] = CommandHelp(
 		"include all|<ADDRESS>*",
 		"permit previously-excluded servers to rejoin the database",
@@ -565,7 +563,7 @@ void initHelp() {
 
 void printVersion() {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("source version %s\n", getHGVersion());
+	printf("source version %s\n", getSourceVersion());
 	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
 }
 
@@ -2000,10 +1998,14 @@ ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, boo
 
 ACTOR Future<bool> include( Database db, std::vector<StringRef> tokens ) {
 	std::vector<AddressExclusion> addresses;
-	if (tokens.size() == 2 && tokens[1] == LiteralStringRef("all"))
-		addresses.push_back( AddressExclusion() );
-	else {
-		for(auto t = tokens.begin()+1; t != tokens.end(); ++t) {
+	bool failed = false;
+	bool all = false;
+	for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
+		if (*t == LiteralStringRef("all")) {
+			all = true;
+		} else if (*t == LiteralStringRef("failed")) {
+			failed = true;
+		} else {
 			auto a = AddressExclusion::parse( *t );
 			if (!a.isValid()) {
 				printf("ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
@@ -2014,8 +2016,13 @@ ACTOR Future<bool> include( Database db, std::vector<StringRef> tokens ) {
 			addresses.push_back( a );
 		}
 	}
-
-	wait( makeInterruptable(includeServers(db, addresses)) );
+	if (all) {
+		std::vector<AddressExclusion> includeAll;
+		includeAll.push_back(AddressExclusion());
+		wait(makeInterruptable(includeServers(db, includeAll, failed)));
+	} else {
+		wait(makeInterruptable(includeServers(db, addresses, failed)));
+	}
 	return false;
 };
 
@@ -2042,11 +2049,14 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		state std::set<AddressExclusion> exclusions;
 		bool force = false;
 		state bool waitForAllExcluded = true;
+		state bool markFailed = false;
 		for(auto t = tokens.begin()+1; t != tokens.end(); ++t) {
 			if(*t == LiteralStringRef("FORCE")) {
 				force = true;
 			} else if (*t == LiteralStringRef("no_wait")) {
 				waitForAllExcluded = false;
+			} else if (*t == LiteralStringRef("failed")) {
+				markFailed = true;
 			} else {
 				auto a = AddressExclusion::parse( *t );
 				if (!a.isValid()) {
@@ -2061,6 +2071,26 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		}
 
 		if(!force) {
+			if (markFailed) {
+				state bool safe;
+				try {
+					bool _safe = wait(makeInterruptable(checkSafeExclusions(db, addresses)));
+					safe = _safe;
+				} catch (Error& e) {
+					TraceEvent("CheckSafeExclusionsError").error(e);
+					safe = false;
+				}
+				if (!safe) {
+					std::string errorStr =
+					    "ERROR: It is unsafe to exclude the specified servers at this time.\n"
+					    "Please check that this exclusion does not bring down an entire storage team.\n"
+					    "Please also ensure that the exclusion will keep a majority of coordinators alive.\n"
+					    "You may add more storage processes or coordinators to make the operation safe.\n"
+					    "Type `exclude FORCE failed <ADDRESS>*' to exclude without performing safety checks.\n";
+					printf("%s", errorStr.c_str());
+					return true;
+				}
+			}
 			StatusObject status = wait( makeInterruptable( StatusClient::statusFetcher( ccf ) ) );
 
 			state std::string errorString = "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
@@ -2146,7 +2176,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			}
 		}
 
-		wait( makeInterruptable(excludeServers(db,addresses)) );
+		wait(makeInterruptable(excludeServers(db, addresses, markFailed)));
 
 		if (waitForAllExcluded) {
 			printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
@@ -2216,6 +2246,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens ) {
 	state Standalone<StringRef> snapCmd;
+	state UID snapUID = deterministicRandom()->randomUniqueID();
 	for ( int i = 1; i < tokens.size(); i++) {
 		snapCmd = snapCmd.withSuffix(tokens[i]);
 		if (i != tokens.size() - 1) {
@@ -2223,11 +2254,11 @@ ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens ) {
 		}
 	}
 	try {
-		UID snapUID = wait(makeInterruptable(mgmtSnapCreate(db, snapCmd)));
+		wait(makeInterruptable(mgmtSnapCreate(db, snapCmd, snapUID)));
 		printf("Snapshot command succeeded with UID %s\n", snapUID.toString().c_str());
 	} catch (Error& e) {
-		fprintf(stderr, "Snapshot create failed %d (%s)."
-				" Please cleanup any instance level snapshots created.\n", e.code(), e.what());
+		fprintf(stderr, "Snapshot command failed %d (%s)."
+				" Please cleanup any instance level snapshots created with UID %s.\n", e.code(), e.what(), snapUID.toString().c_str());
 		return true;
 	}
 	return false;
@@ -2346,7 +2377,7 @@ void onoff_generator(const char* text, const char *line, std::vector<std::string
 }
 
 void configure_generator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "proxies=", "logs=", "resolvers=", NULL};
+	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "memory-radixtree-beta", "proxies=", "logs=", "resolvers=", NULL};
 	array_generator(text, line, opts, lc);
 }
 
@@ -2556,6 +2587,27 @@ Future<T> stopNetworkAfter( Future<T> what ) {
 	}
 }
 
+ACTOR Future<Void> addInterface( std::map<Key,std::pair<Value,ClientLeaderRegInterface>>* address_interface, Reference<FlowLock> connectLock, KeyValue kv) {
+	wait(connectLock->take());
+	state FlowLock::Releaser releaser(*connectLock);
+	state ClientWorkerInterface workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
+	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
+	choose {
+		when( Optional<LeaderInfo> rep = wait( brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())) ) ) {
+			StringRef ip_port = kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key;
+			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
+
+			if(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
+				Key full_ip_port2 = StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
+				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls")) ? full_ip_port2.removeSuffix(LiteralStringRef(":tls")) : full_ip_port2;
+				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
+			}
+		}
+		when( wait(delay(1.0)) ) {}
+	}
+	return Void();
+}
+
 ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state LineNoise& linenoise = *plinenoise;
 	state bool intrans = false;
@@ -2566,7 +2618,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state bool writeMode = false;
 
 	state std::string clusterConnectString;
-	state std::map<Key,Value> address_interface;
+	state std::map<Key,std::pair<Value,ClientLeaderRegInterface>> address_interface;
 
 	state FdbOptions globalOptions;
 	state FdbOptions activeOptions;
@@ -2601,7 +2653,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	if (opt.trace) {
 		TraceEvent("CLIProgramStart")
 			.setMaxEventLength(12000)
-			.detail("SourceVersion", getHGVersion())
+			.detail("SourceVersion", getSourceVersion())
 			.detail("Version", FDB_VT_VERSION)
 			.detail("PackageName", FDB_VT_PACKAGE_NAME)
 			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
@@ -2959,10 +3011,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
 						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
-							auto ip_port = it.key.endsWith(LiteralStringRef(":tls")) ? it.key.removeSuffix(LiteralStringRef(":tls")) : it.key;
-							address_interface[ip_port] = it.value;
+							addInterfs.push_back(addInterface(&address_interface, connectLock, it));
 						}
+						wait( waitForAll(addInterfs) );
 					}
 					if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
 						if(address_interface.size() == 0) {
@@ -2978,7 +3032,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
 						for( auto it : address_interface ) {
-							tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it.second);
+							tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it.second.first);
 						}
 						if (address_interface.size() == 0) {
 							printf("ERROR: no processes to kill. You must run the `kill’ command before running `kill all’.\n");
@@ -2996,7 +3050,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 						if(!is_error) {
 							for(int i = 1; i < tokens.size(); i++) {
-								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), address_interface[tokens[i]]);
+								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), address_interface[tokens[i]].first);
 							}
 							printf("Attempted to kill %zu processes\n", tokens.size() - 1);
 						}
@@ -3271,9 +3325,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
 						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
-							address_interface[it.key] = it.value;
+							addInterfs.push_back(addInterface(&address_interface, connectLock, it));
 						}
+						wait( waitForAll(addInterfs) );
 					}
 					if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
 						if(address_interface.size() == 0) {
@@ -3289,7 +3346,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
 						for( auto it : address_interface ) {
-							tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), it.second);
+							tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), it.second.first);
 						}
 						if (address_interface.size() == 0) {
 							printf("ERROR: no processes to check. You must run the `expensive_data_check’ command before running `expensive_data_check all’.\n");
@@ -3307,7 +3364,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 						if(!is_error) {
 							for(int i = 1; i < tokens.size(); i++) {
-								tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), address_interface[tokens[i]]);
+								tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), address_interface[tokens[i]].first);
 							}
 							printf("Attempted to kill and check %zu processes\n", tokens.size() - 1);
 						}
@@ -3480,7 +3537,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("Data distribution is turned off.\n");
 						} else if (tokencmp(tokens[1], "disable")) {
 							if (tokencmp(tokens[2], "ssfailure")) {
-								bool _ = wait(makeInterruptable(setHealthyZone(db, ignoreSSFailuresZoneString, 0)));
+								wait(success(makeInterruptable(setHealthyZone(db, ignoreSSFailuresZoneString, 0))));
 								printf("Data distribution is disabled for storage server failures.\n");
 							} else if (tokencmp(tokens[2], "rebalance")) {
 								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, true)));
@@ -3492,7 +3549,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 						} else if (tokencmp(tokens[1], "enable")) {
 							if (tokencmp(tokens[2], "ssfailure")) {
-								bool _ = wait(makeInterruptable(clearHealthyZone(db, false, true)));
+								wait(success(makeInterruptable(clearHealthyZone(db, false, true))));
 								printf("Data distribution is enabled for storage server failures.\n");
 							} else if (tokencmp(tokens[2], "rebalance")) {
 								wait(makeInterruptable(setDDIgnoreRebalanceSwitch(db, false)));
@@ -3633,7 +3690,6 @@ ACTOR Future<Void> timeExit(double duration) {
 
 int main(int argc, char **argv) {
 	platformInit();
-	initSignalSafeUnwind();
 	Error::init();
 	std::set_new_handler( &platform::outOfMemory );
 	uint64_t memLimit = 8LL << 30;

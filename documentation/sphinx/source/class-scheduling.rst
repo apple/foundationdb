@@ -30,7 +30,7 @@ Open a Python interactive interpreter and import the FoundationDB API module::
 
 Before using the API, we need to specify the API version. This allows programs to maintain compatibility even if the API is modified in future versions::
 
-    >>> fdb.api_version(620)
+    >>> fdb.api_version(700)
 
 Next, we open a FoundationDB database.  The API will connect to the FoundationDB cluster indicated by the :ref:`default cluster file <default-cluster-file>`. ::
 
@@ -48,7 +48,7 @@ When this command returns without exception, the modification is durably stored 
 If this is all working, it looks like we are ready to start building a real application. For reference, here's the full code for "hello world"::
 
     import fdb
-    fdb.api_version(620)
+    fdb.api_version(700)
     db = fdb.open()
     db[b'hello'] = b'world'
     print 'hello', db[b'hello']
@@ -91,7 +91,7 @@ FoundationDB includes a few tools that make it easy to model data using this app
 opening a :ref:`directory <developer-guide-directories>` in the database::
 
     import fdb
-    fdb.api_version(620)
+    fdb.api_version(700)
 
     db = fdb.open()
     scheduling = fdb.directory.create_or_open(db, ('scheduling',))
@@ -136,7 +136,7 @@ If instead you pass a :class:`Transaction` for the ``tr`` parameter, the transac
 Note that by default, the operation will be retried an infinite number of times and the transaction will never time out. It is therefore recommended that the client choose a default transaction retry limit or timeout value that is suitable for their application. This can be set either at the transaction level using the ``set_retry_limit`` or ``set_timeout`` transaction options or at the database level with the ``set_transaction_retry_limit`` or ``set_transaction_timeout`` database options. For example, one can set a one minute timeout on each transaction and a default retry limit of 100 by calling::
 
     db.options.set_transaction_timeout(60000)  # 60,000 ms = 1 minute
-    db.options.set_retry_limit(100)
+    db.options.set_transaction_retry_limit(100)
 
 Making some sample classes
 --------------------------
@@ -337,7 +337,7 @@ Here's the code for the scheduling tutorial::
     import fdb
     import fdb.tuple
 
-    fdb.api_version(620)
+    fdb.api_version(700)
 
 
     ####################################
@@ -350,7 +350,7 @@ Here's the code for the scheduling tutorial::
 
     db = fdb.open()
     db.options.set_transaction_timeout(60000)  # 60,000 ms = 1 minute
-    db.options.set_retry_limit(100)
+    db.options.set_transaction_retry_limit(100)
     scheduling = fdb.directory.create_or_open(db, ('scheduling',))
     course = scheduling['class']
     attends = scheduling['attends']

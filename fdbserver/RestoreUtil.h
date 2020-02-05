@@ -26,6 +26,7 @@
 #pragma once
 
 #include "fdbclient/Tuple.h"
+#include "fdbclient/CommitTransaction.h"
 #include "flow/flow.h"
 #include "flow/Stats.h"
 #include "fdbrpc/TimedRequest.h"
@@ -33,6 +34,11 @@
 #include "fdbrpc/IAsyncFile.h"
 #include <cstdint>
 #include <cstdarg>
+
+//#define SevFRMutationInfo SevVerbose
+#define SevFRMutationInfo SevInfo
+
+using MutationsVec = Standalone<VectorRef<MutationRef>>;
 
 enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);
@@ -49,6 +55,8 @@ struct FastRestoreOpConfig {
 	int num_appliers = 40;
 	// transactionBatchSizeThreshold is used when applier applies multiple mutations in a transaction to DB
 	double transactionBatchSizeThreshold = 512; // 512 in Bytes
+	// batchSizeThreshold is the maximum data size in each version batch
+	double batchSizeThreshold = 10.0 * 1024.0 * 1024.0 * 1024.0; // 10 GB
 };
 extern FastRestoreOpConfig opConfig;
 
@@ -89,5 +97,7 @@ struct RestoreSimpleRequest : TimedRequest {
 		return ss.str();
 	}
 };
+
+bool isRangeMutation(MutationRef m);
 
 #endif // FDBSERVER_RESTOREUTIL_ACTOR_H

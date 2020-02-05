@@ -43,11 +43,13 @@ struct ProcessClass {
 		DataDistributorClass,
 		CoordinatorClass,
 		RatekeeperClass,
+		StorageCacheClass,
+		BackupClass,
 		InvalidClass = -1
 	};
 
 	enum Fitness { BestFit, GoodFit, UnsetFit, OkayFit, WorstFit, ExcludeFit, NeverAssign }; //cannot be larger than 7 because of leader election mask
-	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, DataDistributor, Ratekeeper, NoRole };
+	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, DataDistributor, Ratekeeper, StorageCache, Backup, NoRole };
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;
 	int16_t _source;
@@ -72,6 +74,8 @@ public:
 		else if (s=="data_distributor") _class = DataDistributorClass;
 		else if (s=="coordinator") _class = CoordinatorClass;
 		else if (s=="ratekeeper") _class = RatekeeperClass;
+		else if (s=="storage_cache") _class = StorageCacheClass;
+		else if (s=="backup") _class = BackupClass;
 		else _class = InvalidClass;
 	}
 
@@ -91,6 +95,8 @@ public:
 		else if (classStr=="data_distributor") _class = DataDistributorClass;
 		else if (classStr=="coordinator") _class = CoordinatorClass;
 		else if (classStr=="ratekeeper") _class = RatekeeperClass;
+		else if (classStr=="storage_cache") _class = StorageCacheClass;
+		else if (classStr=="backup") _class = BackupClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -125,6 +131,8 @@ public:
 			case DataDistributorClass: return "data_distributor";
 			case CoordinatorClass: return "coordinator";
 			case RatekeeperClass: return "ratekeeper";
+			case StorageCacheClass: return "storage_cache";
+			case BackupClass: return "backup";
 			default: return "invalid";
 		}
 	}

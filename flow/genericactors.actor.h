@@ -751,8 +751,8 @@ void forwardVector( Future<V> values, std::vector<Promise<T>> out ) {
 		out[i].send( in[i] );
 }
 
-ACTOR template <class T> 
-Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time ) {
+ACTOR template <class T>
+Future<Void> delayedAsyncVar(Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time) {
 	try {
 		loop {
 			wait( delay( time ) );
@@ -765,8 +765,8 @@ Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> 
 	}
 }
 
-ACTOR template <class T> 
-Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
+ACTOR template <class T>
+Future<Void> setAfter(Reference<AsyncVar<T>> var, double time, T val) {
 	wait( delay( time ) );
 	var->set( val );
 	return Void();
@@ -897,11 +897,6 @@ struct Quorum : SAV<Void> {
 template <class T>
 class QuorumCallback : public Callback<T> {
 public:
-	QuorumCallback(Future<T> future, Quorum<T>* head)
-		: head(head)
-	{
-		future.addCallbackAndClear(this);
-	}
 	virtual void fire(const T& value) {
 		Callback<T>::remove();
 		Callback<T>::next = 0;
@@ -914,7 +909,11 @@ public:
 	}
 
 private:
+	template <class U>
+	friend Future<Void> quorum(std::vector<Future<U>> const& results, int n);
 	Quorum<T>* head;
+	QuorumCallback() = default;
+	QuorumCallback(Future<T> future, Quorum<T>* head) : head(head) { future.addCallbackAndClear(this); }
 };
 
 template <class T>
@@ -925,15 +924,15 @@ Future<Void> quorum(std::vector<Future<T>> const& results, int n) {
 	Quorum<T>* q = new (allocateFast(size)) Quorum<T>(n, results.size());
 
 	QuorumCallback<T>* nextCallback = q->callbacks();
-	for (auto & r : results) {
+	for (auto& r : results) {
 		if (r.isReady()) {
+			new (nextCallback) QuorumCallback<T>();
 			nextCallback->next = 0;
 			if (r.isError())
 				q->oneError(r.getError());
 			else
 				q->oneSuccess();
-		}
-		else
+		} else
 			new (nextCallback) QuorumCallback<T>(r, q);
 		++nextCallback;
 	}
@@ -1687,6 +1686,7 @@ Future<Void> timeReply(Future<T> replyToTime, PromiseStream<double> timeOutput){
 	}
 	return Void();
 }
+
 
 #include "flow/unactorcompiler.h"
 

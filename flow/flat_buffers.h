@@ -73,7 +73,7 @@ struct struct_like_traits<std::tuple<Ts...>> : std::true_type {
 	}
 
 	template <int i, class Type, class Context>
-	static const void assign(Member& m, const Type& t, Context&) {
+	static void assign(Member& m, const Type& t, Context&) {
 		std::get<i>(m) = t;
 	}
 };
@@ -699,6 +699,8 @@ private:
 			} else {
 				load_<Alternative + 1>(type_tag, member);
 			}
+		} else {
+			member = std::decay_t<decltype(member)>{};
 		}
 	}
 };
@@ -809,6 +811,7 @@ struct LoadMember {
 		if constexpr (is_vector_of_union_like<Member>) {
 			if (!field_present()) {
 				i += 2;
+				member = std::decay_t<decltype(member)>{};
 				return;
 			}
 			const uint8_t* types_current = &message[vtable[i++]];
@@ -829,6 +832,8 @@ struct LoadMember {
 				if (types_current[i] > 0) {
 					uint8_t type_tag = types_current[i] - 1; // Flatbuffers indexes from 1.
 					(LoadAlternative<Context, union_like_traits<T>>{ context, current }).load(type_tag, value);
+				} else {
+					value = std::decay_t<decltype(value)>{};
 				}
 				*inserter = std::move(value);
 				++inserter;
@@ -837,6 +842,7 @@ struct LoadMember {
 		} else if constexpr (is_union_like<Member>) {
 			if (!field_present()) {
 				i += 2;
+				member = std::decay_t<decltype(member)>{};
 				return;
 			}
 			uint8_t fb_type_tag;
@@ -846,6 +852,8 @@ struct LoadMember {
 			if (field_present() && fb_type_tag > 0) {
 				(LoadAlternative<Context, union_like_traits<Member>>{ context, &message[vtable[i]] })
 				    .load(type_tag, member);
+			} else {
+				member = std::decay_t<decltype(member)>{};
 			}
 			++i;
 		} else if constexpr (_SizeOf<Member>::size == 0) {
@@ -853,6 +861,8 @@ struct LoadMember {
 		} else {
 			if (field_present()) {
 				load_helper(member, &message[vtable[i]], context);
+			} else {
+				member = std::decay_t<decltype(member)>{};
 			}
 			++i;
 		}
@@ -1040,10 +1050,10 @@ struct LoadSaveHelper<std::vector<bool, Alloc>, Context> : Context {
 		current += sizeof(uint32_t);
 		member.clear();
 		member.resize(length);
-		bool m;
+		uint8_t m;
 		for (uint32_t i = 0; i < length; ++i) {
 			load_helper(m, current, *this);
-			member[i] = m;
+			member[i] = m != 0;
 			current += fb_size<bool>;
 		}
 	}
@@ -1110,7 +1120,7 @@ uint8_t* save(Context& context, const Root& root, FileIdentifier file_identifier
 	save_with_vtables(root, vtableset, precompute_size, &vtable_start, file_identifier, context);
 	uint8_t* out = context.allocate(precompute_size.current_buffer_size);
 	WriteToBuffer writeToBuffer{ context, precompute_size.current_buffer_size, vtable_start, out,
-		                         precompute_size.writeToOffsets.begin() };
+														precompute_size.writeToOffsets.begin() };
 	save_with_vtables(root, vtableset, writeToBuffer, &vtable_start, file_identifier, context);
 	return out;
 }
@@ -1122,10 +1132,15 @@ void load(Root& root, const uint8_t* in, Context& context) {
 
 } // namespace detail
 
-template <class Context, class... Members>
-uint8_t* save_members(Context& context, FileIdentifier file_identifier, Members&... members) {
-	const auto& root = detail::fake_root(members...);
-	return detail::save(context, root, file_identifier);
+template <class Context, class FirstMember, class... Members>
+uint8_t* save_members(Context& context, FileIdentifier file_identifier, const FirstMember& first,
+                      const Members&... members) {
+	if constexpr (serialize_raw<FirstMember>::value) {
+		return serialize_raw<FirstMember>::save_raw(context, first);
+	} else {
+		const auto& root = detail::fake_root(const_cast<FirstMember&>(first), const_cast<Members&>(members)...);
+		return detail::save(context, root, file_identifier);
+	}
 }
 
 template <class Context, class... Members>
@@ -1153,11 +1168,12 @@ struct NoFileIdentifier {};
 template <class T>
 struct EnsureTable
   : std::conditional_t<HasFileIdentifier<T>::value, detail::YesFileIdentifier<T>, detail::NoFileIdentifier> {
-	EnsureTable() = default;
+	EnsureTable() : t() {}
 	EnsureTable(const T& t) : t(t) {}
 	template <class Archive>
 	void serialize(Archive& ar) {
 		if constexpr (is_fb_function<Archive>) {
+			// This is only for vtable collection. Load and save use the LoadSaveHelper specialization below
 			if constexpr (detail::expect_serialize_member<T>) {
 				if constexpr (serializable_traits<T>::value) {
 					serializable_traits<T>::serialize(ar, t);
@@ -1172,7 +1188,41 @@ struct EnsureTable
 		}
 	}
 	T& asUnderlyingType() { return t; }
+	const T& asUnderlyingType() const { return t; }
 
 private:
 	T t;
 };
+
+namespace detail {
+
+// Ensure if there's a LoadSaveHelper specialization available for T it gets used.
+template <class T, class Context>
+struct LoadSaveHelper<EnsureTable<T>, Context> : Context {
+	LoadSaveHelper(const Context& context) : Context(context), alreadyATable(context), wrapInTable(context) {}
+
+	void load(EnsureTable<T>& member, const uint8_t* current) {
+		if constexpr (expect_serialize_member<T>) {
+			alreadyATable.load(member.asUnderlyingType(), current);
+		} else {
+			FakeRoot<T> t{ member.asUnderlyingType() };
+			wrapInTable.load(t, current);
+		}
+	}
+
+	template <class Writer>
+	RelativeOffset save(const EnsureTable<T>& member, Writer& writer, const VTableSet* vtables) {
+		if constexpr (expect_serialize_member<T>) {
+			return alreadyATable.save(member.asUnderlyingType(), writer, vtables);
+		} else {
+			FakeRoot<T> t{ const_cast<T&>(member.asUnderlyingType()) };
+			return wrapInTable.save(t, writer, vtables);
+		}
+	}
+
+private:
+	LoadSaveHelper<T, Context> alreadyATable;
+	LoadSaveHelper<FakeRoot<T>, Context> wrapInTable;
+};
+
+} // namespace detail

@@ -20,7 +20,6 @@
 
 #include <fstream>
 #include "fdbrpc/simulator.h"
-#include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -43,7 +42,7 @@
 #undef min
 
 extern "C" int g_expect_full_pointermap;
-extern const char* getHGVersion();
+extern const char* getSourceVersion();
 
 const int MACHINE_REBOOT_TIME = 10;
 
@@ -232,7 +231,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				.detail("Excluded", process->excluded)
 				.detail("UsingSSL", sslEnabled);
 			TraceEvent("ProgramStart").detail("Cycles", cycles).detail("RandomId", randomId)
-				.detail("SourceVersion", getHGVersion())
+				.detail("SourceVersion", getSourceVersion())
 				.detail("Version", FDB_VT_VERSION)
 				.detail("PackageName", FDB_VT_PACKAGE_NAME)
 				.detail("DataFolder", *dataFolder)
@@ -804,17 +803,38 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	if (deterministicRandom()->random01() < 0.25) db.desiredTLogCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.masterProxyCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.resolverCount = deterministicRandom()->randomInt(1,7);
-	if (deterministicRandom()->random01() < 0.5) {
+	int storage_engine_type = deterministicRandom()->randomInt(0, 3);
+	switch (storage_engine_type) {
+	case 0: {
+		TEST(true); // Simulated cluster using ssd storage engine
 		set_config("ssd");
-	} else {
-		set_config("memory");
+		break;
 	}
+	case 1: {
+		TEST(true); // Simulated cluster using default memory storage engine
+		set_config("memory");
+		break;
+	}
+	case 2: {
+		TEST(true); // Simulated cluster using radix-tree storage engine
+		set_config("memory-radixtree-beta");
+		break;
+	}
+	default:
+		ASSERT(false); // Programmer forgot to adjust cases.
+	}
+	//	if (deterministicRandom()->random01() < 0.5) {
+	//		set_config("ssd");
+	//	} else {
+	//		set_config("memory");
+	//	}
+	//	set_config("memory");
+	//  set_config("memory-radixtree-beta");
 	if(simple) {
 		db.desiredTLogCount = 1;
 		db.masterProxyCount = 1;
 		db.resolverCount = 1;
 	}
-
 	int replication_type = simple ? 1 : ( std::max(minimumReplication, datacenters > 4 ? deterministicRandom()->randomInt(1,3) : std::min(deterministicRandom()->randomInt(0,6), 3)) );
 	switch (replication_type) {
 	case 0: {
@@ -945,11 +965,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 				}
 			}
 
-			if (deterministicRandom()->random01() < 0.25) {
-				int logs = deterministicRandom()->randomInt(1,7);
-				primaryObj["satellite_logs"] = logs;
-				remoteObj["satellite_logs"] = logs;
-			}
+			if (deterministicRandom()->random01() < 0.25) primaryObj["satellite_logs"] =  deterministicRandom()->randomInt(1,7);
+			if (deterministicRandom()->random01() < 0.25) remoteObj["satellite_logs"] =  deterministicRandom()->randomInt(1,7);
 
 			//We cannot run with a remote DC when MAX_READ_TRANSACTION_LIFE_VERSIONS is too small, because the log routers will not be able to keep up.
 			if (minimumRegions <= 1 && (deterministicRandom()->random01() < 0.25 || SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < SERVER_KNOBS->VERSIONS_PER_SECOND)) {
@@ -998,12 +1015,14 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 			primarySatelliteObj["id"] = useNormalDCsAsSatellites ? "1" : "2";
 			primarySatelliteObj["priority"] = 1;
 			primarySatelliteObj["satellite"] = 1;
+			if (deterministicRandom()->random01() < 0.25) primarySatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1,7);
 			primaryDcArr.push_back(primarySatelliteObj);
 
 			StatusObject remoteSatelliteObj;
 			remoteSatelliteObj["id"] = useNormalDCsAsSatellites ? "0" : "3";
 			remoteSatelliteObj["priority"] = 1;
 			remoteSatelliteObj["satellite"] = 1;
+			if (deterministicRandom()->random01() < 0.25) remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1,7);
 			remoteDcArr.push_back(remoteSatelliteObj);
 
 			if (datacenters > 4) {
@@ -1011,12 +1030,14 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 				primarySatelliteObjB["id"] = useNormalDCsAsSatellites ? "2" : "4";
 				primarySatelliteObjB["priority"] = 1;
 				primarySatelliteObjB["satellite"] = 1;
+				if (deterministicRandom()->random01() < 0.25) primarySatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1,7);
 				primaryDcArr.push_back(primarySatelliteObjB);
 
 				StatusObject remoteSatelliteObjB;
 				remoteSatelliteObjB["id"] = useNormalDCsAsSatellites ? "2" : "5";
 				remoteSatelliteObjB["priority"] = 1;
 				remoteSatelliteObjB["satellite"] = 1;
+				if (deterministicRandom()->random01() < 0.25) remoteSatelliteObjB["satellite_logs"] = deterministicRandom()->randomInt(1,7);
 				remoteDcArr.push_back(remoteSatelliteObjB);
 			}
 			if (useNormalDCsAsSatellites) {
@@ -1245,6 +1266,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 
 	bool requiresExtraDBMachines = extraDB && g_simulator.extraDB->toString() != conn.toString();
 	int assignedMachines = 0, nonVersatileMachines = 0;
+	std::vector<ProcessClass::ClassType> processClassesSubSet = {ProcessClass::UnsetClass, ProcessClass::ResolutionClass, ProcessClass::MasterClass};
 	for( int dc = 0; dc < dataCenters; dc++ ) {
 		//FIXME: test unset dcID
 		Optional<Standalone<StringRef>> dcUID = StringRef(format("%d", dc));
@@ -1253,6 +1275,13 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount%dataCenters);
 		printf("Datacenter %d: %d/%d machines, %d/%d coordinators\n", dc, machines, machineCount, dcCoordinators, coordinatorCount);
 		ASSERT( dcCoordinators <= machines );
+
+		//FIXME: temporarily code to test storage cache
+		//TODO: caching disabled for this merge
+		//if(dc==0) {
+		//	machines++;
+		//}
+
 		int useSeedForMachine = deterministicRandom()->randomInt(0, machines);
 		Standalone<StringRef> zoneId;
 		Standalone<StringRef> newZoneId;
@@ -1269,12 +1298,19 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 				if(assignedMachines < 4)
 					processClass = ProcessClass((ProcessClass::ClassType) deterministicRandom()->randomInt(0, 2), ProcessClass::CommandLineSource); //Unset or Storage
 				else if(assignedMachines == 4 && !simconfig.db.regions.size())
-					processClass = ProcessClass((ProcessClass::ClassType) (deterministicRandom()->randomInt(0, 2) * ProcessClass::ResolutionClass), ProcessClass::CommandLineSource); //Unset or Resolution
+					processClass = ProcessClass(processClassesSubSet[deterministicRandom()->randomInt(0, processClassesSubSet.size())], ProcessClass::CommandLineSource); //Unset or Resolution or Master
 				else
 					processClass = ProcessClass((ProcessClass::ClassType) deterministicRandom()->randomInt(0, 3), ProcessClass::CommandLineSource); //Unset, Storage, or Transaction
 				if (processClass == ProcessClass::ResolutionClass)  // *can't* be assigned to other roles, even in an emergency
 					nonVersatileMachines++;
 			}
+
+			//FIXME: temporarily code to test storage cache
+			//TODO: caching disabled for this merge
+			//if(machine==machines-1 && dc==0) {
+			//	processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
+			//	nonVersatileMachines++;
+			//}
 
 			std::vector<IPAddress> ips;
 			for (int i = 0; i < processesPerMachine; i++) {
@@ -1394,8 +1430,6 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	state int extraDB = 0;
 	state int minimumReplication = 0;
 	state int minimumRegions = 0;
-	state float timeout = 5400; // old default is 5400 seconds
-	state float buggify_timeout = 36000.0; // old default is 36000 seconds
 	checkExtraDB(testFile, extraDB, minimumReplication, minimumRegions);
 
 	// TODO (IPv6) Use IPv6?

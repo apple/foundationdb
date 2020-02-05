@@ -131,6 +131,7 @@ struct TransactionOptions {
 	bool lockAware : 1;
 	bool readOnly : 1;
 	bool firstInBatch : 1;
+	bool includePort : 1;
 
 	TransactionOptions(Database const& cx);
 	TransactionOptions();
@@ -210,6 +211,8 @@ public:
 
 	void setVersion( Version v );
 	Future<Version> getReadVersion() { return getReadVersion(0); }
+	Future<Version> getRawReadVersion();
+	Optional<Version> getCachedReadVersion();
 
 	[[nodiscard]] Future<Optional<Value>> get(const Key& key, bool snapshot = false);
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
@@ -240,7 +243,7 @@ public:
 
 	Future< Void > warmRange( Database cx, KeyRange keys );
 
-	Future< StorageMetrics > waitStorageMetrics( KeyRange const& keys, StorageMetrics const& min, StorageMetrics const& max, StorageMetrics const& permittedError, int shardLimit );
+	Future< std::pair<Optional<StorageMetrics>, int> > waitStorageMetrics( KeyRange const& keys, StorageMetrics const& min, StorageMetrics const& max, StorageMetrics const& permittedError, int shardLimit, int expectedShardCount );
 	Future< StorageMetrics > getStorageMetrics( KeyRange const& keys, int shardLimit );
 	Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( KeyRange const& keys, StorageMetrics const& limit, StorageMetrics const& estimated );
 
@@ -317,6 +320,9 @@ int64_t extractIntOption( Optional<StringRef> value, int64_t minValue = std::num
 // Takes a snapshot of the cluster, specifically the following persistent
 // states: coordinator, TLog and storage state
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
+
+// Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
+ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions);
 
 #include "flow/unactorcompiler.h"
 #endif

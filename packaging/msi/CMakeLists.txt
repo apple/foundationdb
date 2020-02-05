@@ -28,14 +28,29 @@ if(WIX_FOUND)
     )
   add_custom_target(wixobj DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/FDBInstaller.wixobj)
   add_dependencies(wixobj fdbserver fdbcli fdbmonitor fdb_c fdbbackup python_binding)
-  string(REPLACE "/" "\\" msi_out_file "${CMAKE_BINARY_DIR}/packages/FDBInstaller.msi")
+	if(NOT FDB_RELEASE)
+    set(prerelease_string "-PRERELEASE")
+  else()
+    set(prerelease_string "")
+  endif()
+	# 64 bits
+  if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(arch_string "-x64")
+  # 32 bits
+  elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
+		set(arch_string "-x32")
+  endif()
+	set(installer-filename "foundationdb-${PROJECT_VERSION}${prerelease_string}${arch_string}.msi")
+	set(installer-filepath "${CMAKE_BINARY_DIR}/packages/${installer-filename}")
+
+  string(REPLACE "/" "\\" msi_out_file "${installer-filepath}")
   add_custom_command(
-    OUTPUT ${CMAKE_BINARY_DIR}/packages/FDBInstaller.msi
+    OUTPUT ${installer-filepath}
     COMMAND ${WIX_LIGHT} FDBInstaller.wixobj -ext WixUIExtension -out ${msi_out_file}
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     COMMENT "Generate MSI installer"
     )
-  add_custom_target(installer DEPENDS ${CMAKE_BINARY_DIR}/packages/FDBInstaller.msi)
+  add_custom_target(installer DEPENDS ${installer-filepath})
   add_dependencies(installer wixobj)
   add_dependencies(packages installer)
   #add_dependencies(installer fdbserver fdbcli fdbmonitor fdbbackup)

@@ -34,7 +34,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
@@ -44,10 +44,14 @@
 
 struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoaderData> {
 	std::map<LoadingParam, Future<Void>> processedFileParams;
+	std::map<LoadingParam, VersionedMutationsMap> kvOpsPerLP; // Buffered kvOps for each loading param
 
 	// rangeToApplier is in master and loader. Loader uses this to determine which applier a mutation should be sent
-	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
-	std::map<Standalone<KeyRef>, UID> rangeToApplier;
+	//   Key is the inclusive lower bound of the key range the applier (UID) is responsible for
+	std::map<Key, UID> rangeToApplier;
+
+	// Sampled mutations to be sent back to restore master
+	std::map<LoadingParam, MutationsVec> sampleMutations;
 	// keyOpsCount is the number of operations per key which is used to determine the key-range boundary for appliers
 	std::map<Standalone<KeyRef>, int> keyOpsCount;
 	int numSampledMutations; // The total number of mutations received from sampled data.
@@ -75,11 +79,12 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	void resetPerVersionBatch() {
 		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnLoader", nodeID);
-		RestoreRoleData::resetPerVersionBatch();
 		rangeToApplier.clear();
 		keyOpsCount.clear();
 		numSampledMutations = 0;
 		processedFileParams.clear();
+		kvOpsPerLP.clear();
+		sampleMutations.clear();
 	}
 
 	// Only get the appliers that are responsible for a range

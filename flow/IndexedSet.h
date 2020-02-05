@@ -55,6 +55,8 @@ class Future;
 
 class Void;
 
+class StringRef;
+
 template <class T, class Metric>
 struct IndexedSet{
 	typedef T value_type;
@@ -92,6 +94,10 @@ public:
 		void decrementNonEnd();
 		bool operator == ( const iterator& r ) const { return i == r.i; }
 		bool operator != ( const iterator& r ) const { return i != r.i; }
+		// following two methods are for memory storage engine(KeyValueStoreMemory class) use only
+		// in order to have same interface as radixtree
+		StringRef& getKey(uint8_t* dummyContent) const { return i->data.key; }
+		StringRef& getValue() const { return i->data.value; }
 	};
 
 	IndexedSet() : root(NULL) {};

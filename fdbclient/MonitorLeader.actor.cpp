@@ -609,11 +609,11 @@ ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterC
 		} else {
 			resetReply(req);
 		}
-		req.knownClientInfoID = clientData->clientInfo->get().id;
+		req.knownClientInfoID = clientData->clientInfo->get().read().id;
 		choose {
 			when( ClientDBInfo ni = wait( brokenPromiseToNever( knownLeader->get().get().clientInterface.openDatabase.getReply( req ) ) ) ) {
 				TraceEvent("MonitorLeaderForProxiesGotClientInfo", knownLeader->get().get().clientInterface.id()).detail("Proxy0", ni.proxies.size() ? ni.proxies[0].id() : UID()).detail("ClientID", ni.id);
-				clientData->clientInfo->set(ni);
+				clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(ni));
 			}
 			when( wait( knownLeader->onChange() ) ) {}
 		}
@@ -649,7 +649,7 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 				ClientDBInfo outInfo;
 				outInfo.id = deterministicRandom()->randomUniqueID();
 				outInfo.forward = leader.get().first.serializedInfo;
-				clientData->clientInfo->set(outInfo);
+				clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(outInfo));
 				TraceEvent("MonitorLeaderForProxiesForwarding").detail("NewConnStr", leader.get().first.serializedInfo.toString());
 				return Void();
 			}
@@ -667,6 +667,25 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 			}
 		}
 		wait( nomineeChange.onTrigger() || allActors );
+	}
+}
+
+void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::vector<MasterProxyInterface>& lastProxies ) {
+	if(ni.proxies.size() > CLIENT_KNOBS->MAX_PROXY_CONNECTIONS) {
+		std::vector<UID> proxyUIDs;
+		for(auto& proxy : ni.proxies) {
+			proxyUIDs.push_back(proxy.id());
+		}
+		if(proxyUIDs != lastProxyUIDs) {
+			lastProxyUIDs = proxyUIDs;
+			lastProxies = ni.proxies;
+			deterministicRandom()->randomShuffle(lastProxies);
+			lastProxies.resize(CLIENT_KNOBS->MAX_PROXY_CONNECTIONS);
+			for(int i = 0; i < lastProxies.size(); i++) {
+				TraceEvent("ConnectedProxy").detail("Proxy", lastProxies[i].id());
+			}
+		}
+		ni.proxies = lastProxies;
 	}
 }
 
@@ -709,11 +728,11 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 			incorrectTime = Optional<double>();
 		}
 
-		state ErrorOr<ClientDBInfo> rep = wait( clientLeaderServer.openDatabase.tryGetReply( req, TaskPriority::CoordinationReply ) );
+		state ErrorOr<CachedSerialization<ClientDBInfo>> rep = wait( clientLeaderServer.openDatabase.tryGetReply( req, TaskPriority::CoordinationReply ) );
 		if (rep.present()) {
-			if( rep.get().forward.present() ) {
-				TraceEvent("MonitorProxiesForwarding").detail("NewConnStr", rep.get().forward.get().toString()).detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
-				info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile->getFilename(), ClusterConnectionString(rep.get().forward.get().toString())));
+			if( rep.get().read().forward.present() ) {
+				TraceEvent("MonitorProxiesForwarding").detail("NewConnStr", rep.get().read().forward.get().toString()).detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
+				info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile->getFilename(), ClusterConnectionString(rep.get().read().forward.get().toString())));
 				return info;
 			}
 			if(connFile != info.intermediateConnFile) {
@@ -729,25 +748,9 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 			info.hasConnected = true;
 			connFile->notifyConnected();
 
-			auto& ni = rep.get();
-			if(ni.proxies.size() > CLIENT_KNOBS->MAX_CLIENT_PROXY_CONNECTIONS) {
-				std::vector<UID> proxyUIDs;
-				for(auto& proxy : ni.proxies) {
-					proxyUIDs.push_back(proxy.id());
-				}
-				if(proxyUIDs != lastProxyUIDs) {
-					lastProxyUIDs = proxyUIDs;
-					lastProxies = ni.proxies;
-					deterministicRandom()->randomShuffle(lastProxies);
-					lastProxies.resize(CLIENT_KNOBS->MAX_CLIENT_PROXY_CONNECTIONS);
-					for(int i = 0; i < lastProxies.size(); i++) {
-						TraceEvent("ClientConnectedProxy").detail("Proxy", lastProxies[i].id());
-					}
-				}
-				ni.proxies = lastProxies;
-			}
-
-			clientInfo->set( rep.get() );
+			auto& ni = rep.get().mutate();
+			shrinkProxyList(ni, lastProxyUIDs, lastProxies);
+			clientInfo->set( ni );
 			successIdx = idx;
 		} else if(idx == successIdx) {
 			wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));

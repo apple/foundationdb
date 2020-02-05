@@ -44,6 +44,10 @@ enum class TaskPriority {
 	Coordination = 8800,
 	FailureMonitor = 8700,
 	ResolutionMetrics = 8700,
+	Worker = 8660,
+	ClusterControllerWorker = 8656,
+	ClusterControllerRecruit = 8654,
+	ClusterControllerRegister = 8652,
 	ClusterController = 8650,
 	MasterTLogRejoin = 8646,
 	ProxyStorageRejoin = 8645,
@@ -55,9 +59,14 @@ enum class TaskPriority {
 	TLogCommitReply = 8580,
 	TLogCommit = 8570,
 	ProxyGetRawCommittedVersion = 8565,
-	ProxyResolverReply = 8560,
-	ProxyCommitBatcher = 8550,
-	ProxyCommit = 8540,
+	ProxyCommitYield3 = 8562,
+	ProxyTLogCommitReply = 8560,
+	ProxyCommitYield2 = 8557,
+	ProxyResolverReply = 8555,
+	ProxyMasterVersionReply = 8550,
+	ProxyCommitYield1 = 8547,
+	ProxyCommit = 8545,
+	ProxyCommitBatcher = 8540,
 	TLogConfirmRunningReply = 8530,
 	TLogConfirmRunning = 8520,
 	ProxyGRVTimer = 8510,
@@ -75,6 +84,7 @@ enum class TaskPriority {
 	DataDistribution = 3500,
 	DiskWrite = 3010,
 	UpdateStorage = 3000,
+	CompactCache = 2900,
 	TLogSpilledPeekReply = 2800,
 	FetchKeys = 2500,
 	Low = 2000,
@@ -295,24 +305,31 @@ template <class T> class Promise;
 
 struct NetworkMetrics {
 	enum { SLOW_EVENT_BINS = 16 };
-	uint64_t countSlowEvents[SLOW_EVENT_BINS];
+	uint64_t countSlowEvents[SLOW_EVENT_BINS] = {};
 
 	enum { PRIORITY_BINS = 9 };
-	TaskPriority priorityBins[ PRIORITY_BINS ];
-	bool priorityBlocked[PRIORITY_BINS];
-	double priorityBlockedDuration[PRIORITY_BINS];
-	double secSquaredPriorityBlocked[PRIORITY_BINS];
-	double priorityTimer[PRIORITY_BINS];
+	TaskPriority priorityBins[PRIORITY_BINS] = {};
+	bool priorityBlocked[PRIORITY_BINS] = {};
+	double priorityBlockedDuration[PRIORITY_BINS] = {};
+	double priorityMaxBlockedDuration[PRIORITY_BINS] = {};
+	double priorityTimer[PRIORITY_BINS] = {};
+	double windowedPriorityTimer[PRIORITY_BINS] = {};
 
-	double oldestAlternativesFailure;
-	double newestAlternativesFailure;
-	double lastAlternativesFailureSkipDelay;
-	double lastSync;
+	double secSquaredSubmit = 0;
+	double secSquaredDiskStall = 0;
 
-	double secSquaredSubmit;
-	double secSquaredDiskStall;
+	NetworkMetrics() {}
+};
 
-	NetworkMetrics() { memset(this, 0, sizeof(*this)); }
+struct NetworkInfo {
+	NetworkMetrics metrics;
+	double oldestAlternativesFailure = 0;
+	double newestAlternativesFailure = 0;
+	double lastAlternativesFailureSkipDelay = 0;
+
+	std::map<std::pair<IPAddress, uint16_t>, std::pair<int,double>> serverTLSConnectionThrottler;
+
+	NetworkInfo() {}
 };
 
 class IEventFD : public ReferenceCounted<IEventFD> {
@@ -463,7 +480,7 @@ public:
 		return (netAddressesFuncPtr) ? reinterpret_cast<NetworkAddressesFuncPtr>(netAddressesFuncPtr)() : NetworkAddressList();
 	}
 
-	NetworkMetrics networkMetrics;
+	NetworkInfo networkInfo;
 protected:
 	INetwork() {}
 

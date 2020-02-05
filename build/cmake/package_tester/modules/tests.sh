@@ -65,7 +65,7 @@ then
        python setup.py install
        successOr "Installing python bindings failed"
        popd
-       python -c 'import fdb; fdb.api_version(620)'
+       python -c 'import fdb; fdb.api_version(700)'
        successOr "Loading python bindings failed"
 
        # Test cmake and pkg-config integration: https://github.com/apple/foundationdb/issues/1483

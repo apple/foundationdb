@@ -202,7 +202,7 @@ will automatically find it and build with TLS support.
 If you installed WIX before running `cmake` you should find the
 `FDBInstaller.msi` in your build directory under `packaging/msi`. 
 
-## Makefile
+## Makefile (Deprecated - all users should transition to using cmake)
 
 #### MacOS
 
@@ -219,7 +219,7 @@ If you installed WIX before running `cmake` you should find the
 
 1. Install [Docker](https://www.docker.com/).
 1. Check out the foundationdb repo.
-1. Run the docker image interactively [Docker Run](https://docs.docker.com/engine/reference/run/#general-form) with the directory containing the foundationdb repo mounted [Docker Mounts](https://docs.docker.com/storage/volumes/).
+1. Run the docker image interactively with [Docker Run](https://docs.docker.com/engine/reference/run/#general-form), and with the directory containing the foundationdb repo mounted via [Docker Mounts](https://docs.docker.com/storage/volumes/).
 
     ```shell
     docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' foundationdb/foundationdb-build:latest

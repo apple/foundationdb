@@ -1,6 +1,6 @@
-###################
-Release Notes (3.0)
-###################
+#############
+Release Notes
+#############
 
 3.0.8
 =====
@@ -13,6 +13,7 @@ Release 3.0.8 is protocol-compatible with all prior 3.0.x releases. All users sh
 
 Fixes
 -----
+
 * Backup: the backup agent could crash in some circumstances, preventing a backup from completing.
 * Linux: On some systems, disk space usage tracking could be inaccurate.
 * In rare cases, range reading could get stuck in an infinite past_version loop.
@@ -20,6 +21,7 @@ Fixes
 
 Java
 ----
+
 * Fix: getBoundaryKeys could throw a NullPointerException.
 
 3.0.7
@@ -32,6 +34,7 @@ Release 3.0.7 is protocol-compatible with all prior 3.0.x releases. All users sh
 
 Fixes
 -----
+
 * ``fdbcli`` would segmentation fault if there was a semicolon after a quoted string.
 * :ref:`Atomic operations <api-python-transaction-atomic-operations>` performed on keys that had been :ref:`snapshot read <api-python-snapshot-reads>` would be converted into a set operation.
 * Reading a key to which an atomic operation had already been applied would cause the read to behave as a snapshot read.
@@ -40,6 +43,7 @@ Fixes
 
 Ruby
 ----
+
 * Fix: ``FDB`` objects could not be garbage collected.
 
 3.0.6
@@ -51,16 +55,19 @@ Release 3.0.6 is protocol-compatible with all prior 3.0.x releases. All users sh
 
 Fixes
 -----
+
 * Read-latency probes for status incorrectly returned zero.
 * Commit-latency probe for status included the time to acquire its read version.
 * Client and server could crash when experiencing problems with network connections.
 
 Node.js
 -------
+
 * Fix: npm source package did not compile on Mac OS X 10.9 or newer.
 
 Windows
 -------
+
 * Added registry key during installation.
 
 3.0.5
@@ -72,6 +79,7 @@ Release 3.0.5 is protocol-compatible with all prior 3.0.x releases. This release
 
 Fixes
 -----
+
 * Windows: fix Visual Studio 2013 code generation bug on older processors or versions of Windows that don't support the AVX instruction set (see https://connect.microsoft.com/VisualStudio/feedback/details/811093).
 
 3.0.4
@@ -83,6 +91,7 @@ Release 3.0.4 is protocol-compatible with all prior 3.0.x releases. Users should
 
 Fixes
 -----
+
 * Mac OS X: backup agent used 100% CPU even when idle.
 * Backups were inoperative on databases with greater than 32-bit versions.
 * Backup agents were not started on Windows.
@@ -92,6 +101,7 @@ Fixes
 
 Node.js
 -------
+
 * Fixed a compilation problem on Linux and Mac OS X as distributed on ``npm``. (Note: The corrected binding is distributed as version 3.0.3.)
 
 3.0.2
@@ -131,7 +141,7 @@ Fixes
 Client
 ------
 
-* Support for API version 300 and backwards compatible with previous API versions.
+* API version updated to 300. See the :ref:`API version upgrade guide <api-version-upgrade-guide-300>` for upgrade details.
 * By default, :ref:`snapshot reads <snapshot isolation>` see writes within the same transaction. The previous behavior can be achieved using transaction options.
 * The :ref:`transaction size limit <large-transactions>` includes conflict ranges.
 * Explicitly added read or write :ref:`conflict ranges <api-python-conflict-ranges>` and :ref:`watches <api-python-watches>` for keys that begin with ``\xFF`` require one of the transaction options ``access_system_keys`` or ``read_system_keys`` to be set.
@@ -150,6 +160,7 @@ Java
 
 Node.js
 -------
+
 * Fix: ``fdb.open``, ``fdb.createCluster``, and ``cluster.openDatabase`` didn't use the callback in API versions 22 or lower.
 * Tuple performance is improved.
 

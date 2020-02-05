@@ -18,8 +18,6 @@ set(FDBCLIENT_SRCS
   DatabaseConfiguration.h
   DatabaseContext.h
   EventTypes.actor.h
-  FailureMonitorClient.actor.cpp
-  FailureMonitorClient.h
   FDBOptions.h
   FDBTypes.h
   FileBackupAgent.actor.cpp
@@ -48,6 +46,7 @@ set(FDBCLIENT_SRCS
   Notified.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
+  RestoreWorkerInterface.actor.h
   RunTransaction.actor.h
   RYWIterator.cpp
   RYWIterator.h
@@ -79,7 +78,9 @@ set(FDBCLIENT_SRCS
   libb64/cdecode.c
   libb64/cencode.c
   md5/md5.c
-  sha1/SHA1.cpp)
+  sha1/SHA1.cpp
+  zipf.c
+  zipf.h)
 
 set(options_srcs ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 

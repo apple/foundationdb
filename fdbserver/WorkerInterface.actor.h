@@ -25,6 +25,7 @@
 #elif !defined(FDBSERVER_WORKERINTERFACE_ACTOR_H)
 	#define FDBSERVER_WORKERINTERFACE_ACTOR_H
 
+#include "fdbserver/BackupInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
@@ -50,6 +51,7 @@ struct WorkerInterface {
 	RequestStream< struct InitializeResolverRequest > resolver;
 	RequestStream< struct InitializeStorageRequest > storage;
 	RequestStream< struct InitializeLogRouterRequest > logRouter;
+	RequestStream< struct InitializeBackupRequest > backup;
 
 	RequestStream< struct LoadedPingRequest > debugPing;
 	RequestStream< struct CoordinationPingMessage > coordinationPing;
@@ -69,9 +71,20 @@ struct WorkerInterface {
 	WorkerInterface() {}
 	WorkerInterface( const LocalityData& locality ) : locality( locality ) {}
 
+	void initEndpoints() {
+		clientInterface.initEndpoints();
+		tLog.getEndpoint( TaskPriority::Worker );
+		master.getEndpoint( TaskPriority::Worker );
+		masterProxy.getEndpoint( TaskPriority::Worker );
+		resolver.getEndpoint( TaskPriority::Worker );
+		logRouter.getEndpoint( TaskPriority::Worker );
+		debugPing.getEndpoint( TaskPriority::Worker );
+		coordinationPing.getEndpoint( TaskPriority::Worker );
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq);
+		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq, backup);
 	}
 };
 
@@ -111,7 +124,7 @@ struct InitializeTLogRequest {
 
 	ReplyPromise< struct TLogInterface > reply;
 
-	InitializeTLogRequest() {}
+	InitializeTLogRequest() : recoverFrom(0) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -132,6 +145,40 @@ struct InitializeLogRouterRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, recoveryCount, routerTag, startVersion, tLogLocalities, tLogPolicy, locality, reply);
+	}
+};
+
+struct InitializeBackupReply {
+	constexpr static FileIdentifier file_identifier = 63843557;
+	struct BackupInterface interf;
+	LogEpoch backupEpoch;
+
+	InitializeBackupReply() = default;
+	InitializeBackupReply(BackupInterface interface, LogEpoch e) : interf(interface), backupEpoch(e) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, interf, backupEpoch);
+	}
+};
+
+struct InitializeBackupRequest {
+	constexpr static FileIdentifier file_identifier = 68354279;
+	UID reqId;
+	LogEpoch recruitedEpoch; // The epoch the worker is recruited.
+	LogEpoch backupEpoch; // The epoch the worker should work on. If different from the recruitedEpoch, then it refers
+	                      // to some previous epoch with unfinished work.
+	Tag routerTag;
+	Version startVersion;
+	Optional<Version> endVersion;
+	ReplyPromise<struct InitializeBackupReply> reply;
+
+	InitializeBackupRequest() = default;
+	explicit InitializeBackupRequest(UID id) : reqId(id) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, recruitedEpoch, backupEpoch, routerTag, startVersion, endVersion, reply);
 	}
 };
 
@@ -386,7 +433,9 @@ struct Role {
 	static const Role LOG_ROUTER;
 	static const Role DATA_DISTRIBUTOR;
 	static const Role RATEKEEPER;
+	static const Role STORAGE_CACHE;
 	static const Role COORDINATOR;
+	static const Role BACKUP;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -411,6 +460,7 @@ void endRole(const Role &role, UID id, std::string reason, bool ok = true, Error
 struct ServerDBInfo;
 
 class Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, TaskPriority taskID = TaskPriority::DefaultEndpoint, bool enableLocalityLoadBalance = true, bool lockAware = false );
+class Database openDBOnServer( Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> const& db, TaskPriority taskID = TaskPriority::DefaultEndpoint, bool enableLocalityLoadBalance = true, bool lockAware = false );
 ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> a,
                                            Reference<AsyncVar<Optional<struct ClusterInterface>>> b);
 
@@ -442,7 +492,9 @@ ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMaste
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
-                        Promise<Void> oldLog, Promise<Void> recovered, std::string folder, Reference<AsyncVar<bool>> degraded); // changes tli->id() to be the recovered ID
+                        Promise<Void> oldLog, Promise<Void> recovered, std::string folder,
+                        Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
+
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                        Reference<ClusterConnectionFile> ccf, LocalityData locality,
                                        Reference<AsyncVar<ServerDBInfo>> dbInfo);
@@ -452,6 +504,8 @@ ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest re
                              Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> storageCache(StorageServerInterface interf, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> backupWorker(BackupInterface bi, InitializeBackupRequest req, Reference<AsyncVar<ServerDBInfo>> db);
 
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);
@@ -464,7 +518,15 @@ namespace oldTLog_6_0 {
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
-                        Promise<Void> oldLog, Promise<Void> recovered, std::string folder, Reference<AsyncVar<bool>> degraded);
+                        Promise<Void> oldLog, Promise<Void> recovered, std::string folder,
+                        Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
+}
+namespace oldTLog_6_2 {
+ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
+                        Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
+                        PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk,
+                        Promise<Void> oldLog, Promise<Void> recovered, std::string folder,
+                        Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
 }
 
 typedef decltype(&tLog) TLogFn;

@@ -26,7 +26,7 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
-#include "flow/Hash3.h"
+#include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
 #include "flow/network.h"
@@ -90,7 +90,7 @@ class hash<Endpoint> {
 public:
 	size_t operator()(const Endpoint &s) const
 	{
-		return hashlittle(&s, sizeof(s), 0);
+		return crc32c_append(0, (const uint8_t*)&s, sizeof(s));
 	}
 };
 }
@@ -293,6 +293,7 @@ private:
 	void closeInternal() {
 		if(peer) {
 			peer->peerClosed();
+			stopReceive = delay(1.0);
 		}
 		leakedConnectionTracker.cancel();
 		peer.clear();
@@ -567,8 +568,7 @@ private:
 		}
 
 		if (randLog) {
-			uint32_t a=0, b=0;
-			hashlittle2( data, read_bytes, &a, &b );
+			uint32_t a = crc32c_append( 0, (const uint8_t*)data, read_bytes );
 			fprintf( randLog, "SFR2 %s %s %s %d %d\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), read_bytes, a );
 		}
 
@@ -583,8 +583,7 @@ private:
 	ACTOR static Future<Void> write_impl( SimpleFile* self, StringRef data, int64_t offset ) {
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog) {
-			uint32_t a=0, b=0;
-			hashlittle2( data.begin(), data.size(), &a, &b );
+			uint32_t a = crc32c_append( 0, data.begin(), data.size() );
 			fprintf( randLog, "SFW1 %s %s %s %d %d %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), a, data.size(), offset );
 		}
 
@@ -835,8 +834,11 @@ public:
 	}
 	ACTOR static Future<Reference<IConnection>> onConnect( Future<Void> ready, Reference<Sim2Conn> conn ) {
 		wait(ready);
-		if (conn->isPeerGone() && deterministicRandom()->random01()<0.5) {
+		if (conn->isPeerGone()) {
 			conn.clear();
+			if(FLOW_KNOBS->SIM_CONNECT_ERROR_MODE == 1 || (FLOW_KNOBS->SIM_CONNECT_ERROR_MODE == 2 && deterministicRandom()->random01() > 0.5)) {
+				throw connection_failed();
+			}
 			wait(Never());
 		}
 		conn->opened = true;

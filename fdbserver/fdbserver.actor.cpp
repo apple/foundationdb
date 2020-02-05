@@ -31,10 +31,9 @@
 #include "flow/SystemMonitor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/FailureMonitorClient.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/MoveKeys.actor.h"
@@ -57,7 +56,6 @@
 #include "fdbrpc/Platform.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
-#include "flow/SignalSafeUnwind.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
@@ -184,7 +182,7 @@ extern void createTemplateDatabase();
 // FIXME: this really belongs in a header somewhere since it is actually used.
 extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
 
-extern const char* getHGVersion();
+extern const char* getSourceVersion();
 
 extern void flushTraceFileVoid();
 
@@ -198,12 +196,6 @@ extern uint8_t *g_extra_memory;
 bool enableFailures = true;
 
 #define test_assert(x) if (!(x)) { cout << "Test failed: " #x << endl; return false; }
-
-template <class X> vector<X> vec( X x ) { vector<X> v; v.push_back(x); return v; }
-template <class X> vector<X> vec( X x, X y ) { vector<X> v; v.push_back(x); v.push_back(y); return v; }
-template <class X> vector<X> vec( X x, X y, X z ) { vector<X> v; v.push_back(x); v.push_back(y); v.push_back(z); return v; }
-
-//KeyRange keyRange( const Key& a, const Key& b ) { return std::make_pair(a,b); }
 
 vector< Standalone<VectorRef<DebugEntryRef>> > debugEntries;
 int64_t totalDebugEntriesSize = 0;
@@ -525,7 +517,7 @@ void* parentWatcher(void *arg) {
 
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("source version %s\n", getHGVersion());
+	printf("source version %s\n", getSourceVersion());
 	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
 }
 
@@ -686,7 +678,7 @@ static void printUsage( const char *name, bool devhelp ) {
 extern bool g_crashOnError;
 
 #if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
-	void* operator new (std::size_t size) throw(std::bad_alloc) {
+	void* operator new (std::size_t size)  {
 		void* p = malloc(size);
 		if(!p)
 			throw std::bad_alloc();
@@ -710,7 +702,7 @@ extern bool g_crashOnError;
 	}
 
 	//array throwing new and matching delete[]
-	void* operator new  [](std::size_t size) throw(std::bad_alloc) {
+	void* operator new  [](std::size_t size) {
 		void* p = malloc(size);
 		if(!p)
 			throw std::bad_alloc();
@@ -1150,10 +1142,8 @@ private:
 			}
 			case OPT_TRACECLOCK: {
 				const char* a = args.OptionArg();
-				if (!strcmp(a, "realtime"))
-					g_trace_clock = TRACE_CLOCK_REALTIME;
-				else if (!strcmp(a, "now"))
-					g_trace_clock = TRACE_CLOCK_NOW;
+				if (!strcmp(a, "realtime")) g_trace_clock.store(TRACE_CLOCK_REALTIME);
+				else if (!strcmp(a, "now")) g_trace_clock.store(TRACE_CLOCK_NOW);
 				else {
 					fprintf(stderr, "ERROR: Unknown clock source `%s'\n", a);
 					printHelpTeaser(argv[0]);
@@ -1510,7 +1500,6 @@ private:
 int main(int argc, char* argv[]) {
 	try {
 		platformInit();
-		initSignalSafeUnwind();
 
 #ifdef ALLOC_INSTRUMENTATION
 		g_extra_memory = new uint8_t[1000000];
@@ -1546,7 +1535,7 @@ int main(int argc, char* argv[]) {
 		delete CLIENT_KNOBS;
 		FlowKnobs* flowKnobs = new FlowKnobs(true, role == Simulation);
 		ClientKnobs* clientKnobs = new ClientKnobs(true);
-		ServerKnobs* serverKnobs = new ServerKnobs(true, clientKnobs);
+		ServerKnobs* serverKnobs = new ServerKnobs(true, clientKnobs, role == Simulation);
 		FLOW_KNOBS = flowKnobs;
 		SERVER_KNOBS = serverKnobs;
 		CLIENT_KNOBS = clientKnobs;
@@ -1578,6 +1567,11 @@ int main(int argc, char* argv[]) {
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);
+
+		if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
+			fprintf(stderr, "ERROR: --memory has to be larger than --cache_memory\n");
+			flushAndExit(FDB_EXIT_ERROR);
+		}
 
 		if (role == SkipListTest) {
 			skipListTest();
@@ -1675,7 +1669,7 @@ int main(int argc, char* argv[]) {
 		TraceEvent("ProgramStart")
 		    .setMaxEventLength(12000)
 		    .detail("RandomSeed", opts.randomSeed)
-		    .detail("SourceVersion", getHGVersion())
+		    .detail("SourceVersion", getSourceVersion())
 		    .detail("Version", FDB_VT_VERSION)
 		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
 		    .detail("FileSystem", opts.fileSystemPath)
@@ -1724,8 +1718,11 @@ int main(int argc, char* argv[]) {
 			std::vector<std::string> directories = platform::listDirectories( dataFolder );
 			for(int i = 0; i < directories.size(); i++)
 				if (directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." &&
-				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos) {
-					TraceEvent(SevError, "IncompatibleDirectoryFound").detail("DataFolder", dataFolder).detail("SuspiciousFile", directories[i]);
+				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos &&
+				    directories[i] != "mutation_backups") {
+					TraceEvent(SevError, "IncompatibleDirectoryFound")
+					    .detail("DataFolder", dataFolder)
+					    .detail("SuspiciousFile", directories[i]);
 					fprintf(stderr, "ERROR: Data folder `%s' had non fdb file `%s'; please use clean, fdb-only folder\n", dataFolder.c_str(), directories[i].c_str());
 					flushAndExit(FDB_EXIT_ERROR);
 				}

@@ -44,7 +44,7 @@ public:
 	double COORDINATOR_RECONNECTION_DELAY;
 	int CLIENT_EXAMPLE_AMOUNT;
 	double MAX_CLIENT_STATUS_AGE;
-	int MAX_CLIENT_PROXY_CONNECTIONS;
+	int MAX_PROXY_CONNECTIONS;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
@@ -66,6 +66,7 @@ public:
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
 	int BROADCAST_BATCH_SIZE;
+	double TRANSACTION_TIMEOUT_DELAY_INTERVAL;
 
 	// When locationCache in DatabaseContext gets to be this size, items will be evicted
 	int LOCATION_CACHE_EVICTION_SIZE;
@@ -74,6 +75,7 @@ public:
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;
 	int STORAGE_METRICS_SHARD_LIMIT;
+	int SHARD_COUNT_LIMIT;
 	double STORAGE_METRICS_UNFAIR_SPLIT_LIMIT;
 	double STORAGE_METRICS_TOO_MANY_SHARDS_DELAY;
 	double AGGREGATE_HEALTH_METRICS_MAX_STALENESS;
@@ -99,6 +101,7 @@ public:
 	int MUTATION_BLOCK_SIZE;
 
 	// Taskbucket
+	double TASKBUCKET_LOGGING_DELAY;
 	int TASKBUCKET_MAX_PRIORITY;
 	double TASKBUCKET_CHECK_TIMEOUT_CHANCE;
 	double TASKBUCKET_TIMEOUT_JITTER_OFFSET;
@@ -131,7 +134,6 @@ public:
 	int BACKUP_COPY_TASKS;
 	int BACKUP_BLOCK_SIZE;
 	int BACKUP_TASKS_PER_AGENT;
-	int CLEAR_LOG_RANGE_COUNT;
 	int SIM_BACKUP_TASKS_PER_AGENT;
 	int BACKUP_RANGEFILE_BLOCK_SIZE;
 	int BACKUP_LOGFILE_BLOCK_SIZE;
@@ -147,6 +149,7 @@ public:
 	double BACKUP_ERROR_DELAY;
 	double BACKUP_STATUS_DELAY;
 	double BACKUP_STATUS_JITTER;
+	double MIN_CLEANUP_SECONDS;
 
 	// Configuration
 	int32_t DEFAULT_AUTO_PROXIES;
@@ -187,6 +190,9 @@ public:
 
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX;
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
+	
+	//fdbcli
+	int CLI_CONNECT_PARALLELISM;
 
 	ClientKnobs(bool randomize = false);
 };

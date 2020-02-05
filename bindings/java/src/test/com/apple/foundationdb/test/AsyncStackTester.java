@@ -495,6 +495,7 @@ public class AsyncStackTester {
 				db.options().setTransactionRetryLimit(10);
 				db.options().setTransactionRetryLimit(-1);
 				db.options().setTransactionCausalReadRisky();
+				db.options().setTransactionIncludePortInAddress();
 
 				tr.options().setPrioritySystemImmediate();
 				tr.options().setPriorityBatch();
@@ -512,6 +513,7 @@ public class AsyncStackTester {
 				tr.options().setLogTransaction();
 				tr.options().setReadLockAware();
 				tr.options().setLockAware();
+				tr.options().setIncludePortInAddress();
 
 				if(!(new FDBException("Fake", 1020)).isRetryable() ||
 						(new FDBException("Fake", 10)).isRetryable())
@@ -665,10 +667,7 @@ public class AsyncStackTester {
 			};
 
 			if(operations == null || ++currentOp == operations.size()) {
-				Transaction tr = db.createTransaction();
-
-				return tr.getRange(nextKey, endKey, 1000).asList()
-				.whenComplete((x, t) -> tr.close())
+				return db.readAsync(readTr -> readTr.getRange(nextKey, endKey, 1000).asList())
 				.thenComposeAsync(next -> {
 					if(next.size() < 1) {
 						//System.out.println("No key found after: " + ByteArrayUtil.printable(nextKey.getKey()));

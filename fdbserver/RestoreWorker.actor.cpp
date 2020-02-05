@@ -1,5 +1,5 @@
 /*
- * Restore.actor.cpp
+ * RestoreWorker.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -54,8 +54,8 @@ void initRestoreWorkerConfig();
 ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Reference<RestoreWorkerData> self,
                                                  RestoreWorkerInterface workerInterf, Database cx);
 ACTOR Future<Void> monitorWorkerLiveness(Reference<RestoreWorkerData> self);
-ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWorkerData> self,
-                                            ActorCollection* actors, Database cx);
+void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWorkerData> self,
+                                      ActorCollection* actors, Database cx);
 ACTOR Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> self, Database cx,
                                                  int min_num_workers = 2);
 ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader, Database cx,
@@ -80,17 +80,17 @@ ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Refer
 
 // Assume only 1 role on a restore worker.
 // Future: Multiple roles in a restore worker
-ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWorkerData> self,
-                                            ActorCollection* actors, Database cx) {
+void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWorkerData> self,
+                                      ActorCollection* actors, Database cx) {
 	// Already recruited a role
 	// Future: Allow multiple restore roles on a restore worker. The design should easily allow this.
 	if (self->loaderInterf.present()) {
 		ASSERT(req.role == RestoreRole::Loader);
 		req.reply.send(RestoreRecruitRoleReply(self->id(), RestoreRole::Loader, self->loaderInterf.get()));
-		return Void();
+		return;
 	} else if (self->applierInterf.present()) {
 		req.reply.send(RestoreRecruitRoleReply(self->id(), RestoreRole::Applier, self->applierInterf.get()));
-		return Void();
+		return;
 	}
 
 	if (req.role == RestoreRole::Loader) {
@@ -98,13 +98,15 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 		self->loaderInterf = RestoreLoaderInterface();
 		self->loaderInterf.get().initEndpoints();
 		RestoreLoaderInterface& recruited = self->loaderInterf.get();
-		DUMPTOKEN(recruited.setApplierKeyRangeVectorRequest);
 		DUMPTOKEN(recruited.initVersionBatch);
+		DUMPTOKEN(recruited.loadFile);
+		DUMPTOKEN(recruited.sendMutations);
 		DUMPTOKEN(recruited.collectRestoreRoleInterfaces);
 		DUMPTOKEN(recruited.finishRestore);
 		actors->add(restoreLoaderCore(self->loaderInterf.get(), req.nodeIndex, cx));
 		TraceEvent("FastRestore").detail("RecruitedLoaderNodeIndex", req.nodeIndex);
-		req.reply.send(RestoreRecruitRoleReply(self->id(), RestoreRole::Loader, self->loaderInterf.get()));
+		req.reply.send(
+		    RestoreRecruitRoleReply(self->loaderInterf.get().id(), RestoreRole::Loader, self->loaderInterf.get()));
 	} else if (req.role == RestoreRole::Applier) {
 		ASSERT(!self->applierInterf.present());
 		self->applierInterf = RestoreApplierInterface();
@@ -117,13 +119,14 @@ ACTOR Future<Void> handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Refer
 		DUMPTOKEN(recruited.finishRestore);
 		actors->add(restoreApplierCore(self->applierInterf.get(), req.nodeIndex, cx));
 		TraceEvent("FastRestore").detail("RecruitedApplierNodeIndex", req.nodeIndex);
-		req.reply.send(RestoreRecruitRoleReply(self->id(), RestoreRole::Applier, self->applierInterf.get()));
+		req.reply.send(
+		    RestoreRecruitRoleReply(self->applierInterf.get().id(), RestoreRole::Applier, self->applierInterf.get()));
 	} else {
 		TraceEvent(SevError, "FastRestore")
 		    .detail("HandleRecruitRoleRequest", "UnknownRole"); //.detail("Request", req.printable());
 	}
 
-	return Void();
+	return;
 }
 
 // Read restoreWorkersKeys from DB to get each restore worker's workerInterface and set it to self->workerInterfaces;
@@ -182,8 +185,10 @@ ACTOR Future<Void> monitorWorkerLiveness(Reference<RestoreWorkerData> self) {
 void initRestoreWorkerConfig() {
 	opConfig.num_loaders = g_network->isSimulated() ? 3 : opConfig.num_loaders;
 	opConfig.num_appliers = g_network->isSimulated() ? 3 : opConfig.num_appliers;
+	// TODO: Set the threshold to a random value in a range
 	opConfig.transactionBatchSizeThreshold =
 	    g_network->isSimulated() ? 512 : opConfig.transactionBatchSizeThreshold; // Byte
+	opConfig.batchSizeThreshold = g_network->isSimulated() ? 10 * 1024 * 1024 : opConfig.batchSizeThreshold; // Byte
 	TraceEvent("FastRestore")
 	    .detail("InitOpConfig", "Result")
 	    .detail("NumLoaders", opConfig.num_loaders)
@@ -234,7 +239,7 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 				}
 				when(RestoreRecruitRoleRequest req = waitNext(interf.recruitRole.getFuture())) {
 					requestTypeStr = "recruitRole";
-					actors.add(handleRecruitRoleRequest(req, self, &actors, cx));
+					handleRecruitRoleRequest(req, self, &actors, cx);
 				}
 				when(RestoreSimpleRequest req = waitNext(interf.terminateWorker.getFuture())) {
 					// Destroy the worker at the end of the restore

@@ -32,25 +32,25 @@ from bindingtester.tests.directory_state_tree import DirectoryStateTreeNode
 fdb.api_version(FDB_API_VERSION)
 
 DEFAULT_DIRECTORY_INDEX = 4
-DEFAULT_DIRECTORY_PREFIX = 'default'
-DIRECTORY_ERROR_STRING = 'DIRECTORY_ERROR'
+DEFAULT_DIRECTORY_PREFIX = b'default'
+DIRECTORY_ERROR_STRING = b'DIRECTORY_ERROR'
 
 def setup_directories(instructions, default_path, random):
     # Clients start with the default directory layer in the directory list
     DirectoryStateTreeNode.reset()
-    dir_list = [DirectoryStateTreeNode.get_layer('\xfe')]
+    dir_list = [DirectoryStateTreeNode.get_layer(b'\xfe')]
 
-    instructions.push_args(0, '\xfe')
+    instructions.push_args(0, b'\xfe')
     instructions.append('DIRECTORY_CREATE_SUBSPACE')
     dir_list.append(DirectoryStateTreeNode(False, True))
 
-    instructions.push_args(0, '')
+    instructions.push_args(0, b'')
     instructions.append('DIRECTORY_CREATE_SUBSPACE')
     dir_list.append(DirectoryStateTreeNode(False, True))
 
     instructions.push_args(1, 2, 1)
     instructions.append('DIRECTORY_CREATE_LAYER')
-    dir_list.append(DirectoryStateTreeNode.get_layer('\xfe'))
+    dir_list.append(DirectoryStateTreeNode.get_layer(b'\xfe'))
 
     create_default_directory_subspace(instructions, default_path, random)
     dir_list.append(dir_list[0].add_child((default_path,), DirectoryStateTreeNode(True, True, has_known_prefix=True)))
@@ -67,7 +67,7 @@ def create_default_directory_subspace(instructions, path, random):
     instructions.push_args(3)
     instructions.append('DIRECTORY_CHANGE')
     prefix = random.random_string(16)
-    instructions.push_args(1, path, '', '%s-%s' % (DEFAULT_DIRECTORY_PREFIX, prefix))
+    instructions.push_args(1, path, b'', b'%s-%s' % (DEFAULT_DIRECTORY_PREFIX, prefix))
     instructions.append('DIRECTORY_CREATE_DATABASE')
 
     instructions.push_args(DEFAULT_DIRECTORY_INDEX)
@@ -88,14 +88,14 @@ def push_instruction_and_record_prefix(instructions, op, op_args, path, dir_inde
         instructions.push_args(dir_index)
         instructions.append('DIRECTORY_CHANGE')
 
-        instructions.push_args(1, '', random.random_string(16), '')
+        instructions.push_args(1, b'', random.random_string(16), b'')
         instructions.append('DIRECTORY_PACK_KEY')
         test_util.to_front(instructions, 3)  # move the existence result up to the front of the stack
 
         t = util.subspace_to_tuple(subspace)
         instructions.push_args(len(t) + 3, *t)
 
-        instructions.append('TUPLE_PACK')  # subspace[<exists>][<packed_key>][random.random_string(16)] = ''
+        instructions.append('TUPLE_PACK')  # subspace[<exists>][<packed_key>][random.random_string(16)] = b''
         instructions.append('SET')
 
         instructions.push_args(DEFAULT_DIRECTORY_INDEX)
@@ -128,7 +128,7 @@ def check_for_duplicate_prefixes(db, subspace):
 
 
 def validate_hca_state(db):
-    hca = fdb.Subspace(('\xfe', 'hca'), '\xfe')
+    hca = fdb.Subspace((b'\xfe', b'hca'), b'\xfe')
     counters = hca[0]
     recent = hca[1]
 
