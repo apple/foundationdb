@@ -779,6 +779,9 @@ ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::vector
 	}
 }
 
+// TODO: `issues` is right now only updated by `monitorTraceLogIssues` and thus is being `set` on every update.
+// It could be changed to `insert` and `trigger` later if we want to use it as a generic way for the caller of this
+// function to report issues to cluster controller.
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                        Reference<ClusterConnectionFile> connFile, LocalityData locality,
                                        Reference<AsyncVar<ServerDBInfo>> dbInfo,
