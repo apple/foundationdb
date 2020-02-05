@@ -29,6 +29,7 @@
 #include <stdarg.h>
 #include <cctype>
 #include <time.h>
+#include <set>
 
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
@@ -222,19 +223,31 @@ public:
 
 	struct IssuesList : ITraceLogIssuesReporter, ThreadSafeReferenceCounted<IssuesList> {
 		IssuesList() : moved(false){};
-		void addIssue(std::string issue) override {
+		void addAndExpire(std::string issue, double expirationInterval) override {
 			MutexHolder h(mutex);
-			if (moved) {
-				issues = std::set<std::string>();
-				moved = false;
+			auto now = ::now();
+			if (issues.find(issue) != issues.end()) {
+				issues[issue]++;
+			} else {
+				issues[issue] = 1;
 			}
-			issues.insert(issue);
+			queue.emplace_back(now + expirationInterval, issue);
 		}
 
-		std::set<std::string> getAndFlushIssues() override {
+		void retrieveIssues(std::vector<std::string>& out) override {
 			MutexHolder h(mutex);
-			moved = true;
-			return std::move(issues);
+			// clean up any expired events first
+			auto now = ::now();
+			while (queue.size() > 0 && queue.front().first <= now) {
+				ASSERT(issues.find(queue.front().second) != issues.end());
+				if (--issues[queue.front().second] == 0) {
+					issues.erase(queue.front().second);
+				}
+				queue.pop_front();
+			}
+			for (auto const& i : issues) {
+				out.push_back(i.first);
+			}
 		}
 
 		void addref() { ThreadSafeReferenceCounted<IssuesList>::addref(); }
@@ -243,7 +256,8 @@ public:
 	private:
 		Mutex mutex;
 		bool moved;
-		std::set<std::string> issues;
+		std::unordered_map<std::string, int64_t> issues;
+		Deque<std::pair<double, std::string>> queue;
 	};
 
 	Reference<IssuesList> issues;
@@ -538,7 +552,7 @@ public:
 		writer->post(a);
 	}
 
-	std::set<std::string> getTraceLogIssues() { return issues->getAndFlushIssues(); }
+	void retriveTraceLogIssues(std::vector<std::string>& out) { return issues->retrieveIssues(out); }
 
 	~TraceLog() {
 		close();
@@ -774,13 +788,9 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 
 	return *this;
 }
-uint64_t getUnsuccessfulFlushCount() {
-	return g_traceLog.getUnsuccessfulFlushCount();
-}
 
-std::set<std::string> getTraceLogIssues() {
-	return std::move(g_traceLog.getTraceLogIssues());
-	return g_traceLog.getTraceLogIssues();
+void retriveTraceLogIssues(std::vector<std::string>& out) {
+	return g_traceLog.retriveTraceLogIssues(out);
 }
 
 void pingTraceLogWriterThread(ThreadFuture<Void>& p) {
