@@ -900,6 +900,29 @@ namespace fileBackup {
 		return LiteralStringRef("OnSetAddTask");
 	}
 
+	// Clears the backup ID from "backupStartedKey" to pause backup workers.
+	ACTOR static Future<Void> clearBackupStartID(Reference<ReadYourWritesTransaction> tr, UID backupUid) {
+		// If backup worker is not enabled, exit early.
+		Optional<Value> started = wait(tr->get(backupStartedKey));
+		std::vector<std::pair<UID, Version>> ids;
+		if (started.present()) {
+			ids = decodeBackupStartedValue(started.get());
+		}
+		auto it = std::find_if(ids.begin(), ids.end(),
+		                       [=](const std::pair<UID, Version>& p) { return p.first == backupUid; });
+		if (it != ids.end()) {
+			ids.erase(it);
+		}
+
+		if (ids.empty()) {
+			TraceEvent("ClearBackup").detail("BackupID", backupUid);
+			tr->clear(backupStartedKey);
+		} else {
+			tr->set(backupStartedKey, encodeBackupStartedValue(ids));
+		}
+		return Void();
+	}
+
 	// Backup and Restore taskFunc definitions will inherit from one of the following classes which
 	// servers to catch and log to the appropriate config any error that execute/finish didn't catch and log.
 	struct RestoreTaskFuncBase : TaskFuncBase {
@@ -2149,8 +2172,8 @@ namespace fileBackup {
 
 			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 			state Key destUidValue = wait(backup.destUidValue().getOrThrow(tr));
-			wait( eraseLogData(tr, backup.getUidAsKey(), destUidValue) );
-			
+			wait(eraseLogData(tr, backup.getUidAsKey(), destUidValue) && clearBackupStartID(tr, uid));
+
 			backup.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
 
 			wait(taskBucket->finish(tr, task));
@@ -2336,29 +2359,6 @@ namespace fileBackup {
 		return BackupSnapshotManifest::addTask(tr, taskBucket, parentTask, completionKey, waitFor);
 	}
 
-	// Clears the backup ID from "backupStartedKey" to pause backup workers.
-	ACTOR static Future<Void> clearBackupStartID(Reference<ReadYourWritesTransaction> tr, UID backupUid) {
-		// If backup worker is not enabled, exit early.
-		Optional<Value> started = wait(tr->get(backupStartedKey));
-		std::vector<std::pair<UID, Version>> ids;
-		if (started.present()) {
-			ids = decodeBackupStartedValue(started.get());
-		}
-		auto it = std::find_if(ids.begin(), ids.end(),
-		                       [=](const std::pair<UID, Version>& p) { return p.first == backupUid; });
-		if (it != ids.end()) {
-			ids.erase(it);
-		}
-
-		if (ids.empty()) {
-			//TraceEvent("ClearBackup").detail("BID", backupUid);
-			tr->clear(backupStartedKey);
-		} else {
-			tr->set(backupStartedKey, encodeBackupStartedValue(ids));
-		}
-		return Void();
-	}
-
 	struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		static StringRef name;
 		static const uint32_t version;
@@ -2388,7 +2388,7 @@ namespace fileBackup {
 			// Check if backup worker is enabled
 			DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
 			if (!dbConfig.backupWorkerEnabled) {
-				return Void();
+				wait(success(changeConfig(cx, "backup_worker_enabled:=1", true)));
 			}
 
 			// Set the "backupStartedKey" and wait for all backup worker started
@@ -2468,7 +2468,7 @@ namespace fileBackup {
 			// task will clean up and set the completed state.
 			wait(success(FileBackupFinishedTask::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), backupFinished)));
 
-			wait(taskBucket->finish(tr, task) && clearBackupStartID(tr, config.getUid()));
+			wait(taskBucket->finish(tr, task));
 
 			return Void();
 		}
@@ -3864,7 +3864,8 @@ public:
 
 			state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
 			wait(success(tr->getReadVersion()));
-			wait( eraseLogData(tr, config.getUidAsKey(), destUidValue) );
+			wait(eraseLogData(tr, config.getUidAsKey(), destUidValue) &&
+			     fileBackup::clearBackupStartID(tr, config.getUid()));
 
 			config.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
 
@@ -3903,8 +3904,9 @@ public:
 
 		// Cancel backup task through tag
 		wait(tag.cancel(tr));
-		
-		wait(eraseLogData(tr, config.getUidAsKey(), destUidValue) && fileBackup::clearBackupStartID(tr, config.getUid()));
+
+		wait(eraseLogData(tr, config.getUidAsKey(), destUidValue) &&
+		     fileBackup::clearBackupStartID(tr, config.getUid()));
 
 		config.stateEnum().set(tr, EBackupState::STATE_ABORTED);
 

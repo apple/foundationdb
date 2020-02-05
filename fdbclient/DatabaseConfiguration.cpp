@@ -41,7 +41,7 @@ void DatabaseConfiguration::resetInternal() {
 	tLogPolicy = storagePolicy = remoteTLogPolicy = Reference<IReplicationPolicy>();
 	remoteDesiredTLogCount = -1;
 	remoteTLogReplicationFactor = repopulateRegionAntiQuorum = 0;
-	backupWorkerEnabled = true;
+	backupWorkerEnabled = false;
 }
 
 void parse( int* i, ValueRef const& v ) {

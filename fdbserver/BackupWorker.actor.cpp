@@ -92,7 +92,6 @@ struct BackupData {
 
 	KeyRangeMap<std::set<UID>> rangeMap; // Save key ranges to a set of backup UIDs
 	std::map<UID, PerBackupInfo> backups; // Backup UID to infos
-	PromiseStream<std::vector<std::pair<UID, Version>>> backupUidVersions; // active backup (UID, StartVersion) pairs
 	AsyncTrigger changedTrigger;
 
 	CounterCollection cc;
@@ -219,14 +218,23 @@ ACTOR Future<Void> monitorBackupStartedKeyChanges(BackupData* self, bool started
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> value = wait(tr.get(backupStartedKey));
+				std::vector<std::pair<UID, Version>> uidVersions;
 				if (value.present()) {
-					self->backupUidVersions.send(decodeBackupStartedValue(value.get()));
+					uidVersions = decodeBackupStartedValue(value.get());
+					TraceEvent e("BackupWorkerGotStartKey", self->myId);
+					int i = 1;
+					for (auto uidVersion : uidVersions) {
+						e.detail(format("BackupID%d", i), uidVersion.first)
+						    .detail(format("Version%d", i), uidVersion.second);
+						i++;
+					}
+					self->onBackupChanges(uidVersions);
 					if (started) return Void();
 				} else {
-					self->backupUidVersions.send({});
+					TraceEvent("BackupWorkerEmptyStartKey", self->myId);
+					self->onBackupChanges(uidVersions);
 
 					if (!started) {
-						TraceEvent("BackupWorkerNoStartKey", self->myId);
 						return Void();
 					}
 				}
@@ -576,15 +584,6 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 				}
 				logSystemChange = self->logSystem.onChange();
 			}
-			when(wait(self->changedTrigger.onTrigger())) {
-				// Check all backups and wait for container and key ranges
-				std::vector<Future<Void>> all;
-				for (auto& uidInfo : self->backups) {
-					if (uidInfo.second.ready || uidInfo.second.stopped) continue;
-					all.push_back(uidInfo.second.waitReady(uidInfo.first));
-				}
-				wait(waitForAll(all));
-			}
 		}
 		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
@@ -639,6 +638,7 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self) {
 		pullFinished = pullAsyncData(self);
 		wait(stopped || pullFinished);
 		if (pullFinished.isReady()) return Void(); // backup is done for some old epoch.
+		pullFinished = Future<Void>(); // cancels pullAsyncData()
 		TraceEvent("BackupWorkerPaused", self->myId);
 	}
 }
@@ -707,16 +707,6 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 				wait(brokenPromiseToNever(db->get().master.notifyBackupWorkerDone.getReply(
 				    BackupWorkerDoneRequest(self.myId, self.backupEpoch))));
 				break;
-			}
-			when(std::vector<std::pair<UID, Version>> uidVersions = waitNext(self.backupUidVersions.getFuture())) {
-				TraceEvent e("BackupWorkerGotStartKey", self.myId);
-				int i = 1;
-				for (auto uidVersion : uidVersions) {
-					e.detail(format("BackupID%d", i), uidVersion.first.toString())
-					    .detail(format("Version%d", i), uidVersion.second);
-					i++;
-				}
-				self.onBackupChanges(uidVersions);
 			}
 			when(wait(error)) {}
 		}
