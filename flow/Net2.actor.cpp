@@ -451,9 +451,43 @@ public:
 	{
 	}
 
+	ACTOR static void doConnect( Reference<SSLConnection> self, Promise<Void> connected) {
+		try {
+			auto to = tcpEndpoint(self->peer_address);
+			BindPromise p("N2_ConnectError", self->id);
+			Future<Void> onConnected = p.getFuture();
+			self->socket.async_connect( to, std::move(p) );
+
+			wait( onConnected );
+			try {
+				BindPromise p("N2_ConnectHandshakeError", self->id);
+				Future<Void> onHandshook = p.getFuture();
+				self->ssl_sock.async_handshake( boost::asio::ssl::stream_base::client, std::move(p) );
+				wait( onHandshook );
+			} catch (Error& e) {
+				std::pair<IPAddress,uint16_t> peerIP = std::make_pair(self->peer_address.ip, self->peer_address.port);
+				auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
+				if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
+					iter->second.first++;
+				} else {
+					g_network->networkInfo.serverTLSConnectionThrottler[peerIP] = std::make_pair(0,now() + FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT);
+				}
+				throw;
+			}
+
+			self->init();
+			connected.send(Void());
+		} catch (Error& e) {
+			// Either the connection failed, or was cancelled by the caller
+			self->closeSocket();
+			connected.sendError(e);
+			throw;
+		}
+	}
+
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
 	ACTOR static Future<Reference<IConnection>> connect( boost::asio::io_service* ios, boost::asio::ssl::context* context, NetworkAddress addr ) {
-		state std::pair<IPAddress,uint16_t> peerIP = std::make_pair(addr.ip, addr.port);
+		std::pair<IPAddress,uint16_t> peerIP = std::make_pair(addr.ip, addr.port);
 		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
 		if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
 			if (now() < iter->second.second) {
@@ -468,31 +502,11 @@ public:
 		}
 		
 		state Reference<SSLConnection> self( new SSLConnection(*ios, *context) );
-
 		self->peer_address = addr;
+		Promise<Void> connected;
+		doConnect(self, connected);
 		try {
-			auto to = tcpEndpoint(addr);
-			BindPromise p("N2_ConnectError", self->id);
-			Future<Void> onConnected = p.getFuture();
-			self->socket.async_connect( to, std::move(p) );
-
-			wait( onConnected );
-			try {
-				BindPromise p("N2_ConnectHandshakeError", self->id);
-				Future<Void> onHandshook = p.getFuture();
-				self->ssl_sock.async_handshake( boost::asio::ssl::stream_base::client, std::move(p) );
-				wait( onHandshook );
-			} catch (Error& e) {
-				auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-				if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-					iter->second.first++;
-				} else {
-					g_network->networkInfo.serverTLSConnectionThrottler[peerIP] = std::make_pair(0,now() + FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT);
-				}
-				throw;
-			}
-
-			self->init();
+			wait(connected.getFuture());
 			return self;
 		} catch (Error& e) {
 			// Either the connection failed, or was cancelled by the caller
