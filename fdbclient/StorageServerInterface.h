@@ -76,7 +76,7 @@ struct StorageServerInterface {
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
-	template <class Ar> 
+	template <class Ar>
 	void serialize( Ar& ar ) {
 		// StorageServerInterface is persisted in the database and in the tLog's data structures, so changes here have to be
 		// versioned carefully!
@@ -128,10 +128,10 @@ struct ServerCacheInfo {
 struct GetValueReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1378929;
 	Optional<Value> value;
-	bool cached = false;
+	bool cached;
 
-	GetValueReply() {}
-	GetValueReply(Optional<Value> value) : value(value) {}
+	GetValueReply() : cached(false) {}
+	GetValueReply(Optional<Value> value, bool cached) : value(value), cached(cached) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -148,8 +148,8 @@ struct GetValueRequest : TimedRequest {
 
 	GetValueRequest(){}
 	GetValueRequest(const Key& key, Version ver, Optional<UID> debugID) : key(key), version(ver), debugID(debugID) {}
-	
-	template <class Ar> 
+
+	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, key, version, debugID, reply);
 	}
@@ -179,8 +179,8 @@ struct WatchValueRequest {
 
 	WatchValueRequest(){}
 	WatchValueRequest(const Key& key, Optional<Value> value, Version ver, Optional<UID> debugID) : key(key), value(value), version(ver), debugID(debugID) {}
-	
-	template <class Ar> 
+
+	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, key, value, version, debugID, reply);
 	}
@@ -223,10 +223,10 @@ struct GetKeyValuesRequest : TimedRequest {
 struct GetKeyReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 11226513;
 	KeySelector sel;
-	bool cached = false;
+	bool cached;
 
-	GetKeyReply() {}
-	GetKeyReply(KeySelector sel) : sel(sel) {}
+	GetKeyReply() : cached(false) {}
+	GetKeyReply(KeySelector sel, bool cached) : sel(sel), cached(cached) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -271,7 +271,7 @@ struct GetShardStateRequest {
 		FETCHING = 1,
 		READABLE = 2
 	};
-	
+
 	KeyRange keys;
 	int32_t mode;
 	ReplyPromise<GetShardStateReply> reply;
