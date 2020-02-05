@@ -68,7 +68,6 @@ struct BackupData {
 			wait(success(info->container) && success(info->ranges));
 			info->ready = true;
 			const auto& ranges = info->ranges.get();
-			info->self->insertRanges(ranges, backupUid);
 			TraceEvent("BackupWorkerInsertRanges", info->self->myId)
 			    .detail("BackupID", backupUid)
 			    .detail("URL", info->container.get()->getURL())
@@ -90,7 +89,6 @@ struct BackupData {
 		bool ready = false; // Change to true when container and ranges are ready
 	};
 
-	KeyRangeMap<std::set<UID>> rangeMap; // Save key ranges to a set of backup UIDs
 	std::map<UID, PerBackupInfo> backups; // Backup UID to infos
 	AsyncTrigger changedTrigger;
 
@@ -112,36 +110,30 @@ struct BackupData {
 	}
 
 	// Inserts a backup's single range into rangeMap.
-	void insertRange(KeyRangeRef range, UID uid) {
-		for (auto& logRange : rangeMap.modify(range)) {
-			logRange->value().insert(uid);
+	template <class T>
+	void insertRange(KeyRangeMap<std::set<T>>& keyRangeMap, KeyRangeRef range, T value) {
+		for (auto& logRange : keyRangeMap.modify(range)) {
+			logRange->value().insert(value);
 		}
-		for (auto& logRange : rangeMap.modify(singleKeyRange(metadataVersionKey))) {
-			logRange->value().insert(uid);
+		for (auto& logRange : keyRangeMap.modify(singleKeyRange(metadataVersionKey))) {
+			logRange->value().insert(value);
 		}
 		TraceEvent("BackupWorkerInsertRange", myId)
-		    .detail("BackupID", uid)
+		    .detail("Value", value)
 		    .detail("Begin", range.begin)
 		    .detail("End", range.end);
 	}
 
 	// Inserts a backup's ranges into rangeMap.
-	void insertRanges(const Optional<std::vector<KeyRange>>& ranges, UID uid) {
+	template <class T>
+	void insertRanges(KeyRangeMap<std::set<T>>& keyRangeMap, const Optional<std::vector<KeyRange>>& ranges, T value) {
 		if (!ranges.present() || ranges.get().empty()) {
 			// insert full ranges of normal keys
-			return insertRange(normalKeys, uid);
+			return insertRange(keyRangeMap, normalKeys, value);
 		}
 		for (const auto& range : ranges.get()) {
-			insertRange(range, uid);
+			insertRange(keyRangeMap, range, value);
 		}
-	}
-
-	// Clears a backup's ranges in the rangeMap.
-	void clearRanges(UID uid) {
-		for (auto& logRange : rangeMap.ranges()) {
-			logRange->value().erase(uid);
-		}
-		rangeMap.coalesce(allKeys);
 	}
 
 	void pop() {
@@ -372,10 +364,8 @@ static Value makePadding(int size) {
 	return pad.substr(0, size);
 }
 
-ACTOR Future<Void> addMutation(BackupData* self, UID backupUid, Reference<IBackupFile> logFile, int idx, MutationRef m,
+ACTOR Future<Void> addMutation(BackupData* self, Reference<IBackupFile> logFile, int idx, MutationRef m,
                                int64_t* blockEnd, int blockSize, bool useM) {
-	if (!self->backups[backupUid].isRunning()) return Void();
-
 	state Standalone<StringRef> keep;
 	state StringRef message;
 
@@ -422,19 +412,23 @@ ACTOR Future<Void> addMutation(BackupData* self, UID backupUid, Reference<IBacku
 ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
 	state int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
 	state std::vector<Future<Reference<IBackupFile>>> logFileFutures;
-	state std::map<UID, int> uidMap; // Backup UID to index in logFileFutures & logFiles
+	state std::vector<Reference<IBackupFile>> logFiles;
+	state std::vector<int64_t> blockEnds;
+	state std::set<UID> activeUids; // active Backups' UIDs
+	state KeyRangeMap<std::set<int>> keyRangeMap; // range to index in logFileFutures, logFiles, & blockEnds
 
 	for (auto it = self->backups.begin(); it != self->backups.end();) {
 		if (!it->second.isRunning()) {
 			if (it->second.stopped) {
-				self->clearRanges(it->first);
 				it = self->backups.erase(it);
 			} else {
 				it++;
 			}
 			continue;
 		}
-		uidMap.emplace(it->first, logFileFutures.size());
+		const int index = logFileFutures.size();
+		activeUids.insert(it->first);
+		self->insertRanges(keyRangeMap, it->second.ranges.get(), index);
 		if (it->second.lastSavedVersion == invalidVersion) {
 			it->second.lastSavedVersion = self->messages[0].getVersion();
 		}
@@ -444,47 +438,37 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	}
 	wait(waitForAll(logFileFutures));
 
-	state std::vector<Reference<IBackupFile>> logFiles;
 	std::transform(logFileFutures.begin(), logFileFutures.end(), std::back_inserter(logFiles),
 	               [](const Future<Reference<IBackupFile>>& f) { return f.get(); });
 
 	for (const auto& file : logFiles) {
 		TraceEvent("OpenMutationFile", self->myId)
-		    .detail("StartVersion", self->messages[0].getVersion())
-		    .detail("EndVersion", popVersion)
-		    .detail("BlockSize", blockSize)
 		    .detail("TagId", self->tag.id)
 		    .detail("File", file->getFileName());
 	}
 
 	state int idx = 0;
-	state std::vector<int64_t> blockEnds(logFiles.size(), 0);
+	blockEnds = std::vector<int64_t>(logFiles.size(), 0);
 	for (; idx < numMsg; idx++) {
 		state MutationRef m;
 		if (!isBackupMessage(self->messages[idx], &m)) continue;
 
 		std::vector<Future<Void>> adds;
 		if (m.type != MutationRef::Type::ClearRange) {
-			for (UID uid : self->rangeMap[m.param1]) {
-				auto it = uidMap.find(uid);
-				if (it == uidMap.end()) continue;
-				adds.push_back(
-				    addMutation(self, uid, logFiles[it->second], idx, m, &blockEnds[it->second], blockSize, false));
+			for (int index : keyRangeMap[m.param1]) {
+				adds.push_back(addMutation(self, logFiles[index], idx, m, &blockEnds[index], blockSize, false));
 			}
 		} else {
 			KeyRangeRef mutationRange(m.param1, m.param2);
 			KeyRangeRef intersectionRange;
 
 			// Find intersection ranges and create mutations for sub-ranges
-			for (auto range : self->rangeMap.intersectingRanges(mutationRange)) {
+			for (auto range : keyRangeMap.intersectingRanges(mutationRange)) {
 				const auto& subrange = range.range();
 				intersectionRange = mutationRange & subrange;
 				MutationRef subm(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
-				for (UID uid : range.value()) {
-					auto it = uidMap.find(uid);
-					if (it == uidMap.end()) continue;
-					adds.push_back(addMutation(self, uid, logFiles[it->second], idx, subm, &blockEnds[it->second],
-					                           blockSize, true));
+				for (int index : range.value()) {
+					adds.push_back(addMutation(self, logFiles[index], idx, subm, &blockEnds[index], blockSize, true));
 				}
 			}
 		}
@@ -505,8 +489,8 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		    .detail("TagId", self->tag.id)
 		    .detail("File", file->getFileName());
 	}
-	for (const auto uidIdx : uidMap) {
-		self->backups[uidIdx.first].lastSavedVersion = popVersion + 1;
+	for (const UID uid : activeUids) {
+		self->backups[uid].lastSavedVersion = popVersion + 1;
 	}
 
 	return Void();
