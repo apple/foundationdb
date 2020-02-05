@@ -145,6 +145,7 @@ public:
 	int MAX_PACKET_SEND_BYTES;
 	int MIN_PACKET_BUFFER_BYTES;
 	int MIN_PACKET_BUFFER_FREE_BYTES;
+	int HANDSHAKE_LIMIT;
 
 	//Sim2
 	//FIMXE: more parameters could be factored out

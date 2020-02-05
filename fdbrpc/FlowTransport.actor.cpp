@@ -428,10 +428,13 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				self->lastConnectTime = now();
 
 				TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
+				wait(g_network->networkInfo.handshakeLock->take());
+				state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
 
 				try {
 					choose {
 						when( Reference<IConnection> _conn = wait( INetworkConnections::net()->connect(self->destination) ) ) { 
+							releaser.release();
 							if (FlowTransport::transport().isClient()) {
 								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 							}
@@ -453,6 +456,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 						}
 					}
 				} catch( Error &e ) {
+					releaser.release();
 					if(e.code() != error_code_connection_failed) {
 						throw;
 					}

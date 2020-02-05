@@ -328,8 +328,9 @@ struct NetworkInfo {
 	double lastAlternativesFailureSkipDelay = 0;
 
 	std::map<std::pair<IPAddress, uint16_t>, std::pair<int,double>> serverTLSConnectionThrottler;
+	struct FlowLock* handshakeLock;
 
-	NetworkInfo() {}
+	NetworkInfo();
 };
 
 class IEventFD : public ReferenceCounted<IEventFD> {

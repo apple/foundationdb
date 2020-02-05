@@ -200,3 +200,5 @@ TEST_CASE("/flow/network/ipaddress") {
 
 	return Void();
 }
+
+NetworkInfo::NetworkInfo() : handshakeLock( new FlowLock(FLOW_KNOBS->HANDSHAKE_LIMIT) ) {}
