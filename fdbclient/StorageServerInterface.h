@@ -76,7 +76,7 @@ struct StorageServerInterface {
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
-	template <class Ar> 
+	template <class Ar>
 	void serialize( Ar& ar ) {
 		// StorageServerInterface is persisted in the database and in the tLog's data structures, so changes here have to be
 		// versioned carefully!
@@ -148,8 +148,8 @@ struct GetValueRequest : TimedRequest {
 
 	GetValueRequest(){}
 	GetValueRequest(const Key& key, Version ver, Optional<UID> debugID) : key(key), version(ver), debugID(debugID) {}
-	
-	template <class Ar> 
+
+	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, key, version, debugID, reply);
 	}
@@ -159,12 +159,13 @@ struct WatchValueReply {
 	constexpr static FileIdentifier file_identifier = 3;
 
 	Version version;
+	bool cached = false;
 	WatchValueReply() = default;
 	explicit WatchValueReply(Version version) : version(version) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version);
+		serializer(ar, version, cached);
 	}
 };
 
@@ -178,8 +179,8 @@ struct WatchValueRequest {
 
 	WatchValueRequest(){}
 	WatchValueRequest(const Key& key, Optional<Value> value, Version ver, Optional<UID> debugID) : key(key), value(value), version(ver), debugID(debugID) {}
-	
-	template <class Ar> 
+
+	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, key, value, version, debugID, reply);
 	}
@@ -191,13 +192,13 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 	VectorRef<KeyValueRef, VecSerStrategy::String> data;
 	Version version; // useful when latestVersion was requested
 	bool more;
-	bool cached;
+	bool cached = false;
 
 	GetKeyValuesReply() : version(invalidVersion), more(false), cached(false) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, arena, cached);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, cached, arena);
 	}
 };
 
@@ -270,7 +271,7 @@ struct GetShardStateRequest {
 		FETCHING = 1,
 		READABLE = 2
 	};
-	
+
 	KeyRange keys;
 	int32_t mode;
 	ReplyPromise<GetShardStateReply> reply;

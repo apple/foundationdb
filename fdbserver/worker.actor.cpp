@@ -977,7 +977,7 @@ ACTOR Future<Void> workerServer(
 			DUMPTOKEN(recruited.getKeyValueStoreType);
 			DUMPTOKEN(recruited.watchValue);
 
-			auto f = storageCacheServer(recruited, 1, dbInfo);
+			auto f = storageCacheServer(recruited, 0, dbInfo);
 			errorForwarders.add(forwardError(errors, Role::STORAGE_CACHE, recruited.id(), f));
 		}
 
