@@ -20,7 +20,6 @@
 
 #include <cinttypes>
 
-#include "IRandom.h"
 #include "fdbclient/ManagementAPI.actor.h"
 
 #include "fdbclient/SystemData.h"
