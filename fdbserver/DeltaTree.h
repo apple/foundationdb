@@ -182,10 +182,12 @@ struct DeltaTree {
 	};
 
 	struct {
-		OffsetT numItems;       // Number of items in the tree.
-		OffsetT nodeBytes;      // Total size of all Nodes including the root
-		uint8_t initialHeight;  // Height of tree as originally built
-		uint8_t maxHeight;      // Maximum height of tree after any insertion.  Value of 0 means no insertions done.
+		OffsetT numItems;         // Number of items in the tree.
+		OffsetT nodeBytesUsed;    // Bytes in use by tree, exluding overhead
+		OffsetT nodeBytesFree;    // Bytes left at end of tree to expand into
+		OffsetT nodeBytesDeleted; // Delta bytes deleted from tree.  Note that some of these bytes could be borrowed by descendents.
+		uint8_t initialHeight;    // Height of tree as originally built
+		uint8_t maxHeight;        // Maximum height of tree after any insertion.  Value of 0 means no insertions done.
 	};
 #pragma pack(pop)
 
@@ -198,7 +200,7 @@ struct DeltaTree {
 	}
 
 	int size() const {
-		return sizeof(DeltaTree) + nodeBytes; 
+		return sizeof(DeltaTree) + nodeBytesUsed; 
 	}
 
 	inline Node & newNode() {
@@ -212,6 +214,8 @@ public:
 	}
 
 	struct DecodedNode {
+		DecodedNode() {}
+
 		// construct root node
 		DecodedNode(Node *raw, const T *prev, const T *next, Arena &arena)
 		  : raw(raw), parent(nullptr), otherAncestor(nullptr), leftChild(nullptr), rightChild(nullptr), prev(prev), next(next),
@@ -230,43 +234,6 @@ public:
 			raw(raw), item(raw->delta().apply(raw->delta().getPrefixSource() ? *prev : *next, arena))
 		{
 			//printf("DecodedNode2 raw=%p delta=%s\n", raw, raw->delta().toString().c_str());
-		}
-
-		// Add newItem to tree and create a DecodedNode for it, linked to parent via the left or right child link
-		DecodedNode(DeltaTree *tree, const T &newItem, int skipLen, DecodedNode *parent, bool wentLeft, Arena &arena)
-		  : parent(parent), otherAncestor(wentLeft ? parent->getPrevAncestor() : parent->getNextAncestor()),
-		  	prev(wentLeft ? parent->prev : &parent->item),
-			next(wentLeft ? &parent->item : parent->next),
-			leftChild(nullptr), rightChild(nullptr),
-			raw(&tree->newNode())
-		{
-			raw->leftChildOffset = 0;
-			raw->rightChildOffset = 0;
-			
-			int commonWithPrev = newItem.getCommonPrefixLen(*prev, skipLen);
-			int commonWithNext = newItem.getCommonPrefixLen(*next, skipLen);
-
-			bool prefixSourcePrev;
-			int commonPrefix;
-			const T *base;
-			if(commonWithPrev >= commonWithNext) {
-				prefixSourcePrev = true;
-				commonPrefix = commonWithPrev;
-				base = prev;
-			}
-			else {
-				prefixSourcePrev = false;
-				commonPrefix = commonWithNext;
-				base = next;
-			}
-
-			int deltaSize = newItem.writeDelta(raw->delta(), *base, commonPrefix);
-			raw->delta().setPrefixSource(prefixSourcePrev);
-		    item = raw->delta().apply(*base, arena);
-
-
-			tree->nodeBytes += sizeof(Node) + deltaSize;
-			++tree->numItems;
 		}
 
 		// Returns true if otherAncestor is the previous ("greatest lesser") ancestor
@@ -363,7 +330,7 @@ public:
 			lower = new(arena) T(arena, *lower);
 			upper = new(arena) T(arena, *upper);
 
-			root = (tree->nodeBytes == 0) ? nullptr : new (arena) DecodedNode(&tree->root(), lower, upper, arena);
+			root = (tree->nodeBytesUsed == 0) ? nullptr : new (arena) DecodedNode(&tree->root(), lower, upper, arena);
 		}
 
 		const T *lowerBound() const {
@@ -384,11 +351,12 @@ public:
 			return Cursor(this);
 		}
 
-		// Insert k into the DeltaTree, updating nodeBytes and initialHeight.
-		// It's up to the caller to know that it will fit in the space available.
-		void insert(const T &k, int skipLen = 0) {
+		// Try to insert k into the DeltaTree, updating byte counts and initialHeight.
+		// Returns true if successful, false if k does not fit in the space available.
+		bool insert(const T &k, int skipLen = 0) {
 			int height = 1;
 			DecodedNode *n = root;
+			bool addLeftChild = false;
 
 			while(n != nullptr) {
 				int cmp = k.compare(n->item, skipLen);
@@ -397,19 +365,7 @@ public:
 					DecodedNode *right = n->getRightChild(arena);
 
 					if(right == nullptr) {
-						// Set the right child of the decoded node to a new decoded node that points to a newly
-						// allocated/written raw node in the tree.  DecodedNode() will write the new node
-						// and update nodeBytes
-						n->rightChild = new (arena) DecodedNode(tree, k, skipLen, n, false, arena);
-						n->raw->rightChildOffset = (uint8_t *)n->rightChild->raw - (uint8_t *)n->raw;
-						//printf("inserted %s at offset %d\n", k.toString().c_str(), n->raw->rightChildOffset);
-
-						// Update max height of the tree if necessary
-						if(height > tree->maxHeight) {
-							tree->maxHeight = height;
-						}
-
-						return;
+						break;
 					}
 
 					n = right;
@@ -418,22 +374,74 @@ public:
 					DecodedNode *left = n->getLeftChild(arena);
 
 					if(left == nullptr) {
-						// See right side case above for comments
-						n->leftChild = new (arena) DecodedNode(tree, k, skipLen, n, true, arena);
-						n->raw->leftChildOffset = (uint8_t *)n->leftChild->raw - (uint8_t *)n->raw;
-						//printf("inserted %s at offset %d\n", k.toString().c_str(), n->raw->leftChildOffset);
-
-						if(height > tree->maxHeight) {
-							tree->maxHeight = height;
-						}
-
-						return;
+						addLeftChild = true;
+						break;
 					}
 
 					n = left;
 				}
 				++height;
 			}
+
+			// Insert k as the left or right child of n, depending on the value of addLeftChild
+			// First, see if it will fit.
+			const T *prev = addLeftChild ? n->prev : &n->item;
+			const T *next = addLeftChild ? &n->item : n->next;
+
+			int common = prev->getCommonPrefixLen(*next, skipLen);
+			int commonWithPrev = k.getCommonPrefixLen(*prev, common);
+			int commonWithNext = k.getCommonPrefixLen(*next, common);
+			bool basePrev = commonWithPrev >= commonWithNext;
+
+			int commonPrefix = basePrev ? commonWithPrev : commonWithNext;
+			const T *base = basePrev ? prev : next;
+
+			int deltaSize = k.deltaSize(*base, false, commonPrefix);
+			int nodeSpace = deltaSize + sizeof(Node);
+			if(nodeSpace > tree->nodeBytesFree) {
+				return false;
+			}
+
+			DecodedNode *newNode = new (arena) DecodedNode();
+			Node *raw = &tree->newNode();
+			raw->leftChildOffset = 0;
+			raw->rightChildOffset = 0;
+			int newOffset = (uint8_t *)raw - (uint8_t *)n->raw;
+			//printf("Inserting %s at offset %d\n", k.toString().c_str(), newOffset);
+
+			if(addLeftChild) {
+				n->leftChild = newNode;
+				n->raw->leftChildOffset = newOffset;
+			}
+			else {
+				n->rightChild = newNode;
+				n->raw->rightChildOffset = newOffset;
+			}
+
+			newNode->parent = n;
+			newNode->leftChild = nullptr;
+			newNode->rightChild = nullptr;
+			newNode->raw = raw;
+			newNode->otherAncestor = addLeftChild ? n->getPrevAncestor() : n->getNextAncestor();
+			newNode->prev = prev;
+			newNode->next = next;
+
+			ASSERT(deltaSize == k.writeDelta(raw->delta(), *base, commonPrefix));
+			raw->delta().setPrefixSource(basePrev);
+
+			// Initialize node's item from the delta (instead of copying into arena) to avoid unnecessary arena space usage
+			newNode->item = raw->delta().apply(*base, arena);
+
+			tree->nodeBytesUsed += nodeSpace;
+			tree->nodeBytesFree -= nodeSpace;
+			++tree->numItems;
+
+			// Update max height of the tree if necessary
+			if(height > tree->maxHeight) {
+				tree->maxHeight = height;
+			}
+
+			return true;
 		}
 	};
 
@@ -677,20 +685,22 @@ public:
 	};
 
 	// Returns number of bytes written
-	int build(const T *begin, const T *end, const T *prev, const T *next) {
+	int build(int spaceAvailable, const T *begin, const T *end, const T *prev, const T *next) {
 		//printf("tree size: %d   node size: %d\n", sizeof(DeltaTree), sizeof(Node));
 		int count = end - begin;
 		numItems = count;
+		nodeBytesDeleted = 0;
 		initialHeight = (uint8_t)log2(count) + 1;
 		maxHeight = 0;
 
 		// The boundary leading to the new page acts as the last time we branched right
 		if(begin != end) {
-			nodeBytes = build(root(), begin, end, prev, next, prev->getCommonPrefixLen(*next, 0));
+			nodeBytesUsed = build(root(), begin, end, prev, next, prev->getCommonPrefixLen(*next, 0));
 		}
 		else {
-			nodeBytes = 0;
+			nodeBytesUsed = 0;
 		}
+		nodeBytesFree = spaceAvailable - size();
 		return size();
 	}
 

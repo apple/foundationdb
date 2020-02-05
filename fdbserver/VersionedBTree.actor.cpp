@@ -2354,7 +2354,7 @@ struct RedwoodRecordRef {
 		return compare(rhs) >= 0;
 	}
 
-	int deltaSize(const RedwoodRecordRef &base, bool worstCase = true) const {
+	int deltaSize(const RedwoodRecordRef &base, bool worstCase = true, int skipLen = 0) const {
 		int size = sizeof(Delta);
 
 		if(value.present()) {
@@ -2365,7 +2365,7 @@ struct RedwoodRecordRef {
 		}
 
 		// Size of prefix length
-		int prefixLen = getCommonPrefixLen(base, 0);
+		int prefixLen = getCommonPrefixLen(base, skipLen);
 		size += (worstCase || prefixLen >= 128) ? 2 : 1;
 
 		int intFieldPrefixLen;
@@ -2587,7 +2587,7 @@ static void makeEmptyRoot(Reference<IPage> page) {
 	BTreePage *btpage = (BTreePage *)page->begin();
 	btpage->height = 1;
 	btpage->kvBytes = 0;
-	btpage->tree().build(nullptr, nullptr, nullptr, nullptr);
+	btpage->tree().build(page->size(), nullptr, nullptr, nullptr, nullptr);
 }
 
 BTreePage::BinaryTree::Mirror * getReader(Reference<const IPage> page) {
@@ -2687,7 +2687,7 @@ public:
 
 #pragma pack(push, 1)
 	struct MetaKey {
-		static constexpr int FORMAT_VERSION = 3;
+		static constexpr int FORMAT_VERSION = 4;
 		// This serves as the format version for the entire tree, individual pages will not be versioned
 		uint16_t formatVersion;
 		uint8_t height;
@@ -3528,7 +3528,7 @@ private:
 				btPage->height = height;
 				btPage->kvBytes = kvBytes;
 
-				int written = btPage->tree().build(&entries[start], &entries[i], &pageLowerBound, &pageUpperBound);
+				int written = btPage->tree().build(pageSize, &entries[start], &entries[i], &pageLowerBound, &pageUpperBound);
 				if(written > pageSize) {
 					fprintf(stderr, "ERROR:  Wrote %d bytes to %d byte page (%d blocks). recs %d  kvBytes %d  compressed %d\n", written, pageSize, blockCount, i - start, kvBytes, compressedBytes);
 					ASSERT(false);
@@ -5378,7 +5378,7 @@ struct IntIntPair {
 		return compare(rhs) < 0;
 	}
 
-	int deltaSize(const IntIntPair &base) const {
+	int deltaSize(const IntIntPair &base, bool worstcase = false, int skipLen = 0) const {
 		return sizeof(Delta);
 	}
 
@@ -5674,9 +5674,10 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	}
 	std::sort(items.begin(), items.end());
 
-	DeltaTree<RedwoodRecordRef> *tree = (DeltaTree<RedwoodRecordRef> *) new uint8_t[N * 100];
+	int bufferSize = N * 100;
+	DeltaTree<RedwoodRecordRef> *tree = (DeltaTree<RedwoodRecordRef> *) new uint8_t[bufferSize];
 
-	tree->build(&items[0], &items[items.size()], &prev, &next);
+	tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
 
 	printf("Count=%d  Size=%d  InitialHeight=%d\n", (int)items.size(), (int)tree->size(), (int)tree->initialHeight);
 	debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t *)tree, tree->size()).toHexString().c_str());
@@ -5766,25 +5767,29 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 	std::vector<IntIntPair> items(uniqueItems.begin(), uniqueItems.end());
 	int bufferSize = N * 2 * 20;
 	DeltaTree<IntIntPair> *tree = (DeltaTree<IntIntPair> *) new uint8_t[bufferSize];
-	int builtSize = tree->build(&items[0], &items[items.size()], &prev, &next);
+	int builtSize = tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
 	ASSERT(builtSize <= bufferSize);
 
 	DeltaTree<IntIntPair>::Mirror r(tree, &prev, &next);
 
-	// Grow uniqueItems to 2N in size and add each new item to the DeltaTree and half of them to toDelete.
+	// Grow uniqueItems until tree is full, adding half of new items to toDelete
 	std::vector<IntIntPair> toDelete;
-	while(uniqueItems.size() < 2 * N) {
+	while(1) {
 		IntIntPair p = randomPair();
 		if(uniqueItems.count(p) == 0) {
+			if(!r.insert(p)) {
+				break;
+			};
 			uniqueItems.insert(p);
-			r.insert(p);
 			if(deterministicRandom()->coinflip()) {
 				toDelete.push_back(p);
 			}
+			//printf("Inserted %s  size=%d\n", items.back().toString().c_str(), tree->size());
 		}
-		ASSERT(tree->size() < bufferSize);		
-		//printf("Inserted %s  size=%d\n", items.back().toString().c_str(), tree->size());
 	}
+
+	ASSERT(tree->numItems > 2 * N);
+	ASSERT(tree->size() <= bufferSize);
 
 	// Update items vector
 	items = std::vector<IntIntPair>(uniqueItems.begin(), uniqueItems.end());
