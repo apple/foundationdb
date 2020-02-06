@@ -1045,17 +1045,19 @@ void merge( Arena& arena, VectorRef<KeyValueRef, VecSerStrategy::String>& output
 // Combines data from base (at an older version) with sets from newer versions in [start, end) and appends the first (up to) |limit| rows to output
 // If limit<0, base and output are in descending order, and start->key()>end->key(), but start is still inclusive and end is exclusive
 {
-	if (limit==0) return;
-	int originalLimit = abs(limit) + output.size();
+	ASSERT(limit != 0);
+
 	bool forward = limit>0;
 	if (!forward) limit = -limit;
+	int adjustedLimit = limit + output.size();
 	int accumulatedBytes = 0;
 
 	KeyValueRef const* baseStart = base.begin();
 	KeyValueRef const* baseEnd = base.end();
-	while (baseStart!=baseEnd && start!=end && --limit>=0 && accumulatedBytes < limitBytes) {
-		if (forward ? baseStart->key < start.key() : baseStart->key > start.key())
+	while (baseStart!=baseEnd && start!=end && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
+		if (forward ? baseStart->key < start.key() : baseStart->key > start.key()) {
 			output.push_back_deep( arena, *baseStart++ );
+		}
 		else {
 			output.push_back_deep( arena, KeyValueRef(start.key(), start->getValue()) );
 			if (baseStart->key == start.key()) ++baseStart;
@@ -1063,18 +1065,17 @@ void merge( Arena& arena, VectorRef<KeyValueRef, VecSerStrategy::String>& output
 		}
 		accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
 	}
-	while (baseStart!=baseEnd && --limit>=0 && accumulatedBytes < limitBytes) {
+	while (baseStart!=baseEnd && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
 		output.push_back_deep( arena, *baseStart++ );
 		accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
 	}
 	if( !stopAtEndOfBase ) {
-		while (start!=end && --limit>=0 && accumulatedBytes < limitBytes) {
+		while (start!=end && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
 			output.push_back_deep( arena, KeyValueRef(start.key(), start->getValue()) );
 			accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
 			if (forward) ++start; else --start;
 		}
 	}
-	ASSERT( output.size() <= originalLimit );
 }
 
 // readRange reads up to |limit| rows from the given range and version, combining data->storage and data->versionedData.
@@ -1089,14 +1090,8 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	state KeyRef readEnd;
 	state Key readBeginTemp;
 	state int vCount;
-	//state UID rrid = deterministicRandom()->randomUniqueID();
-	//state int originalLimit = limit;
-	//state int originalLimitBytes = *pLimitBytes;
-	//state bool track = rrid.first() == 0x1bc134c2f752187cLL;
 
-	// FIXME: Review pLimitBytes behavior
 	// if (limit >= 0) we are reading forward, else backward
-
 	if (limit >= 0) {
 		// We might care about a clear beginning before start that
 		//  runs into range
@@ -1108,20 +1103,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 
 		vStart = view.lower_bound(readBegin);
 
-		/*if (track) {
-			printf("readRange(%llx, @%lld, '%s'-'%s')\n", data->thisServerID.first(), version, printable(range.begin).c_str(), printable(range.end).c_str());
-			printf("mvcc:\n");
-			vEnd = view.upper_bound(range.end);
-			for(auto r=vStart; r != vEnd; ++r) {
-				if (r->isClearTo())
-					printf("  '%s'-'%s' cleared\n", printable(r.key()).c_str(), printable(r->getEndKey()).c_str());
-				else
-					printf("  '%s' := '%s'\n", printable(r.key()).c_str(), printable(r->getValue()).c_str());
-			}
-		}*/
-
 		while (limit>0 && *pLimitBytes>0 && readBegin < range.end) {
-			// ASSERT( vStart == view.lower_bound(readBegin) );
 			ASSERT( !vStart || vStart.key() >= readBegin );
 			if (vStart) { auto b = vStart; --b; ASSERT( !b || b.key() < readBegin ); }
 			ASSERT( data->storageVersion() <= version );
@@ -1141,18 +1123,12 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			Standalone<VectorRef<KeyValueRef>> atStorageVersion = wait(
 					data->storage.readRange( KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes ) );
 
-			/*if (track) {
-				printf("read [%s,%s): %d rows\n", printable(readBegin).c_str(), printable(readEnd).c_str(), atStorageVersion.size());
-				for(auto r=atStorageVersion.begin(); r != atStorageVersion.end(); ++r)
-					printf("  '%s' := '%s'\n", printable(r->key).c_str(), printable(r->value).c_str());
-			}*/
-
 			ASSERT( atStorageVersion.size() <= limit );
 			if (data->storageVersion() > version) throw transaction_too_old();
 
 			bool more = atStorageVersion.size()!=0;
 
-			// merge the sets in [vStart,vEnd) with the sets on disk, stopping at the last key from disk if there is 'more'
+			// merge the sets in [vStart,vEnd) with the sets on disk, stopping at the last key from disk if we read anything 
 			int prevSize = result.data.size();
 			merge( result.arena, result.data, atStorageVersion, vStart, vEnd, vCount, limit, more, *pLimitBytes );
 			limit -= result.data.size() - prevSize;
@@ -1161,13 +1137,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
 
 			// Setup for the next iteration
-			if (more) { // if there might be more data, begin reading right after what we already found to find out
-				//if (track) printf("more\n");
-				if (!(limit<=0 || *pLimitBytes<=0 || result.data.end()[-1].key == atStorageVersion.end()[-1].key))
-					TraceEvent(SevError, "ReadRangeIssue", data->thisServerID).detail("ReadBegin", readBegin).detail("ReadEnd", readEnd)
-						.detail("VStart", vStart ? vStart.key() : LiteralStringRef("nil")).detail("VEnd", vEnd ? vEnd.key() : LiteralStringRef("nil"))
-						.detail("AtStorageVersionBack", atStorageVersion.end()[-1].key).detail("ResultBack", result.data.end()[-1].key)
-						.detail("Limit", limit).detail("LimitBytes", *pLimitBytes).detail("ResultSize", result.data.size()).detail("PrevSize", prevSize);
+			if (more) { // if there might be more data on disk, begin reading right after the last key read 
 				readBegin = readBeginTemp = keyAfter( result.data.end()[-1].key );
 				ASSERT( limit<=0 || *pLimitBytes<=0 || result.data.end()[-1].key == atStorageVersion.end()[-1].key );
 			} else if (vStart && vStart->isClearTo()){ // if vStart is a clear, skip it.
@@ -1181,37 +1151,6 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 		}
 		// all but the last item are less than *pLimitBytes
 		ASSERT( result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0 );
-		/*if (*pLimitBytes <= 0)
-			TraceEvent(SevWarn, "ReadRangeLimitExceeded")
-				.detail("Version", version)
-				.detail("Begin", range.begin )
-				.detail("End", range.end )
-				.detail("LimitReamin", limit)
-				.detail("LimitBytesRemain", *pLimitBytes); */
-
-		/*GetKeyValuesReply correct = wait( readRangeOld(data, version, range, originalLimit, originalLimitBytes) );
-		bool prefix_equal = true;
-		int totalsize = 0;
-		int first_difference = -1;
-		for(int i=0; i<result.data.size() && i<correct.data.size(); i++) {
-			if (result.data[i] != correct.data[i]) {
-				first_difference = i;
-				prefix_equal = false;
-				break;
-			}
-			totalsize += result.data[i].expectedSize() + sizeof(KeyValueRef);
-		}
-
-		// for the following check
-		result.more = limit == 0 || *pLimitBytes<=0;  // FIXME: Does this have to be exact?
-		result.version = version;
-		if ( !(totalsize>originalLimitBytes ? prefix_equal : result.data==correct.data) || correct.more != result.more ) {
-			TraceEvent(SevError, "IncorrectResult", rrid).detail("Server", data->thisServerID).detail("CorrectRows", correct.data.size())
-				.detail("FirstDifference", first_difference).detail("OriginalLimit", originalLimit)
-				.detail("ResultRows", result.data.size()).detail("Result0", result.data[0].key).detail("Correct0", correct.data[0].key)
-				.detail("ResultN", result.data.size() ? result.data[std::min(correct.data.size(),result.data.size())-1].key : "nil")
-				.detail("CorrectN", correct.data.size() ? correct.data[std::min(correct.data.size(),result.data.size())-1].key : "nil");
-		}*/
 	} else {
 		// Reverse read - abandon hope alle ye who enter here
 		readEnd = range.end;
