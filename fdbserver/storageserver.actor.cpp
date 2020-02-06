@@ -1140,13 +1140,14 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			if (more) { // if there might be more data on disk, begin reading right after the last key read 
 				readBegin = readBeginTemp = keyAfter( result.data.end()[-1].key );
 				ASSERT( limit<=0 || *pLimitBytes<=0 || result.data.end()[-1].key == atStorageVersion.end()[-1].key );
-			} else if (vStart && vStart->isClearTo()){ // if vStart is a clear, skip it.
-				//if (track) printf("skip clear\n");
-				readBegin = vStart->getEndKey();  // next disk read should start at the end of the clear
+			} else if (vEnd && vEnd->isClearTo()) {
+				ASSERT(vEnd->getEndKey() > readBegin);
+				readBegin = vEnd->getEndKey();
+				vStart = vEnd;
 				++vStart;
-			} else { // Otherwise, continue at readEnd
-				//if (track) printf("continue\n");
-				readBegin = readEnd;
+			} else {
+				ASSERT(limit<=0 || *pLimitBytes<=0 || readEnd == range.end);
+				break;
 			}
 		}
 		// all but the last item are less than *pLimitBytes
