@@ -179,10 +179,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	struct Reader : IThreadPoolReceiver {
 		DB& db;
 		std::unique_ptr<rocksdb::Iterator> cursor = nullptr;
+		rocksdb::ReadOptions readOptions;
 
 		explicit Reader(DB& db)
 			: db(db)
-		{}
+		{
+			readOptions.total_order_seek = true;
+		}
 
 		void init() override {}
 
@@ -200,7 +203,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				g_traceBatch.addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
 			rocksdb::PinnableSlice value;
-			auto s = db->Get(rocksdb::ReadOptions{}, db->DefaultColumnFamily(), toSlice(a.key), &value);
+			auto s = db->Get(readOptions, db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				g_traceBatch.addEvent("GetValueDebug", a.debugID.get().first(), "Reader.After");
 			}
@@ -225,7 +228,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				g_traceBatch.addEvent("GetValuePrefixDebug", a.debugID.get().first(),
 									  "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			auto s = db->Get(rocksdb::ReadOptions{}, db->DefaultColumnFamily(), toSlice(a.key), &value);
+			auto s = db->Get(readOptions, db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				g_traceBatch.addEvent("GetValuePrefixDebug", a.debugID.get().first(),
 									  "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
@@ -247,7 +250,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		};
 		void action(ReadRangeAction& a) {
 			if (!cursor) {
-				cursor.reset(db->NewIterator(rocksdb::ReadOptions{}));
+				cursor.reset(db->NewIterator(readOptions));
 			}
 			cursor->Seek(toSlice(a.keys.begin));
 			Standalone<VectorRef<KeyValueRef>> result;
