@@ -259,6 +259,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
 				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 				result.push_back_deep(result.arena(), kv);
+				cursor->Next();
 			}
 			a.result.send(result);
 		}
