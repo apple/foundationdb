@@ -185,7 +185,7 @@ struct StorageServerDisk {
 	Future<Key> readNextKeyInclusive( KeyRef key ) { return readFirstKey(storage, KeyRangeRef(key, allKeys.end)); }
 	Future<Optional<Value>> readValue( KeyRef key, Optional<UID> debugID = Optional<UID>() ) { return storage->readValue(key, debugID); }
 	Future<Optional<Value>> readValuePrefix( KeyRef key, int maxLength, Optional<UID> debugID = Optional<UID>() ) { return storage->readValuePrefix(key, maxLength, debugID); }
-	Future<Standalone<VectorRef<KeyValueRef>>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 ) { return storage->readRange(keys, rowLimit, byteLimit); }
+	Future<Standalone<RangeResultRef>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 ) { return storage->readRange(keys, rowLimit, byteLimit); }
 
 	KeyValueStoreType getKeyValueStoreType() { return storage->getType(); }
 	StorageBytes getStorageBytes() { return storage->getStorageBytes(); }
@@ -197,7 +197,7 @@ private:
 	void writeMutations( MutationListRef mutations, Version debugVersion, const char* debugContext );
 
 	ACTOR static Future<Key> readFirstKey( IKeyValueStore* storage, KeyRangeRef range ) {
-		Standalone<VectorRef<KeyValueRef>> r = wait( storage->readRange( range, 1 ) );
+		Standalone<RangeResultRef> r = wait( storage->readRange( range, 1 ) );
 		if (r.size()) return r[0].key;
 		else return range.end;
 	}
@@ -1120,7 +1120,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 
 			// Read the data on disk up to vEnd (or the end of the range)
 			readEnd = vEnd ? std::min( vEnd.key(), range.end ) : range.end;
-			Standalone<VectorRef<KeyValueRef>> atStorageVersion = wait(
+			Standalone<RangeResultRef> atStorageVersion = wait(
 					data->storage.readRange( KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes ) );
 
 			ASSERT( atStorageVersion.size() <= limit );
@@ -1178,7 +1178,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			if (vEnd)
 				readBegin = std::max( readBegin, vEnd->isClearTo() ? vEnd->getEndKey() : vEnd.key() );
 
-			Standalone<VectorRef<KeyValueRef>> atStorageVersion = wait( data->storage.readRange( KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes ) );
+			Standalone<RangeResultRef> atStorageVersion = wait( data->storage.readRange( KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes ) );
 			if (data->storageVersion() > version) throw transaction_too_old();
 
 			int prevSize = result.data.size();
@@ -2976,8 +2976,8 @@ ACTOR Future<Void> applyByteSampleResult( StorageServer* data, IKeyValueStore* s
 	state int totalKeys = 0;
 	state int totalBytes = 0;
 	loop {
-		Standalone<VectorRef<KeyValueRef>> bs = wait( storage->readRange( KeyRangeRef(begin, end), SERVER_KNOBS->STORAGE_LIMIT_BYTES, SERVER_KNOBS->STORAGE_LIMIT_BYTES ) );
-		if(results) results->push_back(bs);
+		Standalone<RangeResultRef> bs = wait( storage->readRange( KeyRangeRef(begin, end), SERVER_KNOBS->STORAGE_LIMIT_BYTES, SERVER_KNOBS->STORAGE_LIMIT_BYTES ) );
+		if(results) results->push_back(bs.castTo<VectorRef<KeyValueRef>>());
 		int rangeSize = bs.expectedSize();
 		totalFetches++;
 		totalKeys += bs.size();
@@ -3058,8 +3058,8 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 	state Future<Optional<Value>> fVersion = storage->readValue(persistVersion);
 	state Future<Optional<Value>> fLogProtocol = storage->readValue(persistLogProtocol);
 	state Future<Optional<Value>> fPrimaryLocality = storage->readValue(persistPrimaryLocality);
-	state Future<Standalone<VectorRef<KeyValueRef>>> fShardAssigned = storage->readRange(persistShardAssignedKeys);
-	state Future<Standalone<VectorRef<KeyValueRef>>> fShardAvailable = storage->readRange(persistShardAvailableKeys);
+	state Future<Standalone<RangeResultRef>> fShardAssigned = storage->readRange(persistShardAssignedKeys);
+	state Future<Standalone<RangeResultRef>> fShardAvailable = storage->readRange(persistShardAvailableKeys);
 
 	state Promise<Void> byteSampleSampleRecovered;
 	state Promise<Void> startByteSampleRestore;
@@ -3096,7 +3096,7 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 	debug_checkRestoredVersion( data->thisServerID, version, "StorageServer" );
 	data->setInitialVersion( version );
 
-	state Standalone<VectorRef<KeyValueRef>> available = fShardAvailable.get();
+	state Standalone<RangeResultRef> available = fShardAvailable.get();
 	state int availableLoc;
 	for(availableLoc=0; availableLoc<available.size(); availableLoc++) {
 		KeyRangeRef keys(
@@ -3110,7 +3110,7 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 		wait(yield());
 	}
 
-	state Standalone<VectorRef<KeyValueRef>> assigned = fShardAssigned.get();
+	state Standalone<RangeResultRef> assigned = fShardAssigned.get();
 	state int assignedLoc;
 	for(assignedLoc=0; assignedLoc<assigned.size(); assignedLoc++) {
 		KeyRangeRef keys(

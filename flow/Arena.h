@@ -519,6 +519,10 @@ public:
 	}
 #endif
 
+	template <class U> Standalone<U> castTo() const {
+		return Standalone<U>(*this, arena());
+	}
+
 	template <class Archive>
 	void serialize(Archive& ar) {
 		// FIXME: something like BinaryReader(ar) >> arena >> *(T*)this; to guarantee standalone arena???
