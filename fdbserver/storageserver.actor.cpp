@@ -1126,20 +1126,19 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			ASSERT( atStorageVersion.size() <= limit );
 			if (data->storageVersion() > version) throw transaction_too_old();
 
-			bool more = atStorageVersion.size()!=0;
-
-			// merge the sets in [vStart,vEnd) with the sets on disk, stopping at the last key from disk if we read anything 
+			// merge the sets in [vStart,vEnd) with the sets on disk, stopping at the last key from disk if we were limited
 			int prevSize = result.data.size();
-			merge( result.arena, result.data, atStorageVersion, vStart, vEnd, vCount, limit, more, *pLimitBytes );
+			merge( result.arena, result.data, atStorageVersion, vStart, vEnd, vCount, limit, atStorageVersion.more, *pLimitBytes );
 			limit -= result.data.size() - prevSize;
 
 			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++)
 				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
 
-			// Setup for the next iteration
-			if (more) { // if there might be more data on disk, begin reading right after the last key read 
-				readBegin = readBeginTemp = keyAfter( result.data.end()[-1].key );
-				ASSERT( limit<=0 || *pLimitBytes<=0 || result.data.end()[-1].key == atStorageVersion.end()[-1].key );
+			// We may have reached our limits in the read from disk, but combining with the MVCC window could have
+			// given us back some room
+			if (atStorageVersion.more && limit > 0 && *pLimitBytes > 0) {
+				ASSERT(result.data.end()[-1].key == atStorageVersion.end()[-1].key);
+				readBegin = readBeginTemp = keyAfter(result.data.end()[-1].key);
 			} else if (vEnd && vEnd->isClearTo()) {
 				ASSERT(vEnd->getEndKey() > readBegin);
 				readBegin = vEnd->getEndKey();
