@@ -44,6 +44,7 @@
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
+#include "flow/TLSPolicy.h"
 #include "flow/UnitTest.h"
 
 #if defined(CMAKE_BUILD) || !defined(WIN32)
@@ -69,6 +70,13 @@ using std::pair;
 #define CERT_FILE_MAX_SIZE (5 * 1024 * 1024)
 
 NetworkOptions networkOptions;
+static Reference<TLSPolicy> tlsPolicy;
+
+static void initTLSPolicy() {
+	if (!tlsPolicy) {
+		tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(TLSPolicy::Is::CLIENT));
+	}
+}
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
@@ -918,11 +926,9 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		case FDBNetworkOptions::TLS_VERIFY_PEERS:
 			validateOptionValue(value, true);
-			try {
-				//tlsOptions->set_verify_peers({ value.get().toString() }); FIXME
-			} catch( Error& e ) {
+			initTLSPolicy();
+			if (!tlsPolicy->set_verify_peers({ value.get().toString() })) {
 				TraceEvent(SevWarnAlways, "TLSValidationSetError")
-					.error( e )
 					.detail("Input", value.get().toString() );
 				throw invalid_option_value();
 			}
@@ -983,7 +989,9 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
-	g_network = newNet2(&networkOptions.sslContext, false, useMetrics || networkOptions.traceDirectory.present(), networkOptions.tlsPassword);
+	initTLSPolicy();
+
+	g_network = newNet2(&networkOptions.sslContext, false, useMetrics || networkOptions.traceDirectory.present(), tlsPolicy, networkOptions.tlsPassword);
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
 }

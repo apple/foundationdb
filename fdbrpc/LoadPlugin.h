@@ -18,27 +18,21 @@
  * limitations under the License.
  */
 
+#ifndef _FLOW_LOADPLUGIN_H_
+#define _FLOW_LOADPLUGIN_H_
+
 #pragma once
 
-// Specialized TLS plugin library
-extern "C" void *get_tls_plugin(const char *plugin_type_name_and_version);
-
-// Name of specialized TLS Plugin
-extern const char* tlsPluginName;
+#include <string>
+#include "flow/flow.h"
 
 template <class T>
 Reference<T> loadPlugin( std::string const& plugin_name ) {
 	void *(*get_plugin)(const char*) = NULL;
-#ifndef TLS_DISABLED
-	if (!plugin_name.compare(tlsPluginName)) {
-		get_plugin = (void*(*)(const char*)) get_tls_plugin;
-	}
-	else
-#endif
-	{
-		void* plugin = loadLibrary( plugin_name.c_str() );
-		if (plugin)
-			get_plugin = (void*(*)(const char*))loadFunction( plugin, "get_plugin" );
-	}
+	void* plugin = loadLibrary( plugin_name.c_str() );
+	if (plugin)
+		get_plugin = (void*(*)(const char*))loadFunction( plugin, "get_plugin" );
 	return (get_plugin) ? Reference<T>( (T*)get_plugin( T::get_plugin_type_name_and_version() ) ) : Reference<T>( NULL );
 }
+
+#endif

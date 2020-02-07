@@ -58,6 +58,7 @@
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/SignalSafeUnwind.h"
+#include "flow/TLSPolicy.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
@@ -964,6 +965,7 @@ int main(int argc, char* argv[]) {
 		bool testOnServers = false;
 
 		boost::asio::ssl::context sslContext(boost::asio::ssl::context::tlsv12);
+		Reference<TLSPolicy> tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(TLSPolicy::Is::SERVER));
 		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
 		std::vector<std::string> tlsVerifyPeers;
 		double fileIoTimeout = 0.0;
@@ -1564,10 +1566,11 @@ int main(int argc, char* argv[]) {
 			if (tlsKeyPath.size()) {
 				sslContext.use_private_key_file(tlsKeyPath, boost::asio::ssl::context::pem);
 			}
-			//if ( tlsVerifyPeers.size() ) FIXME
-			//	tlsOptions->set_verify_peers( tlsVerifyPeers );
+			if ( tlsVerifyPeers.size() ) {
+			  tlsPolicy->set_verify_peers( tlsVerifyPeers );
+			}
 #endif
-			g_network = newNet2(&sslContext, useThreadPool, true, tlsPassword);
+			g_network = newNet2(&sslContext, useThreadPool, true, tlsPolicy, tlsPassword);
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
