@@ -351,8 +351,10 @@ public:
 			return Cursor(this);
 		}
 
-		// Try to insert k into the DeltaTree, updating byte counts and initialHeight.
-		// Returns true if successful, false if k does not fit in the space available.
+		// Try to insert k into the DeltaTree, updating byte counts and initialHeight if they
+		// have changed (they won't if k already exists in the tree but was deleted).
+		// Returns true if successful, false if k does not fit in the space available
+		// or if k is already in the tree (and was not already deleted).
 		bool insert(const T &k, int skipLen = 0) {
 			int height = 1;
 			DecodedNode *n = root;
@@ -362,6 +364,19 @@ public:
 				int cmp = k.compare(n->item, skipLen);
 
 				if(cmp >= 0) {
+					// If we found an item identical to k then if it is deleted, undeleted it,
+					// otherwise fail
+					if(cmp == 0) {
+						auto &d = n->raw->delta();
+						if(d.getDeleted()) {
+							d.setDeleted(false);
+							return true;
+						}
+						else {
+							return false;
+						}
+					}
+
 					DecodedNode *right = n->getRightChild(arena);
 
 					if(right == nullptr) {
@@ -442,6 +457,16 @@ public:
 			}
 
 			return true;
+		}
+
+		// Erase k by setting its deleted flag to true.  Returns true only if k existed
+		bool erase(const T &k, int skipLen = 0) {
+			Cursor c = getCursor();
+			bool r = c.seek(k);
+			if(r) {
+				c.erase();
+			}
+			return r;
 		}
 	};
 
@@ -598,6 +623,29 @@ public:
 			}
 
 			return _hideDeletedForward();
+		}
+
+		// Moves the cursor to the node with exactly item s
+		// If successful, returns true, otherwise returns false and the cursor position will be invalid.
+		bool seek(const T &s, int skipLen = 0) {
+			DecodedNode *n = mirror->root;
+			node = nullptr;
+
+			while(n != nullptr) {
+				int cmp = s.compare(n->item, skipLen);
+
+				if(cmp == 0) {
+					if(n->isDeleted()) {
+						return false;
+					}
+					node = n;
+					return true;
+				}
+
+				n = (cmp > 0) ? n->getRightChild(mirror->arena) : n->getLeftChild(mirror->arena);
+			}
+
+			return false;
 		}
 
 		bool moveFirst() {

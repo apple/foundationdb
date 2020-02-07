@@ -2006,9 +2006,8 @@ struct RedwoodRecordRef {
 		return common;
 	}
 
-	// Compares and orders by key, version, chunk.start, chunk.total.
-	// Value is not considered, as it is does not make sense for a container
-	// to have two records which differ only in value.
+	// Compares and orders by key, version, chunk.start, chunk.total
+	// Ignores value
 	int compare(const RedwoodRecordRef &rhs, int skip = 0) const {
 		int keySkip = std::min(skip, key.size());
 		int cmp = key.substr(keySkip).compare(rhs.key.substr(keySkip));
@@ -2338,7 +2337,7 @@ struct RedwoodRecordRef {
 		return compare(rhs) != 0;
 	}
 
-		bool operator<(const RedwoodRecordRef &rhs) const {
+	bool operator<(const RedwoodRecordRef &rhs) const {
 		return compare(rhs) < 0;
 	}
 
@@ -5343,7 +5342,7 @@ struct IntIntPair {
 		}
 
 		std::string toString() const {
-			return format("DELTA{prefixSource=%d dk=%d(0x%x) dv=%d(0x%x)}", prefixSource, dk, dk, dv, dv);
+			return format("DELTA{prefixSource=%d deleted=%d dk=%d(0x%x) dv=%d(0x%x)}", prefixSource, deleted, dk, dk, dv, dv);
 		}
 	};
 
@@ -5655,8 +5654,10 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	RedwoodRecordRef next(LiteralStringRef("\xff\xff\xff\xff"));
 
 	Arena arena;
-	std::vector<RedwoodRecordRef> items;
-	for(int i = 0; i < N; ++i) {
+	std::set<RedwoodRecordRef> uniqueItems;
+
+	// Add random items to uniqueItems until its size is N
+	while(uniqueItems.size() < N) {
 		std::string k = deterministicRandom()->randomAlphaNumeric(30);
 		std::string v = deterministicRandom()->randomAlphaNumeric(30);
 		RedwoodRecordRef rec;
@@ -5669,10 +5670,11 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 				rec.chunk.total = rec.chunk.start + v.size() + deterministicRandom()->randomInt(0, 100000);
 			}
 		}
-		items.push_back(rec);
-		//printf("i=%d %s\n", i, items.back().toString().c_str());
+		if(uniqueItems.count(rec) == 0) {
+			uniqueItems.insert(rec);
+		}
 	}
-	std::sort(items.begin(), items.end());
+	std::vector<RedwoodRecordRef> items(uniqueItems.begin(), uniqueItems.end());
 
 	int bufferSize = N * 100;
 	DeltaTree<RedwoodRecordRef> *tree = (DeltaTree<RedwoodRecordRef> *) new uint8_t[bufferSize];
@@ -5683,6 +5685,37 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t *)tree, tree->size()).toHexString().c_str());
 
 	DeltaTree<RedwoodRecordRef>::Mirror r(tree, &prev, &next);
+
+	auto withRandomValue = [&](RedwoodRecordRef rec) {
+		if(deterministicRandom()->coinflip()) {
+			rec.value.reset();
+		}
+		else {
+			rec.value = StringRef(arena, deterministicRandom()->randomAlphaNumeric(10));
+		}
+		return rec;
+	};
+
+	// Test delete/insert behavior for each item, making no net changes
+	// Use a random value for each operation because value is not used in RedwoodRecordRef comparisons.
+	printf("Testing seek/delete/insert for existing keys with random values\n");
+	for(auto rec : items) {
+		// Insert existing should fail
+		ASSERT(!r.insert(withRandomValue(rec)));
+
+		// Erase existing should succeed
+		ASSERT(r.erase(withRandomValue(rec)));
+
+		// Erase deleted should fail
+		ASSERT(!r.erase(withRandomValue(rec)));
+
+		// Insert deleted should succeed
+		ASSERT(r.insert(withRandomValue(rec)));
+
+		// Insert existing should fail
+		ASSERT(!r.insert(withRandomValue(rec)));
+	}
+
 	DeltaTree<RedwoodRecordRef>::Cursor fwd = r.getCursor();
 	DeltaTree<RedwoodRecordRef>::Cursor rev = r.getCursor();
 
@@ -5860,8 +5893,29 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 	// Verify tree contents after deletions
 	scanAndVerify();
 
-	printf("Verifying seek behaviors\n");
+	printf("Verifying insert/erase behavior for existing items\n");
+	// Test delete/insert behavior for each item, making no net changes
+	for(auto p : items) {
+		// Insert existing should fail
+		ASSERT(!r.insert(p));
 
+		// Erase existing should succeed
+		ASSERT(r.erase(p));
+
+		// Erase deleted should fail
+		ASSERT(!r.erase(p));
+
+		// Insert deleted should succeed
+		ASSERT(r.insert(p));
+
+		// Insert existing should fail
+		ASSERT(!r.insert(p));
+	}
+
+	// Tree contents should still match items vector
+	scanAndVerify();
+
+	printf("Verifying seek behaviors\n");
 	DeltaTree<IntIntPair>::Cursor s = r.getCursor();
 
 	// SeekLTE to each element
