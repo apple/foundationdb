@@ -37,6 +37,7 @@
 #include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/TLSPolicy.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
@@ -1398,54 +1399,19 @@ void ASIOReactor::wake() {
 
 } // namespace net2
 
-bool verify_certificate_cb(bool preverified, boost::asio::ssl::verify_context& ctx)
-{
-    /*
-	std::cout << "Function : " << __func__ << " ----------------- Line : " << __LINE__ << std::endl;
-    int8_t subject_name[256];
-    X509_STORE_CTX *cts = ctx.native_handle();
-    int32_t length = 0;
-    X509* cert = X509_STORE_CTX_get_current_cert(ctx.native_handle());
-    std::cout << "CTX ERROR : " << cts->error << std::endl;
-
-    int32_t depth = X509_STORE_CTX_get_error_depth(cts);
-    std::cout << "CTX DEPTH : " << depth << std::endl;
-
-    switch (cts->error)
-    {
-    case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT:
-        printf("X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT\n");
-        break;
-    case X509_V_ERR_CERT_NOT_YET_VALID:
-    case X509_V_ERR_ERROR_IN_CERT_NOT_BEFORE_FIELD:
-        printf("Certificate not yet valid!!\n");
-        break;
-    case X509_V_ERR_CERT_HAS_EXPIRED:
-    case X509_V_ERR_ERROR_IN_CERT_NOT_AFTER_FIELD:
-        printf("Certificate expired..\n");
-        break;
-    case X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN:
-        printf("Self signed certificate in chain!!!\n");
-        preverified = true;
-        break;
-    default:
-        break;
-    }
-    const int32_t name_length = 256;
-    X509_NAME_oneline(X509_get_subject_name(cert), reinterpret_cast<char*>(subject_name), name_length);
-    printf("Verifying %s\n", subject_name);
-    printf("Verification status : %d\n", preverified);
-
-    std::cout << "Function : " << __func__ << " ----------------- Line : " << __LINE__ << std::endl;
-	*/
-    return true;
+bool insecurely_always_accept_for_testing(bool _1, boost::asio::ssl::context* _2) {
+	return true;
 }
 
-INetwork* newNet2(boost::asio::ssl::context* sslContext, bool useThreadPool, bool useMetrics, std::string tlsPassword) {
+INetwork* newNet2(boost::asio::ssl::context* sslContext, bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, std::string tlsPassword) {
 	try {
 		sslContext->set_options(boost::asio::ssl::context::default_workarounds);
 		sslContext->set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
-		sslContext->set_verify_callback(boost::bind(&verify_certificate_cb, _1, _2));
+		if (policy) {
+			sslContext->set_verify_callback([policy](bool _, boost::asio::ssl::verify_context& ctx) {
+				return policy->verify_peer(ctx.native_handle());
+			});
+		}
 		N2::g_net2 = new N2::Net2(useThreadPool, useMetrics, sslContext, tlsPassword);
 	}
 	catch(boost::system::system_error e) {

@@ -58,6 +58,8 @@ set(FLOW_SRCS
   ThreadSafeQueue.h
   Trace.cpp
   Trace.h
+  TLSPolicy.h
+  TLSPolicy.cpp
   UnitTest.cpp
   UnitTest.h
   XmlTraceLogFormatter.h

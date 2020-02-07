@@ -30,6 +30,7 @@
 #include "boost/asio/ssl.hpp"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
+#include "flow/TLSPolicy.h"
 
 enum class TaskPriority {
 	Max = 1000000,
@@ -396,7 +397,7 @@ typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
 class INetwork;
 extern INetwork* g_network;
-extern INetwork* newNet2(boost::asio::ssl::context* sslContext, bool useThreadPool = false, bool useMetrics = false, std::string tlsPassword = "");
+extern INetwork* newNet2(boost::asio::ssl::context* sslContext, bool useThreadPool = false, bool useMetrics = false, Reference<TLSPolicy> policy = Reference<TLSPolicy>(), std::string tlsPassword = "");
 
 class INetwork {
 public:
