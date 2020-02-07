@@ -90,14 +90,14 @@ struct StorageQueueInfo {
 	StorageQueuingMetricsReply lastReply;
 	StorageQueuingMetricsReply prevReply;
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
-	Smoother verySmoothDurableVersion, smoothLatestVersion;
+	Smoother smoothDurableVersion, smoothLatestVersion;
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
 	limitReason_t limitReason;
 	StorageQueueInfo(UID id, LocalityData locality)
 	  : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-	    verySmoothDurableVersion(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
+	    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited) {
 		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
@@ -210,7 +210,7 @@ ACTOR Future<Void> trackStorageServerQueueInfo( RatekeeperData* self, StorageSer
 					myQueueInfo->value.smoothInputBytes.reset(reply.get().bytesInput);
 					myQueueInfo->value.smoothFreeSpace.reset(reply.get().storageBytes.available);
 					myQueueInfo->value.smoothTotalSpace.reset(reply.get().storageBytes.total);
-					myQueueInfo->value.verySmoothDurableVersion.reset(reply.get().durableVersion);
+					myQueueInfo->value.smoothDurableVersion.reset(reply.get().durableVersion);
 					myQueueInfo->value.smoothLatestVersion.reset(reply.get().version);
 				} else {
 					self->smoothTotalDurableBytes.addDelta( reply.get().bytesDurable - myQueueInfo->value.prevReply.bytesDurable );
@@ -219,7 +219,7 @@ ACTOR Future<Void> trackStorageServerQueueInfo( RatekeeperData* self, StorageSer
 					myQueueInfo->value.smoothInputBytes.setTotal( reply.get().bytesInput );
 					myQueueInfo->value.smoothFreeSpace.setTotal( reply.get().storageBytes.available );
 					myQueueInfo->value.smoothTotalSpace.setTotal( reply.get().storageBytes.total );
-					myQueueInfo->value.verySmoothDurableVersion.setTotal(reply.get().durableVersion);
+					myQueueInfo->value.smoothDurableVersion.setTotal(reply.get().durableVersion);
 					myQueueInfo->value.smoothLatestVersion.setTotal(reply.get().version);
 				}
 			} else {
@@ -407,7 +407,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		int64_t storageQueue = ss.lastReply.bytesInput - ss.smoothDurableBytes.smoothTotal();
 		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
 
-		int64_t storageDurabilityLag = ss.smoothLatestVersion.smoothTotal() - ss.verySmoothDurableVersion.smoothTotal();
+		int64_t storageDurabilityLag = ss.smoothLatestVersion.smoothTotal() - ss.smoothDurableVersion.smoothTotal();
 		worstDurabilityLag = std::max(worstDurabilityLag, storageDurabilityLag);
 
 		storageDurabilityLagReverseIndex.insert(std::make_pair(-1*storageDurabilityLag, &ss));

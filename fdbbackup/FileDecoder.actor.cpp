@@ -28,6 +28,7 @@
 #include "fdbclient/MutationList.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 namespace file_converter {
 
