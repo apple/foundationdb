@@ -113,7 +113,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 
 // Assume: Only update the local data if it (applierInterf) has not been set
 void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self) {
-	TraceEvent("FastRestore").detail("HandleRestoreSysInfoRequest", self->id());
+	TraceEvent("FastRestoreLoader").detail("HandleRestoreSysInfoRequest", self->id());
 	ASSERT(self.isValid());
 
 	// The loader has received the appliers interfaces

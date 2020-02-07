@@ -285,7 +285,7 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 		}
 	}
 
-	TraceEvent("FastRestore").detail("MonitorLeader", "FinishLeaderElection").detail("Leader", leaderInterf.id());
+	TraceEvent("FastRestore").detail("MonitorLeader", "FinishLeaderElection").detail("Leader", leaderInterf.id()).detail("IamLeader", leaderInterf == myWorkerInterf);
 	return Void();
 }
 
