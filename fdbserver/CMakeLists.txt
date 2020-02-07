@@ -28,6 +28,8 @@ set(FDBSERVER_SRCS
   IKeyValueStore.h
   IPager.h
   IVersionedStore.h
+  KeyDump.actor.cpp
+  KeyDump.actor.h
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreSQLite.actor.cpp

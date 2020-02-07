@@ -112,5 +112,6 @@ inline IKeyValueStore* openKVStore( KeyValueStoreType storeType, std::string con
 
 void GenerateIOLogChecksumFile(std::string filename);
 Future<Void> KVFileCheck(std::string const & filename, bool const &integrity);
+std::vector<IKeyValueStore*> getStorageKeyValueStores(std::string folder);
 
 #endif
