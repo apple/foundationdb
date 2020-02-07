@@ -305,6 +305,10 @@ public:
 		init();
 	}
 
+	virtual Future<Void> acceptHandshake() { return Void(); }
+
+	virtual Future<Void> connectHandshake() { return Void(); }
+
 	// returns when write() can write at least one byte
 	virtual Future<Void> onWritable() {
 		++g_net2->countWriteProbes;
@@ -451,40 +455,6 @@ public:
 	{
 	}
 
-	ACTOR static void doConnect( Reference<SSLConnection> self, Promise<Void> connected) {
-		try {
-			auto to = tcpEndpoint(self->peer_address);
-			BindPromise p("N2_ConnectError", self->id);
-			Future<Void> onConnected = p.getFuture();
-			self->socket.async_connect( to, std::move(p) );
-
-			wait( onConnected );
-			try {
-				BindPromise p("N2_ConnectHandshakeError", self->id);
-				Future<Void> onHandshook = p.getFuture();
-				self->ssl_sock.async_handshake( boost::asio::ssl::stream_base::client, std::move(p) );
-				wait( onHandshook );
-			} catch (Error& e) {
-				std::pair<IPAddress,uint16_t> peerIP = std::make_pair(self->peer_address.ip, self->peer_address.port);
-				auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-				if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-					iter->second.first++;
-				} else {
-					g_network->networkInfo.serverTLSConnectionThrottler[peerIP] = std::make_pair(0,now() + FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT);
-				}
-				throw;
-			}
-
-			self->init();
-			connected.send(Void());
-		} catch (Error& e) {
-			// Either the connection failed, or was cancelled by the caller
-			self->closeSocket();
-			connected.sendError(e);
-			throw;
-		}
-	}
-
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
 	ACTOR static Future<Reference<IConnection>> connect( boost::asio::io_service* ios, boost::asio::ssl::context* context, NetworkAddress addr ) {
 		std::pair<IPAddress,uint16_t> peerIP = std::make_pair(addr.ip, addr.port);
@@ -503,10 +473,15 @@ public:
 		
 		state Reference<SSLConnection> self( new SSLConnection(*ios, *context) );
 		self->peer_address = addr;
-		Promise<Void> connected;
-		doConnect(self, connected);
+		
 		try {
-			wait(connected.getFuture());
+			auto to = tcpEndpoint(self->peer_address);
+			BindPromise p("N2_ConnectError", self->id);
+			Future<Void> onConnected = p.getFuture();
+			self->socket.async_connect( to, std::move(p) );
+
+			wait( onConnected );
+			self->init();
 			return self;
 		} catch (Error& e) {
 			// Either the connection failed, or was cancelled by the caller
@@ -519,6 +494,103 @@ public:
 	void accept(NetworkAddress peerAddr) {
 		this->peer_address = peerAddr;
 		init();
+	}
+
+	ACTOR static void doAcceptHandshake( Reference<SSLConnection> self, Promise<Void> connected) {
+		try {
+			state std::pair<IPAddress,uint16_t> peerIP = std::make_pair(self->getPeerAddress().ip, static_cast<uint16_t>(0));
+			auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
+			if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
+				if (now() < iter->second.second) {
+					if(iter->second.first >= FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS) {
+						TraceEvent("TLSIncomingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", peerIP.first.toString());
+						wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+						throw connection_failed();
+					}
+				} else {
+					g_network->networkInfo.serverTLSConnectionThrottler.erase(peerIP);
+				}
+			}
+
+			wait(g_network->networkInfo.handshakeLock->take());
+			state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
+
+			BindPromise p("N2_AcceptHandshakeError", UID());
+			auto onHandshook = p.getFuture();
+			self->getSSLSocket().async_handshake( boost::asio::ssl::stream_base::server, std::move(p) );
+			wait( onHandshook );
+			wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskPriority::WriteSocket));
+			connected.send(Void());
+		} catch (...) {
+			auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
+			if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
+				iter->second.first++;
+			} else {
+				g_network->networkInfo.serverTLSConnectionThrottler[peerIP] = std::make_pair(0,now() + FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT);
+			}
+			self->closeSocket();
+			connected.sendError(connection_failed());
+			throw;
+		}
+	}
+
+	ACTOR static Future<Void> acceptHandshakeWrapper( Reference<SSLConnection> self ) {
+		Promise<Void> connected;
+		doAcceptHandshake(self, connected);
+		try {
+			wait(connected.getFuture());
+			return Void();
+		} catch (Error& e) {
+			// Either the connection failed, or was cancelled by the caller
+			self->closeSocket();
+			throw;
+		}
+	}
+
+	virtual Future<Void> acceptHandshake() { 
+		return acceptHandshakeWrapper( Reference<SSLConnection>::addRef(this) );
+	}
+
+	ACTOR static void doConnectHandshake( Reference<SSLConnection> self, Promise<Void> connected) {
+		try {
+			wait(g_network->networkInfo.handshakeLock->take());
+			state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
+
+			BindPromise p("N2_ConnectHandshakeError", self->id);
+			Future<Void> onHandshook = p.getFuture();
+			self->ssl_sock.async_handshake( boost::asio::ssl::stream_base::client, std::move(p) );
+			wait( onHandshook );
+			wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskPriority::WriteSocket));
+			connected.send(Void());
+		} catch (...) {
+			std::pair<IPAddress,uint16_t> peerIP = std::make_pair(self->peer_address.ip, self->peer_address.port);
+			auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
+			if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
+				iter->second.first++;
+			} else {
+				g_network->networkInfo.serverTLSConnectionThrottler[peerIP] = std::make_pair(0,now() + FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT);
+			}
+			self->closeSocket();
+			connected.sendError(connection_failed());
+			throw;
+		}
+	}
+
+	ACTOR static Future<Void> connectHandshakeWrapper( Reference<SSLConnection> self ) {
+		Promise<Void> connected;
+		doConnectHandshake(self, connected);
+		try {
+			wait(connected.getFuture());
+			return Void();
+		} catch (Error& e) {
+			// Either the connection failed, or was cancelled by the caller
+			self->closeSocket();
+			throw;
+		}
+	}
+
+	virtual Future<Void> connectHandshake() { 
+		return connectHandshakeWrapper( Reference<SSLConnection>::addRef(this) );
 	}
 
 	// returns when write() can write at least one byte
@@ -734,42 +806,14 @@ private:
 			auto f = p.getFuture();
 			self->acceptor.async_accept( conn->getSocket(), peer_endpoint, std::move(p) );
 			wait( f );
-			state IPAddress peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes()) : IPAddress(peer_endpoint.address().to_v4().to_ulong());
-			state std::pair<IPAddress,uint16_t> peerIP = std::make_pair(peer_address, static_cast<uint16_t>(0));
-			auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-			if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-				if (now() < iter->second.second) {
-					if(iter->second.first >= FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS) {
-						TraceEvent("TLSIncomingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", peerIP.first.toString());
-						wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
-						throw connection_failed();
-					}
-				} else {
-					g_network->networkInfo.serverTLSConnectionThrottler.erase(peerIP);
-				}
-			}
-
-			try {
-				BindPromise p("N2_AcceptHandshakeError", UID());
-				auto f = p.getFuture();
-				conn->getSSLSocket().async_handshake( boost::asio::ssl::stream_base::server, std::move(p) );
-				wait( f );
-			} catch (...) {
-				auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-				if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-					iter->second.first++;
-				} else {
-					g_network->networkInfo.serverTLSConnectionThrottler[peerIP] = std::make_pair(0,now() + FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT);
-				}
-				throw;
-			}
+			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes()) : IPAddress(peer_endpoint.address().to_v4().to_ulong());
 			
 			conn->accept(NetworkAddress(peer_address, peer_endpoint.port(), false, true));
 
 			return conn;
 		} catch (...) {
 			conn->close();
-			return Reference<IConnection>();
+			throw;
 		}
 	}
 };

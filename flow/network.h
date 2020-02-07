@@ -349,6 +349,10 @@ public:
 	// Closes the underlying connection eventually if it is not already closed.
 	virtual void close() = 0;
 
+	virtual Future<Void> acceptHandshake() = 0;
+
+	virtual Future<Void> connectHandshake() = 0;
+
 	// returns when write() can write at least one byte (or may throw an error if the connection dies)
 	virtual Future<Void> onWritable() = 0;
 

@@ -50,6 +50,9 @@ struct TLSConnection : IConnection, ReferenceCounted<TLSConnection> {
 
 	virtual void close() { conn->close(); }
 
+	virtual Future<Void> acceptHandshake() { return Void(); }
+	virtual Future<Void> connectHandshake() { return Void(); }
+
 	virtual Future<Void> onWritable();
 
 	virtual Future<Void> onReadable();

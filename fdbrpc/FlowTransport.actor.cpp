@@ -428,22 +428,21 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				self->lastConnectTime = now();
 
 				TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
-				wait(g_network->networkInfo.handshakeLock->take());
-				state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
 
 				try {
 					choose {
 						when( Reference<IConnection> _conn = wait( INetworkConnections::net()->connect(self->destination) ) ) { 
-							releaser.release();
+							conn = _conn;
+							wait(conn->connectHandshake());
 							if (FlowTransport::transport().isClient()) {
 								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 							}
 							if (self->unsent.empty()) {
-								_conn->close();
+								conn->close();
+								conn = Reference<IConnection>();
 								clientReconnectDelay = false;
 								continue;
 							} else {
-								conn = _conn;
 								TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
 										.suppressFor(1.0)
 										.detail("PeerAddr", self->destination);
@@ -456,7 +455,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 						}
 					}
 				} catch( Error &e ) {
-					releaser.release();
 					if(e.code() != error_code_connection_failed) {
 						throw;
 					}
@@ -966,6 +964,7 @@ ACTOR static Future<Void> connectionReader(
 
 ACTOR static Future<Void> connectionIncoming( TransportData* self, Reference<IConnection> conn ) {
 	try {
+		wait(conn->acceptHandshake());
 		state Promise<Reference<Peer>> onConnected;
 		state Future<Void> reader = connectionReader( self, conn, Reference<Peer>(), onConnected );
 		choose {

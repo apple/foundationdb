@@ -200,6 +200,9 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 	virtual void delref() { ReferenceCounted<Sim2Conn>::delref(); }
 	virtual void close() { closedByCaller = true; closeInternal(); }
 
+	virtual Future<Void> acceptHandshake() { return Void(); }
+	virtual Future<Void> connectHandshake() { return Void(); }
+
 	virtual Future<Void> onWritable() { return whenWritable(this); }
 	virtual Future<Void> onReadable() { return whenReadable(this); }
 
