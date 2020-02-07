@@ -132,7 +132,7 @@ def test_fdb_transactional_generator(db):
         @fdb.transactional
         def function_that_yields(tr):
             yield 0
-        assert fdb.get_api_version() < 700, "Pre-7.0, a decorators may wrap a function that yield"
+        assert fdb.get_api_version() < 700, "Pre-7.0, a decorator may wrap a function that yields"
     except ValueError as e:
         assert fdb.get_api_version() >= 700, "Post-7.0, a decorator should throw if wrapped function yields"
 
