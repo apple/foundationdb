@@ -770,11 +770,12 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr) {
 	this->transactionInfo.push_back(arena, info);
 }
 
-class MiniConflictSet2 : NonCopyable {
+// SOMEDAY: This should probably be replaced with a roaring bitmap.
+class MiniConflictSet : NonCopyable {
 	std::vector<bool> values;
 
 public:
-	explicit MiniConflictSet2(int size) { values.assign(size, false); }
+	explicit MiniConflictSet(int size) { values.assign(size, false); }
 	void set(int begin, int end) {
 		for (int i = begin; i < end; i++) values[i] = true;
 	}
@@ -782,99 +783,6 @@ public:
 		for (int i = begin; i < end; i++)
 			if (values[i]) return true;
 		return false;
-	}
-};
-
-class MiniConflictSet : NonCopyable {
-	typedef uint64_t wordType;
-	enum { bucketShift = 6, bucketMask = sizeof(wordType) * 8 - 1 };
-	std::vector<wordType> values; // undefined when andValues is true for a range of values
-	std::vector<wordType> orValues;
-	std::vector<wordType> andValues;
-	MiniConflictSet2 debug; // SOMEDAY: Test on big ranges, eliminate this
-
-	wordType bitMask(unsigned int bit) { // computes results for bit%word
-		return (((wordType)1) << (bit & bucketMask));
-	}
-	void setNthBit(std::vector<wordType>& v, const unsigned int bit) { v[bit >> bucketShift] |= bitMask(bit); }
-	void clearNthBit(std::vector<wordType>& v, const unsigned int bit) { v[bit >> bucketShift] &= ~(bitMask(bit)); }
-	bool getNthBit(const std::vector<wordType>& v, const unsigned int bit) {
-		return (v[bit >> bucketShift] & bitMask(bit)) != 0;
-	}
-	int wordsForNBits(unsigned int bits) { return (bits + ((1 << bucketShift) - 1)) >> bucketShift; }
-	wordType highBits(int b) { // bits (b&bucketMask) and higher are 1
-#pragma warning(disable : 4146)
-		return -bitMask(b);
-#pragma warning(default : 4146)
-	}
-	wordType lowBits(int b) { // bits lower than (b&bucketMask) are 1
-		return bitMask(b) - 1;
-	}
-	wordType lowBits2(int b) { return (b & bucketMask) ? lowBits(b) : -1; }
-
-	void setBits(std::vector<wordType>& v, int bitBegin, int bitEnd, bool fillMiddle) {
-		if (bitBegin >= bitEnd) return;
-		int beginWord = bitBegin >> bucketShift;
-		int lastWord = ((bitEnd + bucketMask) >> bucketShift) - 1;
-		if (beginWord == lastWord) {
-			v[beginWord] |= highBits(bitBegin) & lowBits2(bitEnd);
-		} else {
-			v[beginWord] |= highBits(bitBegin);
-			if (fillMiddle)
-				for (int w = beginWord + 1; w < lastWord; w++) v[w] = wordType(-1);
-			v[lastWord] |= lowBits2(bitEnd);
-		}
-	}
-
-	bool orBits(std::vector<wordType>& v, int bitBegin, int bitEnd, bool getMiddle) {
-		if (bitBegin >= bitEnd) return false;
-		int beginWord = bitBegin >> bucketShift;
-		int lastWord = ((bitEnd + bucketMask) >> bucketShift) - 1;
-		if (beginWord == lastWord)
-			return (v[beginWord] & highBits(bitBegin) & lowBits2(bitEnd)) != 0;
-		else {
-			if (getMiddle)
-				for (int w = beginWord + 1; w < lastWord; w++)
-					if (v[w]) return true;
-			return ((v[beginWord] & highBits(bitBegin)) | (v[lastWord] & lowBits2(bitEnd))) != 0;
-		}
-	}
-
-	bool orImpl(int begin, int end) {
-		if (begin == end) return false;
-		int beginWord = begin >> bucketShift;
-		int lastWord = ((end + bucketMask) >> bucketShift) - 1;
-
-		return orBits(orValues, beginWord + 1, lastWord, true) || getNthBit(andValues, beginWord) ||
-		       getNthBit(andValues, lastWord) || orBits(values, begin, end, false);
-	}
-
-public:
-	explicit MiniConflictSet(int size) : debug(size) {
-		static_assert((1 << bucketShift) == sizeof(wordType) * 8, "BucketShift incorrect");
-
-		values.assign(wordsForNBits(size), false);
-		orValues.assign(wordsForNBits(wordsForNBits(size)), false);
-		andValues.assign(wordsForNBits(wordsForNBits(size)), false);
-	}
-
-	void set(int begin, int end) {
-		debug.set(begin, end);
-		if (begin == end) return;
-
-		int beginWord = begin >> bucketShift;
-		int lastWord = ((end + bucketMask) >> bucketShift) - 1;
-
-		setBits(values, begin, end, false);
-		setBits(andValues, beginWord + 1, lastWord, true);
-		setBits(orValues, beginWord, lastWord + 1, true);
-	}
-
-	bool any(int begin, int end) {
-		bool a = orImpl(begin, end);
-		bool b = debug.any(begin, end);
-		ASSERT(a == b);
-		return b;
 	}
 };
 

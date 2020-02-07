@@ -182,8 +182,10 @@ const Value backupProgressValue(const WorkerBackupStatus& status);
 UID decodeBackupProgressKey(const KeyRef& key);
 WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value);
 
-//    "\xff/backupStarted"
+//    "\xff/backupStarted" := "[[vector<UID,Version1>]]"
 extern const KeyRef backupStartedKey;
+Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids);
+std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& value);
 
 extern const KeyRef coordinatorsKey;
 extern const KeyRef logsKey;
