@@ -274,7 +274,8 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 	TraceEvent("FastRestoreApplerPhaseApplyTxn", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("FromVersion", batchData->kvOps.empty() ? -1 : batchData->kvOps.begin()->first)
-	    .detail("EndVersion", batchData->kvOps.empty() ? -1 : batchData->kvOps.rbegin()->first);
+	    .detail("EndVersion", batchData->kvOps.empty() ? -1 : batchData->kvOps.rbegin()->first)
+		.detail("Now", now());
 
 	// Assume the process will not crash when it apply mutations to DB. The reply message can be lost though
 	if (batchData->kvOps.empty()) {
@@ -345,7 +346,7 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 				tr->reset();
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				TraceEvent("FastRestore_ApplierTxn")
+				TraceEvent(SevFRMutationInfo, "FastRestore_ApplierTxn")
 				    .detail("ApplierApplyToDB", applierID)
 				    .detail("TxnId", progress.curTxnId)
 				    .detail("CurrentIndexInCurrentTxn", progress.curIndexInCurTxn)
@@ -422,7 +423,8 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 
 	TraceEvent("FastRestoreApplerPhaseApplyTxn", applierID)
 	    .detail("BatchIndex", batchIndex)
-	    .detail("CleanupCurTxnIds", progress.curTxnId);
+	    .detail("CleanupCurTxnIds", progress.curTxnId)
+		.detail("Now", now());
 	// clean up txn ids
 	loop {
 		try {
