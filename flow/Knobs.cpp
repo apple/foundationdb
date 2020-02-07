@@ -119,6 +119,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( SLOW_LOOP_CUTOFF,                          15.0 / 1000.0 );
 	init( SLOW_LOOP_SAMPLING_RATE,                             0.1 );
 	init( TSC_YIELD_TIME,                                  1000000 );
+	init( MIN_LOGGED_PRIORITY_BUSY_FRACTION,                  0.05 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
