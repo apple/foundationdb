@@ -116,18 +116,8 @@ bool operator<(const KeyInfo& lhs, const KeyInfo& rhs) {
 	int c = memcmp(lhs.key.begin(), rhs.key.begin(), i);
 	if (c != 0) return c < 0;
 
-	// SOMEDAY: This is probably not very fast.  Slows D.Sort by ~20% relative to previous (incorrect) version.
-
-	bool lDone, rDone;
-	int lc, rc;
-	while (true) {
-		lDone = getCharacter(lhs, i, lc);
-		rDone = getCharacter(rhs, i, rc);
-		if (lDone && rDone) return false; // equality
-		if (lc < rc) return true;
-		if (lc > rc) return false;
-		i++;
-	}
+	// Always sort shorter keys before longer keys.
+	return lhs.key.size() < rhs.key.size();
 }
 
 bool operator==(const KeyInfo& lhs, const KeyInfo& rhs) {
