@@ -1567,7 +1567,7 @@ int main(int argc, char* argv[]) {
 			//if ( tlsVerifyPeers.size() ) FIXME
 			//	tlsOptions->set_verify_peers( tlsVerifyPeers );
 #endif
-			g_network = newNet2(useThreadPool, true, &sslContext, tlsPassword);
+			g_network = newNet2(&sslContext, useThreadPool, true, tlsPassword);
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
@@ -1790,7 +1790,7 @@ int main(int argc, char* argv[]) {
 					}
 				}
 			}
-			setupAndRun( dataFolder, testFile, restarting, (isRestoring >= 1), whitelistBinPaths, Reference<TLSOptions>()); //FIXME
+			setupAndRun( dataFolder, testFile, restarting, (isRestoring >= 1), whitelistBinPaths);
 			g_simulator.run();
 		} else if (role == FDBD) {
 			ASSERT( connectionFile );

@@ -983,7 +983,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
-	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present(), &networkOptions.sslContext, networkOptions.tlsPassword);
+	g_network = newNet2(&networkOptions.sslContext, false, useMetrics || networkOptions.traceDirectory.present(), networkOptions.tlsPassword);
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
 }

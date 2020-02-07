@@ -1441,7 +1441,7 @@ bool verify_certificate_cb(bool preverified, boost::asio::ssl::verify_context& c
     return true;
 }
 
-INetwork* newNet2(bool useThreadPool, bool useMetrics, boost::asio::ssl::context* sslContext, std::string tlsPassword) {
+INetwork* newNet2(boost::asio::ssl::context* sslContext, bool useThreadPool, bool useMetrics, std::string tlsPassword) {
 	try {
 		sslContext->set_options(boost::asio::ssl::context::default_workarounds);
 		sslContext->set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
