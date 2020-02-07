@@ -82,7 +82,7 @@
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, 
 	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID, 
-	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, 
+	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_BYZANTIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK,
 	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, 
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, 
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH
@@ -141,6 +141,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_MACHINE_CLASS,         "--class",                     SO_REQ_SEP },
 	{ OPT_BUGGIFY,               "-b",                          SO_REQ_SEP },
 	{ OPT_BUGGIFY,               "--buggify",                   SO_REQ_SEP },
+	{ OPT_BYZANTIFY,             "-B",                          SO_REQ_SEP },
+	{ OPT_BYZANTIFY,             "--byzantify",                 SO_REQ_SEP },
 	{ OPT_VERSION,               "-v",                          SO_NONE },
 	{ OPT_VERSION,               "--version",                   SO_NONE },
 	{ OPT_CRASHONERROR,          "--crash",                     SO_NONE },
@@ -624,6 +626,8 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("  --kvfile FILE  Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.\n");
 		printf("  -b [on,off], --buggify [on,off]\n"
 			   "                 Sets Buggify system state, defaults to `off'.\n");
+		printf("  -B [on,off], --byzantify [on,off]\n"
+			   "                 Sets Byzantine system state, defaults to `off'.\n");
 		printf("  --crash        Crash on serious errors instead of continuing.\n");
 		printf("  -N NETWORKIMPL, --network NETWORKIMPL\n"
 			   "                 Select network implementation, `net2' (default),\n");
@@ -1305,6 +1309,17 @@ private:
 					buggifyEnabled = false;
 				else {
 					fprintf(stderr, "ERROR: Unknown buggify state `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+			case OPT_BYZANTIFY:
+				if (!strcmp(args.OptionArg(), "on"))
+					byzantineEnabled() = true;
+				else if (!strcmp(args.OptionArg(), "off"))
+					byzantineEnabled() = false;
+				else {
+					fprintf(stderr, "ERROR: Unknown byzantine state `%s'\n", args.OptionArg());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}

@@ -90,6 +90,8 @@ namespace std {
 
 class IRandom {
 public:
+	using result_type = uint64_t;
+
 	virtual double random01() = 0; // return random value in [0, 1]
 	virtual int randomInt(int min, int maxPlusOne) = 0;
 	virtual int64_t randomInt64(int64_t min, int64_t maxPlusOne) = 0;
@@ -102,6 +104,12 @@ public:
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
+
+	// these are so that we can use a IRandom object as a random number generator
+	// for the standard library
+	static constexpr result_type min() { return std::numeric_limits<uint64_t>::min(); }
+	static constexpr result_type max() { return std::numeric_limits<uint64_t>::max(); }
+	virtual result_type operator()() = 0;
 
 	// The following functions have fixed implementations for now:
 	template <class C>
