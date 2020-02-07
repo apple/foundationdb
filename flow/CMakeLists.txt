@@ -99,7 +99,7 @@ endif()
 if(NOT WITH_TLS)
   target_compile_definitions(flow PUBLIC TLS_DISABLED)
 else()
-  target_link_libraries(flow PUBLIC FDBLibTLS)
+  target_link_libraries(flow PUBLIC LibreSSL)
 endif()
 
 if(APPLE)
