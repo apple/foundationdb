@@ -101,7 +101,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	// Note: Insert new items into processedFileState will not invalidate the reference.
 	state NotifiedVersion& curFilePos = batchData->processedFileState[req.asset];
 
-	TraceEvent("FastRestoreApplierPhaseReceiveMutations", self->id())
+	TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
 	    .detail("ProcessedFileVersion", curFilePos.get())
