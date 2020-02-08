@@ -18,11 +18,6 @@ SPHINXBUILD	= $(VENVDIR)/bin/sphinx-build
 SPHINXAUTOBUILD	= $(VENVDIR)/bin/sphinx-autobuild
 TEMPLATEDIR	= $(ROOTDIR)/_templates
 
-# virtualenv for sphinx-build
-VENV_VERSION	?= virtualenv-13.0.1
-VENV_URL_BASE	?= https://pypi.python.org
-VENV_URL	?= $(VENV_URL_BASE)/packages/source/v/virtualenv/$(VENV_VERSION).tar.gz
-
 # Internal variables.
 PAPEROPT_a4	= -D latex_paper_size=a4
 PAPEROPT_letter	= -D latex_paper_size=letter
