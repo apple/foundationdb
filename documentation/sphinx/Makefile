@@ -68,9 +68,7 @@ buildsphinx:
 	if [ ! -e $(SPHINXBUILD) ]; then \
 		mkdir $(BUILDDIR); \
 		cd $(BUILDDIR); \
-		curl -OL $(VENV_URL); \
-		tar zxvf $(VENV_VERSION).tar.gz; \
-		python2 ./$(VENV_VERSION)/virtualenv.py venv; \
+		python3 -m venv venv; \
 	fi
 	. $(VENVDIR)/bin/activate && \
 	cp .pip.conf $(VENVDIR)/pip.conf && \
