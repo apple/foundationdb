@@ -23,6 +23,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Status.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/JsonBuilder.h"
 
@@ -897,6 +898,29 @@ namespace fileBackup {
 		wait(waitFor->onSetAddTask(tr, taskBucket, task));
 
 		return LiteralStringRef("OnSetAddTask");
+	}
+
+	// Clears the backup ID from "backupStartedKey" to pause backup workers.
+	ACTOR static Future<Void> clearBackupStartID(Reference<ReadYourWritesTransaction> tr, UID backupUid) {
+		// If backup worker is not enabled, exit early.
+		Optional<Value> started = wait(tr->get(backupStartedKey));
+		std::vector<std::pair<UID, Version>> ids;
+		if (started.present()) {
+			ids = decodeBackupStartedValue(started.get());
+		}
+		auto it = std::find_if(ids.begin(), ids.end(),
+		                       [=](const std::pair<UID, Version>& p) { return p.first == backupUid; });
+		if (it != ids.end()) {
+			ids.erase(it);
+		}
+
+		if (ids.empty()) {
+			TraceEvent("ClearBackup").detail("BackupID", backupUid);
+			tr->clear(backupStartedKey);
+		} else {
+			tr->set(backupStartedKey, encodeBackupStartedValue(ids));
+		}
+		return Void();
 	}
 
 	// Backup and Restore taskFunc definitions will inherit from one of the following classes which
@@ -2148,7 +2172,8 @@ namespace fileBackup {
 
 			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 			state Key destUidValue = wait(backup.destUidValue().getOrThrow(tr));
-			wait( eraseLogData(tr, backup.getUidAsKey(), destUidValue) );
+
+			wait(eraseLogData(tr, backup.getUidAsKey(), destUidValue) && clearBackupStartID(tr, uid));
 
 			backup.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
 
@@ -2346,8 +2371,8 @@ namespace fileBackup {
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			wait(checkTaskVersion(cx, task, StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version));
 
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			loop{
-				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2361,7 +2386,56 @@ namespace fileBackup {
 				}
 			}
 
-			return Void();
+			// Check if backup worker is enabled
+			DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
+			if (!dbConfig.backupWorkerEnabled) {
+				wait(success(changeConfig(cx, "backup_worker_enabled:=1", true)));
+			}
+
+			// Set the "backupStartedKey" and wait for all backup worker started
+			tr->reset();
+			state BackupConfig config(task);
+			loop {
+				state Future<Void> watchFuture;
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					state Future<Void> keepRunning = taskBucket->keepRunning(tr, task);
+
+					state Future<Optional<Value>> started = tr->get(backupStartedKey);
+					state Future<Optional<Value>> taskStarted = tr->get(config.allWorkerStarted().key);
+					wait(success(started) && success(taskStarted));
+
+					std::vector<std::pair<UID, Version>> ids;
+					if (started.get().present()) {
+						ids = decodeBackupStartedValue(started.get().get());
+					}
+					const UID uid = config.getUid();
+				    auto it = std::find_if(ids.begin(), ids.end(),
+				                           [uid](const std::pair<UID, Version>& p) { return p.first == uid; });
+					if (it == ids.end()) {
+						ids.emplace_back(uid, Params.beginVersion().get(task));
+					} else {
+						Params.beginVersion().set(task, it->second);
+					}
+
+					tr->set(backupStartedKey, encodeBackupStartedValue(ids));
+
+					// The task may be restarted. Set the watch if started key has NOT been set.
+					if (!taskStarted.get().present()) {
+						watchFuture = tr->watch(config.allWorkerStarted().key);
+					}
+
+					wait(keepRunning);
+					wait(tr->commit());
+					if (!taskStarted.get().present()) {
+						wait(watchFuture);
+					}
+					return Void();
+				} catch (Error &e) {
+					wait(tr->onError(e));
+				}
+			}
 		}
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
@@ -2396,6 +2470,7 @@ namespace fileBackup {
 			wait(success(FileBackupFinishedTask::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), backupFinished)));
 
 			wait(taskBucket->finish(tr, task));
+
 			return Void();
 		}
 
@@ -3790,7 +3865,8 @@ public:
 
 			state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
 			wait(success(tr->getReadVersion()));
-			wait( eraseLogData(tr, config.getUidAsKey(), destUidValue) );
+			wait(eraseLogData(tr, config.getUidAsKey(), destUidValue) &&
+			     fileBackup::clearBackupStartID(tr, config.getUid()));
 
 			config.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
 
@@ -3830,7 +3906,8 @@ public:
 		// Cancel backup task through tag
 		wait(tag.cancel(tr));
 
-		wait(eraseLogData(tr, config.getUidAsKey(), destUidValue));
+		wait(eraseLogData(tr, config.getUidAsKey(), destUidValue) &&
+		     fileBackup::clearBackupStartID(tr, config.getUid()));
 
 		config.stateEnum().set(tr, EBackupState::STATE_ABORTED);
 
