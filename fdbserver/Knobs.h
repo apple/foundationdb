@@ -491,6 +491,7 @@ public:
 	// FASTRESTORE_VB_PARALLELISM is the number of concurrently running version batches
 	int64_t FASTRESTORE_VB_PARALLELISM;
 	int64_t FASTRESTORE_VB_MONITOR_DELAY; // How quickly monitor finished version batch
+	int64_t FASTRESTORE_VB_LAUNCH_DELAY;
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
