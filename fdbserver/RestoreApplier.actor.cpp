@@ -42,9 +42,13 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int nodeIndex, Database cx) {
 	state Reference<RestoreApplierData> self =
 	    Reference<RestoreApplierData>(new RestoreApplierData(applierInterf.id(), nodeIndex));
-
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
+	state double updateProcessStatsDelay = SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL;
+	state Future<Void> updateProcessStatsTimer = delay(updateProcessStatsDelay);
+
+	actors.add(traceProcessMetrics(self, "Applier"));
+
 	loop {
 		state std::string requestTypeStr = "[Init]";
 
@@ -73,6 +77,10 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 					if (req.terminate) {
 						exitRole = Void();
 					}
+				}
+				when(wait(updateProcessStatsTimer)) {
+					updateProcessStats(self);
+					updateProcessStatsTimer = delay(updateProcessStatsDelay);
 				}
 				when(wait(exitRole)) {
 					TraceEvent("FastRestore").detail("RestoreApplierCore", "ExitRole").detail("NodeID", self->id());
@@ -132,6 +140,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			    .detail("Version", commitVersion)
 			    .detail("Index", mIndex)
 			    .detail("MutationReceived", mutation.toString());
+			batchData->counters.receivedBytes += mutation.totalSize();
+			batchData->counters.receivedMutations += 1;
 			// Sanity check
 			if (g_network->isSimulated()) {
 				if (isRangeMutation(mutation)) {
@@ -174,8 +184,9 @@ struct DBApplyProgress {
 
 	// Decide when to commit a transaction. We buffer enough mutations in a txn before commit the txn
 	bool startNextVersion; // The next txn will include mutations in next version
-	int numAtomicOps;
-	double transactionSize;
+	int numAtomicOps; // Status counter
+	double txnBytes; // Decide when to commit a txn
+	double txnMutations; // Status counter
 
 	Reference<ApplierBatchData> batchData;
 	UID applierId;
@@ -183,7 +194,8 @@ struct DBApplyProgress {
 	DBApplyProgress() = default;
 	explicit DBApplyProgress(UID applierId, Reference<ApplierBatchData> batchData)
 	  : applierId(applierId), batchData(batchData), curIndexInCurTxn(0), startIndexInUncommittedTxn(0), curTxnId(0),
-	    uncommittedTxnId(0), lastTxnHasError(false), startNextVersion(false), numAtomicOps(0), transactionSize(0) {
+	    uncommittedTxnId(0), lastTxnHasError(false), startNextVersion(false), numAtomicOps(0), txnBytes(0),
+	    txnMutations(0) {
 		curItInCurTxn = batchData->kvOps.begin();
 		while (curItInCurTxn != batchData->kvOps.end() && curItInCurTxn->second.empty()) {
 			curItInCurTxn++;
@@ -206,7 +218,8 @@ struct DBApplyProgress {
 
 	// Setup for the next transaction; This should be done after nextMutation()
 	void nextTxn() {
-		transactionSize = 0;
+		txnBytes = 0;
+		txnMutations = 0;
 		numAtomicOps = 0;
 		lastTxnHasError = false;
 		startNextVersion = false;
@@ -235,15 +248,15 @@ struct DBApplyProgress {
 		curTxnId = uncommittedTxnId;
 
 		numAtomicOps = 0;
-		transactionSize = 0;
+		txnBytes = 0;
+		txnMutations = 0;
 		startNextVersion = false;
 		lastTxnHasError = false;
 	}
 
 	bool shouldCommit() {
-		return (!lastTxnHasError &&
-		        (startNextVersion || transactionSize >= SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES ||
-		         curItInCurTxn == batchData->kvOps.end()));
+		return (!lastTxnHasError && (startNextVersion || txnBytes >= SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES ||
+		                             curItInCurTxn == batchData->kvOps.end()));
 	}
 
 	bool hasError() { return lastTxnHasError; }
@@ -370,8 +383,8 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 					    .detail("Version", progress.curItInCurTxn->first)
 					    .detail("Index", progress.curIndexInCurTxn)
 					    .detail("Mutation", m.toString())
-					    .detail("MutationSize", m.expectedSize())
-					    .detail("TxnSize", progress.transactionSize);
+					    .detail("MutationSize", m.totalSize())
+					    .detail("TxnSize", progress.txnBytes);
 					if (m.type == MutationRef::SetValue) {
 						tr->set(m.param1, m.param2);
 					} else if (m.type == MutationRef::ClearRange) {
@@ -386,7 +399,8 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 							.detail("TypeName", typeStr);
 					}
 
-					progress.transactionSize += m.expectedSize();
+					progress.txnBytes += m.totalSize(); // Changed expectedSize to totalSize
+					progress.txnMutations += 1;
 
 					progress.nextMutation(); // Prepare for the next mutation
 					// commit per FASTRESTORE_TXN_BATCH_MAX_BYTES bytes; and commit does not cross version boundary
@@ -399,6 +413,10 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 			// Commit the txn and prepare the starting point for next txn
 			if (progress.shouldCommit()) {
 				wait(tr->commit());
+				// Update status counter appliedBytes, appliedMutations, atomicOps
+				batchData->counters.appliedBytes += progress.txnBytes;
+				batchData->counters.appliedTxns += progress.txnMutations;
+				batchData->counters.appliedAtomicOps += progress.numAtomicOps;
 			}
 
 			if (progress.isDone()) { // Are all mutations processed?
@@ -414,9 +432,6 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 			    .detail("Version", progress.curItInCurTxn->first)
 			    .error(e, true);
 			progress.lastTxnHasError = true;
-			// if (e.code() == commit_unknown_result) {
-			// 	lastTxnHasError = true;
-			// }
 			wait(tr->onError(e));
 		}
 	}

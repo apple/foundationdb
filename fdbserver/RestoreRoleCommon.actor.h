@@ -30,6 +30,7 @@
 
 #include <sstream>
 #include "flow/Stats.h"
+#include "flow/SystemMonitor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/Notified.h"
@@ -109,6 +110,10 @@ public:
 	UID nodeID;
 	int nodeIndex;
 
+	double cpuUsage;
+	double memory;
+	double residentMemory;
+
 	std::map<UID, RestoreLoaderInterface> loadersInterf; // UID: loaderInterf's id
 	std::map<UID, RestoreApplierInterface> appliersInterf; // UID: applierInterf's id
 
@@ -116,7 +121,7 @@ public:
 
 	bool versionBatchStart = false;
 
-	RestoreRoleData() : role(RestoreRole::Invalid){};
+	RestoreRoleData() : role(RestoreRole::Invalid), cpuUsage(0.0), memory(0.0), residentMemory(0.0){};
 
 	virtual ~RestoreRoleData() {}
 
@@ -133,6 +138,9 @@ public:
 
 	virtual std::string describeNode() = 0;
 };
+
+void updateProcessStats(Reference<RestoreRoleData> self);
+ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role);
 
 #include "flow/unactorcompiler.h"
 #endif

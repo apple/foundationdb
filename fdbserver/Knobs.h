@@ -493,6 +493,7 @@ public:
 	int64_t FASTRESTORE_VB_MONITOR_DELAY; // How quickly monitor finished version batch
 	int64_t FASTRESTORE_VB_LAUNCH_DELAY;
 	int64_t FASTRESTORE_ROLE_LOGGING_DELAY;
+	int64_t FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL; // How quickly to update process metrics for restore
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };

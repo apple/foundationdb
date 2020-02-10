@@ -54,6 +54,8 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	std::map<LoadingParam, MutationsVec> sampleMutations;
 	int numSampledMutations; // The total number of mutations received from sampled data.
 
+	Future<Void> pollMetrics;
+
 	// Status counters
 	struct Counters {
 		CounterCollection cc;
@@ -66,7 +68,11 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 		    sampledBytes("SampledBytes", cc) {}
 	} counters;
 
-	explicit LoaderBatchData(UID loaderInterfID, int batchIndex) : counters(this, loaderInterfID, batchIndex) {}
+	explicit LoaderBatchData(UID nodeID, int batchIndex) : counters(this, nodeID, batchIndex) {
+		pollMetrics =
+		    traceCounters("RestoreLoaderMetrics", nodeID, SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
+		                  nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
+	}
 
 	void reset() {
 		processedFileParams.clear();

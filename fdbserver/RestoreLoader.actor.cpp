@@ -59,11 +59,12 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx) {
 	state Reference<RestoreLoaderData> self =
 	    Reference<RestoreLoaderData>(new RestoreLoaderData(loaderInterf.id(), nodeIndex));
-
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
+	state double updateProcessStatsDelay = SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL;
+	state Future<Void> updateProcessStatsTimer = delay(updateProcessStatsDelay);
 
-	actors.add(traceCounters("RestoreLoaderMetrics", self->id(), SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self->counters.cc, self->nodeId.toString() + "/RestoreLoaderMetrics"));
+	actors.add(traceProcessMetrics(self, "Loader"));
 
 	loop {
 		state std::string requestTypeStr = "[Init]";
@@ -97,6 +98,10 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 					if (req.terminate) {
 						exitRole = Void();
 					}
+				}
+				when(wait(updateProcessStatsTimer)) {
+					updateProcessStats(self);
+					updateProcessStatsTimer = delay(updateProcessStatsDelay);
 				}
 				when(wait(exitRole)) {
 					TraceEvent("FastRestore").detail("RestoreLoaderCore", "ExitRole").detail("NodeID", self->id());
