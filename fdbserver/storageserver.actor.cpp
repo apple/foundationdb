@@ -2720,9 +2720,9 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		if(ver != invalidVersion) {
 			data->lastVersionWithData = ver;
-		} else {
-			ver = cloneCursor2->version().version - 1;
-		}
+		} 
+		ver = cloneCursor2->version().version - 1;
+
 		if(injectedChanges) data->lastVersionWithData = ver;
 
 		data->updateEagerReads = NULL;
