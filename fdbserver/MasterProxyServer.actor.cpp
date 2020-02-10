@@ -531,7 +531,6 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
                                       LogPushData* toCommit, Version commitVersion) {
 	state std::map<Key, MutationListRef>::iterator logRangeMutation = logRangeMutations->begin();
 	state int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
-	state int yieldBytes = 0;
 	state BinaryWriter valueWriter(Unversioned());
 
 	// Serialize the log range mutations within the map
@@ -539,18 +538,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 	{
 		//FIXME: this is re-implementing the serialize function of MutationListRef in order to have a yield
 		valueWriter = BinaryWriter(IncludeVersion());
-		valueWriter << logRangeMutation->second.totalSize();
-
-		state MutationListRef::Blob* blobIter = logRangeMutation->second.blob_begin;
-		while(blobIter) {
-			if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
-				yieldBytes = 0;
-				wait(yield(TaskPriority::ProxyCommitYield2));
-			}
-			valueWriter.serializeBytes(blobIter->data);
-			yieldBytes += blobIter->data.size();
-			blobIter = blobIter->next;
-		}
+		valueWriter << logRangeMutation->second;
 
 		Key val = valueWriter.toValue();
 		
