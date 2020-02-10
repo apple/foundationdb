@@ -1221,12 +1221,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::set<NetworkAddress> workerAddresses;
 
 		for (const auto& it : workers) {
-			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(it.interf.address());
+			NetworkAddress addr = it.interf.tLog.getEndpoint().addresses.getTLSAddress();
+			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(addr);
 			if(!info || info->failed) {
 				TraceEvent("ConsistencyCheck_FailedWorkerInList").detail("Addr", it.interf.address());
 				return false;
 			}
-			workerAddresses.insert( NetworkAddress(it.interf.address().ip, it.interf.address().port, true, false) );
+			workerAddresses.insert( NetworkAddress(addr.ip, addr.port, true, addr.isTLS()) );
 		}
 
 		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();

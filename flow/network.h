@@ -284,6 +284,13 @@ struct NetworkAddressList {
 		return secondaryAddress < r.secondaryAddress;
 	}
 
+	NetworkAddress getTLSAddress() const {
+		if(!secondaryAddress.present() || address.isTLS()) {
+			return address;
+		}
+		return secondaryAddress.get();
+	}
+
 	std::string toString() const {
 		if(!secondaryAddress.present()) {
 			return address.toString();

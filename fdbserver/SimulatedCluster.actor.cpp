@@ -210,7 +210,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 		wait( delay( waitTime ) );
 
 		state ISimulator::ProcessInfo* process =
-		    g_simulator.newProcess("Server", ip, port, listenPerProcess, localities, processClass, dataFolder->c_str(),
+		    g_simulator.newProcess("Server", ip, port, sslEnabled, listenPerProcess, localities, processClass, dataFolder->c_str(),
 		                           coordFolder->c_str());
 		wait(g_simulator.onProcess(process,
 		                           TaskPriority::DefaultYield)); // Now switch execution to the process on which we will run
@@ -1317,9 +1317,9 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 		Standalone<StringRef> newZoneId = Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString());
 		LocalityData	localities(Optional<Standalone<StringRef>>(), newZoneId, newZoneId, Optional<Standalone<StringRef>>());
 		systemActors->push_back( reportErrors( simulatedMachine(
-			conn, ips, sslEnabled,
+			conn, ips, sslEnabled && sslOnly,
 			localities, ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
-			baseFolder, false, i == useSeedForMachine, AgentNone, sslEnabled, whitelistBinPaths ),
+			baseFolder, false, i == useSeedForMachine, AgentNone, sslEnabled && sslOnly, whitelistBinPaths ),
 			"SimulatedTesterMachine") );
 	}
 	*pStartingConfiguration = startingConfigString;
@@ -1387,7 +1387,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 
 	// TODO (IPv6) Use IPv6?
 	wait(g_simulator.onProcess(
-	    g_simulator.newProcess("TestSystem", IPAddress(0x01010101), 1, 1,
+	    g_simulator.newProcess("TestSystem", IPAddress(0x01010101), 1, false, 1,
 	                           LocalityData(Optional<Standalone<StringRef>>(),
 	                                        Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
 	                                        Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
