@@ -492,6 +492,7 @@ public:
 	int64_t FASTRESTORE_VB_PARALLELISM;
 	int64_t FASTRESTORE_VB_MONITOR_DELAY; // How quickly monitor finished version batch
 	int64_t FASTRESTORE_VB_LAUNCH_DELAY;
+	int64_t FASTRESTORE_ROLE_LOGGING_DELAY;
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };

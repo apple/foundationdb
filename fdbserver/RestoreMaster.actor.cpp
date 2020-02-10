@@ -427,8 +427,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 	    .detail("BatchIndex", batchIndex)
 	    .detail("FileTypeLoadedInVersionBatch", isRangeFile)
 	    .detail("BeginVersion", versionBatch.beginVersion)
-	    .detail("EndVersion", versionBatch.endVersion)
-	    .detail("Files", (files != nullptr ? files->size() : -1));
+	    .detail("EndVersion", versionBatch.endVersion);
 	return Void();
 }
 
@@ -687,8 +686,8 @@ ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std
 
 	TraceEvent("FastRestoreMasterPhaseCollectBackupFilesDone")
 	    .detail("BackupDesc", desc.toString())
-	    .detail("RangeFiles", rangeFiles.size())
-	    .detail("LogFiles", logFiles.size());
+	    .detail("RangeFiles", rangeFiles->size())
+	    .detail("LogFiles", logFiles->size());
 	return Void();
 }
 

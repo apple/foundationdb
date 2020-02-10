@@ -54,6 +54,20 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	std::map<LoadingParam, MutationsVec> sampleMutations;
 	int numSampledMutations; // The total number of mutations received from sampled data.
 
+	// Status counters
+	struct Counters {
+		CounterCollection cc;
+		Counter loadedRangeBytes, loadedLogBytes, sentBytes;
+		Counter sampledBytes;
+
+		Counters(LoaderBatchData* self, UID loaderInterfID, int batchIndex)
+		  : cc("LoaderBatch", loaderInterfID.toString() + ":" + std::to_string(batchIndex)),
+		    loadedRangeBytes("LoadedRangeBytes", cc), loadedLogBytes("LoadedLogBytes", cc), sentBytes("SentBytes", cc),
+		    sampledBytes("SampledBytes", cc) {}
+	} counters;
+
+	explicit LoaderBatchData(UID loaderInterfID, int batchIndex) : counters(this, loaderInterfID, batchIndex) {}
+
 	void reset() {
 		processedFileParams.clear();
 		kvOpsPerLP.clear();
@@ -62,6 +76,8 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 		rangeToApplier.clear();
 	}
 };
+
+using LoaderCounters = LoaderBatchData::Counters;
 
 struct LoaderBatchStatus : public ReferenceCounted<LoaderBatchStatus> {
 	Optional<Future<Void>> sendAllRanges;
@@ -108,7 +124,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	void initVersionBatch(int batchIndex) {
 		TraceEvent("FastRestore").detail("InitVersionBatchOnLoader", nodeID);
-		batch[batchIndex] = Reference<LoaderBatchData>(new LoaderBatchData());
+		batch[batchIndex] = Reference<LoaderBatchData>(new LoaderBatchData(nodeID, batchIndex));
 		status[batchIndex] = Reference<LoaderBatchStatus>(new LoaderBatchStatus());
 	}
 
