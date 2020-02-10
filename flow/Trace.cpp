@@ -222,7 +222,7 @@ public:
 	};
 
 	struct IssuesList : ITraceLogIssuesReporter, ThreadSafeReferenceCounted<IssuesList> {
-		IssuesList() : moved(false){};
+		IssuesList(){};
 		void addAndExpire(std::string issue, double expirationInterval) override {
 			MutexHolder h(mutex);
 			auto now = ::now();
@@ -255,7 +255,6 @@ public:
 
 	private:
 		Mutex mutex;
-		bool moved;
 		std::unordered_map<std::string, int64_t> issues;
 		Deque<std::pair<double, std::string>> queue;
 	};
