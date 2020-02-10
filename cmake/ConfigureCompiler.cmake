@@ -85,7 +85,11 @@ if(WIN32)
   # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
   # this sets the windows target version to Windows Server 2003
   set(WINDOWS_TARGET 0x0502)
-  add_compile_options(/W3 /EHsc /bigobj $<$<CONFIG:Release>:/Zi> /MP /FC)
+  if(CMAKE_CXX_FLAGS MATCHES "/W[0-4]")
+    # TODO: This doesn't seem to be good style, but I couldn't find a better way so far
+    string(REGEX REPLACE "/W[0-4]" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+  endif()
+  add_compile_options(/W0 /EHsc /bigobj $<$<CONFIG:Release>:/Zi> /MP /FC /Gm-)
   add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} WINVER=${WINDOWS_TARGET} NTDDI_VERSION=0x05020000 BOOST_ALL_NO_LIB)
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
