@@ -746,7 +746,7 @@ class ObjectCache : NonCopyable {
 	typedef boost::intrusive::list<Entry> EvictionOrderT;
 
 public:
-	ObjectCache(int sizeLimit = 1) : sizeLimit(sizeLimit), cacheHits(0), cacheMisses(0), noHitEvictions(0) {
+	ObjectCache(int sizeLimit = 1) : sizeLimit(sizeLimit), cacheHits(0), cacheMisses(0), noHitEvictions(0), failedEvictions(0) {
 	}
 
 	void setSizeLimit(int n) {
@@ -797,9 +797,11 @@ public:
 				// since sizeLimit must be > 0, entry was just added to the end of the evictionOrder, and this loop will end
 				// if we move anything to the end of the eviction order, we can be guaraunted that entry != toEvict, so we
 				// do not need to check.
+				// If the item is not evictable then move it to the back of the eviction order and stop.
 				if(!toEvict.item.evictable()) {
 					evictionOrder.erase(evictionOrder.iterator_to(toEvict));
 					evictionOrder.push_back(toEvict);
+					++failedEvictions;
 					break;
 				} else {
 					if(toEvict.hits == 0) {
@@ -858,6 +860,7 @@ private:
 	int64_t cacheHits;
 	int64_t cacheMisses;
 	int64_t noHitEvictions;
+	int64_t failedEvictions;
 
 	CacheT cache;
 	EvictionOrderT evictionOrder;
