@@ -87,6 +87,10 @@ struct KeyInfo {
 	  : key(key), begin(begin), write(write), transaction(transaction), pIndex(pIndex) {}
 };
 
+force_inline int extra_ordering(const KeyInfo& ki) {
+	return ki.begin * 2 + (ki.write ^ ki.begin);
+}
+
 // returns true if done with string
 force_inline bool getCharacter(const KeyInfo& ki, int character, int& outputCharacter) {
 	// normal case
@@ -103,7 +107,7 @@ force_inline bool getCharacter(const KeyInfo& ki, int character, int& outputChar
 
 	if (character == ki.key.size() + 1) {
 		// end/begin+read/write relative sorting
-		outputCharacter = ki.begin * 2 + (ki.write ^ ki.begin);
+		outputCharacter = extra_ordering(ki);
 		return false;
 	}
 
@@ -117,7 +121,15 @@ bool operator<(const KeyInfo& lhs, const KeyInfo& rhs) {
 	if (c != 0) return c < 0;
 
 	// Always sort shorter keys before longer keys.
-	return lhs.key.size() < rhs.key.size();
+	if (lhs.key.size() < rhs.key.size()) {
+		return true;
+	}
+	if (lhs.key.size() > rhs.key.size()) {
+		return false;
+	}
+
+	// When the keys are the same length, use the extra ordering constraint.
+	return extra_ordering(lhs) < extra_ordering(rhs);
 }
 
 bool operator==(const KeyInfo& lhs, const KeyInfo& rhs) {
