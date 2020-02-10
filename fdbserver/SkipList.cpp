@@ -965,6 +965,8 @@ void skipListTest() {
 
 	miniConflictSetTest();
 
+	operatorLessThanTest();
+
 	setAffinity(0);
 
 	double start;
