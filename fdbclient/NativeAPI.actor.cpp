@@ -2422,6 +2422,9 @@ void TransactionOptions::reset(Database const& cx) {
 	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
 	sizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 	lockAware = cx->lockAware;
+	if (cx->apiVersionAtLeast(700)) {
+		includePort = true;
+	}
 }
 
 void Transaction::reset() {
