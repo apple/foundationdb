@@ -64,20 +64,9 @@ struct BackupData {
 		PerBackupInfo() = default;
 		PerBackupInfo(BackupData* data, Version v) : self(data), startVersion(v) {}
 
-		ACTOR static Future<Void> _waitReady(PerBackupInfo* info, UID backupUid) {
-			wait(success(info->container) && success(info->ranges));
-			info->ready = true;
-			const auto& ranges = info->ranges.get();
-			TraceEvent("BackupWorkerInsertRanges", info->self->myId)
-			    .detail("BackupID", backupUid)
-			    .detail("URL", info->container.get()->getURL())
-			    .detail("Ranges", ranges.present() ? describe(ranges.get()) : "[empty]");
-			return Void();
+		bool isRunning() {
+			return container.isReady() && ranges.isReady() && !stopped;
 		}
-
-		Future<Void> waitReady(UID backupUid) { return _waitReady(this, backupUid); }
-
-		bool isRunning() { return ready && !stopped; }
 
 		BackupData* self = nullptr;
 		Version startVersion = invalidVersion;
@@ -86,7 +75,6 @@ struct BackupData {
 		Future<Optional<std::vector<KeyRange>>> ranges; // Key ranges of this backup
 		bool allWorkerStarted = false; // Only worker with Tag(-2,0) uses & sets this field
 		bool stopped = false; // Is the backup stopped?
-		bool ready = false; // Change to true when container and ranges are ready
 	};
 
 	std::map<UID, PerBackupInfo> backups; // Backup UID to infos
@@ -416,6 +404,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	state std::vector<int64_t> blockEnds;
 	state std::set<UID> activeUids; // active Backups' UIDs
 	state KeyRangeMap<std::set<int>> keyRangeMap; // range to index in logFileFutures, logFiles, & blockEnds
+	state MutationRef m;
 
 	for (auto it = self->backups.begin(); it != self->backups.end();) {
 		if (!it->second.isRunning()) {
@@ -436,6 +425,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		    it->second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id));
 		it++;
 	}
+	keyRangeMap.coalesce(allKeys);
 	wait(waitForAll(logFileFutures));
 
 	std::transform(logFileFutures.begin(), logFileFutures.end(), std::back_inserter(logFiles),
@@ -450,7 +440,6 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	state int idx = 0;
 	blockEnds = std::vector<int64_t>(logFiles.size(), 0);
 	for (; idx < numMsg; idx++) {
-		state MutationRef m;
 		if (!isBackupMessage(self->messages[idx], &m)) continue;
 
 		std::vector<Future<Void>> adds;
@@ -699,6 +688,33 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 		if (e.code() != error_code_actor_cancelled && e.code() != error_code_worker_removed) {
 			throw;
 		}
+	}
+	return Void();
+}
+
+#include "flow/UnitTest.h"
+
+TEST_CASE("/BackupWorker/Range") {
+	KeyRangeMap<std::set<int>> rangeMap;
+
+	for (int index : rangeMap[LiteralStringRef("1")]) {
+		ASSERT(false);
+		printf("index %d\n", index);
+	}
+
+	for (auto& logRange : rangeMap.modify(normalKeys)) {
+		logRange->value().insert(1);
+	}
+	for (auto& logRange : rangeMap.modify(singleKeyRange(metadataVersionKey))) {
+		logRange->value().insert(1);
+	}
+	for (auto& logRange : rangeMap.modify(KeyRange(KeyRangeRef(LiteralStringRef("0"), LiteralStringRef("5"))))) {
+		logRange->value().insert(2);
+	}
+	// rangeMap.coalesce(allKeys);
+
+	for (int index : rangeMap[LiteralStringRef("1")]) {
+		printf("index %d\n", index);
 	}
 	return Void();
 }
