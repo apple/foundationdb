@@ -64,9 +64,9 @@ void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<
 	Standalone<Optional<StringRef>> passValue = value;
 
 	// ThreadSafeDatabase is not allowed to do anything with options except pass them through to RYW.
-	onMainThreadVoid( [db, option, passValue](){ 
+	onMainThreadVoid( [db, option, passValue](){
 		db->checkDeferredError();
-		db->setOption(option, passValue.contents()); 
+		db->setOption(option, passValue.contents());
 	}, &db->deferredError );
 }
 
@@ -77,7 +77,7 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 	// but run its constructor on the main thread
 	DatabaseContext *db = this->db = DatabaseContext::allocateOnForeignThread();
 
-	onMainThreadVoid([db, connFile, apiVersion](){ 
+	onMainThreadVoid([db, connFile, apiVersion](){
 		try {
 			Database::createDatabase(Reference<ClusterConnectionFile>(connFile), apiVersion, false, LocalityData(), db).extractPtr();
 		}
@@ -292,7 +292,7 @@ void ThreadSafeTransaction::setOption( FDBTransactionOptions::Option option, Opt
 		TraceEvent("UnknownTransactionOption").detail("Option", option);
 		throw invalid_option();
 	}
-	
+
 	ReadYourWritesTransaction *tr = this->tr;
 	Standalone<Optional<StringRef>> passValue = value;
 

@@ -334,31 +334,31 @@ ACTOR Standalone<RangeResultRef> getRange( Transaction* tr, KeySelector begin, K
 
 
 
-static void printWriteMap(WriteMap *p) {
-	WriteMap::iterator it(p);
-	for (it.skip(allKeys.begin); it.beginKey() < allKeys.end; ++it) {
-		if (it.is_cleared_range()) {
-			printf("CLEARED ");
-		}
-		if (it.is_conflict_range()) {
-			printf("CONFLICT ");
-		}
-		if (it.is_operation()) {
-			printf("OPERATION ");
-			printf(it.is_independent() ? "INDEPENDENT " : "DEPENDENT ");
-		}
-		if (it.is_unmodified_range()) {
-			printf("UNMODIFIED ");
-		}
-		if (it.is_unreadable()) {
-			printf("UNREADABLE ");
-		}
-		printf(": \"%s\" -> \"%s\"\n",
-			printable(it.beginKey().toStandaloneStringRef()).c_str(),
-			printable(it.endKey().toStandaloneStringRef()).c_str());
-	}
-	printf("\n");
-}
+//static void printWriteMap(WriteMap *p) {
+//	WriteMap::iterator it(p);
+//	for (it.skip(allKeys.begin); it.beginKey() < allKeys.end; ++it) {
+//		if (it.is_cleared_range()) {
+//			printf("CLEARED ");
+//		}
+//		if (it.is_conflict_range()) {
+//			printf("CONFLICT ");
+//		}
+//		if (it.is_operation()) {
+//			printf("OPERATION ");
+//			printf(it.is_independent() ? "INDEPENDENT " : "DEPENDENT ");
+//		}
+//		if (it.is_unmodified_range()) {
+//			printf("UNMODIFIED ");
+//		}
+//		if (it.is_unreadable()) {
+//			printf("UNREADABLE ");
+//		}
+//		printf(": \"%s\" -> \"%s\"\n",
+//			printable(it.beginKey().toStandaloneStringRef()).c_str(),
+//			printable(it.endKey().toStandaloneStringRef()).c_str());
+//	}
+//	printf("\n");
+//}
 
 static int getWriteMapCount(WriteMap *p) {
 //	printWriteMap(p);
