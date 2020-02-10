@@ -936,12 +936,42 @@ void miniConflictSetTest() {
 	printf("miniConflictSetTest complete\n");
 }
 
+void operatorLessThanTest() {
+	{ // Longer strings before shorter strings.
+		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, -1);
+		KeyInfo b(LiteralStringRef("hello\0"), /*begin=*/false, /*write=*/false, 0);
+		ASSERT(a < b);
+		ASSERT(!(b < a));
+		ASSERT(!(a == b));
+	}
+
+	{ // Reads before writes.
+		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/false, -1);
+		KeyInfo b(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0);
+		ASSERT(a < b);
+		ASSERT(!(b < a));
+		ASSERT(!(a == b));
+	}
+
+	{ // Begin reads after writes.
+		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, -1);
+		KeyInfo b(LiteralStringRef("hello"), /*begin=*/true, /*write=*/false, 0);
+		ASSERT(a < b);
+		ASSERT(!(b < a));
+		ASSERT(!(a == b));
+	}
+
+	{ // Begin writes after writes.
+		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, -1);
+		KeyInfo b(LiteralStringRef("hello"), /*begin=*/true, /*write=*/true, 0);
+		ASSERT(a < b);
+		ASSERT(!(b < a));
+		ASSERT(!(a == b));
+	}
+}
+
 void skipListTest() {
 	printf("Skip list test\n");
-
-	// A test case that breaks the old operator<
-	// KeyInfo a( LiteralStringRef("hello"), true, false, true, -1 );
-	// KeyInfo b( LiteralStringRef("hello\0"), false, false, false, 0 );
 
 	miniConflictSetTest();
 
