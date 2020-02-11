@@ -27,12 +27,14 @@
 struct LockDatabaseWorkload : TestWorkload {
 	double lockAfter, unlockAfter;
 	bool ok;
+	bool onlyCheckLocked;
 
 	LockDatabaseWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx), ok(true)
 	{
 		lockAfter = getOption( options, LiteralStringRef("lockAfter"), 0.0 );
 		unlockAfter = getOption( options, LiteralStringRef("unlockAfter"), 10.0 );
+		onlyCheckLocked = getOption(options, LiteralStringRef("onlyCheckLocked"), false);
 		ASSERT(unlockAfter > lockAfter);
 	}
 
@@ -42,9 +44,8 @@ struct LockDatabaseWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
-		if( clientId == 0 )
-			return lockWorker( cx, this );
+	virtual Future<Void> start(Database const& cx) {
+		if (clientId == 0) return onlyCheckLocked ? checkLocked(cx, this) : lockWorker(cx, this);
 		return Void();
 	}
 

@@ -1,0 +1,4 @@
+testTitle=ConfigureLocked
+testName=LockDatabase
+configureLocked=1
+onlyCheckLocked=1
