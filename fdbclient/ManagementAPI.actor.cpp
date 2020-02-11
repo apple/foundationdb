@@ -53,6 +53,8 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	}
 
 	if (mode == "locked") {
+		// Setting this key is interpreted as an instruction to use the normal version-stamp-based mechanism for locking
+		// the database.
 		out[databaseLockedKey.toString()] = deterministicRandom()->randomUniqueID().toString();
 		return out;
 	}
