@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.2.16
+======
+
+Fixes
+-----
+
+* Storage servers could fail to advance their version correctly in response to empty commits. `(PR #2617) <https://github.com/apple/foundationdb/pull/2617>`_.
+
 6.2.15
 ======
 
