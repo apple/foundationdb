@@ -411,8 +411,8 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		// Update sampled data
 		for (int i = 0; i < reply.samples.size(); ++i) {
 			MutationRef mutation = reply.samples[i];
-			batchData->samples.addMetric(mutation.param1, mutation.totalSize());
-			batchData->samplesSize += mutation.totalSize();
+			batchData->samples.addMetric(mutation.param1, mutation.weightedTotalSize());
+			batchData->samplesSize += mutation.weightedTotalSize();
 		}
 	}
 

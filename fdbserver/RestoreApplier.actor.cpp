@@ -141,7 +141,9 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			    .detail("Index", mIndex)
 			    .detail("MutationReceived", mutation.toString());
 			batchData->counters.receivedBytes += mutation.totalSize();
+			batchData->counters.receivedWeightedBytes += mutation.weightedTotalSize(); // atomicOp will be amplified
 			batchData->counters.receivedMutations += 1;
+			batchData->counters.receivedAtomicOps += isAtomicOp((MutationRef::Type) mutation.type) ? 1 : 0;
 			// Sanity check
 			if (g_network->isSimulated()) {
 				if (isRangeMutation(mutation)) {
@@ -399,7 +401,7 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 							.detail("TypeName", typeStr);
 					}
 
-					progress.txnBytes += m.totalSize(); // Changed expectedSize to totalSize
+					progress.txnBytes += m.weightedTotalSize(); // Changed expectedSize to totalSize
 					progress.txnMutations += 1;
 
 					progress.nextMutation(); // Prepare for the next mutation
@@ -413,8 +415,8 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 			// Commit the txn and prepare the starting point for next txn
 			if (progress.shouldCommit()) {
 				wait(tr->commit());
-				// Update status counter appliedBytes, appliedMutations, atomicOps
-				batchData->counters.appliedBytes += progress.txnBytes;
+				// Update status counter appliedWeightedBytes, appliedMutations, atomicOps
+				batchData->counters.appliedWeightedBytes += progress.txnBytes;
 				batchData->counters.appliedMutations += progress.txnMutations;
 				batchData->counters.appliedAtomicOps += progress.numAtomicOps;
 				batchData->counters.appliedTxns += 1;

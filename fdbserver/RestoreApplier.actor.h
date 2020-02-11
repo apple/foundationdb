@@ -51,14 +51,16 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	// Status counters
 	struct Counters {
 		CounterCollection cc;
-		Counter receivedBytes, receivedMutations;
-		Counter appliedBytes, appliedMutations, appliedAtomicOps;
+		Counter receivedBytes, receivedWeightedBytes, receivedMutations, receivedAtomicOps;
+		Counter appliedWeightedBytes, appliedMutations, appliedAtomicOps;
 		Counter appliedTxns;
 
 		Counters(ApplierBatchData* self, UID applierInterfID, int batchIndex)
 		  : cc("ApplierBatch", applierInterfID.toString() + ":" + std::to_string(batchIndex)),
 		    receivedBytes("ReceivedBytes", cc), receivedMutations("ReceivedMutations", cc),
-		    appliedBytes("AppliedBytes", cc), appliedMutations("AppliedMutations", cc),
+			receivedAtomicOps("ReceivedAtomicOps", cc),
+			receivedWeightedBytes("ReceivedWeightedMutations", cc),
+		    appliedWeightedBytes("AppliedWeightedBytes", cc), appliedMutations("AppliedMutations", cc),
 		    appliedAtomicOps("AppliedAtomicOps", cc), appliedTxns("AppliedTxns", cc) {}
 	} counters;
 

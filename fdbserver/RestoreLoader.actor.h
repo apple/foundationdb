@@ -60,12 +60,12 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	struct Counters {
 		CounterCollection cc;
 		Counter loadedRangeBytes, loadedLogBytes, sentBytes;
-		Counter sampledBytes;
+		Counter sampledRangeBytes, sampledLogBytes;
 
 		Counters(LoaderBatchData* self, UID loaderInterfID, int batchIndex)
 		  : cc("LoaderBatch", loaderInterfID.toString() + ":" + std::to_string(batchIndex)),
 		    loadedRangeBytes("LoadedRangeBytes", cc), loadedLogBytes("LoadedLogBytes", cc), sentBytes("SentBytes", cc),
-		    sampledBytes("SampledBytes", cc) {}
+		    sampledRangeBytes("SampledRangeBytes", cc), sampledLogBytes("SampledLogBytes", cc) {}
 	} counters;
 
 	explicit LoaderBatchData(UID nodeID, int batchIndex) : counters(this, nodeID, batchIndex) {
