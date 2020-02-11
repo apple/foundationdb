@@ -158,7 +158,7 @@ description is not currently required but encouraged.
             defaultFor="500"/>
     <Option name="transaction_retry_limit" code="501"
             paramType="Int" paramDescription="number of times to retry"
-            description="Set a timeout in milliseconds which, when elapsed, will cause a transaction automatically to be cancelled. This sets the ``retry_limit`` option of each transaction created by this database. See the transaction option description for more information." 
+            description="Set a maximum number of retries after which additional calls to ``onError`` will throw the most recently seen error code. This sets the ``retry_limit`` option of each transaction created by this database. See the transaction option description for more information." 
             defaultFor="501"/>
     <Option name="transaction_max_retry_delay" code="502"
             paramType="Int" paramDescription="value in milliseconds of maximum delay"
@@ -217,7 +217,7 @@ description is not currently required but encouraged.
     <Option name="debug_transaction_identifier" code="403" paramType="String" paramDescription="String identifier to be used when tracing or profiling this transaction. The identifier must not exceed 100 characters."
             description="Sets a client provided identifier for the transaction that will be used in scenarios like tracing or profiling. Client trace logging or transaction profiling must be separately enabled." />
     <Option name="log_transaction" code="404"
-            description="Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled and to get log output." />
+            description="Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled to get log output." />
     <Option name="transaction_logging_max_field_length" code="405" paramType="Int" paramDescription="Maximum length of escaped key and value fields."
             description="Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option, after which the field will be truncated. A negative value disables truncation." />
     <Option name="timeout" code="500"
@@ -240,7 +240,7 @@ description is not currently required but encouraged.
     <Option name="snapshot_ryw_disable" code="601"
             description="Snapshot read operations will not see the results of writes done in the same transaction. This was the default behavior prior to API version 300." />
     <Option name="lock_aware" code="700"
-            description="The transaction can read and write to locked databases, and is resposible for checking that it took the lock."/>
+            description="The transaction can read and write to locked databases, and is responsible for checking that it took the lock."/>
     <Option name="used_during_commit_protection_disable" code="701"
             description="By default, operations that are performed on a transaction while it is being committed will not only fail themselves, but they will attempt to fail other in-flight operations (such as the commit) as well. This behavior is intended to help developers discover situations where operations could be unintentionally executed after the transaction has been reset. Setting this option removes that protection, causing only the offending operation to fail."/>
     <Option name="read_lock_aware" code="702"
