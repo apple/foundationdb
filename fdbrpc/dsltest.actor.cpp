@@ -262,14 +262,20 @@ ACTOR template <class A, class B>
 class TestBuffer : public ReferenceCounted<TestBuffer> {
 public:
 	static TestBuffer* create( int length ) {
+#if defined(__INTEL_COMPILER)
+		return new TestBuffer(length);
+#else
 		auto b = (TestBuffer*)new int[ (length+7)/4 ];
 		new (b) TestBuffer(length);
 		return b;
+#endif
 	}
+#if !defined(__INTEL_COMPILER)
 	void operator delete( void* buf ) {
 		cout << "Freeing buffer" << endl;
 		delete[] (int*)buf;
 	}
+#endif
 
 	int size() const { return length; }
 	uint8_t* begin() { return data; }
@@ -278,7 +284,7 @@ public:
 	const uint8_t* end() const { return data+length; }
 
 private:
-	TestBuffer(int length) throw () : length(length) {}
+	TestBuffer(int length) noexcept : length(length) {}
 	int length;
 	uint8_t data[1];
 };

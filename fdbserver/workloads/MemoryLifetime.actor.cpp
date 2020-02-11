@@ -151,7 +151,7 @@ struct MemoryLifetime : KVWorkload {
 					wait( delay(0.01) );
 					//we cannot check the contents like other operations so just touch all the values to make sure we dont crash
 					for (int i = 0; i < getAddress_res1.size(); i++) {
-						ASSERT(IPAddress::parse(getAddress_res1[i]).present());
+						ASSERT(NetworkAddress::parseOptional(getAddress_res1[i]).present());
 					}
 				}
 				if(now() - startTime > self->testDuration)

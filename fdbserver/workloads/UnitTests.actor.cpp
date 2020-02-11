@@ -64,10 +64,10 @@ struct UnitTestWorkload : TestWorkload {
 	ACTOR static Future<Void> runUnitTests(UnitTestWorkload* self) {
 		state std::vector<UnitTest*> tests;
 
-		for (auto t = g_unittests.tests; t != NULL; t = t->next) {
-			if (StringRef(t->name).startsWith(self->testPattern)) {
+		for (auto test = g_unittests.tests; test != NULL; test = test->next) {
+			if (StringRef(test->name).startsWith(self->testPattern)) {
 				++self->testsAvailable;
-				tests.push_back(t);
+				tests.push_back(test);
 			}
 		}
 		fprintf(stdout, "Found %zu tests\n", tests.size());

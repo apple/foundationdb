@@ -93,8 +93,11 @@ if(WIN32)
 else()
   set(GCC NO)
   set(CLANG NO)
+  set(ICC NO)
   if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
     set(CLANG YES)
+  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
+    set(ICC YES)
   else()
     # This is not a very good test. However, as we do not really support many architectures
     # this is good enough for now
@@ -240,6 +243,9 @@ else()
     # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
     # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
     add_compile_options(-Wno-attributes)
+  elseif(ICC)
+    add_compile_options(-wd1879 -wd1011)
+    add_link_options(-static-intel)
   endif()
   add_compile_options(-Wno-error=format
     -Wunused-variable
