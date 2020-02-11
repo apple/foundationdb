@@ -415,8 +415,9 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 				wait(tr->commit());
 				// Update status counter appliedBytes, appliedMutations, atomicOps
 				batchData->counters.appliedBytes += progress.txnBytes;
-				batchData->counters.appliedTxns += progress.txnMutations;
+				batchData->counters.appliedMutations += progress.txnMutations;
 				batchData->counters.appliedAtomicOps += progress.numAtomicOps;
+				batchData->counters.appliedTxns += 1;
 			}
 
 			if (progress.isDone()) { // Are all mutations processed?
