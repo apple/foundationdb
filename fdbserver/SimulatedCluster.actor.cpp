@@ -1205,7 +1205,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 		    .detail("Address", coordinatorAddresses[i])
 		    .detail("Coordinators", describe(coordinatorAddresses));
 		g_simulator.protectedAddresses.insert(
-		    NetworkAddress(coordinatorAddresses[i].ip, coordinatorAddresses[i].port, true, false));
+		    NetworkAddress(coordinatorAddresses[i].ip, coordinatorAddresses[i].port, true, coordinatorAddresses[i].isTLS()));
 		if(coordinatorAddresses[i].port==2) {
 			g_simulator.protectedAddresses.insert(NetworkAddress(coordinatorAddresses[i].ip, 1, true, false));
 		}
