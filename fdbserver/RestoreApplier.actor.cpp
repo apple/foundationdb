@@ -289,11 +289,13 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 	TraceEvent("FastRestoreApplerPhaseApplyTxn", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("FromVersion", batchData->kvOps.empty() ? -1 : batchData->kvOps.begin()->first)
-	    .detail("EndVersion", batchData->kvOps.empty() ? -1 : batchData->kvOps.rbegin()->first)
-		.detail("Now", now());
+	    .detail("EndVersion", batchData->kvOps.empty() ? -1 : batchData->kvOps.rbegin()->first);
 
 	// Assume the process will not crash when it apply mutations to DB. The reply message can be lost though
 	if (batchData->kvOps.empty()) {
+		TraceEvent("FastRestoreApplerPhaseApplyTxnDone", applierID)
+		    .detail("BatchIndex", batchIndex)
+		    .detail("Reason", "NoMutationAtVersions");
 		return Void();
 	}
 	ASSERT_WE_THINK(batchData->kvOps.size());
@@ -401,7 +403,7 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 							.detail("TypeName", typeStr);
 					}
 
-					progress.txnBytes += m.weightedTotalSize(); // Changed expectedSize to totalSize
+					progress.txnBytes += m.totalSize(); // Changed expectedSize to totalSize
 					progress.txnMutations += 1;
 
 					progress.nextMutation(); // Prepare for the next mutation
