@@ -400,15 +400,7 @@ Future<Void> map( FutureStream<T> input, F func, PromiseStream<std::invoke_resul
 }
 
 //Returns if the future returns true, otherwise waits forever.
-ACTOR static Future<Void> returnIfTrue( Future<bool> f )
-{
-	bool b = wait( f );
-	if ( b ) {
-		return Void();
-	}
-	wait( Never() );
-	throw internal_error();
-}
+ACTOR Future<Void> returnIfTrue( Future<bool> f );
 
 //Returns if the future, when waited on and then evaluated with the predicate, returns true, otherwise waits forever
 template<class T, class F>
@@ -961,30 +953,7 @@ Future<Void> waitForAny( std::vector<Future<T>> const& results ) {
 	return quorum( results, 1 );
 }
 
-ACTOR static Future<bool> shortCircuitAny( std::vector<Future<bool>> f )
-{
-	std::vector<Future<Void>> sc;
-	for(Future<bool> fut : f) {
-		sc.push_back(returnIfTrue(fut));
-	}
-
-	choose {
-		when( wait( waitForAll( f ) ) ) {
-			// Handle a possible race condition? If the _last_ term to
-			// be evaluated triggers the waitForAll before bubbling
-			// out of the returnIfTrue quorum
-			for ( auto fut : f ) {
-				if ( fut.get() ) {
-					return true;
-				}
-			}
-			return false;
-		}
-		when( wait( waitForAny( sc ) ) ) {
-			return true;
-		}
-	}
-}
+ACTOR Future<bool> shortCircuitAny( std::vector<Future<bool>> f );
 
 ACTOR template <class T>
 Future<std::vector<T>> getAll( std::vector<Future<T>> input ) {
@@ -1121,16 +1090,7 @@ Future<T> orYield( Future<T> f ) {
 		return f;
 }
 
-static Future<Void> orYield( Future<Void> f ) {
-	if(f.isReady()) {
-		if(f.isError())
-			return tagError<Void>(yield(), f.getError());
-		else
-			return yield();
-	}
-	else
-		return f;
-}
+Future<Void> orYield( Future<Void> f );
 
 ACTOR template <class T> Future<T> chooseActor( Future<T> lhs, Future<T> rhs ) {
 	choose {
@@ -1142,7 +1102,7 @@ ACTOR template <class T> Future<T> chooseActor( Future<T> lhs, Future<T> rhs ) {
 // set && set -> set
 // error && x -> error
 // all others -> unset
-static Future<Void> operator &&( Future<Void> const& lhs, Future<Void> const& rhs ) {
+inline Future<Void> operator &&( Future<Void> const& lhs, Future<Void> const& rhs ) {
 	if(lhs.isReady()) {
 		if(lhs.isError()) return lhs;
 		else return rhs;
@@ -1417,7 +1377,7 @@ struct YieldedFutureActor : SAV<Void>, ActorCallback<YieldedFutureActor, 1, Void
 	}
 };
 
-static Future<Void> yieldedFuture(Future<Void> f) {
+inline Future<Void> yieldedFuture(Future<Void> f) {
 	if (f.isReady())
 		return yield();
 	else

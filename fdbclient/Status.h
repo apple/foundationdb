@@ -68,7 +68,7 @@ struct StatusValue : json_spirit::mValue {
 	StatusValue(json_spirit::mValue const& o) : json_spirit::mValue(o) {}
 };
 
-static StatusObject makeMessage(const char *name, const char *description) {
+inline StatusObject makeMessage(const char *name, const char *description) {
 	StatusObject out;
 	out["name"] = name;
 	out["description"] = description;
@@ -88,7 +88,7 @@ template <> inline bool JSONDoc::get<JSONDoc>(const std::string path, StatusObje
 }
 
 // Takes an object by reference so make usage look clean and avoid the client doing object["messages"] which will create the key.
-static bool findMessagesByName(StatusObjectReader object, std::set<std::string> to_find) {
+inline bool findMessagesByName(StatusObjectReader object, std::set<std::string> to_find) {
 
 	if (!object.has("messages") || object.last().type() != json_spirit::array_type)
 		return false;

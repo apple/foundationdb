@@ -236,7 +236,7 @@ void* runNetwork() {
 
 FDBDatabase* openDatabase(struct ResultSet *rs, pthread_t *netThread) {
 	checkError(fdb_setup_network(), "setup network", rs);
-	pthread_create(netThread, NULL, &runNetwork, NULL);
+	pthread_create(netThread, NULL, (void*)(&runNetwork), NULL);
 
 	FDBDatabase *db;
 	checkError(fdb_create_database(NULL, &db), "create database", rs);
