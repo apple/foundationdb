@@ -382,7 +382,9 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 
 	state std::vector<RestoreLoadFileReply> replies;
 	// Wait on the batch of load files or log files
-	wait(getBatchReplies(&RestoreLoaderInterface::loadFile, loadersInterf, requests, &replies));
+	wait(getBatchReplies(&RestoreLoaderInterface::loadFile, loadersInterf, requests, &replies,
+	                     TaskPriority::RestoreLoaderLoadFiles));
+
 	TraceEvent("FastRestoreMasterPhaseLoadFilesReply")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("SamplingReplies", replies.size());
@@ -451,7 +453,8 @@ ACTOR static Future<Void> sendMutationsFromLoaders(Reference<MasterBatchData> ba
 		    useRangeFile ? RestoreSendStatus::SendingRanges : RestoreSendStatus::SendingLogs;
 	}
 	state std::vector<RestoreCommonReply> replies;
-	wait(getBatchReplies(&RestoreLoaderInterface::sendMutations, loadersInterf, requests, &replies));
+	wait(getBatchReplies(&RestoreLoaderInterface::sendMutations, loadersInterf, requests, &replies,
+	                     TaskPriority::RestoreLoaderSendMutations));
 
 	// Update status and sanity check
 	for (auto& reply : replies) {
@@ -756,8 +759,8 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 		// Use batchData->applyToDB just incase the actor at a batchIndex is executed more than once.
 		if (!batchData->applyToDB.present()) {
 			batchData->applyToDB = Never();
-			batchData->applyToDB =
-			    getBatchReplies(&RestoreApplierInterface::applyToDB, appliersInterf, requests, &replies);
+			batchData->applyToDB = getBatchReplies(&RestoreApplierInterface::applyToDB, appliersInterf, requests,
+			                                       &replies, TaskPriority::RestoreApplierWriteDB);
 		} else {
 			TraceEvent(SevError, "FastRestoreNotifyApplierToApplierMutations")
 			    .detail("BatchIndex", batchIndex)

@@ -439,8 +439,7 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 
 	TraceEvent("FastRestoreApplerPhaseApplyTxn", applierID)
 	    .detail("BatchIndex", batchIndex)
-	    .detail("CleanupCurTxnIds", progress.curTxnId)
-		.detail("Now", now());
+	    .detail("CleanupCurTxnIds", progress.curTxnId);
 	// clean up txn ids
 	loop {
 		try {

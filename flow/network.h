@@ -87,6 +87,10 @@ enum class TaskPriority {
 	CompactCache = 2900,
 	TLogSpilledPeekReply = 2800,
 	FetchKeys = 2500,
+	RestoreApplierWriteDB = 2400,
+	RestoreApplierReceiveMutations = 2310,
+	RestoreLoaderSendMutations = 2300,
+	RestoreLoaderLoadFiles = 2200,
 	Low = 2000,
 
 	Min = 1000,
