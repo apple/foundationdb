@@ -69,6 +69,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 		pollMetrics =
 		    traceCounters("FastRestoreApplierMetrics", nodeID, SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
 		                  nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
+		TraceEvent("FastRestoreApplierMetricsCreated").detail("Node", nodeID);
 	}
 	~ApplierBatchData() = default;
 

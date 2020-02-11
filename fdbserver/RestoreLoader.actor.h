@@ -72,6 +72,7 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 		pollMetrics =
 		    traceCounters("FastRestoreLoaderMetrics", nodeID, SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
 		                  nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
+		TraceEvent("FastRestoreLoaderMetricsCreated").detail("Node", nodeID);
 	}
 
 	void reset() {
