@@ -45,7 +45,7 @@ struct LockDatabaseWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId == 0) return onlyCheckLocked ? checkLocked(cx, this) : lockWorker(cx, this);
+		if (clientId == 0) return onlyCheckLocked ? timeout(checkLocked(cx, this), 60, Void()) : lockWorker(cx, this);
 		return Void();
 	}
 
@@ -111,6 +111,7 @@ struct LockDatabaseWorkload : TestWorkload {
 				self->ok = false;
 				return Void();
 			} catch( Error &e ) {
+				TEST(e.code() == error_code_database_locked); // Database confirmed locked
 				wait( tr.onError(e) );
 			}
 		}
