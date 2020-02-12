@@ -469,8 +469,6 @@ bool TLSPolicy::verify_peer(X509_STORE_CTX* store_ctx) {
 	bool verify_success;
 	std::string verify_failure_reason;
 
-	TraceEvent("TLSPolicyVerifyPeerCalled");
-
 	// Any matching rule is sufficient.
 	for (auto &verify_rule: rules) {
 		std::tie(verify_success, verify_failure_reason) = check_verify(&verify_rule, store_ctx, is_client);
