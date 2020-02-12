@@ -134,7 +134,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 		}
 		for (int mIndex = 0; mIndex < mutations.size(); mIndex++) {
 			MutationRef mutation = mutations[mIndex];
-			TraceEvent(SevFRMutationInfo, "FastRestore")
+			TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseReceiveMutations")
 			    .detail("ApplierNode", self->id())
 			    .detail("RestoreAsset", req.asset.toString())
 			    .detail("Version", commitVersion)
