@@ -297,12 +297,9 @@ private:
 
 	static force_inline bool less(const uint8_t* a, int aLen, const uint8_t* b, int bLen) {
 		int len = min(aLen, bLen);
-		for (int i = 0; i < len; i++)
-			if (a[i] < b[i])
-				return true;
-			else if (a[i] > b[i])
-				return false;
-
+		int c = memcmp(a, b, len);
+		if (c < 0) return true;
+		if (c > 0) return false;
 		return aLen < bLen;
 	}
 
