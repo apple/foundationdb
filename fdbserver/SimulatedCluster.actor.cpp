@@ -48,6 +48,8 @@ const int MACHINE_REBOOT_TIME = 10;
 
 bool destructed = false;
 
+/*
+FIXME: Remove this?
 static const char* certBytes =
 	"-----BEGIN CERTIFICATE-----\n"
 	"MIIEGzCCAwOgAwIBAgIJANUQj1rRA2XMMA0GCSqGSIb3DQEBBQUAMIGjMQswCQYD\n"
@@ -101,6 +103,7 @@ static const char* certBytes =
 	"iastGId8HyONy3UPGPxCn4b95cIxKvdpt+hvWtYHIBCfHXluQK7zsDMgvtXjYNiz\n"
 	"peZRikYlwmu1K2YRTf7oLE2Ogw==\n"
 	"-----END PRIVATE KEY-----\n";
+*/
 
 template <class T>
 T simulate( const T& in ) {
