@@ -47,15 +47,9 @@ struct StagingKey {
 	Version version; // largest version of set or clear for the key
 	std::map<Version, MutationsVec> pendingMutations; // mutations not set or clear type
 
-	// bool operator < (const StagingKey& rhs) const {
-	// 	return std::tie(key, version, type, value)
-	// }
 	explicit StagingKey() : version(0) {}
-	explicit StagingKey(MutationRef m, Version version)
-	  : key(m.param1), val(m.param2), type(m.type), version(versoin) {}
 
 	void add(const MutationRef& m, Version newVersion) {
-		ASSERT(version > 0); // Only add mutation
 		if (version < newVersion) {
 			if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
 				key = m.param1;
@@ -81,7 +75,6 @@ struct StagingKey {
 				    .detail("ExistingKeyType", typeString[type]);
 			}
 		} // else  input mutation is old and can be ignored
-		return;
 	}
 }
 
@@ -127,6 +120,13 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 		TraceEvent("FastRestoreApplierMetricsCreated").detail("Node", nodeID);
 	}
 	~ApplierBatchData() = default;
+
+	void addMutation(MutationRef m, Version ver) {
+		if (stagingKeys.find(m.param1) == stagingKeys.end()) {
+			stagingKeys.emplace(m.param1, StagingKey());
+		}
+		stagingKeys[m.param1].add(m, ver);
+	}
 
 	void reset() {
 		kvOps.clear();
