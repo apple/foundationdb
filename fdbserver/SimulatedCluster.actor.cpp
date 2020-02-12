@@ -1207,7 +1207,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 		g_simulator.protectedAddresses.insert(
 		    NetworkAddress(coordinatorAddresses[i].ip, coordinatorAddresses[i].port, true, coordinatorAddresses[i].isTLS()));
 		if(coordinatorAddresses[i].port==2) {
-			g_simulator.protectedAddresses.insert(NetworkAddress(coordinatorAddresses[i].ip, 1, true, false));
+			g_simulator.protectedAddresses.insert(NetworkAddress(coordinatorAddresses[i].ip, 1, true, true));
 		}
 	}
 	deterministicRandom()->randomShuffle(coordinatorAddresses);
