@@ -564,7 +564,8 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 		TraceEvent("FastRestoreMasterPhaseCalculateApplierKeyRanges")
 		    .detail("BatchIndex", batchIndex)
 		    .detail("CumulativeSize", cumulativeSize)
-		    .detail("Slot", slotIdx++);
+		    .detail("Slot", slotIdx++)
+		    .detail("LowerBoundKey", lowerBound->toString());
 		cumulativeSize += slotSize;
 	}
 	if (keyrangeSplitter.size() < numAppliers) {
