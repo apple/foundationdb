@@ -1134,18 +1134,21 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++)
 				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
 
-			// We may have reached our limits in the read from disk, but combining with the MVCC window could have
-			// given us back some room
-			if (atStorageVersion.more && limit > 0 && *pLimitBytes > 0) {
+			if (limit <=0 || *pLimitBytes <= 0) {
+				break;
+			} 
+
+			// If we hit our limits reading from disk but then combining with MVCC gave us back more room
+			if (atStorageVersion.more) {
 				ASSERT(result.data.end()[-1].key == atStorageVersion.end()[-1].key);
 				readBegin = readBeginTemp = keyAfter(result.data.end()[-1].key);
-			} else if (vEnd && vEnd->isClearTo() && limit > 0 && *pLimitBytes > 0) {
+			} else if (vEnd && vEnd->isClearTo()) {
 				ASSERT(vStart == vEnd); // vStart will have been advanced by merge()
 				ASSERT(vEnd->getEndKey() > readBegin);
 				readBegin = vEnd->getEndKey();
 				++vStart;
 			} else {
-				ASSERT(limit<=0 || *pLimitBytes<=0 || readEnd == range.end);
+				ASSERT(readEnd == range.end);
 				break;
 			}
 		}
@@ -1192,16 +1195,20 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++)
 				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
 
-			if (atStorageVersion.more && limit < 0 && *pLimitBytes > 0) {
+			if (limit >=0 || *pLimitBytes <= 0) {
+				break;
+			} 
+
+			if (atStorageVersion.more) {
 				ASSERT(result.data.end()[-1].key == atStorageVersion.end()[-1].key);
 				readEnd = result.data.end()[-1].key;
-			} else if (vEnd && vEnd->isClearTo() && limit < 0 && *pLimitBytes > 0) {
+			} else if (vEnd && vEnd->isClearTo()) {
 				ASSERT(vStart == vEnd);
 				ASSERT(vEnd.key() < readEnd)
 				readEnd = vEnd.key();
 				--vStart;
 			} else {
-				ASSERT(limit>=0 || *pLimitBytes<=0 || readBegin == range.begin);
+				ASSERT(readBegin == range.begin);
 				break;
 			}
 		}
