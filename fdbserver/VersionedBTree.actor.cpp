@@ -2009,8 +2009,7 @@ struct RedwoodRecordRef {
 		return common;
 	}
 
-	// Compares and orders by key, version, chunk.start, chunk.total
-	// Ignores value
+	// Compares and orders by key, version, chunk.start, chunk.total, value
 	int compare(const RedwoodRecordRef &rhs, int skip = 0) const {
 		int keySkip = std::min(skip, key.size());
 		int cmp = key.substr(keySkip).compare(rhs.key.substr(keySkip));
@@ -2024,10 +2023,22 @@ struct RedwoodRecordRef {
 				cmp = chunk.start - rhs.chunk.start;
 				if(cmp == 0) {
 					cmp = chunk.total - rhs.chunk.total;
+					if(cmp == 0) {
+						cmp = value.compare(rhs.value);
+					}
 				}
 			}
 		}
 		return cmp;
+	}
+
+	bool sameUserKey(const StringRef &k, int skipLen) const {
+		// Keys are the same if the sizes are the same and either the skipLen is longer or the non-skipped suffixes are the same.
+		return key.size() == k.size() && ( skipLen > key.size() || key.substr(skipLen) == k.substr(skipLen) );
+	}
+
+	bool sameExceptValue(const RedwoodRecordRef &rhs, int skipLen = 0) const {
+		return sameUserKey(rhs.key, skipLen) && version == rhs.version && chunk.total == rhs.chunk.total && chunk.start == rhs.chunk.start;
 	}
 
 	static const int intFieldArraySize = 14;
@@ -2326,11 +2337,6 @@ struct RedwoodRecordRef {
 		}
 	};
 #pragma pack(pop)
-
-	// Compares key fields and value for equality
-	bool identical(const RedwoodRecordRef &rhs) const {
-		return compare(rhs) == 0 && value == rhs.value;
-	}
 
 	bool operator==(const RedwoodRecordRef &rhs) const {
 		return compare(rhs) == 0;
@@ -3151,7 +3157,7 @@ private:
 			// record from the original page which is at the current cursor position.
 			if(!modified) {
 				if(cursor.valid()) {
-					if(!rec.identical(cursor.get())) {
+					if(rec != cursor.get()) {
 						debug_printf("InternalPageBuilder: Found internal page difference.  new: %s  old: %s\n", rec.toString().c_str(), cursor.get().toString().c_str());
 						modified = true;
 					}
@@ -3175,7 +3181,7 @@ private:
 			// then add the upper bound of the previous set as a value-less record so that on future reads
 			// the previous child page can be decoded correctly.
 			if(!entries.empty() && entries.back().value.present()
-				&& (newSet.children.empty() || newSet.children.front() != lastUpperBound))
+				&& (newSet.children.empty() || !newSet.children.front().sameExceptValue(lastUpperBound)))
 			{
 				debug_printf("InternalPageBuilder: Added placeholder %s\n", lastUpperBound.withoutValue().toString().c_str());
 				addEntry(lastUpperBound.withoutValue());
@@ -3212,12 +3218,12 @@ private:
 				// If the page contents were not modified so far and the upper bound required
 				// for the last child page (lastUpperBound) does not match what the page
 				// was encoded with then the page must be modified.
-				if(!modified && lastUpperBound != decodeUpperBound) {
+				if(!modified && !lastUpperBound.sameExceptValue(decodeUpperBound)) {
 					debug_printf("InternalPageBuilder::end  modified set true because lastUpperBound does not match decodeUpperBound\n");
 					modified = true;
 				}
 
-				if(modified && lastUpperBound != upperBound) {
+				if(modified && !lastUpperBound.sameExceptValue(upperBound)) {
 					debug_printf("InternalPageBuilder::end  Modified is true but lastUpperBound does not match upperBound so adding placeholder\n");
 					addEntry(lastUpperBound.withoutValue());
 					lastUpperBound = upperBound;
@@ -4165,7 +4171,7 @@ private:
 					debug_printf("%s Internal page modified, creating replacements.\n", context.c_str());
 					debug_printf("%s newChildren=%s  lastUpperBound=%s  upperBound=%s\n", context.c_str(), toString(pageBuilder.entries).c_str(), pageBuilder.lastUpperBound.toString().c_str(), upperBound->toString().c_str());
 
-					ASSERT(pageBuilder.lastUpperBound == *upperBound);
+					ASSERT(pageBuilder.lastUpperBound.sameExceptValue(*upperBound));
 
  					Standalone<VectorRef<RedwoodRecordRef>> childEntries = wait(holdWhile(pageBuilder.entries, writePages(self, false, lowerBound, upperBound, pageBuilder.entries, page->height, writeVersion, rootID)));
 
@@ -5689,34 +5695,23 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 
 	DeltaTree<RedwoodRecordRef>::Mirror r(tree, &prev, &next);
 
-	auto withRandomValue = [&](RedwoodRecordRef rec) {
-		if(deterministicRandom()->coinflip()) {
-			rec.value.reset();
-		}
-		else {
-			rec.value = StringRef(arena, deterministicRandom()->randomAlphaNumeric(10));
-		}
-		return rec;
-	};
-
 	// Test delete/insert behavior for each item, making no net changes
-	// Use a random value for each operation because value is not used in RedwoodRecordRef comparisons.
 	printf("Testing seek/delete/insert for existing keys with random values\n");
 	for(auto rec : items) {
 		// Insert existing should fail
-		ASSERT(!r.insert(withRandomValue(rec)));
+		ASSERT(!r.insert(rec));
 
 		// Erase existing should succeed
-		ASSERT(r.erase(withRandomValue(rec)));
+		ASSERT(r.erase(rec));
 
 		// Erase deleted should fail
-		ASSERT(!r.erase(withRandomValue(rec)));
+		ASSERT(!r.erase(rec));
 
 		// Insert deleted should succeed
-		ASSERT(r.insert(withRandomValue(rec)));
+		ASSERT(r.insert(rec));
 
 		// Insert existing should fail
-		ASSERT(!r.insert(withRandomValue(rec)));
+		ASSERT(!r.insert(rec));
 	}
 
 	DeltaTree<RedwoodRecordRef>::Cursor fwd = r.getCursor();
