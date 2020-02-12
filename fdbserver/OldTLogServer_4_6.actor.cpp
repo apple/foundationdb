@@ -43,6 +43,7 @@ using std::make_pair;
 using std::min;
 using std::max;
 
+#define TLOG_VERSION "4.6"
 namespace oldTLog_4_6 {
 
 	typedef int16_t OldTag;
@@ -270,6 +271,7 @@ namespace oldTLog_4_6 {
 		std::map<UID, Reference<struct LogData>> id_data;
 
 		UID dbgid;
+		UID workerID;
 
 		IKeyValueStore* persistentData;
 		IDiskQueue* rawPersistentQueue;
@@ -303,8 +305,8 @@ namespace oldTLog_4_6 {
 		PromiseStream<Future<Void>> sharedActors;
 		bool terminated;
 
-		TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
-				: dbgid(dbgid), instanceID(deterministicRandom()->randomUniqueID().first()),
+		TLogData(UID dbgid, UID workerID, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
+				: dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()),
 				  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
 				  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0), prevVersion(0),
 				  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false),
@@ -412,7 +414,9 @@ namespace oldTLog_4_6 {
 				// These are initialized differently on init() or recovery
 				recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), recovery(Void())
 		{
-			startRole(Role::TRANSACTION_LOG,interf.id(), UID());
+			std::map<std::string, std::string> details;
+			details["TLogVersion"] = TLOG_VERSION;
+			startRole(Role::TRANSACTION_LOG, interf.id(), tLogData->workerID, details, "Restored");
 
 			persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
 			persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
@@ -1421,9 +1425,9 @@ namespace oldTLog_4_6 {
 		return Void();
 	}
 
-	ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, UID tlogId )
+	ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, UID tlogId, UID workerID )
 	{
-		state TLogData self( tlogId, persistentData, persistentQueue, db );
+		state TLogData self( tlogId, workerID, persistentData, persistentQueue, db );
 		state Future<Void> error = actorCollection( self.sharedActors.getFuture() );
 
 		TraceEvent("SharedTlog", tlogId);
