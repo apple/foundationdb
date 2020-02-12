@@ -414,7 +414,6 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	}
 	if (activeUids.empty()) {
 		// stop early if there is no active backups
-		self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
 		TraceEvent("BackupWorkerSkip", self->myId).detail("Count", numMsg);
 		return Void();
 	}
@@ -432,7 +431,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 
 	blockEnds = std::vector<int64_t>(logFiles.size(), 0);
 	for (idx = 0; idx < numMsg; idx++) {
-		auto& message = self->messages[idx];
+		const auto& message = self->messages[idx];
 		MutationRef m;
 		if (!message.isBackupMessage(&m)) continue;
 
@@ -443,7 +442,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 			}
 		} else {
 			KeyRangeRef mutationRange(m.param1, m.param2);
-			KeyRange intersectionRange;
+			KeyRangeRef intersectionRange;
 
 			// Find intersection ranges and create mutations for sub-ranges
 			for (auto range : keyRangeMap.intersectingRanges(mutationRange)) {
@@ -462,8 +461,6 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		wait(waitForAll(adds));
 		mutations.clear();
 	}
-
-	self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
 
 	std::vector<Future<Void>> finished;
 	std::transform(logFiles.begin(), logFiles.end(), std::back_inserter(finished),
@@ -504,7 +501,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			// Even though messages is empty, we still want to advance popVersion.
 			popVersion = std::max(popVersion, maxPopVersion);
 		} else {
-			int numMsg = 0;
+			state int numMsg = 0;
 			for (const auto& message : self->messages) {
 				if (message.getVersion() > maxPopVersion) break;
 				popVersion = std::max(popVersion, message.getVersion());
@@ -512,6 +509,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			}
 			if (numMsg > 0) {
 				wait(saveMutationsToFile(self, popVersion, numMsg));
+				self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
 			}
 		}
 		if (self->pullFinished.get() && self->messages.empty()) {
