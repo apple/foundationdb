@@ -34,6 +34,8 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/Knobs.h"
 
+#include "absl/container/btree_map.h"
+
 using std::max;
 using std::min;
 
