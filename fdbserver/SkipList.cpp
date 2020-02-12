@@ -962,6 +962,10 @@ void operatorLessThanTest() {
 	}
 }
 
+void CreateABTree() {
+  absl::btree_map<StringRef, Version> btree;
+}
+
 void skipListTest() {
 	printf("Skip list test\n");
 
