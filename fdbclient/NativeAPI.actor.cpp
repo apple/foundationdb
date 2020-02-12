@@ -3184,6 +3184,7 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRangeRef keys, 
 				TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 				throw;
 			}
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 			cx->invalidateCache(keys);
 			StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys));
 			return m;
