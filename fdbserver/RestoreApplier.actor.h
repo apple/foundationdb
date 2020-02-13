@@ -30,6 +30,7 @@
 #include <sstream>
 #include "flow/Stats.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Atomic.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
@@ -40,6 +41,8 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef::Type type);
+
 struct StagingKey {
 	Key key; // TODO: Maybe not needed?
 	Value val;
@@ -47,21 +50,22 @@ struct StagingKey {
 	Version version; // largest version of set or clear for the key
 	std::map<Version, MutationsVec> pendingMutations; // mutations not set or clear type
 
-	explicit StagingKey() : version(0) {}
+	explicit StagingKey() : version(0), type(MutationRef::MAX_ATOMIC_OP) {}
 
 	void add(const MutationRef& m, Version newVersion) {
 		if (version < newVersion) {
 			if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
 				key = m.param1;
 				val = m.param2;
-				type = m.type;
+				type = (MutationRef::Type)m.type;
 				version = newVersion;
 			} else {
 				if (pendingMutations.find(newVersion) == pendingMutations.end()) {
 					pendingMutations.emplace(newVersion, MutationsVec());
 				}
 				// TODO: Do we really need deep copy?
-				pendingMutations[newVersion].push_back_deep(pendingMutations.arena(), m);
+				MutationsVec& mutations = pendingMutations[newVersion];
+				mutations.push_back_deep(mutations.arena(), m);
 			}
 		} else if (version == newVersion) {
 			TraceEvent("FastRestoreApplierStagingKeyMutationAtSameVersion")
@@ -76,13 +80,63 @@ struct StagingKey {
 			}
 		} // else  input mutation is old and can be ignored
 	}
-}
+
+	void precomputeResult() {
+		std::map<Version, MutationsVec>::iterator lb = pendingMutations.lower_bound(version);
+		if (lb->first == version) {
+			// Sanity check mutations at version are either atomicOps which can be ignored or the same value as buffered
+			for (int i = 0; i < lb->second.size(); i++) {
+				MutationRef m = lb->second[i];
+				if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
+					if (std::tie(type, key, val) != std::tie(m.type, m.param1, m.param2)) {
+						TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnhandledSituation")
+						    .detail("BufferedType", typeString[type])
+						    .detail("PendingType", typeString[m.type])
+						    .detail("BufferedVal", val.toString())
+						    .detail("PendingVal", m.param2.toString());
+					}
+				}
+			}
+		}
+		while (lb != pendingMutations.end()) {
+			if (lb->first == version) {
+				continue;
+			}
+			for (auto& atomicOp : lb->second) {
+				val = applyAtomicOp(val, atomicOp.param2, (MutationRef::Type)atomicOp.type);
+			}
+			version = lb->first;
+		}
+	}
+
+	// Does the key has at least 1 set or clear mutation to get the base value
+	bool hasBaseValue() {
+		if (version > 0) {
+			ASSERT(type == MutationRef::SetValue || type == MutationRef::ClearRange);
+		}
+		return version > 0;
+	}
+
+	// Has all pendingMutations been pre-applied to the val?
+	bool hasPrecomputed() {
+		ASSERT(pendingMutations.rbegin()->first >= pendingMutations.begin()->first);
+		return version >= pendingMutations.rbegin()->first;
+	}
+
+	int expectedMutationSize() { return key.size() + val.size(); }
+};
 
 struct StagingKeyRange {
-	KeyRange range;
-	MutationRef::Type type; // clearrange
+	Standalone<MutationRef> mutation;
 	Version version;
-}
+
+	explicit StagingKeyRange(MutationRef m, Version newVersion) : mutation(m), version(newVersion) {}
+
+	bool operator<(const StagingKeyRange& rhs) const {
+		return std::tie(version, mutation.type, mutation.param1, mutation.param2) <
+		       std::tie(rhs.version, rhs.mutation.type, rhs.mutation.param1, rhs.mutation.param2);
+	}
+};
 
 struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	// processedFileState: key: RestoreAsset; value: largest version of mutation received on the applier
@@ -91,6 +145,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	VersionedMutationsMap kvOps; // Mutations at each version
 	std::map<Key, StagingKey> stagingKeys;
 	std::set<StagingKeyRange> stagingKeyRanges;
+	FlowLock applyStagingKeysBatchLock;
 
 	Future<Void> pollMetrics;
 
@@ -113,7 +168,8 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	void addref() { return ReferenceCounted<ApplierBatchData>::addref(); }
 	void delref() { return ReferenceCounted<ApplierBatchData>::delref(); }
 
-	explicit ApplierBatchData(UID nodeID, int batchIndex) : counters(this, nodeID, batchIndex) {
+	explicit ApplierBatchData(UID nodeID, int batchIndex)
+	  : counters(this, nodeID, batchIndex), applyStagingKeysBatchLock(SERVER_KNOBS->FASTRESTORE_APPLYING_PARALLELISM) {
 		pollMetrics =
 		    traceCounters("FastRestoreApplierMetrics", nodeID, SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
 		                  nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
@@ -122,10 +178,28 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	~ApplierBatchData() = default;
 
 	void addMutation(MutationRef m, Version ver) {
-		if (stagingKeys.find(m.param1) == stagingKeys.end()) {
-			stagingKeys.emplace(m.param1, StagingKey());
+		if (!isRangeMutation(m)) {
+			if (stagingKeys.find(m.param1) == stagingKeys.end()) {
+				stagingKeys.emplace(m.param1, StagingKey());
+			}
+			stagingKeys[m.param1].add(m, ver);
+		} else {
+			stagingKeyRanges.insert(StagingKeyRange(m, ver));
 		}
-		stagingKeys[m.param1].add(m, ver);
+	}
+
+	// Return true if all staging keys have been precomputed
+	bool allKeysPrecomputed() {
+		for (auto& stagingKey : stagingKeys) {
+			if (!stagingKey.second.hasPrecomputed()) {
+				TraceEvent("FastRestoreApplierAllKeysPrecomputedFalse")
+				    .detail("Key", stagingKey.first)
+				    .detail("BufferedVersion", stagingKey.second.version)
+				    .detail("MaxPendingVersion", stagingKey.second.pendingMutations.rbegin()->first);
+				return false;
+			}
+		}
+		return true;
 	}
 
 	void reset() {
