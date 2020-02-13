@@ -73,10 +73,13 @@ struct StagingKey {
 			    .detail("NewMutation", m.toString())
 			    .detail("ExistingKeyType", typeString[type]);
 			if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
-				TraceEvent(SevError, "FastRestoreApplierStagingKeyMutationAtSameVersionUnhandled")
-				    .detail("Version", newVersion)
-				    .detail("NewMutation", m.toString())
-				    .detail("ExistingKeyType", typeString[type]);
+				if (m.type != type || m.param2 != val) {
+					TraceEvent(SevError, "FastRestoreApplierStagingKeyMutationAtSameVersionUnhandled")
+						.detail("Version", newVersion)
+						.detail("NewMutation", m.toString())
+						.detail("ExistingKeyType", typeString[type])
+						.detail("ExitingKeyValue", val);
+				}
 			}
 		} // else  input mutation is old and can be ignored
 	}

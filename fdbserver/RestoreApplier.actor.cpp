@@ -796,7 +796,7 @@ Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef:
 	else if (type == MutationRef::ByteMax)
 		return doByteMax(existingValue, value, arena);
 	else {
-		TraceEvent(SevError, "ApplyAtomicOpUnhandledType").detail("Type", type).detail("TypeStr", typeString[type]);
+		TraceEvent(SevError, "ApplyAtomicOpUnhandledType").detail("Type", (int) type).detail("TypeName", typeString[type]);
 		ASSERT(false);
 	}
 	return Value();
