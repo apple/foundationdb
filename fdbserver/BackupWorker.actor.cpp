@@ -54,13 +54,12 @@ struct VersionedMessage {
 			}
 		}
 
-		BinaryReader reader(message.begin(), message.size(), AssumeVersion(currentProtocolVersion));
+		ArenaReader reader(arena, message, AssumeVersion(currentProtocolVersion));
 
 		// Return false for LogProtocolMessage.
 		if (LogProtocolMessage::isNextIn(reader)) return false;
 
 		reader >> *m;
-TraceEvent("KeyDebug").detail("M", m->toString());
 		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;
 	}
 };
