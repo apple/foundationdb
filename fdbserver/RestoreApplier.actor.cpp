@@ -293,6 +293,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 		}
 	}
 
+	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysWaitOn", applierID);
 	wait(fGetAndComputeKeys);
 
 	// Sanity check all stagingKeys have been precomputed
@@ -794,6 +795,9 @@ Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef:
 		return doByteMin(existingValue, value, arena);
 	else if (type == MutationRef::ByteMax)
 		return doByteMax(existingValue, value, arena);
-	ASSERT(false);
+	else {
+		TraceEvent(SevError, "ApplyAtomicOpUnhandledType").detail("Type", type).detail("TypeStr", typeString[type]);
+		ASSERT(false);
+	}
 	return Value();
 }

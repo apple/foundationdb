@@ -82,7 +82,14 @@ struct StagingKey {
 	}
 
 	void precomputeResult() {
+		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult")
+		    .detail("Key", key)
+		    .detail("Version", version)
+		    .detail("LargestPendingVersion", (pendingMutations.empty() ? -1 : pendingMutations.rbegin()->first));
 		std::map<Version, MutationsVec>::iterator lb = pendingMutations.lower_bound(version);
+		if (lb == pendingMutations.end()) {
+			return;
+		}
 		if (lb->first == version) {
 			// Sanity check mutations at version are either atomicOps which can be ignored or the same value as buffered
 			for (int i = 0; i < lb->second.size(); i++) {
@@ -102,8 +109,18 @@ struct StagingKey {
 			if (lb->first == version) {
 				continue;
 			}
-			for (auto& atomicOp : lb->second) {
-				val = applyAtomicOp(val, atomicOp.param2, (MutationRef::Type)atomicOp.type);
+			for (auto& mutation : lb->second) {
+				if (isAtomicOp((MutationRef::Type) mutation.type)) {
+					val = applyAtomicOp(val, mutation.param2, (MutationRef::Type)mutation.type);
+				} else if (mutation.type == MutationRef::SetValue || mutation.type == MutationRef::ClearRange) {
+					TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnexpectedSet")
+					    .detail("Type", typeString[mutation.type])
+					    .detail("Version", lb->first);
+				} else {
+					TraceEvent(SevWarnAlways, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation")
+					    .detail("Type", typeString[mutation.type])
+					    .detail("Version", lb->first);
+				}
 			}
 			version = lb->first;
 			type = MutationRef::SetValue; // Precomputed result should be set to DB.
@@ -120,8 +137,8 @@ struct StagingKey {
 
 	// Has all pendingMutations been pre-applied to the val?
 	bool hasPrecomputed() {
-		ASSERT(pendingMutations.rbegin()->first >= pendingMutations.begin()->first);
-		return version >= pendingMutations.rbegin()->first;
+		ASSERT(pendingMutations.empty() || pendingMutations.rbegin()->first >= pendingMutations.begin()->first);
+		return pendingMutations.empty() || version >= pendingMutations.rbegin()->first;
 	}
 
 	int expectedMutationSize() { return key.size() + val.size(); }
@@ -200,6 +217,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 				return false;
 			}
 		}
+		TraceEvent("FastRestoreApplierAllKeysPrecomputed");
 		return true;
 	}
 
