@@ -106,6 +106,7 @@ struct StagingKey {
 				val = applyAtomicOp(val, atomicOp.param2, (MutationRef::Type)atomicOp.type);
 			}
 			version = lb->first;
+			type = MutationRef::SetValue; // Precomputed result should be set to DB.
 		}
 	}
 
