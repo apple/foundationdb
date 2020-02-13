@@ -778,14 +778,15 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 	return Void();
 }
 
-// Copy from WriteDuringRead.actor.cpp
+// Copy from WriteDuringRead.actor.cpp with small modifications
+// Not all AtomicOps are handled in this function: SetVersionstampedKey, SetVersionstampedValue,
 Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef::Type type) {
 	Arena arena;
 	if (type == MutationRef::AddValue)
 		return doLittleEndianAdd(existingValue, value, arena);
 	else if (type == MutationRef::AppendIfFits)
 		return doAppendIfFits(existingValue, value, arena);
-	else if (type == MutationRef::And)
+	else if (type == MutationRef::And || type == MutationRef::AndV2)
 		return doAndV2(existingValue, value, arena);
 	else if (type == MutationRef::Or)
 		return doOr(existingValue, value, arena);
@@ -793,14 +794,12 @@ Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef:
 		return doXor(existingValue, value, arena);
 	else if (type == MutationRef::Max)
 		return doMax(existingValue, value, arena);
-	else if (type == MutationRef::Min)
+	else if (type == MutationRef::Min || type == MutationRef::MinV2)
 		return doMinV2(existingValue, value, arena);
 	else if (type == MutationRef::ByteMin)
 		return doByteMin(existingValue, value, arena);
 	else if (type == MutationRef::ByteMax)
 		return doByteMax(existingValue, value, arena);
-	else if (type == MutationRef::CompareAndClear)
-		return doCompareAndClear(existingValue, value, arena);
 	else {
 		TraceEvent(SevError, "ApplyAtomicOpUnhandledType").detail("TypeCode", (int) type).detail("TypeName", typeString[type]);
 		ASSERT(false);
