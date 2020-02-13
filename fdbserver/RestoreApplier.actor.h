@@ -70,7 +70,7 @@ struct StagingKey {
 				MutationsVec& mutations = pendingMutations[newVersion];
 				mutations.push_back_deep(mutations.arena(), m);
 			}
-		} else if (version == newVersion) {
+		} else if (version == newVersion) { // Sanity check
 			TraceEvent("FastRestoreApplierStagingKeyMutationAtSameVersion")
 			    .detail("Version", newVersion)
 			    .detail("NewMutation", m.toString())
@@ -113,6 +113,7 @@ struct StagingKey {
 		}
 		while (lb != pendingMutations.end()) {
 			if (lb->first == version) {
+				lb++;
 				continue;
 			}
 			for (auto& mutation : lb->second) {
@@ -138,6 +139,7 @@ struct StagingKey {
 				}
 			}
 			version = lb->first;
+			lb++;
 		}
 	}
 

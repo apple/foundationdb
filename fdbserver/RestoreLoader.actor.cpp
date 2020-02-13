@@ -264,7 +264,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 			    .detail("BatchIndex", req.batchIndex)
 			    .detail("UseRangeFile", req.useRangeFile);
 			wait(batchStatus->sendAllRanges.get());
-		} else if (req.useRangeFile) {
+		} else {
 			TraceEvent(SevDebug, "FastRestoreSendMutationsSkipDuplicateRangeRequest", self->id())
 			    .detail("BatchIndex", req.batchIndex)
 			    .detail("UseRangeFile", req.useRangeFile);
