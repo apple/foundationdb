@@ -154,8 +154,8 @@ struct LocalityRecord : public ReferenceCounted<LocalityRecord> {
 
 // This class stores the information for string to integer map for keys and values
 struct StringToIntMap : public ReferenceCounted<StringToIntMap> {
-	std::map<std::string, int>		_hashmap;
-	std::vector<std::string>			_lookuparray;
+	std::map<std::string, int> _hashmap;
+	std::vector<std::string> _lookuparray;
 	StringToIntMap() {}
 	StringToIntMap(StringToIntMap const& source):_hashmap(source._hashmap), _lookuparray(source._lookuparray){}
 	virtual ~StringToIntMap(){}
@@ -172,8 +172,9 @@ struct StringToIntMap : public ReferenceCounted<StringToIntMap> {
 		_hashmap = source._hashmap;
 		_lookuparray = source._lookuparray;
 	}
-	std::string lookupString(int hashValue) const
-	{	return (hashValue < _lookuparray.size()) ? _lookuparray[hashValue] : "<missing>";	}
+	std::string lookupString(int hashValue) const {
+		return (hashValue < _lookuparray.size()) ? _lookuparray[hashValue] : "<missing>";
+	}
 	int convertString( std::string const& value) {
 		int hashValue;
 		auto itValue = _hashmap.find(value);
@@ -187,12 +188,11 @@ struct StringToIntMap : public ReferenceCounted<StringToIntMap> {
 		}
 		return hashValue;
 	}
-	int convertString( char const* value)
-	{	return convertString(std::string(value));	}
-	int convertString( StringRef const& value)
-	{	return convertString(value.printable());	}
-	int convertString( Optional<Standalone<StringRef>> const& value)
-	{	return convertString((value.present()) ? value.get().printable() : "<undefined>");	}
+	int convertString(char const* value) { return convertString(std::string(value)); }
+	int convertString(StringRef const& value) { return convertString(value.printable()); }
+	int convertString(Optional<Standalone<StringRef>> const& value) {
+		return convertString((value.present()) ? value.get().printable() : "<undefined>");
+	}
 
 	int	getMemoryUsed() const {
 		int memSize = sizeof(_hashmap) + sizeof(_lookuparray);
@@ -208,6 +208,6 @@ struct StringToIntMap : public ReferenceCounted<StringToIntMap> {
 	virtual void delref() { ReferenceCounted<StringToIntMap>::delref(); }
 };
 
-extern const std::vector<LocalityEntry>		emptyEntryArray;
+extern const std::vector<LocalityEntry> emptyEntryArray;
 
 #endif

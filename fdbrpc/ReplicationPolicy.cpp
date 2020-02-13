@@ -261,16 +261,13 @@ bool PolicyAcross::validate(
 // FIXME: Simplify this function, such as removing unnecessary printf
 // fromServers are the servers that must have;
 // alsoServers are the servers you can choose.
-bool PolicyAcross::selectReplicas(
-	Reference<LocalitySet>	&						fromServers,
-	std::vector<LocalityEntry> const&		alsoServers,
-	std::vector<LocalityEntry>	&				results )
-{
-	int					count = 0;
-	AttribKey		indexKey = fromServers->keyIndex(_attribKey);
-	auto				groupIndexKey = fromServers->getGroupKeyIndex(indexKey);
-	int					resultsSize, resultsAdded;
-	int					resultsInit = results.size();
+bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry> const& alsoServers,
+                                  std::vector<LocalityEntry>& results) {
+	int count = 0;
+	AttribKey indexKey = fromServers->keyIndex(_attribKey);
+	auto groupIndexKey = fromServers->getGroupKeyIndex(indexKey);
+	int resultsSize, resultsAdded;
+	int resultsInit = results.size();
 
 	// Clear the member variables
 	_usedValues.clear();
