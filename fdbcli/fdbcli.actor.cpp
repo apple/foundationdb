@@ -1774,6 +1774,10 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 		printf("Configuration changed\n");
 		ret=false;
 		break;
+	case ConfigurationResult::LOCKED_NOT_NEW:
+		printf("ERROR: `only new databases can be configured as locked`\n");
+		ret = true;
+		break;
 	default:
 		ASSERT(false);
 		ret=true;
