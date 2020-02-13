@@ -38,6 +38,7 @@ else()
 endif()
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 target_link_libraries(fdb_c PUBLIC $<BUILD_INTERFACE:fdbclient>)
+target_link_options(fdb_c PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map -Wl,-z,nodelete)
 target_include_directories(fdb_c PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
