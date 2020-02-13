@@ -154,7 +154,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequestV2(RestoreSendVersioned
 				}
 			}
 			// Note: Log and range mutations may be delivered out of order. Can we handle it?
-			if (mutation.type == MutationRef::SetVersionstampedKey || mutation.type == MutationRef::SetVersionstampedValue) {
+			if (mutation.type == MutationRef::SetVersionstampedKey ||
+			    mutation.type == MutationRef::SetVersionstampedValue) {
 				batchData->addVersionStampedKV(mutation, commitVersion, numVersionStampedKV);
 				numVersionStampedKV++;
 			} else {
@@ -809,7 +810,9 @@ Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef:
 	else if (type == MutationRef::ByteMax)
 		return doByteMax(existingValue, value, arena);
 	else {
-		TraceEvent(SevError, "ApplyAtomicOpUnhandledType").detail("TypeCode", (int) type).detail("TypeName", typeString[type]);
+		TraceEvent(SevError, "ApplyAtomicOpUnhandledType")
+		    .detail("TypeCode", (int)type)
+		    .detail("TypeName", typeString[type]);
 		ASSERT(false);
 	}
 	return Value();

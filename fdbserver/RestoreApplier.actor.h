@@ -78,10 +78,10 @@ struct StagingKey {
 			if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
 				if (m.type != type || m.param2 != val) {
 					TraceEvent(SevError, "FastRestoreApplierStagingKeyMutationAtSameVersionUnhandled")
-						.detail("Version", newVersion)
-						.detail("NewMutation", m.toString())
-						.detail("ExistingKeyType", typeString[type])
-						.detail("ExitingKeyValue", val);
+					    .detail("Version", newVersion)
+					    .detail("NewMutation", m.toString())
+					    .detail("ExistingKeyType", typeString[type])
+					    .detail("ExitingKeyValue", val);
 				}
 			}
 		} // else  input mutation is old and can be ignored
@@ -124,7 +124,7 @@ struct StagingKey {
 						val = key;
 						type = MutationRef::ClearRange;
 					} // else no-op
-				} else if (isAtomicOp((MutationRef::Type) mutation.type)) {
+				} else if (isAtomicOp((MutationRef::Type)mutation.type)) {
 					val = applyAtomicOp(val, mutation.param2, (MutationRef::Type)mutation.type);
 					type = MutationRef::SetValue; // Precomputed result should be set to DB.
 				} else if (mutation.type == MutationRef::SetValue || mutation.type == MutationRef::ClearRange) {
@@ -225,12 +225,16 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	void addVersionStampedKV(MutationRef m, Version ver, uint16_t numVersionStampedKV) {
 		if (m.type == MutationRef::SetVersionstampedKey) {
 			// Assume transactionNumber = 0 does not affect result
-			TraceEvent(SevDebug, "FastRestoreApplierAddMutation").detail("MutationType", typeString[m.type]).detail("FakedTransactionNumber", numVersionStampedKV);
+			TraceEvent(SevDebug, "FastRestoreApplierAddMutation")
+			    .detail("MutationType", typeString[m.type])
+			    .detail("FakedTransactionNumber", numVersionStampedKV);
 			transformVersionstampMutation(m, &MutationRef::param1, ver, numVersionStampedKV);
 			addMutation(m, ver);
 		} else if (m.type == MutationRef::SetVersionstampedValue) {
 			// Assume transactionNumber = 0 does not affect result
-			TraceEvent(SevDebug, "FastRestoreApplierAddMutation").detail("MutationType", typeString[m.type]).detail("FakedTransactionNumber", numVersionStampedKV);
+			TraceEvent(SevDebug, "FastRestoreApplierAddMutation")
+			    .detail("MutationType", typeString[m.type])
+			    .detail("FakedTransactionNumber", numVersionStampedKV);
 			transformVersionstampMutation(m, &MutationRef::param2, ver, numVersionStampedKV);
 			addMutation(m, ver);
 		} else {
