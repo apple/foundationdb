@@ -69,15 +69,23 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 
 
 ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
+	state std::vector<UID> lastProxyUIDs;
+	state std::vector<MasterProxyInterface> lastProxies;
 	loop {
-		info->set( db->get().client );
+		ClientDBInfo ni = db->get().client;
+		shrinkProxyList(ni, lastProxyUIDs, lastProxies);
+		info->set( ni );
 		wait( db->onChange() );
 	}
 }
 
 ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
+	state std::vector<UID> lastProxyUIDs;
+	state std::vector<MasterProxyInterface> lastProxies;
 	loop {
-		info->set( db->get().read().client );
+		ClientDBInfo ni = db->get().read().client;
+		shrinkProxyList(ni, lastProxyUIDs, lastProxies);
+		info->set( ni );
 		wait( db->onChange() );
 	}
 }

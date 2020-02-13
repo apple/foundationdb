@@ -343,7 +343,9 @@ private:
 			n->nPointers = level+1;
 
 			n->valueLength = value.size();
-			memcpy(n->value(), value.begin(), value.size());
+			if (value.size() > 0) {
+				memcpy(n->value(), value.begin(), value.size());
+			}
 			return n;
 		}
 
@@ -1033,8 +1035,8 @@ class MiniConflictSet : NonCopyable {
 	std::vector<wordType> andValues;
 	MiniConflictSet2 debug;		// SOMEDAY: Test on big ranges, eliminate this
 
-	uint64_t bitMask(unsigned int bit){ // computes results for bit%word
-		return (((wordType)1) << ( bit & bucketMask )); // '&' unnecesary?
+	wordType bitMask(unsigned int bit) { // computes results for bit%word
+		return (((wordType)1) << (bit & bucketMask));
 	}
 	void setNthBit(std::vector<wordType>& v, const unsigned int bit){
 		v[bit>>bucketShift] |= bitMask(bit);
@@ -1050,11 +1052,11 @@ class MiniConflictSet : NonCopyable {
 	}
 	wordType highBits(int b){ // bits (b&bucketMask) and higher are 1
 		#pragma warning(disable: 4146)
-		return -(wordType(1) << b);
+		return -bitMask(b);
 		#pragma warning(default: 4146)
 	}
-	wordType lowBits(int b){ // bits lower than b are 1
-		return (wordType(1)<<b)-1;
+	wordType lowBits(int b) { // bits lower than (b&bucketMask) are 1
+		return bitMask(b) - 1;
 	}
 	wordType lowBits2(int b) {
 		return (b&bucketMask) ? lowBits(b) : -1;
@@ -1090,6 +1092,15 @@ class MiniConflictSet : NonCopyable {
 		}
 	}
 
+	bool orImpl(int begin, int end) {
+		if (begin == end) return false;
+		int beginWord = begin >> bucketShift;
+		int lastWord = ((end + bucketMask) >> bucketShift) - 1;
+
+		return orBits(orValues, beginWord + 1, lastWord, true) || getNthBit(andValues, beginWord) ||
+		       getNthBit(andValues, lastWord) || orBits(values, begin, end, false);
+	}
+
 public:
 	explicit MiniConflictSet( int size ) : debug(size) {
 		static_assert((1<<bucketShift) == sizeof(wordType)*8, "BucketShift incorrect");
@@ -1116,16 +1127,6 @@ public:
 		bool b = debug.any(begin,end);
 		ASSERT( a == b );
 		return b;
-	}
-
-	bool orImpl( int begin, int end ) {
-		if (begin == end) return false;
-		int beginWord = begin>>bucketShift;
-		int lastWord = ((end+bucketMask) >> bucketShift) - 1;
-
-		return orBits( orValues, beginWord+1, lastWord, true ) ||
-			getNthBit( andValues, beginWord ) || getNthBit( andValues, lastWord ) ||
-			orBits( values, begin, end, false );
 	}
 };
 

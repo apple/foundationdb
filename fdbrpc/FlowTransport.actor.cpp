@@ -818,7 +818,9 @@ ACTOR static Future<Void> connectionReader(
 					const int unproc_len = unprocessed_end - unprocessed_begin;
 					const int len = getNewBufferSize(unprocessed_begin, unprocessed_end, peerAddress);
 					uint8_t* const newBuffer = new (newArena) uint8_t[ len ];
-					memcpy( newBuffer, unprocessed_begin, unproc_len );
+					if (unproc_len > 0) {
+						memcpy(newBuffer, unprocessed_begin, unproc_len);
+					}
 					arena = newArena;
 					unprocessed_begin = newBuffer;
 					unprocessed_end = newBuffer + unproc_len;
@@ -1092,11 +1094,13 @@ Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
 void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 	if (!isStream || !endpoint.getPrimaryAddress().isValid())
 		return;
-	else if (FlowTransport::transport().isClient())
-		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 
 	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
+	
 	if(peer->peerReferences == -1) {
+		if (FlowTransport::transport().isClient()) {
+			IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
+		}
 		peer->peerReferences = 1;
 	} else {
 		peer->peerReferences++;

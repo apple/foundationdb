@@ -73,6 +73,10 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
+	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );
+	init( TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT,             11.0 );
+	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
+	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               0 );
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );

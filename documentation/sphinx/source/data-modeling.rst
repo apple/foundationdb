@@ -269,6 +269,18 @@ Using the table name as the subspace, we could implement the common row-oriented
             cols[c] = v
         return cols
 
+
+Versionstamps
+-------------
+
+A common data model is to index your data with a sequencing prefix to allow log scans or tails of recent data. This index requires a unique, monotonically increasing value, like an AUTO_INCREMENT PRIMARY KEY in SQL. This could be implemented at the client level by reading the value for conflict checks before every increment. A better solution is the versionstamp, which can be generated at commit-time with no read conflict ranges, providing a unique sequence ID in a single conflict-free write.
+
+Versioning commits provides FoundationDB with MVCC guarantees and transactional integrity. Versionstamps write the transaction's commit version as a value to an arbitrary key as part of the same transaction, allowing the client to leverage the version's unique and serial properties.  Because the versionstamp is generated at commit-time, the versionstamped key cannot be read in the same transaction that it is written, and the versionstamp's value will be unknown until the transaction is committed. After the transaction is committed, the versionstamp can be obtained.
+
+The versionstamp guarantees uniqueness and monotonically increasing values for the entire lifetime of a single FDB cluster. This is even true if the cluster is restored from a backup, as a restored cluster will begin at a higher version than when the backup was taken. Special care must be taken when moving data between two FoundationDB clusters containing versionstamps, as the differing cluster versions might break the monotonicity.
+
+There are two concepts of versionstamp depending on your context. At the fdb_c client level, or any binding outside of the Tuple layer, the 'versionstamp' is 10 bytes: the transaction's commit version (8 bytes) and transaction batch order (2 bytes). The user can manually add 2 additional bytes to provide application level ordering. The tuple layer provides a useful api for getting and setting both the 10 byte system version and the 2 byte user version. In the context of the Tuple layer, the 'versionstamp' is all 12 bytes. For examples on how to use the versionstamp in the python binding, see the :doc:`api-python` documentation.
+
 .. _data-modeling-entity-relationship:
 
 Entity-relationship models

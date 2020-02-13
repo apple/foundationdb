@@ -451,6 +451,7 @@ public:
 	bool shuttingDown;
 
 	bool behind;
+	bool versionBehind;
 
 	bool debug_inApplyUpdate;
 	double debug_lastValidateTime;
@@ -545,7 +546,7 @@ public:
 			shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0),
 			logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
 			readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")),
-			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false),
+			behind(false), versionBehind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false),
 			lastUpdate(now()), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0)
 	{
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
@@ -780,7 +781,7 @@ ACTOR Future<Version> waitForVersion( StorageServer* data, Version version ) {
 	else if (version <= data->version.get())
 		return version;
 
-	if(data->behind && version > data->version.get()) {
+	if((data->behind || data->versionBehind) && version > data->version.get()) {
 		throw process_behind();
 	}
 
@@ -1244,7 +1245,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			merge( result.arena, result.data, atStorageVersion, vStart, vEnd, vCount, limit, false, *pLimitBytes );
 			limit += result.data.size() - prevSize;
 
-			for (auto i = &result.data[prevSize]; i != result.data.end(); i++)
+			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++)
 				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
 
 			vStart = vEnd;
@@ -2767,9 +2768,9 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		if(ver != invalidVersion) {
 			data->lastVersionWithData = ver;
-		} else {
-			ver = cloneCursor2->version().version - 1;
-		}
+		} 
+		ver = cloneCursor2->version().version - 1;
+
 		if(injectedChanges) data->lastVersionWithData = ver;
 
 		data->updateEagerReads = NULL;
@@ -3358,9 +3359,18 @@ ACTOR Future<Void> waitMetrics( StorageServerMetrics* self, WaitMetricsRequest r
 				break;
 			}
 
-			if ( timedout || !req.min.allLessOrEqual( metrics ) || !metrics.allLessOrEqual( req.max ) ) {
-				TEST( !timedout ); // ShardWaitMetrics return case 2 (delayed)
-				TEST( timedout ); // ShardWaitMetrics return on timeout
+			if( timedout ) {
+				TEST( true ); // ShardWaitMetrics return on timeout
+				if(deterministicRandom()->random01() < SERVER_KNOBS->WAIT_METRICS_WRONG_SHARD_CHANCE) {
+					req.reply.sendError( wrong_shard_server() );
+				} else {
+					req.reply.send( metrics );
+				}
+				break;
+			}
+
+			if ( !req.min.allLessOrEqual( metrics ) || !metrics.allLessOrEqual( req.max ) ) {
+				TEST( true ); // ShardWaitMetrics return case 2 (delayed)
 				req.reply.send( metrics );
 				break;
 			}
@@ -3449,6 +3459,28 @@ ACTOR Future<Void> logLongByteSampleRecovery(Future<Void> recovery) {
 	return Void();
 }
 
+ACTOR Future<Void> checkBehind( StorageServer* self ) {
+	state int behindCount = 0;
+	loop {
+		wait( delay(SERVER_KNOBS->BEHIND_CHECK_DELAY) );
+		state Transaction tr(self->cx);
+		loop {
+			try {
+				Version readVersion = wait( tr.getRawReadVersion() );
+				if( readVersion > self->version.get() + SERVER_KNOBS->BEHIND_CHECK_VERSIONS ) {
+					behindCount++;
+				} else {
+					behindCount = 0;
+				}
+				self->versionBehind = behindCount >= SERVER_KNOBS->BEHIND_CHECK_COUNT;
+				break;
+			} catch( Error &e ) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterface ssi )
 {
 	state Future<Void> doUpdate = Void();
@@ -3465,6 +3497,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	actors.add(self->otherError.getFuture());
 	actors.add(metricsCore(self, ssi));
 	actors.add(logLongByteSampleRecovery(self->byteSampleRecovery));
+	actors.add(checkBehind(self));
 
 	self->coreStarted.send( Void() );
 

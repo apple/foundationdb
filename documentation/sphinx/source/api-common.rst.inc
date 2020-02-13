@@ -111,6 +111,9 @@
 .. |atomic-xor| replace::
     Performs a bitwise "xor" operation. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes. If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
 
+.. |atomic-compare-and-clear| replace::
+   Performs an atomic ``compare and clear`` operation. If the existing value in the database is equal to the given value, then given key is cleared.
+
 .. |atomic-max1| replace::
     Sets the value in the database to the larger of the existing value and ``param``. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes. If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
 
@@ -191,6 +194,10 @@
 .. |transaction-watch-limit-blurb| replace::
 
     By default, each database connection can have no more than 10,000 watches that have not yet reported a change. When this number is exceeded, an attempt to create a watch will |error-raise-type| a :ref:`too_many_watches <developer-guide-error-codes>` |error-type|. This limit can be changed using |max-watches-database-option|. Because a watch outlives the transaction that creates it, any watch that is no longer needed should be cancelled by calling |future-cancel| on its returned future.
+
+.. |transaction-clear-range-blurb| replace::
+
+    Range clears are efficient with FoundationDB -- clearing large amounts of data will be fast. However, this will not immediately free up disk - data for the deleted range is cleaned up in the background. For purposes of computing the transaction size, only the begin and end keys of a clear range are counted. The size of the data stored in the range does not count against the transaction size limit.
 
 .. |conflict-range-note| replace::
 
@@ -441,6 +448,14 @@
 
     Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option, after which the field will be truncated. A negative value disables truncation. One can set the default max field length for all transactions by calling |transaction-logging-max-field-length-database-option|.
 
+..  |option-set-debug-transaction-identifier| replace::
+
+    Sets a client provided string identifier for the transaction that will be used in scenarios like tracing or profiling. Client trace logging or transaction profiling must be separately enabled.
+
+..  |option-set-log-transaction| replace::
+
+    Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled to get log output.
+
 .. |future-blurb1| replace::
     Many FoundationDB API functions return "future" objects. A brief overview of futures is included in the :doc:`class scheduling tutorial <class-scheduling>`. Most future objects behave just like a normal object, but block when you use them for the first time if the asynchronous function which returned the future has not yet completed its action. A future object is considered ready when either a value is available, or when an error has occurred.
 
@@ -448,8 +463,11 @@
 
     Cancels |future-type-string| and its associated asynchronous operation. If called before the future is ready, attempts to access its value will |error-raise-type| an :ref:`operation_cancelled <developer-guide-error-codes>` |error-type|. Cancelling a future which is already ready has no effect. Note that even if a future is not ready, its associated asynchronous operation may have succesfully completed and be unable to be cancelled.
 
-.. |fdb-open-blurb| replace::
-    Initializes the FoundationDB API and connects to the cluster specified by the :ref:`cluster file <foundationdb-cluster-file>`. This function is often called without any parameters, using only the defaults. If no cluster file is passed, FoundationDB automatically :ref:`determines a cluster file <specifying-a-cluster-file>` with which to connect to a cluster.
+.. |fdb-open-blurb1| replace::
+    Connects to the cluster specified by the :ref:`cluster file <foundationdb-cluster-file>`. This function is often called without any parameters, using only the defaults. If no cluster file is passed, FoundationDB automatically :ref:`determines a cluster file <specifying-a-cluster-file>` with which to connect to a cluster.
+
+.. |fdb-open-blurb2| replace::
+	A single client can use this function multiple times to connect to different clusters simultaneously, with each invocation requiring its own cluster file. To connect to multiple clusters running at different, incompatible versions, the :ref:`multi-version client API <multi-version-client-api>` must be used.
 
 .. |fdb-transactional-unknown-result-note| replace::
     In some failure scenarios, it is possible that your transaction will be executed twice. See :ref:`developer-guide-unknown-results` for more information.

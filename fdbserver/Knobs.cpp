@@ -26,7 +26,7 @@ ServerKnobs const* SERVER_KNOBS = new ServerKnobs();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
-ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
+ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimulated) {
 	// clang-format off
 	// Versions
 	init( VERSIONS_PER_SECOND,                                   1e6 );
@@ -90,8 +90,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );
 	init( BEST_TEAM_STUCK_DELAY,                                 1.0 );
-	init(BG_REBALANCE_POLLING_INTERVAL,                          10.0);
-	init(BG_REBALANCE_SWITCH_CHECK_INTERVAL,                      5.0); if (randomize && BUGGIFY) BG_REBALANCE_SWITCH_CHECK_INTERVAL = 1.0;
+	init( BG_REBALANCE_POLLING_INTERVAL,                        10.0 );
+	init( BG_REBALANCE_SWITCH_CHECK_INTERVAL,                    5.0 ); if (randomize && BUGGIFY) BG_REBALANCE_SWITCH_CHECK_INTERVAL = 1.0;
 	init( DD_QUEUE_LOGGING_INTERVAL,                             5.0 );
 	init( RELOCATION_PARALLELISM_PER_SOURCE_SERVER,                2 ); if( randomize && BUGGIFY ) RELOCATION_PARALLELISM_PER_SOURCE_SERVER = 1;
 	init( DD_QUEUE_MAX_KEY_SERVERS,                              100 ); if( randomize && BUGGIFY ) DD_QUEUE_MAX_KEY_SERVERS = 1;
@@ -105,7 +105,6 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( INFLIGHT_PENALTY_HEALTHY,                              1.0 );
 	init( INFLIGHT_PENALTY_UNHEALTHY,                           10.0 );
 	init( INFLIGHT_PENALTY_ONE_LEFT,                          1000.0 );
-	init( MERGE_ONTO_NEW_TEAM,                                     1 ); if( randomize && BUGGIFY ) MERGE_ONTO_NEW_TEAM = deterministicRandom()->coinflip() ? 0 : 2;
 	
 	init( PRIORITY_RECOVER_MOVE,                                 110 );
 	init( PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,                 120 );
@@ -118,7 +117,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( PRIORITY_TEAM_2_LEFT,                                  709 );
 	init( PRIORITY_TEAM_1_LEFT,                                  800 );
 	init( PRIORITY_TEAM_0_LEFT,                                  809 );
-	init( PRIORITY_SPLIT_SHARD,                                  900 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_SHARD = 350;
+	init( PRIORITY_SPLIT_SHARD,                                  950 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_SHARD = 350;
 
 	// Data distribution
 	init( RETRY_RELOCATESHARD_DELAY,                             0.1 );
@@ -182,7 +181,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( DATA_DISTRIBUTION_LOGGING_INTERVAL,                    5.0 );
 	init( DD_ENABLED_CHECK_DELAY,                                1.0 );
 	init( DD_STALL_CHECK_DELAY,                                  0.4 ); //Must be larger than 2*MAX_BUGGIFIED_DELAY
-	init( DD_MERGE_COALESCE_DELAY,                             120.0 ); if( randomize && BUGGIFY ) DD_MERGE_COALESCE_DELAY = 0.001;
+	init( DD_LOW_BANDWIDTH_DELAY,         isSimulated ? 90.0 : 240.0 ); if( randomize && BUGGIFY ) DD_LOW_BANDWIDTH_DELAY = 0; //Because of delayJitter, this should be less than 0.9 * DD_MERGE_COALESCE_DELAY
+	init( DD_MERGE_COALESCE_DELAY,       isSimulated ? 120.0 : 300.0 ); if( randomize && BUGGIFY ) DD_MERGE_COALESCE_DELAY = 0.001;
 	init( STORAGE_METRICS_POLLING_DELAY,                         2.0 ); if( randomize && BUGGIFY ) STORAGE_METRICS_POLLING_DELAY = 15.0;
 	init( STORAGE_METRICS_RANDOM_DELAY,                          0.2 );
 	init( FREE_SPACE_RATIO_CUTOFF,                               0.1 );
@@ -205,16 +205,16 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( DD_CHECK_INVALID_LOCALITY_DELAY,                       60  ); if( randomize && BUGGIFY ) DD_CHECK_INVALID_LOCALITY_DELAY = 1 + deterministicRandom()->random01() * 600;
 
 	// TeamRemover
-	TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER =                       false; if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
+	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
 	init( TR_REMOVE_MACHINE_TEAM_DELAY,                         60.0 ); if( randomize && BUGGIFY ) TR_REMOVE_MACHINE_TEAM_DELAY =  deterministicRandom()->random01() * 60.0;
-	TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS =                           true; if( randomize && BUGGIFY ) TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS = deterministicRandom()->random01() < 0.1 ? true : false;
-	TR_FLAG_DISABLE_SERVER_TEAM_REMOVER =                        false; if( randomize && BUGGIFY ) TR_FLAG_DISABLE_SERVER_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
+	init( TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS,                    true ); if( randomize && BUGGIFY ) TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS = deterministicRandom()->random01() < 0.1 ? true : false;
+	init( TR_FLAG_DISABLE_SERVER_TEAM_REMOVER,                 false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_SERVER_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
 	init( TR_REMOVE_SERVER_TEAM_DELAY,                          60.0 ); if( randomize && BUGGIFY ) TR_REMOVE_SERVER_TEAM_DELAY =  deterministicRandom()->random01() * 60.0;
 	init( TR_REMOVE_SERVER_TEAM_EXTRA_DELAY,                     5.0 ); if( randomize && BUGGIFY ) TR_REMOVE_SERVER_TEAM_EXTRA_DELAY =  deterministicRandom()->random01() * 10.0;
 
 	// Redwood Storage Engine
 	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_LIMIT,                   30 );
-	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_MIN,                     0 );
+	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_MIN,                      0 );
 
 	// KeyValueStore SQLITE
 	init( CLEAR_BUFFER_SIZE,                                   20000 );
@@ -318,7 +318,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( ENFORCED_MIN_RECOVERY_DURATION,                       0.085 ); if( shortRecoveryDuration ) ENFORCED_MIN_RECOVERY_DURATION = 0.01;
 	init( REQUIRED_MIN_RECOVERY_DURATION,                       0.080 ); if( shortRecoveryDuration ) REQUIRED_MIN_RECOVERY_DURATION = 0.01;
 	init( ALWAYS_CAUSAL_READ_RISKY,                             false );
-	init( MAX_COMMIT_UPDATES,                                  100000 ); if( randomize && BUGGIFY ) MAX_COMMIT_UPDATES = 1;
+	init( MAX_COMMIT_UPDATES,                                    2000 ); if( randomize && BUGGIFY ) MAX_COMMIT_UPDATES = 1;
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
@@ -341,7 +341,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( SAMPLE_EXPIRATION_TIME,                                1.0 );
 	init( SAMPLE_POLL_TIME,                                      0.1 );
 	init( RESOLVER_STATE_MEMORY_LIMIT,                           1e6 );
-	init( LAST_LIMITED_RATIO,                                    0.6 );
+	init( LAST_LIMITED_RATIO,                                    2.0 );
 
 	//Cluster Controller
 	init( CLUSTER_CONTROLLER_LOGGING_DELAY,                      5.0 );
@@ -370,11 +370,11 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( CLIENT_REGISTER_INTERVAL,                            600.0 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
-	init( EXPECTED_MASTER_FITNESS,             ProcessClass::UnsetFit );
-	init( EXPECTED_TLOG_FITNESS,               ProcessClass::UnsetFit );
-	init( EXPECTED_LOG_ROUTER_FITNESS,         ProcessClass::UnsetFit );
-	init( EXPECTED_PROXY_FITNESS,              ProcessClass::UnsetFit );
-	init( EXPECTED_RESOLVER_FITNESS,           ProcessClass::UnsetFit );
+	init( EXPECTED_MASTER_FITNESS,            ProcessClass::UnsetFit );
+	init( EXPECTED_TLOG_FITNESS,              ProcessClass::UnsetFit );
+	init( EXPECTED_LOG_ROUTER_FITNESS,        ProcessClass::UnsetFit );
+	init( EXPECTED_PROXY_FITNESS,             ProcessClass::UnsetFit );
+	init( EXPECTED_RESOLVER_FITNESS,          ProcessClass::UnsetFit );
 	init( RECRUITMENT_TIMEOUT,                                   600 ); if( randomize && BUGGIFY ) RECRUITMENT_TIMEOUT = deterministicRandom()->coinflip() ? 60.0 : 1.0;
 
 	init( POLICY_RATING_TESTS,                                   200 ); if( randomize && BUGGIFY ) POLICY_RATING_TESTS = 20;
@@ -395,7 +395,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MIN_REBOOT_TIME,                                       4.0 ); if( longReboots ) MIN_REBOOT_TIME = 10.0;
 	init( MAX_REBOOT_TIME,                                       5.0 ); if( longReboots ) MAX_REBOOT_TIME = 20.0;
 	init( LOG_DIRECTORY,                                          ".");  // Will be set to the command line flag.
-	init(SERVER_MEM_LIMIT, 8LL << 30);
+	init( SERVER_MEM_LIMIT,                                8LL << 30 );
 
 	//Ratekeeper
 	bool slowRatekeeper = randomize && BUGGIFY;
@@ -473,6 +473,10 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( BYTE_SAMPLE_LOAD_DELAY,                                0.0 ); if( randomize && BUGGIFY ) BYTE_SAMPLE_LOAD_DELAY = 0.1;
 	init( BYTE_SAMPLE_START_DELAY,                               1.0 ); if( randomize && BUGGIFY ) BYTE_SAMPLE_START_DELAY = 0.0;
 	init( UPDATE_STORAGE_PROCESS_STATS_INTERVAL,                 5.0 );
+	init( BEHIND_CHECK_DELAY,                                    2.0 );
+	init( BEHIND_CHECK_COUNT,                                      2 );
+	init( BEHIND_CHECK_VERSIONS,             5 * VERSIONS_PER_SECOND );
+	init( WAIT_METRICS_WRONG_SHARD_CHANCE,                       0.1 );
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
@@ -494,7 +498,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 
 	// Buggification
 	init( BUGGIFIED_EVENTUAL_CONSISTENCY,                        1.0 );
-	BUGGIFY_ALL_COORDINATION =                                   false; if( randomize && BUGGIFY ) BUGGIFY_ALL_COORDINATION = true;
+	init( BUGGIFY_ALL_COORDINATION,                            false ); if( randomize && BUGGIFY ) BUGGIFY_ALL_COORDINATION = true;
 
 	// Status
 	init( STATUS_MIN_TIME_BETWEEN_REQUESTS,                      0.0 );
@@ -512,7 +516,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 
 	// Timekeeper
 	init( TIME_KEEPER_DELAY,                                      10 );
-	init( TIME_KEEPER_MAX_ENTRIES,                              3600 * 24 * 30 * 6); if( randomize && BUGGIFY ) { TIME_KEEPER_MAX_ENTRIES = 2; }
+	init( TIME_KEEPER_MAX_ENTRIES,                3600 * 24 * 30 * 6 ); if( randomize && BUGGIFY ) { TIME_KEEPER_MAX_ENTRIES = 2; }
 
 	// clang-format on
 

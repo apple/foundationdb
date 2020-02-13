@@ -133,12 +133,12 @@ std::string removeWhitespace(const std::string &t)
 	if (found != std::string::npos)
 		str.erase(found + 1);
 	else
-		str.clear();			// str is all whitespace
+		str.clear(); // str is all whitespace
 	found = str.find_first_not_of(ws);
 	if (found != std::string::npos)
 		str.erase(0, found);
 	else
-		str.clear();			// str is all whitespace
+		str.clear(); // str is all whitespace
 
 	return str;
 }
@@ -1391,7 +1391,7 @@ void getLocalTime(const time_t *timep, struct tm *result) {
 }
 
 void setMemoryQuota( size_t limit ) {
-#if defined(USE_ASAN)
+#if defined(USE_SANITIZER)
 	// ASAN doesn't work with memory quotas: https://github.com/google/sanitizers/wiki/AddressSanitizer#ulimit--v
 	return;
 #endif
@@ -1786,7 +1786,7 @@ bool deleteFile( std::string const& filename ) {
 #endif
 	Error e = systemErrorCodeToError();
 	TraceEvent(SevError, "DeleteFile").detail("Filename", filename).GetLastError().error(e);
-	throw errno;
+	throw e;
 }
 
 static void createdDirectory() { INJECT_FAULT( platform_error, "createDirectory" ); }
@@ -2807,6 +2807,7 @@ extern std::atomic<int64_t> net2liveness;
 extern volatile thread_local int profilingEnabled;
 extern void initProfiling();
 
+std::atomic<double> checkThreadTime;
 volatile thread_local bool profileThread = false;
 #endif
 
@@ -2831,7 +2832,9 @@ void profileHandler(int sig) {
 	// We are casting away the volatile-ness of the backtrace array, but we believe that should be reasonably safe in the signal handler
 	ProfilingSample* ps = const_cast<ProfilingSample*>((volatile ProfilingSample*)(net2backtraces + net2backtraces_offset));
 
-	ps->timestamp = timer();
+	// We can only read the check thread time in a signal handler if the atomic is lock free.
+	// We can't get the time from a timer() call because it's not signal safe.
+	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
 
 	// SOMEDAY: should we limit the maximum number of frames from
 	// backtrace beyond just available space?
@@ -2864,6 +2867,7 @@ void* checkThread(void *arg) {
 				}
 
 				lastSignal = t;
+				checkThreadTime.store(lastSignal);
 				pthread_kill(mainThread, SIGPROF);
 			}
 		}
