@@ -117,7 +117,8 @@ struct StagingKey {
 			}
 			for (auto& mutation : lb->second) {
 				if (type == MutationRef::CompareAndClear) { // Special atomicOp
-					Optional<Value> retVal = doCompareAndClear(existingValue, value, arena);
+					Arena arena;
+					Optional<ValueRef> retVal = doCompareAndClear(val, mutation.param2, arena);
 					if (!retVal.present()) {
 						val = key;
 						type = MutationRef::ClearRange;

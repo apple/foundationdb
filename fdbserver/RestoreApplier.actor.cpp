@@ -779,7 +779,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 }
 
 // Copy from WriteDuringRead.actor.cpp with small modifications
-// Not all AtomicOps are handled in this function: SetVersionstampedKey, SetVersionstampedValue,
+// Not all AtomicOps are handled in this function: SetVersionstampedKey, SetVersionstampedValue, and CompareAndClear
 Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef::Type type) {
 	Arena arena;
 	if (type == MutationRef::AddValue)
