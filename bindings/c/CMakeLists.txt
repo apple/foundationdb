@@ -48,10 +48,10 @@ if(APPLE)
     COMMENT "Generate exported_symbols_list")
   add_custom_target(exported_symbols_list DEPENDS ${symbols})
   add_dependencies(fdb_c exported_symbols_list)
-  target_link_options(fdb_c PRIVATE -Xlinker -exported_symbols_list -Xlinker ${symbols})
+  target_link_options(fdb_c PRIVATE "LINKER:-exported_symbols_list,${symbols}")
 elseif(WIN32)
 else()
-  target_link_options(fdb_c PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map -Wl,-z,nodelete)
+  target_link_options(fdb_c PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete")
 endif()
 target_include_directories(fdb_c PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
