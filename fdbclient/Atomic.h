@@ -28,11 +28,11 @@ static ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptiona
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!existingValue.size()) return otherOperand;
 	if(!otherOperand.size()) return otherOperand;
-	
+
 	uint8_t* buf = new (ar) uint8_t [otherOperand.size()];
 	int i = 0;
 	int carry = 0;
-		
+
 	for(i = 0; i<std::min(existingValue.size(), otherOperand.size()); i++) {
 		int sum = existingValue[i] + otherOperand[i] + carry;
 		buf[i] = sum;
@@ -44,16 +44,16 @@ static ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptiona
 		carry = sum >> 8;
 	}
 
-	return StringRef(buf, i);	
+	return StringRef(buf, i);
 }
 
 static ValueRef doAnd(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!otherOperand.size()) return otherOperand;
-	
+
 	uint8_t* buf = new (ar) uint8_t [otherOperand.size()];
 	int i = 0;
-	
+
 	for(i = 0; i<std::min(existingValue.size(), otherOperand.size()); i++)
 		buf[i] = existingValue[i] & otherOperand[i];
 	for(; i<otherOperand.size(); i++)
@@ -76,7 +76,7 @@ static ValueRef doOr(const Optional<ValueRef>& existingValueOptional, const Valu
 
 	uint8_t* buf = new (ar) uint8_t [otherOperand.size()];
 	int i = 0;
-	
+
 	for(i = 0; i<std::min(existingValue.size(), otherOperand.size()); i++)
 		buf[i] = existingValue[i] | otherOperand[i];
 	for(; i<otherOperand.size(); i++)
@@ -89,10 +89,10 @@ static ValueRef doXor(const Optional<ValueRef>& existingValueOptional, const Val
 	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!existingValue.size()) return otherOperand;
 	if(!otherOperand.size()) return otherOperand;
-	
+
 	uint8_t* buf = new (ar) uint8_t [otherOperand.size()];
 	int i = 0;
-	
+
 	for(i = 0; i<std::min(existingValue.size(), otherOperand.size()); i++)
 		buf[i] = existingValue[i] ^ otherOperand[i];
 
@@ -212,7 +212,7 @@ static ValueRef doMinV2(const Optional<ValueRef>& existingValueOptional, const V
 
 static ValueRef doByteMin(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	if (!existingValueOptional.present()) return otherOperand;
-	
+
 	const ValueRef& existingValue = existingValueOptional.get();
 	if (existingValue < otherOperand)
 		return existingValue;

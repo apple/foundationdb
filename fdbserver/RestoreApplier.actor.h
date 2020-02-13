@@ -52,7 +52,10 @@ struct StagingKey {
 
 	explicit StagingKey() : version(0), type(MutationRef::MAX_ATOMIC_OP) {}
 
+	// Add mutation m at newVersion to stagingKey
+	// Assume: SetVersionstampedKey and SetVersionstampedValue have been converted to set
 	void add(const MutationRef& m, Version newVersion) {
+		ASSERT(m.type != MutationRef::SetVersionstampedKey && m.type != MutationRef::SetVersionstampedValue);
 		if (version < newVersion) {
 			if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
 				key = m.param1;
@@ -206,6 +209,22 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 			stagingKeys[m.param1].add(m, ver);
 		} else {
 			stagingKeyRanges.insert(StagingKeyRange(m, ver));
+		}
+	}
+
+	void addVersionStampedKV(MutationRef m, Version ver, uint16_t numVersionStampedKV) {
+		if (m.type == MutationRef::SetVersionstampedKey) {
+			// Assume transactionNumber = 0 does not affect result
+			TraceEvent(SevDebug, "FastRestoreApplierAddMutation").detail("MutationType", typeString[m.type]).detail("FakedTransactionNumber", numVersionStampedKV);
+			transformVersionstampMutation(m, &MutationRef::param1, ver, numVersionStampedKV);
+			addMutation(m, ver);
+		} else if (m.type == MutationRef::SetVersionstampedValue) {
+			// Assume transactionNumber = 0 does not affect result
+			TraceEvent(SevDebug, "FastRestoreApplierAddMutation").detail("MutationType", typeString[m.type]).detail("FakedTransactionNumber", numVersionStampedKV);
+			transformVersionstampMutation(m, &MutationRef::param2, ver, numVersionStampedKV);
+			addMutation(m, ver);
+		} else {
+			ASSERT(false);
 		}
 	}
 

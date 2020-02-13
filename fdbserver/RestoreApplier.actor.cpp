@@ -123,6 +123,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequestV2(RestoreSendVersioned
 	if (curFilePos.get() == req.prevVersion) {
 		isDuplicated = false;
 		Version commitVersion = req.version;
+		uint16_t numVersionStampedKV = 0;
 		MutationsVec mutations(req.mutations);
 		// Sanity check: mutations in range file is in [beginVersion, endVersion);
 		// mutations in log file is in [beginVersion, endVersion], both inclusive.
@@ -153,7 +154,12 @@ ACTOR static Future<Void> handleSendMutationVectorRequestV2(RestoreSendVersioned
 				}
 			}
 			// Note: Log and range mutations may be delivered out of order. Can we handle it?
-			batchData->addMutation(mutation, commitVersion);
+			if (mutation.type == MutationRef::SetVersionstampedKey || mutation.type == MutationRef::SetVersionstampedValue) {
+				batchData->addVersionStampedKV(mutation, commitVersion, numVersionStampedKV);
+				numVersionStampedKV++;
+			} else {
+				batchData->addMutation(mutation, commitVersion);
+			}
 		}
 		curFilePos.set(req.version);
 	}
@@ -775,9 +781,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 // Copy from WriteDuringRead.actor.cpp
 Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef::Type type) {
 	Arena arena;
-	if (type == MutationRef::SetValue)
-		return value;
-	else if (type == MutationRef::AddValue)
+	if (type == MutationRef::AddValue)
 		return doLittleEndianAdd(existingValue, value, arena);
 	else if (type == MutationRef::AppendIfFits)
 		return doAppendIfFits(existingValue, value, arena);
@@ -795,8 +799,10 @@ Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef:
 		return doByteMin(existingValue, value, arena);
 	else if (type == MutationRef::ByteMax)
 		return doByteMax(existingValue, value, arena);
+	else if (type == MutationRef::CompareAndClear)
+		return doCompareAndClear(existingValue, value, arena);
 	else {
-		TraceEvent(SevError, "ApplyAtomicOpUnhandledType").detail("Type", (int) type).detail("TypeName", typeString[type]);
+		TraceEvent(SevError, "ApplyAtomicOpUnhandledType").detail("TypeCode", (int) type).detail("TypeName", typeString[type]);
 		ASSERT(false);
 	}
 	return Value();
