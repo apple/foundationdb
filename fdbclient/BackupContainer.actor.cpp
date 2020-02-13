@@ -240,9 +240,13 @@ std::string BackupDescription::toJSON() const {
  *     file written will be after the start version of the snapshot's execution.
  * 
  *   Log files are at file paths like
- *       /logs/.../log,startVersion,endVersion,blockSize
+ *       /plogs/...log,startVersion,endVersion,UID,blocksize,tagID
+ *       /logs/.../log,startVersion,endVersion,UID,blockSize
  *     where ... is a multi level path which sorts lexically into version order and results in approximately 1
- *     unique folder per day containing about 5,000 files.
+ *     unique folder per day containing about 5,000 files. Logs after 7.0 are stored in "plogs"
+ *     directory and are partitioned according to tagIDs (0, 1, 2, ...). Logs before 7.0 are
+ *     stored in "logs" directory and are not partitioned.
+ *
  *
  *   BACKWARD COMPATIBILITY
  *
@@ -329,18 +333,18 @@ public:
 	}
 
 	// The innermost folder covers 100,000 seconds (1e11 versions) which is 5,000 mutation log files at current settings.
-	static std::string logVersionFolderString(Version v, bool mlogs) {
-		return format("%s/%s/", (mlogs ? "mlogs" : "logs"), versionFolderString(v, 11).c_str());
+	static std::string logVersionFolderString(Version v, bool partitioned) {
+		return format("%s/%s/", (partitioned ? "plogs" : "logs"), versionFolderString(v, 11).c_str());
 	}
 
-	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) override {
+	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) final {
 		return writeFile(logVersionFolderString(beginVersion, false) +
 		                 format("log,%lld,%lld,%s,%d", beginVersion, endVersion,
 		                        deterministicRandom()->randomUniqueID().toString().c_str(), blockSize));
 	}
 
 	Future<Reference<IBackupFile>> writeTaggedLogFile(Version beginVersion, Version endVersion, int blockSize,
-	                                                  uint16_t tagId) override {
+	                                                  uint16_t tagId) final {
 		return writeFile(logVersionFolderString(beginVersion, true) +
 		                 format("log,%lld,%lld,%s,%d,%d", beginVersion, endVersion,
 		                        deterministicRandom()->randomUniqueID().toString().c_str(), blockSize, tagId));
@@ -528,18 +532,19 @@ public:
 		return writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem>::addRef(this), fileNames, totalBytes);
 	};
 
-	// List log files, unsorted, which contain data at any version >= beginVersion and <= targetVersion
-	Future<std::vector<LogFile>> listLogFiles(Version beginVersion = 0, Version targetVersion = std::numeric_limits<Version>::max()) {
-		// The first relevant log file could have a begin version less than beginVersion based on the knobs which determine log file range size,
-		// so start at an earlier version adjusted by how many versions a file could contain.
+	// List log files, unsorted, which contain data at any version >= beginVersion and <= targetVersion.
+	// "partitioned" flag indicates if new partitioned mutation logs or old logs should be listed.
+	Future<std::vector<LogFile>> listLogFiles(Version beginVersion, Version targetVersion, bool partitioned) {
+		// The first relevant log file could have a begin version less than beginVersion based on the knobs which
+		// determine log file range size, so start at an earlier version adjusted by how many versions a file could
+		// contain.
 		//
 		// Get the cleaned (without slashes) first and last folders that could contain relevant results.
-		bool mlogs = false; // tagged mutation logs
 		std::string firstPath = cleanFolderString(
 		    logVersionFolderString(std::max<Version>(0, beginVersion - CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES *
 		                                                                   CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE),
-		                           mlogs));
-		std::string lastPath = cleanFolderString(logVersionFolderString(targetVersion, mlogs));
+		                           partitioned));
+		std::string lastPath = cleanFolderString(logVersionFolderString(targetVersion, partitioned));
 
 		std::function<bool(std::string const &)> pathFilter = [=](const std::string &folderPath) {
 			// Remove slashes in the given folder path so that the '/' positions in the version folder string do not matter
@@ -549,7 +554,7 @@ public:
 				|| (cleaned > firstPath && cleaned < lastPath);
 		};
 
-		return map(listFiles("logs/", pathFilter), [=](const FilesAndSizesT &files) {
+		return map(listFiles((partitioned ? "plogs/" : "logs/"), pathFilter), [=](const FilesAndSizesT& files) {
 			std::vector<LogFile> results;
 			LogFile lf;
 			for(auto &f : files) {
@@ -636,11 +641,15 @@ public:
 	ACTOR static Future<BackupFileList> dumpFileList_impl(Reference<BackupContainerFileSystem> bc, Version begin, Version end) {
 		state Future<std::vector<RangeFile>> fRanges = bc->listRangeFiles(begin, end);
 		state Future<std::vector<KeyspaceSnapshotFile>> fSnapshots = bc->listKeyspaceSnapshots(begin, end);
-		state Future<std::vector<LogFile>> fLogs = bc->listLogFiles(begin, end);
+		state std::vector<LogFile> logs;
+		state std::vector<LogFile> pLogs;
 
-		wait(success(fRanges) && success(fSnapshots) && success(fLogs));
+		wait(success(fRanges) && success(fSnapshots) &&
+		     store(logs, bc->listLogFiles(begin, end, false)) &&
+		     store(pLogs, bc->listLogFiles(begin, end, true)));
+		logs.insert(logs.end(), std::make_move_iterator(pLogs.begin()), std::make_move_iterator(pLogs.end()));
 
-		return BackupFileList({fRanges.get(), fLogs.get(), fSnapshots.get()});
+		return BackupFileList({ fRanges.get(), std::move(logs), fSnapshots.get() });
 	}
 
 	Future<BackupFileList> dumpFileList(Version begin, Version end) override {
@@ -767,7 +776,12 @@ public:
 		}
 
 		state std::vector<LogFile> logs;
-		wait(store(logs, bc->listLogFiles(scanBegin, scanEnd)) && store(desc.snapshots, bc->listKeyspaceSnapshots()));
+		state std::vector<LogFile> pLogs;
+		wait(store(logs, bc->listLogFiles(scanBegin, scanEnd, false)) &&
+		     store(pLogs, bc->listLogFiles(scanBegin, scanEnd, true)) &&
+		     store(desc.snapshots, bc->listKeyspaceSnapshots()));
+		// FIXME: check partitioned logs & maybe enable the below line
+		// logs.insert(logs.end(), std::make_move_iterator(pLogs.begin()), std::make_move_iterator(pLogs.end()));
 
 		// List logs in version order so log continuity can be analyzed
 		std::sort(logs.begin(), logs.end());
@@ -879,8 +893,10 @@ public:
 		state BackupDescription desc = wait(bc->describeBackup(false, expireEndVersion));
 
 		// Resolve relative versions using max log version
-		expireEndVersion =       resolveRelativeVersion(desc.maxLogEnd, expireEndVersion,       "ExpireEndVersion",       invalid_option_value());
-		restorableBeginVersion = resolveRelativeVersion(desc.maxLogEnd, restorableBeginVersion, "RestorableBeginVersion", invalid_option_value());
+		expireEndVersion =
+		    resolveRelativeVersion(desc.maxLogEnd, expireEndVersion, "ExpireEndVersion", invalid_option_value());
+		restorableBeginVersion = resolveRelativeVersion(desc.maxLogEnd, restorableBeginVersion,
+		                                                "RestorableBeginVersion", invalid_option_value());
 
 		// It would be impossible to have restorability to any version < expireEndVersion after expiring to that version
 		if(restorableBeginVersion < expireEndVersion)
@@ -921,13 +937,17 @@ public:
 			.detail("ScanBeginVersion", scanBegin);
 
 		state std::vector<LogFile> logs;
+		state std::vector<LogFile> pLogs; // partitioned mutation logs
 		state std::vector<RangeFile> ranges;
 
 		if(progress != nullptr) {
 			progress->step = "Listing files";
 		}
 		// Get log files or range files that contain any data at or before expireEndVersion
-		wait(store(logs, bc->listLogFiles(scanBegin, expireEndVersion - 1)) && store(ranges, bc->listRangeFiles(scanBegin, expireEndVersion - 1)));
+		wait(store(logs, bc->listLogFiles(scanBegin, expireEndVersion - 1, false)) &&
+		     store(pLogs, bc->listLogFiles(scanBegin, expireEndVersion - 1, true)) &&
+		     store(ranges, bc->listRangeFiles(scanBegin, expireEndVersion - 1)));
+		logs.insert(logs.end(), std::make_move_iterator(pLogs.begin()), std::make_move_iterator(pLogs.end()));
 
 		// The new logBeginVersion will be taken from the last log file, if there is one
 		state Optional<Version> newLogBeginVersion;
@@ -1067,7 +1087,8 @@ public:
 				return Optional<RestorableFileSet>(restorable);
 			}
 
-			state std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion));
+			// FIXME: check if there are tagged logs. for each tag, there is no version gap.
+			state std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion, false));
 
 			// List logs in version order so log continuity can be analyzed
 			std::sort(logs.begin(), logs.end());
@@ -1098,7 +1119,7 @@ public:
 		return Optional<RestorableFileSet>();
 	}
 
-	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) override {
+	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) final {
 		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion);
 	}
 
@@ -1183,8 +1204,8 @@ public:
 
 class BackupContainerLocalDirectory : public BackupContainerFileSystem, ReferenceCounted<BackupContainerLocalDirectory> {
 public:
-	void addref() override { return ReferenceCounted<BackupContainerLocalDirectory>::addref(); }
-	void delref() override { return ReferenceCounted<BackupContainerLocalDirectory>::delref(); }
+	void addref() final { return ReferenceCounted<BackupContainerLocalDirectory>::addref(); }
+	void delref() final { return ReferenceCounted<BackupContainerLocalDirectory>::delref(); }
 
 	static std::string getURLFormat() { return "file://</path/to/base/dir/>"; }
 
@@ -1233,7 +1254,7 @@ public:
 		return results;
 	}
 
-	Future<Void> create() override {
+	Future<Void> create() final {
 		// Nothing should be done here because create() can be called by any process working with the container URL, such as fdbbackup.
 		// Since "local directory" containers are by definition local to the machine they are accessed from,
 		// the container's creation (in this case the creation of a directory) must be ensured prior to every file creation,
@@ -1243,11 +1264,11 @@ public:
 	}
 
 	// The container exists if the folder it resides in exists
-	Future<bool> exists() override {
+	Future<bool> exists() final {
 		return directoryExists(m_path);
 	}
 
-	Future<Reference<IAsyncFile>> readFile(std::string path) override {
+	Future<Reference<IAsyncFile>> readFile(std::string path) final {
 		int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED;
 		// Simulation does not properly handle opening the same file from multiple machines using a shared filesystem,
 		// so create a symbolic link to make each file opening appear to be unique.  This could also work in production
@@ -1272,10 +1293,10 @@ public:
 			int blockSize = 0;
 			// Extract block size from the filename, if present
 			size_t lastComma = path.find_last_of(',');
-			if(lastComma != path.npos) {
+			if (lastComma != path.npos) {
 				blockSize = atoi(path.substr(lastComma + 1).c_str());
 			}
-			if(blockSize <= 0) {
+			if (blockSize <= 0) {
 				blockSize = deterministicRandom()->randomInt(1e4, 1e6);
 			}
 			if(deterministicRandom()->random01() < .01) {
@@ -1324,7 +1345,7 @@ public:
 		std::string m_finalFullPath;
 	};
 
-	Future<Reference<IBackupFile>> writeFile(std::string path) override {
+	Future<Reference<IBackupFile>> writeFile(std::string path) final {
 		int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
 		std::string fullPath = joinPath(m_path, path);
 		platform::createDirectory(parentDirectory(fullPath));
@@ -1335,12 +1356,12 @@ public:
 		});
 	}
 
-	Future<Void> deleteFile(std::string path) override {
+	Future<Void> deleteFile(std::string path) final {
 		::deleteFile(joinPath(m_path, path));
 		return Void();
 	}
 
-	Future<FilesAndSizesT> listFiles(std::string path, std::function<bool(std::string const &)>) {
+	Future<FilesAndSizesT> listFiles(std::string path, std::function<bool(std::string const&)>) final {
 		FilesAndSizesT results;
 
 		std::vector<std::string> files;
@@ -1360,7 +1381,7 @@ public:
 		return results;
 	}
 
-	Future<Void> deleteContainer(int* pNumDeleted) override {
+	Future<Void> deleteContainer(int* pNumDeleted) final {
 		// In order to avoid deleting some random directory due to user error, first describe the backup
 		// and make sure it has something in it.
 		return map(describeBackup(false, invalidVersion), [=](BackupDescription const &desc) {
@@ -1420,8 +1441,8 @@ public:
 		}
 	}
 
-	void addref() override { return ReferenceCounted<BackupContainerBlobStore>::addref(); }
-	void delref() override { return ReferenceCounted<BackupContainerBlobStore>::delref(); }
+	void addref() final { return ReferenceCounted<BackupContainerBlobStore>::addref(); }
+	void delref() final { return ReferenceCounted<BackupContainerBlobStore>::delref(); }
 
 	static std::string getURLFormat() {
 		return BlobStoreEndpoint::getURLFormat(true) + " (Note: The 'bucket' parameter is required.)";
@@ -1429,7 +1450,7 @@ public:
 
 	virtual ~BackupContainerBlobStore() {}
 
-	Future<Reference<IAsyncFile>> readFile(std::string path) override {
+	Future<Reference<IAsyncFile>> readFile(std::string path) final {
 			return Reference<IAsyncFile>(
 				new AsyncFileReadAheadCache(
 					Reference<IAsyncFile>(new AsyncFileBlobStoreRead(m_bstore, m_bucket, dataPath(path))),
@@ -1466,17 +1487,18 @@ public:
 			return map(m_file->sync(), [=](Void _) { self->m_file.clear(); return Void(); });
 		}
 
-		void addref() override { return ReferenceCounted<BackupFile>::addref(); }
-		void delref() override { return ReferenceCounted<BackupFile>::delref(); }
+		void addref() final { return ReferenceCounted<BackupFile>::addref(); }
+		void delref() final { return ReferenceCounted<BackupFile>::delref(); }
+
 	private:
 		Reference<IAsyncFile> m_file;
 	};
 
-	Future<Reference<IBackupFile>> writeFile(std::string path) override {
+	Future<Reference<IBackupFile>> writeFile(std::string path) final {
 		return Reference<IBackupFile>(new BackupFile(path, Reference<IAsyncFile>(new AsyncFileBlobStoreWrite(m_bstore, m_bucket, dataPath(path)))));
 	}
 
-	Future<Void> deleteFile(std::string path) override {
+	Future<Void> deleteFile(std::string path) final {
 		return m_bstore->deleteObject(m_bucket, dataPath(path));
 	}
 
@@ -1498,7 +1520,7 @@ public:
 		return files;
 	}
 
-	Future<FilesAndSizesT> listFiles(std::string path, std::function<bool(std::string const &)> pathFilter) {
+	Future<FilesAndSizesT> listFiles(std::string path, std::function<bool(std::string const &)> pathFilter) final {
 		return listFiles_impl(Reference<BackupContainerBlobStore>::addRef(this), path, pathFilter);
 	}
 
@@ -1514,12 +1536,12 @@ public:
 		return Void();
 	}
 
-	Future<Void> create() override {
+	Future<Void> create() final {
 		return create_impl(Reference<BackupContainerBlobStore>::addRef(this));
 	}
 
 	// The container exists if the index entry in the blob bucket exists
-	Future<bool> exists() override {
+	Future<bool> exists() final {
 		return m_bstore->objectExists(m_bucket, indexEntry());
 	}
 
@@ -1539,7 +1561,7 @@ public:
 		return Void();
 	}
 
-	Future<Void> deleteContainer(int* pNumDeleted) override {
+	Future<Void> deleteContainer(int* pNumDeleted) final {
 		return deleteContainer_impl(Reference<BackupContainerBlobStore>::addRef(this), pNumDeleted);
 	}
 
