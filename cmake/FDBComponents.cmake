@@ -9,21 +9,26 @@ if(USE_VALGRIND)
 endif()
 
 ################################################################################
-# LibreSSL
+# SSL
 ################################################################################
 
 set(DISABLE_TLS OFF CACHE BOOL "Don't try to find LibreSSL and always build without TLS support")
 if(DISABLE_TLS)
   set(WITH_TLS OFF)
 else()
-  set(LIBRESSL_USE_STATIC_LIBS TRUE)
-  find_package(LibreSSL)
-  if(LibreSSL_FOUND)
+  set(OPENSSL_USE_STATIC_LIBS TRUE)
+  find_package(OpenSSL)
+  if(NOT OPENSSL_FOUND)
+    set(LIBRESSL_USE_STATIC_LIBS TRUE)
+    find_package(LibreSSL)
+    add_library(OpenSSL::SSL ALIAS LibreSSL)
+  endif()
+  if(OPENSSL_FOUND OR LIBRESSL_FOUND)
     set(WITH_TLS ON)
     add_compile_options(-DHAVE_OPENSSL)
   else()
-    message(STATUS "LibreSSL NOT Found - Will compile without TLS Support")
-    message(STATUS "You can set LibreSSL_ROOT to the LibreSSL install directory to help cmake find it")
+    message(STATUS "Neither OpenSSL nor LibreSSL were found - Will compile without TLS Support")
+    message(STATUS "You can set OPENSSL_ROOT_DIR or LibreSSL_ROOT to the LibreSSL install directory to help cmake find it")
     set(WITH_TLS OFF)
   endif()
 endif()
