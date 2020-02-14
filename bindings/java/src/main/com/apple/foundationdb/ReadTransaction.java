@@ -210,6 +210,15 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
 	 *
+	 * <p>
+	 *     When converting the result of this query to a list using {@link AsyncIterable#asList()} with the {@code ITERATOR} streaming
+	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+	 *     known in advance that the {@link AsyncIterable#asList()} function will fetch all results in the range. If a limit is specified,
+	 *     the {@code EXACT} streaming mode will be used, and otherwise it will use {@code WANT_ALL}.
+	 *
+	 *     To achieve comparable performance when iterating over an entire range without using {@link AsyncIterable#asList()}, the same
+	 *     streaming mode would need to be used.
+	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
@@ -289,6 +298,15 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
 	 *
+	 * <p>
+	 *     When converting the result of this query to a list using {@link AsyncIterable#asList()} with the {@code ITERATOR} streaming
+	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+	 *     known in advance that the {@link AsyncIterable#asList()} function will fetch all results in the range. If a limit is specified,
+	 *     the {@code EXACT} streaming mode will be used, and otherwise it will use {@code WANT_ALL}.
+	 *
+	 *     To achieve comparable performance when iterating over an entire range without using {@link AsyncIterable#asList()}, the same
+	 *     streaming mode would need to be used.
+	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
@@ -380,10 +398,39 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
 	 *
+	 * <p>
+	 *     When converting the result of this query to a list using {@link AsyncIterable#asList()} with the {@code ITERATOR} streaming
+	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+	 *     known in advance that the {@link AsyncIterable#asList()} function will fetch all results in the range. If a limit is specified,
+	 *     the {@code EXACT} streaming mode will be used, and otherwise it will use {@code WANT_ALL}.
+	 *
+	 *     To achieve comparable performance when iterating over an entire range without using {@link AsyncIterable#asList()}, the same
+	 *     streaming mode would need to be used.
+	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<KeyValue> getRange(Range range,
 			int limit, boolean reverse, StreamingMode mode);
+
+
+	/**
+	 * Gets an estimate for the number of bytes stored in the given range.
+	 *
+	 * @param begin the beginning of the range (inclusive)
+	 * @param end the end of the range (exclusive)
+	 *
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	CompletableFuture<Long> getEstimatedRangeSizeBytes(byte[] begin, byte[] end);
+
+	/**
+	 * Gets an estimate for the number of bytes stored in the given range.
+	 *
+	 * @param range the range of the keys
+	 *
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	CompletableFuture<Long> getEstimatedRangeSizeBytes(Range range);
 
 	/**
 	 * Returns a set of options that can be set on a {@code Transaction}

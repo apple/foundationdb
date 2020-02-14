@@ -243,11 +243,11 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 }
 
 std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std::string prefix, UID id ) {
-	if( storeType == KeyValueStoreType::SSD_BTREE_V1)
+	if(storeType == KeyValueStoreType::SSD_BTREE_V1)
 		return joinPath( folder, prefix + id.toString() + ".fdb" );
 	else if (storeType == KeyValueStoreType::SSD_BTREE_V2)
 		return joinPath(folder, prefix + id.toString() + ".sqlite");
-	else if( storeType == KeyValueStoreType::MEMORY || KeyValueStoreType::MEMORY_RADIXTREE)
+	else if(storeType == KeyValueStoreType::MEMORY || storeType == KeyValueStoreType::MEMORY_RADIXTREE)
 		return joinPath( folder, prefix + id.toString() + "-" );
 	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
 		return joinPath(folder, prefix + id.toString() + ".redwood");

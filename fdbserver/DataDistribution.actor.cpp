@@ -2782,16 +2782,16 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 			TraceEvent("ServerTeamRemover", self->distributorId)
 			    .detail("ServerTeamToRemove", st->getServerIDsStr())
 			    .detail("NumProcessTeamsOnTheServerTeam", maxNumProcessTeams)
-			    .detail("CurrentServerTeamNumber", self->teams.size())
-			    .detail("DesiredTeam", desiredServerTeams);
+			    .detail("CurrentServerTeams", self->teams.size())
+			    .detail("DesiredServerTeams", desiredServerTeams);
 
 			numServerTeamRemoved++;
 		} else {
 			if (numServerTeamRemoved > 0) {
 				// Only trace the information when we remove a machine team
 				TraceEvent("ServerTeamRemoverDone", self->distributorId)
-				    .detail("CurrentServerTeamNumber", self->teams.size())
-				    .detail("DesiredServerTeam", desiredServerTeams)
+				    .detail("CurrentServerTeams", self->teams.size())
+				    .detail("DesiredServerTeams", desiredServerTeams)
 				    .detail("NumServerTeamRemoved", numServerTeamRemoved);
 				self->traceTeamCollectionInfo();
 				numServerTeamRemoved = 0; //Reset the counter to avoid keep printing the message
