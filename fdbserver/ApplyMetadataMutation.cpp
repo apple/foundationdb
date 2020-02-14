@@ -491,14 +491,24 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 				keyBegin = itr->first;
 				mutationBegin = itr->second;
 				++itr;
-				keyEnd = itr->first;
-				mutationEnd = itr->second;
+				if (itr != cachedRangeInfo.end()) {
+					keyEnd = itr->first;
+					mutationEnd = itr->second;
+				} else {
+					TraceEvent(SevDebug, "EndKeyNotFound", dbgid).detail("KeyBegin", keyBegin.toString());
+					break;
+				}
 			} else {
 				keyEnd = itr->first;
 				mutationEnd = itr->second;
 				++itr;
-				keyBegin = itr->first;
-				mutationBegin = itr->second;
+				if (itr != cachedRangeInfo.end()) {
+					keyBegin = itr->first;
+					mutationBegin = itr->second;
+				} else {
+					TraceEvent(SevDebug, "BeginKeyNotFound", dbgid).detail("KeyEnd", keyEnd.toString());
+					break;
+				}
 			}
 
 			// Now get all the storage server tags for the cached key-ranges
