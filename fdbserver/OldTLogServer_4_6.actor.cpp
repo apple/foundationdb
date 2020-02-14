@@ -43,7 +43,6 @@ using std::make_pair;
 using std::min;
 using std::max;
 
-#define TLOG_VERSION "4.6"
 namespace oldTLog_4_6 {
 
 	typedef int16_t OldTag;
@@ -414,9 +413,7 @@ namespace oldTLog_4_6 {
 				// These are initialized differently on init() or recovery
 				recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), recovery(Void())
 		{
-			std::map<std::string, std::string> details;
-			details["TLogVersion"] = TLOG_VERSION;
-			startRole(Role::TRANSACTION_LOG, interf.id(), tLogData->workerID, details, "Restored");
+			startRole(Role::TRANSACTION_LOG, interf.id(), tLogData->workerID, {{"SharedTLog", tLogData->dbgid.shortString()}}, "Restored");
 
 			persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
 			persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
@@ -1124,7 +1121,7 @@ namespace oldTLog_4_6 {
 					// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our TLogInterface
 					TLogRejoinRequest req;
 					req.myInterface = tli;
-					TraceEvent("TLogRejoining", self->dbgid).detail("Master", self->dbInfo->get().master.id());
+					TraceEvent("TLogRejoining", tli.id()).detail("Master", self->dbInfo->get().master.id());
 					choose {
 					    when(TLogRejoinReply rep =
 					             wait(brokenPromiseToNever(self->dbInfo->get().master.tlogRejoin.getReply(req)))) {
