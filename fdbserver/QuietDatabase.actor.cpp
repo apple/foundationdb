@@ -211,10 +211,9 @@ ACTOR Future<std::pair<int64_t,int64_t>> getTLogQueueInfo( Database cx, Referenc
 
 ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, bool use_system_priority = false) {
 	state Transaction tr( cx );
-	if (use_system_priority)
-		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 	loop {
+		if (use_system_priority) tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			Standalone<RangeResultRef> serverList = wait( tr.getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY ) );
 			ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
