@@ -62,6 +62,12 @@ protected:
 
 // Structures for various backup components
 
+// Mutation log version written by old FileBackupAgent
+static const uint32_t BACKUP_AGENT_MLOG_VERSION = 2001;
+
+// Mutation log version written by BackupWorker
+static const uint32_t PARTITIONED_MLOG_VERSION = 4110;
+
 struct LogFile {
 	Version beginVersion;
 	Version endVersion;

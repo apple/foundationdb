@@ -59,7 +59,4 @@ CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 
 }  // namespace file_converter
 
-// Mutation log version written by old FileBackupAgent
-static const uint32_t BACKUP_AGENT_MLOG_VERSION = 2001;
-
 #endif  // FDBBACKUP_FILECONVERTER_H
