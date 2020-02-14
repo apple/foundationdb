@@ -234,21 +234,24 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	int i = 0;
 	for(auto& key : imcompleteStagingKeys) {
 		if (!values[i].present()) {
-			TraceEvent(SevError, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError").detail("Key", key.first).detail("Reason", "Not found in DB")
+			TraceEvent(SevWarnAlways, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError").detail("Key", key.first).detail("Reason", "Not found in DB")
 				.detail("PendingMutations", key.second->second.pendingMutations.size()).detail("StagingKeyType", (int) key.second->second.type);
 			for(auto& vm : key.second->second.pendingMutations) {
 				for(auto& m : vm.second) {
-					TraceEvent(SevError, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError").detail("PendingMutationVersion", vm.first).detail("PendingMutation", m.toString());
+					TraceEvent(SevWarnAlways, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError").detail("PendingMutationVersion", vm.first).detail("PendingMutation", m.toString());
 				}
 			}
+			key.second->second.precomputeResult();
+			i++;
 			continue;
+		} else {
+			// The key's version ideally should be the most recently committed version.
+			// But as long as it is > 1 and less than the start version of the version batch, it is the same result.
+			MutationRef m(MutationRef::SetValue, key.first, fValues[i].get().get());
+			key.second->second.add(m, (Version)1);
+			key.second->second.precomputeResult();
+			i++;
 		}
-		// The key's version ideally should be the most recently committed version.
-		// But as long as it is > 1 and less than the start version of the version batch, it is the same result.
-		MutationRef m(MutationRef::SetValue, key.first, fValues[i].get().get());
-		key.second->second.add(m, (Version)1);
-		key.second->second.precomputeResult();
-		i++;
 	}
 	// for (auto& kv : fKVs) {
 	// 	if (!kv.second.get().present()) {

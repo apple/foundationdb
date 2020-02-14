@@ -125,7 +125,11 @@ struct StagingKey {
 						type = MutationRef::ClearRange;
 					} // else no-op
 				} else if (isAtomicOp((MutationRef::Type)mutation.type)) {
-					val = applyAtomicOp(val, mutation.param2, (MutationRef::Type)mutation.type);
+					Optional<StringRef> inputVal;
+					if (hasBaseValue()) {
+						inputVal = val;
+					}
+					val = applyAtomicOp(inputVal, mutation.param2, (MutationRef::Type)mutation.type);
 					type = MutationRef::SetValue; // Precomputed result should be set to DB.
 				} else if (mutation.type == MutationRef::SetValue || mutation.type == MutationRef::ClearRange) {
 					type = MutationRef::SetValue; // Precomputed result should be set to DB.
