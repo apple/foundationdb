@@ -612,7 +612,8 @@ namespace fileBackup {
 	struct LogFileWriter {
 		static const std::string &FFs;
 
-		LogFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0) : file(file), blockSize(blockSize), blockEnd(0), fileVersion(2001) {}
+		LogFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
+		  : file(file), blockSize(blockSize), blockEnd(0) {}
 
 		// Start a new block if needed, then write the key and value
 		ACTOR static Future<Void> writeKV_impl(LogFileWriter *self, Key k, Value v) {
@@ -629,8 +630,8 @@ namespace fileBackup {
 				// Set new blockEnd
 				self->blockEnd += self->blockSize;
 
-				// write Header
-				wait(self->file->append((uint8_t *)&self->fileVersion, sizeof(self->fileVersion)));
+				// write the block header
+				wait(self->file->append((uint8_t *)&BACKUP_AGENT_MLOG_VERSION, sizeof(BACKUP_AGENT_MLOG_VERSION)));
 			}
 
 			wait(self->file->appendStringRefWithLen(k));
@@ -650,7 +651,6 @@ namespace fileBackup {
 
 	private:
 		int64_t blockEnd;
-		uint32_t fileVersion;
 	};
 
 	ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset, int len) {
@@ -663,8 +663,8 @@ namespace fileBackup {
 		state StringRefReader reader(buf, restore_corrupted_data());
 
 		try {
-			// Read header, currently only decoding version 2001
-			if(reader.consume<int32_t>() != 2001)
+			// Read header, currently only decoding version BACKUP_AGENT_MLOG_VERSION
+			if(reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION)
 				throw restore_unsupported_file_version();
 
 			// Read k/v pairs.  Block ends either at end of last value exactly or with 0xFF as first key len byte.

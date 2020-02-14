@@ -162,6 +162,9 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 			Version msgVersion = invalidVersion;
 
 			try {
+				// Read block header
+				if (reader.consume<int32_t>() != PARTITIONED_MLOG_VERSION) throw restore_unsupported_file_version();
+
 				while (1) {
 					// If eof reached or first key len bytes is 0xFF then end of block was reached.
 					if (reader.eof() || *reader.rptr == 0xFF) break;

@@ -371,7 +371,8 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile, VersionedMessage 
 		}
 
 		*blockEnd += blockSize;
-		// TODO: add block header
+		// write block Header
+		wait(logFile->append((uint8_t*)&PARTITIONED_MLOG_VERSION, sizeof(PARTITIONED_MLOG_VERSION)));
 	}
 
 	wait(logFile->append((void*)header.begin(), header.size()));

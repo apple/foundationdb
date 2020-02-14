@@ -396,8 +396,8 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 	state parallelFileRestore::StringRefReader reader(buf, restore_corrupted_data());
 
 	try {
-		// Read header, currently only decoding version 2001
-		if (reader.consume<int32_t>() != 2001) throw restore_unsupported_file_version();
+		// Read header, currently only decoding version BACKUP_AGENT_MLOG_VERSION
+		if (reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION) throw restore_unsupported_file_version();
 
 		// Read k/v pairs.  Block ends either at end of last value exactly or with 0xFF as first key len byte.
 		while (1) {
