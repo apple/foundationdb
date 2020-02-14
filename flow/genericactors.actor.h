@@ -718,17 +718,15 @@ private:
 	}
 };
 
-ACTOR template <class T> Future<Void> asyncDeserialize( Reference<AsyncVar<Standalone<StringRef>>> input, Reference<AsyncVar<Optional<T>>> output, bool useObjSerializer ) {
+ACTOR template <class T>
+Future<Void> asyncDeserialize(Reference<AsyncVar<Standalone<StringRef>>> input,
+                              Reference<AsyncVar<Optional<T>>> output) {
 	loop {
 		if (input->get().size()) {
-			if (useObjSerializer) {
-				ObjectReader reader(input->get().begin(), IncludeVersion());
-				T res;
-				reader.deserialize(res);
-				output->set(res);
-			} else {
-				output->set( BinaryReader::fromStringRef<T>( input->get(), IncludeVersion() ) );
-			}
+			ObjectReader reader(input->get().begin(), IncludeVersion());
+			T res;
+			reader.deserialize(res);
+			output->set(res);
 		} else
 			output->set( Optional<T>() );
 		wait( input->onChange() );
