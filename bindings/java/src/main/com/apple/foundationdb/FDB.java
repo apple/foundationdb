@@ -191,9 +191,10 @@ public class FDB {
 	}
 
 	/**
-	 * Disables shutdown hook that stops network thread upon process shutdown. Useful if you have your own
-	 * shutdown hook where you use FDB instance and you do not want to have race conditions
-	 * leading to accessing already closed FDB connection because all shutdown hooks are executed concurrently.
+	 * Disables shutdown hook that stops network thread upon process shutdown. This is useful if you need to run
+	 * your own shutdown hook that uses the FDB instance and you need to avoid race conditions
+	 * with the default shutdown hook. Replacement shutdown hook should stop the network thread manually
+	 * by calling {@link #stopNetwork}.
 	 */
 	public synchronized void disableShutdownHook() {
 		useShutdownHook = false;
