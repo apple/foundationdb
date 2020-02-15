@@ -154,7 +154,7 @@ struct InitializeBackupReply {
 	LogEpoch backupEpoch;
 
 	InitializeBackupReply() = default;
-	InitializeBackupReply(BackupInterface interf, LogEpoch e) : interf(interf), backupEpoch(e) {}
+	InitializeBackupReply(BackupInterface interface, LogEpoch e) : interf(interface), backupEpoch(e) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
