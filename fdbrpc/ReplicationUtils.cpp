@@ -122,7 +122,8 @@ bool findBestPolicySetSimple(std::vector<LocalityEntry>& bestResults, Reference<
 	// Then greedily choose LocalityEntries.
 	int perValue = nMinItems / pa->getCount();
 	int remainder = nMinItems % pa->getCount();
-	for (auto it = kvToEntryCounts.rbegin(); it != kvToEntryCounts.rend() && bestResults.size() < nMinItems; ++it) {
+	for (std::reverse_iterator<std::vector<std::pair<AttribRecord, int>>> it = kvToEntryCounts.rbegin();
+	     it != kvToEntryCounts.rend() && bestResults.size() < nMinItems; ++it) {
 		int _perValue = remainder > 0 ? perValue + 1 : perValue;
 		auto& entryList = kvToEntryMap[it->first];
 		if (it->second >= _perValue) {
