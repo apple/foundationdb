@@ -773,7 +773,7 @@ private:
 };
 
 struct ISerializeSource {
-	virtual void serializePacketWriter(PacketWriter&, bool useObjectSerializer) const = 0;
+	virtual void serializePacketWriter(PacketWriter&) const = 0;
 	virtual void serializeBinaryWriter(BinaryWriter&) const = 0;
 	virtual void serializeObjectWriter(ObjectWriter&) const = 0;
 };
@@ -781,13 +781,9 @@ struct ISerializeSource {
 template <class T, class V>
 struct MakeSerializeSource : ISerializeSource {
 	using value_type = V;
-	virtual void serializePacketWriter(PacketWriter& w, bool useObjectSerializer) const {
-		if (useObjectSerializer) {
-			ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));
-			writer.serialize(get()); // Writes directly into buffer supplied by |w|
-		} else {
-			static_cast<T const*>(this)->serialize(w);
-		}
+	virtual void serializePacketWriter(PacketWriter& w) const {
+		ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));
+		writer.serialize(get()); // Writes directly into buffer supplied by |w|
 	}
 	virtual void serializeBinaryWriter(BinaryWriter& w) const { static_cast<T const*>(this)->serialize(w); }
 	virtual value_type const& get() const = 0;

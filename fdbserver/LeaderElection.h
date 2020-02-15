@@ -61,11 +61,9 @@ Future<Void> tryBecomeLeader( ServerCoordinators const& coordinators,
 							  Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo)
 {
 	Reference<AsyncVar<Value>> serializedInfo(new AsyncVar<Value>);
-	Future<Void> m = tryBecomeLeaderInternal(
-		coordinators,
-		FLOW_KNOBS->USE_OBJECT_SERIALIZER ? ObjectWriter::toValue(proposedInterface, IncludeVersion()) : BinaryWriter::toValue(proposedInterface, IncludeVersion()),
-		serializedInfo, hasConnected, asyncPriorityInfo);
-	return m || asyncDeserialize(serializedInfo, outKnownLeader, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
+	Future<Void> m = tryBecomeLeaderInternal(coordinators, ObjectWriter::toValue(proposedInterface, IncludeVersion()),
+	                                         serializedInfo, hasConnected, asyncPriorityInfo);
+	return m || asyncDeserialize(serializedInfo, outKnownLeader);
 }
 
 #ifndef __INTEL_COMPILER
