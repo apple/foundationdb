@@ -404,27 +404,6 @@ std::tuple<bool,std::string> check_verify(const TLSPolicy::Rule* verify, X509_ST
 	// if returning false, give a reason string
 	std::string reason = "";
 
-	if (verify->verify_time) {
-		X509_VERIFY_PARAM* param = X509_STORE_CTX_get0_param(store_ctx);
-		time_t cert_time = X509_VERIFY_PARAM_get_time(param);
-		STACK_OF(X509) *sk = X509_STORE_CTX_get0_chain(store_ctx);
-		for (int i = 0; i < sk_X509_num(sk); i++) {
-			X509* cert = sk_X509_value(sk, i);
-
-			int rv = X509_cmp_time(X509_get0_notBefore(cert), &cert_time);
-			if (rv >= 0) {
-				reason = "Cert is not yet valid";
-				goto err;
-			}
-
-			rv = X509_cmp_time(X509_get0_notAfter(cert), &cert_time);
-			if (rv <= 0) {
-				reason = "Cert has expired";
-				goto err;
-			}
-		}
-	}
-
 	// Check subject criteria.
 	cert = sk_X509_value(X509_STORE_CTX_get0_chain(store_ctx), 0);
 	if ((subject = X509_get_subject_name(cert)) == NULL) {
@@ -470,10 +449,7 @@ std::tuple<bool,std::string> check_verify(const TLSPolicy::Rule* verify, X509_ST
 	return std::make_tuple(rc, reason);
 }
 
-bool TLSPolicy::verify_peer(X509_STORE_CTX* store_ctx) {
-	//???
-	//X509_STORE_CTX* store_ctx = X509_STORE_CTX_new();
-	//X509_STORE_CTX_init(store_ctx, X509_STORE_CTX_get0_store(store_ctx_), X509_STORE_CTX_get0_cert(store_ctx_), X509_STORE_CTX_get0_chain(store_ctx_));
+bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 	bool rc = false;
 	std::set<std::string> verify_failure_reasons;
 	bool verify_success;
@@ -483,13 +459,12 @@ bool TLSPolicy::verify_peer(X509_STORE_CTX* store_ctx) {
 	if (std::any_of(rules.begin(), rules.end(), [](const Rule& r){ return r.verify_cert; }))
 		return true;
 
-	X509_STORE_CTX_set_default(store_ctx, is_client ? "ssl_server" : "ssl_client");
-	X509_VERIFY_PARAM_set_flags(X509_STORE_CTX_get0_param(store_ctx), X509_V_FLAG_NO_CHECK_TIME);
-	if (X509_verify_cert(store_ctx) <= 0) {
-		const char *errstr = X509_verify_cert_error_string(X509_STORE_CTX_get_error(store_ctx));
-		verify_failure_reason = "Verify cert error: " + std::string(errstr);
-		TraceEvent("TLSPolicyFailure").suppressFor(1.0).detail("Reason", verify_failure_reason);
+	if(!preverified) {
 		return false;
+	}
+
+	if(!rules.size()) {
+		return true;
 	}
 
 	// Any matching rule is sufficient.

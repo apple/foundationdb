@@ -70,7 +70,7 @@ public:
 	};
 
 	bool set_verify_peers(std::vector<std::string> verify_peers);
-	bool verify_peer(X509_STORE_CTX* store_ctx);
+	bool verify_peer(bool preverified, X509_STORE_CTX* store_ctx);
 
 	TLSPolicy(Is client) : is_client(client == Is::CLIENT) {}
 	virtual ~TLSPolicy();

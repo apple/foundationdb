@@ -1399,7 +1399,7 @@ void ASIOReactor::wake() {
 
 } // namespace net2
 
-bool insecurely_always_accept_for_testing(bool _1, boost::asio::ssl::context* _2) {
+bool insecurely_always_accept(bool _1, boost::asio::ssl::verify_context& _2) {
 	return true;
 }
 
@@ -1408,9 +1408,11 @@ INetwork* newNet2(boost::asio::ssl::context* sslContext, bool useThreadPool, boo
 		sslContext->set_options(boost::asio::ssl::context::default_workarounds);
 		sslContext->set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
 		if (policy) {
-			sslContext->set_verify_callback([policy](bool _, boost::asio::ssl::verify_context& ctx) {
-				return policy->verify_peer(ctx.native_handle());
+			sslContext->set_verify_callback([policy](bool preverified, boost::asio::ssl::verify_context& ctx) {
+				return policy->verify_peer(preverified, ctx.native_handle());
 			});
+		} else {
+			sslContext->set_verify_callback(boost::bind(&insecurely_always_accept, _1, _2));
 		}
 		N2::g_net2 = new N2::Net2(useThreadPool, useMetrics, sslContext, tlsPassword);
 	}
