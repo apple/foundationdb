@@ -513,8 +513,8 @@ public:
 				}
 			}
 
-			wait(g_network->networkInfo.handshakeLock->take());
-			state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
+			int64_t permitNumber = wait(g_network->networkInfo.handshakeLock->take());
+			state BoundedFlowLock::Releaser releaser(g_network->networkInfo.handshakeLock, permitNumber);
 
 			BindPromise p("N2_AcceptHandshakeError", UID());
 			auto onHandshook = p.getFuture();
@@ -531,7 +531,6 @@ public:
 			}
 			self->closeSocket();
 			connected.sendError(connection_failed());
-			throw;
 		}
 	}
 
@@ -554,8 +553,8 @@ public:
 
 	ACTOR static void doConnectHandshake( Reference<SSLConnection> self, Promise<Void> connected) {
 		try {
-			wait(g_network->networkInfo.handshakeLock->take());
-			state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
+			int64_t permitNumber = wait(g_network->networkInfo.handshakeLock->take());
+			state BoundedFlowLock::Releaser releaser(g_network->networkInfo.handshakeLock, permitNumber);
 
 			BindPromise p("N2_ConnectHandshakeError", self->id);
 			Future<Void> onHandshook = p.getFuture();
@@ -573,7 +572,6 @@ public:
 			}
 			self->closeSocket();
 			connected.sendError(connection_failed());
-			throw;
 		}
 	}
 

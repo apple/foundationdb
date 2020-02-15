@@ -329,6 +329,8 @@ struct NetworkMetrics {
 	NetworkMetrics() {}
 };
 
+struct BoundedFlowLock;
+
 struct NetworkInfo {
 	NetworkMetrics metrics;
 	double oldestAlternativesFailure = 0;
@@ -336,7 +338,7 @@ struct NetworkInfo {
 	double lastAlternativesFailureSkipDelay = 0;
 
 	std::map<std::pair<IPAddress, uint16_t>, std::pair<int,double>> serverTLSConnectionThrottler;
-	struct FlowLock* handshakeLock;
+	BoundedFlowLock* handshakeLock;
 
 	NetworkInfo();
 };
