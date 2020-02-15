@@ -1,4 +1,4 @@
-find_package(Boost 1.67)
+find_package(Boost 1.72)
 
 if(Boost_FOUND)
   add_library(boost_target INTERFACE)
@@ -6,7 +6,7 @@ if(Boost_FOUND)
 else()
   include(ExternalProject)
   ExternalProject_add(boostProject
-    URL "https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2"
+    URL "https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2"
     URL_HASH SHA256=2684c972994ee57fc5632e03bf044746f6eb45d4920c343937a465fd67a5adba
     CONFIGURE_COMMAND ""
     BUILD_COMMAND ""
