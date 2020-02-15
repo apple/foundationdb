@@ -89,7 +89,7 @@ struct BackupData {
 		BackupData* self = nullptr;
 		Version startVersion = invalidVersion;
 		Version lastSavedVersion = invalidVersion;
-		Future<Reference<IBackupContainer>> container;
+		Future<Optional<Reference<IBackupContainer>>> container;
 		Future<Optional<std::vector<KeyRange>>> ranges; // Key ranges of this backup
 		bool allWorkerStarted = false; // Only worker with Tag(-2,0) uses & sets this field
 		bool stopped = false; // Is the backup stopped?
@@ -188,7 +188,7 @@ struct BackupData {
 
 				// Open the container and get key ranges
 				BackupConfig config(uid);
-				inserted.first->second.container = config.backupContainer().getOrThrow(cx);
+				inserted.first->second.container = config.backupContainer().get(cx);
 				inserted.first->second.ranges = config.backupRanges().get(cx);
 			} else {
 				stopList.erase(uid);
@@ -395,10 +395,16 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	for (auto it = self->backups.begin(); it != self->backups.end();) {
 		if (!it->second.isRunning()) {
 			if (it->second.stopped) {
+				TraceEvent("BackupWorkerRemoveStoppedContainer", self->myId).detail("BackupId", it->first);
 				it = self->backups.erase(it);
 			} else {
 				it++;
 			}
+			continue;
+		}
+		if (!it->second.container.get().present()) {
+			TraceEvent("BackupWorkerNoContainer", self->myId).detail("BackupId", it->first);
+			it = self->backups.erase(it);
 			continue;
 		}
 		const int index = logFileFutures.size();
@@ -407,7 +413,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		if (it->second.lastSavedVersion == invalidVersion) {
 			it->second.lastSavedVersion = self->messages[0].getVersion();
 		}
-		logFileFutures.push_back(it->second.container.get()->writeTaggedLogFile(
+		logFileFutures.push_back(it->second.container.get().get()->writeTaggedLogFile(
 		    it->second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id));
 		it++;
 	}
