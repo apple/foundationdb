@@ -1120,8 +1120,7 @@ struct AutoQuorumChange : IQuorumChange {
 				*err = CoordinatorsResult::NOT_ENOUGH_MACHINES;
 				return vector<NetworkAddress>();
 			}
-			desiredCount = std::max(oldCoordinators.size(), (workers.size() - 1) | 1);
-			chosen.resize(desiredCount);
+			chosen.resize((chosen.size() - 1) | 1);
 		}
 
 		return chosen;
