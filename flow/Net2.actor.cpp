@@ -439,12 +439,13 @@ private:
 };
 
 class Listener : public IListener, ReferenceCounted<Listener> {
+	boost::asio::io_context& io_service;
 	NetworkAddress listenAddress;
 	tcp::acceptor acceptor;
 
 public:
-	Listener( boost::asio::io_service& io_service, NetworkAddress listenAddress )
-		: listenAddress(listenAddress), acceptor( io_service, tcpEndpoint( listenAddress ) )
+	Listener( boost::asio::io_context& io_service, NetworkAddress listenAddress )
+		: io_service(io_service), listenAddress(listenAddress), acceptor( io_service, tcpEndpoint( listenAddress ) )
 	{
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
@@ -461,7 +462,7 @@ public:
 
 private:
 	ACTOR static Future<Reference<IConnection>> doAccept( Listener* self ) {
-		state Reference<Connection> conn( new Connection( self->acceptor.get_io_service() ) );
+		state Reference<Connection> conn( new Connection( self->io_service ) );
 		state tcp::acceptor::endpoint_type peer_endpoint;
 		try {
 			BindPromise p("N2_AcceptError", UID());
