@@ -38,6 +38,16 @@ struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 	virtual void delref() { ReferenceCounted<IReplicationPolicy>::delref(); }
 	virtual int maxResults() const = 0;
 	virtual int depth() const = 0;
+
+	// This function does the followings:
+	//     - If `alsoServers` already meets the policy requirments, return;
+	//     - If `alsoServers` only partially meets the policy requirements( or does not meet at all, say it's empty),
+	//     out of `fromServers` select a set of servers, which once combined with `alsoServers` will meet the policy
+	//     requirements, and append the newly selected servers into `resutls`
+	//
+	// Put them all together, this function first implicitly validates `alsoServers` against the policy and then select
+	// whatever servers, from `fromServers`, that is necessary in order to be valid. Use `validate()` for validation
+	// only purpose since that's faster
 	virtual bool selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry> const& alsoServers,
 	                            std::vector<LocalityEntry>& results) = 0;
 	virtual void traceLocalityRecords(Reference<LocalitySet> const& fromServers);
@@ -143,6 +153,9 @@ struct PolicyAcross : IReplicationPolicy, public ReferenceCounted<PolicyAcross> 
 		set->insert(_attribKey);
 		_policy->attributeKeys(set);
 	}
+
+	std::string embeddedPolicyName() const { return _policy->name(); }
+	int getCount() const { return _count; }
 
 protected:
 	int _count;

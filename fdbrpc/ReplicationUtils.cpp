@@ -82,18 +82,81 @@ double ratePolicy(
 	return rating;
 }
 
-bool findBestPolicySet(
-	std::vector<LocalityEntry>&	bestResults,
-	Reference<LocalitySet> &						localitySet,
-	Reference<IReplicationPolicy>	const&				policy,
-	unsigned int								nMinItems,
-	unsigned int								nSelectTests,
-	unsigned int								nPolicyTests)
-{
-	bool													bSucceeded = true;
-	Reference<LocalitySet>								bestLocalitySet, testLocalitySet;
-	std::vector<LocalityEntry>		results;
-	double												testRate, bestRate = -1.0;
+// A specialized version for policies of shape PolicyAcorss(xxx, "xxx", PolicyOne()), which is the most commonly used
+// policy
+bool findBestPolicySetSimple(std::vector<LocalityEntry>& bestResults, Reference<LocalitySet>& localitySet,
+                             Reference<IReplicationPolicy> const& policy, unsigned int nMinItems) {
+	ASSERT(bestResults.size() == 0);
+	if (nMinItems > localitySet->getRecordCount()) {
+		return false; // not enough replicas avaiable
+	}
+	PolicyAcross* pa = (PolicyAcross*)(policy.getPtr());
+	if (nMinItems <= pa->getCount()) {
+		return policy->selectReplicas(localitySet, bestResults);
+	}
+
+	auto& keyValueArray = localitySet->getKeyValueArray();
+	auto& kvToEntryMap = localitySet->getKeyValueToRecordMap();
+
+	std::set<std::string> attribKeys = policy->attributeKeys();
+	ASSERT(attribKeys.size() == 1);
+	AttribKey indexKey = localitySet->keyIndex(*(attribKeys.begin()));
+	auto groupIndexKey = localitySet->getGroupKeyIndex(indexKey);
+	auto& valueArray = keyValueArray[groupIndexKey._id];
+	if (valueArray.size() < pa->getCount()) {
+		// not enough unique values for this key.
+		// For exmaple not enough zones if this is a PolicyAcross asking 3 unique "zoneId"s
+		return false;
+	}
+	std::vector<std::pair<AttribRecord, int>> kvToEntryCounts;
+
+	for (auto const& value : keyValueArray[groupIndexKey._id]) {
+		AttribRecord r(groupIndexKey, value);
+		std::pair<AttribRecord, int> pair(r, kvToEntryMap[r].size());
+		auto insert = std::lower_bound(kvToEntryCounts.begin(), kvToEntryCounts.end(), pair,
+		                               [](std::pair<AttribRecord, int> const& lhs,
+		                                  std::pair<AttribRecord, int> const& rhs) { return lhs.second < rhs.second; });
+		kvToEntryCounts.insert(insert, pair);
+	}
+	// Try to evenly distibute nMinItems across pa->getCount() groups
+	// Then greedily choose LocalityEntries.
+	int perValue = nMinItems / pa->getCount();
+	int remainder = nMinItems % pa->getCount();
+	for (auto it = kvToEntryCounts.rbegin(); it != kvToEntryCounts.rend() && bestResults.size() < nMinItems; ++it) {
+		int _perValue = remainder > 0 ? perValue + 1 : perValue;
+		auto& entryList = kvToEntryMap[it->first];
+		if (it->second >= _perValue) {
+			bestResults.insert(bestResults.end(), entryList.begin(), entryList.begin() + _perValue);
+			remainder--;
+		} else {
+			bestResults.insert(bestResults.end(), entryList.begin(), entryList.end());
+		}
+	}
+
+	if (bestResults.size() >= nMinItems) {
+		return true;
+	} else {
+		// Either not enough LocalityEntries with the value defined for the target key,
+		// or its distribution is largely skewed.
+		// Add some random elements.
+		return localitySet->random(bestResults, bestResults, nMinItems - bestResults.size());
+	}
+}
+
+bool findBestPolicySet(std::vector<LocalityEntry>& bestResults, Reference<LocalitySet>& localitySet,
+                       Reference<IReplicationPolicy> const& policy, unsigned int nMinItems, unsigned int nSelectTests,
+                       unsigned int nPolicyTests) {
+
+	if (policy->name() == "Across") {
+		PolicyAcross* pa = (PolicyAcross*)(policy.getPtr());
+		if (pa->embeddedPolicyName() == "One") {
+			return findBestPolicySetSimple(bestResults, localitySet, policy, nMinItems);
+		}
+	}
+	bool bSucceeded = true;
+	Reference<LocalitySet> bestLocalitySet, testLocalitySet;
+	std::vector<LocalityEntry> results;
+	double testRate, bestRate = -1.0;
 
 	if (g_replicationdebug > 3) {
 		printf("Finding best from LocalitySet:\n");
@@ -113,9 +176,7 @@ bool findBestPolicySet(
 		}
 
 		// Get some additional random items, if needed
-		if ((nMinItems > results.size())																			&&
-				(!localitySet->random(results, results, nMinItems-results.size())))
-		{
+		if ((nMinItems > results.size()) && (!localitySet->random(results, results, nMinItems - results.size()))) {
 			bSucceeded = false;
 			break;
 		}

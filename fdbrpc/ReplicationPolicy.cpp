@@ -176,11 +176,6 @@ void IReplicationPolicy::traceOneLocalityRecord(Reference<LocalityRecord> record
 	}
 }
 
-// Validate if the team satisfies the replication policy
-// LocalitySet is the base class about the locality information
-// solutionSet is the team to be validated
-// fromServers is the location information of all servers
-// return true if the team satisfies the policy; false otherwise
 bool PolicyAcross::validate(
 		std::vector<LocalityEntry>	const&	solutionSet,
 		Reference<LocalitySet> const&				fromServers ) const
@@ -255,12 +250,6 @@ bool PolicyAcross::validate(
 	return valid;
 }
 
-// Choose new servers from "least utilized" alsoServers and append the new servers to results
-// fromserverse are the servers that have already been chosen and
-// that should be excluded from being selected as replicas.
-// FIXME: Simplify this function, such as removing unnecessary printf
-// fromServers are the servers that must have;
-// alsoServers are the servers you can choose.
 bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry> const& alsoServers,
                                   std::vector<LocalityEntry>& results) {
 	int count = 0;
@@ -314,9 +303,7 @@ bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers, std::vect
 		}
 	}
 
-	// Process the remaining results, if present
 	if ((count < _count) && (_addedResults.size())) {
-		// Sort the added results array
 		std::sort(_addedResults.begin(), _addedResults.end(), PolicyAcross::compareAddedResults);
 
 		if (g_replicationdebug > 0) {
@@ -343,8 +330,6 @@ bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers, std::vect
 		}
 	}
 
-	// Cannot find replica from the least used alsoServers, now try to find replicas from all servers
-	// Process the remaining values
 	if (count < _count) {
 		if (g_replicationdebug > 0) {
 			printf("Across items:%4d key: %-7s policy: %-10s => %s  count:%3d of%3d\n", fromServers->size(), _attribKey.c_str(), _policy->name().c_str(), _policy->info().c_str(), count, _count);

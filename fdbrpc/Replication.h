@@ -28,7 +28,11 @@
 
 struct LocalitySet : public ReferenceCounted<LocalitySet> {
 public:
-	LocalitySet(LocalitySet const& source):_entryArray(source._entryArray), _mutableEntryArray(source._mutableEntryArray), _keyValueArray(source._keyValueArray), _keyIndexArray(source._keyIndexArray), _cacheArray(source._cacheArray), _keymap(source._keymap), _localitygroup(source._localitygroup), _cachehits(source._cachehits), _cachemisses(source._cachemisses) {}
+	LocalitySet(LocalitySet const& source)
+	  : _entryArray(source._entryArray), _mutableEntryArray(source._mutableEntryArray),
+	    _keyValueArray(source._keyValueArray), _keyIndexArray(source._keyIndexArray), _cacheArray(source._cacheArray),
+	    _keymap(source._keymap), _localitygroup(source._localitygroup), _cachehits(source._cachehits),
+	    _cachemisses(source._cachemisses), _kvToEntryMap(source._kvToEntryMap) {}
 	LocalitySet(LocalitySet& localityGroup):_localitygroup(&localityGroup), _keymap(new StringToIntMap()), _cachehits(0), _cachemisses(0) {}
 	virtual ~LocalitySet() {}
 
@@ -63,6 +67,7 @@ public:
 		_keyIndexArray.clear();
 		_cacheArray.clear();
 		_keymap->clear();
+		_kvToEntryMap.clear();
 	}
 
 	LocalitySet & copy(LocalitySet const& source) {
@@ -75,6 +80,7 @@ public:
 		_cachemisses = source._cachemisses;
 		_keymap = source._keymap;
 		_localitygroup = (LocalitySet*) source._localitygroup;
+		_kvToEntryMap = source._kvToEntryMap;
 		return *this;
 	}
 
@@ -87,6 +93,7 @@ public:
 		_cachehits = source._cachehits;
 		_cachemisses = source._cachemisses;
 		_keymap->copy(*source._keymap);
+		_kvToEntryMap = source._kvToEntryMap;
 
 		ASSERT(source._localitygroup == (LocalitySet*) source._localitygroup);
 		_localitygroup = (LocalitySet*) this;
@@ -169,6 +176,8 @@ public:
 	void DisplayEntries(const char*  name = "zone") const {
 		staticDisplayEntries(*this, getEntries(), name);
 	}
+
+	int getRecordCount() const { return _entryArray.size(); }
 
 	// This function is used to create an subset containing all of the entries within
 	// the specified value for the given key
@@ -384,6 +393,9 @@ public:
 		for (auto& valueArray : _keyValueArray) {
 			memorySize += sizeof(AttribValue) * valueArray.capacity();
 		}
+		for (auto const& pair : _kvToEntryMap) {
+			memorySize += sizeof(AttribRecord) + sizeof(LocalityEntry) * pair.second.size();
+		}
 		return memorySize;
 	}
 
@@ -426,6 +438,11 @@ protected:
 		}
 
 		for (auto& keyValuePair : record->_dataMap->_keyvaluearray) {
+			if (_kvToEntryMap.find(keyValuePair) == _kvToEntryMap.end()) {
+				_kvToEntryMap[keyValuePair] = { record->_entryIndex };
+			} else {
+				_kvToEntryMap[keyValuePair].push_back(record->_entryIndex);
+			}
 			auto keyString = _localitygroup->keyText(keyValuePair.first);
 			auto indexKey = keyIndex(keyString);
 			auto& indexValue = keyValuePair.second;
@@ -479,6 +496,10 @@ public:
 
 	Reference<StringToIntMap> _keymap;
 
+	std::map<AttribRecord, std::vector<LocalityEntry>>& getKeyValueToRecordMap() { return _kvToEntryMap; }
+
+	std::vector<std::vector<AttribValue>>& getKeyValueArray() { return _keyValueArray; }
+
 protected:
 	virtual Reference<StringToIntMap>&	getGroupValueMap()
 	{	return _localitygroup->getGroupValueMap(); }
@@ -493,6 +514,7 @@ protected:
 
 	std::vector<AttribKey>								_keyIndexArray;
 	std::vector<LocalityCacheRecord>			_cacheArray;
+	std::map<AttribRecord, std::vector<LocalityEntry>> _kvToEntryMap;
 
 	LocalitySet*													_localitygroup;
 	long long unsigned int								_cachehits;
