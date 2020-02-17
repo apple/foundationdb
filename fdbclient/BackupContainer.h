@@ -260,6 +260,11 @@ public:
 	// restore to given version is not possible.
 	virtual Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) = 0;
 
+	// Get exactly the files necessary to restore to targetVersion. Returns non-present if
+	// restore to given version is not possible. This is intended for parallel
+	// restore in FDB 7.0, which reads partitioned mutation logs.
+	virtual Future<Optional<RestorableFileSet>> getPartitionedRestoreSet(Version targetVersion) = 0;
+
 	// Get an IBackupContainer based on a container spec string
 	static Reference<IBackupContainer> openContainer(std::string url);
 	static std::vector<std::string> getURLFormats();

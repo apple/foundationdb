@@ -23,6 +23,7 @@
 
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/RestoreLoader.actor.h"
+#include "fdbserver/RestoreRoleCommon.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -140,6 +141,90 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 	req.reply.send(RestoreCommonReply(self->id()));
 }
 
+// Parse a data block in a partitioned mutation log file and store mutations
+// into "kvOpsIter" and samples into "samplesIter".
+ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
+    NotifiedVersion* processedFileOffset, std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
+    std::map<LoadingParam, MutationsVec>::iterator samplesIter, Reference<IBackupContainer> bc, RestoreAsset asset) {
+	state Standalone<StringRef> buf = makeString(asset.len);
+	state Reference<IAsyncFile> file = wait(bc->readFile(asset.filename));
+	int rLen = wait(file->read(mutateString(buf), asset.len, asset.offset));
+	if (rLen != asset.len) throw restore_bad_read();
+
+	TraceEvent("FastRestore")
+	    .detail("DecodingLogFile", asset.filename)
+	    .detail("Offset", asset.offset)
+	    .detail("Length", asset.len);
+
+	// Ensure data blocks in the same file are processed in order
+	wait(processedFileOffset->whenAtLeast(asset.offset));
+	ASSERT(processedFileOffset->get() == asset.offset);
+
+	BackupStringRefReader reader(buf, restore_corrupted_data());
+	try {
+		// Read block header
+		if (reader.consume<int32_t>() != PARTITIONED_MLOG_VERSION) throw restore_unsupported_file_version();
+
+		Version lastVersion = invalidVersion;
+		VersionedMutationsMap& kvOps = kvOpsIter->second;
+		VersionedMutationsMap::iterator it = kvOps.end();
+		while (1) {
+			// If eof reached or first key len bytes is 0xFF then end of block was reached.
+			if (reader.eof() || *reader.rptr == 0xFF) break;
+
+			// Deserialize messages written in saveMutationsToFile().
+			Version msgVersion = bigEndian64(reader.consume<Version>());
+			uint32_t sub = bigEndian32(reader.consume<uint32_t>());
+			int msgSize = bigEndian32(reader.consume<int>());
+			const uint8_t* message = reader.consume(msgSize);
+
+			// Skip mutations out of the version range
+			if (!asset.isInVersionRange(msgVersion)) continue;
+
+			if (lastVersion != msgVersion) {
+				bool inserted;
+				std::tie(it, inserted) = kvOps.emplace(msgVersion, MutationsVec());
+				lastVersion = msgVersion;
+			}
+			ASSERT(it != kvOps.end());
+
+			ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(currentProtocolVersion));
+			MutationRef mutation;
+			rd >> mutation;
+
+			// Should this mutation be skipped?
+			if (mutation.param1 >= asset.range.end ||
+			    (isRangeMutation(mutation) && mutation.param2 < asset.range.begin) ||
+			    (!isRangeMutation(mutation) && mutation.param1 < asset.range.begin)) {
+				continue;
+			}
+			// Only apply mutation within the asset.range
+			if (isRangeMutation(mutation)) {
+				mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
+				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
+			}
+
+			TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
+			    .detail("CommitVersion", msgVersion)
+			    .detail("ParsedMutation", mutation.toString());
+			it->second.push_back_deep(it->second.arena(), mutation);
+			// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
+			if (deterministicRandom()->random01() * 100 < SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
+				samplesIter->second.push_back_deep(samplesIter->second.arena(), mutation);
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "FileRestoreCorruptLogFileBlock")
+		    .error(e)
+		    .detail("Filename", file->getFilename())
+		    .detail("BlockOffset", asset.offset)
+		    .detail("BlockLen", asset.len);
+		throw;
+	}
+	processedFileOffset->set(asset.offset + asset.len);
+	return Void();
+}
+
 ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<LoaderBatchData> batchData, UID loaderID,
                                         Reference<IBackupContainer> bc) {
 	// Temporary data structure for parsing log files into (version, <K, V, mutationType>)
@@ -155,15 +240,15 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<LoaderBatc
 	// Q: How to record the  param's fields inside LoadingParam Refer to storageMetrics
 	TraceEvent("FastRestoreLoaderProcessLoadingParam", loaderID).detail("LoadingParam", param.toString());
 	ASSERT(param.blockSize > 0);
-	ASSERT(param.asset.offset % param.blockSize == 0); // Parse file must be at block bondary.
+	ASSERT(param.asset.offset % param.blockSize == 0); // Parse file must be at block boundary.
 	ASSERT(batchData->kvOpsPerLP.find(param) == batchData->kvOpsPerLP.end());
 
 	// NOTE: map's iterator is guaranteed to be stable, but pointer may not.
-	// state VersionedMutationsMap* kvOps = &self->kvOpsPerLP[param];
-	batchData->kvOpsPerLP.emplace(param, VersionedMutationsMap());
-	batchData->sampleMutations.emplace(param, MutationsVec());
-	kvOpsPerLPIter = batchData->kvOpsPerLP.find(param);
-	samplesIter = batchData->sampleMutations.find(param);
+	bool inserted;
+	std::tie(kvOpsPerLPIter, inserted) = batchData->kvOpsPerLP.emplace(param, VersionedMutationsMap());
+	ASSERT(inserted);
+	std::tie(samplesIter, inserted) = batchData->sampleMutations.emplace(param, MutationsVec());
+	ASSERT(inserted);
 
 	for (int64_t j = param.asset.offset; j < param.asset.len; j += param.blockSize) {
 		RestoreAsset subAsset = param.asset;
@@ -174,13 +259,18 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<LoaderBatc
 			    kvOpsPerLPIter, samplesIter, &batchData->counters, bc, param.rangeVersion.get(), subAsset));
 		} else {
 			// TODO: Sanity check the log file's range is overlapped with the restored version range
-			fileParserFutures.push_back(
-			    _parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap, &mutationPartMap, bc, subAsset));
+			if (param.isPartitionedLog()) {
+				fileParserFutures.push_back(_parsePartitionedLogFileOnLoader(&processedFileOffset, kvOpsPerLPIter,
+				                                                             samplesIter, bc, subAsset));
+			} else {
+				fileParserFutures.push_back(_parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap,
+				                                                             &mutationPartMap, bc, subAsset));
+			}
 		}
 	}
 	wait(waitForAll(fileParserFutures));
 
-	if (!param.isRangeFile) {
+	if (!param.isRangeFile && !param.isPartitionedLog()) {
 		_parseSerializedMutation(kvOpsPerLPIter, &mutationMap, samplesIter, &batchData->counters, param.asset);
 	}
 
@@ -508,15 +598,15 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 	// Use commitVersion as id
 	Standalone<StringRef> id = StringRef((uint8_t*)&commitVersion, sizeof(Version));
 
-	if (mutationMap.find(id) == mutationMap.end()) {
+	auto it = mutationMap.find(id);
+	if (it == mutationMap.end()) {
 		mutationMap.insert(std::make_pair(id, val_input));
 		if (part != 0) {
 			TraceEvent(SevError, "FastRestore").detail("FirstPartNotZero", part).detail("KeyInput", getHexString(key_input));
 		}
 		mutationPartMap.insert(std::make_pair(id, part));
 	} else { // Concatenate the val string with the same commitVersion
-		mutationMap[id] =
-		    mutationMap[id].contents().withSuffix(val_input.contents()); // Assign the new Areana to the map's value
+		it->second = it->second.contents().withSuffix(val_input.contents()); // Assign the new Areana to the map's value
 		if (part != (mutationPartMap[id] + 1)) {
 			// Check if the same range or log file has been processed more than once!
 			TraceEvent(SevError, "FastRestore")
@@ -722,14 +812,11 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pPro
 	if (pProcessedFileOffset->get() == asset.offset) {
 		int start = 0;
 		int end = data.size();
-		int numConcatenated = 0;
 		for (int i = start; i < end; ++i) {
 			// Key k = data[i].key.withPrefix(mutationLogPrefix);
 			// ValueRef v = data[i].value;
 			// Concatenate the backuped param1 and param2 (KV) at the same version.
-			bool concatenated =
-			    concatenateBackupMutationForLogFile(pMutationMap, pMutationPartMap, data[i].key, data[i].value, asset);
-			numConcatenated += (concatenated ? 1 : 0);
+			concatenateBackupMutationForLogFile(pMutationMap, pMutationPartMap, data[i].key, data[i].value, asset);
 		}
 		pProcessedFileOffset->set(asset.offset + asset.len);
 	}
