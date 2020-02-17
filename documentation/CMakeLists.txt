@@ -10,7 +10,7 @@ set(pip_command ${venv_dir}/bin/pip${EXE_SUFFIX})
 set(python_command ${venv_dir}/bin/python${EXE_SUFFIX})
 
 add_custom_command(OUTPUT ${venv_dir}/venv_setup
-  COMMAND ${VIRTUALENV_EXE} venv &&
+  COMMAND ${Python3_EXECUTABLE} -m venv venv &&
           ${CMAKE_COMMAND} -E copy ${sphinx_dir}/.pip.conf ${venv_dir}/pip.conf &&
           . ${venv_dir}/bin/activate &&
           ${pip_command} install --upgrade pip &&
