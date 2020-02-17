@@ -188,6 +188,7 @@ struct RestoreFileFR {
 	int64_t cursor; // The start block location to be restored. All blocks before cursor have been scheduled to load and
 	                // restore
 	int fileIndex; // index of backup file. Must be identical per file.
+	int partitionId = -1; // Partition ID (Log Router Tag ID) for mutation files.
 
 	Tuple pack() const {
 		return Tuple()
@@ -199,7 +200,8 @@ struct RestoreFileFR {
 		    .append(endVersion)
 		    .append(beginVersion)
 		    .append(cursor)
-		    .append(fileIndex);
+		    .append(fileIndex)
+		    .append(partitionId);
 	}
 	static RestoreFileFR unpack(Tuple const& t) {
 		RestoreFileFR r;
@@ -213,6 +215,7 @@ struct RestoreFileFR {
 		r.beginVersion = t.getInt(i++);
 		r.cursor = t.getInt(i++);
 		r.fileIndex = t.getInt(i++);
+		r.partitionId = t.getInt(i++);
 		return r;
 	}
 
@@ -225,18 +228,21 @@ struct RestoreFileFR {
 	  : version(invalidVersion), isRange(false), blockSize(0), fileSize(0), endVersion(invalidVersion),
 	    beginVersion(invalidVersion), cursor(0), fileIndex(0) {}
 
-	RestoreFileFR(Version version, std::string fileName, bool isRange, int64_t blockSize, int64_t fileSize,
-	              Version endVersion, Version beginVersion)
-	  : version(version), fileName(fileName), isRange(isRange), blockSize(blockSize), fileSize(fileSize),
-	    endVersion(endVersion), beginVersion(beginVersion), cursor(0), fileIndex(0) {}
+	explicit RestoreFileFR(const RangeFile& f)
+	  : version(f.version), fileName(f.fileName), isRange(true), blockSize(f.blockSize), fileSize(f.fileSize),
+	    endVersion(f.version), beginVersion(f.version), cursor(0), fileIndex(0) {}
+
+	explicit RestoreFileFR(const LogFile& f)
+	  : version(f.beginVersion), fileName(f.fileName), isRange(false), blockSize(f.blockSize), fileSize(f.fileSize),
+	    endVersion(f.endVersion), beginVersion(f.beginVersion), cursor(0), fileIndex(0), partitionId(f.tagId) {}
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << "version:" << std::to_string(version) << " fileName:" << fileName
-		   << " isRange:" << std::to_string(isRange) << " blockSize:" << std::to_string(blockSize)
-		   << " fileSize:" << std::to_string(fileSize) << " endVersion:" << std::to_string(endVersion)
-		   << " beginVersion:" << std::to_string(beginVersion) << " cursor:" << std::to_string(cursor)
-		   << " fileIndex:" << std::to_string(fileIndex);
+		ss << "version:" << version << " fileName:" << fileName
+		   << " isRange:" << isRange << " blockSize:" << blockSize
+		   << " fileSize:" << fileSize << " endVersion:" << endVersion
+		   << " beginVersion:" << beginVersion << " cursor:" << cursor
+		   << " fileIndex:" << fileIndex << " partitionId:" << partitionId;
 		return ss.str();
 	}
 };

@@ -1064,7 +1064,7 @@ public:
 		return expireData_impl(Reference<BackupContainerFileSystem>::addRef(this), expireEndVersion, force, progress, restorableBeginVersion);
 	}
 
-	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion) {
+	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion, bool partitioned) {
 		// Find the most recent keyrange snapshot to end at or before targetVersion
 		state Optional<KeyspaceSnapshotFile> snapshot;
 		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
@@ -1088,10 +1088,14 @@ public:
 			}
 
 			// FIXME: check if there are tagged logs. for each tag, there is no version gap.
-			state std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion, false));
+			state std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion, partitioned));
 
 			// List logs in version order so log continuity can be analyzed
 			std::sort(logs.begin(), logs.end());
+
+			// TODO(jingyu): for partitioned logs, the continuity checking should be based on
+			// epochs and versions, which should be saved in a metadata file by backup worker and
+			// thus is available here.
 
 			// If there are logs and the first one starts at or before the snapshot begin version then proceed
 			if(!logs.empty() && logs.front().beginVersion <= snapshot.get().beginVersion) {
@@ -1120,7 +1124,11 @@ public:
 	}
 
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) final {
-		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion);
+		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, false);
+	}
+
+	Future<Optional<RestorableFileSet>> getPartitionedRestoreSet(Version targetVersion) final {
+		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, true);
 	}
 
 private:

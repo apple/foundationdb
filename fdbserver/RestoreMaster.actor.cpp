@@ -276,7 +276,6 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	self->initBackupContainer(request.url);
 
 	// Get all backup files' description and save them to files
-	// TODO for Jingyu: Verify all backup files in new backup are collected
 	wait(collectBackupFiles(self->bc, &rangeFiles, &logFiles, cx, request));
 
 	std::sort(rangeFiles.begin(), rangeFiles.end());
@@ -337,12 +336,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
                                              Database cx, RestoreRequest request, VersionBatch versionBatch,
                                              bool isRangeFile) {
 	// set is internally sorted
-	std::set<RestoreFileFR>* files = nullptr;
-	if (isRangeFile) {
-		files = &versionBatch.rangeFiles;
-	} else {
-		files = &versionBatch.logFiles;
-	}
+	std::set<RestoreFileFR>* files = isRangeFile ? &versionBatch.rangeFiles : &versionBatch.logFiles;
 
 	TraceEvent("FastRestoreMasterPhaseLoadFilesStart")
 	    .detail("BatchIndex", batchIndex)
@@ -376,6 +370,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		param.asset.uid = deterministicRandom()->randomUniqueID();
 		param.asset.filename = file.fileName;
 		param.asset.fileIndex = file.fileIndex;
+		param.asset.partitionId = file.partitionId;
 		param.asset.offset = 0;
 		param.asset.len = file.fileSize;
 		param.asset.range = request.range;
@@ -692,7 +687,7 @@ ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std
 		request.targetVersion = desc.maxRestorableVersion.get();
 	}
 
-	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(request.targetVersion));
+	Optional<RestorableFileSet> restorable = wait(bc->getPartitionedRestoreSet(request.targetVersion));
 
 	if (!restorable.present()) {
 		TraceEvent(SevWarn, "FastRestoreMasterPhaseCollectBackupFiles").detail("NotRestorable", request.targetVersion);
@@ -709,7 +704,7 @@ ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std
 		if (f.fileSize <= 0) {
 			continue;
 		}
-		RestoreFileFR file(f.version, f.fileName, true, f.blockSize, f.fileSize, f.version, f.version);
+		RestoreFileFR file(f);
 		TraceEvent("FastRestoreMasterPhaseCollectBackupFiles").detail("RangeFileFR", file.toString());
 		uniqueRangeFiles.insert(file);
 	}
@@ -718,7 +713,7 @@ ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std
 		if (f.fileSize <= 0) {
 			continue;
 		}
-		RestoreFileFR file(f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.beginVersion);
+		RestoreFileFR file(f);
 		TraceEvent("FastRestoreMasterPhaseCollectBackupFiles").detail("LogFileFR", file.toString());
 		logFiles->push_back(file);
 		uniqueLogFiles.insert(file);

@@ -251,7 +251,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	// Split backup files into version batches, each of which has similar data size
 	// Input: sorted range files, sorted log files;
 	// Output: a set of version batches whose size is less than SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES
-	//    	   and each mutation in backup files is included in the version batches exactly once.
+	//         and each mutation in backup files is included in the version batches exactly once.
 	// Assumption 1: input files has no empty files;
 	// Assumption 2: range files at one version <= FASTRESTORE_VERSIONBATCH_MAX_BYTES.
 	// Note: We do not allow a versionBatch size larger than the FASTRESTORE_VERSIONBATCH_MAX_BYTES because the range
