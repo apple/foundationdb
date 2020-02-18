@@ -280,7 +280,6 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 	if (batchData->kvOps.empty()) {
 		return Void();
 	}
-	ASSERT_WE_THINK(batchData->kvOps.size());
 
 	batchData->sanityCheckMutationOps();
 

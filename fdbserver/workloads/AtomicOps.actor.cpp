@@ -26,7 +26,8 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-#define SevAtomicOpDebug SevInfo
+//#define SevAtomicOpDebug SevInfo
+#define SevAtomicOpDebug SevVerbose
 
 struct AtomicOpsWorkload : TestWorkload {
 	int opNum, actorCount, nodeCount;
@@ -184,7 +185,7 @@ struct AtomicOpsWorkload : TestWorkload {
 				try {
 					int group = deterministicRandom()->randomInt(0,100);
 					state uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
-					state Key val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
+					state Value val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
 					state std::pair<Key, Key> logDebugKey = self->logDebugKey(group);
 					int nodeIndex = deterministicRandom()->randomInt(0, self->nodeCount / 100);
 					state Key opsKey(format("ops%08x%08x", group, nodeIndex));
