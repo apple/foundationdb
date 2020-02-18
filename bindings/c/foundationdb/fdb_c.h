@@ -28,10 +28,10 @@
 #endif
 
 #if !defined(FDB_API_VERSION)
-#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 620)
+#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 700)
 #elif FDB_API_VERSION < 13
 #error API version no longer supported (upgrade to 13)
-#elif FDB_API_VERSION > 620
+#elif FDB_API_VERSION > 700
 #error Requested API version requires a newer version of this header
 #endif
 
@@ -91,12 +91,21 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*), void *hook_parameter);
 
 #pragma pack(push, 4)
+#if FDB_API_VERSION >= 700
+    typedef struct keyvalue {
+        const uint8_t* key;
+        int key_length;
+        const uint8_t* value;
+        int value_length;
+    } FDBKeyValue;
+#else
     typedef struct keyvalue {
         const void* key;
         int key_length;
         const void* value;
         int value_length;
     } FDBKeyValue;
+#endif
 #pragma pack(pop)
 
     DLLEXPORT void fdb_future_cancel( FDBFuture* f );
@@ -246,6 +255,10 @@ extern "C" {
                                        uint8_t const* end_key_name,
                                        int end_key_name_length,
                                        FDBConflictRangeType type);
+
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+    fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, uint8_t const* begin_key_name,
+        int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length);
 
     #define FDB_KEYSEL_LAST_LESS_THAN(k, l) k, l, 0, 0
     #define FDB_KEYSEL_LAST_LESS_OR_EQUAL(k, l) k, l, 1, 0

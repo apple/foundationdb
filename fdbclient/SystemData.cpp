@@ -523,6 +523,19 @@ WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
 	return status;
 }
 
+Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids) {
+	BinaryWriter wr(IncludeVersion());
+	wr << ids;
+	return wr.toValue();
+}
+
+std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& value) {
+	std::vector<std::pair<UID, Version>> ids;
+	BinaryReader reader(value, IncludeVersion());
+	if (value.size() > 0) reader >> ids;
+	return ids;
+}
+
 const KeyRef coordinatorsKey = LiteralStringRef("\xff/coordinators");
 const KeyRef logsKey = LiteralStringRef("\xff/logs");
 const KeyRef minRequiredCommitVersionKey = LiteralStringRef("\xff/minRequiredCommitVersion");

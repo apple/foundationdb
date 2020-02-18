@@ -20,7 +20,6 @@
 
 #include <fstream>
 #include "fdbrpc/simulator.h"
-#include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -804,17 +803,38 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	if (deterministicRandom()->random01() < 0.25) db.desiredTLogCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.masterProxyCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.resolverCount = deterministicRandom()->randomInt(1,7);
-	if (deterministicRandom()->random01() < 0.5) {
+	int storage_engine_type = deterministicRandom()->randomInt(0, 3);
+	switch (storage_engine_type) {
+	case 0: {
+		TEST(true); // Simulated cluster using ssd storage engine
 		set_config("ssd");
-	} else {
-		set_config("memory");
+		break;
 	}
+	case 1: {
+		TEST(true); // Simulated cluster using default memory storage engine
+		set_config("memory");
+		break;
+	}
+	case 2: {
+		TEST(true); // Simulated cluster using radix-tree storage engine
+		set_config("memory-radixtree-beta");
+		break;
+	}
+	default:
+		ASSERT(false); // Programmer forgot to adjust cases.
+	}
+	//	if (deterministicRandom()->random01() < 0.5) {
+	//		set_config("ssd");
+	//	} else {
+	//		set_config("memory");
+	//	}
+	//	set_config("memory");
+	//  set_config("memory-radixtree-beta");
 	if(simple) {
 		db.desiredTLogCount = 1;
 		db.masterProxyCount = 1;
 		db.resolverCount = 1;
 	}
-
 	int replication_type = simple ? 1 : ( std::max(minimumReplication, datacenters > 4 ? deterministicRandom()->randomInt(1,3) : std::min(deterministicRandom()->randomInt(0,6), 3)) );
 	switch (replication_type) {
 	case 0: {
@@ -862,6 +882,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		set_config(format("log_spill:=%d", logSpill));
 		int logVersion = deterministicRandom()->randomInt( TLogVersion::MIN_RECRUITABLE, TLogVersion::MAX_SUPPORTED+1 );
 		set_config(format("log_version:=%d", logVersion));
+		set_config("backup_worker_enabled:=1");
 	} else {
 		if (deterministicRandom()->random01() < 0.7)
 			set_config(format("log_version:=%d", TLogVersion::MAX_SUPPORTED));
@@ -1255,7 +1276,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount%dataCenters);
 		printf("Datacenter %d: %d/%d machines, %d/%d coordinators\n", dc, machines, machineCount, dcCoordinators, coordinatorCount);
 		ASSERT( dcCoordinators <= machines );
-		
+
 		//FIXME: temporarily code to test storage cache
 		//TODO: caching disabled for this merge
 		//if(dc==0) {

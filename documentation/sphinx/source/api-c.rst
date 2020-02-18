@@ -51,8 +51,6 @@
 .. |timeout-database-option| replace:: FIXME
 .. |causal-read-risky-transaction-option| replace:: FIXME
 .. |causal-read-risky-database-option| replace:: FIXME
-.. |include-port-in-address-database-option| replace:: FIXME
-.. |include-port-in-address-transaction-option| replace:: FIXME
 .. |transaction-logging-max-field-length-database-option| replace:: FIXME
 .. |transaction-logging-max-field-length-transaction-option| replace:: FIXME
 
@@ -135,7 +133,7 @@ API versioning
 
 Prior to including ``fdb_c.h``, you must define the ``FDB_API_VERSION`` macro. This, together with the :func:`fdb_select_api_version()` function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is |api-version|. ::
 
-  #define FDB_API_VERSION 620
+  #define FDB_API_VERSION 700
   #include <foundationdb/fdb_c.h>
 
 .. function:: fdb_error_t fdb_select_api_version(int version)

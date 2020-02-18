@@ -460,7 +460,7 @@ void initHelp() {
 		"clear a range of keys from the database",
 		"All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["configure"] = CommandHelp(
-		"configure [new] <single|double|triple|three_data_hall|three_datacenter|ssd|memory|proxies=<PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
+		"configure [new] <single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
 		"change the database configuration",
 		"The `new' option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When used, both a redundancy mode and a storage engine must be specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. Must be at least 1, or set to -1 which restores the number of proxies to the default value.\n\nlogs=<LOGS>: Sets the desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the FoundationDB Administration Guide for more information.");
 	helpMap["fileconfigure"] = CommandHelp(
@@ -1383,7 +1383,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						NetworkAddress parsedAddress;
 						try {
 							parsedAddress = NetworkAddress::parse(address);
-						} catch (Error& e) {
+						} catch (Error&) {
 							// Groups all invalid IP address/port pair in the end of this detail group.
 							line = format("  %-22s (invalid IP address or port)", address.c_str());
 							IPAddress::IPAddressStore maxIp;
@@ -1916,10 +1916,10 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, bool isClusterTLS ) {
 	state StringRef setName;
 	StringRef nameTokenBegin = LiteralStringRef("description=");
-	for(auto t = tokens.begin()+1; t != tokens.end(); ++t)
-		if (t->startsWith(nameTokenBegin)) {
-			setName = t->substr(nameTokenBegin.size());
-			std::copy( t+1, tokens.end(), t );
+	for(auto tok = tokens.begin()+1; tok != tokens.end(); ++tok)
+		if (tok->startsWith(nameTokenBegin)) {
+			setName = tok->substr(nameTokenBegin.size());
+			std::copy( tok+1, tokens.end(), tok );
 			tokens.resize( tokens.size()-1 );
 			break;
 		}
@@ -2377,7 +2377,7 @@ void onoff_generator(const char* text, const char *line, std::vector<std::string
 }
 
 void configure_generator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "proxies=", "logs=", "resolvers=", NULL};
+	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "memory-radixtree-beta", "proxies=", "logs=", "resolvers=", NULL};
 	array_generator(text, line, opts, lc);
 }
 

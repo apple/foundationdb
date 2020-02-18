@@ -782,6 +782,11 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	// Set to true when all backup workers for saving mutation logs have been started.
+	KeyBackedProperty<bool> allWorkerStarted() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	// Stop differntial logging if already started or don't start after completing KV ranges
 	KeyBackedProperty<bool> stopWhenDone() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));

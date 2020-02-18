@@ -585,6 +585,24 @@ bool traceFormatImpl(std::string& format) {
 		return false;
 	}
 }
+
+template <bool validate>
+bool traceClockSource(std::string& source) {
+	std::transform(source.begin(), source.end(), source.begin(), ::tolower);
+	if (source == "now") {
+		if (!validate) {
+			g_trace_clock.store(TRACE_CLOCK_NOW);
+		}
+		return true;
+	} else if (source == "realtime") {
+		if (!validate) {
+			g_trace_clock.store(TRACE_CLOCK_REALTIME);
+		}
+		return true;
+	} else {
+		return false;
+	}
+}
 } // namespace
 
 bool selectTraceFormatter(std::string format) {
@@ -598,6 +616,19 @@ bool selectTraceFormatter(std::string format) {
 
 bool validateTraceFormat(std::string format) {
 	return traceFormatImpl</*validate*/ true>(format);
+}
+
+bool selectTraceClockSource(std::string source) {
+	ASSERT(!g_traceLog.isOpen());
+	bool recognized = traceClockSource</*validate*/ false>(source);
+	if (!recognized) {
+		TraceEvent(SevWarnAlways, "UnrecognizedTraceClockSource").detail("source", source);
+	}
+	return recognized;
+}
+
+bool validateTraceClockSource(std::string source) {
+	return traceClockSource</*validate*/ true>(source);
 }
 
 ThreadFuture<Void> flushTraceFile() {

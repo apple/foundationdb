@@ -61,7 +61,9 @@ Future<Void> monitorProxies( Reference<AsyncVar<Reference<ClusterConnectionFile>
 
 void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::vector<MasterProxyInterface>& lastProxies );
 
+#ifndef __INTEL_COMPILER
 #pragma region Implementation
+#endif
 
 Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Value>> const& outSerializedLeaderInfo );
 
@@ -69,7 +71,7 @@ template <class LeaderInterface>
 struct LeaderDeserializer {
 	Future<Void> operator()(const Reference<AsyncVar<Value>>& serializedInfo,
 							const Reference<AsyncVar<Optional<LeaderInterface>>>& outKnownLeader) {
-		return asyncDeserialize(serializedInfo, outKnownLeader, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
+		return asyncDeserialize(serializedInfo, outKnownLeader);
 	}
 };
 
@@ -93,6 +95,8 @@ Future<Void> monitorLeader(Reference<ClusterConnectionFile> const& connFile,
 	return m || deserializer( serializedInfo, outKnownLeader );
 }
 
+#ifndef __INTEL_COMPILER
 #pragma endregion
+#endif
 
 #endif

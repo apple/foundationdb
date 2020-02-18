@@ -442,12 +442,14 @@ ACTOR Future<Void> getKeyValues( StorageCacheData* data, GetKeyValuesRequest req
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storagecache.getKeyValues.Before");
 		state Version version = wait( waitForVersion( data, req.version ) );
 
+		state KeyRange cachedKeyRange;
 		try {
-		state KeyRange cachedKeyRange = getCachedKeyRange( data, req.begin );
+			cachedKeyRange = getCachedKeyRange(data, req.begin);
 
-		if( req.debugID.present() )
-			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storagecache.getKeyValues.AfterVersion");
-		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
+			if (req.debugID.present())
+				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(),
+				                      "storagecache.getKeyValues.AfterVersion");
+			//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard", "None").detail("In", "getKeyValues>getShardKeyRange"); throw e; }
 
 		if ( !selectorInRange(req.end, cachedKeyRange) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == cachedKeyRange.end) ) {
@@ -806,7 +808,6 @@ ACTOR Future<Void> compactCache(StorageCacheData* data) {
 		//TODO not really in use as of now. may need in some failure cases. Revisit and remove if no plausible use
 		state Promise<Void> compactionInProgress;
 		data->compactionInProgress = compactionInProgress.getFuture();
-		state Version oldestVersion = data->oldestVersion.get();
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		// Call the compaction routine that does the actual work,
 		// TODO It's a synchronous function call as of now. Should it asynch?
