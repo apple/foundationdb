@@ -19,6 +19,7 @@
     <ActorCompiler Include="FlowTests.actor.cpp" />
     <ActorCompiler Include="genericactors.actor.cpp" />
     <ActorCompiler Include="FlowTransport.actor.cpp" />
+    <ActorCompiler Include="HealthMonitor.actor.cpp" />
     <ActorCompiler Include="IAsyncFile.actor.cpp" />
     <ClCompile Include="AsyncFileWriteChecker.cpp" />
     <ClCompile Include="libcoroutine\Common.c" />
@@ -70,6 +71,7 @@
     <ClInclude Include="AsyncFileWriteChecker.h" />
     <ClInclude Include="ContinuousSample.h" />
     <ClInclude Include="FailureMonitor.h" />
+    <ClInclude Include="HealthMonitor.h" />
     <ActorCompiler Include="LoadBalance.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>

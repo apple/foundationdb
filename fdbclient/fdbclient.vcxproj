@@ -48,6 +48,7 @@
     <ClInclude Include="HTTP.h" />
     <ClInclude Include="KeyBackedTypes.h" />
     <ClInclude Include="MetricLogger.h" />
+    <ClInclude Include="HealthMonitorClient.h" />
     <ClInclude Include="IClientApi.h" />
     <ClInclude Include="JsonBuilder.h" />
     <ClInclude Include="JSONDoc.h" />
@@ -110,6 +111,7 @@
     <ActorCompiler Include="BlobStore.actor.cpp" />
     <ActorCompiler Include="DatabaseBackupAgent.actor.cpp" />
     <ClCompile Include="DatabaseConfiguration.cpp" />
+    <ClCompile Include="HealthMonitorClient.actor.cpp" />
     <ClCompile Include="FDBOptions.g.cpp" />
     <ActorCompiler Include="FileBackupAgent.actor.cpp" />
     <ActorCompiler Include="HTTP.actor.cpp" />

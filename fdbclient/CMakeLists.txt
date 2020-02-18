@@ -21,6 +21,8 @@ set(FDBCLIENT_SRCS
   FDBOptions.h
   FDBTypes.h
   FileBackupAgent.actor.cpp
+  HealthMonitorClient.h
+  HealthMonitorClient.actor.cpp
   HTTP.actor.cpp
   IClientApi.h
   JsonBuilder.cpp

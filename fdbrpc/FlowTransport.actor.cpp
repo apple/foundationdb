@@ -28,6 +28,7 @@
 #include "flow/crc32c.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/HealthMonitor.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
@@ -189,6 +190,7 @@ public:
 	std::vector<Future<Void>> listeners;
 	std::unordered_map<NetworkAddress, Reference<struct Peer>> peers;
 	std::unordered_map<NetworkAddress, std::pair<double, double>> closedPeers;
+	HealthMonitor healthMonitor;
 	Reference<AsyncVar<bool>> degraded;
 	bool warnAlwaysForLargePacket;
 
@@ -533,6 +535,10 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 					self->transport->degraded->set(true);
 				}
 				it.second = now();
+			}
+
+			if (self->destination.isPublic() && !FlowTransport::transport().isClient()) {
+				FlowTransport::transport().healthMonitor()->reportPeerClosed(self->destination);
 			}
 
 			if (conn) {
@@ -1315,4 +1321,16 @@ void FlowTransport::createInstance(bool isClient, uint64_t transportId) {
 	g_network->setGlobal(INetwork::enFlowTransport, (flowGlobalType) new FlowTransport(transportId));
 	g_network->setGlobal(INetwork::enNetworkAddressFunc, (flowGlobalType) &FlowTransport::getGlobalLocalAddress);
 	g_network->setGlobal(INetwork::enNetworkAddressesFunc, (flowGlobalType) &FlowTransport::getGlobalLocalAddresses);
+}
+
+HealthMonitor* FlowTransport::healthMonitor() {
+	return &self->healthMonitor;
+}
+
+std::set<NetworkAddress> FlowTransport::getPeers() const {
+	std::set<NetworkAddress> result;
+	for (const auto& it : self->peers) {
+		result.insert(it.first);
+	}
+	return result;
 }

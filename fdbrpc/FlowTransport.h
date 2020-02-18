@@ -23,6 +23,7 @@
 #pragma once
 
 #include <algorithm>
+#include "fdbrpc/HealthMonitor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
@@ -204,6 +205,9 @@ public:
 	static NetworkAddressList getGlobalLocalAddresses() { return transport().getLocalAddresses(); }
 
 	Endpoint loadedEndpoint(const UID& token);
+
+	HealthMonitor* healthMonitor();
+	std::set<NetworkAddress> getPeers() const;
 
 private:
 	class TransportData* self;

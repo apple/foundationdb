@@ -36,6 +36,7 @@ struct ClusterInterface {
 	RequestStream< ReplyPromise<Void> > ping;
 	RequestStream< struct GetClientWorkersRequest > getClientWorkers;
 	RequestStream< struct ForceRecoveryRequest > forceRecovery;
+	RequestStream< struct HealthMonitoringRequest > healthMonitoring;
 
 	bool operator == (ClusterInterface const& r) const { return id() == r.id(); }
 	bool operator != (ClusterInterface const& r) const { return id() != r.id(); }
@@ -48,7 +49,8 @@ struct ClusterInterface {
 		databaseStatus.getFuture().isReady() ||
 		ping.getFuture().isReady() ||
 		getClientWorkers.getFuture().isReady() ||
-		forceRecovery.getFuture().isReady();
+		forceRecovery.getFuture().isReady() ||
+		healthMonitoring.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -58,11 +60,13 @@ struct ClusterInterface {
 		ping.getEndpoint( TaskPriority::ClusterController );
 		getClientWorkers.getEndpoint( TaskPriority::ClusterController );
 		forceRecovery.getEndpoint( TaskPriority::ClusterController );
+		healthMonitoring.getEndpoint( TaskPriority::FailureMonitor );
 	}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, openDatabase, failureMonitoring, databaseStatus, ping, getClientWorkers, forceRecovery);
+		serializer(ar, openDatabase, failureMonitoring, databaseStatus, ping, getClientWorkers, forceRecovery,
+		           healthMonitoring);
 	}
 };
 
@@ -227,6 +231,31 @@ struct FailureMonitoringRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, senderStatus, failureInformationVersion, addresses, reply);
+	}
+};
+
+struct HealthMonitoringReply {
+	constexpr static FileIdentifier file_identifier = 6820326;
+	Version healthInformationVersion;
+	Arena arena;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, healthInformationVersion, arena);
+	}
+};
+
+struct HealthMonitoringRequest {
+	constexpr static FileIdentifier file_identifier = 5867852;
+	Version healthInformationVersion;
+	int lastRequestElapsed;
+	std::map<NetworkAddress, int> closedPeers;
+	std::map<NetworkAddress, bool> peerStatus;
+	ReplyPromise<struct HealthMonitoringReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, lastRequestElapsed, healthInformationVersion, closedPeers, peerStatus, reply);
 	}
 };
 

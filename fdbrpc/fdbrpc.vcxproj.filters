@@ -16,6 +16,7 @@
     <ActorCompiler Include="genericactors.actor.h" />
     <ActorCompiler Include="FailureMonitor.actor.cpp" />
     <ActorCompiler Include="FlowTransport.actor.cpp" />
+    <ActorCompiler Include="HealthMonitor.actor.cpp" />
     <ActorCompiler Include="ActorFuzz.actor.cpp" />
     <ActorCompiler Include="AsyncFileReadAhead.actor.h" />
     <ActorCompiler Include="IAsyncFile.actor.cpp" />
