@@ -160,7 +160,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 	wait(processedFileOffset->whenAtLeast(asset.offset));
 	ASSERT(processedFileOffset->get() == asset.offset);
 
-	BackupStringRefReader reader(buf, restore_corrupted_data());
+	StringRefReader reader(buf, restore_corrupted_data());
 	try {
 		// Read block header
 		if (reader.consume<int32_t>() != PARTITIONED_MLOG_VERSION) throw restore_unsupported_file_version();
@@ -174,7 +174,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 
 			// Deserialize messages written in saveMutationsToFile().
 			Version msgVersion = bigEndian64(reader.consume<Version>());
-			uint32_t sub = bigEndian32(reader.consume<uint32_t>());
+			bigEndian32(reader.consume<uint32_t>()); // subsequence number
 			int msgSize = bigEndian32(reader.consume<int>());
 			const uint8_t* message = reader.consume(msgSize);
 
@@ -576,7 +576,7 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 	std::map<Standalone<StringRef>, uint32_t>& mutationPartMap = *pMutationPartMap;
 	const int key_prefix_len = sizeof(uint8_t) + sizeof(Version) + sizeof(uint32_t);
 
-	BackupStringRefReader readerKey(key_input, restore_corrupted_data()); // read key_input!
+	StringRefReader readerKey(key_input, restore_corrupted_data()); // read key_input!
 	int logRangeMutationFirstLength = key_input.size() - key_prefix_len;
 	bool concatenated = false;
 
@@ -646,13 +646,13 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 		StringRef k = m.first.contents();
 		StringRef val = m.second.contents();
 
-		BackupStringRefReader kReader(k, restore_corrupted_data());
+		StringRefReader kReader(k, restore_corrupted_data());
 		uint64_t commitVersion = kReader.consume<uint64_t>(); // Consume little Endian data
 		// We have already filter the commit not in [beginVersion, endVersion) when we concatenate kv pair in log file
 		ASSERT_WE_THINK(asset.isInVersionRange(commitVersion));
 		kvOps.insert(std::make_pair(commitVersion, MutationsVec()));
 
-		BackupStringRefReader vReader(val, restore_corrupted_data());
+		StringRefReader vReader(val, restore_corrupted_data());
 		vReader.consume<uint64_t>(); // Consume the includeVersion
 		// TODO(xumengpanda): verify the protocol version is compatible and raise error if needed
 
