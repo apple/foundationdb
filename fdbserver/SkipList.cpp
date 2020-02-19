@@ -730,6 +730,7 @@ class BConflicts {
 	absl::btree_map<std::string, Version> btree;
 
 	bool detectConflict(absl::string_view begin, absl::string_view end, Version version) {
+		if (btree.empty()) return false;
 		// Find the highest range that covers the conflict range and then iterate backwards
 		// until we see a conflict or hit the beginning of the range.
 		auto it = btree.lower_bound(end);
@@ -763,7 +764,7 @@ public:
 		// TODO: Try out the job queueing logic from SkipList.
 		for (int i = 0; i < count; i++) {
 			const auto& range = ranges[i];
-			transactionConflictStatus[range.transaction] =
+			transactionConflictStatus[range.transaction] |=
 			    detectConflict(convertRef(range.begin), convertRef(range.end), range.version);
 		}
 	}
@@ -945,7 +946,8 @@ void ConflictBatch::checkReadConflictRanges() {
 	cs->bConflicts.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(), bConflictStatus);
 	for (int i = 0; i < transactionCount; i++) {
 		if (transactionConflictStatus[i] != bConflictStatus[i]) {
-			std::cout << "Skip: " << transactionConflictStatus[i] << " BTree: " << bConflictStatus[i] << std::endl;
+			std::cout << "i: " << i << " Skip: " << transactionConflictStatus[i] << " BTree: " << bConflictStatus[i]
+			          << std::endl;
 		}
 	}
 	delete[] bConflictStatus;
