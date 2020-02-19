@@ -3361,6 +3361,7 @@ ACTOR Future<Void> waitMetrics( StorageServerMetrics* self, WaitMetricsRequest r
 
 			if( timedout ) {
 				TEST( true ); // ShardWaitMetrics return on timeout
+				//FIXME: instead of using random chance, send wrong_shard_server when the call in from waitMetricsMultiple (requires additional information in the request)
 				if(deterministicRandom()->random01() < SERVER_KNOBS->WAIT_METRICS_WRONG_SHARD_CHANCE) {
 					req.reply.sendError( wrong_shard_server() );
 				} else {
