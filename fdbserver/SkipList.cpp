@@ -764,7 +764,10 @@ class BConflicts {
 		}
 
 		// Clear the interior of the range.
-		btree.erase(++begin_it, end_it);
+		++begin_it;
+		if (begin_it != end_it) {
+			btree.erase(begin_it, end_it);
+		}
 	}
 
 public:
