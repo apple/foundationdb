@@ -795,7 +795,8 @@ public:
 	// TODO: Consider using a hint to stop iteration early when we've deleted as many keys as
 	// we could.
 	void removeBefore(Version oldest) {
-		absl::erase_if(btree, [=](std::pair<const std::string, Version>& p) { return p.second < oldest; });
+		// This needs to replicate the logic in the SkipList `removeBefore`.
+		ASSERT(false);
 	}
 };
 
