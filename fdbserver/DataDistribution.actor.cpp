@@ -156,7 +156,7 @@ ACTOR Future<Void> updateServerMetrics( TCServerInfo *server, Database cx ) {
 								tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 								return tr->getReadVersion(); }));
 		Version versionDiff = versionNow - server->serverMetrics.get().version;
-		if(versionDiff > SERVER_KNOBS->DD_SS_FAILURE_VERSIONLAG) { // TODO: Knobbify
+		if(versionDiff > SERVER_KNOBS->DD_SS_FAILURE_VERSIONLAG) {
 			if(server->ssVersionTooFarBehind.get() == false) {
 				TraceEvent(SevInfo, "SSVersionDiffLarge").detail("ServerId", server->id.toString()).detail("VersionNow", versionNow).detail("SSVersion", server->serverMetrics.get().version).detail("Diff", versionDiff);
 				server->ssVersionTooFarBehind.set(true);
@@ -3588,7 +3588,7 @@ ACTOR Future<Void> storageServerTracker(
 					if(server->updated.canBeSet()) {
 						server->updated.send(Void());
 					}
-					
+
 					// Remove server from FF/serverList
 					wait( removeStorageServer( cx, server->id, self->lock ) );
 
