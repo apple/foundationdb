@@ -242,8 +242,7 @@ ACTOR static Future<Void> monitorFinishedVersion(Reference<RestoreMasterData> se
 	loop {
 		TraceEvent("FastRestoreMonitorFinishedVersion", self->id())
 		    .detail("RestoreRequest", request.toString())
-		    .detail("BatchIndex", self->finishedBatch.get())
-		    .detail("Now", now());
+		    .detail("BatchIndex", self->finishedBatch.get());
 		wait(delay(SERVER_KNOBS->FASTRESTORE_VB_MONITOR_DELAY));
 	}
 }

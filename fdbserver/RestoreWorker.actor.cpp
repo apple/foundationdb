@@ -250,7 +250,7 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 // RestoreMaster is the leader
 ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader, Database cx,
                                  RestoreWorkerInterface myWorkerInterf) {
-	wait(delay(5.0));
+	wait(delay(SERVER_KNOBS->FASTRESTORE_MONITOR_LEADER_DELAY));
 	TraceEvent("FastRestoreWorker", myWorkerInterf.id()).detail("MonitorLeader", "StartLeaderElection");
 	state int count = 0;
 	loop {
