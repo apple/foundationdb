@@ -43,6 +43,10 @@
 
 Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef::Type type);
 
+// Key whose mutations are buffered on applier.
+// key, value, type and version defines the parsed mutation at version.
+// pendingMutations has all versioned mutations to be applied.
+// Mutations in pendingMutations whose version is below the version in StagingKey can be ignored in applying phase.
 struct StagingKey {
 	Key key; // TODO: Maybe not needed?
 	Value val;
@@ -87,6 +91,7 @@ struct StagingKey {
 		} // else  input mutation is old and can be ignored
 	}
 
+	// Precompute the final value of the key.
 	void precomputeResult() {
 		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult")
 		    .detail("Key", key)
@@ -164,6 +169,8 @@ struct StagingKey {
 	int expectedMutationSize() { return key.size() + val.size(); }
 };
 
+// The range mutation received on applier.
+// Range mutations should be applied both to the destination DB and to the StagingKeys
 struct StagingKeyRange {
 	Standalone<MutationRef> mutation;
 	Version version;

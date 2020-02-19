@@ -131,7 +131,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 
 		for (int mIndex = 0; mIndex < mutations.size(); mIndex++) {
 			MutationRef mutation = mutations[mIndex];
-			TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseReceiveMutations")
+			TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 			    .detail("ApplierNode", self->id())
 			    .detail("RestoreAsset", req.asset.toString())
 			    .detail("Version", commitVersion)
@@ -195,7 +195,6 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 ACTOR static Future<Void> getAndComputeStagingKeys(
     std::map<Key, std::map<Key, StagingKey>::iterator> imcompleteStagingKeys, Database cx, UID applierID) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	// state std::vector<std::pair<Key, Future<Optional<Value>>>> fKVs;
 	state std::vector<Future<Optional<Value>>> fValues;
 	state std::vector<Optional<Value>> values;
 	state int i = 0;
@@ -207,8 +206,6 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (auto& key : imcompleteStagingKeys) {
-				// fKVs.push_back(std::make_pair(key.first, tr->get(key.first)));
-				// fValues.push_back(fKVs.back().second);
 				fValues.push_back(tr->get(key.first));
 			}
 			for (i = 0; i < fValues.size(); i++) {
@@ -227,7 +224,6 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	}
 
 	ASSERT(values.size() == imcompleteStagingKeys.size());
-	// TODO: Optimize the performance by reducing map lookup: making getKey's future a field in the input map
 	int i = 0;
 	for (auto& key : imcompleteStagingKeys) {
 		if (!values[i].present()) {
