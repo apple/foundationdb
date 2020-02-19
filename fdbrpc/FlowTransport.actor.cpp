@@ -1099,7 +1099,7 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 		return;
 
 	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
-	
+
 	if(peer->peerReferences == -1) {
 		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 		peer->peerReferences = 1;

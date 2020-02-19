@@ -73,6 +73,36 @@ ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req,
 	return Void();
 }
 
+void updateProcessStats(Reference<RestoreRoleData> self) {
+	if (g_network->isSimulated()) {
+		// memUsage and cpuUsage are not relevant in the simulator,
+		// and relying on the actual values could break seed determinism
+		self->cpuUsage = 100.0;
+		self->memory = 100.0;
+		self->residentMemory = 100.0;
+		return;
+	}
+
+	SystemStatistics sysStats = getSystemStatistics();
+	if (sysStats.initialized) {
+		self->cpuUsage = 100 * sysStats.processCPUSeconds / sysStats.elapsed;
+		self->memory = sysStats.processMemory;
+		self->residentMemory = sysStats.processResidentMemory;
+	}
+}
+
+ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role) {
+	loop {
+		TraceEvent("FastRestoreTraceProcessMetrics")
+		    .detail("Role", role)
+		    .detail("Node", self->nodeID)
+		    .detail("CpuUsage", self->cpuUsage)
+		    .detail("UsedMemory", self->memory)
+		    .detail("ResidentMemory", self->residentMemory);
+		wait(delay(SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY));
+	}
+}
+
 //-------Helper functions
 std::string getHexString(StringRef input) {
 	std::stringstream ss;

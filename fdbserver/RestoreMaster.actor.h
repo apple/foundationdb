@@ -100,10 +100,15 @@ struct MasterBatchData : public ReferenceCounted<MasterBatchData> {
 		return ret;
 	}
 
-	void logApplierKeyRange() {
-		TraceEvent("FastRestore").detail("ApplierKeyRangeNum", rangeToApplier.size());
+	void logApplierKeyRange(int batchIndex) {
+		TraceEvent("FastRestoreLogApplierKeyRange")
+		    .detail("BatchIndex", batchIndex)
+		    .detail("ApplierKeyRangeNum", rangeToApplier.size());
 		for (auto& applier : rangeToApplier) {
-			TraceEvent("FastRestore").detail("KeyRangeLowerBound", applier.first).detail("Applier", applier.second);
+			TraceEvent("FastRestoreLogApplierKeyRange")
+			    .detail("BatchIndex", batchIndex)
+			    .detail("KeyRangeLowerBound", applier.first)
+			    .detail("Applier", applier.second);
 		}
 	}
 };

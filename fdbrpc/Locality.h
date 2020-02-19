@@ -70,7 +70,7 @@ public:
 		else if (s=="log") _class = LogClass;
 		else if (s=="router") _class = LogRouterClass;
 		else if (s=="cluster_controller") _class = ClusterControllerClass;
-		else if (s == "fast_restore") _class = FastRestoreClass;
+		else if (s=="fast_restore") _class = FastRestoreClass;
 		else if (s=="data_distributor") _class = DataDistributorClass;
 		else if (s=="coordinator") _class = CoordinatorClass;
 		else if (s=="ratekeeper") _class = RatekeeperClass;

@@ -526,7 +526,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 		}
 
 		wait(test);
-		
+
 		endRole(Role::TESTER, workIface.id(), "Complete");
 	} catch (Error& e) {
 		if (!replied) {

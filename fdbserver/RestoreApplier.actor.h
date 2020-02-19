@@ -46,10 +46,32 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	Optional<Future<Void>> dbApplier;
 	VersionedMutationsMap kvOps; // Mutations at each version
 
+	Future<Void> pollMetrics;
+
+	// Status counters
+	struct Counters {
+		CounterCollection cc;
+		Counter receivedBytes, receivedWeightedBytes, receivedMutations, receivedAtomicOps;
+		Counter appliedWeightedBytes, appliedMutations, appliedAtomicOps;
+		Counter appliedTxns;
+
+		Counters(ApplierBatchData* self, UID applierInterfID, int batchIndex)
+		  : cc("ApplierBatch", applierInterfID.toString() + ":" + std::to_string(batchIndex)),
+		    receivedBytes("ReceivedBytes", cc), receivedMutations("ReceivedMutations", cc),
+		    receivedAtomicOps("ReceivedAtomicOps", cc), receivedWeightedBytes("ReceivedWeightedMutations", cc),
+		    appliedWeightedBytes("AppliedWeightedBytes", cc), appliedMutations("AppliedMutations", cc),
+		    appliedAtomicOps("AppliedAtomicOps", cc), appliedTxns("AppliedTxns", cc) {}
+	} counters;
+
 	void addref() { return ReferenceCounted<ApplierBatchData>::addref(); }
 	void delref() { return ReferenceCounted<ApplierBatchData>::delref(); }
 
-	ApplierBatchData() = default;
+	explicit ApplierBatchData(UID nodeID, int batchIndex) : counters(this, nodeID, batchIndex) {
+		pollMetrics =
+		    traceCounters("FastRestoreApplierMetrics", nodeID, SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
+		                  &counters.cc, nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
+		TraceEvent("FastRestoreApplierMetricsCreated").detail("Node", nodeID);
+	}
 	~ApplierBatchData() = default;
 
 	void reset() {
@@ -116,7 +138,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 
 	void initVersionBatch(int batchIndex) {
 		TraceEvent("FastRestoreApplierInitVersionBatch", id()).detail("BatchIndex", batchIndex);
-		batch[batchIndex] = Reference<ApplierBatchData>(new ApplierBatchData());
+		batch[batchIndex] = Reference<ApplierBatchData>(new ApplierBatchData(nodeID, batchIndex));
 	}
 
 	void resetPerRestoreRequest() {
