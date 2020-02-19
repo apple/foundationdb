@@ -782,7 +782,7 @@ public:
 	void removeBefore(Version oldest) {
 		absl::erase_if(btree, [=](std::pair<const std::string, Version>& p) { return p.second < oldest; });
 	}
-}
+};
 
 #include "fdbserver/ConflictSet.h"
 
