@@ -213,6 +213,11 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 				samplesIter->second.push_back_deep(samplesIter->second.arena(), mutation);
 			}
 		}
+
+		// Make sure any remaining bytes in the block are 0xFF
+		for (auto b : reader.remainder()) {
+			if (b != 0xFF) throw restore_corrupted_data_padding();
+		}
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FileRestoreCorruptLogFileBlock")
 		    .error(e)
