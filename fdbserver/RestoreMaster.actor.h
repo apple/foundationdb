@@ -231,19 +231,17 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			}
 			++rangeIdx;
 		}
-		int logIdx = 0;
 		std::vector<RestoreFileFR> retLogs;
 		// Scan all logFiles every time to avoid assumption on log files' version ranges.
 		// For example, we do not assume each version range only exists in one log file
-		while (logIdx < logFiles.size()) {
-			Version begin = std::max(prevVersion, logFiles[logIdx].beginVersion);
-			Version end = std::min(nextVersion, logFiles[logIdx].endVersion);
+		for (const auto& file : logFiles) {
+			Version begin = std::max(prevVersion, file.beginVersion);
+			Version end = std::min(nextVersion, file.endVersion);
 			if (begin < end) { // logIdx file overlap in [prevVersion, nextVersion)
-				double ratio = (end - begin) * 1.0 / (logFiles[logIdx].endVersion - logFiles[logIdx].beginVersion);
-				size += logFiles[logIdx].fileSize * ratio;
-				retLogs.push_back(logFiles[logIdx]);
+				double ratio = (end - begin) * 1.0 / (file.endVersion - file.beginVersion);
+				size += file.fileSize * ratio;
+				retLogs.push_back(file);
 			}
-			++logIdx;
 		}
 		return std::make_tuple(size, rangeIdx, retLogs);
 	}
