@@ -174,7 +174,7 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	state int numTries = 0;
 	state int restoreIndex = 0;
 
-	TraceEvent("FastRestoreMasterWaitOnRestoreRequests", masterData->id());
+	TraceEvent("FastRestoreMasterWaitOnRestoreRequests", self->id());
 
 	// lock DB for restore
 	numTries = 0;
@@ -187,10 +187,10 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(checkDatabaseLock(tr, randomUID));
-			TraceEvent("FastRestoreMasterProcessRestoreRequests", masterData->id()).detail("DBIsLocked", randomUID);
+			TraceEvent("FastRestoreMasterProcessRestoreRequests", self->id()).detail("DBIsLocked", randomUID);
 			break;
 		} catch (Error& e) {
-			TraceEvent("FastRestoreMasterProcessRestoreRequests", masterData->id()).detail("CheckLockError", e.what());
+			TraceEvent("FastRestoreMasterProcessRestoreRequests", self->id()).detail("CheckLockError", e.what());
 			TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreMayFail")
 			    .detail("Reason", "DB is not properly locked")
 			    .detail("ExpectedLockID", randomUID);
@@ -205,7 +205,7 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	try {
 		for (restoreIndex = 0; restoreIndex < restoreRequests.size(); restoreIndex++) {
 			RestoreRequest& request = restoreRequests[restoreIndex];
-			TraceEvent("FastRestoreMasterProcessRestoreRequests", masterData->id())
+			TraceEvent("FastRestoreMasterProcessRestoreRequests", self->id())
 			    .detail("RestoreRequestInfo", request.toString());
 			// TODO: Initialize MasterData and all loaders and appliers' data for each restore request!
 			self->resetPerRestoreRequest();
@@ -214,10 +214,10 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 		}
 	} catch (Error& e) {
 		if (restoreIndex < restoreRequests.size()) {
-			TraceEvent(SevError, "FastRestoreMasterProcessRestoreRequestsFailed")
+			TraceEvent(SevError, "FastRestoreMasterProcessRestoreRequestsFailed", self->id())
 			    .detail("RestoreRequest", restoreRequests[restoreIndex].toString());
 		} else {
-			TraceEvent(SevError, "FastRestoreMasterProcessRestoreRequestsFailed")
+			TraceEvent(SevError, "FastRestoreMasterProcessRestoreRequestsFailed", self->id())
 			    .detail("RestoreRequests", restoreRequests.size())
 			    .detail("RestoreIndex", restoreIndex);
 		}
@@ -229,7 +229,7 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	try {
 		wait(unlockDatabase(cx, randomUID));
 	} catch (Error& e) {
-		TraceEvent(SevError, "FastRestoreMasterUnlockDBFailed").detail("UID", randomUID.toString());
+		TraceEvent(SevError, "FastRestoreMasterUnlockDBFailed", self->id()).detail("UID", randomUID.toString());
 		ASSERT_WE_THINK(false); // This unlockDatabase should always succeed, we think.
 	}
 
