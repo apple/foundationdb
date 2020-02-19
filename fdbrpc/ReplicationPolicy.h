@@ -119,6 +119,8 @@ struct PolicyAcross : IReplicationPolicy, public ReferenceCounted<PolicyAcross> 
 	explicit PolicyAcross(const PolicyAcross& other) : PolicyAcross(other._count, other._attribKey, other._policy) {}
 	virtual ~PolicyAcross();
 	virtual std::string name() const { return "Across"; }
+	std::string embeddedPolicyName() const { return _policy->name(); }
+	int getCount() const { return _count; }
 	virtual std::string info() const { return format("%s^%d x ", _attribKey.c_str(), _count) + _policy->info(); }
 	virtual int maxResults() const { return _count * _policy->maxResults(); }
 	virtual int depth() const { return 1 + _policy->depth(); }

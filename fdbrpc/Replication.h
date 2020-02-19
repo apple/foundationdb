@@ -253,7 +253,7 @@ public:
 
 		while (nRandomItems > 0)
 		{
-			if (nItemsLeft <= 0) {
+			if (nRandomItems > nItemsLeft || nItemsLeft <= 0) {
 				bComplete = false;
 				break;
 			}
@@ -478,6 +478,8 @@ public:
 	{	return _localitygroup->getGroupKeyMap(); }
 
 	Reference<StringToIntMap> _keymap;
+
+	virtual std::vector<std::vector<AttribValue>> const& getKeyValueArray() const { return _keyValueArray; }
 
 protected:
 	virtual Reference<StringToIntMap>&	getGroupValueMap()
