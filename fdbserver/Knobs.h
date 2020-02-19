@@ -171,7 +171,9 @@ public:
 	int DD_EXCLUDE_MIN_REPLICAS;
 	bool DD_VALIDATE_LOCALITY;
 	int DD_CHECK_INVALID_LOCALITY_DELAY;
-
+	int64_t DD_SS_FAILURE_VERSIONLAG;
+	int64_t DD_SS_ALLOWED_VERSIONLAG;
+	
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
 	double TR_REMOVE_MACHINE_TEAM_DELAY; // wait for the specified time before try to remove next machine team
