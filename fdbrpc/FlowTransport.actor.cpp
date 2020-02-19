@@ -1118,7 +1118,7 @@ void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream)
 				.detail("Address", endpoint.getPrimaryAddress())
 				.detail("Token", endpoint.token);
 		}
-		if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty() && peer->outstandingReplies==0) {
+		if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty() && peer->outstandingReplies==0 && peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY) {
 			peer->resetPing.trigger();
 		}
 	}
