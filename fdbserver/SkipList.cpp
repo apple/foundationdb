@@ -714,28 +714,6 @@ StringRef setK(Arena& arena, int i) {
 	return StringRef((const uint8_t*)ss, keySize);
 }
 
-#include "fdbserver/ConflictSet.h"
-
-struct ConflictSet {
-	ConflictSet() : oldestVersion(0) {}
-	~ConflictSet() {}
-
-	SkipList versionHistory;
-	Key removalKey;
-	Version oldestVersion;
-	BConflicts bConflicts;
-};
-
-ConflictSet* newConflictSet() {
-	return new ConflictSet;
-}
-void clearConflictSet(ConflictSet* cs, Version v) {
-	SkipList(v).swap(cs->versionHistory);
-}
-void destroyConflictSet(ConflictSet* cs) {
-	delete cs;
-}
-
 // TODO: Write a comparator that works with StringRef.
 absl::string_view convertRef(const StringRef& ref) {
 	return absl::string_view(reinterpret_cast<const char*>(ref.begin()), ref.size());
@@ -777,7 +755,7 @@ class BConflicts {
 		// Find the first node inside of the range, so that we can clear the range without
 		// deleting a node referencing a range below.
 		auto begin_it = btree.upper_bound(begin);
-		btree.remove(begin_it, end_it);
+		btree.erase(begin_it, end_it);
 	}
 
 public:
@@ -804,6 +782,28 @@ public:
 	void removeBefore(Version oldest) {
 		absl::erase_if(btree, [=](std::pair<const std::string, Version>& p) { return p.second < oldest; });
 	}
+}
+
+#include "fdbserver/ConflictSet.h"
+
+struct ConflictSet {
+	ConflictSet() : oldestVersion(0) {}
+	~ConflictSet() {}
+
+	SkipList versionHistory;
+	Key removalKey;
+	Version oldestVersion;
+	BConflicts bConflicts;
+};
+
+ConflictSet* newConflictSet() {
+	return new ConflictSet;
+}
+void clearConflictSet(ConflictSet* cs, Version v) {
+	SkipList(v).swap(cs->versionHistory);
+}
+void destroyConflictSet(ConflictSet* cs) {
+	delete cs;
 }
 
 ConflictBatch::ConflictBatch(ConflictSet* cs)
