@@ -26,7 +26,13 @@
 #include <string>
 #include <vector>
 #include <openssl/x509.h>
+#include <boost/system/system_error.hpp>
 #include "flow/FastRef.h"
+
+struct TLSParams {
+	std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
+	std::string tlsCertBytes, tlsKeyBytes, tlsCABytes;
+};
 
 typedef int NID;
 
@@ -69,17 +75,23 @@ public:
 		SERVER
 	};
 
-	bool set_verify_peers(std::vector<std::string> verify_peers);
-	bool verify_peer(bool preverified, X509_STORE_CTX* store_ctx);
-
 	TLSPolicy(Is client) : is_client(client == Is::CLIENT) {}
 	virtual ~TLSPolicy();
 
 	virtual void addref() { ReferenceCounted<TLSPolicy>::addref(); }
 	virtual void delref() { ReferenceCounted<TLSPolicy>::delref(); }
 
+	static std::string ErrorString(boost::system::error_code e);
+
+	bool set_verify_peers(std::vector<std::string> verify_peers);
+	bool verify_peer(bool preverified, X509_STORE_CTX* store_ctx);
+
+	std::string toString() const;
+
 	struct Rule {
 		explicit Rule(std::string input);
+
+		std::string toString() const;
 
 		std::map< NID, Criteria > subject_criteria;
 		std::map< NID, Criteria > issuer_criteria;

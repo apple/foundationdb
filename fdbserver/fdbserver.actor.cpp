@@ -966,7 +966,7 @@ int main(int argc, char* argv[]) {
 
 		boost::asio::ssl::context sslContext(boost::asio::ssl::context::tlsv12);
 		Reference<TLSPolicy> tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(TLSPolicy::Is::SERVER));
-		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
+		TLSParams tlsParams;
 		std::vector<std::string> tlsVerifyPeers;
 		double fileIoTimeout = 0.0;
 		bool fileIoWarnOnly = false;
@@ -1339,16 +1339,16 @@ int main(int argc, char* argv[]) {
 					args.OptionArg();
 					break;
 				case TLSOptions::OPT_TLS_CERTIFICATES:
-					tlsCertPath = args.OptionArg();
+					tlsParams.tlsCertPath = args.OptionArg();
 					break;
 				case TLSOptions::OPT_TLS_PASSWORD:
-					tlsPassword = args.OptionArg();
+					tlsParams.tlsPassword = args.OptionArg();
 					break;
 				case TLSOptions::OPT_TLS_CA_FILE:
-					tlsCAPath = args.OptionArg();
+					tlsParams.tlsCAPath = args.OptionArg();
 					break;
 				case TLSOptions::OPT_TLS_KEY:
-					tlsKeyPath = args.OptionArg();
+					tlsParams.tlsKeyPath = args.OptionArg();
 					break;
 				case TLSOptions::OPT_TLS_VERIFY_PEERS:
 					tlsVerifyPeers.push_back(args.OptionArg());
@@ -1556,21 +1556,11 @@ int main(int argc, char* argv[]) {
 			openTraceFile(NetworkAddress(), rollsize, maxLogsSize, logFolder, "trace", logGroup);
 		} else {
 #ifndef TLS_DISABLED
-			if ( tlsCertPath.size() ) {
-				sslContext.use_certificate_chain_file(tlsCertPath);
-			}
-			if (tlsCAPath.size()) {
-				std::string cert = readFileBytes(tlsCAPath, CERT_FILE_MAX_SIZE);
-				sslContext.add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
-			}
-			if (tlsKeyPath.size()) {
-				sslContext.use_private_key_file(tlsKeyPath, boost::asio::ssl::context::pem);
-			}
 			if ( tlsVerifyPeers.size() ) {
 			  tlsPolicy->set_verify_peers( tlsVerifyPeers );
 			}
 #endif
-			g_network = newNet2(&sslContext, useThreadPool, true, tlsPolicy, tlsPassword);
+			g_network = newNet2(&sslContext, useThreadPool, true, tlsPolicy, tlsParams);
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
