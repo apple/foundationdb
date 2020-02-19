@@ -727,7 +727,6 @@ absl::string_view convertRef(const StringRef& ref) {
 // containing progressively smaller ranges.
 class BConflicts {
 	// TODO: Consider a string type that uses the fast allocation path.
-	absl::btree_map<std::string, Version> btree;
 
 	bool detectConflict(absl::string_view begin, absl::string_view end, Version version) {
 		if (btree.empty()) return false;
@@ -743,23 +742,34 @@ class BConflicts {
 		return false;
 	}
 
+	// Adds new nodes to set the range (begin, end] equal to `now`.
 	void addConflictRange(Version now, absl::string_view begin, absl::string_view end) {
+		// Insert a node (if needed) to truncate the range from below.
+		auto begin_it = btree.lower_bound(begin);
+		if (begin_it == btree.end()) {
+			// If `begin` is not currently covered by a range, set the version to 0.
+			begin_it = btree.insert(begin_it, { std::string(begin), 0 })
+		} else if (begin_it->first != begin) {
+			// If the `begin` is covered but not an endpoint, set `begin` to the old range
+			// value.
+			begin_it = btree.insert(begin_it, { std::string(begin), begin_it->second })
+		}
+
+		// Insert or update the node for `end`.
 		auto end_it = btree.lower_bound(end);
 		if (end_it != btree.end() && end_it->first == end) {
-			// We already have a node for the endpoint, simply update it.
 			end_it->second = now;
 		} else {
-			// If the range is not currently covered, insert a range at the end.
 			end_it = btree.insert(end_it, { std::string(end), now });
 		}
 
-		// Find the first node inside of the range, so that we can clear the range without
-		// deleting a node referencing a range below.
-		auto begin_it = btree.upper_bound(begin);
-		btree.erase(begin_it, end_it);
+		// Clear the interior of the range.
+		btree.erase(++begin_it, end_it);
 	}
 
 public:
+	absl::btree_map<std::string, Version> btree;
+
 	void detectConflicts(ReadConflictRange* ranges, int count, bool* transactionConflictStatus) {
 		// TODO: Try out the job queueing logic from SkipList.
 		for (int i = 0; i < count; i++) {
@@ -893,6 +903,8 @@ void ConflictBatch::GetTooOldTransactions(std::vector<int>& tooOldTransactions) 
 
 void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::vector<int>& nonConflicting,
                                     std::vector<int>* tooOldTransactions) {
+	std::cout << "Skip: " << cs->versionHistory.count() << " BTree: " << cs->bConflicts.btree.size() << std::endl;
+
 	double t = timer();
 	sortPoints(points);
 	g_sort += timer() - t;
