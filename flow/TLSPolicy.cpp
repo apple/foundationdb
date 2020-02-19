@@ -37,8 +37,45 @@
 #include "flow/Trace.h"
 #include "flow/TLSPolicy.h"
 
+std::string TLSPolicy::ErrorString(boost::system::error_code e) {
+	char* str = ERR_error_string(e.value(), NULL);
+	return std::string(str);
+}
+
 // To force typeinfo to only be emitted once.
 TLSPolicy::~TLSPolicy() {}
+
+std::string TLSPolicy::toString() const {
+	std::stringstream ss;
+	ss << "TLSPolicy{ Rules=[";
+	for (const auto &r : rules) {
+		ss << " " << r.toString() << ",";
+	}
+	ss << " ] }";
+	return ss.str();
+}
+
+std::string TLSPolicy::Rule::toString() const {
+	std::stringstream ss;
+
+	ss << "Rule{ verify_cert=" << verify_cert
+		 << ", verify_time=" << verify_time;
+	ss << ", Subject=[";
+	for (const auto& s : subject_criteria) {
+		ss << " { NID=" << s.first << ", Criteria=" << s.second.criteria << "},";
+	}
+	ss << " ], Issuer=[";
+	for (const auto& s : issuer_criteria) {
+		ss << " { NID=" << s.first << ", Criteria=" << s.second.criteria << "},";
+	}
+	ss << " ], Root=[";
+	for (const auto& s : root_criteria) {
+		ss << " { NID=" << s.first << ", Criteria=" << s.second.criteria << "},";
+	}
+	ss << " ] }";
+
+	return ss.str();
+}
 
 static int hexValue(char c) {
 	static char const digits[] = "0123456789ABCDEF";
@@ -456,10 +493,12 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 	std::string verify_failure_reason;
 
 	// If certificate verification is disabled, there's nothing more to do.
-	if (std::any_of(rules.begin(), rules.end(), [](const Rule& r){ return r.verify_cert; }))
+	if (std::any_of(rules.begin(), rules.end(), [](const Rule& r){ return !r.verify_cert; })) {
 		return true;
+	}
 
 	if(!preverified) {
+		TraceEvent("TLSPolicyFailure").suppressFor(1.0).detail("Reason", "preverification failed").detail("VerifyError", X509_verify_cert_error_string(X509_STORE_CTX_get_error(store_ctx)));
 		return false;
 	}
 

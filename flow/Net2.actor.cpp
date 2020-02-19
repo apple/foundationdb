@@ -113,7 +113,7 @@ thread_local INetwork* thread_network = 0;
 class Net2 sealed : public INetwork, public INetworkConnections {
 
 public:
-	Net2(bool useThreadPool, bool useMetrics, boost::asio::ssl::context* sslContext, std::string tlsPassword);
+	Net2(bool useThreadPool, bool useMetrics, boost::asio::ssl::context* sslContext, const TLSParams& tlsParams);
 	void run();
 	void initMetrics();
 
@@ -253,7 +253,7 @@ public:
 		try {
 			if (error) {
 				// Log the error...
-				TraceEvent(SevWarn, errContext, errID).suppressFor(1.0).detail("Message", error.value());
+				TraceEvent(SevWarn, errContext, errID).suppressFor(1.0).detail("Message", error.value()).detail("WhichMeans", TLSPolicy::ErrorString(error));
 				p.sendError( connection_failed() );
 			} else
 				p.send( Void() );
@@ -828,7 +828,11 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	}
 };
 
-Net2::Net2(bool useThreadPool, bool useMetrics, boost::asio::ssl::context* sslContext, std::string tlsPassword)
+// 5MB for loading files into memory
+// TODO: Move to a headerfile and delete all the copies of this.
+#define CERT_FILE_MAX_SIZE (5 * 1024 * 1024)
+
+Net2::Net2(bool useThreadPool, bool useMetrics, boost::asio::ssl::context* sslContext, const TLSParams& tlsParams)
 	: useThreadPool(useThreadPool),
 	  network(this),
 	  reactor(this),
@@ -839,12 +843,32 @@ Net2::Net2(bool useThreadPool, bool useMetrics, boost::asio::ssl::context* sslCo
 	  lastMinTaskID(TaskPriority::Zero),
 	  numYields(0),
 	  sslContext(sslContext),
-	  tlsPassword(tlsPassword)
+	  tlsPassword(tlsParams.tlsPassword)
 {
 	TraceEvent("Net2Starting");
 
 	if(sslContext) {
 		sslContext->set_password_callback(std::bind(&Net2::get_password, this));
+
+		if (tlsParams.tlsCertPath.size() ) {
+			sslContext->use_certificate_chain_file(tlsParams.tlsCertPath);
+		}
+		if (tlsParams.tlsCertBytes.size() ) {
+			sslContext->use_certificate(boost::asio::buffer(tlsParams.tlsCertBytes.data(), tlsParams.tlsCertBytes.size()), boost::asio::ssl::context::pem);
+		}
+		if (tlsParams.tlsCAPath.size()) {
+			std::string cert = readFileBytes(tlsParams.tlsCAPath, CERT_FILE_MAX_SIZE);
+			sslContext->add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
+		}
+		if (tlsParams.tlsCABytes.size()) {
+			sslContext->add_certificate_authority(boost::asio::buffer(tlsParams.tlsCABytes.data(), tlsParams.tlsCABytes.size()));
+		}
+		if (tlsParams.tlsKeyPath.size()) {
+			sslContext->use_private_key_file(tlsParams.tlsKeyPath, boost::asio::ssl::context::pem);
+		}
+		if (tlsParams.tlsKeyBytes.size()) {
+			sslContext->use_private_key(boost::asio::buffer(tlsParams.tlsKeyBytes.data(), tlsParams.tlsKeyBytes.size()), boost::asio::ssl::context::pem);
+		}
 	}
 
 	// Set the global members
@@ -1401,7 +1425,7 @@ bool insecurely_always_accept(bool _1, boost::asio::ssl::verify_context& _2) {
 	return true;
 }
 
-INetwork* newNet2(boost::asio::ssl::context* sslContext, bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, std::string tlsPassword) {
+INetwork* newNet2(boost::asio::ssl::context* sslContext, bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, const TLSParams& tlsParams) {
 	try {
 		sslContext->set_options(boost::asio::ssl::context::default_workarounds);
 		sslContext->set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
@@ -1412,7 +1436,7 @@ INetwork* newNet2(boost::asio::ssl::context* sslContext, bool useThreadPool, boo
 		} else {
 			sslContext->set_verify_callback(boost::bind(&insecurely_always_accept, _1, _2));
 		}
-		N2::g_net2 = new N2::Net2(useThreadPool, useMetrics, sslContext, tlsPassword);
+		N2::g_net2 = new N2::Net2(useThreadPool, useMetrics, sslContext, tlsParams);
 	}
 	catch(boost::system::system_error e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());

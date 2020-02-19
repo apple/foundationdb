@@ -70,6 +70,7 @@ using std::pair;
 #define CERT_FILE_MAX_SIZE (5 * 1024 * 1024)
 
 NetworkOptions networkOptions;
+TLSParams tlsParams;
 static Reference<TLSPolicy> tlsPolicy;
 
 static void initTLSPolicy() {
@@ -890,38 +891,34 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			break;
 		case FDBNetworkOptions::TLS_CERT_PATH:
 			validateOptionValue(value, true);
-			networkOptions.sslContext.use_certificate_chain_file(value.get().toString());
+			tlsParams.tlsCertPath = value.get().toString();
 			break;
 		case FDBNetworkOptions::TLS_CERT_BYTES: {
 			validateOptionValue(value, true);
-			std::string cert = value.get().toString();
-			networkOptions.sslContext.use_certificate(boost::asio::buffer(cert.data(), cert.size()), boost::asio::ssl::context::pem);
+			tlsParams.tlsCertBytes = value.get().toString();
 			break;
 		}
 		case FDBNetworkOptions::TLS_CA_PATH: {
 			validateOptionValue(value, true);
-			std::string cert = readFileBytes(value.get().toString(), CERT_FILE_MAX_SIZE);
-			networkOptions.sslContext.add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
+			tlsParams.tlsCAPath = value.get().toString();
 			break;
 		}
 		case FDBNetworkOptions::TLS_CA_BYTES: {
 			validateOptionValue(value, true);
-			std::string cert = value.get().toString();
-			networkOptions.sslContext.add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
+			tlsParams.tlsCABytes = value.get().toString();
 			break;
 		}
 		case FDBNetworkOptions::TLS_PASSWORD:
 			validateOptionValue(value, true);
-			networkOptions.tlsPassword = value.get().toString();
+			tlsParams.tlsPassword = value.get().toString();
 			break;
 		case FDBNetworkOptions::TLS_KEY_PATH:
 			validateOptionValue(value, true);		
-			networkOptions.sslContext.use_private_key_file(value.get().toString(), boost::asio::ssl::context::pem);
+			tlsParams.tlsKeyPath = value.get().toString();
 			break;
 		case FDBNetworkOptions::TLS_KEY_BYTES: {
 			validateOptionValue(value, true);
-			std::string cert = value.get().toString();
-			networkOptions.sslContext.use_private_key(boost::asio::buffer(cert.data(), cert.size()), boost::asio::ssl::context::pem);
+			tlsParams.tlsKeyBytes = value.get().toString();
 			break;
 		}
 		case FDBNetworkOptions::TLS_VERIFY_PEERS:
@@ -991,7 +988,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 
 	initTLSPolicy();
 
-	g_network = newNet2(&networkOptions.sslContext, false, useMetrics || networkOptions.traceDirectory.present(), tlsPolicy, networkOptions.tlsPassword);
+	g_network = newNet2(&networkOptions.sslContext, false, useMetrics || networkOptions.traceDirectory.present(), tlsPolicy, tlsParams);
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
 }
