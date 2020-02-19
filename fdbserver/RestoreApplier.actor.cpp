@@ -34,8 +34,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR static Future<Void> handleSendMutationVectorRequestV2(RestoreSendVersionedMutationsRequest req,
-                                                            Reference<RestoreApplierData> self);
+ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
+                                                          Reference<RestoreApplierData> self);
 ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self,
                                                  Database cx);
 
@@ -60,7 +60,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 				when(RestoreSendVersionedMutationsRequest req =
 				         waitNext(applierInterf.sendMutationVector.getFuture())) {
 					requestTypeStr = "sendMutationVector";
-					actors.add(handleSendMutationVectorRequestV2(req, self));
+					actors.add(handleSendMutationVectorRequest(req, self));
 				}
 				when(RestoreVersionBatchRequest req = waitNext(applierInterf.applyToDB.getFuture())) {
 					requestTypeStr = "applyToDB";
@@ -101,8 +101,8 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 // No race condition as long as we do not wait or yield when operate the shared data.
 // Multiple such actors can run on different fileIDs, because mutations in different files belong to different versions;
 // Only one actor can process mutations from the same file
-ACTOR static Future<Void> handleSendMutationVectorRequestV2(RestoreSendVersionedMutationsRequest req,
-                                                            Reference<RestoreApplierData> self) {
+ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
+                                                          Reference<RestoreApplierData> self) {
 	state Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
 	// Assume: processedFileState[req.asset] will not be erased while the actor is active.
 	// Note: Insert new items into processedFileState will not invalidate the reference.
@@ -421,7 +421,9 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 	return Void();
 }
 
-ACTOR Future<Void> applyToDBV2(UID applierID, int64_t batchIndex, Reference<ApplierBatchData> batchData, Database cx) {
+// Write mutations to the destination DB
+ACTOR Future<Void> writeMutationsToDB(UID applierID, int64_t batchIndex, Reference<ApplierBatchData> batchData,
+                                      Database cx) {
 	TraceEvent("FastRestoreApplerPhaseApplyTxn", applierID).detail("BatchIndex", batchIndex);
 	wait(precomputeMutationsResult(batchData, applierID, batchIndex, cx));
 
@@ -447,7 +449,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 		if (!batchData->dbApplier.present()) {
 			isDuplicated = false;
 			batchData->dbApplier = Never();
-			batchData->dbApplier = applyToDBV2(self->id(), req.batchIndex, batchData, cx);
+			batchData->dbApplier = writeMutationsToDB(self->id(), req.batchIndex, batchData, cx);
 		}
 
 		ASSERT(batchData->dbApplier.present());
