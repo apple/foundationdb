@@ -750,20 +750,22 @@ const KeyRangeRef restoreApplierKeys(LiteralStringRef("\xff\x02/restoreApplier/"
 const KeyRef restoreApplierTxnValue = LiteralStringRef("1");
 
 // restoreApplierKeys: track atomic transaction progress to ensure applying atomicOp exactly once
-// Version is passed in as LittleEndian, it must be converted to BigEndian to maintain ordering in lexical order
-const Key restoreApplierKeyFor(UID const& applierID, Version version) {
+// Version and batchIndex are passed in as LittleEndian,
+// they must be converted to BigEndian to maintain ordering in lexical order
+const Key restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(restoreApplierKeys.begin);
-	wr << applierID << bigEndian64(version);
+	wr << applierID << bigEndian64(batchIndex) << bigEndian64(version);
 	return wr.toValue();
 }
 
-std::pair<UID, Version> decodeRestoreApplierKey(ValueRef const& key) {
+std::tuple<UID, int64_t, Version> decodeRestoreApplierKey(ValueRef const& key) {
 	BinaryReader rd(key, Unversioned());
 	UID applierID;
+	int64_t batchIndex;
 	Version version;
-	rd >> applierID >> version;
-	return std::make_pair(applierID, bigEndian64(version));
+	rd >> applierID >> batchIndex >> version;
+	return std::make_tuple(applierID, bigEndian64(batchIndex), bigEndian64(version));
 }
 
 // Encode restore worker key for workerID

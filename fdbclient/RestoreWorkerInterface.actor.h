@@ -51,6 +51,7 @@ struct RestoreSendMutationsToAppliersRequest;
 struct RestoreSendVersionedMutationsRequest;
 struct RestoreSysInfo;
 struct RestoreApplierInterface;
+struct RestoreFinishRequest;
 
 // RestoreSysInfo includes information each (type of) restore roles should know.
 // At this moment, it only include appliers. We keep the name for future extension.
@@ -129,7 +130,7 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 	RequestStream<RestoreSendMutationsToAppliersRequest> sendMutations;
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
 	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
-	RequestStream<RestoreVersionBatchRequest> finishRestore;
+	RequestStream<RestoreFinishRequest> finishRestore;
 
 	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator!=(RestoreWorkerInterface const& r) const { return id() != r.id(); }
@@ -166,7 +167,7 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 	RequestStream<RestoreVersionBatchRequest> applyToDB;
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
 	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
-	RequestStream<RestoreVersionBatchRequest> finishRestore;
+	RequestStream<RestoreFinishRequest> finishRestore;
 
 	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator!=(RestoreWorkerInterface const& r) const { return id() != r.id(); }
@@ -337,6 +338,7 @@ struct RestoreRecruitRoleRequest : TimedRequest {
 	std::string toString() { return printable(); }
 };
 
+// Static info. across version batches
 struct RestoreSysInfoRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 75960741;
 
@@ -364,18 +366,21 @@ struct RestoreLoadFileReply : TimedRequest {
 
 	LoadingParam param;
 	MutationsVec samples; // sampled mutations
+	bool isDuplicated; // true if loader thinks the request is a duplicated one
 
 	RestoreLoadFileReply() = default;
-	explicit RestoreLoadFileReply(LoadingParam param, MutationsVec samples) : param(param), samples(samples) {}
+	explicit RestoreLoadFileReply(LoadingParam param, MutationsVec samples, bool isDuplicated)
+	  : param(param), samples(samples), isDuplicated(isDuplicated) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, param, samples);
+		serializer(ar, param, samples, isDuplicated);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "LoadingParam:" << param.toString() << " samples.size:" << samples.size();
+		ss << "LoadingParam:" << param.toString() << " samples.size:" << samples.size()
+		   << " isDuplicated:" << isDuplicated;
 		return ss.str();
 	}
 };
@@ -384,21 +389,22 @@ struct RestoreLoadFileReply : TimedRequest {
 struct RestoreLoadFileRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 26557364;
 
+	int batchIndex;
 	LoadingParam param;
 
 	ReplyPromise<RestoreLoadFileReply> reply;
 
 	RestoreLoadFileRequest() = default;
-	explicit RestoreLoadFileRequest(LoadingParam& param) : param(param){};
+	explicit RestoreLoadFileRequest(int batchIndex, LoadingParam& param) : batchIndex(batchIndex), param(param){};
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, param, reply);
+		serializer(ar, batchIndex, param, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreLoadFileRequest param:" << param.toString();
+		ss << "RestoreLoadFileRequest batchIndex:" << batchIndex << " param:" << param.toString();
 		return ss.str();
 	}
 };
@@ -406,24 +412,25 @@ struct RestoreLoadFileRequest : TimedRequest {
 struct RestoreSendMutationsToAppliersRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 68827305;
 
+	int batchIndex; // version batch index
 	std::map<Key, UID> rangeToApplier;
 	bool useRangeFile; // Send mutations parsed from range file?
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendMutationsToAppliersRequest() = default;
-	explicit RestoreSendMutationsToAppliersRequest(std::map<Key, UID> rangeToApplier, bool useRangeFile)
-	  : rangeToApplier(rangeToApplier), useRangeFile(useRangeFile) {}
+	explicit RestoreSendMutationsToAppliersRequest(int batchIndex, std::map<Key, UID> rangeToApplier, bool useRangeFile)
+	  : batchIndex(batchIndex), rangeToApplier(rangeToApplier), useRangeFile(useRangeFile) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeToApplier, useRangeFile, reply);
+		serializer(ar, batchIndex, rangeToApplier, useRangeFile, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreSendMutationsToAppliersRequest keyToAppliers.size:" << rangeToApplier.size()
-		   << " useRangeFile:" << useRangeFile;
+		ss << "RestoreSendMutationsToAppliersRequest batchIndex:" << batchIndex
+		   << " keyToAppliers.size:" << rangeToApplier.size() << " useRangeFile:" << useRangeFile;
 		return ss.str();
 	}
 };
@@ -431,6 +438,7 @@ struct RestoreSendMutationsToAppliersRequest : TimedRequest {
 struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 69764565;
 
+	int batchIndex; // version batch index
 	RestoreAsset asset; // Unique identifier for the current restore asset
 
 	Version prevVersion, version; // version is the commitVersion of the mutation vector.
@@ -440,41 +448,65 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendVersionedMutationsRequest() = default;
-	explicit RestoreSendVersionedMutationsRequest(const RestoreAsset& asset, Version prevVersion, Version version,
-	                                              bool isRangeFile, MutationsVec mutations)
-	  : asset(asset), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile), mutations(mutations) {}
+	explicit RestoreSendVersionedMutationsRequest(int batchIndex, const RestoreAsset& asset, Version prevVersion,
+	                                              Version version, bool isRangeFile, MutationsVec mutations)
+	  : batchIndex(batchIndex), asset(asset), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile),
+	    mutations(mutations) {}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreAsset:" << asset.toString() << " prevVersion:" << prevVersion << " version:" << version
-		   << " isRangeFile:" << isRangeFile << " mutations.size:" << mutations.size();
+		ss << "VersionBatchIndex:" << batchIndex << "RestoreAsset:" << asset.toString()
+		   << " prevVersion:" << prevVersion << " version:" << version << " isRangeFile:" << isRangeFile
+		   << " mutations.size:" << mutations.size();
 		return ss.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, asset, prevVersion, version, isRangeFile, mutations, reply);
+		serializer(ar, batchIndex, asset, prevVersion, version, isRangeFile, mutations, reply);
 	}
 };
 
 struct RestoreVersionBatchRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 13018413;
+	constexpr static FileIdentifier file_identifier = 97223537;
 
-	int batchID;
+	int batchIndex;
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreVersionBatchRequest() = default;
-	explicit RestoreVersionBatchRequest(int batchID) : batchID(batchID) {}
+	explicit RestoreVersionBatchRequest(int batchIndex) : batchIndex(batchIndex) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, batchID, reply);
+		serializer(ar, batchIndex, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreVersionBatchRequest BatchID:" << batchID;
+		ss << "RestoreVersionBatchRequest batchIndex:" << batchIndex;
+		return ss.str();
+	}
+};
+
+struct RestoreFinishRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 13018413;
+
+	bool terminate; // role exits if terminate = true
+
+	ReplyPromise<RestoreCommonReply> reply;
+
+	RestoreFinishRequest() = default;
+	explicit RestoreFinishRequest(bool terminate) : terminate(terminate) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, terminate, reply);
+	}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "RestoreFinishRequest terminate:" << terminate;
 		return ss.str();
 	}
 };

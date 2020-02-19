@@ -38,8 +38,8 @@ struct RunRestoreWorkerWorkload : TestWorkload {
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 
 	virtual Future<Void> start(Database const& cx) {
-		int num_myWorkers = 3;
-		TraceEvent("RunParallelRestoreWorkerWorkload").detail("Start", "RestoreAgentDB");
+		int num_myWorkers = SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS + SERVER_KNOBS->FASTRESTORE_NUM_LOADERS + 1;
+		TraceEvent("RunParallelRestoreWorkerWorkload").detail("Start", "RestoreAgentDB").detail("Workers", num_myWorkers);
 		printf("RunParallelRestoreWorkerWorkload, we will start %d restore workers\n", num_myWorkers);
 		std::vector<Future<Void>> myWorkers;
 		for (int i = 0; i < num_myWorkers; ++i) {

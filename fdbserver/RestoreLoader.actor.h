@@ -42,7 +42,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoaderData> {
+struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	std::map<LoadingParam, Future<Void>> processedFileParams;
 	std::map<LoadingParam, VersionedMutationsMap> kvOpsPerLP; // Buffered kvOps for each loading param
 
@@ -52,9 +52,38 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	// Sampled mutations to be sent back to restore master
 	std::map<LoadingParam, MutationsVec> sampleMutations;
-	// keyOpsCount is the number of operations per key which is used to determine the key-range boundary for appliers
-	std::map<Standalone<KeyRef>, int> keyOpsCount;
 	int numSampledMutations; // The total number of mutations received from sampled data.
+
+	void reset() {
+		processedFileParams.clear();
+		kvOpsPerLP.clear();
+		sampleMutations.clear();
+		numSampledMutations = 0;
+		rangeToApplier.clear();
+	}
+};
+
+struct LoaderBatchStatus : public ReferenceCounted<LoaderBatchStatus> {
+	Optional<Future<Void>> sendAllRanges;
+	Optional<Future<Void>> sendAllLogs;
+
+	void addref() { return ReferenceCounted<LoaderBatchStatus>::addref(); }
+	void delref() { return ReferenceCounted<LoaderBatchStatus>::delref(); }
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "sendAllRanges: "
+		   << (!sendAllRanges.present() ? "invalid" : (sendAllRanges.get().isReady() ? "ready" : "notReady"))
+		   << " sendAllLogs: "
+		   << (!sendAllLogs.present() ? "invalid" : (sendAllLogs.get().isReady() ? "ready" : "notReady"));
+		return ss.str();
+	}
+};
+
+struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoaderData> {
+	// buffered data per version batch
+	std::map<int, Reference<LoaderBatchData>> batch;
+	std::map<int, Reference<LoaderBatchStatus>> status;
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
@@ -77,25 +106,15 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		return ss.str();
 	}
 
-	void resetPerVersionBatch() {
-		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnLoader", nodeID);
-		rangeToApplier.clear();
-		keyOpsCount.clear();
-		numSampledMutations = 0;
-		processedFileParams.clear();
-		kvOpsPerLP.clear();
-		sampleMutations.clear();
+	void initVersionBatch(int batchIndex) {
+		TraceEvent("FastRestore").detail("InitVersionBatchOnLoader", nodeID);
+		batch[batchIndex] = Reference<LoaderBatchData>(new LoaderBatchData());
+		status[batchIndex] = Reference<LoaderBatchStatus>(new LoaderBatchStatus());
 	}
 
-	// Only get the appliers that are responsible for a range
-	std::vector<UID> getWorkingApplierIDs() {
-		std::vector<UID> applierIDs;
-		for (auto& applier : rangeToApplier) {
-			applierIDs.push_back(applier.second);
-		}
-
-		ASSERT(!applierIDs.empty());
-		return applierIDs;
+	void resetPerRestoreRequest() {
+		batch.clear();
+		status.clear();
 	}
 
 	void initBackupContainer(Key url) {

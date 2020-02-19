@@ -40,50 +40,19 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreApplierData> {
+struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	// processedFileState: key: RestoreAsset; value: largest version of mutation received on the applier
 	std::map<RestoreAsset, NotifiedVersion> processedFileState;
 	Optional<Future<Void>> dbApplier;
+	VersionedMutationsMap kvOps; // Mutations at each version
 
-	// rangeToApplier is in master and loader. Loader uses it to determine which applier a mutation should be sent
-	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
-	std::map<Key, UID> rangeToApplier;
-	// keyOpsCount is the number of operations per key that is used to determine the key-range boundary for appliers
-	std::map<Key, int> keyOpsCount;
+	void addref() { return ReferenceCounted<ApplierBatchData>::addref(); }
+	void delref() { return ReferenceCounted<ApplierBatchData>::delref(); }
 
-	// For master applier to hold the lower bound of key ranges for each appliers
-	std::vector<Key> keyRangeLowerBounds;
+	ApplierBatchData() = default;
+	~ApplierBatchData() = default;
 
-	// TODO: This block of variables may be moved to RestoreRoleData
-	bool inProgressApplyToDB = false;
-
-	// Mutations at each version
-	VersionedMutationsMap kvOps;
-
-	void addref() { return ReferenceCounted<RestoreApplierData>::addref(); }
-	void delref() { return ReferenceCounted<RestoreApplierData>::delref(); }
-
-	explicit RestoreApplierData(UID applierInterfID, int assignedIndex) {
-		nodeID = applierInterfID;
-		nodeIndex = assignedIndex;
-
-		// Q: Why do we need to initMetric?
-		// version.initMetric(LiteralStringRef("RestoreApplier.Version"), cc.id);
-
-		role = RestoreRole::Applier;
-	}
-
-	~RestoreApplierData() = default;
-
-	std::string describeNode() {
-		std::stringstream ss;
-		ss << "NodeID:" << nodeID.toString() << " nodeIndex:" << nodeIndex;
-		return ss.str();
-	}
-
-	void resetPerVersionBatch() {
-		TraceEvent("FastRestore").detail("ResetPerVersionBatchOnApplier", nodeID);
-		inProgressApplyToDB = false;
+	void reset() {
 		kvOps.clear();
 		dbApplier = Optional<Future<Void>>();
 	}
@@ -122,6 +91,43 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 			}
 		}
 		return ret;
+	}
+};
+
+struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreApplierData> {
+	// Buffer for uncommitted data at ongoing version batches
+	std::map<int, Reference<ApplierBatchData>> batch;
+	NotifiedVersion finishedBatch; // The version batch that has been applied to DB
+
+	void addref() { return ReferenceCounted<RestoreApplierData>::addref(); }
+	void delref() { return ReferenceCounted<RestoreApplierData>::delref(); }
+
+	explicit RestoreApplierData(UID applierInterfID, int assignedIndex) {
+		nodeID = applierInterfID;
+		nodeIndex = assignedIndex;
+
+		// Q: Why do we need to initMetric?
+		// version.initMetric(LiteralStringRef("RestoreApplier.Version"), cc.id);
+
+		role = RestoreRole::Applier;
+	}
+
+	~RestoreApplierData() = default;
+
+	void initVersionBatch(int batchIndex) {
+		TraceEvent("FastRestoreApplierInitVersionBatch", id()).detail("BatchIndex", batchIndex);
+		batch[batchIndex] = Reference<ApplierBatchData>(new ApplierBatchData());
+	}
+
+	void resetPerRestoreRequest() {
+		batch.clear();
+		finishedBatch = NotifiedVersion(0);
+	}
+
+	std::string describeNode() {
+		std::stringstream ss;
+		ss << "NodeID:" << nodeID.toString() << " nodeIndex:" << nodeIndex;
+		return ss.str();
 	}
 };
 

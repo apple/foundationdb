@@ -42,30 +42,31 @@ ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
 	return Void();
 }
 
-void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self) {
-	if (self->versionBatchStart) {
-		self->versionBatchStart = false;
-	}
-
-	TraceEvent("FastRestore")
-	    .detail("FinishRestoreRequest", req.batchID)
-	    .detail("Role", getRoleStr(self->role))
-	    .detail("Node", self->id());
+void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<RestoreRoleData> self) {
+	self->resetPerRestoreRequest();
+	TraceEvent("FastRestoreRolePhaseFinishRestoreRequest", self->id())
+	    .detail("FinishRestoreRequest", req.terminate)
+	    .detail("Role", getRoleStr(self->role));
 
 	req.reply.send(RestoreCommonReply(self->id()));
 }
 
+// Multiple version batches may execute in parallel and init their version batches
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
-	// batchId is continuous. (req.batchID-1) is the id of the just finished batch.
-	wait(self->versionBatchId.whenAtLeast(req.batchID - 1));
+	TraceEvent("FastRestoreRolePhaseInitVersionBatch", self->id())
+	    .detail("BatchIndex", req.batchIndex)
+	    .detail("Role", getRoleStr(self->role))
+	    .detail("VersionBatchNotifiedVersion", self->versionBatchId.get());
+	// batchId is continuous. (req.batchIndex-1) is the id of the just finished batch.
+	wait(self->versionBatchId.whenAtLeast(req.batchIndex - 1));
 
-	if (self->versionBatchId.get() == req.batchID - 1) {
-		self->resetPerVersionBatch();
-		TraceEvent("FastRestore")
-		    .detail("InitVersionBatch", req.batchID)
+	if (self->versionBatchId.get() == req.batchIndex - 1) {
+		self->initVersionBatch(req.batchIndex);
+		TraceEvent("FastRestoreInitVersionBatch")
+		    .detail("BatchIndex", req.batchIndex)
 		    .detail("Role", getRoleStr(self->role))
 		    .detail("Node", self->id());
-		self->versionBatchId.set(req.batchID);
+		self->versionBatchId.set(req.batchIndex);
 	}
 
 	req.reply.send(RestoreCommonReply(self->id()));

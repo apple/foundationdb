@@ -41,8 +41,6 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-extern bool debug_verbose;
-
 struct RestoreRoleInterface;
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
@@ -56,7 +54,7 @@ using VersionedMutationsMap = std::map<Version, MutationsVec>;
 
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
-void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self);
+void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<RestoreRoleData> self);
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
 // This struct is mostly copied from StringRefReader. We add a sanity check in this struct.
@@ -113,13 +111,10 @@ public:
 
 	std::map<UID, RestoreLoaderInterface> loadersInterf; // UID: loaderInterf's id
 	std::map<UID, RestoreApplierInterface> appliersInterf; // UID: applierInterf's id
-	RestoreApplierInterface masterApplierInterf;
 
 	NotifiedVersion versionBatchId; // Continuously increase for each versionBatch
 
 	bool versionBatchStart = false;
-
-	uint32_t inProgressFlag = 0;
 
 	RestoreRoleData() : role(RestoreRole::Invalid){};
 
@@ -127,7 +122,9 @@ public:
 
 	UID id() const { return nodeID; }
 
-	virtual void resetPerVersionBatch() = 0;
+	virtual void initVersionBatch(int batchIndex) = 0;
+
+	virtual void resetPerRestoreRequest() = 0;
 
 	void clearInterfaces() {
 		loadersInterf.clear();
