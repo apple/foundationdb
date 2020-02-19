@@ -806,9 +806,7 @@ void destroyConflictSet(ConflictSet* cs) {
 	delete cs;
 }
 
-ConflictBatch::ConflictBatch(ConflictSet* cs)
-  : cs(cs), transactionCount(0) {
-}
+ConflictBatch::ConflictBatch(ConflictSet* cs) : cs(cs), transactionCount(0) {}
 
 ConflictBatch::~ConflictBatch() {}
 
@@ -942,8 +940,12 @@ void ConflictBatch::checkReadConflictRanges() {
 
 	cs->versionHistory.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(),
 	                                   transactionConflictStatus);
-	cs->bConflicts.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(),
-	                               transactionConflictStatus);
+	auto bConflictStatus = new bool[transactionCount];
+	cs->bConflicts.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(), bConflictStatus);
+	for (int i = 0; i < transactionCount; i++) {
+		ASSERT(transactionConflictStatus[i] == bConflictStatus[i]);
+	}
+	delete[] bConflictStatus;
 }
 
 void ConflictBatch::addConflictRanges(Version now, std::vector<std::pair<StringRef, StringRef>>::iterator begin,
