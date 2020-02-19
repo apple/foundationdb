@@ -723,7 +723,7 @@ struct ConflictSet {
 	SkipList versionHistory;
 	Key removalKey;
 	Version oldestVersion;
-	Bconflicts bConflicts;
+	BConflicts bConflicts;
 };
 
 ConflictSet* newConflictSet() {
@@ -777,7 +777,7 @@ class BConflicts {
 		// Find the first node inside of the range, so that we can clear the range without
 		// deleting a node referencing a range below.
 		auto begin_it = btree.upper_bound(begin);
-		btree->remove(begin_it, end_it);
+		btree.remove(begin_it, end_it);
 	}
 
 public:
@@ -802,7 +802,7 @@ public:
 	// TODO: Consider using a hint to stop iteration early when we've deleted as many keys as
 	// we could.
 	void removeBefore(Version oldest) {
-		absl::erase_if(btree, [](std::pair<const std::string, Version>& p) { return p.second < oldest; });
+		absl::erase_if(btree, [=](std::pair<const std::string, Version>& p) { return p.second < oldest; });
 	}
 }
 
