@@ -284,7 +284,6 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 		       std::tie(f2.endVersion, f2.beginVersion, f2.fileIndex, f2.fileName);
 	});
 
-	// TODO for Jingyu: Verify new backup files are grouped into correct version batches.
 	self->buildVersionBatches(rangeFiles, logFiles, &self->versionBatches); // Divide files into version batches
 	self->dumpVersionBatches(self->versionBatches);
 
@@ -686,8 +685,11 @@ ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std
 	if (request.targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
 		request.targetVersion = desc.maxRestorableVersion.get();
 	}
+	TraceEvent("FastRestore").detail("TargetVersion", request.targetVersion).detail("BackupDesc", desc.toString());
 
-	Optional<RestorableFileSet> restorable = wait(bc->getPartitionedRestoreSet(request.targetVersion));
+	Optional<RestorableFileSet> restorable =
+	    wait(SERVER_KNOBS->FASTRESTORE_USE_PARTITIONED_LOGS ? bc->getPartitionedRestoreSet(request.targetVersion)
+	                                                        : bc->getRestoreSet(request.targetVersion));
 
 	if (!restorable.present()) {
 		TraceEvent(SevWarn, "FastRestoreMasterPhaseCollectBackupFiles").detail("NotRestorable", request.targetVersion);
