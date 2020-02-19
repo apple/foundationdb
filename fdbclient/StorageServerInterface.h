@@ -400,7 +400,7 @@ struct GetStorageMetricsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, load, available, capacity, bytesInputRate);
+		serializer(ar, load, available, capacity, bytesInputRate, version);
 	}
 };
 
