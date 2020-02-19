@@ -1494,10 +1494,14 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 			state bool ok = true;
 			inProgressExclusion.clear();
 			for(auto& s : serverList) {
-				auto addr = decodeServerListValue( s.value ).address();
-				if ( addressExcluded(exclusions, addr) ) {
+				auto addresses = decodeServerListValue( s.value ).getKeyValues.getEndpoint().addresses;
+				if ( addressExcluded(exclusions, addresses.address) ) {
 					ok = false;
-					inProgressExclusion.insert(addr);
+					inProgressExclusion.insert(addresses.address);
+				}
+				if ( addresses.secondaryAddress.present() && addressExcluded(exclusions, addresses.secondaryAddress.get()) ) {
+					ok = false;
+					inProgressExclusion.insert(addresses.secondaryAddress.get());
 				}
 			}
 
