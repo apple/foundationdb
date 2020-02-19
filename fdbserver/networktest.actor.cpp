@@ -24,7 +24,7 @@
 
 UID WLTOKEN_NETWORKTEST( -1, 2 );
 
-struct latency_stats {
+struct LatencyStats {
 	using sample = double;
 	double x = 0;
 	double x2 = 0;
@@ -46,20 +46,10 @@ struct latency_stats {
 		n++;
 	}
 
-	void reset() {
-		*this = latency_stats();
-	}
-
-	double count() {
-		return n;
-	}
-
-	double mean() {
-		return x/n;
-	}
-	double stddev() {
-		return sqrt(x2/n - (x/n)*(x/n));
-	}
+	void reset() { *this = LatencyStats(); }
+	double count() { return n; }
+	double mean() { return x / n; }
+	double stddev() { return sqrt(x2 / n - (x / n) * (x / n)); }
 };
 
 NetworkTestInterface::NetworkTestInterface( NetworkAddress remote )
@@ -77,13 +67,12 @@ ACTOR Future<Void> networkTestServer() {
 	state Future<Void> logging = delay( 1.0 );
 	state double lastTime = now();
 	state int sent = 0;
-	state latency_stats latency;
-	state latency_stats::sample sample;
+	state LatencyStats latency;
 
 	loop {
 		choose {
 			when( NetworkTestRequest req = waitNext( interf.test.getFuture() ) ) {
-				sample = latency.tick();
+				LatencyStats::sample sample = latency.tick();
 				req.reply.send( NetworkTestReply( Value( std::string( req.replySize, '.' ) ) ) );
 				latency.tock(sample);
 				sent++;
@@ -91,9 +80,9 @@ ACTOR Future<Void> networkTestServer() {
 			when( wait( logging ) ) {
 				auto spd = sent / (now() - lastTime);
 				if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
-					fprintf( stderr, "%f\t%.3f\t%.3f\n", spd, latency.mean() * 1e6, latency.stddev() * 1e6 );
+					fprintf(stderr, "%f\t%.3f\t%.3f\n", spd, latency.mean() * 1e6, latency.stddev() * 1e6);
 				} else {
-					fprintf( stderr, "responses per second: %f (%f us)\n", spd, latency.mean() * 1e6 );
+					fprintf(stderr, "responses per second: %f (%f us)\n", spd, latency.mean() * 1e6);
 				}
 				latency.reset();
 				lastTime = now();
@@ -104,7 +93,7 @@ ACTOR Future<Void> networkTestServer() {
 	}
 }
 
-static bool more_requests_pending(int count) {
+static bool moreRequestsPending(int count) {
 	if (count == -1) {
 		return false;
 	} else {
@@ -113,43 +102,46 @@ static bool more_requests_pending(int count) {
 	}
 }
 
-static bool more_logging_needed(int count, int iteration) {
+static bool moreLoggingNeeded(int count, int iteration) {
 	if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
 		return iteration <= 2;
 	} else {
-		return more_requests_pending(count);
+		return moreRequestsPending(count);
 	}
 }
 
-ACTOR Future<Void> testClient( std::vector<NetworkTestInterface> interfs, int* sent, int* completed, latency_stats * latency ) {
-	state std::string request_payload( FLOW_KNOBS->NETWORK_TEST_REQUEST_SIZE, '.');
+ACTOR Future<Void> testClient(std::vector<NetworkTestInterface> interfs, int* sent, int* completed,
+                              LatencyStats* latency) {
+	state std::string request_payload(FLOW_KNOBS->NETWORK_TEST_REQUEST_SIZE, '.');
 	state int count = FLOW_KNOBS->NETWORK_TEST_REQUEST_COUNT;
-	state latency_stats::sample sample;
+	state LatencyStats::sample sample;
 
-	while (more_requests_pending(*sent)) {
+	while (moreRequestsPending(*sent)) {
 		(*sent)++;
 		sample = latency->tick();
-		NetworkTestReply rep = wait(  retryBrokenPromise(interfs[deterministicRandom()->randomInt(0, interfs.size())].test, NetworkTestRequest( StringRef(request_payload), FLOW_KNOBS->NETWORK_TEST_REPLY_SIZE ) ) );
+		NetworkTestReply rep = wait(
+		    retryBrokenPromise(interfs[deterministicRandom()->randomInt(0, interfs.size())].test,
+		                       NetworkTestRequest(StringRef(request_payload), FLOW_KNOBS->NETWORK_TEST_REPLY_SIZE)));
 		latency->tock(sample);
 		(*completed)++;
 	}
 	return Void();
 }
 
-ACTOR Future<Void> logger( int * sent, int* completed, latency_stats * latency ) {
+ACTOR Future<Void> logger(int* sent, int* completed, LatencyStats* latency) {
 	state double lastTime = now();
 	state int logged = 0;
 	state int iteration = 0;
-	while (more_logging_needed(logged, ++iteration)) {
+	while (moreLoggingNeeded(logged, ++iteration)) {
 		wait( delay(1.0) );
-		auto spd = (*completed-logged) / (now() - lastTime);
+		auto spd = (*completed - logged) / (now() - lastTime);
 		if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
 			if (iteration == 2) {
 				// We don't report the first iteration because of warm-up effects.
-				printf( "%f\t%.3f\t%.3f\n", spd, latency->mean() * 1e6, latency->stddev() * 1e6);
+				printf("%f\t%.3f\t%.3f\n", spd, latency->mean() * 1e6, latency->stddev() * 1e6);
 			}
 		} else {
-			fprintf( stderr, "messages per second: %f (%6.3f us)\n", spd, latency->mean() * 1e6);
+			fprintf(stderr, "messages per second: %f (%6.3f us)\n", spd, latency->mean() * 1e6);
 		}
 		latency->reset();
 		lastTime = now();
@@ -227,17 +219,17 @@ ACTOR Future<Void> networkTestClient( std:: string testServers ) {
 	state std::vector<NetworkAddress> servers = NetworkAddress::parseList(testServers);
 	state int sent = 0;
 	state int completed = 0;
-	state latency_stats latency;
+	state LatencyStats latency;
 
 	for( int i = 0; i < servers.size(); i++ ) {
 		interfs.push_back( NetworkTestInterface( servers[i] ) );
 	}
 
 	state std::vector<Future<Void>> clients;
-	for( int i = 0; i < FLOW_KNOBS->NETWORK_TEST_CLIENT_COUNT; i++ ) {
-		clients.push_back( testClient( interfs, &sent, &completed, &latency ) );
+	for (int i = 0; i < FLOW_KNOBS->NETWORK_TEST_CLIENT_COUNT; i++) {
+		clients.push_back(testClient(interfs, &sent, &completed, &latency));
 	}
-	clients.push_back( logger( &sent, &completed, &latency ) );
+	clients.push_back(logger(&sent, &completed, &latency));
 
 	wait( waitForAll( clients ) );
 	return Void();
