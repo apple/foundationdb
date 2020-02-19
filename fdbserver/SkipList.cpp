@@ -942,7 +942,7 @@ void ConflictBatch::checkReadConflictRanges() {
 	cs->versionHistory.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(),
 	                                   transactionConflictStatus);
 	auto bConflictStatus = new bool[transactionCount];
-	memset(transactionConflictStatus, 0, transactionCount * sizeof(bool));
+	memset(bConflictStatus, 0, transactionCount * sizeof(bool));
 	cs->bConflicts.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(), bConflictStatus);
 	for (int i = 0; i < transactionCount; i++) {
 		if (transactionConflictStatus[i] != bConflictStatus[i]) {
