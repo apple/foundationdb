@@ -361,13 +361,14 @@ public:
 						) {
 							// First make sure the current localitySet is able to fulfuill the policy
 							AttribKey indexKey = logServerSet->keyIndex(*attributeKeys.begin());
-							size_t uniqueValueCount = logServerSet->getKeyValueArray()[indexKey._id].size();
-							if (logServerSet->getKeyValueArray()[indexKey._id].size() < pa->getCount()) {
+							int uniqueValueCount = logServerSet->getKeyValueArray()[indexKey._id].size();
+							int targetUniqueValueCount = pa->getCount();
+							if (uniqueValueCount < targetUniqueValueCount) {
 								// logServerSet won't be able to fulfill the policy
 								bestFound = false;
 							} else {
-								// Loop through all servers and, in each loop, try to choose `pa->getCount()` servers,
-								// each of which has a unique attribute value
+								// Loop through all servers and, in each loop, try to choose `targetUniqueValueCount`
+								// servers, each of which has a unique attribute value
 								std::set<AttribValue> seen;
 								auto mutableEntries = logServerSet->getMutableEntries();
 								int upperBound = mutableEntries.size();
@@ -383,7 +384,7 @@ public:
 											mutableEntries[i] = mutableEntries[upperBound];
 											mutableEntries[upperBound] = item;
 										}
-										if (seen.size() == pa->getCount()) {
+										if (seen.size() == targetUniqueValueCount) {
 											seen.clear();
 											i = 0;
 										}
@@ -391,10 +392,10 @@ public:
 									}
 									i++;
 									if (i == upperBound && bestSet.size() < desired) {
-										// Since logServerSet does contain at least `pa->getCount()` unique values
-										// for the given attribute key, and yet we are here, it must be all items from
-										// 0 to current upperBound all have one or two unique values.
-										// At this point, we need to choose desired-bestSet.size() elements out of them
+										// Since logServerSet does contain at least `targetUniqueValueCount` unique
+										// values for the given attribute key, and yet we are here, it must be all items
+										// from 0 to current upperBound all have one or two unique values. At this
+										// point, we need to choose desired-bestSet.size() elements out of them
 										bestSet.insert(bestSet.end(), mutableEntries.begin(),
 										               mutableEntries.begin() + (desired - bestSet.size()));
 									}
