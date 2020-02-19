@@ -33,6 +33,10 @@ CMake-based build system. Both of them should currently work for most users,
 and CMake should be the preferred choice as it will eventually become the only
 build system available.
 
+If compiling for local development, please set -DUSE_WERROR=ON in
+cmake. Our CI compiles with -Werror on, so this way you'll find out about
+compiler warnings that break the build earlier.
+
 ## CMake
 
 To build with CMake, generally the following is required (works on Linux and

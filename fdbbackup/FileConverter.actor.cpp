@@ -31,6 +31,7 @@
 #include "fdbclient/MutationList.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 namespace file_converter {
 
@@ -171,7 +172,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 					int msgSize = bigEndian32(reader.consume<int>());
 					const uint8_t* message = reader.consume(msgSize);
 
-					BinaryReader rd(message, msgSize, AssumeVersion(currentProtocolVersion));
+					ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(currentProtocolVersion));
 					MutationRef m;
 					rd >> m;
 					count++;
@@ -315,10 +316,11 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 
 		if (!fp->mutations.empty() && fp->mutations.back().version.version >= minVersion) return Void();
 
+		state int64_t len;
 		try {
 			// Read block by block until we see the minVersion
 			loop {
-				state int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - fp->offset);
+				len = std::min<int64_t>(file.blockSize, file.fileSize - fp->offset);
 				if (len == 0) {
 					fp->eof = true;
 					return Void();
@@ -466,7 +468,7 @@ ACTOR Future<Void> convert(ConvertParams params) {
 			arena = Arena();
 		}
 
-		BinaryReader rd(data.message, AssumeVersion(currentProtocolVersion));
+		ArenaReader rd(data.arena, data.message, AssumeVersion(currentProtocolVersion));
 		MutationRef m;
 		rd >> m;
 		std::cout << data.version.toString() << " m = " << m.toString() << "\n";

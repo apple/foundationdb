@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "Arena.h"
 #include "boost/asio.hpp"
 
 #include "flow/network.h"
@@ -95,6 +96,15 @@ NetworkAddress NetworkAddress::parse( std::string const& s ) {
 		if (sscanf(f.c_str(), "%d.%d.%d.%d:%d%n", &a, &b, &c, &d, &port, &count) < 5 || count != f.size())
 			throw connection_string_invalid();
 		return NetworkAddress((a << 24) + (b << 16) + (c << 8) + d, port, true, isTLS);
+	}
+}
+
+Optional<NetworkAddress> NetworkAddress::parseOptional(std::string const& s) {
+	try {
+		return NetworkAddress::parse(s);
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_connection_string_invalid);
+		return Optional<NetworkAddress>();
 	}
 }
 

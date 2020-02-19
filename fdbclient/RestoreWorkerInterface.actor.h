@@ -469,7 +469,7 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 };
 
 struct RestoreVersionBatchRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 13018413;
+	constexpr static FileIdentifier file_identifier = 97223537;
 
 	int batchIndex;
 

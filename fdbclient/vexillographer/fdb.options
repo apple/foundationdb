@@ -51,6 +51,9 @@ description is not currently required but encouraged.
     <Option name="trace_format" code="34"
             paramType="String" paramDescription="Format of trace files"
             description="Select the format of the log files. xml (the default) and json are supported."/>
+    <Option name="trace_clock_source" code="35"
+            paramType="String" paramDescription="Trace clock source"
+            description="Select clock source for trace files. now (the default) or realtime are supported." />
     <Option name="knob" code="40"
             paramType="String" paramDescription="knob_name=knob_value"
             description="Set internal tuning or debugging knobs"/>
@@ -172,7 +175,7 @@ description is not currently required but encouraged.
             description="The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock."
             defaultFor="20"/>
     <Option name="transaction_include_port_in_address" code="505"
-            description="Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated."
+            description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 700, this option is enabled by default and setting this has no effect."
             defaultFor="23"/>
   </Scope>
   
@@ -183,7 +186,7 @@ description is not currently required but encouraged.
             description="The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock."/>
     <Option name="causal_read_disable" code="21" />
     <Option name="include_port_in_address" code="23"
-            description="Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated." />
+            description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 700, this option is enabled by default and setting this has no effect." />
     <Option name="next_write_no_write_conflict_range" code="30"
             description="The next write performed on this transaction will not generate a write conflict range. As a result, other transactions which read the key(s) being modified by the next write will not conflict with this transaction. Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on." />
     <Option name="commit_on_first_proxy" code="40"
@@ -258,7 +261,7 @@ description is not currently required but encouraged.
     <Option name="want_all" code="-2"
             description="Client intends to consume the entire range and would like it all transferred as early as possible." />
     <Option name="iterator" code="-1"
-            description="The default. The client doesn't know how much of the range it is likely to used and wants different performance concerns to be balanced. Only a small portion of data is transferred to the client initially (in order to minimize costs if the client doesn't read the entire range), and as the caller iterates over more items in the range larger batches will be transferred in order to minimize latency." />
+            description="The default. The client doesn't know how much of the range it is likely to used and wants different performance concerns to be balanced. Only a small portion of data is transferred to the client initially (in order to minimize costs if the client doesn't read the entire range), and as the caller iterates over more items in the range larger batches will be transferred in order to minimize latency. After enough iterations, the iterator mode will eventually reach the same byte limit as ``WANT_ALL``" />
     <Option name="exact" code="0"
             description="Infrequently used. The client has passed a specific row limit and wants that many rows delivered in a single batch. Because of iterator operation in client drivers make request batches transparent to the user, consider ``WANT_ALL`` StreamingMode instead. A row limit must be specified if this mode is used." />
     <Option name="small" code="1"

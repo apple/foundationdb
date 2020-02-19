@@ -283,10 +283,10 @@ static std::string describe(
 	}
 	return s;
 }
-static 	std::string describeZones( std::vector<LocalityData> const& items, int max_items = -1 ) {
+inline std::string describeZones( std::vector<LocalityData> const& items, int max_items = -1 ) {
 	return describe(items, LocalityData::keyZoneId, max_items);
 }
-static 	std::string describeDataHalls( std::vector<LocalityData> const& items, int max_items = -1 ) {
+inline std::string describeDataHalls( std::vector<LocalityData> const& items, int max_items = -1 ) {
 	return describe(items, LocalityData::keyDataHallId, max_items);
 }
 

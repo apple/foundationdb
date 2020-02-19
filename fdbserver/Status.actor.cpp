@@ -574,7 +574,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     WorkerEvents programStarts, std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
     vector<std::pair<StorageServerInterface, EventMap>> storageServers,
     vector<std::pair<TLogInterface, EventMap>> tLogs, vector<std::pair<MasterProxyInterface, EventMap>> proxies,
-    ServerCoordinators coordinators, Database cx, Optional<DatabaseConfiguration> configuration, 
+    ServerCoordinators coordinators, Database cx, Optional<DatabaseConfiguration> configuration,
     Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
 
 	state JsonBuilderObject processMap;
@@ -1160,10 +1160,10 @@ struct LogRangeAndUID {
 
 	LogRangeAndUID(KeyRange const& range, UID const& destID) : range(range), destID(destID) {}
 
-	bool operator < (LogRangeAndUID const& r) const { 
+	bool operator < (LogRangeAndUID const& r) const {
 		if(range.begin != r.range.begin) return range.begin < r.range.begin;
 		if(range.end != r.range.end) return range.end < r.range.end;
-		return destID < r.destID; 
+		return destID < r.destID;
 	}
 };
 
@@ -1280,7 +1280,7 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored) && success(ddModeKey))) {
 					int unreplicated = 0;
 					for(int i = 0; i < result.get().regions.size(); i++) {
-						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) { 
+						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) {
 							unreplicated++;
 						}
 					}
@@ -2408,8 +2408,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, networkMetrics,
 		                                                            latestError, traceFileOpenErrors, programStarts,
-		                                                            processIssues, storageServers, tLogs, proxies, 
-		                                                            coordinators, cx, configuration, 
+		                                                            processIssues, storageServers, tLogs, proxies,
+		                                                            coordinators, cx, configuration,
 		                                                            loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
 		                                                            &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;

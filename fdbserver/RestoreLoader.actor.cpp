@@ -38,7 +38,8 @@ void splitMutation(std::map<Key, UID>* pRangeToApplier, MutationRef m, Arena& mv
                    VectorRef<MutationRef>& mvector, Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs);
 void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
                               SerializedMutationListMap* mutationMap,
-                              std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc, const RestoreAsset& asset);
+                              std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc,
+                              const RestoreAsset& asset);
 
 void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self);
@@ -61,8 +62,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 	    Reference<RestoreLoaderData>(new RestoreLoaderData(loaderInterf.id(), nodeIndex));
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
-	state double updateProcessStatsDelay = SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL;
-	state Future<Void> updateProcessStatsTimer = delay(updateProcessStatsDelay);
+	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
 	actors.add(traceProcessMetrics(self, "Loader"));
 
@@ -101,7 +101,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				}
 				when(wait(updateProcessStatsTimer)) {
 					updateProcessStats(self);
-					updateProcessStatsTimer = delay(updateProcessStatsDelay);
+					updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 				}
 				when(wait(exitRole)) {
 					TraceEvent("FastRestore").detail("RestoreLoaderCore", "ExitRole").detail("NodeID", self->id());
@@ -121,7 +121,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 
 // Assume: Only update the local data if it (applierInterf) has not been set
 void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self) {
-	TraceEvent("FastRestoreLoader").detail("HandleRestoreSysInfoRequest", self->id());
+	TraceEvent("FastRestoreLoader", self->id()).detail("HandleRestoreSysInfoRequest", self->id());
 	ASSERT(self.isValid());
 
 	// The loader has received the appliers interfaces
@@ -148,7 +148,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<LoaderBatc
 	state std::map<LoadingParam, MutationsVec>::iterator samplesIter = batchData->sampleMutations.end();
 
 	// Q: How to record the  param's fields inside LoadingParam Refer to storageMetrics
-	TraceEvent("FastRestore").detail("Loader", loaderID).detail("StartProcessLoadParam", param.toString());
+	TraceEvent("FastRestoreLoaderProcessLoadingParam", loaderID).detail("LoadingParam", param.toString());
 	ASSERT(param.blockSize > 0);
 	ASSERT(param.asset.offset % param.blockSize == 0); // Parse file must be at block bondary.
 	ASSERT(batchData->kvOpsPerLP.find(param) == batchData->kvOpsPerLP.end());
@@ -179,7 +179,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<LoaderBatc
 		_parseSerializedMutation(kvOpsPerLPIter, &mutationMap, samplesIter, &batchData->counters, param.asset);
 	}
 
-	TraceEvent("FastRestore").detail("Loader", loaderID).detail("FinishLoadingFile", param.asset.filename);
+	TraceEvent("FastRestoreLoaderProcessLoadingParamDone", loaderID).detail("LoadingParam", param.toString());
 
 	return Void();
 }
@@ -522,7 +522,7 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 // Parse the kv pair (version, serialized_mutation), which are the results parsed from log file, into
 // (version, <K, V, mutationType>) pair;
 // Put the parsed versioned mutations into *pkvOps.
-// 
+//
 // Input key: [commitVersion_of_the_mutation_batch:uint64_t];
 // Input value: [includeVersion:uint64_t][val_length:uint32_t][encoded_list_of_mutations], where
 // includeVersion is the serialized version in the batch commit. It is not the commitVersion in Input key.
@@ -533,7 +533,8 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 //	a mutation is encoded as [type:uint32_t][keyLength:uint32_t][valueLength:uint32_t][keyContent][valueContent]
 void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
                               SerializedMutationListMap* pmutationMap,
-                              std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc, const RestoreAsset& asset) {
+                              std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc,
+                              const RestoreAsset& asset) {
 	VersionedMutationsMap& kvOps = kvOpsIter->second;
 	MutationsVec& samples = samplesIter->second;
 	SerializedMutationListMap& mutationMap = *pmutationMap;

@@ -523,6 +523,19 @@ WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
 	return status;
 }
 
+Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids) {
+	BinaryWriter wr(IncludeVersion());
+	wr << ids;
+	return wr.toValue();
+}
+
+std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& value) {
+	std::vector<std::pair<UID, Version>> ids;
+	BinaryReader reader(value, IncludeVersion());
+	if (value.size() > 0) reader >> ids;
+	return ids;
+}
+
 const KeyRef coordinatorsKey = LiteralStringRef("\xff/coordinators");
 const KeyRef logsKey = LiteralStringRef("\xff/logs");
 const KeyRef minRequiredCommitVersionKey = LiteralStringRef("\xff/minRequiredCommitVersion");
@@ -737,7 +750,7 @@ const KeyRangeRef restoreApplierKeys(LiteralStringRef("\xff\x02/restoreApplier/"
 const KeyRef restoreApplierTxnValue = LiteralStringRef("1");
 
 // restoreApplierKeys: track atomic transaction progress to ensure applying atomicOp exactly once
-// Version and batchIndex is passed in as LittleEndian,
+// Version and batchIndex are passed in as LittleEndian,
 // they must be converted to BigEndian to maintain ordering in lexical order
 const Key restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version) {
 	BinaryWriter wr(Unversioned());

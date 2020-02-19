@@ -26,7 +26,8 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-#define SevAtomicOpDebug SevInfo
+//#define SevAtomicOpDebug SevInfo
+#define SevAtomicOpDebug SevVerbose
 
 struct AtomicOpsWorkload : TestWorkload {
 	int opNum, actorCount, nodeCount;
@@ -181,13 +182,13 @@ struct AtomicOpsWorkload : TestWorkload {
 			wait( poisson( &lastTime, delay ) );
 			state ReadYourWritesTransaction tr(cx);
 			loop {
+				int group = deterministicRandom()->randomInt(0, 100);
+				state uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
+				state Key val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
+				state std::pair<Key, Key> logDebugKey = self->logDebugKey(group);
+				int nodeIndex = deterministicRandom()->randomInt(0, self->nodeCount / 100);
+				state Key opsKey(format("ops%08x%08x", group, nodeIndex));
 				try {
-					int group = deterministicRandom()->randomInt(0,100);
-					state uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
-					state Key val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
-					state std::pair<Key, Key> logDebugKey = self->logDebugKey(group);
-					int nodeIndex = deterministicRandom()->randomInt(0, self->nodeCount / 100);
-					state Key opsKey(format("ops%08x%08x", group, nodeIndex));
 					tr.set(logDebugKey.first, val); // set log key
 					tr.set(logDebugKey.second, opsKey); // set debug key; one opsKey can have multiple logs key
 					tr.atomicOp(opsKey, val, self->opType);
@@ -216,8 +217,8 @@ struct AtomicOpsWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> dumpLogKV(Database cx, int g) {
+		state ReadYourWritesTransaction tr(cx);
 		try {
-			state ReadYourWritesTransaction tr(cx);
 			Key begin(format("log%08x", g));
 			Standalone<RangeResultRef> log = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
 			if (log.more) {
@@ -242,8 +243,8 @@ struct AtomicOpsWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> dumpDebugKV(Database cx, int g) {
+		state ReadYourWritesTransaction tr(cx);
 		try {
-			state ReadYourWritesTransaction tr(cx);
 			Key begin(format("debug%08x", g));
 			Standalone<RangeResultRef> debuglog =
 			    wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
@@ -261,10 +262,11 @@ struct AtomicOpsWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> dumpOpsKV(Database cx, int g) {
+		state ReadYourWritesTransaction tr(cx);
 		try {
-			state ReadYourWritesTransaction tr(cx);
 			Key begin(format("ops%08x", g));
-			Standalone<RangeResultRef> ops = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+			Standalone<RangeResultRef> ops =
+			    wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
 			if (ops.more) {
 				TraceEvent(SevError, "OpsHitTxnLimits").detail("Result", ops.toString());
 			}
@@ -274,14 +276,14 @@ struct AtomicOpsWorkload : TestWorkload {
 				memcpy(&intValue, kv.value.begin(), kv.value.size());
 				sum += intValue;
 				TraceEvent("AtomicOpOps")
-					.detail("Key", kv.key)
-					.detail("Val", kv.value)
-					.detail("IntVal", intValue)
-					.detail("CurSum", sum);
+				    .detail("Key", kv.key)
+				    .detail("Val", kv.value)
+				    .detail("IntVal", intValue)
+				    .detail("CurSum", sum);
 			}
-		} catch( Error &e ) {
+		} catch (Error& e) {
 			TraceEvent("DumpOpsKVError").detail("Error", e.what());
-			wait( tr.onError(e) );
+			wait(tr.onError(e));
 		}
 		return Void();
 	}
@@ -290,9 +292,8 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Get mapping between opsKeys and debugKeys
 		state ReadYourWritesTransaction tr1(cx);
 		state std::map<Key, Key> records; // <ops, debugKey>
-		Key begin(format("debug%08x", g));
 		Standalone<RangeResultRef> debuglog =
-		    wait(tr1.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+		    wait(tr1.getRange(prefixRange(format("debug%08x", g)), CLIENT_KNOBS->TOO_MANY));
 		if (debuglog.more) {
 			TraceEvent(SevError, "DebugLogHitTxnLimits").detail("Result", debuglog.toString());
 			return Void();
@@ -304,8 +305,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Get log key's value and assign it to the associated debugKey
 		state ReadYourWritesTransaction tr2(cx);
 		state std::map<Key, int64_t> logVal; // debugKey, log's value
-		Key begin(format("log%08x", g));
-		Standalone<RangeResultRef> log = wait(tr2.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+		Standalone<RangeResultRef> log = wait(tr2.getRange(prefixRange(format("log%08x", g)), CLIENT_KNOBS->TOO_MANY));
 		if (log.more) {
 			TraceEvent(SevError, "LogHitTxnLimits").detail("Result", log.toString());
 			return Void();
@@ -319,8 +319,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Get opsKeys and validate if it has correct value
 		state ReadYourWritesTransaction tr3(cx);
 		state std::map<Key, int64_t> opsVal; // ops key, ops value
-		Key begin(format("ops%08x", g));
-		Standalone<RangeResultRef> ops = wait(tr3.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
+		Standalone<RangeResultRef> ops = wait(tr3.getRange(prefixRange(format("ops%08x", g)), CLIENT_KNOBS->TOO_MANY));
 		if (ops.more) {
 			TraceEvent(SevError, "OpsHitTxnLimits").detail("Result", ops.toString());
 			return Void();

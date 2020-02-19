@@ -29,11 +29,11 @@
 
 struct ConflictSet;
 ConflictSet* newConflictSet();
-void clearConflictSet( ConflictSet*, Version );
+void clearConflictSet(ConflictSet*, Version);
 void destroyConflictSet(ConflictSet*);
 
 struct ConflictBatch {
-	explicit ConflictBatch( ConflictSet* );
+	explicit ConflictBatch(ConflictSet*);
 	~ConflictBatch();
 
 	enum TransactionCommitResult {
@@ -42,24 +42,26 @@ struct ConflictBatch {
 		TransactionCommitted,
 	};
 
-	void addTransaction( const CommitTransactionRef& transaction );
-	void detectConflicts(Version now, Version newOldestVersion, std::vector<int>& nonConflicting, std::vector<int>* tooOldTransactions = NULL);
+	void addTransaction(const CommitTransactionRef& transaction);
+	void detectConflicts(Version now, Version newOldestVersion, std::vector<int>& nonConflicting,
+	                     std::vector<int>* tooOldTransactions = nullptr);
 	void GetTooOldTransactions(std::vector<int>& tooOldTransactions);
 
 private:
 	ConflictSet* cs;
-	Standalone< VectorRef< struct TransactionInfo* > > transactionInfo;
+	Standalone<VectorRef<struct TransactionInfo*>> transactionInfo;
 	std::vector<struct KeyInfo> points;
 	int transactionCount;
-	std::vector< std::pair<StringRef,StringRef> > combinedWriteConflictRanges;
-	std::vector< struct ReadConflictRange > combinedReadConflictRanges;
+	std::vector<std::pair<StringRef, StringRef>> combinedWriteConflictRanges;
+	std::vector<struct ReadConflictRange> combinedReadConflictRanges;
 	bool* transactionConflictStatus;
 
 	void checkIntraBatchConflicts();
 	void combineWriteConflictRanges();
 	void checkReadConflictRanges();
 	void mergeWriteConflictRanges(Version now);
-	void addConflictRanges(Version now, std::vector< std::pair<StringRef,StringRef> >::iterator begin, std::vector< std::pair<StringRef,StringRef> >::iterator end, class SkipList* part);
+	void addConflictRanges(Version now, std::vector<std::pair<StringRef, StringRef>>::iterator begin,
+	                       std::vector<std::pair<StringRef, StringRef>>::iterator end, class SkipList* part);
 };
 
 #endif

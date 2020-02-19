@@ -46,8 +46,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 	    Reference<RestoreApplierData>(new RestoreApplierData(applierInterf.id(), nodeIndex));
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
-	state double updateProcessStatsDelay = SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL;
-	state Future<Void> updateProcessStatsTimer = delay(updateProcessStatsDelay);
+	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
 	actors.add(traceProcessMetrics(self, "Applier"));
 
@@ -82,7 +81,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 				}
 				when(wait(updateProcessStatsTimer)) {
 					updateProcessStats(self);
-					updateProcessStatsTimer = delay(updateProcessStatsDelay);
+					updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 				}
 				when(wait(exitRole)) {
 					TraceEvent("FastRestore").detail("RestoreApplierCore", "ExitRole").detail("NodeID", self->id());
@@ -470,7 +469,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			batchData->counters.receivedBytes += mutation.totalSize();
 			batchData->counters.receivedWeightedBytes += mutation.weightedTotalSize(); // atomicOp will be amplified
 			batchData->counters.receivedMutations += 1;
-			batchData->counters.receivedAtomicOps += isAtomicOp((MutationRef::Type) mutation.type) ? 1 : 0;
+			batchData->counters.receivedAtomicOps += isAtomicOp((MutationRef::Type)mutation.type) ? 1 : 0;
 			// Sanity check
 			if (g_network->isSimulated()) {
 				if (isRangeMutation(mutation)) {
@@ -625,7 +624,6 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 		    .detail("Reason", "NoMutationAtVersions");
 		return Void();
 	}
-	ASSERT_WE_THINK(batchData->kvOps.size());
 
 	batchData->sanityCheckMutationOps();
 

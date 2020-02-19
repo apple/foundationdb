@@ -329,17 +329,19 @@ public:
 	}
 
 	// The innermost folder covers 100,000 seconds (1e11 versions) which is 5,000 mutation log files at current settings.
-	static std::string logVersionFolderString(Version v) {
-		return format("logs/%s/", versionFolderString(v, 11).c_str());
+	static std::string logVersionFolderString(Version v, bool mlogs) {
+		return format("%s/%s/", (mlogs ? "mlogs" : "logs"), versionFolderString(v, 11).c_str());
 	}
 
 	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) override {
-		return writeFile(logVersionFolderString(beginVersion) + format("log,%lld,%lld,%s,%d", beginVersion, endVersion, deterministicRandom()->randomUniqueID().toString().c_str(), blockSize));
+		return writeFile(logVersionFolderString(beginVersion, false) +
+		                 format("log,%lld,%lld,%s,%d", beginVersion, endVersion,
+		                        deterministicRandom()->randomUniqueID().toString().c_str(), blockSize));
 	}
 
 	Future<Reference<IBackupFile>> writeTaggedLogFile(Version beginVersion, Version endVersion, int blockSize,
 	                                                  uint16_t tagId) override {
-		return writeFile(logVersionFolderString(beginVersion) +
+		return writeFile(logVersionFolderString(beginVersion, true) +
 		                 format("log,%lld,%lld,%s,%d,%d", beginVersion, endVersion,
 		                        deterministicRandom()->randomUniqueID().toString().c_str(), blockSize, tagId));
 	}
@@ -517,10 +519,12 @@ public:
 		// so start at an earlier version adjusted by how many versions a file could contain.
 		//
 		// Get the cleaned (without slashes) first and last folders that could contain relevant results.
-		std::string firstPath = cleanFolderString(logVersionFolderString(
-			std::max<Version>(0, beginVersion - CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE)
-		));
-		std::string lastPath =  cleanFolderString(logVersionFolderString(targetVersion));
+		bool mlogs = false; // tagged mutation logs
+		std::string firstPath = cleanFolderString(
+		    logVersionFolderString(std::max<Version>(0, beginVersion - CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES *
+		                                                                   CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE),
+		                           mlogs));
+		std::string lastPath = cleanFolderString(logVersionFolderString(targetVersion, mlogs));
 
 		std::function<bool(std::string const &)> pathFilter = [=](const std::string &folderPath) {
 			// Remove slashes in the given folder path so that the '/' positions in the version folder string do not matter

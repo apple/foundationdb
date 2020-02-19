@@ -48,6 +48,9 @@
 #pragma warning (disable: 4073)
 #pragma init_seg(lib)
 #define INIT_SEG
+#elif defined(__INTEL_COMPILER)
+// intel compiler ignored INIT_SEG for thread local variables
+#define INIT_SEG
 #elif defined(__GNUG__)
 #ifdef __linux__
 #define INIT_SEG __attribute__ ((init_priority (1000)))

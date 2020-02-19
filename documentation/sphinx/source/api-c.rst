@@ -51,8 +51,6 @@
 .. |timeout-database-option| replace:: FIXME
 .. |causal-read-risky-transaction-option| replace:: FIXME
 .. |causal-read-risky-database-option| replace:: FIXME
-.. |include-port-in-address-database-option| replace:: FIXME
-.. |include-port-in-address-transaction-option| replace:: FIXME
 .. |transaction-logging-max-field-length-database-option| replace:: FIXME
 .. |transaction-logging-max-field-length-transaction-option| replace:: FIXME
 

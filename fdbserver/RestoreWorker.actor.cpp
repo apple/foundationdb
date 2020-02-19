@@ -250,8 +250,8 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 // RestoreMaster is the leader
 ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader, Database cx,
                                  RestoreWorkerInterface myWorkerInterf) {
-    wait(delay(5.0));
-	TraceEvent("FastRestore").detail("MonitorLeader", "StartLeaderElection");
+	wait(delay(SERVER_KNOBS->FASTRESTORE_MONITOR_LEADER_DELAY));
+	TraceEvent("FastRestoreWorker", myWorkerInterf.id()).detail("MonitorLeader", "StartLeaderElection");
 	state int count = 0;
 	loop {
 		try {
@@ -285,7 +285,10 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 		}
 	}
 
-	TraceEvent("FastRestore").detail("MonitorLeader", "FinishLeaderElection").detail("Leader", leaderInterf.id()).detail("IamLeader", leaderInterf == myWorkerInterf);
+	TraceEvent("FastRestoreWorker", myWorkerInterf.id())
+	    .detail("MonitorLeader", "FinishLeaderElection")
+	    .detail("Leader", leaderInterf.id())
+	    .detail("IamLeader", leaderInterf == myWorkerInterf);
 	return Void();
 }
 
@@ -299,7 +302,7 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 	myWorkerInterf.initEndpoints();
 	state Reference<RestoreWorkerData> self = Reference<RestoreWorkerData>(new RestoreWorkerData());
 	self->workerID = myWorkerInterf.id();
-	TraceEvent("FastRestoreKnobs")
+	TraceEvent("FastRestoreWorkerKnobs", myWorkerInterf.id())
 	    .detail("FailureTimeout", SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT)
 	    .detail("HeartBeat", SERVER_KNOBS->FASTRESTORE_HEARTBEAT_INTERVAL)
 	    .detail("SamplePercentage", SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT)
@@ -310,7 +313,7 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 
 	wait(monitorleader(leader, cx, myWorkerInterf));
 
-	TraceEvent("FastRestore").detail("LeaderElection", "WaitForLeader");
+	TraceEvent("FastRestoreWorker", myWorkerInterf.id()).detail("LeaderElection", "WaitForLeader");
 	if (leader->get() == myWorkerInterf) {
 		// Restore master worker: doLeaderThings();
 		myWork = startRestoreWorkerLeader(self, myWorkerInterf, cx);
@@ -326,16 +329,10 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> connFile, LocalityData locality,
                                  std::string coordFolder) {
 	try {
-		state vector<Future<Void>> actors;
-		// Connect to coordinators in order to connect to fdb cluster
-		// ServerCoordinators coordinators(connFile);
-		// if (coordFolder.size())
-		// 	actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder), "ClusterCoordinatorFailed"));
-
 		Database cx = Database::createDatabase(connFile, Database::API_VERSION_LATEST, true, locality);
 		wait(reportErrors(_restoreWorker(cx, locality), "RestoreWorker"));
-	}  catch (Error& e) {
-		TraceEvent("FastRestoreRestoreWorker").detail("Error", e.what());
+	} catch (Error& e) {
+		TraceEvent("FastRestoreWorker").detail("Error", e.what());
 		throw e;
 	}
 

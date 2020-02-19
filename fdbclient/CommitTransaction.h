@@ -86,6 +86,9 @@ struct MutationRef {
 	int totalSize() const { return OVERHEAD_BYTES + param1.size() + param2.size(); }
 	int expectedSize() const { return param1.size() + param2.size(); }
 	int weightedTotalSize() const {
+		// AtomicOp can cause more workload to FDB cluster than the same-size set mutation;
+		// Amplify atomicOp size to consider such extra workload.
+		// A good value for FASTRESTORE_ATOMICOP_WEIGHT needs experimental evaluations.
 		if (isAtomicOp()) {
 			return totalSize() * SERVER_KNOBS->FASTRESTORE_ATOMICOP_WEIGHT;
 		} else {
@@ -102,9 +105,7 @@ struct MutationRef {
 		}
 	}
 
-	bool isAtomicOp() const {
-		return (ATOMIC_MASK & (1<<type)) != 0;
-	}
+	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
 
 	template <class Ar>
 	void serialize( Ar& ar ) {

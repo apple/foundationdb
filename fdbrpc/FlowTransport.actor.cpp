@@ -578,9 +578,7 @@ void Peer::prependConnectPacket() {
 
 	pkt.connectPacketLength = sizeof(pkt) - sizeof(pkt.connectPacketLength);
 	pkt.protocolVersion = currentProtocolVersion;
-	if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
-		pkt.protocolVersion.addObjectSerializerFlag();
-	}
+	pkt.protocolVersion.addObjectSerializerFlag();
 	pkt.connectionId = transport->transportId;
 
 	PacketBuffer* pb_first = PacketBuffer::create();
@@ -655,14 +653,10 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 	if (receiver) {
 		try {
 			g_currentDeliveryPeerAddress = destination.addresses;
-			if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
-				StringRef data = reader.arenaReadAll();
-				ASSERT(data.size() > 8);
-				ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
-				receiver->receive(objReader);
-			} else {
-				receiver->receive(reader);
-			}
+			StringRef data = reader.arenaReadAll();
+			ASSERT(data.size() > 8);
+			ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
+			receiver->receive(objReader);
 			g_currentDeliveryPeerAddress = { NetworkAddress() };
 		} catch (Error& e) {
 			g_currentDeliveryPeerAddress = {NetworkAddress()};
@@ -864,8 +858,8 @@ ACTOR static Future<Void> connectionReader(
 						serializer(pktReader, pkt);
 
 						uint64_t connectionId = pkt.connectionId;
-						if((FLOW_KNOBS->USE_OBJECT_SERIALIZER != 0) != pkt.protocolVersion.hasObjectSerializerFlag() ||
-						   !pkt.protocolVersion.isCompatible(currentProtocolVersion)) {
+						if (!pkt.protocolVersion.hasObjectSerializerFlag() ||
+						    !pkt.protocolVersion.isCompatible(currentProtocolVersion)) {
 							incompatibleProtocolVersionNewer = pkt.protocolVersion > currentProtocolVersion;
 							NetworkAddress addr = pkt.canonicalRemotePort
 							                          ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
@@ -896,8 +890,7 @@ ACTOR static Future<Void> connectionReader(
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but it's safer to keep the old behavior.
 								throw incompatible_protocol_version();
 							}
-						}
-						else {
+						} else {
 							compatible = true;
 							TraceEvent("ConnectionEstablished", conn->getDebugID())
 								.suppressFor(1.0)
@@ -1102,13 +1095,11 @@ Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
 }
 
 void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
-	TraceEvent("AddPeerRef").detail("Endpoint", endpoint.getPrimaryAddress()).detail("IsStream", isStream).detail("EndpointValid", endpoint.getPrimaryAddress().isValid());
 	if (!isStream || !endpoint.getPrimaryAddress().isValid())
 		return;
 
 	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
 
-	TraceEvent("AddPeerRef").detail("Endpoint", endpoint.getPrimaryAddress()).detail("IsStream", isStream).detail("PeerRef", peer->peerReferences);
 	if(peer->peerReferences == -1) {
 		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 		peer->peerReferences = 1;
@@ -1163,15 +1154,9 @@ static void sendLocal( TransportData* self, ISerializeSource const& what, const 
 	// SOMEDAY: Would it be better to avoid (de)serialization by doing this check in flow?
 
 	Standalone<StringRef> copy;
-	if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
-		ObjectWriter wr(AssumeVersion(currentProtocolVersion));
-		what.serializeObjectWriter(wr);
-		copy = wr.toStringRef();
-	} else {
-		BinaryWriter wr( AssumeVersion(currentProtocolVersion) );
-		what.serializeBinaryWriter(wr);
-		copy = wr.toValue();
-	}
+	ObjectWriter wr(AssumeVersion(currentProtocolVersion));
+	what.serializeObjectWriter(wr);
+	copy = wr.toStringRef();
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(copy.begin(), copy.size());
 #endif
@@ -1210,7 +1195,7 @@ static ReliablePacket* sendPacket( TransportData* self, Reference<Peer> peer, IS
 
 	wr.writeAhead(packetInfoSize , &packetInfoBuffer);
 	wr << destination.token;
-	what.serializePacketWriter(wr, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
+	what.serializePacketWriter(wr);
 	pb = wr.finish();
 	len = wr.size() - packetInfoSize;
 

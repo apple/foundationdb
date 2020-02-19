@@ -449,6 +449,17 @@ class TransactionRead(_FDBBase):
         if isinstance(key, slice):
             return self.get_range(key.start, key.stop, reverse=(key.step == -1))
         return self.get(key)
+    
+    def get_estimated_range_size_bytes(self, beginKey, endKey):
+        if beginKey is None:
+            beginKey = b''
+        if endKey is None:
+            endKey = b'\xff'
+        return FutureInt64(self.capi.fdb_transaction_get_estimated_range_size_bytes(
+            self.tpointer,
+            beginKey, len(beginKey), 
+            endKey, len(endKey)
+            ))
 
 
 class Transaction(TransactionRead):
@@ -1423,6 +1434,9 @@ def init_c_api():
                                                 ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                                 ctypes.c_int, ctypes.c_int]
     _capi.fdb_transaction_get_range.restype = ctypes.c_void_p
+
+    _capi.fdb_transaction_get_estimated_range_size_bytes.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    _capi.fdb_transaction_get_estimated_range_size_bytes.restype = ctypes.c_void_p
 
     _capi.fdb_transaction_add_conflict_range.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
     _capi.fdb_transaction_add_conflict_range.restype = ctypes.c_int

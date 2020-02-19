@@ -216,19 +216,19 @@ ACTOR Future< Standalone<RangeResultRef> > getRange(Reference<Transaction> tr, K
 	}
 }
 
-ACTOR static Future<Void> debugPrintRange(Reference<Transaction> tr, std::string subspace, std::string msg) {
-	if (!tr)
-		return Void();
-
-	Standalone<RangeResultRef> results = wait(getRange(tr, KeyRange(KeyRangeRef(subspace + '\x00', subspace + '\xff'))));
-	printf("==================================================DB:%s:%s, count:%d\n", msg.c_str(),
-	       StringRef(subspace).printable().c_str(), results.size());
-	for (auto & s : results) {
-		printf("=====key:%s, value:%s\n", StringRef(s.key).printable().c_str(), StringRef(s.value).printable().c_str());
-	}
-
-	return Void();
-}
+//ACTOR static Future<Void> debugPrintRange(Reference<Transaction> tr, std::string subspace, std::string msg) {
+//	if (!tr)
+//		return Void();
+//
+//	Standalone<RangeResultRef> results = wait(getRange(tr, KeyRange(KeyRangeRef(subspace + '\x00', subspace + '\xff'))));
+//	printf("==================================================DB:%s:%s, count:%d\n", msg.c_str(),
+//	       StringRef(subspace).printable().c_str(), results.size());
+//	for (auto & s : results) {
+//		printf("=====key:%s, value:%s\n", StringRef(s.key).printable().c_str(), StringRef(s.value).printable().c_str());
+//	}
+//
+//	return Void();
+//}
 
 ACTOR Future<Void> stackSub(FlowTesterStack* stack) {
 	if (stack->data.size() < 2)

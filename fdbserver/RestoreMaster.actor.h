@@ -167,6 +167,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		batch.clear();
 		batchStatus.clear();
 		finishedBatch = NotifiedVersion();
+		ASSERT(runningVersionBatches.get() == 0);
 	}
 
 	std::string describeNode() {

@@ -58,6 +58,7 @@ struct NetworkOptions {
 	uint64_t traceMaxLogsSize;
 	std::string traceLogGroup;
 	std::string traceFormat;
+	std::string traceClockSource;
 	Optional<bool> logClientInfo;
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 	bool slowTaskProfilingEnabled;
@@ -66,7 +67,7 @@ struct NetworkOptions {
 	NetworkOptions()
 	  : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
 	    traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	    traceFormat("xml"), slowTaskProfilingEnabled(false) {}
+	    traceFormat("xml"), traceClockSource("now"), slowTaskProfilingEnabled(false) {}
 };
 
 class Database {
@@ -244,6 +245,7 @@ public:
 	Future< Void > warmRange( Database cx, KeyRange keys );
 
 	Future< std::pair<Optional<StorageMetrics>, int> > waitStorageMetrics( KeyRange const& keys, StorageMetrics const& min, StorageMetrics const& max, StorageMetrics const& permittedError, int shardLimit, int expectedShardCount );
+	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
 	Future< StorageMetrics > getStorageMetrics( KeyRange const& keys, int shardLimit );
 	Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( KeyRange const& keys, StorageMetrics const& limit, StorageMetrics const& estimated );
 
