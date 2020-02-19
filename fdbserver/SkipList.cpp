@@ -764,7 +764,8 @@ class BConflicts {
 		}
 
 		// Clear the interior of the range.
-		++begin_it;
+		// TODO: We only need this lookup if we insert for `end`.
+		begin_it = btree.upper_bound(begin);
 		if (begin_it != end_it) {
 			btree.erase(begin_it, end_it);
 		}
