@@ -2204,7 +2204,7 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 
 		if (performRestore) {
 			if (dbVersion == invalidVersion) {
-				printf("[INFO] get latest version\n");
+				TraceEvent("FastRestoreAgent").detail("TargetRestoreVersion", "Largest restorable version");
 				BackupDescription desc = wait(IBackupContainer::openContainer(container)->describeBackup());
 				if (!desc.maxRestorableVersion.present()) {
 					fprintf(stderr, "The specified backup is not restorable to any version.\n");
@@ -2212,7 +2212,7 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 				}
 
 				dbVersion = desc.maxRestorableVersion.get();
-				printf("[INFO] restore to version:%ld\n", dbVersion);
+				TraceEvent("FastRestoreAgent").detail("TargetRestoreVersion", dbVersion);
 			}
 			Version _restoreVersion = wait(fastRestore(db, KeyRef(tagName), KeyRef(container), waitForDone, dbVersion,
 			                                           verbose, range, KeyRef(addPrefix), KeyRef(removePrefix)));

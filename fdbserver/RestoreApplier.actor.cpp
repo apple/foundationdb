@@ -44,8 +44,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 	    Reference<RestoreApplierData>(new RestoreApplierData(applierInterf.id(), nodeIndex));
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
-	state double updateProcessStatsDelay = SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL;
-	state Future<Void> updateProcessStatsTimer = delay(updateProcessStatsDelay);
+	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
 	actors.add(traceProcessMetrics(self, "Applier"));
 
@@ -80,7 +79,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 				}
 				when(wait(updateProcessStatsTimer)) {
 					updateProcessStats(self);
-					updateProcessStatsTimer = delay(updateProcessStatsDelay);
+					updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 				}
 				when(wait(exitRole)) {
 					TraceEvent("FastRestore").detail("RestoreApplierCore", "ExitRole").detail("NodeID", self->id());

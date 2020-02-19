@@ -61,8 +61,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 	    Reference<RestoreLoaderData>(new RestoreLoaderData(loaderInterf.id(), nodeIndex));
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
-	state double updateProcessStatsDelay = SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL;
-	state Future<Void> updateProcessStatsTimer = delay(updateProcessStatsDelay);
+	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
 	actors.add(traceProcessMetrics(self, "Loader"));
 
@@ -101,7 +100,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				}
 				when(wait(updateProcessStatsTimer)) {
 					updateProcessStats(self);
-					updateProcessStatsTimer = delay(updateProcessStatsDelay);
+					updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 				}
 				when(wait(exitRole)) {
 					TraceEvent("FastRestore").detail("RestoreLoaderCore", "ExitRole").detail("NodeID", self->id());
@@ -121,7 +120,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 
 // Assume: Only update the local data if it (applierInterf) has not been set
 void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self) {
-	TraceEvent("FastRestoreLoader").detail("HandleRestoreSysInfoRequest", self->id());
+	TraceEvent("FastRestoreLoader", self->id()).detail("HandleRestoreSysInfoRequest", self->id());
 	ASSERT(self.isValid());
 
 	// The loader has received the appliers interfaces
@@ -148,7 +147,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<LoaderBatc
 	state std::map<LoadingParam, MutationsVec>::iterator samplesIter = batchData->sampleMutations.end();
 
 	// Q: How to record the  param's fields inside LoadingParam Refer to storageMetrics
-	TraceEvent("FastRestore").detail("Loader", loaderID).detail("StartProcessLoadParam", param.toString());
+	TraceEvent("FastRestoreLoaderProcessLoadingParam", loaderID).detail("LoadingParam", param.toString());
 	ASSERT(param.blockSize > 0);
 	ASSERT(param.asset.offset % param.blockSize == 0); // Parse file must be at block bondary.
 	ASSERT(batchData->kvOpsPerLP.find(param) == batchData->kvOpsPerLP.end());
@@ -179,7 +178,7 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<LoaderBatc
 		_parseSerializedMutation(kvOpsPerLPIter, &mutationMap, samplesIter, &batchData->counters, param.asset);
 	}
 
-	TraceEvent("FastRestore").detail("Loader", loaderID).detail("FinishLoadingFile", param.asset.filename);
+	TraceEvent("FastRestoreLoaderProcessLoadingParamDone", loaderID).detail("LoadingParam", param.toString());
 
 	return Void();
 }

@@ -3576,8 +3576,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	state double lastLoopTopTime = now();
 	state Future<Void> dbInfoChange = Void();
 	state Future<Void> checkLastUpdate = Void();
-	state double updateProcessStatsDelay = SERVER_KNOBS->UPDATE_STORAGE_PROCESS_STATS_INTERVAL;
-	state Future<Void> updateProcessStatsTimer = delay(updateProcessStatsDelay);
+	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
 	actors.add(updateStorage(self));
 	actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
@@ -3689,7 +3688,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
-				updateProcessStatsTimer = delay(updateProcessStatsDelay);
+				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 			}
 			when(wait(actors.getResult())) {}
 		}
