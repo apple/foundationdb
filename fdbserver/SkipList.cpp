@@ -34,6 +34,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/Knobs.h"
 
+#include "absl/strings/string_view.h"
 #include "absl/container/btree_map.h"
 
 using std::max;
@@ -722,6 +723,7 @@ struct ConflictSet {
 	SkipList versionHistory;
 	Key removalKey;
 	Version oldestVersion;
+	Bconflicts bConflicts;
 };
 
 ConflictSet* newConflictSet() {
@@ -734,7 +736,79 @@ void destroyConflictSet(ConflictSet* cs) {
 	delete cs;
 }
 
-ConflictBatch::ConflictBatch(ConflictSet* cs) : cs(cs), transactionCount(0) {}
+// TODO: Write a comparator that works with StringRef.
+absl::string_view convertRef(const StringRef& ref) {
+	return absl::string_view(reinterpret_cast<const char*>(ref.begin()), ref.size());
+}
+
+// Each node represents a range covering `it` to `it++` and the greatest version we've seen
+// is `it->second`.
+//
+// The SkipList implementation was a variant on an order statistic tree so that there was
+// less need for iteration. Each level had the maximum version for a range with lower levels
+// containing progressively smaller ranges.
+class BConflicts {
+	// TODO: Consider a string type that uses the fast allocation path.
+	absl::btree_map<std::string, Version> btree;
+
+	bool detectConflict(absl::string_view begin, absl::string_view end, Version version) {
+		// Find the highest range that covers the conflict range and then iterate backwards
+		// until we see a conflict or hit the beginning of the range.
+		auto it = btree.lower_bound(end);
+		if (it == btree.end()) --it;
+		while (it->first > begin && it != btree.begin()) {
+			if (it->second > version) return true;
+			--it;
+		}
+		if (it == btree.begin()) return it->second > version;
+		return false;
+	}
+
+	void addConflictRange(Version now, absl::string_view begin, absl::string_view end) {
+		auto end_it = btree.lower_bound(end);
+		if (end_it != btree.end() && end_it->first == end) {
+			// We already have a node for the endpoint, simply update it.
+			end_it->second = now;
+		} else {
+			// If the range is not currently covered, insert a range at the end.
+			end_it = btree.insert(end_it, { std::string(end), now });
+		}
+
+		// Find the first node inside of the range, so that we can clear the range without
+		// deleting a node referencing a range below.
+		auto begin_it = btree.upper_bound(begin);
+		btree->remove(begin_it, end_it);
+	}
+
+public:
+	void detectConflicts(ReadConflictRange* ranges, int count, bool* transactionConflictStatus) {
+		// TODO: Try out the job queueing logic from SkipList.
+		for (int i = 0; i < count; i++) {
+			const auto& range = ranges[i];
+			transactionConflictStatus[range.transaction] =
+			    detectConflict(convertRef(range.begin), convertRef(range.end), range.version);
+		}
+	}
+
+	void addConflictRanges(Version now, std::vector<std::pair<StringRef, StringRef>>::iterator begin,
+	                       std::vector<std::pair<StringRef, StringRef>>::iterator end) {
+		for (auto it = begin; it != end; ++it) {
+			auto b = convertRef(it->first);
+			auto e = convertRef(it->second);
+			addConflictRange(now, b, e);
+		}
+	}
+
+	// TODO: Consider using a hint to stop iteration early when we've deleted as many keys as
+	// we could.
+	void removeBefore(Version oldest) {
+		absl::erase_if(btree, [](std::pair<const std::string, Version>& p) { return p.second < oldest; });
+	}
+}
+
+ConflictBatch::ConflictBatch(ConflictSet* cs)
+  : cs(cs), transactionCount(0) {
+}
 
 ConflictBatch::~ConflictBatch() {}
 
@@ -858,6 +932,7 @@ void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::
 		cs->versionHistory.find(&cs->removalKey, &finger, &temp, 1);
 		cs->versionHistory.removeBefore(cs->oldestVersion, finger, combinedWriteConflictRanges.size() * 3 + 10);
 		cs->removalKey = finger.getValue();
+		cs->bConflicts.removeBefore(cs->oldestVersion);
 	}
 	g_removeBefore += timer() - t;
 }
@@ -867,6 +942,8 @@ void ConflictBatch::checkReadConflictRanges() {
 
 	cs->versionHistory.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(),
 	                                   transactionConflictStatus);
+	cs->bConflicts.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(),
+	                               transactionConflictStatus);
 }
 
 void ConflictBatch::addConflictRanges(Version now, std::vector<std::pair<StringRef, StringRef>>::iterator begin,
@@ -888,6 +965,8 @@ void ConflictBatch::addConflictRanges(Version now, std::vector<std::pair<StringR
 		part->addConflictRanges(&fingers[0], ss / 2, now);
 		ss = stripeSize;
 	}
+
+	cs->bConflicts.addConflictRanges(now, begin, end);
 }
 
 void ConflictBatch::mergeWriteConflictRanges(Version now) {
@@ -962,10 +1041,6 @@ void operatorLessThanTest() {
 		ASSERT(!(b < a));
 		ASSERT(!(a == b));
 	}
-}
-
-void CreateABTree() {
-  absl::btree_map<StringRef, Version> btree;
 }
 
 void skipListTest() {
