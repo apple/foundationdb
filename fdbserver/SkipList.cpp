@@ -748,11 +748,11 @@ class BConflicts {
 		auto begin_it = btree.lower_bound(begin);
 		if (begin_it == btree.end()) {
 			// If `begin` is not currently covered by a range, set the version to 0.
-			begin_it = btree.insert(begin_it, { std::string(begin), 0 })
+			begin_it = btree.insert(begin_it, { std::string(begin), 0 });
 		} else if (begin_it->first != begin) {
 			// If the `begin` is covered but not an endpoint, set `begin` to the old range
 			// value.
-			begin_it = btree.insert(begin_it, { std::string(begin), begin_it->second })
+			begin_it = btree.insert(begin_it, { std::string(begin), begin_it->second });
 		}
 
 		// Insert or update the node for `end`.
