@@ -115,8 +115,7 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> masterWorker
 			break;
 		}
 
-		TraceEvent("FastRestoreMaster",  masterData->id())
-		    .detail("WorkerNode", workerInterf.first);
+		TraceEvent("FastRestoreMaster", masterData->id()).detail("WorkerNode", workerInterf.first);
 		requests.emplace_back(workerInterf.first, RestoreRecruitRoleRequest(role, nodeIndex));
 		nodeIndex++;
 	}
@@ -134,7 +133,9 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> masterWorker
 			TraceEvent(SevError, "FastRestoreMaster").detail("RecruitRestoreRolesInvalidRole", reply.role);
 		}
 	}
-	TraceEvent("FastRestoreRecruitRestoreRolesDone", masterData->id()).detail("Workers", masterWorker->workerInterfaces.size()).detail("RecruitedRoles", replies.size());
+	TraceEvent("FastRestoreRecruitRestoreRolesDone", masterData->id())
+	    .detail("Workers", masterWorker->workerInterfaces.size())
+	    .detail("RecruitedRoles", replies.size());
 
 	return Void();
 }
@@ -149,9 +150,11 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> masterW
 		requests.emplace_back(loader.first, RestoreSysInfoRequest(sysInfo));
 	}
 
-	TraceEvent("FastRestoreDistributeRestoreSysInfoToLoaders", masterData->id()).detail("Loaders", masterData->loadersInterf.size());
+	TraceEvent("FastRestoreDistributeRestoreSysInfoToLoaders", masterData->id())
+	    .detail("Loaders", masterData->loadersInterf.size());
 	wait(sendBatchRequests(&RestoreLoaderInterface::updateRestoreSysInfo, masterData->loadersInterf, requests));
-	TraceEvent("FastRestoreDistributeRestoreSysInfoToLoadersDone",  masterData->id()).detail("Loaders", masterData->loadersInterf.size());
+	TraceEvent("FastRestoreDistributeRestoreSysInfoToLoadersDone", masterData->id())
+	    .detail("Loaders", masterData->loadersInterf.size());
 
 	return Void();
 }
@@ -171,7 +174,7 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	state int numTries = 0;
 	state int restoreIndex = 0;
 
-	TraceEvent("FastRestoreMasterWaitOnRestoreRequests",  masterData->id());
+	TraceEvent("FastRestoreMasterWaitOnRestoreRequests", masterData->id());
 
 	// lock DB for restore
 	numTries = 0;
@@ -184,10 +187,10 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(checkDatabaseLock(tr, randomUID));
-			TraceEvent("FastRestoreMasterProcessRestoreRequests",  masterData->id()).detail("DBIsLocked", randomUID);
+			TraceEvent("FastRestoreMasterProcessRestoreRequests", masterData->id()).detail("DBIsLocked", randomUID);
 			break;
 		} catch (Error& e) {
-			TraceEvent("FastRestoreMasterProcessRestoreRequests",  masterData->id()).detail("CheckLockError", e.what());
+			TraceEvent("FastRestoreMasterProcessRestoreRequests", masterData->id()).detail("CheckLockError", e.what());
 			TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreMayFail")
 			    .detail("Reason", "DB is not properly locked")
 			    .detail("ExpectedLockID", randomUID);
@@ -202,7 +205,8 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	try {
 		for (restoreIndex = 0; restoreIndex < restoreRequests.size(); restoreIndex++) {
 			RestoreRequest& request = restoreRequests[restoreIndex];
-			TraceEvent("FastRestoreMasterProcessRestoreRequests",  masterData->id()).detail("RestoreRequestInfo", request.toString());
+			TraceEvent("FastRestoreMasterProcessRestoreRequests", masterData->id())
+			    .detail("RestoreRequestInfo", request.toString());
 			// TODO: Initialize MasterData and all loaders and appliers' data for each restore request!
 			self->resetPerRestoreRequest();
 			wait(success(processRestoreRequest(self, cx, request)));
@@ -229,7 +233,6 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 		ASSERT_WE_THINK(false); // This unlockDatabase should always succeed, we think.
 	}
 
-
 	TraceEvent("FastRestoreMasterRestoreCompleted", self->id());
 
 	return Void();
@@ -237,7 +240,10 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 
 ACTOR static Future<Void> monitorFinishedVersion(Reference<RestoreMasterData> self, RestoreRequest request) {
 	loop {
-		TraceEvent("FastRestoreMonitorFinishedVersion", self->id()).detail("RestoreRequest", request.toString()).detail("BatchIndex", self->finishedBatch.get()).detail("Now", now());
+		TraceEvent("FastRestoreMonitorFinishedVersion", self->id())
+		    .detail("RestoreRequest", request.toString())
+		    .detail("BatchIndex", self->finishedBatch.get())
+		    .detail("Now", now());
 		wait(delay(SERVER_KNOBS->FASTRESTORE_VB_MONITOR_DELAY));
 	}
 }
@@ -287,7 +293,11 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 			wait(self->runningVersionBatches.onChange());
 		}
 		int batchIndex = versionBatch->batchIndex;
-		TraceEvent("FastRestoreMasterDispatchVersionBatches").detail("BatchIndex", batchIndex).detail("BatchSize", versionBatch->size).detail("RunningVersionBatches", self->runningVersionBatches.get()).detail("Start", now());
+		TraceEvent("FastRestoreMasterDispatchVersionBatches")
+		    .detail("BatchIndex", batchIndex)
+		    .detail("BatchSize", versionBatch->size)
+		    .detail("RunningVersionBatches", self->runningVersionBatches.get())
+		    .detail("Start", now());
 		self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
 		self->batchStatus[batchIndex] = Reference<MasterBatchStatus>(new MasterBatchStatus());
 		fBatches.push_back(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, *versionBatch));

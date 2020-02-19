@@ -250,7 +250,7 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 // RestoreMaster is the leader
 ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader, Database cx,
                                  RestoreWorkerInterface myWorkerInterf) {
-    wait(delay(5.0));
+	wait(delay(5.0));
 	TraceEvent("FastRestoreWorker", myWorkerInterf.id()).detail("MonitorLeader", "StartLeaderElection");
 	state int count = 0;
 	loop {
@@ -285,7 +285,10 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 		}
 	}
 
-	TraceEvent("FastRestoreWorker", myWorkerInterf.id()).detail("MonitorLeader", "FinishLeaderElection").detail("Leader", leaderInterf.id()).detail("IamLeader", leaderInterf == myWorkerInterf);
+	TraceEvent("FastRestoreWorker", myWorkerInterf.id())
+	    .detail("MonitorLeader", "FinishLeaderElection")
+	    .detail("Leader", leaderInterf.id())
+	    .detail("IamLeader", leaderInterf == myWorkerInterf);
 	return Void();
 }
 
@@ -328,7 +331,7 @@ ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> connFile, Loca
 	try {
 		Database cx = Database::createDatabase(connFile, Database::API_VERSION_LATEST, true, locality);
 		wait(reportErrors(_restoreWorker(cx, locality), "RestoreWorker"));
-	}  catch (Error& e) {
+	} catch (Error& e) {
 		TraceEvent("FastRestoreWorker").detail("Error", e.what());
 		throw e;
 	}

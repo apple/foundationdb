@@ -105,9 +105,7 @@ struct MutationRef {
 		}
 	}
 
-	bool isAtomicOp() const {
-		return (ATOMIC_MASK & (1<<type)) != 0;
-	}
+	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
 
 	template <class Ar>
 	void serialize( Ar& ar ) {

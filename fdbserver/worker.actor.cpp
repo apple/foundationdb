@@ -1516,10 +1516,10 @@ ACTOR Future<Void> fdbd(
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
 		// Endpoints should be registered first before any process trying to connect to it.
 		// So coordinationServer actor should be the first one executed before any other.
-		if ( coordFolder.size() ) {
-			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
-			actors.push_back(fileNotFoundToNever(
-			    coordinationServer(coordFolder)));
+		if (coordFolder.size()) {
+			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
+			// their files
+			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder)));
 		}
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
