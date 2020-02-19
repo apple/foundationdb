@@ -66,7 +66,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 	Version debugMinRecentStateVersion;
 };
-}
+} // namespace
 
 ACTOR Future<Void> resolveBatch(
 	Reference<Resolver> self, 

@@ -255,6 +255,71 @@ namespace actorcompiler
             //showTokens();
         }
 
+        class ClassContext {
+            public string name;
+            public int inBlocks;
+        }
+
+        private bool ParseClassContext(TokenRange toks, out string name)
+        {
+            name = "";
+            if (toks.Begin == toks.End)
+            {
+                return false;
+            }
+
+            // http://nongnu.org/hcb/#attribute-specifier-seq
+            Token first;
+            while (true)
+            {
+                first = toks.First(NonWhitespace);
+                if (first.Value == "[")
+                {
+                    var contents = first.GetMatchingRangeIn(toks);
+                    toks = range(contents.End + 1, toks.End);
+                }
+                else if (first.Value == "alignas")
+                {
+                    toks = range(first.Position + 1, toks.End);
+                    first = toks.First(NonWhitespace);
+                    first.Assert("Expected ( after alignas", t => t.Value == "(");
+                    var contents = first.GetMatchingRangeIn(toks);
+                    toks = range(contents.End + 1, toks.End);
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            // http://nongnu.org/hcb/#class-head-name
+            first = toks.First(NonWhitespace);
+            if (!identifierPattern.Match(first.Value).Success) {
+                return false;
+            }
+            while (true) {
+                first.Assert("Expected identifier", t=>identifierPattern.Match(t.Value).Success);
+                name += first.Value;
+                toks = range(first.Position + 1, toks.End);
+                if (toks.First(NonWhitespace).Value == "::") {
+                    name += "::";
+                    toks = toks.SkipWhile(Whitespace).Skip(1);
+                } else {
+                    break;
+                }
+                first = toks.First(NonWhitespace);
+            }
+            // http://nongnu.org/hcb/#class-virt-specifier-seq
+            toks = toks.SkipWhile(t => Whitespace(t) || t.Value == "final" || t.Value == "explicit" || t.Value == "sealed");
+
+            first = toks.First(NonWhitespace);
+            if (first.Value == ":" || first.Value == "{") {
+                // At this point we've confirmed that this is a class.
+                return true;
+            }
+            return false;
+        }
+
         public void Write(System.IO.TextWriter writer, string destFileName)
         {
             writer.NewLine = "\n";
@@ -266,6 +331,7 @@ namespace actorcompiler
                 outLine++;
             }
             int inBlocks = 0;
+            Stack<ClassContext> classContextStack = new Stack<ClassContext>();
             for(int i=0; i<tokens.Length; i++)
             {
                 if(tokens[0].SourceLine == 0)
@@ -276,9 +342,13 @@ namespace actorcompiler
                 {
                     int end;
                     var actor = ParseActor(i, out end);
+                    if (classContextStack.Count > 0)
+                    {
+                        actor.enclosingClass = String.Join("::", classContextStack.Reverse().Select(t => t.name));
+                    }
                     var actorWriter = new System.IO.StringWriter();
                     actorWriter.NewLine = "\n";
-                    new ActorCompiler(actor, sourceFile, inBlocks==0, LineNumbersEnabled, generateProbes).Write(actorWriter);
+                    new ActorCompiler(actor, sourceFile, inBlocks == 0, LineNumbersEnabled, generateProbes).Write(actorWriter);
                     string[] actorLines = actorWriter.ToString().Split('\n');
 
                     bool hasLineNumber = false;
@@ -322,10 +392,29 @@ namespace actorcompiler
                         outLine++;
                     }
                 }
+                else if (tokens[i].Value == "class" || tokens[i].Value == "struct" || tokens[i].Value == "union")
+                {
+                    writer.Write(tokens[i].Value);
+                    string name;
+                    if (ParseClassContext(range(i+1, tokens.Length), out name))
+                    {
+                        classContextStack.Push(new ClassContext { name = name, inBlocks = inBlocks});
+                    }
+                }
                 else
                 {
-                    if (tokens[i].Value == "{") inBlocks++;
-                    else if (tokens[i].Value == "}") inBlocks--;
+                    if (tokens[i].Value == "{")
+                    {
+                        inBlocks++;
+                    }
+                    else if (tokens[i].Value == "}")
+                    {
+                        inBlocks--;
+                        if (classContextStack.Count > 0 && classContextStack.Peek().inBlocks == inBlocks)
+                        {
+                            classContextStack.Pop();
+                        }
+                    }
                     writer.Write(tokens[i].Value);
                     outLine += tokens[i].Value.Count(c => c == '\n');
                 }
@@ -1018,6 +1107,8 @@ namespace actorcompiler
             }
         }
 
+        readonly Regex identifierPattern = new Regex(@"\G[a-zA-Z_][a-zA-Z_0-9]*", RegexOptions.Singleline);
+
         readonly Regex[] tokenExpressions = (new string[] {
             @"\{",
             @"\}",
@@ -1033,6 +1124,7 @@ namespace actorcompiler
             @"\r\n",
             @"\n",
             @"::",
+            @":",
             @"."
         }).Select( x=>new Regex(@"\G"+x, RegexOptions.Singleline) ).ToArray();
 

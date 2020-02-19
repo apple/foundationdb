@@ -99,7 +99,6 @@ public:
 class ArenaObjectReader;
 class NetworkMessageReceiver {
 public:
-	virtual void receive( ArenaReader& ) = 0;
 	virtual void receive(ArenaObjectReader&) = 0;
 	virtual bool isStream() const { return false; }
 };

@@ -234,20 +234,19 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 		return joinPath( folder, sample_filename );
 	else if ( storeType == KeyValueStoreType::SSD_BTREE_V2 )
 		return joinPath(folder, sample_filename);
-	else if( storeType == KeyValueStoreType::MEMORY || KeyValueStoreType::MEMORY_RADIXTREE )
+	else if( storeType == KeyValueStoreType::MEMORY || storeType == KeyValueStoreType::MEMORY_RADIXTREE )
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
-	
 	else if ( storeType == KeyValueStoreType::SSD_REDWOOD_V1 )
 		return joinPath(folder, sample_filename);
 	UNREACHABLE();
 }
 
 std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std::string prefix, UID id ) {
-	if( storeType == KeyValueStoreType::SSD_BTREE_V1)
+	if(storeType == KeyValueStoreType::SSD_BTREE_V1)
 		return joinPath( folder, prefix + id.toString() + ".fdb" );
 	else if (storeType == KeyValueStoreType::SSD_BTREE_V2)
 		return joinPath(folder, prefix + id.toString() + ".sqlite");
-	else if( storeType == KeyValueStoreType::MEMORY || KeyValueStoreType::MEMORY_RADIXTREE)
+	else if(storeType == KeyValueStoreType::MEMORY || storeType == KeyValueStoreType::MEMORY_RADIXTREE)
 		return joinPath( folder, prefix + id.toString() + "-" );
 	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
 		return joinPath(folder, prefix + id.toString() + ".redwood");

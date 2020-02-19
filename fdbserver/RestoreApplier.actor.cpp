@@ -298,7 +298,6 @@ ACTOR Future<Void> applyToDB(UID applierID, int64_t batchIndex, Reference<Applie
 		    .detail("Reason", "NoMutationAtVersions");
 		return Void();
 	}
-	ASSERT_WE_THINK(batchData->kvOps.size());
 
 	batchData->sanityCheckMutationOps();
 

@@ -229,7 +229,8 @@ struct NetworkAddress {
 	bool isTLS() const { return (flags & FLAG_TLS) != 0; }
 	bool isV6() const { return ip.isV6(); }
 
-	static NetworkAddress parse( std::string const& );
+	static NetworkAddress parse(std::string const&); // May throw connection_string_invalid
+	static Optional<NetworkAddress> parseOptional(std::string const&);
 	static std::vector<NetworkAddress> parseList( std::string const& );
 	std::string toString() const;
 

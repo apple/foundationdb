@@ -244,7 +244,7 @@ public:
 		try {
 			if (error) {
 				// Log the error...
-				TraceEvent(SevWarn, errContext, errID).suppressFor(1.0).detail("Message", error.value());
+				TraceEvent(SevWarn, errContext, errID).suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
 				p.sendError( connection_failed() );
 			} else
 				p.send( Void() );
@@ -425,15 +425,15 @@ private:
 		boost::system::error_code error;
 		socket.close(error);
 		if (error)
-			TraceEvent(SevWarn, "N2_CloseError", id).suppressFor(1.0).detail("Message", error.value());
+			TraceEvent(SevWarn, "N2_CloseError", id).suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
 	}
 
 	void onReadError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_ReadError", id).suppressFor(1.0).detail("Message", error.value());
+		TraceEvent(SevWarn, "N2_ReadError", id).suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
 		closeSocket();
 	}
 	void onWriteError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_WriteError", id).suppressFor(1.0).detail("Message", error.value());
+		TraceEvent(SevWarn, "N2_WriteError", id).suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
 		closeSocket();
 	}
 };

@@ -484,7 +484,7 @@ public:
 	double FASTRESTORE_SAMPLING_PERCENT;
 	int64_t FASTRESTORE_NUM_LOADERS;
 	int64_t FASTRESTORE_NUM_APPLIERS;
-	// FASTRESTORE_TXN_BATCH_MAX_BYTES is txn size appliers apply mutations
+	// FASTRESTORE_TXN_BATCH_MAX_BYTES is target txn size used by appliers to apply mutations
 	double FASTRESTORE_TXN_BATCH_MAX_BYTES;
 	// FASTRESTORE_VERSIONBATCH_MAX_BYTES is the maximum data size in each version batch
 	double FASTRESTORE_VERSIONBATCH_MAX_BYTES;

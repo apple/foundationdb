@@ -571,6 +571,12 @@ bool selectTraceFormatter(std::string format);
 // Returns true iff format is recognized.
 bool validateTraceFormat(std::string format);
 
+// Select the clock source for trace files. Returns false if the format is unrecognized. No longer safe to call after a call
+// to openTraceFile.
+bool selectTraceClockSource(std::string source);
+// Returns true iff source is recognized.
+bool validateTraceClockSource(std::string source);
+
 void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
 

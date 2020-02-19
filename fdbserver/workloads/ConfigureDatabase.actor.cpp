@@ -322,8 +322,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			else if ( randomChoice == 6 ) {
 				// Some configurations will be invalid, and that's fine.
 				wait(success( IssueConfigurationChange( cx, logTypes[deterministicRandom()->randomInt( 0, sizeof(logTypes)/sizeof(logTypes[0]))], false ) ));
-			}
-			else {
+			} else {
 				ASSERT(false);
 			}
 		}

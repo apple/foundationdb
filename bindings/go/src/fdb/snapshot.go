@@ -86,3 +86,11 @@ func (s Snapshot) GetReadVersion() FutureInt64 {
 func (s Snapshot) GetDatabase() Database {
 	return s.transaction.db
 }
+
+func (s Snapshot) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
+	beginKey, endKey := r.FDBRangeKeys()
+	return s.getEstimatedRangeSizeBytes(
+		beginKey.FDBKey(),
+		endKey.FDBKey(),
+	)
+}

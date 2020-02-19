@@ -1343,6 +1343,16 @@ Future< Standalone<VectorRef<const char*> >> ReadYourWritesTransaction::getAddre
 	return result;
 }
 
+Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
+	if(checkUsedDuringCommit()) {
+		throw used_during_commit();
+	}
+	if( resetPromise.isSet() )
+		return resetPromise.getFuture().getError();
+
+	return map(waitOrError(tr.getStorageMetrics(keys, -1), resetPromise.getFuture()), [](const StorageMetrics& m) { return m.bytes; });
+}
+
 void ReadYourWritesTransaction::addReadConflictRange( KeyRangeRef const& keys ) {
 	if(checkUsedDuringCommit()) {
 		throw used_during_commit();
