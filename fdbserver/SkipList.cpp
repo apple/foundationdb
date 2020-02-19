@@ -944,7 +944,9 @@ void ConflictBatch::checkReadConflictRanges() {
 	memset(transactionConflictStatus, 0, transactionCount * sizeof(bool));
 	cs->bConflicts.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(), bConflictStatus);
 	for (int i = 0; i < transactionCount; i++) {
-		ASSERT(transactionConflictStatus[i] == bConflictStatus[i]);
+		if (transactionConflictStatus[i] != bConflictStatus[i]) {
+			std::cout << "Skip: " << transactionConflictStatus[i] << " BTree: " << bConflictStatus[i] << std::endl;
+		}
 	}
 	delete[] bConflictStatus;
 }
