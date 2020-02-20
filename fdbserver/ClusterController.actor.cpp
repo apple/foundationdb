@@ -337,7 +337,6 @@ public:
 				else {
 					std::vector<LocalityEntry> bestSet;
 					std::vector<LocalityData> tLocalities;
-					bool bestFound = false;
 
 					// Try to find the best team of servers to fulfill the policy
 					if (findBestPolicySet(bestSet, logServerSet, policy, desired, SERVER_KNOBS->POLICY_RATING_TESTS,
