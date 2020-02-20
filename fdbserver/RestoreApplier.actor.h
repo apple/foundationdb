@@ -29,8 +29,8 @@
 
 #include <sstream>
 #include "flow/Stats.h"
-#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Atomic.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
@@ -241,10 +241,8 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 
 	void addMutation(MutationRef m, Version ver) {
 		if (!isRangeMutation(m)) {
-			if (stagingKeys.find(m.param1) == stagingKeys.end()) {
-				stagingKeys.emplace(m.param1, StagingKey());
-			}
-			stagingKeys[m.param1].add(m, ver);
+			auto item = stagingKeys.emplace(m.param1, StagingKey());
+			item.first->second.add(m, ver);
 		} else {
 			stagingKeyRanges.insert(StagingKeyRange(m, ver));
 		}
