@@ -1748,8 +1748,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		populateOpsThatCreateDirectories(); // FIXME
 
 		// This is "our" network
-		boost::asio::ssl::context sslContext(boost::asio::ssl::context::tlsv12);
-		g_network = newNet2(&sslContext, false);
+		g_network = newNet2(false);
 
 		ASSERT(!API::isAPIVersionSelected());
 		try {
@@ -1792,8 +1791,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 
 ACTOR void _test_versionstamp() {
 	try {
-		boost::asio::ssl::context sslContext(boost::asio::ssl::context::tlsv12);
-		g_network = newNet2(&sslContext, false);
+		g_network = newNet2(false);
 
 		API *fdb = FDB::API::selectAPIVersion(620);
 

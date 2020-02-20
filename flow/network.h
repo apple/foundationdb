@@ -406,7 +406,7 @@ typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
 class INetwork;
 extern INetwork* g_network;
-extern INetwork* newNet2(boost::asio::ssl::context* sslContext, bool useThreadPool = false, bool useMetrics = false, Reference<TLSPolicy> policy = Reference<TLSPolicy>(), const TLSParams& tlsParams = TLSParams());
+extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false, Reference<TLSPolicy> policy = Reference<TLSPolicy>(), const TLSParams& tlsParams = TLSParams());
 
 class INetwork {
 public:

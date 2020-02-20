@@ -61,14 +61,12 @@ struct NetworkOptions {
 	Optional<bool> logClientInfo;
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 	bool slowTaskProfilingEnabled;
-	boost::asio::ssl::context sslContext;
-	std::string tlsPassword;
 
 	// The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
 	NetworkOptions()
 	  : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
 	    traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	    traceFormat("xml"), slowTaskProfilingEnabled(false), sslContext(boost::asio::ssl::context(boost::asio::ssl::context::tlsv12)), tlsPassword("") {}
+	    traceFormat("xml"), slowTaskProfilingEnabled(false) {}
 };
 
 class Database {

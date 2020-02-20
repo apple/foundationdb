@@ -82,8 +82,7 @@ void fdb_flow_test() {
 	fdb->setupNetwork();
 	startThread(networkThread, fdb);
 
-	boost::asio::ssl::context sslContext(boost::asio::ssl::context::tlsv12);
-	g_network = newNet2( &sslContext, false );
+	g_network = newNet2(false);
 
 	openTraceFile(NetworkAddress(), 1000000, 1000000, ".");
 	systemMonitor();

@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/TLSConnection.h"
-
 #ifndef FDBSERVER_SIMULATEDCLUSTER_H
 #define FDBSERVER_SIMULATEDCLUSTER_H
 #pragma once

@@ -38,7 +38,6 @@
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/TLSConnection.h"
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Knobs.h"
@@ -988,7 +987,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 
 	initTLSPolicy();
 
-	g_network = newNet2(&networkOptions.sslContext, false, useMetrics || networkOptions.traceDirectory.present(), tlsPolicy, tlsParams);
+	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present(), tlsPolicy, tlsParams);
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
 }

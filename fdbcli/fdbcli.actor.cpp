@@ -33,7 +33,6 @@
 
 #include "flow/DeterministicRandom.h"
 #include "flow/SignalSafeUnwind.h"
-#include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Platform.h"
 
 #include "flow/SimpleOpt.h"
@@ -2503,22 +2502,22 @@ struct CLIOptions {
 
 #ifndef TLS_DISABLED
 			// TLS Options
-		    case TLSOptions::OPT_TLS_PLUGIN:
+		    case TLSParams::OPT_TLS_PLUGIN:
 			    args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_CERTIFICATES:
+		    case TLSParams::OPT_TLS_CERTIFICATES:
 			    tlsCertPath = args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_CA_FILE:
+		    case TLSParams::OPT_TLS_CA_FILE:
 			    tlsCAPath = args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_KEY:
+		    case TLSParams::OPT_TLS_KEY:
 			    tlsKeyPath = args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_PASSWORD:
+		    case TLSParams::OPT_TLS_PASSWORD:
 			    tlsPassword = args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_VERIFY_PEERS:
+		    case TLSParams::OPT_TLS_VERIFY_PEERS:
 			    tlsVerifyPeers = args.OptionArg();
 			    break;
 #endif

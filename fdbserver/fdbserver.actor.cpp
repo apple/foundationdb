@@ -52,7 +52,6 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include <time.h>
 #include "fdbserver/Status.h"
-#include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Platform.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
@@ -964,7 +963,6 @@ int main(int argc, char* argv[]) {
 		int minTesterCount = 1;
 		bool testOnServers = false;
 
-		boost::asio::ssl::context sslContext(boost::asio::ssl::context::tlsv12);
 		Reference<TLSPolicy> tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(TLSPolicy::Is::SERVER));
 		TLSParams tlsParams;
 		std::vector<std::string> tlsVerifyPeers;
@@ -1335,22 +1333,22 @@ int main(int argc, char* argv[]) {
 					whitelistBinPaths = args.OptionArg();
 					break;
 #ifndef TLS_DISABLED
-				case TLSOptions::OPT_TLS_PLUGIN:
+				case TLSParams::OPT_TLS_PLUGIN:
 					args.OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_CERTIFICATES:
+				case TLSParams::OPT_TLS_CERTIFICATES:
 					tlsParams.tlsCertPath = args.OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_PASSWORD:
+				case TLSParams::OPT_TLS_PASSWORD:
 					tlsParams.tlsPassword = args.OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_CA_FILE:
+				case TLSParams::OPT_TLS_CA_FILE:
 					tlsParams.tlsCAPath = args.OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_KEY:
+				case TLSParams::OPT_TLS_KEY:
 					tlsParams.tlsKeyPath = args.OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_VERIFY_PEERS:
+				case TLSParams::OPT_TLS_VERIFY_PEERS:
 					tlsVerifyPeers.push_back(args.OptionArg());
 					break;
 #endif
@@ -1560,7 +1558,7 @@ int main(int argc, char* argv[]) {
 			  tlsPolicy->set_verify_peers( tlsVerifyPeers );
 			}
 #endif
-			g_network = newNet2(&sslContext, useThreadPool, true, tlsPolicy, tlsParams);
+			g_network = newNet2(useThreadPool, true, tlsPolicy, tlsParams);
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
