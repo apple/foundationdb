@@ -746,7 +746,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
                                                         int batchIndex, NotifiedVersion* finishedBatch) {
 
 	wait(finishedBatch->whenAtLeast(batchIndex - 1));
-	TraceEvent("FastRestoreMasterPhaseApplyToDBStart")
+	TraceEvent("FastRestoreMasterPhaseApplyToDB")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("FinishedBatch", finishedBatch->get());
 
@@ -754,7 +754,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 		// Prepare the applyToDB requests
 		std::vector<std::pair<UID, RestoreVersionBatchRequest>> requests;
 
-		TraceEvent("FastRestoreMasterPhaseApplyMutations")
+		TraceEvent("FastRestoreMasterPhaseApplyToDB")
 		    .detail("BatchIndex", batchIndex)
 		    .detail("Appliers", appliersInterf.size());
 		for (auto& applier : appliersInterf) {
@@ -770,7 +770,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 			batchData->applyToDB = getBatchReplies(&RestoreApplierInterface::applyToDB, appliersInterf, requests,
 			                                       &replies, TaskPriority::RestoreApplierWriteDB);
 		} else {
-			TraceEvent(SevError, "FastRestoreNotifyApplierToApplierMutations")
+			TraceEvent(SevError, "FastRestoreMasterPhaseApplyToDB")
 			    .detail("BatchIndex", batchIndex)
 			    .detail("Attention", "Actor should not be invoked twice for the same batch index");
 		}
@@ -783,7 +783,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 			if (batchStatus->applyStatus[reply.id] == RestoreApplyStatus::Applying) {
 				batchStatus->applyStatus[reply.id] = RestoreApplyStatus::Applied;
 				if (reply.isDuplicated) {
-					TraceEvent(SevWarn, "FastRestoreNotifyApplierToApplierMutations")
+					TraceEvent(SevWarn, "FastRestoreMasterPhaseApplyToDB")
 					    .detail("Applier", reply.id)
 					    .detail("DuplicateRequestReturnEarlier", "Apply db request should have been processed");
 				}
@@ -791,7 +791,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 		}
 		for (auto& applier : appliersInterf) {
 			if (batchStatus->applyStatus[applier.first] != RestoreApplyStatus::Applied) {
-				TraceEvent(SevError, "FastRestoreNotifyApplierToApplierMutations")
+				TraceEvent(SevError, "FastRestoreMasterPhaseApplyToDB")
 				    .detail("Applier", applier.first)
 				    .detail("ApplyStatus", batchStatus->applyStatus[applier.first]);
 			}
