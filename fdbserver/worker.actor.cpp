@@ -618,7 +618,7 @@ Standalone<StringRef> roleString(std::set<std::pair<std::string, std::string>> r
 	return StringRef(result);
 }
 
-void startRole(const Role &role, UID roleId, UID workerId, std::map<std::string, std::string> details, std::string origination) {
+void startRole(const Role &role, UID roleId, UID workerId, const std::map<std::string, std::string> &details, const std::string &origination) {
 	if(role.includeInTraceRoles) {
 		addTraceRole(role.abbreviation);
 	}
@@ -921,7 +921,7 @@ ACTOR Future<Void> workerServer(
 				auto& logData = sharedLogs[std::make_tuple(s.tLogOptions.version, s.storeType, s.tLogOptions.spillType)];
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
-				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !logData.actor.isValid() || logData.actor.isReady() ? logData.requests : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery, folder, degraded, activeSharedTLog );
+				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !logData.actor.isValid() || logData.actor.isReady() ? logData.requests : PromiseStream<InitializeTLogRequest>(), s.storeID, interf.id(), true, oldLog, recovery, folder, degraded, activeSharedTLog );
 				recoveries.push_back(recovery.getFuture());
 				activeSharedTLog->set(s.storeID);
 
@@ -1087,7 +1087,7 @@ ACTOR Future<Void> workerServer(
 					filesClosed.add( data->onClosed() );
 					filesClosed.add( queue->onClosed() );
 
-					Future<Void> tLogCore = tLogFn( data, queue, dbInfo, locality, logData.requests, logId, false, Promise<Void>(), Promise<Void>(), folder, degraded, activeSharedTLog );
+					Future<Void> tLogCore = tLogFn( data, queue, dbInfo, locality, logData.requests, logId, interf.id(), false, Promise<Void>(), Promise<Void>(), folder, degraded, activeSharedTLog );
 					tLogCore = handleIOErrors( tLogCore, data, logId );
 					tLogCore = handleIOErrors( tLogCore, queue, logId );
 					errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, logId, tLogCore ) );
