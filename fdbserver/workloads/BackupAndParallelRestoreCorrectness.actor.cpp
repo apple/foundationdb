@@ -26,6 +26,8 @@
 #include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+#define TEST_ABORT_FASTRESTORE	0
+
 // A workload which test the correctness of backup and restore process
 struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	double backupAfter, restoreAfter, abortAndRestartAfter;
@@ -482,7 +484,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				TraceEvent("FastRestore").detail("TriggerRestore", "Setting up restoreRequestTriggerKey");
 
 				// Sometimes kill and restart the restore
-				if (BUGGIFY) {
+				// In real cluster, aborting a restore needs: 
+				// (1) kill restore cluster; (2) clear dest. DB restore system keyspace.
+				// TODO: Consider gracefully abort a restore and restart.
+				if (BUGGIFY && TEST_ABORT_FASTRESTORE) {
 					TraceEvent(SevError, "FastRestore").detail("Buggify", "NotImplementedYet");
 					wait(delay(deterministicRandom()->randomInt(0, 10)));
 					for (restoreIndex = 0; restoreIndex < restores.size(); restoreIndex++) {
