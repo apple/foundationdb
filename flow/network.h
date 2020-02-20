@@ -44,6 +44,7 @@ enum class TaskPriority {
 	DiskIOComplete = 9150,
 	LoadBalancedEndpoint = 9000,
 	ReadSocket = 9000,
+	Handshake = 8900,
 	CoordinationReply = 8810,
 	Coordination = 8800,
 	FailureMonitor = 8700,

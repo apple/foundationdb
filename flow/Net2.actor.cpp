@@ -569,7 +569,7 @@ public:
 			auto onHandshook = p.getFuture();
 			self->getSSLSocket().async_handshake( boost::asio::ssl::stream_base::server, std::move(p) );
 			wait( onHandshook );
-			wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskPriority::WriteSocket));
+			wait(delay(0, TaskPriority::Handshake));
 			connected.send(Void());
 		} catch (...) {
 			auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
@@ -609,7 +609,7 @@ public:
 			Future<Void> onHandshook = p.getFuture();
 			self->ssl_sock.async_handshake( boost::asio::ssl::stream_base::client, std::move(p) );
 			wait( onHandshook );
-			wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskPriority::WriteSocket));
+			wait(delay(0, TaskPriority::Handshake));
 			connected.send(Void());
 		} catch (...) {
 			std::pair<IPAddress,uint16_t> peerIP = std::make_pair(self->peer_address.ip, self->peer_address.port);
