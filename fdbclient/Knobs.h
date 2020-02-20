@@ -190,6 +190,10 @@ public:
 
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX;
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
+
+	// fdbcli		
+	int CLI_CONNECT_PARALLELISM;
+	double CLI_CONNECT_TIMEOUT;
 	
 	ClientKnobs(bool randomize = false);
 };

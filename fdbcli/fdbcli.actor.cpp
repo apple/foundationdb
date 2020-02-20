@@ -2552,7 +2552,9 @@ Future<T> stopNetworkAfter( Future<T> what ) {
 	}
 }
 
-ACTOR Future<Void> addInterface( std::map<Key,std::pair<Value,ClientLeaderRegInterface>>* address_interface, KeyValue kv) {
+ACTOR Future<Void> addInterface( std::map<Key,std::pair<Value,ClientLeaderRegInterface>>* address_interface, Reference<FlowLock> connectLock, KeyValue kv) {
+	wait(connectLock->take());		
+	state FlowLock::Releaser releaser(*connectLock);
 	state ClientWorkerInterface workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
 	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
 	choose {
@@ -2566,7 +2568,7 @@ ACTOR Future<Void> addInterface( std::map<Key,std::pair<Value,ClientLeaderRegInt
 				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
 			}
 		}
-		when( wait(delay(1.0)) ) {}
+		when( wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT)) ) {}
 	}
 	return Void();
 }
@@ -2974,9 +2976,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
 						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
-							addInterfs.push_back(addInterface(&address_interface, it));
+							addInterfs.push_back(addInterface(&address_interface, connectLock, it));
 						}
 						wait( waitForAll(addInterfs) );
 					}
@@ -3287,9 +3290,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
 						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
-							addInterfs.push_back(addInterface(&address_interface, it));
+							addInterfs.push_back(addInterface(&address_interface, connectLock, it));
 						}
 						wait( waitForAll(addInterfs) );
 					}

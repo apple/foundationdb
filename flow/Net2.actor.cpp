@@ -837,8 +837,6 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 };
 
 // 5MB for loading files into memory
-// TODO: Move to a headerfile and delete all the copies of this.
-#define CERT_FILE_MAX_SIZE (5 * 1024 * 1024)
 
 #ifndef TLS_DISABLED
 bool insecurely_always_accept(bool _1, boost::asio::ssl::verify_context& _2) {
@@ -884,7 +882,7 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, con
 		sslContext.use_certificate(boost::asio::buffer(tlsParams.tlsCertBytes.data(), tlsParams.tlsCertBytes.size()), boost::asio::ssl::context::pem);
 	}
 	if (tlsParams.tlsCAPath.size()) {
-		std::string cert = readFileBytes(tlsParams.tlsCAPath, CERT_FILE_MAX_SIZE);
+		std::string cert = readFileBytes(tlsParams.tlsCAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
 		sslContext.add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
 	}
 	if (tlsParams.tlsCABytes.size()) {

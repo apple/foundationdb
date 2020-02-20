@@ -66,8 +66,6 @@ using std::max;
 using std::min;
 using std::pair;
 
-#define CERT_FILE_MAX_SIZE (5 * 1024 * 1024)
-
 NetworkOptions networkOptions;
 TLSParams tlsParams;
 static Reference<TLSPolicy> tlsPolicy;
