@@ -75,12 +75,16 @@ struct GetTeamRequest {
 	bool wantsNewServers;
 	bool wantsTrueBest;
 	bool preferLowerUtilization;
+	bool requiresAssignedData;
+	double minFreeSpaceRatio;
 	double inflightPenalty;
 	std::vector<UID> completeSources;
 	Promise< Optional< Reference<IDataDistributionTeam> > > reply;
 
 	GetTeamRequest() {}
-	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, double inflightPenalty = 1.0 ) : wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), inflightPenalty( inflightPenalty ) {}
+	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, bool requiresAssignedData, double minFreeSpaceRatio = 0.0, double inflightPenalty = 1.0 ) 
+		: wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), requiresAssignedData(requiresAssignedData), 
+		  minFreeSpaceRatio( minFreeSpaceRatio ), inflightPenalty( inflightPenalty ) {}
 };
 
 struct GetMetricsRequest {
