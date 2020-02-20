@@ -79,14 +79,32 @@ struct StagingKey {
 			    .detail("Version", newVersion)
 			    .detail("NewMutation", m.toString())
 			    .detail("ExistingKeyType", typeString[type]);
-			if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
-				if (m.type != type || m.param2 != val) {
-					TraceEvent(SevError, "FastRestoreApplierStagingKeyMutationAtSameVersionUnhandled")
+			if (m.type == MutationRef::SetValue) {
+				if (type == MutationRef::SetValue) {
+					if (m.param2 != val) {
+						TraceEvent(SevError, "FastRestoreApplierStagingKeyMutationAtSameVersionUnhandled")
+						    .detail("Version", newVersion)
+						    .detail("NewMutation", m.toString())
+						    .detail("ExistingKeyType", typeString[type])
+						    .detail("ExitingKeyValue", val)
+						    .detail("Investigate",
+						            "Why would backup have two sets with different value at same version");
+					} // else {} Backup has duplicate set at the same version
+				} else {
+					TraceEvent(SevWarnAlways, "FastRestoreApplierStagingKeyMutationAtSameVersionOverride")
 					    .detail("Version", newVersion)
 					    .detail("NewMutation", m.toString())
 					    .detail("ExistingKeyType", typeString[type])
 					    .detail("ExitingKeyValue", val);
+					type = (MutationRef::Type)m.type;
+					val = m.param2;
 				}
+			} else if (m.type == MutationRef::ClearRange) {
+				TraceEvent(SevWarnAlways, "FastRestoreApplierStagingKeyMutationAtSameVersionSkipped")
+				    .detail("Version", newVersion)
+				    .detail("NewMutation", m.toString())
+				    .detail("ExistingKeyType", typeString[type])
+				    .detail("ExitingKeyValue", val);
 			}
 		} // else  input mutation is old and can be ignored
 	}
