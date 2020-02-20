@@ -774,7 +774,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							}
 						}
 						if(found && teamList[j]->isHealthy() &&
-						   (!req.requiresAssignedData || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(teamList[j]->getServerIDs(), self->primary)).size() > 0) &&
+						   (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(teamList[j]->getServerIDs(), self->primary)).size() > 0) &&
 						   teamList[j]->getMinFreeSpaceRatio() >= req.minFreeSpaceRatio) 
 						{
 							req.reply.send( teamList[j] );
@@ -789,7 +789,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				for( int i = 0; i < self->teams.size(); i++ ) {
 					if (self->teams[i]->isHealthy() &&
 					    (!req.preferLowerUtilization || self->teams[i]->hasHealthyFreeSpace()) &&
-					    (!req.requiresAssignedData || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(self->teams[i]->getServerIDs(), self->primary)) .size() > 0) &&
+					    (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(self->teams[i]->getServerIDs(), self->primary)) .size() > 0) &&
 					    self->teams[i]->getMinFreeSpaceRatio() >= req.minFreeSpaceRatio) 
 					{
 						int64_t loadBytes = self->teams[i]->getLoadBytes(true, req.inflightPenalty);
@@ -807,7 +807,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 					bool ok = dest->isHealthy() &&
 					          (!req.preferLowerUtilization || dest->hasHealthyFreeSpace()) &&
-					          (!req.requiresAssignedData || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)).size() > 0) &&
+					          (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)).size() > 0) &&
 					          dest->getMinFreeSpaceRatio() >= req.minFreeSpaceRatio;
 
 					for(int i=0; ok && i<randomTeams.size(); i++) {
@@ -844,7 +844,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					for( int j = 0; j < teamList.size(); j++ ) {
 						bool found = true;
 						auto serverIDs = teamList[j]->getServerIDs();
-						if((req.requiresAssignedData && self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(serverIDs, self->primary)).size() == 0) ||
+						if((req.teamMustHaveShards && self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(serverIDs, self->primary)).size() == 0) ||
 						    teamList[j]->getMinFreeSpaceRatio() < req.minFreeSpaceRatio) 
 						{
 							continue;
