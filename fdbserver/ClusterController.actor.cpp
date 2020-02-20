@@ -621,11 +621,6 @@ public:
 	}
 
 	RecruitRemoteFromConfigurationReply findRemoteWorkersForConfiguration( RecruitRemoteFromConfigurationRequest const& req ) {
-		if(!updateGoodRemoteRecruitmentTime) {
-			updateGoodRemoteRecruitmentTime = true;
-			goodRemoteRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY);
-		}
-		
 		RecruitRemoteFromConfigurationReply result;
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
 
@@ -1243,7 +1238,6 @@ public:
 	double startTime;
 	Future<Void> goodRecruitmentTime;
 	Future<Void> goodRemoteRecruitmentTime;
-	bool updateGoodRemoteRecruitmentTime;
 	Version datacenterVersionDifference;
 	bool versionDifferenceUpdated;
 	PromiseStream<Future<Void>> addActor;
@@ -1268,8 +1262,8 @@ public:
 	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
 		: clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()),
 			id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), gotProcessClasses(false),
-			gotFullyRecoveredConfig(false), startTime(now()), goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), 
-			updateGoodRemoteRecruitmentTime(false), datacenterVersionDifference(0),
+			gotFullyRecoveredConfig(false), startTime(now()), goodRecruitmentTime(Never()),
+			goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0),
 			versionDifferenceUpdated(false), recruitingDistributor(false), recruitRatekeeper(false),
 			clusterControllerMetrics("ClusterController", id.toString()),
 			openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
@@ -1326,7 +1320,6 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 			rmq.lifetime = db->serverInfo->get().read().masterLifetime;
 			rmq.forceRecovery = db->forceRecovery;
 
-			cluster->updateGoodRemoteRecruitmentTime = false;
 			cluster->masterProcessId = masterWorker.worker.interf.locality.processId();
 			cluster->db.unfinishedRecoveries++;
 			state Future<ErrorOr<MasterInterface>> fNewMaster = masterWorker.worker.interf.master.tryGetReply( rmq );
@@ -1616,12 +1609,8 @@ ACTOR Future<Void> doCheckOutstandingRequests( ClusterControllerData* self ) {
 ACTOR Future<Void> doCheckOutstandingRemoteRequests( ClusterControllerData* self ) {
 	try {
 		wait( delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL) );
-		while( !self->goodRemoteRecruitmentTime.isReady() && self->updateGoodRemoteRecruitmentTime ) {
+		while( !self->goodRemoteRecruitmentTime.isReady() ) {
 			wait(self->goodRemoteRecruitmentTime);
-		}
-
-		if(!self->updateGoodRemoteRecruitmentTime) {
-			return Void();
 		}
 
 		checkOutstandingRemoteRecruitmentRequests( self );
@@ -1634,7 +1623,7 @@ ACTOR Future<Void> doCheckOutstandingRemoteRequests( ClusterControllerData* self
 }
 
 void checkOutstandingRequests( ClusterControllerData* self ) {
-	if( self->outstandingRemoteRequestChecker.isReady() && self->updateGoodRemoteRecruitmentTime) {
+	if( self->outstandingRemoteRequestChecker.isReady() ) {
 		self->outstandingRemoteRequestChecker = doCheckOutstandingRemoteRequests(self);
 	}
 
@@ -2033,9 +2022,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	if(info == self->id_worker.end()) {
 		TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerId",w.id()).detail("ProcessId", w.locality.processId()).detail("ZoneId", w.locality.zoneId()).detail("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
 		self->goodRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY);
-		if(self->updateGoodRemoteRecruitmentTime) {
-			self->goodRemoteRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY);
-		}
+		self->goodRemoteRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY);
 	} else {
 		TraceEvent("ClusterControllerWorkerAlreadyRegistered", self->id).suppressFor(1.0).detail("WorkerId",w.id()).detail("ProcessId", w.locality.processId()).detail("ZoneId", w.locality.zoneId()).detail("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
 	}
