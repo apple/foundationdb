@@ -1278,6 +1278,11 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 			return Standalone<RangeResultRef>();
 		}
 	}
+
+	// start with simplest point, private key space are only allowed to query if both begin and end start with \xff\xff
+	const KeyRef privateKeyPrefix = systemKeys.end;
+	if (begin.getKey().startsWith(privateKeyPrefix) && end.getKey().startsWith(privateKeyPrefix))
+		return getDatabase()->privateKeySpace.getRange(this, begin, end, limits, snapshot, reverse);
 	
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
