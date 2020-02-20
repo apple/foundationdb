@@ -1093,9 +1093,24 @@ public:
 			// List logs in version order so log continuity can be analyzed
 			std::sort(logs.begin(), logs.end());
 
-			// TODO(jingyu): for partitioned logs, the continuity checking should be based on
-			// epochs and versions, which should be saved in a metadata file by backup worker and
-			// thus is available here.
+			if (partitioned) {
+				// Remove duplicated log files that can happen for old epochs.
+				std::vector<LogFile> filtered;
+				int i = 0;
+				for (int j = 1; j < logs.size(); j++) {
+					if (!logs[i].sameContent(logs[j])) {
+						filtered.push_back(logs[i]);
+						i = j;
+					}
+				}
+				if (i < logs.size()) filtered.push_back(logs[i]);
+
+				// TODO(jingyu): for partitioned logs, the continuity checking should be based on
+				// epochs and versions, which should be saved in a metadata file by backup worker and
+				// thus is available here. For now, assume it's continuous.
+				restorable.logs.swap(filtered);
+				return Optional<RestorableFileSet>(restorable);
+			}
 
 			// If there are logs and the first one starts at or before the snapshot begin version then proceed
 			if(!logs.empty() && logs.front().beginVersion <= snapshot.get().beginVersion) {
