@@ -129,8 +129,7 @@ public:
 	std::vector<LocalityEntry> const&	getEntries() const
 	{	return _entryArray; }
 
-	std::vector<LocalityEntry> const&	getMutableEntries() const
-	{	return _mutableEntryArray; }
+	std::vector<LocalityEntry>& getMutableEntries() { return _mutableEntryArray; }
 
 	std::vector<LocalityEntry> const&	getGroupEntries() const
 	{	return _localitygroup->_entryArray; }

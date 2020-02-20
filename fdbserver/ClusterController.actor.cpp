@@ -340,81 +340,8 @@ public:
 					bool bestFound = false;
 
 					// Try to find the best team of servers to fulfill the policy
-
-					// Specialization for policies of shape:
-					//    - PolicyOne()
-					//    - PolicyAcross(,"zoneId",PolicyOne())
-					//    - TODO: More specializations for common policies
-					if (policy->name() == "One") {
-						bestFound = true;
-						int count = 0;
-						for (auto const& entry : logServerSet->getEntries()) {
-							bestSet.push_back(entry);
-							if (++count == desired) break;
-						}
-					} else if (policy->name() == "Across") {
-						PolicyAcross* pa = (PolicyAcross*)policy.getPtr();
-						std::set<std::string> attributeKeys;
-						pa->attributeKeys(&attributeKeys);
-						if (pa->embeddedPolicyName() == "One" && attributeKeys.size() == 1 &&
-						    *attributeKeys.begin() == "zoneId" // This algorithm can actually apply to any field
-						) {
-							// First make sure the current localitySet is able to fulfuill the policy
-							AttribKey indexKey = logServerSet->keyIndex(*attributeKeys.begin());
-							int uniqueValueCount = logServerSet->getKeyValueArray()[indexKey._id].size();
-							int targetUniqueValueCount = pa->getCount();
-							if (uniqueValueCount < targetUniqueValueCount) {
-								// logServerSet won't be able to fulfill the policy
-								bestFound = false;
-							} else {
-								// Loop through all servers and, in each loop, try to choose `targetUniqueValueCount`
-								// servers, each of which has a unique attribute value
-								std::set<AttribValue> seen;
-								auto mutableEntries = logServerSet->getMutableEntries();
-								int upperBound = mutableEntries.size();
-								int i = 0;
-								while (bestSet.size() < desired) {
-									auto& item = mutableEntries[i];
-									Optional<AttribValue> value = logServerSet->getRecord(item._id)->getValue(indexKey);
-									if (value.present() && seen.find(value.get()) == seen.end()) {
-										seen.insert(value.get());
-										bestSet.push_back(item);
-										upperBound--;
-										if (i < upperBound) {
-											mutableEntries[i] = mutableEntries[upperBound];
-											mutableEntries[upperBound] = item;
-										}
-										if (seen.size() == targetUniqueValueCount) {
-											seen.clear();
-											i = 0;
-										}
-										continue;
-									}
-									i++;
-									if (i == upperBound && bestSet.size() < desired) {
-										// Since logServerSet does contain at least `targetUniqueValueCount` unique
-										// values for the given attribute key, and yet we are here, it must be all items
-										// from 0 to current upperBound all have one or two unique values. At this
-										// point, we need to choose desired-bestSet.size() elements out of them
-										bestSet.insert(bestSet.end(), mutableEntries.begin(),
-										               mutableEntries.begin() + (desired - bestSet.size()));
-									}
-								}
-								bestFound = true;
-							}
-						} else {
-							// Fall back to the heavy way
-							bestFound =
-							    findBestPolicySet(bestSet, logServerSet, policy, desired,
-							                      SERVER_KNOBS->POLICY_RATING_TESTS, SERVER_KNOBS->POLICY_GENERATIONS);
-						}
-					} else {
-						// Fall back to the heavy way
-						bestFound =
-						    findBestPolicySet(bestSet, logServerSet, policy, desired, SERVER_KNOBS->POLICY_RATING_TESTS,
-						                      SERVER_KNOBS->POLICY_GENERATIONS);
-					}
-					if (bestFound) {
+					if (findBestPolicySet(bestSet, logServerSet, policy, desired, SERVER_KNOBS->POLICY_RATING_TESTS,
+					                      SERVER_KNOBS->POLICY_GENERATIONS)) {
 						results.reserve(results.size() + bestSet.size());
 						for (auto& entry : bestSet) {
 							auto object = logServerMap->getObject(entry);
