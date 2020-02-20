@@ -535,7 +535,6 @@ ACTOR Future<Void> commitBatch(
 	TEST(self->latestLocalCommitBatchResolving.get() < localBatchNumber-1); // Queuing pre-resolution commit processing 
 	wait(self->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber-1));
 	state Future<Void> releaseDelay = delay(batchOperations*self->commitComputePerOperation[latencyBucket], TaskPriority::ProxyMasterVersionReply);
-	wait(yield(TaskPriority::ProxyCommitYield1));
 
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.GettingCommitVersion");
