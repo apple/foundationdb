@@ -463,11 +463,6 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 	state bool quorum_reachable = false;
 	state int coordinatorsFaultTolerance = 0;
 
-	if(!clusterInterface) {
-		clusterInterface = Reference<AsyncVar<Optional<ClusterInterface>>>(new AsyncVar<Optional<ClusterInterface>>);
-		state Future<Void> leaderMon = monitorLeader<ClusterInterface>(f, clusterInterface);
-	}
-
 	try {
 		state int64_t clientTime = time(0);
 
