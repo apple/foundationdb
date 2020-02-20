@@ -25,17 +25,12 @@
 #include <map>
 #include <string>
 #include <vector>
-#include <openssl/x509.h>
 #include <boost/system/system_error.hpp>
 #include "flow/FastRef.h"
 
-struct TLSParams {
-	enum { OPT_TLS = 100000, OPT_TLS_PLUGIN, OPT_TLS_CERTIFICATES, OPT_TLS_KEY, OPT_TLS_VERIFY_PEERS, OPT_TLS_CA_FILE, OPT_TLS_PASSWORD };
+#ifndef TLS_DISABLED
 
-	std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
-	std::string tlsCertBytes, tlsKeyBytes, tlsCABytes;
-};
-
+#include <openssl/x509.h>
 typedef int NID;
 
 enum class MatchType {
@@ -69,6 +64,14 @@ struct Criteria {
 		return criteria == c.criteria && match_type == c.match_type && location == c.location;
 	}
 };
+#endif
+
+struct TLSParams {
+	enum { OPT_TLS = 100000, OPT_TLS_PLUGIN, OPT_TLS_CERTIFICATES, OPT_TLS_KEY, OPT_TLS_VERIFY_PEERS, OPT_TLS_CA_FILE, OPT_TLS_PASSWORD };
+
+	std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
+	std::string tlsCertBytes, tlsKeyBytes, tlsCABytes;
+};
 
 class TLSPolicy : ReferenceCounted<TLSPolicy> {
 public:
@@ -83,6 +86,7 @@ public:
 	virtual void addref() { ReferenceCounted<TLSPolicy>::addref(); }
 	virtual void delref() { ReferenceCounted<TLSPolicy>::delref(); }
 
+#ifndef TLS_DISABLED
 	static std::string ErrorString(boost::system::error_code e);
 
 	bool set_verify_peers(std::vector<std::string> verify_peers);
@@ -104,6 +108,7 @@ public:
 	};
 
 	std::vector<Rule> rules;
+#endif
 	bool is_client;
 };
 

@@ -50,8 +50,6 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
-typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket&> ssl_socket;
-
 #if defined(__linux__)
 #include <execinfo.h>
 
@@ -156,7 +154,9 @@ public:
 //private:
 
 	ASIOReactor reactor;
+#ifndef TLS_DISABLED
 	boost::asio::ssl::context sslContext;
+#endif
 	std::string tlsPassword;
 
 	std::string get_password() const {
@@ -253,7 +253,11 @@ public:
 		try {
 			if (error) {
 				// Log the error...
-				TraceEvent(SevWarn, errContext, errID).suppressFor(1.0).detail("Message", error.value()).detail("WhichMeans", TLSPolicy::ErrorString(error));
+				TraceEvent(SevWarn, errContext, errID).suppressFor(1.0).detail("Message", error.value())
+#ifndef TLS_DISABLED
+				.detail("WhichMeans", TLSPolicy::ErrorString(error))
+#endif
+				;
 				p.sendError( connection_failed() );
 			} else
 				p.send( Void() );
@@ -441,6 +445,51 @@ private:
 		closeSocket();
 	}
 };
+
+class Listener : public IListener, ReferenceCounted<Listener> {
+	NetworkAddress listenAddress;
+	tcp::acceptor acceptor;
+
+public:
+	Listener( boost::asio::io_service& io_service, NetworkAddress listenAddress )
+		: listenAddress(listenAddress), acceptor( io_service, tcpEndpoint( listenAddress ) )
+	{
+		platform::setCloseOnExec(acceptor.native_handle());
+	}
+
+	virtual void addref() { ReferenceCounted<Listener>::addref(); }
+	virtual void delref() { ReferenceCounted<Listener>::delref(); }
+
+	// Returns one incoming connection when it is available
+	virtual Future<Reference<IConnection>> accept() {
+		return doAccept( this );
+	}
+
+	virtual NetworkAddress getListenAddress() { return listenAddress; }
+
+private:
+	ACTOR static Future<Reference<IConnection>> doAccept( Listener* self ) {
+		state Reference<Connection> conn( new Connection( self->acceptor.get_io_service() ) );
+		state tcp::acceptor::endpoint_type peer_endpoint;
+		try {
+			BindPromise p("N2_AcceptError", UID());
+			auto f = p.getFuture();
+			self->acceptor.async_accept( conn->getSocket(), peer_endpoint, std::move(p) );
+			wait( f );
+			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes())
+			                                                    : IPAddress(peer_endpoint.address().to_v4().to_ulong());
+			conn->accept(NetworkAddress(peer_address, peer_endpoint.port()));
+
+			return conn;
+		} catch (...) {
+			conn->close();
+			throw;
+		}
+	}
+};
+
+#ifndef TLS_DISABLED
+typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket&> ssl_socket;
 
 class SSLConnection : public IConnection, ReferenceCounted<SSLConnection> {
 public:
@@ -732,48 +781,6 @@ private:
 	}
 };
 
-class Listener : public IListener, ReferenceCounted<Listener> {
-	NetworkAddress listenAddress;
-	tcp::acceptor acceptor;
-
-public:
-	Listener( boost::asio::io_service& io_service, NetworkAddress listenAddress )
-		: listenAddress(listenAddress), acceptor( io_service, tcpEndpoint( listenAddress ) )
-	{
-		platform::setCloseOnExec(acceptor.native_handle());
-	}
-
-	virtual void addref() { ReferenceCounted<Listener>::addref(); }
-	virtual void delref() { ReferenceCounted<Listener>::delref(); }
-
-	// Returns one incoming connection when it is available
-	virtual Future<Reference<IConnection>> accept() {
-		return doAccept( this );
-	}
-
-	virtual NetworkAddress getListenAddress() { return listenAddress; }
-
-private:
-	ACTOR static Future<Reference<IConnection>> doAccept( Listener* self ) {
-		state Reference<Connection> conn( new Connection( self->acceptor.get_io_service() ) );
-		state tcp::acceptor::endpoint_type peer_endpoint;
-		try {
-			BindPromise p("N2_AcceptError", UID());
-			auto f = p.getFuture();
-			self->acceptor.async_accept( conn->getSocket(), peer_endpoint, std::move(p) );
-			wait( f );
-			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes())
-			                                                    : IPAddress(peer_endpoint.address().to_v4().to_ulong());
-			conn->accept(NetworkAddress(peer_address, peer_endpoint.port()));
-
-			return conn;
-		} catch (...) {
-			conn->close();
-			throw;
-		}
-	}
-};
-
 class SSLListener : public IListener, ReferenceCounted<SSLListener> {
 	NetworkAddress listenAddress;
 	tcp::acceptor acceptor;
@@ -816,6 +823,7 @@ private:
 		}
 	}
 };
+#endif
 
 struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	Promise<Void> promise;
@@ -832,9 +840,11 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 // TODO: Move to a headerfile and delete all the copies of this.
 #define CERT_FILE_MAX_SIZE (5 * 1024 * 1024)
 
+#ifndef TLS_DISABLED
 bool insecurely_always_accept(bool _1, boost::asio::ssl::verify_context& _2) {
 	return true;
 }
+#endif
 
 Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, const TLSParams& tlsParams)
 	: useThreadPool(useThreadPool),
@@ -846,12 +856,15 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, con
 	  tsc_begin(0), tsc_end(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield),
 	  lastMinTaskID(TaskPriority::Zero),
 	  numYields(0),
-	  tlsPassword(tlsParams.tlsPassword),
-	  sslContext(boost::asio::ssl::context(boost::asio::ssl::context::tlsv12))
+	  tlsPassword(tlsParams.tlsPassword)
+#ifndef TLS_DISABLED
+	  ,sslContext(boost::asio::ssl::context(boost::asio::ssl::context::tlsv12))
+#endif
 
 {
 	TraceEvent("Net2Starting");
 
+#ifndef TLS_DISABLED
 	sslContext.set_options(boost::asio::ssl::context::default_workarounds);
 	sslContext.set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
 	if (policy) {
@@ -883,6 +896,7 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, con
 	if (tlsParams.tlsKeyBytes.size()) {
 		sslContext.use_private_key(boost::asio::buffer(tlsParams.tlsKeyBytes.data(), tlsParams.tlsKeyBytes.size()), boost::asio::ssl::context::pem);
 	}
+#endif
 
 	// Set the global members
 	if(useMetrics) {
@@ -1260,9 +1274,11 @@ THREAD_HANDLE Net2::startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg )
 }
 
 Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::string host ) {
+#ifndef TLS_DISABLED
 	if ( toAddr.isTLS() ) {
 		return SSLConnection::connect(&this->reactor.ios, &this->sslContext, toAddr);
 	}
+#endif
 
 	return Connection::connect(&this->reactor.ios, toAddr);
 }
@@ -1337,9 +1353,11 @@ bool Net2::isAddressOnThisHost( NetworkAddress const& addr ) {
 
 Reference<IListener> Net2::listen( NetworkAddress localAddr ) {
 	try {
+#ifndef TLS_DISABLED
 		if ( localAddr.isTLS() ) {
 			return Reference<IListener>(new SSLListener( reactor.ios, &this->sslContext, localAddr ));
 		}
+#endif
 		return Reference<IListener>( new Listener( reactor.ios, localAddr ) );
 	} catch (boost::system::system_error const& e) {
 		Error x;

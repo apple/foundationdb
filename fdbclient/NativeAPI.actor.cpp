@@ -73,9 +73,11 @@ TLSParams tlsParams;
 static Reference<TLSPolicy> tlsPolicy;
 
 static void initTLSPolicy() {
+#ifndef TLS_DISABLED
 	if (!tlsPolicy) {
 		tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(TLSPolicy::Is::CLIENT));
 	}
+#endif
 }
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
@@ -923,11 +925,13 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		case FDBNetworkOptions::TLS_VERIFY_PEERS:
 			validateOptionValue(value, true);
 			initTLSPolicy();
+#ifndef TLS_DISABLED
 			if (!tlsPolicy->set_verify_peers({ value.get().toString() })) {
 				TraceEvent(SevWarnAlways, "TLSValidationSetError")
 					.detail("Input", value.get().toString() );
 				throw invalid_option_value();
 			}
+#endif
 			break;
 		case FDBNetworkOptions::CLIENT_BUGGIFY_ENABLE:
 			enableBuggify(true, BuggifyType::Client);

@@ -27,7 +27,9 @@
 #include <stdint.h>
 #include <variant>
 #include "boost/asio.hpp"
+#ifndef TLS_DISABLED
 #include "boost/asio/ssl.hpp"
+#endif
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
 #include "flow/TLSPolicy.h"

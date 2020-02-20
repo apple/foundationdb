@@ -18,6 +18,11 @@
  * limitations under the License.
  */
 
+#include "flow/TLSPolicy.h"
+
+TLSPolicy::~TLSPolicy() {}
+
+#ifndef TLS_DISABLED
 #include <algorithm>
 #include <cstring>
 #include <exception>
@@ -35,7 +40,6 @@
 
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
-#include "flow/TLSPolicy.h"
 
 std::string TLSPolicy::ErrorString(boost::system::error_code e) {
 	char* str = ERR_error_string(e.value(), NULL);
@@ -43,7 +47,7 @@ std::string TLSPolicy::ErrorString(boost::system::error_code e) {
 }
 
 // To force typeinfo to only be emitted once.
-TLSPolicy::~TLSPolicy() {}
+
 
 std::string TLSPolicy::toString() const {
 	std::stringstream ss;
@@ -526,3 +530,4 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 	}
 	return rc;
 }
+#endif
