@@ -238,63 +238,63 @@ public:
 
 	virtual int64_t getLoadBytes( bool includeInFlight = true, double inflightPenalty = 1.0 ) {
 		int64_t physicalBytes = getLoadAverage();
-		double minFreeSpaceRatio = getMinFreeSpaceRatio(includeInFlight);
+		double minAvailableSpaceRatio = getMinAvailableSpaceRatio(includeInFlight);
 		int64_t inFlightBytes = includeInFlight ? getDataInFlightToTeam() / servers.size() : 0;
-		double freeSpaceMultiplier = SERVER_KNOBS->FREE_SPACE_RATIO_CUTOFF / ( std::max( std::min( SERVER_KNOBS->FREE_SPACE_RATIO_CUTOFF, minFreeSpaceRatio ), 0.000001 ) );
+		double availableSpaceMultiplier = SERVER_KNOBS->FREE_SPACE_RATIO_CUTOFF / ( std::max( std::min( SERVER_KNOBS->FREE_SPACE_RATIO_CUTOFF, minAvailableSpaceRatio ), 0.000001 ) );
 
-		if(freeSpaceMultiplier > 1 && deterministicRandom()->random01() < 0.001)
-			TraceEvent(SevWarn, "DiskNearCapacity").detail("FreeSpaceRatio", minFreeSpaceRatio);
+		if(availableSpaceMultiplier > 1 && deterministicRandom()->random01() < 0.001)
+			TraceEvent(SevWarn, "DiskNearCapacity").detail("AvailableSpaceRatio", minAvailableSpaceRatio);
 
-		return (physicalBytes + (inflightPenalty*inFlightBytes)) * freeSpaceMultiplier;
+		return (physicalBytes + (inflightPenalty*inFlightBytes)) * availableSpaceMultiplier;
 	}
 
-	virtual int64_t getMinFreeSpace( bool includeInFlight = true ) {
-		int64_t minFreeSpace = std::numeric_limits<int64_t>::max();
+	virtual int64_t getMinAvailableSpace( bool includeInFlight = true ) {
+		int64_t minAvailableSpace = std::numeric_limits<int64_t>::max();
 		for(int i=0; i<servers.size(); i++) {
 			if( servers[i]->serverMetrics.present() ) {
 				auto& replyValue = servers[i]->serverMetrics.get();
 
-				ASSERT(replyValue.free.bytes >= 0);
+				ASSERT(replyValue.available.bytes >= 0);
 				ASSERT(replyValue.capacity.bytes >= 0);
 
-				int64_t bytesFree = replyValue.free.bytes;
+				int64_t bytesAvailable = replyValue.available.bytes;
 				if(includeInFlight) {
-					bytesFree -= servers[i]->dataInFlightToServer;
+					bytesAvailable -= servers[i]->dataInFlightToServer;
 				}
 
-				minFreeSpace = std::min(bytesFree, minFreeSpace);
+				minAvailableSpace = std::min(bytesAvailable, minAvailableSpace);
 			}
 		}
 
-		return minFreeSpace; // Could be negative
+		return minAvailableSpace; // Could be negative
 	}
 
-	virtual double getMinFreeSpaceRatio( bool includeInFlight = true ) {
+	virtual double getMinAvailableSpaceRatio( bool includeInFlight = true ) {
 		double minRatio = 1.0;
 		for(int i=0; i<servers.size(); i++) {
 			if( servers[i]->serverMetrics.present() ) {
 				auto& replyValue = servers[i]->serverMetrics.get();
 
-				ASSERT(replyValue.free.bytes >= 0);
+				ASSERT(replyValue.available.bytes >= 0);
 				ASSERT(replyValue.capacity.bytes >= 0);
 
-				int64_t bytesFree = replyValue.free.bytes;
+				int64_t bytesAvailable = replyValue.available.bytes;
 				if(includeInFlight) {
-					bytesFree = std::max((int64_t)0, bytesFree - servers[i]->dataInFlightToServer);
+					bytesAvailable = std::max((int64_t)0, bytesAvailable - servers[i]->dataInFlightToServer);
 				}
 
 				if(replyValue.capacity.bytes == 0)
 					minRatio = 0;
 				else
-					minRatio = std::min( minRatio, ((double)bytesFree) / replyValue.capacity.bytes );
+					minRatio = std::min( minRatio, ((double)bytesAvailable) / replyValue.capacity.bytes );
 			}
 		}
 
 		return minRatio;
 	}
 
-	virtual bool hasHealthyFreeSpace() {
-		return getMinFreeSpaceRatio() > SERVER_KNOBS->MIN_FREE_SPACE_RATIO && getMinFreeSpace() > SERVER_KNOBS->MIN_FREE_SPACE;
+	virtual bool hasHealthyAvailableSpace() {
+		return getMinAvailableSpaceRatio() > SERVER_KNOBS->MIN_FREE_SPACE_RATIO && getMinAvailableSpace() > SERVER_KNOBS->MIN_FREE_SPACE;
 	}
 
 	virtual Future<Void> updateStorageMetrics() {
@@ -775,7 +775,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 						}
 						if(found && teamList[j]->isHealthy() &&
 						   (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(teamList[j]->getServerIDs(), self->primary)).size() > 0) &&
-						   teamList[j]->getMinFreeSpaceRatio() >= req.minFreeSpaceRatio) 
+						   teamList[j]->getMinAvailableSpaceRatio() >= req.minAvailableSpaceRatio) 
 						{
 							req.reply.send( teamList[j] );
 							return Void();
@@ -788,9 +788,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				ASSERT( !bestOption.present() );
 				for( int i = 0; i < self->teams.size(); i++ ) {
 					if (self->teams[i]->isHealthy() &&
-					    (!req.preferLowerUtilization || self->teams[i]->hasHealthyFreeSpace()) &&
+					    (!req.preferLowerUtilization || self->teams[i]->hasHealthyAvailableSpace()) &&
 					    (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(self->teams[i]->getServerIDs(), self->primary)) .size() > 0) &&
-					    self->teams[i]->getMinFreeSpaceRatio() >= req.minFreeSpaceRatio) 
+					    self->teams[i]->getMinAvailableSpaceRatio() >= req.minAvailableSpaceRatio) 
 					{
 						int64_t loadBytes = self->teams[i]->getLoadBytes(true, req.inflightPenalty);
 						if( !bestOption.present() || ( req.preferLowerUtilization && loadBytes < bestLoadBytes ) || ( !req.preferLowerUtilization && loadBytes > bestLoadBytes ) ) {
@@ -806,9 +806,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
 					bool ok = dest->isHealthy() &&
-					          (!req.preferLowerUtilization || dest->hasHealthyFreeSpace()) &&
+					          (!req.preferLowerUtilization || dest->hasHealthyAvailableSpace()) &&
 					          (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)).size() > 0) &&
-					          dest->getMinFreeSpaceRatio() >= req.minFreeSpaceRatio;
+					          dest->getMinAvailableSpaceRatio() >= req.minAvailableSpaceRatio;
 
 					for(int i=0; ok && i<randomTeams.size(); i++) {
 						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
@@ -845,7 +845,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 						bool found = true;
 						auto serverIDs = teamList[j]->getServerIDs();
 						if((req.teamMustHaveShards && self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(serverIDs, self->primary)).size() == 0) ||
-						    teamList[j]->getMinFreeSpaceRatio() < req.minFreeSpaceRatio) 
+						    teamList[j]->getMinAvailableSpaceRatio() < req.minAvailableSpaceRatio) 
 						{
 							continue;
 						}
