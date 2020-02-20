@@ -955,7 +955,7 @@ namespace oldTLog_4_6 {
 
 			peekMessagesFromMemory( logData, req, messages2, endVersion );
 
-			Standalone<VectorRef<KeyValueRef>> kvs = wait(
+			Standalone<RangeResultRef> kvs = wait(
 				self->persistentData->readRange(KeyRangeRef(
 					persistTagMessagesKey(logData->logId, oldTag, req.begin),
 					persistTagMessagesKey(logData->logId, oldTag, logData->persistentDataDurableVersion + 1)), SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES));
@@ -1269,8 +1269,8 @@ namespace oldTLog_4_6 {
 
 		IKeyValueStore *storage = self->persistentData;
 		state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
-		state Future<Standalone<VectorRef<KeyValueRef>>> fVers = storage->readRange(persistCurrentVersionKeys);
-		state Future<Standalone<VectorRef<KeyValueRef>>> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
+		state Future<Standalone<RangeResultRef>> fVers = storage->readRange(persistCurrentVersionKeys);
+		state Future<Standalone<RangeResultRef>> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
 
 		// FIXME: metadata in queue?
 
@@ -1283,7 +1283,7 @@ namespace oldTLog_4_6 {
 		}
 
 		if (!fFormat.get().present()) {
-			Standalone<VectorRef<KeyValueRef>> v = wait( self->persistentData->readRange( KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1 ) );
+			Standalone<RangeResultRef> v = wait( self->persistentData->readRange( KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1 ) );
 			if (!v.size()) {
 				TEST(true); // The DB is completely empty, so it was never initialized.  Delete it.
 				throw worker_removed();
@@ -1336,7 +1336,7 @@ namespace oldTLog_4_6 {
 			tagKeys = prefixRange( rawId.withPrefix(persistTagPoppedKeys.begin) );
 			loop {
 				if(logData->removed.isReady()) break;
-				Standalone<VectorRef<KeyValueRef>> data = wait( self->persistentData->readRange( tagKeys, BUGGIFY ? 3 : 1<<30, 1<<20 ) );
+				Standalone<RangeResultRef> data = wait( self->persistentData->readRange( tagKeys, BUGGIFY ? 3 : 1<<30, 1<<20 ) );
 				if (!data.size()) break;
 				((KeyRangeRef&)tagKeys) = KeyRangeRef( keyAfter(data.back().key, tagKeys.arena()), tagKeys.end );
 
