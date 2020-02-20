@@ -502,6 +502,7 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 			++data->counters.rowsQueried;
 			resultSize = v.get().size();
 			data->counters.bytesQueried += resultSize;
+			TraceEvent("SCGetValueQPresent", data->thisServerID).detail("ResultSize",resultSize).detail("Version", version).detail("ReqKey",req.key);
 		}
 
 		if( req.debugID.present() )

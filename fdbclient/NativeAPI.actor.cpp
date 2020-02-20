@@ -98,6 +98,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 	return runAfter(loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model),
 					[ctx](auto res) {
 						if (res.cached) {
+							TraceEvent(SevDebug, "NativeCientReqCached");
 							ctx->updateCache.trigger();
 						}
 						return res;
@@ -596,11 +597,19 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 						}
 						auto iter = self->locationCache.rangeContaining(begin);
 						if (iter->value() && !iter->value()->hasCaches) {
-							self->locationCache.insert(KeyRangeRef{ begin, iter->range().end },
-													   addCaches(iter->value(), cacheInterfaces));
+							if (end>=iter->range().end) {
+								TraceEvent(SevDebug, "UpdateCachedRangeInsert1").detail("Begin",begin).detail("End",iter->range().end);
+								self->locationCache.insert(KeyRangeRef{ begin, iter->range().end },
+														   addCaches(iter->value(), cacheInterfaces));
+							} else {
+								TraceEvent(SevDebug, "UpdateCachedRangeInsert2").detail("Begin",begin).detail("End",end);
+								self->locationCache.insert(KeyRangeRef{ begin, end },
+														   addCaches(iter->value(), cacheInterfaces));
+							}
 						}
 						iter = self->locationCache.rangeContainingKeyBefore(end);
 						if (iter->value() && !iter->value()->hasCaches) {
+							TraceEvent(SevDebug, "UpdateCachedRangeInsert2").detail("Begin",iter->range().begin).detail("End", end);
 							self->locationCache.insert(KeyRangeRef{iter->range().begin, end}, addCaches(iter->value(), cacheInterfaces));
 						}
 					}
@@ -1775,6 +1784,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 			req.begin = firstGreaterOrEqual( range.begin );
 			req.end = firstGreaterOrEqual( range.end );
 
+			TraceEvent(SevDebug, "GetExactRange").detail("Begin", req.begin.getKey()).detail("End", req.end.getKey());
 			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 

@@ -892,6 +892,8 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 		// Check if the desired key might be cached
 		auto cached = data->cachedRangeMap[req.key];
+		if (cached)
+			TraceEvent(SevDebug, "SSGetValueCached").detail("Key", req.key);
 
 		GetValueReply reply(v, cached);
 		reply.penalty = data->getPenalty();
@@ -1093,11 +1095,14 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	//state int originalLimitBytes = *pLimitBytes;
 	//state bool track = rrid.first() == 0x1bc134c2f752187cLL;
 
-	// Check if the desired key-range intersects the cached key-ranges
-	// TODO This will return true for cached even if only sub-ranges of desired ranges might be cached.
-	// Revisit to see if we only want to set it when the entire range is cached
-	auto cached = data->cachedRangeMap.intersectingRanges(range);
-	result.cached = (cached.begin() != cached.end());
+	// Check if the desired key-range is cached
+	auto containingRange = data->cachedRangeMap.rangeContaining(range.begin);
+	if (containingRange.value() && containingRange->range().end >= range.end) {
+		TraceEvent(SevDebug, "SSReadRangeCached").detail("Size",data->cachedRangeMap.size()).detail("ContainingRangeBegin",containingRange->range().begin).detail("ContainingRangeEnd",containingRange->range().end).
+			detail("Begin", range.begin).detail("End",range.end);
+		result.cached = true;
+	} else
+		result.cached = false;
 
 	// FIXME: Review pLimitBytes behavior
 	// if (limit >= 0) we are reading forward, else backward
@@ -1357,6 +1362,8 @@ KeyRange getShardKeyRange( StorageServer* data, const KeySelectorRef& sel )
 // Returns largest range such that the shard state isReadable and selectorInRange(sel, range) or wrong_shard_server if no such range exists
 {
 	auto i = sel.isBackward() ? data->shards.rangeContainingKeyBefore( sel.getKey() ) : data->shards.rangeContaining( sel.getKey() );
+	//if (sel.getKey().startsWith(storageCacheServersPrefix))
+	//	TraceEvent("SSGetShardKeyRange", data->thisServerID).detail("SelKey", sel.getKey());
 	if (!i->value()->isReadable()) throw wrong_shard_server();
 	ASSERT( selectorInRange(sel, i->range()) );
 	return i->range();
@@ -1537,6 +1544,8 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 
 		// Check if the desired key might be cached
 		auto cached = data->cachedRangeMap[k];
+		if (cached)
+			TraceEvent(SevDebug, "SSGetKeyCached").detail("Key", k).detail("Begin", shard.begin.printable()).detail("End", shard.end.printable());
 
 		GetKeyReply reply(updated, cached);
 		reply.penalty = data->getPenalty();
@@ -2505,6 +2514,8 @@ public:
 		}
 
 		if (m.param1.startsWith( systemKeys.end )) {
+			if (m.param1.startsWith( storageCacheServersPrefix))
+				TraceEvent(SevDebug, "SSApplyMutation", data->thisServerID).detail("Mutation", m.toString());
 			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix))
 				applyPrivateCacheData( data, m);
 			else {
@@ -2512,6 +2523,8 @@ public:
 				applyPrivateData( data, m );
 			}
 		} else {
+			if (m.param1.startsWith( storageCacheServersPrefix))
+				TraceEvent(SevDebug, "SSSplitMutation", data->thisServerID).detail("Mutation", m.toString());
 			// FIXME: enable when debugMutation is active
 			//for(auto m = changes[c].mutations.begin(); m; ++m) {
 			//	debugMutation("SSUpdateMutation", changes[c].version, *m);
@@ -2604,6 +2617,7 @@ private:
 			ASSERT((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix));
 			KeyRangeRef keys( cacheStartKey.removePrefix(systemKeys.begin).removePrefix( storageCachePrefix ),
 							  m.param1.removePrefix(systemKeys.begin).removePrefix( storageCachePrefix ));
+		    TraceEvent(SevDebug, "SSPrivateCacheMutationInsert", data->thisServerID).detail("Begin", keys.begin).detail("End", keys.end);
 			data->cachedRangeMap.insert(keys, true);
 			//TraceEvent(SevDebug, "SSPrivateCacheMutation", data->thisServerID).detail("Begin", keys.begin).detail("End", keys.end);
 			//fprintf(stderr, "applyPrivateCacheData : begin: %s, end: %s\n", printable(keys.begin).c_str(), printable(keys.end).c_str());
@@ -2614,6 +2628,7 @@ private:
 			auto cachedRanges = data->shards.intersectingRanges(keys);
 			for(auto shard = cachedRanges.begin(); shard != cachedRanges.end(); ++shard) {
 				KeyRangeRef intersectingRange = shard.range() & keys;
+				TraceEvent(SevDebug, "SSPrivateCacheMutationInsertUnexpected", data->thisServerID).detail("Begin", intersectingRange.begin).detail("End", intersectingRange.end);
 				data->cachedRangeMap.insert(KeyRangeRef(intersectingRange.begin, intersectingRange.end), true);
 			}
 			}
