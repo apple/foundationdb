@@ -293,8 +293,8 @@ public:
 		return minRatio;
 	}
 
-	virtual bool hasHealthyFreeSpace() {
-		return getMinFreeSpaceRatio() > SERVER_KNOBS->MIN_FREE_SPACE_RATIO && getMinFreeSpace() > SERVER_KNOBS->MIN_FREE_SPACE;
+	virtual bool hasHealthyFreeSpace(double minRatio, int64_t minFreeSpace) {
+		return (minRatio == 0 || getMinFreeSpaceRatio() > minRatio) && (minFreeSpace == std::numeric_limits<int64_t>::min() || getMinFreeSpace() > minFreeSpace);
 	}
 
 	virtual Future<Void> updateStorageMetrics() {
@@ -758,6 +758,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			std::vector<Reference<IDataDistributionTeam>> randomTeams;
 			const std::set<UID> completeSources(req.completeSources.begin(), req.completeSources.end());
 
+			// Note: this block does not apply any filters from the request
 			if( !req.wantsNewServers ) {
 				for( int i = 0; i < req.completeSources.size(); i++ ) {
 					if( !self->server_info.count( req.completeSources[i] ) ) {
@@ -784,7 +785,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			if( req.wantsTrueBest ) {
 				ASSERT( !bestOption.present() );
 				for( int i = 0; i < self->teams.size(); i++ ) {
-					if( self->teams[i]->isHealthy() && (!req.preferLowerUtilization || self->teams[i]->hasHealthyFreeSpace()) ) {
+					if (self->teams[i]->isHealthy() &&
+					    self->teams[i]->hasHealthyFreeSpace(req.minFreeSpaceRatio, req.preferLowerUtilization ? SERVER_KNOBS->MIN_FREE_SPACE : std::numeric_limits<int64_t>::min()) &&
+					    (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(self->teams[i]->getServerIDs(), self->primary)).size() > 0))
+					{
 						int64_t loadBytes = self->teams[i]->getLoadBytes(true, req.inflightPenalty);
 						if( !bestOption.present() || ( req.preferLowerUtilization && loadBytes < bestLoadBytes ) || ( !req.preferLowerUtilization && loadBytes > bestLoadBytes ) ) {
 							bestLoadBytes = loadBytes;
@@ -798,7 +802,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				while( randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT && nTries < SERVER_KNOBS->BEST_TEAM_MAX_TEAM_TRIES ) {
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
-					bool ok = dest->isHealthy() && (!req.preferLowerUtilization || dest->hasHealthyFreeSpace());
+					bool ok = dest->isHealthy() &&
+					          dest->hasHealthyFreeSpace(req.minFreeSpaceRatio, req.preferLowerUtilization ? SERVER_KNOBS->MIN_FREE_SPACE : std::numeric_limits<int64_t>::min()) &&
+					          (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)).size() > 0);
+
 					for(int i=0; ok && i<randomTeams.size(); i++) {
 						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
 							ok = false;
@@ -823,6 +830,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 			// Note: req.completeSources can be empty and all servers (and server teams) can be unhealthy.
 			// We will get stuck at this! This only happens when a DC fails. No need to consider it right now.
+			// Note: this block does not apply any filters from the request
 			if(!bestOption.present() && self->zeroHealthyTeams->get()) {
 				//Attempt to find the unhealthy source server team and return it
 				for( int i = 0; i < req.completeSources.size(); i++ ) {

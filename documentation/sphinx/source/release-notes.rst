@@ -17,6 +17,8 @@ Fixes
 * Status could not label more than 5 processes as proxies. `(PR #2653) <https://github.com/apple/foundationdb/pull/2653>`_.
 * The ``TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER``, ``TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS``, ``TR_FLAG_DISABLE_SERVER_TEAM_REMOVER``, and ``BUGGIFY_ALL_COORDINATION`` knobs could not be set at runtime. `(PR #2661) <https://github.com/apple/foundationdb/pull/2661>`_.
 * Backup container filename parsing was unnecessarily consulting the local filesystem which will error when permission is denied. `(PR #2693) <https://github.com/apple/foundationdb/pull/2693>`_.
+* Rebalancing data movement could stop doing work even though the data in the cluster was not well balanced. `(PR #2703) <https://github.com/apple/foundationdb/pull/2703>`_.
+
 
 6.2.15
 ======
