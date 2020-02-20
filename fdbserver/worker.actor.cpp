@@ -1383,37 +1383,46 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	state UID processIDUid;
 	platform::createDirectory(folder);
 
-	try {
-		state std::string lockFilePath = joinPath(folder, "processId");
-		state ErrorOr<Reference<IAsyncFile>> lockFile = wait(errorOr(IAsyncFileSystem::filesystem(g_network)->open(lockFilePath, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0600)));
+	loop {
+		try {
+			state std::string lockFilePath = joinPath(folder, "processId");
+			state ErrorOr<Reference<IAsyncFile>> lockFile = wait(errorOr(IAsyncFileSystem::filesystem(g_network)->open(lockFilePath, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0600)));
 
-		if (lockFile.isError() && lockFile.getError().code() == error_code_file_not_found && !fileExists(lockFilePath)) {
-			Reference<IAsyncFile> _lockFile = wait(IAsyncFileSystem::filesystem()->open(lockFilePath, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_LOCK | IAsyncFile::OPEN_READWRITE, 0600));
-			lockFile = _lockFile;
-			processIDUid = deterministicRandom()->randomUniqueID();
-			BinaryWriter wr(IncludeVersion());
-			wr << processIDUid;
-			wait(lockFile.get()->write(wr.getData(), wr.getLength(), 0));
-			wait(lockFile.get()->sync());
-		}
-		else {
-			if (lockFile.isError()) throw lockFile.getError(); // If we've failed to open the file, throw an exception
+			if (lockFile.isError() && lockFile.getError().code() == error_code_file_not_found && !fileExists(lockFilePath)) {
+				Reference<IAsyncFile> _lockFile = wait(IAsyncFileSystem::filesystem()->open(lockFilePath, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_LOCK | IAsyncFile::OPEN_READWRITE, 0600));
+				lockFile = _lockFile;
+				processIDUid = deterministicRandom()->randomUniqueID();
+				BinaryWriter wr(IncludeVersion());
+				wr << processIDUid;
+				wait(lockFile.get()->write(wr.getData(), wr.getLength(), 0));
+				wait(lockFile.get()->sync());
+			}
+			else {
+				if (lockFile.isError()) throw lockFile.getError(); // If we've failed to open the file, throw an exception
 
-			int64_t fileSize = wait(lockFile.get()->size());
-			state Key fileData = makeString(fileSize);
-			wait(success(lockFile.get()->read(mutateString(fileData), fileSize, 0)));
-			processIDUid = BinaryReader::fromStringRef<UID>(fileData, IncludeVersion());
+				int64_t fileSize = wait(lockFile.get()->size());
+				state Key fileData = makeString(fileSize);
+				wait(success(lockFile.get()->read(mutateString(fileData), fileSize, 0)));
+				processIDUid = BinaryReader::fromStringRef<UID>(fileData, IncludeVersion());
+			}
+			return processIDUid;
 		}
-	}
-	catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled) {
-			if (!e.isInjectedFault())
+		catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			if (!e.isInjectedFault()) {
 				fprintf(stderr, "ERROR: error creating or opening process id file `%s'.\n", joinPath(folder, "processId").c_str());
+			}
 			TraceEvent(SevError, "OpenProcessIdError").error(e);
+			
+			if(!g_network->isSimulated()) {
+				throw;
+			}
+
+			deleteFile(lockFilePath);
 		}
-		throw;
 	}
-	return processIDUid;
 }
 
 ACTOR Future<Void> fdbd(

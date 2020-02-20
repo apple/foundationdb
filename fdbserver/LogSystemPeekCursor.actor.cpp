@@ -1054,7 +1054,12 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, TaskPriori
 	loop {
 		wait( allLoaders || delay(SERVER_KNOBS->DESIRED_GET_MORE_DELAY, taskID) );
 		minVersion = self->end;
-		for(auto cursor : self->cursors) {
+		for(int i = 0; i < self->cursors.size(); i++) {
+			auto cursor = self->cursors[i];
+			while(cursor->hasMessage()) {
+				self->cursorMessages[i].push_back(ILogSystem::BufferedCursor::BufferedMessage(cursor->arena(), (!self->withTags || self->collectTags) ? cursor->getMessage() : cursor->getMessageWithTags(), !self->withTags ? VectorRef<Tag>() : cursor->getTags(), cursor->version()));
+				cursor->nextMessage();
+			}
 			minVersion = std::min(minVersion, cursor->version().version);
 		}
 		if(minVersion > self->messageVersion.version) {
