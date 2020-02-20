@@ -105,6 +105,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 
 	//GenericActors
 	init( BUGGIFY_FLOW_LOCK_RELEASE_DELAY,                     1.0 );
+	init( LOW_PRIORITY_DELAY_COUNT,                              5 );
 
 	//IAsyncFile
 	init( INCREMENTAL_DELETE_TRUNCATE_AMOUNT,                  5e8 ); //500MB
