@@ -318,6 +318,9 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( REQUIRED_MIN_RECOVERY_DURATION,                       0.080 ); if( shortRecoveryDuration ) REQUIRED_MIN_RECOVERY_DURATION = 0.01;
 	init( ALWAYS_CAUSAL_READ_RISKY,                             false );
 	init( MAX_COMMIT_UPDATES,                                    2000 ); if( randomize && BUGGIFY ) MAX_COMMIT_UPDATES = 1;
+	init( MIN_PROXY_COMPUTE,                                    0.001 );
+	init( PROXY_COMPUTE_BUCKETS,                                 5000 );
+	init( PROXY_COMPUTE_GROWTH_RATE,                             0.01 );
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
