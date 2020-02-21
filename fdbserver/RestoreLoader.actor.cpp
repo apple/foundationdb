@@ -404,8 +404,10 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 		    .detail("RestoreAsset", asset.toString());
 		ASSERT(prevVersion < commitVersion);
 		prevVersion = commitVersion;
+		// Tracking this request can be spammy
 		wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
-		                       TaskPriority::RestoreLoaderSendMutations));
+		                       TaskPriority::RestoreLoaderSendMutations,
+		                       SERVER_KNOBS->FASTRESTORE_TRACK_LOADER_SEND_REQUESTS));
 
 		requests.clear();
 

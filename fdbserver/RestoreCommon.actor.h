@@ -254,8 +254,9 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 // Do not expect a meaningful reply
 // The UID in a request is the UID of the interface to handle the request
 ACTOR template <class Interface, class Request>
-Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
-                               std::vector<std::pair<UID, Request>> requests, TaskPriority taskID = TaskPriority::Low) {
+Future<Void> sendBatchRequestsToDelete(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
+                                       std::vector<std::pair<UID, Request>> requests,
+                                       TaskPriority taskID = TaskPriority::Low) {
 
 	if (requests.empty()) {
 		return Void();
@@ -291,9 +292,9 @@ Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::
 }
 
 ACTOR template <class Interface, class Request>
-Future<Void> sendBatchRequestsV2(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
-                                 std::vector<std::pair<UID, Request>> requests,
-                                 TaskPriority taskID = TaskPriority::Low, bool trackRequestLatency = true) {
+Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
+                               std::vector<std::pair<UID, Request>> requests, TaskPriority taskID = TaskPriority::Low,
+                               bool trackRequestLatency = true) {
 
 	if (requests.empty()) {
 		return Void();

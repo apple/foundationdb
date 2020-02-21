@@ -499,6 +499,7 @@ public:
 	int64_t FASTRESTORE_MONITOR_LEADER_DELAY;
 	int64_t FASTRESTORE_STRAGGLER_THRESHOLD;
 	bool FASTRESTORE_TRACK_REQUEST_LATENCY;
+	bool FASTRESTORE_TRACK_LOADER_SEND_REQUESTS; // track requests of load send mutations to appliers?
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
