@@ -37,6 +37,7 @@ TLSPolicy::~TLSPolicy() {}
 #include <openssl/x509_vfy.h>
 #include <stdint.h>
 #include <string>
+#include <sstream>
 #include <utility>
 
 #include "flow/FastRef.h"
