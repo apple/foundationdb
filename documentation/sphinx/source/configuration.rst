@@ -27,11 +27,11 @@ System requirements
   * Or, an unsupported Linux distribution with:
 
     * Kernel version between 2.6.33 and 3.0.x (inclusive) or 3.7 or greater
-    * Works with .deb or .rpm packages
+    * Preferably .deb or .rpm package support
   
   * Or, macOS 10.7 or later
   
-  .. warning:: The macOS version of the FoundationDB server is intended for use on locally accessible development machines only. Other uses are not supported.
+  .. warning:: The macOS and Windows versions of the FoundationDB server are intended for use on locally accessible development machines only. Other uses are not supported.
   
 * 4GB **ECC** RAM (per fdbserver process)
 * Storage
@@ -386,6 +386,8 @@ FoundationDB will never use processes on the same machine for the replication of
     *(best for 5+ machines)*
 
     FoundationDB replicates data to three machines, and at least three available machines are required to make progress. This is the recommended mode for a cluster of five or more machines in a single datacenter.
+
+    .. note:: When running in cloud environments with managed disks that are already replicated and persistent, ``double`` replication may still be considered for 5+ machine clusters.  This will result in a lower total read throughput, but offers a reasonable tradeoff for cost.
 
 ``three_data_hall`` mode
     FoundationDB stores data in triplicate, with one copy on a storage server in each of three data halls. The transaction logs are replicated four times, with two data halls containing two replicas apiece. Four available machines (two in each of two data halls) are therefore required to make progress. This configuration enables the cluster to remain available after losing a single data hall and one machine in another data hall.
@@ -768,13 +770,11 @@ Region configuration is better in almost all ways than the ``three_datacenter`` 
 Known limitations
 -----------------
 
-The 6.0 release still has a number of rough edges related to region configuration. This is a collection of all the issues that have been pointed out in the sections above. These issues should be significantly improved in future releases of FoundationDB:
+The 6.2 release still has a number of rough edges related to region configuration. This is a collection of all the issues that have been pointed out in the sections above. These issues should be significantly improved in future releases of FoundationDB:
 
     * FoundationDB supports replicating data to at most two regions.
 
     * ``two_satellite_fast`` does not hide latency properly when configured with more than 4 satellite transaction logs.
-
-    * While a datacenter has failed, the maximum write throughput of the cluster will be roughly 1/3 of normal performance.
 
 .. _guidelines-process-class-config:
 
