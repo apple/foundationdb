@@ -133,9 +133,9 @@ If you want to create a package you have to tell cmake what platform it is for.
 And then you can build by simply calling `cpack`. So for debian, call:
 
 ```
-cmake -DINSTALL_LAYOUT=DEB  <FDB_SOURCE_DIR>
+cmake <FDB_SOURCE_DIR>
 make
-cpack
+cpack -G DEB
 ```
 
 For RPM simply replace `DEB` with `RPM`.
@@ -155,9 +155,9 @@ To generate a installable package, you have to call CMake with the corresponding
 arguments and then use cpack to generate the package:
 
 ```sh
-cmake -DINSTALL_LAYOUT=OSX  <FDB_SOURCE_DIR>
+cmake <FDB_SOURCE_DIR>
 make
-cpack
+cpack -G productbuild
 ```
 
 ### Windows
