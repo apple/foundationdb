@@ -1197,8 +1197,15 @@ struct ConsistencyCheckWorkload : TestWorkload
 				if(!statefulProcesses[itr->interf.address()].count(id)) {
 					TraceEvent("ConsistencyCheck_ExtraDataStore").detail("Address", itr->interf.address()).detail("DataStoreID", id);
 					if(g_network->isSimulated()) {
-						TraceEvent("ConsistencyCheck_RebootProcess").detail("Address", itr->interf.address()).detail("DataStoreID", id);
-						g_simulator.rebootProcess(g_simulator.getProcessByAddress(itr->interf.address()), ISimulator::RebootProcess);
+						//FIXME: this is hiding the fact that we can recruit a new storage server on a location the has files left behind by a previous failure
+						// this means that the process is wasting disk space until the process is rebooting
+						auto p = g_simulator.getProcessByAddress(itr->interf.address());
+						TraceEvent("ConsistencyCheck_RebootProcess").detail("Address", itr->interf.address()).detail("DataStoreID", id).detail("Reliable", p->isReliable());
+						if(p->isReliable()) {
+							g_simulator.rebootProcess(p, ISimulator::RebootProcess);
+						} else {
+							g_simulator.killProcess(p, ISimulator::KillInstantly);
+						}
 					}
 
 					foundExtraDataStore = true;
