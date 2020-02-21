@@ -228,23 +228,24 @@ std::string BackupDescription::toJSON() const {
  *   Snapshot manifests (a complete set of files constituting a database snapshot for the backup's target ranges)
  *   are stored as JSON files at paths like
  *       /snapshots/snapshot,minVersion,maxVersion,totalBytes
- * 
+ *
  *   Key range files for snapshots are stored at paths like
  *       /kvranges/snapshot,startVersion/N/range,version,uid,blockSize
  *     where startVersion is the version at which the backup snapshot execution began and N is a number
- *     that is increased as key range files are generated over time (at varying rates) such that there 
+ *     that is increased as key range files are generated over time (at varying rates) such that there
  *     are around 5,000 key range files in each folder.
  *
- *     Note that startVersion will NOT correspond to the minVersion of a snapshot manifest because 
+ *     Note that startVersion will NOT correspond to the minVersion of a snapshot manifest because
  *     snapshot manifest min/max versions are based on the actual contained data and the first data
  *     file written will be after the start version of the snapshot's execution.
- * 
+ *
  *   Log files are at file paths like
- *       /plogs/...log,startVersion,endVersion,UID,blocksize,tagID
+ *       /plogs/...log,startVersion,endVersion,UID,blocksize,tagID-of-N
  *       /logs/.../log,startVersion,endVersion,UID,blockSize
  *     where ... is a multi level path which sorts lexically into version order and results in approximately 1
  *     unique folder per day containing about 5,000 files. Logs after 7.0 are stored in "plogs"
- *     directory and are partitioned according to tagIDs (0, 1, 2, ...). Logs before 7.0 are
+ *     directory and are partitioned according to tagIDs (0, 1, 2, ...) and the total number
+ *     partitions is N. Logs before 7.0 are
  *     stored in "logs" directory and are not partitioned.
  *
  *
@@ -252,8 +253,8 @@ std::string BackupDescription::toJSON() const {
  *
  *   Prior to FDB version 6.0.16, key range files were stored using a different folder scheme.  Newer versions
  *   still support this scheme for all restore and backup management operations but key range files generated
- *   by backup using version 6.0.16 or later use the scheme describe above.  
- * 
+ *   by backup using version 6.0.16 or later use the scheme describe above.
+ *
  *   The old format stored key range files at paths like
  *       /ranges/.../range,version,uid,blockSize
  *     where ... is a multi level path with sorts lexically into version order and results in up to approximately
@@ -1060,8 +1061,73 @@ public:
 	}
 
 	// Delete all data up to (but not including endVersion)
-	Future<Void> expireData(Version expireEndVersion, bool force, ExpireProgress *progress, Version restorableBeginVersion) override {
+	Future<Void> expireData(Version expireEndVersion, bool force, ExpireProgress* progress,
+	                        Version restorableBeginVersion) final {
 		return expireData_impl(Reference<BackupContainerFileSystem>::addRef(this), expireEndVersion, force, progress, restorableBeginVersion);
+	}
+
+	// For a list of log files specified by their indices (of the same tag),
+	// returns if they are continous in the range [begin, end].
+	static bool isContinuous(const std::vector<LogFile>& files, std::vector<int> indices, Version begin, Version end,
+	                         std::map<std::pair<Version, Version>, int>* tags) {
+		Version lastBegin = invalidVersion;
+		Version lastEnd = invalidVersion;
+		int lastTags = -1;
+
+		for (int idx : indices) {
+			const LogFile& file = files[idx];
+			if (lastEnd == invalidVersion) {
+				if (file.beginVersion > begin) return false;
+				if (file.endVersion > begin) {
+					lastBegin = begin;
+					lastTags = file.totalTags;
+				} else {
+					continue;
+				}
+			} else if (lastEnd != file.beginVersion) {
+				return false; // not continuous
+			}
+
+			if (lastTags != file.totalTags) {
+				if (tags != nullptr) {
+					tags->emplace(std::make_pair(lastBegin, file.beginVersion - 1), lastTags);
+				}
+				lastBegin = file.beginVersion;
+				lastTags = file.totalTags;
+			}
+			lastEnd = file.endVersion;
+			if (lastEnd > end) break;
+		}
+		if (lastBegin == invalidVersion || lastEnd <= end) return false; // not covering the range
+		if (tags != nullptr) {
+			tags->emplace(std::make_pair(lastBegin, end), lastTags);
+		}
+		return true;
+	}
+
+	// Returns true if logs are continuous in the range [begin, end].
+	// "files" should be pre-sorted according to version order.
+	static bool isPartitionedLogsContinuous(const std::vector<LogFile>& files, Version begin, Version end) {
+		std::map<int, std::vector<int>> tagIndices; // tagId -> indices in files
+		for (int i = 0; i < files.size(); i++) {
+			ASSERT(files[i].tagId >= 0 && files[i].tagId < files[i].totalTags);
+			auto& indices = tagIndices[files[i].tagId];
+			indices.push_back(i);
+		}
+
+		// check tag 0 is continuous and create a map of ranges to tags
+		std::map<std::pair<Version, Version>, int> tags; // range [start, end) -> tags
+		if (!isContinuous(files, tagIndices[0], begin, end, &tags)) return false;
+
+		// for each range in tags, check all tags from 1 are continouous
+		for (const auto [beginEnd, count] : tags) {
+			for (int i = 1; i < count; i++) {
+				if (!isContinuous(files, tagIndices[i], beginEnd.first, beginEnd.second, nullptr)) {
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion, bool partitioned) {
@@ -1105,11 +1171,11 @@ public:
 				}
 				if (i < logs.size()) filtered.push_back(logs[i]);
 
-				// TODO(jingyu): for partitioned logs, the continuity checking should be based on
-				// epochs and versions, which should be saved in a metadata file by backup worker and
-				// thus is available here. For now, assume it's continuous.
 				restorable.logs.swap(filtered);
-				return Optional<RestorableFileSet>(restorable);
+				if (isPartitionedLogsContinuous(restorable.logs, snapshot.get().beginVersion, targetVersion)) {
+					return Optional<RestorableFileSet>(restorable);
+				}
+				return Optional<RestorableFileSet>();
 			}
 
 			// If there are logs and the first one starts at or before the snapshot begin version then proceed
@@ -2005,6 +2071,57 @@ TEST_CASE("/backup/time") {
 	ASSERT(BackupAgentBase::parseTime("2019/03/31.22:45:07+0000") == BackupAgentBase::parseTime("2019/04/01.03:45:07+0500"));
 	ASSERT(BackupAgentBase::parseTime("2019/03/31.22:45:07+0030") == BackupAgentBase::parseTime("2019/04/01.03:45:07+0530"));
 	ASSERT(BackupAgentBase::parseTime("2019/03/31.22:45:07+0030") == BackupAgentBase::parseTime("2019/04/01.04:00:07+0545"));
+
+	return Void();
+}
+
+TEST_CASE("/backup/continuous") {
+	std::vector<LogFile> files;
+
+	// [0, 100) 2 tags
+	files.push_back({ 0, 100, 10, "file1", 100, 0, 2 }); // Tag 0: 0-100
+	ASSERT(!BackupContainerFileSystem::isPartitionedLogsContinuous(files, 0, 99));
+
+	files.push_back({ 0, 100, 10, "file2", 200, 1, 2 }); // Tag 1: 0-100
+	ASSERT(BackupContainerFileSystem::isPartitionedLogsContinuous(files, 0, 99));
+	ASSERT(!BackupContainerFileSystem::isPartitionedLogsContinuous(files, 0, 100));
+
+	// [100, 300) 3 tags
+	files.push_back({ 100, 200, 10, "file3", 200, 0, 3 }); // Tag 0: 100-200
+	files.push_back({ 100, 250, 10, "file4", 200, 1, 3 }); // Tag 1: 100-250
+	std::sort(files.begin(), files.end());
+	ASSERT(BackupContainerFileSystem::isPartitionedLogsContinuous(files, 0, 99));
+	ASSERT(!BackupContainerFileSystem::isPartitionedLogsContinuous(files, 0, 100));
+	ASSERT(!BackupContainerFileSystem::isPartitionedLogsContinuous(files, 50, 150));
+
+	files.push_back({ 100, 300, 10, "file5", 200, 2, 3 }); // Tag 2: 100-300
+	std::sort(files.begin(), files.end());
+	ASSERT(BackupContainerFileSystem::isPartitionedLogsContinuous(files, 50, 150));
+	ASSERT(!BackupContainerFileSystem::isPartitionedLogsContinuous(files, 50, 200));
+	ASSERT(BackupContainerFileSystem::isPartitionedLogsContinuous(files, 10, 199));
+
+	files.push_back({ 250, 300, 10, "file6", 200, 0, 3 }); // Tag 0: 250-300, missing 200-250
+	std::sort(files.begin(), files.end());
+	ASSERT(!BackupContainerFileSystem::isPartitionedLogsContinuous(files, 50, 240));
+	ASSERT(!BackupContainerFileSystem::isPartitionedLogsContinuous(files, 100, 280));
+
+	files.push_back({ 250, 300, 10, "file7", 200, 1, 3 }); // Tag 1: 250-300
+	std::sort(files.begin(), files.end());
+	ASSERT(!BackupContainerFileSystem::isPartitionedLogsContinuous(files, 100, 280));
+
+	files.push_back({ 200, 250, 10, "file8", 200, 0, 3 }); // Tag 0: 200-250
+	std::sort(files.begin(), files.end());
+	ASSERT(BackupContainerFileSystem::isPartitionedLogsContinuous(files, 0, 299));
+	ASSERT(BackupContainerFileSystem::isPartitionedLogsContinuous(files, 100, 280));
+
+	// [300, 400) 1 tag
+	// files.push_back({200, 250, 10, "file9", 200, 0, 3}); // Tag 0: 200-250, duplicate file
+	files.push_back({ 300, 400, 10, "file10", 200, 0, 1 }); // Tag 1: 300-400
+	std::sort(files.begin(), files.end());
+	ASSERT(BackupContainerFileSystem::isPartitionedLogsContinuous(files, 0, 399));
+	ASSERT(BackupContainerFileSystem::isPartitionedLogsContinuous(files, 100, 399));
+	ASSERT(BackupContainerFileSystem::isPartitionedLogsContinuous(files, 150, 399));
+	ASSERT(BackupContainerFileSystem::isPartitionedLogsContinuous(files, 250, 399));
 
 	return Void();
 }
