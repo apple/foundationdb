@@ -498,6 +498,7 @@ public:
 	int64_t FASTRESTORE_APPLYING_PARALLELISM; // number of outstanding txns writing to dest. DB
 	int64_t FASTRESTORE_MONITOR_LEADER_DELAY;
 	int64_t FASTRESTORE_STRAGGLER_THRESHOLD;
+	bool FASTRESTORE_TRACK_REQUEST_LATENCY;
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
