@@ -26,6 +26,8 @@
 #include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+#define TEST_ABORT_FASTRESTORE	0
+
 // A workload which test the correctness of backup and restore process
 struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	double backupAfter, restoreAfter, abortAndRestartAfter;
@@ -198,50 +200,45 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				if (BUGGIFY) {
 					state KeyBackedTag backupTag = makeBackupTag(tag.toString());
 					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName);
-					// Wait until the backup is in a restorable state
-					state int resultWait = wait(backupAgent->waitBackup(cx, backupTag.tagName, false));
-					UidAndAbortedFlagT uidFlag = wait(backupTag.getOrThrow(cx));
-					state UID logUid = uidFlag.first;
-					state Reference<IBackupContainer> lastBackupContainer =
-					    wait(BackupConfig(logUid).backupContainer().getD(cx));
+					// Wait until the backup is in a restorable state and get the status, URL, and UID atomically
+					state Reference<IBackupContainer> lastBackupContainer;
+					state UID lastBackupUID;
+					state int resultWait = wait(backupAgent->waitBackup(cx, backupTag.tagName, false, &lastBackupContainer, &lastBackupUID));
+
+					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName).detail("Result", resultWait);
 
 					state bool restorable = false;
-					if (lastBackupContainer) {
-						state BackupDescription desc = wait(lastBackupContainer->describeBackup());
-						wait(desc.resolveVersionTimes(cx));
-						printf("BackupDescription:\n%s\n", desc.toString().c_str());
-						restorable = desc.maxRestorableVersion.present();
+					if(lastBackupContainer) {
+						state Future<BackupDescription> fdesc = lastBackupContainer->describeBackup();
+						wait(ready(fdesc));
+
+						if(!fdesc.isError()) {
+							state BackupDescription desc = fdesc.get();
+							wait(desc.resolveVersionTimes(cx));
+							printf("BackupDescription:\n%s\n", desc.toString().c_str());
+							restorable = desc.maxRestorableVersion.present();
+						}
 					}
 
 					TraceEvent("BARW_LastBackupContainer", randomID)
-					    .detail("BackupTag", printable(tag))
-					    .detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
-					    .detail("LogUid", logUid)
-					    .detail("WaitStatus", resultWait)
-					    .detail("Restorable", restorable);
+						.detail("BackupTag", printable(tag))
+						.detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
+						.detail("LastBackupUID", lastBackupUID).detail("WaitStatus", resultWait).detail("Restorable", restorable);
 
 					// Do not check the backup, if aborted
 					if (resultWait == BackupAgentBase::STATE_ABORTED) {
 					}
 					// Ensure that a backup container was found
 					else if (!lastBackupContainer) {
-						TraceEvent("BARW_MissingBackupContainer", randomID)
-						    .detail("LogUid", logUid)
-						    .detail("BackupTag", printable(tag))
-						    .detail("WaitStatus", resultWait);
+						TraceEvent(SevError, "BARW_MissingBackupContainer", randomID).detail("LastBackupUID", lastBackupUID).detail("BackupTag", printable(tag)).detail("WaitStatus", resultWait);
 						printf("BackupCorrectnessMissingBackupContainer   tag: %s  status: %d\n",
 						       printable(tag).c_str(), resultWait);
 					}
 					// Check that backup is restorable
-					else {
-						if (!restorable) {
-							TraceEvent("BARW_NotRestorable", randomID)
-							    .detail("LogUid", logUid)
-							    .detail("BackupTag", printable(tag))
-							    .detail("BackupFolder", lastBackupContainer->getURL())
-							    .detail("WaitStatus", resultWait);
-							printf("BackupCorrectnessNotRestorable:  tag: %s\n", printable(tag).c_str());
-						}
+					else if(!restorable) {
+						TraceEvent(SevError, "BARW_NotRestorable", randomID).detail("LastBackupUID", lastBackupUID).detail("BackupTag", printable(tag))
+							.detail("BackupFolder", lastBackupContainer->getURL()).detail("WaitStatus", resultWait);
+						printf("BackupCorrectnessNotRestorable:  tag: %s\n", printable(tag).c_str());
 					}
 
 					// Abort the backup, if not the first backup because the second backup may have aborted the backup
@@ -482,7 +479,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				TraceEvent("FastRestore").detail("TriggerRestore", "Setting up restoreRequestTriggerKey");
 
 				// Sometimes kill and restart the restore
-				if (BUGGIFY) {
+				// In real cluster, aborting a restore needs: 
+				// (1) kill restore cluster; (2) clear dest. DB restore system keyspace.
+				// TODO: Consider gracefully abort a restore and restart.
+				if (BUGGIFY && TEST_ABORT_FASTRESTORE) {
 					TraceEvent(SevError, "FastRestore").detail("Buggify", "NotImplementedYet");
 					wait(delay(deterministicRandom()->randomInt(0, 10)));
 					for (restoreIndex = 0; restoreIndex < restores.size(); restoreIndex++) {
