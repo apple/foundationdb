@@ -1261,6 +1261,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 		req.recruitedEpoch = epoch;
 		req.backupEpoch = epoch;
 		req.routerTag = idsTags[i].second;
+		req.totalTags = logRouterTags;
 		req.startVersion = startVersion;
 		TraceEvent("BackupRecruitment", self->dbgid)
 		    .detail("BKID", req.reqId)
@@ -1275,17 +1276,19 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 	}
 
 	wait(gotProgress);
-	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> toRecruit = backupProgress->getUnfinishedBackup();
-	for (const auto& [epochVersion, tagVersions] : toRecruit) {
+	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit =
+	    backupProgress->getUnfinishedBackup();
+	for (const auto& [epochVersionCount, tagVersions] : toRecruit) {
 		for (const auto& [tag, version] : tagVersions) {
 			const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
 			i++;
 			InitializeBackupRequest req(deterministicRandom()->randomUniqueID());
 			req.recruitedEpoch = epoch;
-			req.backupEpoch = epochVersion.first;
+			req.backupEpoch = std::get<0>(epochVersionCount);
 			req.routerTag = tag;
+			req.totalTags = std::get<2>(epochVersionCount);
 			req.startVersion = version; // savedVersion + 1
-			req.endVersion = epochVersion.second - 1;
+			req.endVersion = std::get<1>(epochVersionCount) - 1;
 			TraceEvent("BackupRecruitment", self->dbgid)
 			    .detail("BKID", req.reqId)
 			    .detail("Tag", req.routerTag.toString())
