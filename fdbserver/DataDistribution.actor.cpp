@@ -299,7 +299,7 @@ public:
 	}
 
 	virtual bool hasHealthyAvailableSpace(double minRatio) {
-		return getMinAvailableSpaceRatio() > minRatio && getMinAvailableSpace() > SERVER_KNOBS->MIN_AVAILABLE_SPACE;
+		return getMinAvailableSpaceRatio() >= minRatio && getMinAvailableSpace() > SERVER_KNOBS->MIN_AVAILABLE_SPACE;
 	}
 
 	virtual Future<Void> updateStorageMetrics() {
