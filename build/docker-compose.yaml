@@ -2,7 +2,7 @@ version: "3"
 
 services:
   common: &common
-    image: foundationdb/foundationdb-build:0.1.10
+    image: foundationdb/foundationdb-build:0.1.11
 
   build-setup: &build-setup
     <<: *common
@@ -31,7 +31,7 @@ services:
     volumes:
       - ..:/foundationdb
     working_dir: /foundationdb
-    command: scl enable devtoolset-8 rh-python36 rh-ruby24 -- bash -c 'make -j "$${MAKEJOBS}" docpackage'
+    command: scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash -c 'make -j "$${MAKEJOBS}" docpackage'
 
 
   release-packages: &release-packages
