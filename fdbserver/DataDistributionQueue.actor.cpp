@@ -1279,7 +1279,7 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 			traceEvent.detail("ResetCount", resetCount);
 			tr.reset();
 		} catch (Error& e) {
-			traceEvent.error(e);
+			traceEvent.error(e, true); // Log actor_cancelled because it's not legal to suppress an event that's initialized
 			wait(tr.onError(e));
 		}
 
@@ -1376,7 +1376,7 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 			traceEvent.detail("ResetCount", resetCount);
 			tr.reset();
 		} catch (Error& e) {
-			traceEvent.error(e);
+			traceEvent.error(e, true); // Log actor_cancelled because it's not legal to suppress an event that's initialized
 			wait(tr.onError(e));
 		}
 
