@@ -82,50 +82,58 @@ double ratePolicy(
 	return rating;
 }
 
-bool findBestPolicySetSimple(PolicyAcross* pa, Reference<LocalitySet> logServerSet, std::vector<LocalityEntry>& bestSet,
+int mostUsedZoneCount(Reference<LocalitySet>& logServerSet, std::vector<LocalityEntry>& bestSet) {
+	AttribKey indexKey = logServerSet->keyIndex("zoneid");
+	std::map<AttribValue, int> entries;
+	for(int i = 0; i < bestSet.size(); i++) {
+		Optional<AttribValue> value = logServerSet->getRecordViaEntry(bestSet[i])->getValue(indexKey);
+		entries[value.get()]++;
+	}
+	int maxEntries = 0;
+	for(auto it : entries) {
+		maxEntries = std::max(maxEntries, it.second);
+	}
+	return maxEntries;
+}
+
+bool findBestPolicySetSimple(int targetUniqueValueCount, Reference<LocalitySet>& logServerSet, std::vector<LocalityEntry>& bestSet,
                              int desired) {
 	auto& mutableEntries = logServerSet->getMutableEntries();
 	deterministicRandom()->randomShuffle(mutableEntries);
 	// First make sure the current localitySet is able to fulfuill the policy
-	std::set<std::string> attributeKeys;
-	AttribKey indexKey = logServerSet->keyIndex(*attributeKeys.begin());
+	AttribKey indexKey = logServerSet->keyIndex("zoneid");
 	int uniqueValueCount = logServerSet->getKeyValueArray()[indexKey._id].size();
-	int targetUniqueValueCount = pa->getCount();
-	bool found = false;
+
 	if (uniqueValueCount < targetUniqueValueCount) {
 		// logServerSet won't be able to fulfill the policy
-		found = false;
-	} else {
-		// Loop through all servers and, in each loop, try to choose `targetUniqueValueCount`
-		// servers, each of which has a unique attribute value
-		std::set<AttribValue> seen;
-		int upperBound = mutableEntries.size();
-		int i = 0;
-		while (bestSet.size() < desired) {
-			auto& item = mutableEntries[i];
-			Optional<AttribValue> value = logServerSet->getRecord(item._id)->getValue(indexKey);
-			if (value.present() && seen.find(value.get()) == seen.end()) {
-				seen.insert(value.get());
-				bestSet.push_back(item);
-				upperBound--;
-				if (i < upperBound) {
-					std::swap(mutableEntries[i], mutableEntries[upperBound]);
-				}
-				if (seen.size() == targetUniqueValueCount) {
-					seen.clear();
-					i = 0;
-				}
-				continue;
-			}
-			i++;
-			if (i == upperBound && bestSet.size() < desired) {
-				seen.clear();
-				i = 0;
-			}
-		}
-		found = true;
+		return false;
 	}
-	return found;
+
+	std::map<AttribValue, std::vector<int>> entries;
+	for(int i = 0; i < mutableEntries.size(); i++) {
+		Optional<AttribValue> value = logServerSet->getRecord(mutableEntries[i]._id)->getValue(indexKey);
+		if (value.present()) {
+			entries[value.get()].push_back(i);
+		}
+	}
+
+	ASSERT_WE_THINK(uniqueValueCount == entries.size());
+
+	desired = std::max(desired, targetUniqueValueCount);
+	auto it = entries.begin();
+	while (bestSet.size() < desired) {
+		if(it->second.size()) {
+			bestSet.push_back(mutableEntries[it->second.back()]);
+			it->second.pop_back();
+		}
+		
+		++it;
+		if(it == entries.end()) {
+			it = entries.begin();
+		}
+	}
+
+	return true;
 }
 
 bool findBestPolicySetExpensive(std::vector<LocalityEntry>& bestResults, Reference<LocalitySet>& localitySet,
@@ -223,7 +231,7 @@ bool findBestPolicySet(std::vector<LocalityEntry>& bestResults, Reference<Locali
 		if (pa->embeddedPolicyName() == "One" && attributeKeys.size() == 1 &&
 		    *attributeKeys.begin() == "zoneid" // This algorithm can actually apply to any field
 		) {
-			bestFound = findBestPolicySetSimple(pa, localitySet, bestResults, nMinItems);
+			bestFound = findBestPolicySetSimple(pa->getCount(), localitySet, bestResults, nMinItems);
 			if (bestFound && g_network->isSimulated()) {
 				std::vector<LocalityEntry> oldBest;
 				auto oldBestFound =
@@ -231,9 +239,7 @@ bool findBestPolicySet(std::vector<LocalityEntry>& bestResults, Reference<Locali
 				if (!oldBestFound) {
 					TraceEvent(SevError, "FBPSMissmatch").detail("Policy", policy->info());
 				} else {
-					auto set = localitySet->restrict(bestResults);
-					auto oldSet = localitySet->restrict(oldBest);
-					ASSERT_WE_THINK(ratePolicy(set, policy, nPolicyTests) <= ratePolicy(oldSet, policy, nPolicyTests));
+					ASSERT(mostUsedZoneCount(localitySet, bestResults) <= mostUsedZoneCount(localitySet, oldBest));
 				}
 			}
 		} else {
