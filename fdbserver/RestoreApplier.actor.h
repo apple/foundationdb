@@ -51,14 +51,14 @@ struct StagingKey {
 	Key key; // TODO: Maybe not needed?
 	Value val;
 	MutationRef::Type type; // set or clear
-	Version version; // largest version of set or clear for the key
-	std::map<Version, MutationsVec> pendingMutations; // mutations not set or clear type
+	LogMessageVersion version; // largest version of set or clear for the key
+	std::map<LogMessageVersion, MutationsVec> pendingMutations; // mutations not set or clear type
 
 	explicit StagingKey() : version(0), type(MutationRef::MAX_ATOMIC_OP) {}
 
 	// Add mutation m at newVersion to stagingKey
 	// Assume: SetVersionstampedKey and SetVersionstampedValue have been converted to set
-	void add(const MutationRef& m, Version newVersion) {
+	void add(const MutationRef& m, LogMessageVersion newVersion) {
 		ASSERT(m.type != MutationRef::SetVersionstampedKey && m.type != MutationRef::SetVersionstampedValue);
 		if (version < newVersion) {
 			if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
@@ -76,14 +76,14 @@ struct StagingKey {
 			}
 		} else if (version == newVersion) { // Sanity check
 			TraceEvent("FastRestoreApplierStagingKeyMutationAtSameVersion")
-			    .detail("Version", newVersion)
+			    .detail("Version", newVersion.toString())
 			    .detail("NewMutation", m.toString())
 			    .detail("ExistingKeyType", typeString[type]);
 			if (m.type == MutationRef::SetValue) {
 				if (type == MutationRef::SetValue) {
 					if (m.param2 != val) {
 						TraceEvent(SevError, "FastRestoreApplierStagingKeyMutationAtSameVersionUnhandled")
-						    .detail("Version", newVersion)
+						    .detail("Version", newVersion.toString())
 						    .detail("NewMutation", m.toString())
 						    .detail("ExistingKeyType", typeString[type])
 						    .detail("ExitingKeyValue", val)
@@ -92,7 +92,7 @@ struct StagingKey {
 					} // else {} Backup has duplicate set at the same version
 				} else {
 					TraceEvent(SevWarnAlways, "FastRestoreApplierStagingKeyMutationAtSameVersionOverride")
-					    .detail("Version", newVersion)
+					    .detail("Version", newVersion.toString())
 					    .detail("NewMutation", m.toString())
 					    .detail("ExistingKeyType", typeString[type])
 					    .detail("ExitingKeyValue", val);
@@ -101,7 +101,7 @@ struct StagingKey {
 				}
 			} else if (m.type == MutationRef::ClearRange) {
 				TraceEvent(SevWarnAlways, "FastRestoreApplierStagingKeyMutationAtSameVersionSkipped")
-				    .detail("Version", newVersion)
+				    .detail("Version", newVersion.toString())
 				    .detail("NewMutation", m.toString())
 				    .detail("ExistingKeyType", typeString[type])
 				    .detail("ExitingKeyValue", val);
@@ -113,9 +113,10 @@ struct StagingKey {
 	void precomputeResult() {
 		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult")
 		    .detail("Key", key)
-		    .detail("Version", version)
-		    .detail("LargestPendingVersion", (pendingMutations.empty() ? -1 : pendingMutations.rbegin()->first));
-		std::map<Version, MutationsVec>::iterator lb = pendingMutations.lower_bound(version);
+		    .detail("Version", version.toString())
+		    .detail("LargestPendingVersion",
+		            (pendingMutations.empty() ? "-1" : pendingMutations.rbegin()->first.toString()));
+		std::map<LogMessageVersion, MutationsVec>::iterator lb = pendingMutations.lower_bound(version);
 		if (lb == pendingMutations.end()) {
 			return;
 		}
@@ -158,11 +159,11 @@ struct StagingKey {
 					type = MutationRef::SetValue; // Precomputed result should be set to DB.
 					TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnexpectedSet")
 					    .detail("Type", typeString[mutation.type])
-					    .detail("Version", lb->first);
+					    .detail("Version", lb->first.toString());
 				} else {
 					TraceEvent(SevWarnAlways, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation")
 					    .detail("Type", typeString[mutation.type])
-					    .detail("Version", lb->first);
+					    .detail("Version", lb->first.toString());
 				}
 			}
 			version = lb->first;
@@ -172,10 +173,10 @@ struct StagingKey {
 
 	// Does the key has at least 1 set or clear mutation to get the base value
 	bool hasBaseValue() {
-		if (version > 0) {
+		if (version.version > 0) {
 			ASSERT(type == MutationRef::SetValue || type == MutationRef::ClearRange);
 		}
-		return version > 0;
+		return version.version > 0;
 	}
 
 	// Has all pendingMutations been pre-applied to the val?
@@ -191,9 +192,9 @@ struct StagingKey {
 // Range mutations should be applied both to the destination DB and to the StagingKeys
 struct StagingKeyRange {
 	Standalone<MutationRef> mutation;
-	Version version;
+	LogMessageVersion version;
 
-	explicit StagingKeyRange(MutationRef m, Version newVersion) : mutation(m), version(newVersion) {}
+	explicit StagingKeyRange(MutationRef m, LogMessageVersion newVersion) : mutation(m), version(newVersion) {}
 
 	bool operator<(const StagingKeyRange& rhs) const {
 		return std::tie(version, mutation.type, mutation.param1, mutation.param2) <
@@ -263,7 +264,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	}
 	~ApplierBatchData() = default;
 
-	void addMutation(MutationRef m, Version ver) {
+	void addMutation(MutationRef m, LogMessageVersion ver) {
 		if (!isRangeMutation(m)) {
 			auto item = stagingKeys.emplace(m.param1, StagingKey());
 			item.first->second.add(m, ver);
@@ -272,20 +273,20 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 		}
 	}
 
-	void addVersionStampedKV(MutationRef m, Version ver, uint16_t numVersionStampedKV) {
+	void addVersionStampedKV(MutationRef m, LogMessageVersion ver, uint16_t numVersionStampedKV) {
 		if (m.type == MutationRef::SetVersionstampedKey) {
 			// Assume transactionNumber = 0 does not affect result
 			TraceEvent(SevDebug, "FastRestoreApplierAddMutation")
 			    .detail("MutationType", typeString[m.type])
 			    .detail("FakedTransactionNumber", numVersionStampedKV);
-			transformVersionstampMutation(m, &MutationRef::param1, ver, numVersionStampedKV);
+			transformVersionstampMutation(m, &MutationRef::param1, ver.version, numVersionStampedKV);
 			addMutation(m, ver);
 		} else if (m.type == MutationRef::SetVersionstampedValue) {
 			// Assume transactionNumber = 0 does not affect result
 			TraceEvent(SevDebug, "FastRestoreApplierAddMutation")
 			    .detail("MutationType", typeString[m.type])
 			    .detail("FakedTransactionNumber", numVersionStampedKV);
-			transformVersionstampMutation(m, &MutationRef::param2, ver, numVersionStampedKV);
+			transformVersionstampMutation(m, &MutationRef::param2, ver.version, numVersionStampedKV);
 			addMutation(m, ver);
 		} else {
 			ASSERT(false);
@@ -298,8 +299,8 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 			if (!stagingKey.second.hasPrecomputed()) {
 				TraceEvent("FastRestoreApplierAllKeysPrecomputedFalse")
 				    .detail("Key", stagingKey.first)
-				    .detail("BufferedVersion", stagingKey.second.version)
-				    .detail("MaxPendingVersion", stagingKey.second.pendingMutations.rbegin()->first);
+				    .detail("BufferedVersion", stagingKey.second.version.toString())
+				    .detail("MaxPendingVersion", stagingKey.second.pendingMutations.rbegin()->first.toString());
 				return false;
 			}
 		}
@@ -320,20 +321,17 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	}
 
 	bool isKVOpsSorted() {
-		bool ret = true;
 		auto prev = kvOps.begin();
 		for (auto it = kvOps.begin(); it != kvOps.end(); ++it) {
 			if (prev->first > it->first) {
-				ret = false;
-				break;
+				return false;
 			}
 			prev = it;
 		}
-		return ret;
+		return true;
 	}
 
 	bool allOpsAreKnown() {
-		bool ret = true;
 		for (auto it = kvOps.begin(); it != kvOps.end(); ++it) {
 			for (auto m = it->second.begin(); m != it->second.end(); ++m) {
 				if (m->type == MutationRef::SetValue || m->type == MutationRef::ClearRange ||
@@ -341,11 +339,11 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 					continue;
 				else {
 					TraceEvent(SevError, "FastRestore").detail("UnknownMutationType", m->type);
-					ret = false;
+					return false;
 				}
 			}
 		}
-		return ret;
+		return true;
 	}
 };
 

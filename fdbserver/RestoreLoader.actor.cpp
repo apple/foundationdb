@@ -165,7 +165,6 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 		// Read block header
 		if (reader.consume<int32_t>() != PARTITIONED_MLOG_VERSION) throw restore_unsupported_file_version();
 
-		Version lastVersion = invalidVersion;
 		VersionedMutationsMap& kvOps = kvOpsIter->second;
 		VersionedMutationsMap::iterator it = kvOps.end();
 		while (1) {
@@ -173,20 +172,18 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			if (reader.eof() || *reader.rptr == 0xFF) break;
 
 			// Deserialize messages written in saveMutationsToFile().
-			Version msgVersion = bigEndian64(reader.consume<Version>());
-			bigEndian32(reader.consume<uint32_t>()); // subsequence number
+			LogMessageVersion msgVersion;
+			msgVersion.version = bigEndian64(reader.consume<Version>());
+			msgVersion.sub = bigEndian32(reader.consume<uint32_t>());
 			int msgSize = bigEndian32(reader.consume<int>());
 			const uint8_t* message = reader.consume(msgSize);
 
 			// Skip mutations out of the version range
-			if (!asset.isInVersionRange(msgVersion)) continue;
+			if (!asset.isInVersionRange(msgVersion.version)) continue;
 
-			if (lastVersion != msgVersion) {
-				bool inserted;
-				std::tie(it, inserted) = kvOps.emplace(msgVersion, MutationsVec());
-				lastVersion = msgVersion;
-			}
-			ASSERT(it != kvOps.end());
+			bool inserted;
+			std::tie(it, inserted) = kvOps.emplace(msgVersion, MutationsVec());
+			ASSERT(inserted);
 
 			ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(currentProtocolVersion));
 			MutationRef mutation;
@@ -205,7 +202,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			}
 
 			TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
-			    .detail("CommitVersion", msgVersion)
+			    .detail("CommitVersion", msgVersion.toString())
 			    .detail("ParsedMutation", mutation.toString());
 			it->second.push_back_deep(it->second.arena(), mutation);
 			// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
@@ -306,7 +303,6 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		    .detail("BatchIndex", req.batchIndex)
 		    .detail("ProcessLoadParam", req.param.toString());
 		ASSERT(batchData->sampleMutations.find(req.param) == batchData->sampleMutations.end());
-		batchData->processedFileParams[req.param] = Never(); // Ensure second exec. wait on _processLoadingParam()
 		batchData->processedFileParams[req.param] = _processLoadingParam(req.param, batchData, self->id(), self->bc);
 		isDuplicated = false;
 	} else {
@@ -314,8 +310,9 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		    .detail("BatchIndex", req.batchIndex)
 		    .detail("WaitOnProcessLoadParam", req.param.toString());
 	}
-	ASSERT(batchData->processedFileParams.find(req.param) != batchData->processedFileParams.end());
-	wait(batchData->processedFileParams[req.param]); // wait on the processing of the req.param.
+	auto it = batchData->processedFileParams.find(req.param);
+	ASSERT(it != batchData->processedFileParams.end());
+	wait(it->second); // wait on the processing of the req.param.
 
 	req.reply.send(RestoreLoadFileReply(req.param, batchData->sampleMutations[req.param], isDuplicated));
 	TraceEvent("FastRestoreLoaderPhaseLoadFileDone", self->id())
@@ -426,16 +423,15 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	    .detail("RestoreAsset", asset.toString());
 
 	// There should be no mutation at asset.endVersion version because it is exclusive
-	if (kvOps.find(asset.endVersion) != kvOps.end()) {
+	if (kvOps.find(LogMessageVersion(asset.endVersion)) != kvOps.end()) {
 		TraceEvent(SevError, "FastRestoreLoaderSendMutationToApplier")
 		    .detail("BatchIndex", batchIndex)
 		    .detail("RestoreAsset", asset.toString())
 		    .detail("IsRangeFile", isRangeFile)
 		    .detail("Data loss at version", asset.endVersion);
-	}
-	// Ensure there is a mutation request sent at endVersion, so that applier can advance its notifiedVersion
-	if (kvOps.find(asset.endVersion) == kvOps.end()) {
-		kvOps[asset.endVersion] = MutationsVec(); // Empty mutation vector will be handled by applier
+	} else {
+		// Ensure there is a mutation request sent at endVersion, so that applier can advance its notifiedVersion
+		kvOps[LogMessageVersion(asset.endVersion)] = MutationsVec(); // Empty mutation vector will be handled by applier
 	}
 
 	splitMutationIndex = 0;
@@ -445,22 +441,24 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 		// applierMutationsBuffer is the mutation vector to be sent to each applier
 		// applierMutationsSize is buffered mutation vector size for each applier
 		std::map<UID, MutationsVec> applierMutationsBuffer;
+		std::map<UID, SubSequenceVec> applierSubsBuffer;
 		std::map<UID, double> applierMutationsSize;
 		for (auto& applierID : applierIDs) {
 			applierMutationsBuffer[applierID] = MutationsVec();
+			applierSubsBuffer[applierID] = SubSequenceVec();
 			applierMutationsSize[applierID] = 0.0;
 		}
-		Version commitVersion = kvOp->first;
-		if (!(commitVersion >= asset.beginVersion && commitVersion <= asset.endVersion)) { // Debug purpose
+		const LogMessageVersion& commitVersion = kvOp->first;
+		if (!(commitVersion.version >= asset.beginVersion &&
+		      commitVersion.version <= asset.endVersion)) { // Debug purpose
 			TraceEvent(SevError, "FastRestore_SendMutationsToApplier")
-			    .detail("CommitVersion", commitVersion)
+			    .detail("CommitVersion", commitVersion.version)
 			    .detail("RestoreAsset", asset.toString());
 		}
-		ASSERT(commitVersion >= asset.beginVersion);
-		ASSERT(commitVersion <= asset.endVersion); // endVersion is an empty commit to ensure progress
+		ASSERT(commitVersion.version >= asset.beginVersion);
+		ASSERT(commitVersion.version <= asset.endVersion); // endVersion is an empty commit to ensure progress
 
-		for (int mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
-			MutationRef kvm = kvOp->second[mIndex];
+		for (const MutationRef& kvm : kvOp->second) {
 			// Send the mutation to applier
 			if (isRangeMutation(kvm)) {
 				MutationsVec mvector;
@@ -478,6 +476,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 					// printf("SPLITTED MUTATION: %d: mutation:%s applierID:%s\n", splitMutationIndex,
 					// mutation.toString().c_str(), applierID.toString().c_str());
 					applierMutationsBuffer[applierID].push_back_deep(applierMutationsBuffer[applierID].arena(), mutation);
+					applierSubsBuffer[applierID].push_back(applierSubsBuffer[applierID].arena(), commitVersion.sub);
 					applierMutationsSize[applierID] += mutation.expectedSize();
 
 					kvCount++;
@@ -493,30 +492,30 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				kvCount++;
 
 				applierMutationsBuffer[applierID].push_back_deep(applierMutationsBuffer[applierID].arena(), mutation);
+				applierSubsBuffer[applierID].push_back(applierSubsBuffer[applierID].arena(), commitVersion.sub);
 				applierMutationsSize[applierID] += mutation.expectedSize();
 			}
 		} // Mutations at the same version
 
 		// TODO: Sanity check each asset has been received exactly once!
 		// Send the mutations to appliers for each version
-		for (auto& applierID : applierIDs) {
-			requests.push_back(std::make_pair(
-			    applierID, RestoreSendVersionedMutationsRequest(batchIndex, asset, prevVersion, commitVersion,
-			                                                    isRangeFile, applierMutationsBuffer[applierID])));
+		for (const UID& applierID : applierIDs) {
+			requests.emplace_back(applierID, RestoreSendVersionedMutationsRequest(
+			                                     batchIndex, asset, prevVersion, commitVersion.version, isRangeFile,
+			                                     applierMutationsBuffer[applierID], applierSubsBuffer[applierID]));
 		}
 		TraceEvent(SevDebug, "FastRestore_SendMutationToApplier")
 		    .detail("PrevVersion", prevVersion)
-		    .detail("CommitVersion", commitVersion)
+		    .detail("CommitVersion", commitVersion.toString())
 		    .detail("RestoreAsset", asset.toString());
-		ASSERT(prevVersion < commitVersion);
-		prevVersion = commitVersion;
+		ASSERT(prevVersion <= commitVersion.version);
+		prevVersion = commitVersion.version;
 		// Tracking this request can be spammy
 		wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
 		                       TaskPriority::RestoreLoaderSendMutations,
 		                       SERVER_KNOBS->FASTRESTORE_TRACK_LOADER_SEND_REQUESTS));
 
 		requests.clear();
-
 	} // all versions of mutations in the same file
 
 	TraceEvent("FastRestore").detail("LoaderSendMutationOnAppliers", kvCount);
@@ -655,7 +654,8 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 		uint64_t commitVersion = kReader.consume<uint64_t>(); // Consume little Endian data
 		// We have already filter the commit not in [beginVersion, endVersion) when we concatenate kv pair in log file
 		ASSERT_WE_THINK(asset.isInVersionRange(commitVersion));
-		kvOps.insert(std::make_pair(commitVersion, MutationsVec()));
+		auto it = kvOps.insert(std::make_pair(LogMessageVersion(commitVersion), MutationsVec()));
+		ASSERT(it.second); // inserted is true
 
 		StringRefReader vReader(val, restore_corrupted_data());
 		vReader.consume<uint64_t>(); // Consume the includeVersion
@@ -695,7 +695,7 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 			TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
 			    .detail("CommitVersion", commitVersion)
 			    .detail("ParsedMutation", mutation.toString());
-			kvOps[commitVersion].push_back_deep(kvOps[commitVersion].arena(), mutation);
+			it.first->second.push_back_deep(it.first->second.arena(), mutation);
 			// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
 			if (deterministicRandom()->random01() * 100 < SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
 				samples.push_back_deep(samples.arena(), mutation);
@@ -774,13 +774,13 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 		cc->loadedRangeBytes += m.totalSize();
 
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
-		kvOps.insert(std::make_pair(version, MutationsVec()));
+		auto it = kvOps.insert(std::make_pair(LogMessageVersion(version), MutationsVec()));
 		TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
 		    .detail("CommitVersion", version)
 		    .detail("ParsedMutationKV", m.toString());
 
-		ASSERT_WE_THINK(kvOps.find(version) != kvOps.end());
-		kvOps[version].push_back_deep(kvOps[version].arena(), m);
+		ASSERT_WE_THINK(kvOps.find(LogMessageVersion(version)) != kvOps.end());
+		it.first->second.push_back_deep(it.first->second.arena(), m);
 		// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
 		if (deterministicRandom()->random01() * 100 < SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
 			cc->sampledRangeBytes += m.totalSize();

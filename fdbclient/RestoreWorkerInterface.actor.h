@@ -453,26 +453,28 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	Version prevVersion, version; // version is the commitVersion of the mutation vector.
 	bool isRangeFile;
 	MutationsVec mutations; // All mutations at the same version parsed by one loader
+	SubSequenceVec subs; // Sub-sequence number for mutations
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendVersionedMutationsRequest() = default;
 	explicit RestoreSendVersionedMutationsRequest(int batchIndex, const RestoreAsset& asset, Version prevVersion,
-	                                              Version version, bool isRangeFile, MutationsVec mutations)
+	                                              Version version, bool isRangeFile, MutationsVec mutations,
+	                                              SubSequenceVec subs)
 	  : batchIndex(batchIndex), asset(asset), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile),
-	    mutations(mutations) {}
+	    mutations(mutations), subs(subs) {}
 
 	std::string toString() {
 		std::stringstream ss;
 		ss << "VersionBatchIndex:" << batchIndex << "RestoreAsset:" << asset.toString()
 		   << " prevVersion:" << prevVersion << " version:" << version << " isRangeFile:" << isRangeFile
-		   << " mutations.size:" << mutations.size();
+		   << " mutations.size:" << mutations.size() << " subs.size:" << subs.size();
 		return ss.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, batchIndex, asset, prevVersion, version, isRangeFile, mutations, reply);
+		serializer(ar, batchIndex, asset, prevVersion, version, isRangeFile, mutations, subs, reply);
 	}
 };
 
