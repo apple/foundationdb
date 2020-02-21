@@ -754,6 +754,12 @@ public:
 	// Everything actually network related is delegated to the Sim2Net class; Sim2 is only concerned with simulating machines and time
 	virtual double now() { return time; }
 
+	// timer() can be up to one second ahead of now()
+	virtual double timer() {
+		timerTime += deterministicRandom()->random01()*(time+1.0-timerTime)/2.0;
+		return timerTime; 
+	}
+
 	virtual Future<class Void> delay( double seconds, TaskPriority taskID ) {
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay( seconds, taskID, currentProcess );
@@ -1590,7 +1596,7 @@ public:
 		machines.erase(machineId);
 	}
 
-	Sim2() : time(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
+	Sim2() : time(0.0), timerTime(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
 		// Not letting currentProcess be NULL eliminates some annoying special cases
 		currentProcess = new ProcessInfo("NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), {NetworkAddress()}, this, "", "");
 		g_network = net2 = newNet2(false, true);
@@ -1626,6 +1632,7 @@ public:
 		else {
 			mutex.enter();
 			this->time = t.time;
+			this->timerTime = std::max(this->timerTime, this->time);
 			mutex.leave();
 
 			this->currentProcess = t.machine;
@@ -1678,6 +1685,7 @@ public:
 	//time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	//time should only be modified from the main thread.
 	double time;
+	double timerTime;
 	TaskPriority currentTaskID;
 
 	//taskCount is guarded by ISimulator::mutex
@@ -1720,7 +1728,7 @@ ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
 		TEST( kt == ISimulator::RebootAndDelete ); // Simulated machine rebooted with data and coordination state deletion
 		TEST( kt == ISimulator::RebootProcessAndDelete ); // Simulated process rebooted with data and coordination state deletion
 
-		if( p->rebooting )
+		if( p->rebooting || !p->isReliable() )
 			return;
 		TraceEvent("RebootingProcess").detail("KillType", kt).detail("Address", p->address).detail("ZoneId", p->locality.zoneId()).detail("DataHall", p->locality.dataHallId()).detail("Locality", p->locality.toString()).detail("Failed", p->failed).detail("Excluded", p->excluded).detail("Cleared", p->cleared).backtrace();
 		p->rebooting = true;

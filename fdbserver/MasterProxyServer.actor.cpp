@@ -237,6 +237,8 @@ struct ProxyCommitData {
 	int updateCommitRequests = 0;
 	NotifiedDouble lastCommitTime;
 
+	vector<double> commitComputePerOperation;
+
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
 	//When a tag related to a storage server does change, we empty out all of these vectors to signify they must be repopulated.
 	//We do not repopulate them immediately to avoid a slow task.
@@ -293,7 +295,9 @@ struct ProxyCommitData {
 			localCommitBatchesStarted(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
 			firstProxy(firstProxy), cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
 			singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0), lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0)
-	{}
+	{
+		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS,0.0);
+	}
 };
 
 struct ResolutionRequestBuilder {
@@ -475,6 +479,13 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
 }
 
+ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> releaseDelay, int64_t localBatchNumber) {
+	wait(releaseDelay);
+	ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber-1);
+	self->latestLocalCommitBatchResolving.set(localBatchNumber);
+	return Void();
+}
+
 ACTOR Future<Void> commitBatch(
 	ProxyCommitData* self,
 	vector<CommitTransactionRequest> trs,
@@ -486,6 +497,14 @@ ACTOR Future<Void> commitBatch(
 	state Optional<UID> debugID;
 	state bool forceRecovery = false;
 	state BinaryWriter valueWriter(Unversioned());
+	
+	state int batchOperations = 0;
+	int64_t batchBytes = 0;
+	for (int t = 0; t<trs.size(); t++) {
+		batchOperations += trs[t].transaction.mutations.size();
+		batchBytes += trs[t].transaction.mutations.expectedSize();
+	}
+	state int latencyBucket = batchOperations == 0 ? 0 : std::min<int>(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS-1,SERVER_KNOBS->PROXY_COMPUTE_BUCKETS*batchBytes/(batchOperations*(CLIENT_KNOBS->VALUE_SIZE_LIMIT+CLIENT_KNOBS->KEY_SIZE_LIMIT)));
 
 	ASSERT(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS <= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);  // since we are using just the former to limit the number of versions actually in flight!
 
@@ -515,7 +534,7 @@ ACTOR Future<Void> commitBatch(
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 	TEST(self->latestLocalCommitBatchResolving.get() < localBatchNumber-1); // Queuing pre-resolution commit processing 
 	wait(self->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber-1));
-	wait(yield(TaskPriority::ProxyCommitYield1));
+	state Future<Void> releaseDelay = delay(batchOperations*self->commitComputePerOperation[latencyBucket], TaskPriority::ProxyMasterVersionReply);
 
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.GettingCommitVersion");
@@ -566,9 +585,7 @@ ACTOR Future<Void> commitBatch(
 	}
 
 	state vector<vector<int>> transactionResolverMap = std::move( requests.transactionResolverMap );
-
-	ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber-1);
-	self->latestLocalCommitBatchResolving.set(localBatchNumber);
+	state Future<Void> releaseFuture = releaseResolvingAfter(self, releaseDelay, localBatchNumber);
 
 	/////// Phase 2: Resolution (waiting on the network; pipelined)
 	state vector<ResolveTransactionBatchReply> resolution = wait( getAll(replies) );
@@ -579,8 +596,10 @@ ACTOR Future<Void> commitBatch(
 	////// Phase 3: Post-resolution processing (CPU bound except for very rare situations; ordered; currently atomic but doesn't need to be)
 	TEST(self->latestLocalCommitBatchLogging.get() < localBatchNumber-1); // Queuing post-resolution commit processing 
 	wait(self->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber-1));
-	wait(yield(TaskPriority::ProxyCommitYield2));
+	wait(yield(TaskPriority::ProxyCommitYield1));
 
+	state double computeStart = g_network->timer();
+	state double computeDuration = 0; 
 	self->stats.txnCommitResolved += trs.size();
 
 	if (debugID.present())
@@ -738,7 +757,11 @@ ACTOR Future<Void> commitBatch(
 			for (; mutationNum < pMutations->size(); mutationNum++) {
 				if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
 					yieldBytes = 0;
-					wait(yield(TaskPriority::ProxyCommitYield2));
+					if(g_network->check_yield(TaskPriority::ProxyCommitYield1)) {
+						computeDuration += g_network->timer() - computeStart;
+						wait(delay(0, TaskPriority::ProxyCommitYield1));
+						computeStart = g_network->timer();
+					}
 				}
 
 				auto& m = (*pMutations)[mutationNum];
@@ -844,7 +867,11 @@ ACTOR Future<Void> commitBatch(
 			while(blobIter) {
 				if(yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
 					yieldBytes = 0;
-					wait(yield(TaskPriority::ProxyCommitYield2));
+					if(g_network->check_yield(TaskPriority::ProxyCommitYield1)) {
+						computeDuration += g_network->timer() - computeStart;
+						wait(delay(0, TaskPriority::ProxyCommitYield1));
+						computeStart = g_network->timer();
+					}
 				}
 				valueWriter.serializeBytes(blobIter->data);
 				yieldBytes += blobIter->data.size();
@@ -906,29 +933,33 @@ ACTOR Future<Void> commitBatch(
 
 	// Storage servers mustn't make durable versions which are not fully committed (because then they are impossible to roll back)
 	// We prevent this by limiting the number of versions which are semi-committed but not fully committed to be less than the MVCC window
-	while (self->committedVersion.get() < commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
-		// This should be *extremely* rare in the real world, but knob buggification should make it happen in simulation
-		TEST(true);  // Semi-committed pipeline limited by MVCC window
-		//TraceEvent("ProxyWaitingForCommitted", self->dbgid).detail("CommittedVersion", self->committedVersion.get()).detail("NeedToCommit", commitVersion);
-		choose{
-			when(wait(self->committedVersion.whenAtLeast(commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS))) {
-				wait(yield());
-				break; 
-			}
-			when(GetReadVersionReply v = wait(self->getConsistentReadVersion.getReply(GetReadVersionRequest(0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE | GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
-				if(v.version > self->committedVersion.get()) {
-					self->locked = v.locked;
-					self->metadataVersion = v.metadataVersion;
-					self->committedVersion.set(v.version);
+	if(self->committedVersion.get() < commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
+		computeDuration += g_network->timer() - computeStart;
+		while (self->committedVersion.get() < commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
+			// This should be *extremely* rare in the real world, but knob buggification should make it happen in simulation
+			TEST(true);  // Semi-committed pipeline limited by MVCC window
+			//TraceEvent("ProxyWaitingForCommitted", self->dbgid).detail("CommittedVersion", self->committedVersion.get()).detail("NeedToCommit", commitVersion);
+			choose{
+				when(wait(self->committedVersion.whenAtLeast(commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS))) {
+					wait(yield());
+					break; 
 				}
-				
-				if (self->committedVersion.get() < commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
-					wait(delay(SERVER_KNOBS->PROXY_SPIN_DELAY));
+				when(GetReadVersionReply v = wait(self->getConsistentReadVersion.getReply(GetReadVersionRequest(0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE | GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
+					if(v.version > self->committedVersion.get()) {
+						self->locked = v.locked;
+						self->metadataVersion = v.metadataVersion;
+						self->committedVersion.set(v.version);
+					}
+					
+					if (self->committedVersion.get() < commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
+						wait(delay(SERVER_KNOBS->PROXY_SPIN_DELAY));
+				}
 			}
 		}
+		computeStart = g_network->timer();
 	}
 
-	state LogSystemDiskQueueAdapter::CommitMessage msg = wait(storeCommits.back().first); // Should just be doing yields
+	state LogSystemDiskQueueAdapter::CommitMessage msg = storeCommits.back().first.get();
 
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.AfterStoreCommits");
@@ -961,6 +992,16 @@ ACTOR Future<Void> commitBatch(
 		self->latestLocalCommitBatchLogging.set(localBatchNumber);
 	}
 
+	computeDuration += g_network->timer() - computeStart;
+	if(computeDuration > SERVER_KNOBS->MIN_PROXY_COMPUTE && batchOperations > 0) {
+		double computePerOperation = computeDuration/batchOperations;
+		if(computePerOperation <= self->commitComputePerOperation[latencyBucket] || self->commitComputePerOperation[latencyBucket] == 0.0) {
+			self->commitComputePerOperation[latencyBucket] = computePerOperation;
+		} else {
+			self->commitComputePerOperation[latencyBucket] = SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE*computePerOperation + ((1.0-SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE)*self->commitComputePerOperation[latencyBucket]);
+		}
+	}
+
 	/////// Phase 4: Logging (network bound; pipelined up to MAX_READ_TRANSACTION_LIFE_VERSIONS (limited by loop above))
 
 	try {
@@ -978,7 +1019,7 @@ ACTOR Future<Void> commitBatch(
 	}
 	self->lastCommitLatency = now()-commitStartTime;
 	self->lastCommitTime = std::max(self->lastCommitTime.get(), commitStartTime);
-	wait(yield(TaskPriority::ProxyCommitYield3));
+	wait(yield(TaskPriority::ProxyCommitYield2));
 
 	if( self->popRemoteTxs && msg.popTo > ( self->txsPopVersions.size() ? self->txsPopVersions.back().second : self->lastTxsPop ) ) {
 		if(self->txsPopVersions.size() >= SERVER_KNOBS->MAX_TXS_POP_VERSION_HISTORY) {
@@ -1017,7 +1058,7 @@ ACTOR Future<Void> commitBatch(
 	}
 
 	// Send replies to clients
-	double endTime = timer();
+	double endTime = g_network->timer();
 	for (int t = 0; t < trs.size(); t++) {
 		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			ASSERT_WE_THINK(commitVersion != invalidVersion);
@@ -1068,6 +1109,7 @@ ACTOR Future<Void> commitBatch(
 
 	self->commitBatchesMemBytesCount -= currentBatchMemBytesCount;
 	ASSERT_ABORT(self->commitBatchesMemBytesCount >= 0);
+	wait(releaseFuture);
 	return Void();
 }
 
@@ -1149,7 +1191,7 @@ struct TransactionRateInfo {
 
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests, ProxyStats *stats) {
 	GetReadVersionReply reply = wait(replyFuture);
-	double end = timer();
+	double end = g_network->timer();
 	for(GetReadVersionRequest const& request : requests) {
 		if(request.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
 			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
@@ -1345,7 +1387,7 @@ ACTOR static Future<Void> rejoinServer( MasterProxyInterface proxy, ProxyCommitD
 			GetStorageServerRejoinInfoReply rep;
 			rep.version = commitData->version;
 			rep.tag = decodeServerTagValue( commitData->txnStateStore->readValue(serverTagKeyFor(req.id)).get().get() );
-			Standalone<VectorRef<KeyValueRef>> history = commitData->txnStateStore->readRange(serverTagHistoryRangeFor(req.id)).get();
+			Standalone<RangeResultRef> history = commitData->txnStateStore->readRange(serverTagHistoryRangeFor(req.id)).get();
 			for(int i = history.size()-1; i >= 0; i-- ) {
 				rep.history.push_back(std::make_pair(decodeServerTagHistoryKey(history[i].key), decodeServerTagValue(history[i].value)));
 			}
@@ -1696,7 +1738,7 @@ ACTOR Future<Void> masterProxyServerCore(
 					state KeyRange txnKeys = allKeys;
 					loop {
 						wait(yield());
-						Standalone<VectorRef<KeyValueRef>> data = commitData.txnStateStore->readRange(txnKeys, SERVER_KNOBS->BUGGIFIED_ROW_LIMIT, SERVER_KNOBS->APPLY_MUTATION_BYTES).get();
+						Standalone<RangeResultRef> data = commitData.txnStateStore->readRange(txnKeys, SERVER_KNOBS->BUGGIFIED_ROW_LIMIT, SERVER_KNOBS->APPLY_MUTATION_BYTES).get();
 						if(!data.size()) break;
 						((KeyRangeRef&)txnKeys) = KeyRangeRef( keyAfter(data.back().key, txnKeys.arena()), txnKeys.end );
 

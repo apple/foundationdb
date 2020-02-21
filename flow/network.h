@@ -64,12 +64,11 @@ enum class TaskPriority {
 	TLogCommitReply = 8580,
 	TLogCommit = 8570,
 	ProxyGetRawCommittedVersion = 8565,
-	ProxyCommitYield3 = 8562,
-	ProxyTLogCommitReply = 8560,
+	ProxyMasterVersionReply = 8560,
 	ProxyCommitYield2 = 8557,
-	ProxyResolverReply = 8555,
-	ProxyMasterVersionReply = 8550,
-	ProxyCommitYield1 = 8547,
+	ProxyTLogCommitReply = 8555,
+	ProxyCommitYield1 = 8550,
+	ProxyResolverReply = 8547,
 	ProxyCommit = 8545,
 	ProxyCommitBatcher = 8540,
 	TLogConfirmRunningReply = 8530,
@@ -438,6 +437,10 @@ public:
 	virtual double now() = 0;
 	// Provides a clock that advances at a similar rate on all connected endpoints
 	// FIXME: Return a fixed point Time class
+
+	virtual double timer() = 0;
+	// A wrapper for directly getting the system time. The time returned by now() only updates in the run loop, 
+	// so it cannot be used to measure times of functions that do not have wait statements.
 
 	virtual Future<class Void> delay( double seconds, TaskPriority taskID ) = 0;
 	// The given future will be set after seconds have elapsed

@@ -348,8 +348,23 @@ public:
 		return writeFile(snapshotFolderString(snapshotBeginVersion) + format("/%d/", snapshotFileCount / (BUGGIFY ? 1 : 5000)) + fileName);
 	}
 
+	// Find what should be the filename of a path by finding whatever is after the last forward or backward slash, or failing to find those, the whole string.
+	static std::string fileNameOnly(std::string path) {
+		// Find the last forward slash position, defaulting to 0 if not found
+		int pos = path.find_last_of('/');
+		if(pos == std::string::npos) {
+			pos = 0;
+		}
+		// Find the last backward slash position after pos, and update pos if found
+		int b = path.find_last_of('\\', pos);
+		if(b != std::string::npos) {
+			pos = b;
+		}
+		return path.substr(pos + 1);
+	}
+
 	static bool pathToRangeFile(RangeFile &out, std::string path, int64_t size) {
-		std::string name = basename(path);
+		std::string name = fileNameOnly(path);
 		RangeFile f;
 		f.fileName = path;
 		f.fileSize = size;
@@ -362,7 +377,7 @@ public:
 	}
 
 	static bool pathToLogFile(LogFile &out, std::string path, int64_t size) {
-		std::string name = basename(path);
+		std::string name = fileNameOnly(path);
 		LogFile f;
 		f.fileName = path;
 		f.fileSize = size;
@@ -375,7 +390,7 @@ public:
 	}
 
 	static bool pathToKeyspaceSnapshotFile(KeyspaceSnapshotFile &out, std::string path) {
-		std::string name = basename(path);
+		std::string name = fileNameOnly(path);
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
 		int len;

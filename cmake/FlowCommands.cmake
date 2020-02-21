@@ -185,12 +185,12 @@ function(add_flow_target)
         if(WIN32)
           add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
             COMMAND $<TARGET_FILE:actorcompiler> "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags}
-            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" actorcompiler
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}"
             COMMENT "Compile actor: ${src}")
         else()
           add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
             COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags} > /dev/null
-            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" actorcompiler
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}"
             COMMENT "Compile actor: ${src}")
         endif()
       else()
@@ -220,15 +220,18 @@ function(add_flow_target)
       get_filename_component(dname ${CMAKE_CURRENT_SOURCE_DIR} NAME)
       string(REGEX REPLACE "\\..*" "" fname ${src})
       string(REPLACE / _ fname ${fname})
-      set_source_files_properties(${src} PROPERTIES COMPILE_DEFINITIONS FNAME=${dname}_${fname})
+      #set_source_files_properties(${src} PROPERTIES COMPILE_DEFINITIONS FNAME=${dname}_${fname})
     endforeach()
 
     set_property(TARGET ${AFT_NAME} PROPERTY SOURCE_FILES ${AFT_SRCS})
     set_property(TARGET ${AFT_NAME} PROPERTY COVERAGE_FILTERS ${AFT_SRCS})
 
     add_custom_target(${AFT_NAME}_actors DEPENDS ${generated_files})
+    add_dependencies(${AFT_NAME}_actors actorcompiler)
     add_dependencies(${AFT_NAME} ${AFT_NAME}_actors)
-    assert_no_version_h(${AFT_NAME}_actors)
+    if(NOT WIN32)
+      assert_no_version_h(${AFT_NAME}_actors)
+    endif()
     generate_coverage_xml(${AFT_NAME})
     if(strip_target)
       strip_debug_symbols(${AFT_NAME})

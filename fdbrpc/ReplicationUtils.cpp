@@ -82,14 +82,55 @@ double ratePolicy(
 	return rating;
 }
 
-bool findBestPolicySet(
-	std::vector<LocalityEntry>&	bestResults,
-	Reference<LocalitySet> &						localitySet,
-	Reference<IReplicationPolicy>	const&				policy,
-	unsigned int								nMinItems,
-	unsigned int								nSelectTests,
-	unsigned int								nPolicyTests)
-{
+bool findBestPolicySetSimple(PolicyAcross* pa, Reference<LocalitySet> logServerSet, std::vector<LocalityEntry>& bestSet,
+                             int desired) {
+	auto& mutableEntries = logServerSet->getMutableEntries();
+	deterministicRandom()->randomShuffle(mutableEntries);
+	// First make sure the current localitySet is able to fulfuill the policy
+	std::set<std::string> attributeKeys;
+	AttribKey indexKey = logServerSet->keyIndex(*attributeKeys.begin());
+	int uniqueValueCount = logServerSet->getKeyValueArray()[indexKey._id].size();
+	int targetUniqueValueCount = pa->getCount();
+	bool found = false;
+	if (uniqueValueCount < targetUniqueValueCount) {
+		// logServerSet won't be able to fulfill the policy
+		found = false;
+	} else {
+		// Loop through all servers and, in each loop, try to choose `targetUniqueValueCount`
+		// servers, each of which has a unique attribute value
+		std::set<AttribValue> seen;
+		int upperBound = mutableEntries.size();
+		int i = 0;
+		while (bestSet.size() < desired) {
+			auto& item = mutableEntries[i];
+			Optional<AttribValue> value = logServerSet->getRecord(item._id)->getValue(indexKey);
+			if (value.present() && seen.find(value.get()) == seen.end()) {
+				seen.insert(value.get());
+				bestSet.push_back(item);
+				upperBound--;
+				if (i < upperBound) {
+					std::swap(mutableEntries[i], mutableEntries[upperBound]);
+				}
+				if (seen.size() == targetUniqueValueCount) {
+					seen.clear();
+					i = 0;
+				}
+				continue;
+			}
+			i++;
+			if (i == upperBound && bestSet.size() < desired) {
+				seen.clear();
+				i = 0;
+			}
+		}
+		found = true;
+	}
+	return found;
+}
+
+bool findBestPolicySetExpensive(std::vector<LocalityEntry>& bestResults, Reference<LocalitySet>& localitySet,
+                                Reference<IReplicationPolicy> const& policy, unsigned int nMinItems,
+                                unsigned int nSelectTests, unsigned int nPolicyTests) {
 	bool													bSucceeded = true;
 	Reference<LocalitySet>								bestLocalitySet, testLocalitySet;
 	std::vector<LocalityEntry>		results;
@@ -113,9 +154,7 @@ bool findBestPolicySet(
 		}
 
 		// Get some additional random items, if needed
-		if ((nMinItems > results.size())																			&&
-				(!localitySet->random(results, results, nMinItems-results.size())))
-		{
+		if ((nMinItems > results.size()) && (!localitySet->random(results, results, nMinItems - results.size()))) {
 			bSucceeded = false;
 			break;
 		}
@@ -156,6 +195,55 @@ bool findBestPolicySet(
 	}
 
 	return bSucceeded;
+}
+
+bool findBestPolicySet(std::vector<LocalityEntry>& bestResults, Reference<LocalitySet>& localitySet,
+                       Reference<IReplicationPolicy> const& policy, unsigned int nMinItems, unsigned int nSelectTests,
+                       unsigned int nPolicyTests) {
+
+	bool bestFound = false;
+
+	// Specialization for policies of shape:
+	//    - PolicyOne()
+	//    - PolicyAcross(,"zoneId",PolicyOne())
+	//    - TODO: More specializations for common policies
+	if (policy->name() == "One") {
+		bestFound = true;
+		int count = 0;
+		auto& mutableEntries = localitySet->getMutableEntries();
+		deterministicRandom()->randomShuffle(mutableEntries);
+		for (auto const& entry : mutableEntries) {
+			bestResults.push_back(entry);
+			if (++count == nMinItems) break;
+		}
+	} else if (policy->name() == "Across") {
+		PolicyAcross* pa = (PolicyAcross*)policy.getPtr();
+		std::set<std::string> attributeKeys;
+		pa->attributeKeys(&attributeKeys);
+		if (pa->embeddedPolicyName() == "One" && attributeKeys.size() == 1 &&
+		    *attributeKeys.begin() == "zoneid" // This algorithm can actually apply to any field
+		) {
+			bestFound = findBestPolicySetSimple(pa, localitySet, bestResults, nMinItems);
+			if (bestFound && g_network->isSimulated()) {
+				std::vector<LocalityEntry> oldBest;
+				auto oldBestFound =
+				    findBestPolicySetExpensive(oldBest, localitySet, policy, nMinItems, nSelectTests, nPolicyTests);
+				if (!oldBestFound) {
+					TraceEvent(SevError, "FBPSMissmatch").detail("Policy", policy->info());
+				} else {
+					auto set = localitySet->restrict(bestResults);
+					auto oldSet = localitySet->restrict(oldBest);
+					ASSERT_WE_THINK(ratePolicy(set, policy, nPolicyTests) <= ratePolicy(oldSet, policy, nPolicyTests));
+				}
+			}
+		} else {
+			bestFound =
+			    findBestPolicySetExpensive(bestResults, localitySet, policy, nMinItems, nSelectTests, nPolicyTests);
+		}
+	} else {
+		bestFound = findBestPolicySetExpensive(bestResults, localitySet, policy, nMinItems, nSelectTests, nPolicyTests);
+	}
+	return bestFound;
 }
 
 bool findBestUniquePolicySet(

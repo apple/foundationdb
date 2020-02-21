@@ -184,7 +184,9 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -205,11 +207,22 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 * @param mode provide a hint about how the results are to be used. This
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
 	 *
+	 * <p>
+	 *     When converting the result of this query to a list using {@link AsyncIterable#asList()} with the {@code ITERATOR} streaming
+	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+	 *     known in advance that the {@link AsyncIterable#asList()} function will fetch all results in the range. If a limit is specified,
+	 *     the {@code EXACT} streaming mode will be used, and otherwise it will use {@code WANT_ALL}.
+	 *
+	 *     To achieve comparable performance when iterating over an entire range without using {@link AsyncIterable#asList()}, the same
+	 *     streaming mode would need to be used.
+	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
@@ -263,7 +276,9 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -284,11 +299,22 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 * @param mode provide a hint about how the results are to be used. This
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
 	 *
+	 * <p>
+	 *     When converting the result of this query to a list using {@link AsyncIterable#asList()} with the {@code ITERATOR} streaming
+	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+	 *     known in advance that the {@link AsyncIterable#asList()} function will fetch all results in the range. If a limit is specified,
+	 *     the {@code EXACT} streaming mode will be used, and otherwise it will use {@code WANT_ALL}.
+	 *
+	 *     To achieve comparable performance when iterating over an entire range without using {@link AsyncIterable#asList()}, the same
+	 *     streaming mode would need to be used.
+	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
@@ -351,7 +377,9 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -375,11 +403,22 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 * @param mode provide a hint about how the results are to be used. This
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
 	 *
+	 * <p>
+	 *     When converting the result of this query to a list using {@link AsyncIterable#asList()} with the {@code ITERATOR} streaming
+	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+	 *     known in advance that the {@link AsyncIterable#asList()} function will fetch all results in the range. If a limit is specified,
+	 *     the {@code EXACT} streaming mode will be used, and otherwise it will use {@code WANT_ALL}.
+	 *
+	 *     To achieve comparable performance when iterating over an entire range without using {@link AsyncIterable#asList()}, the same
+	 *     streaming mode would need to be used.
+	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<KeyValue> getRange(Range range,

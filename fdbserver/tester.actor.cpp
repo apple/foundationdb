@@ -970,6 +970,8 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			TraceEvent("TestParserTest").detail("ParsedSimDrAgents", spec.simDrAgents);
 		} else if( attrib == "extraDB" ) {
 			TraceEvent("TestParserTest").detail("ParsedExtraDB", "");
+		} else if ( attrib == "configureLocked" ) {
+			TraceEvent("TestParserTest").detail("ParsedConfigureLocked", "");
 		} else if( attrib == "minimumReplication" ) {
 			TraceEvent("TestParserTest").detail("ParsedMinimumReplication", "");
 		} else if( attrib == "minimumRegions" ) {

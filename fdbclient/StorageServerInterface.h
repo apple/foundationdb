@@ -383,7 +383,7 @@ struct SplitMetricsRequest {
 struct GetStorageMetricsReply {
 	constexpr static FileIdentifier file_identifier = 15491478;
 	StorageMetrics load;
-	StorageMetrics free;
+	StorageMetrics available;
 	StorageMetrics capacity;
 	double bytesInputRate;
 
@@ -391,7 +391,7 @@ struct GetStorageMetricsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, load, free, capacity, bytesInputRate);
+		serializer(ar, load, available, capacity, bytesInputRate);
 	}
 };
 

@@ -170,25 +170,25 @@ public:
 		});
 	}
 
-	virtual int64_t getMinFreeSpace(bool includeInFlight = true) {
+	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) {
 		int64_t result = std::numeric_limits<int64_t>::max();
 		for (auto it = teams.begin(); it != teams.end(); it++) {
-			result = std::min(result, (*it)->getMinFreeSpace(includeInFlight));
+			result = std::min(result, (*it)->getMinAvailableSpace(includeInFlight));
 		}
 		return result;
 	}
 
-	virtual double getMinFreeSpaceRatio(bool includeInFlight = true) {
+	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) {
 		double result = std::numeric_limits<double>::max();
 		for (auto it = teams.begin(); it != teams.end(); it++) {
-			result = std::min(result, (*it)->getMinFreeSpaceRatio(includeInFlight));
+			result = std::min(result, (*it)->getMinAvailableSpaceRatio(includeInFlight));
 		}
 		return result;
 	}
 
-	virtual bool hasHealthyFreeSpace() {
-		return all([](Reference<IDataDistributionTeam> team) {
-			return team->hasHealthyFreeSpace();
+	virtual bool hasHealthyAvailableSpace(double minRatio, int64_t minAvailableSpace) {
+		return all([minRatio, minAvailableSpace](Reference<IDataDistributionTeam> team) {
+			return team->hasHealthyAvailableSpace(minRatio, minAvailableSpace);
 		});
 	}
 
@@ -929,7 +929,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					if(rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT) inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_UNHEALTHY;
 					if(rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
-					auto req = GetTeamRequest(rd.wantsNewServers, rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, true, inflightPenalty);
+					auto req = GetTeamRequest(rd.wantsNewServers, rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, true, false, SERVER_KNOBS->MIN_FREE_SPACE_RATIO, inflightPenalty);
 					req.completeSources = rd.completeSources;
 					Optional<Reference<IDataDistributionTeam>> bestTeam = wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
 					// If a DC has no healthy team, we stop checking the other DCs until
@@ -1213,21 +1213,19 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(
-				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, true))));
+				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, true, false, SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF))));
 				if (randomTeam.present()) {
-					if (randomTeam.get()->getMinFreeSpaceRatio() > SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF) {
-						state Optional<Reference<IDataDistributionTeam>> loadedTeam =
-						    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-						        GetTeamRequest(true, true, false))));
-						if (loadedTeam.present()) {
-							bool moved =
-							    wait(rebalanceTeams(self, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM, loadedTeam.get(),
-							                        randomTeam.get(), teamCollectionIndex == 0));
-							if (moved) {
-								resetCount = 0;
-							} else {
-								resetCount++;
-							}
+					state Optional<Reference<IDataDistributionTeam>> loadedTeam =
+						wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
+							GetTeamRequest(true, true, false, true))));
+					if (loadedTeam.present()) {
+						bool moved =
+							wait(rebalanceTeams(self, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM, loadedTeam.get(),
+												randomTeam.get(), teamCollectionIndex == 0));
+						if (moved) {
+							resetCount = 0;
+						} else {
+							resetCount++;
 						}
 					}
 				}
@@ -1282,20 +1280,18 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(
-				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, false))));
+				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, false, true))));
 				if (randomTeam.present()) {
 					state Optional<Reference<IDataDistributionTeam>> unloadedTeam = wait(brokenPromiseToNever(
-					    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, true, true))));
+					    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, true, true, false, SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF))));
 					if (unloadedTeam.present()) {
-						if (unloadedTeam.get()->getMinFreeSpaceRatio() > SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF) {
-							bool moved =
-							    wait(rebalanceTeams(self, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, randomTeam.get(),
-							                        unloadedTeam.get(), teamCollectionIndex == 0));
-							if (moved) {
-								resetCount = 0;
-							} else {
-								resetCount++;
-							}
+						bool moved =
+							wait(rebalanceTeams(self, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, randomTeam.get(),
+												unloadedTeam.get(), teamCollectionIndex == 0));
+						if (moved) {
+							resetCount = 0;
+						} else {
+							resetCount++;
 						}
 					}
 				}

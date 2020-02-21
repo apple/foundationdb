@@ -185,7 +185,7 @@ struct StorageServerDisk {
 	Future<Key> readNextKeyInclusive( KeyRef key ) { return readFirstKey(storage, KeyRangeRef(key, allKeys.end)); }
 	Future<Optional<Value>> readValue( KeyRef key, Optional<UID> debugID = Optional<UID>() ) { return storage->readValue(key, debugID); }
 	Future<Optional<Value>> readValuePrefix( KeyRef key, int maxLength, Optional<UID> debugID = Optional<UID>() ) { return storage->readValuePrefix(key, maxLength, debugID); }
-	Future<Standalone<VectorRef<KeyValueRef>>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 ) { return storage->readRange(keys, rowLimit, byteLimit); }
+	Future<Standalone<RangeResultRef>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 ) { return storage->readRange(keys, rowLimit, byteLimit); }
 
 	KeyValueStoreType getKeyValueStoreType() { return storage->getType(); }
 	StorageBytes getStorageBytes() { return storage->getStorageBytes(); }
@@ -197,7 +197,7 @@ private:
 	void writeMutations( MutationListRef mutations, Version debugVersion, const char* debugContext );
 
 	ACTOR static Future<Key> readFirstKey( IKeyValueStore* storage, KeyRangeRef range ) {
-		Standalone<VectorRef<KeyValueRef>> r = wait( storage->readRange( range, 1 ) );
+		Standalone<RangeResultRef> r = wait( storage->readRange( range, 1 ) );
 		if (r.size()) return r[0].key;
 		else return range.end;
 	}
@@ -1045,17 +1045,19 @@ void merge( Arena& arena, VectorRef<KeyValueRef, VecSerStrategy::String>& output
 // Combines data from base (at an older version) with sets from newer versions in [start, end) and appends the first (up to) |limit| rows to output
 // If limit<0, base and output are in descending order, and start->key()>end->key(), but start is still inclusive and end is exclusive
 {
-	if (limit==0) return;
-	int originalLimit = abs(limit) + output.size();
+	ASSERT(limit != 0);
+
 	bool forward = limit>0;
 	if (!forward) limit = -limit;
+	int adjustedLimit = limit + output.size();
 	int accumulatedBytes = 0;
 
 	KeyValueRef const* baseStart = base.begin();
 	KeyValueRef const* baseEnd = base.end();
-	while (baseStart!=baseEnd && start!=end && --limit>=0 && accumulatedBytes < limitBytes) {
-		if (forward ? baseStart->key < start.key() : baseStart->key > start.key())
+	while (baseStart!=baseEnd && start!=end && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
+		if (forward ? baseStart->key < start.key() : baseStart->key > start.key()) {
 			output.push_back_deep( arena, *baseStart++ );
+		}
 		else {
 			output.push_back_deep( arena, KeyValueRef(start.key(), start->getValue()) );
 			if (baseStart->key == start.key()) ++baseStart;
@@ -1063,18 +1065,17 @@ void merge( Arena& arena, VectorRef<KeyValueRef, VecSerStrategy::String>& output
 		}
 		accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
 	}
-	while (baseStart!=baseEnd && --limit>=0 && accumulatedBytes < limitBytes) {
+	while (baseStart!=baseEnd && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
 		output.push_back_deep( arena, *baseStart++ );
 		accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
 	}
 	if( !stopAtEndOfBase ) {
-		while (start!=end && --limit>=0 && accumulatedBytes < limitBytes) {
+		while (start!=end && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
 			output.push_back_deep( arena, KeyValueRef(start.key(), start->getValue()) );
 			accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
 			if (forward) ++start; else --start;
 		}
 	}
-	ASSERT( output.size() <= originalLimit );
 }
 
 // readRange reads up to |limit| rows from the given range and version, combining data->storage and data->versionedData.
@@ -1089,14 +1090,8 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	state KeyRef readEnd;
 	state Key readBeginTemp;
 	state int vCount;
-	//state UID rrid = deterministicRandom()->randomUniqueID();
-	//state int originalLimit = limit;
-	//state int originalLimitBytes = *pLimitBytes;
-	//state bool track = rrid.first() == 0x1bc134c2f752187cLL;
 
-	// FIXME: Review pLimitBytes behavior
 	// if (limit >= 0) we are reading forward, else backward
-
 	if (limit >= 0) {
 		// We might care about a clear beginning before start that
 		//  runs into range
@@ -1108,20 +1103,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 
 		vStart = view.lower_bound(readBegin);
 
-		/*if (track) {
-			printf("readRange(%llx, @%lld, '%s'-'%s')\n", data->thisServerID.first(), version, printable(range.begin).c_str(), printable(range.end).c_str());
-			printf("mvcc:\n");
-			vEnd = view.upper_bound(range.end);
-			for(auto r=vStart; r != vEnd; ++r) {
-				if (r->isClearTo())
-					printf("  '%s'-'%s' cleared\n", printable(r.key()).c_str(), printable(r->getEndKey()).c_str());
-				else
-					printf("  '%s' := '%s'\n", printable(r.key()).c_str(), printable(r->getValue()).c_str());
-			}
-		}*/
-
 		while (limit>0 && *pLimitBytes>0 && readBegin < range.end) {
-			// ASSERT( vStart == view.lower_bound(readBegin) );
 			ASSERT( !vStart || vStart.key() >= readBegin );
 			if (vStart) { auto b = vStart; --b; ASSERT( !b || b.key() < readBegin ); }
 			ASSERT( data->storageVersion() <= version );
@@ -1138,93 +1120,58 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 
 			// Read the data on disk up to vEnd (or the end of the range)
 			readEnd = vEnd ? std::min( vEnd.key(), range.end ) : range.end;
-			Standalone<VectorRef<KeyValueRef>> atStorageVersion = wait(
+			Standalone<RangeResultRef> atStorageVersion = wait(
 					data->storage.readRange( KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes ) );
-
-			/*if (track) {
-				printf("read [%s,%s): %d rows\n", printable(readBegin).c_str(), printable(readEnd).c_str(), atStorageVersion.size());
-				for(auto r=atStorageVersion.begin(); r != atStorageVersion.end(); ++r)
-					printf("  '%s' := '%s'\n", printable(r->key).c_str(), printable(r->value).c_str());
-			}*/
 
 			ASSERT( atStorageVersion.size() <= limit );
 			if (data->storageVersion() > version) throw transaction_too_old();
 
-			bool more = atStorageVersion.size()!=0;
-
-			// merge the sets in [vStart,vEnd) with the sets on disk, stopping at the last key from disk if there is 'more'
+			// merge the sets in [vStart,vEnd) with the sets on disk, stopping at the last key from disk if we were limited
 			int prevSize = result.data.size();
-			merge( result.arena, result.data, atStorageVersion, vStart, vEnd, vCount, limit, more, *pLimitBytes );
+			merge( result.arena, result.data, atStorageVersion, vStart, vEnd, vCount, limit, atStorageVersion.more, *pLimitBytes );
 			limit -= result.data.size() - prevSize;
 
 			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++)
 				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
 
-			// Setup for the next iteration
-			if (more) { // if there might be more data, begin reading right after what we already found to find out
-				//if (track) printf("more\n");
-				if (!(limit<=0 || *pLimitBytes<=0 || result.data.end()[-1].key == atStorageVersion.end()[-1].key))
-					TraceEvent(SevError, "ReadRangeIssue", data->thisServerID).detail("ReadBegin", readBegin).detail("ReadEnd", readEnd)
-						.detail("VStart", vStart ? vStart.key() : LiteralStringRef("nil")).detail("VEnd", vEnd ? vEnd.key() : LiteralStringRef("nil"))
-						.detail("AtStorageVersionBack", atStorageVersion.end()[-1].key).detail("ResultBack", result.data.end()[-1].key)
-						.detail("Limit", limit).detail("LimitBytes", *pLimitBytes).detail("ResultSize", result.data.size()).detail("PrevSize", prevSize);
-				readBegin = readBeginTemp = keyAfter( result.data.end()[-1].key );
-				ASSERT( limit<=0 || *pLimitBytes<=0 || result.data.end()[-1].key == atStorageVersion.end()[-1].key );
-			} else if (vStart && vStart->isClearTo()){ // if vStart is a clear, skip it.
-				//if (track) printf("skip clear\n");
-				readBegin = vStart->getEndKey();  // next disk read should start at the end of the clear
-				++vStart;
-			} else { // Otherwise, continue at readEnd
-				//if (track) printf("continue\n");
-				readBegin = readEnd;
-			}
-		}
-		// all but the last item are less than *pLimitBytes
-		ASSERT( result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0 );
-		/*if (*pLimitBytes <= 0)
-			TraceEvent(SevWarn, "ReadRangeLimitExceeded")
-				.detail("Version", version)
-				.detail("Begin", range.begin )
-				.detail("End", range.end )
-				.detail("LimitReamin", limit)
-				.detail("LimitBytesRemain", *pLimitBytes); */
+			if (limit <=0 || *pLimitBytes <= 0) {
+				break;
+			} 
 
-		/*GetKeyValuesReply correct = wait( readRangeOld(data, version, range, originalLimit, originalLimitBytes) );
-		bool prefix_equal = true;
-		int totalsize = 0;
-		int first_difference = -1;
-		for(int i=0; i<result.data.size() && i<correct.data.size(); i++) {
-			if (result.data[i] != correct.data[i]) {
-				first_difference = i;
-				prefix_equal = false;
+			// If we hit our limits reading from disk but then combining with MVCC gave us back more room
+			if (atStorageVersion.more) {
+				ASSERT(result.data.end()[-1].key == atStorageVersion.end()[-1].key);
+				readBegin = readBeginTemp = keyAfter(result.data.end()[-1].key);
+			} else if (vEnd && vEnd->isClearTo()) {
+				ASSERT(vStart == vEnd); // vStart will have been advanced by merge()
+				ASSERT(vEnd->getEndKey() > readBegin);
+				readBegin = vEnd->getEndKey();
+				++vStart;
+			} else {
+				ASSERT(readEnd == range.end);
 				break;
 			}
-			totalsize += result.data[i].expectedSize() + sizeof(KeyValueRef);
 		}
-
-		// for the following check
-		result.more = limit == 0 || *pLimitBytes<=0;  // FIXME: Does this have to be exact?
-		result.version = version;
-		if ( !(totalsize>originalLimitBytes ? prefix_equal : result.data==correct.data) || correct.more != result.more ) {
-			TraceEvent(SevError, "IncorrectResult", rrid).detail("Server", data->thisServerID).detail("CorrectRows", correct.data.size())
-				.detail("FirstDifference", first_difference).detail("OriginalLimit", originalLimit)
-				.detail("ResultRows", result.data.size()).detail("Result0", result.data[0].key).detail("Correct0", correct.data[0].key)
-				.detail("ResultN", result.data.size() ? result.data[std::min(correct.data.size(),result.data.size())-1].key : "nil")
-				.detail("CorrectN", correct.data.size() ? correct.data[std::min(correct.data.size(),result.data.size())-1].key : "nil");
-		}*/
 	} else {
-		// Reverse read - abandon hope alle ye who enter here
-		readEnd = range.end;
-
-		vStart = view.lastLess(readEnd);
+		vStart = view.lastLess(range.end);
 
 		// A clear might extend all the way to range.end
-		if (vStart && vStart->isClearTo() && vStart->getEndKey() >= readEnd) {
+		if (vStart && vStart->isClearTo() && vStart->getEndKey() >= range.end) {
 			readEnd = vStart.key();
 			--vStart;
+		} else {
+			readEnd = range.end;
 		}
 
 		while (limit < 0 && *pLimitBytes > 0 && readEnd > range.begin) {
+			ASSERT(!vStart || vStart.key() < readEnd);
+			if (vStart) {
+				auto b = vStart;
+				++b;
+				ASSERT(!b || b.key() >= readEnd);
+			}
+			ASSERT(data->storageVersion() <= version);
+
 			vEnd = vStart;
 			vCount = 0;
 			int vSize=0;
@@ -1234,30 +1181,42 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 				--vEnd;
 			}
 
-			readBegin = range.begin;
-			if (vEnd)
-				readBegin = std::max( readBegin, vEnd->isClearTo() ? vEnd->getEndKey() : vEnd.key() );
+			readBegin = vEnd ? std::max(vEnd->isClearTo() ? vEnd->getEndKey() : vEnd.key(), range.begin) : range.begin;
+			Standalone<RangeResultRef> atStorageVersion =
+			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes));
 
-			Standalone<VectorRef<KeyValueRef>> atStorageVersion = wait( data->storage.readRange( KeyRangeRef(readBegin, readEnd), limit ) );
+			ASSERT(atStorageVersion.size() <= -limit);
 			if (data->storageVersion() > version) throw transaction_too_old();
 
 			int prevSize = result.data.size();
-			merge( result.arena, result.data, atStorageVersion, vStart, vEnd, vCount, limit, false, *pLimitBytes );
+			merge(result.arena, result.data, atStorageVersion, vStart, vEnd, vCount, limit, atStorageVersion.more, *pLimitBytes);
 			limit += result.data.size() - prevSize;
 
 			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++)
 				*pLimitBytes -= sizeof(KeyValueRef) + i->expectedSize();
 
-			vStart = vEnd;
-			readEnd = readBegin;
+			if (limit >=0 || *pLimitBytes <= 0) {
+				break;
+			} 
 
-			if (vStart && vStart->isClearTo()) {
-				ASSERT( vStart.key() < readEnd );
-				readEnd = vStart.key();
+			if (atStorageVersion.more) {
+				ASSERT(result.data.end()[-1].key == atStorageVersion.end()[-1].key);
+				readEnd = result.data.end()[-1].key;
+			} else if (vEnd && vEnd->isClearTo()) {
+				ASSERT(vStart == vEnd);
+				ASSERT(vEnd.key() < readEnd)
+				readEnd = vEnd.key();
 				--vStart;
+			} else {
+				ASSERT(readBegin == range.begin);
+				break;
 			}
 		}
 	}
+
+	// all but the last item are less than *pLimitBytes
+	ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
+
 	result.more = limit == 0 || *pLimitBytes<=0;  // FIXME: Does this have to be exact?
 	result.version = version;
 	return result;
@@ -2768,9 +2727,9 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		if(ver != invalidVersion) {
 			data->lastVersionWithData = ver;
-		} else {
-			ver = cloneCursor2->version().version - 1;
-		}
+		} 
+		ver = cloneCursor2->version().version - 1;
+
 		if(injectedChanges) data->lastVersionWithData = ver;
 
 		data->updateEagerReads = NULL;
@@ -3036,8 +2995,8 @@ ACTOR Future<Void> applyByteSampleResult( StorageServer* data, IKeyValueStore* s
 	state int totalKeys = 0;
 	state int totalBytes = 0;
 	loop {
-		Standalone<VectorRef<KeyValueRef>> bs = wait( storage->readRange( KeyRangeRef(begin, end), SERVER_KNOBS->STORAGE_LIMIT_BYTES, SERVER_KNOBS->STORAGE_LIMIT_BYTES ) );
-		if(results) results->push_back(bs);
+		Standalone<RangeResultRef> bs = wait( storage->readRange( KeyRangeRef(begin, end), SERVER_KNOBS->STORAGE_LIMIT_BYTES, SERVER_KNOBS->STORAGE_LIMIT_BYTES ) );
+		if(results) results->push_back(bs.castTo<VectorRef<KeyValueRef>>());
 		int rangeSize = bs.expectedSize();
 		totalFetches++;
 		totalKeys += bs.size();
@@ -3118,8 +3077,8 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 	state Future<Optional<Value>> fVersion = storage->readValue(persistVersion);
 	state Future<Optional<Value>> fLogProtocol = storage->readValue(persistLogProtocol);
 	state Future<Optional<Value>> fPrimaryLocality = storage->readValue(persistPrimaryLocality);
-	state Future<Standalone<VectorRef<KeyValueRef>>> fShardAssigned = storage->readRange(persistShardAssignedKeys);
-	state Future<Standalone<VectorRef<KeyValueRef>>> fShardAvailable = storage->readRange(persistShardAvailableKeys);
+	state Future<Standalone<RangeResultRef>> fShardAssigned = storage->readRange(persistShardAssignedKeys);
+	state Future<Standalone<RangeResultRef>> fShardAvailable = storage->readRange(persistShardAvailableKeys);
 
 	state Promise<Void> byteSampleSampleRecovered;
 	state Promise<Void> startByteSampleRestore;
@@ -3156,7 +3115,7 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 	debug_checkRestoredVersion( data->thisServerID, version, "StorageServer" );
 	data->setInitialVersion( version );
 
-	state Standalone<VectorRef<KeyValueRef>> available = fShardAvailable.get();
+	state Standalone<RangeResultRef> available = fShardAvailable.get();
 	state int availableLoc;
 	for(availableLoc=0; availableLoc<available.size(); availableLoc++) {
 		KeyRangeRef keys(
@@ -3170,7 +3129,7 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 		wait(yield());
 	}
 
-	state Standalone<VectorRef<KeyValueRef>> assigned = fShardAssigned.get();
+	state Standalone<RangeResultRef> assigned = fShardAssigned.get();
 	state int assignedLoc;
 	for(assignedLoc=0; assignedLoc<assigned.size(); assignedLoc++) {
 		KeyRangeRef keys(
@@ -3361,6 +3320,7 @@ ACTOR Future<Void> waitMetrics( StorageServerMetrics* self, WaitMetricsRequest r
 
 			if( timedout ) {
 				TEST( true ); // ShardWaitMetrics return on timeout
+				//FIXME: instead of using random chance, send wrong_shard_server when the call in from waitMetricsMultiple (requires additional information in the request)
 				if(deterministicRandom()->random01() < SERVER_KNOBS->WAIT_METRICS_WRONG_SHARD_CHANCE) {
 					req.reply.sendError( wrong_shard_server() );
 				} else {
