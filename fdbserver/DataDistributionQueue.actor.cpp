@@ -186,9 +186,9 @@ public:
 		return result;
 	}
 
-	virtual bool hasHealthyAvailableSpace() {
-		return all([](Reference<IDataDistributionTeam> team) {
-			return team->hasHealthyAvailableSpace();
+	virtual bool hasHealthyAvailableSpace(double minRatio, int64_t minAvailableSpace) {
+		return all([minRatio, minAvailableSpace](Reference<IDataDistributionTeam> team) {
+			return team->hasHealthyAvailableSpace(minRatio, minAvailableSpace);
 		});
 	}
 
@@ -929,7 +929,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					if(rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT) inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_UNHEALTHY;
 					if(rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
-					auto req = GetTeamRequest(rd.wantsNewServers, rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, true, false, 0.0, inflightPenalty);
+					auto req = GetTeamRequest(rd.wantsNewServers, rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, true, false, SERVER_KNOBS->MIN_FREE_SPACE_RATIO, inflightPenalty);
 					req.completeSources = rd.completeSources;
 					Optional<Reference<IDataDistributionTeam>> bestTeam = wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
 					// If a DC has no healthy team, we stop checking the other DCs until

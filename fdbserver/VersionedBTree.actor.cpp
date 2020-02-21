@@ -4859,22 +4859,26 @@ public:
 		m_tree->set(keyValue);
 	}
 
-	Future< Standalone< VectorRef< KeyValueRef > > > readRange(KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30) {
+	Future< Standalone< RangeResultRef > > readRange(KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30) {
 		debug_printf("READRANGE %s\n", printable(keys).c_str());
 		return catchError(readRange_impl(this, keys, rowLimit, byteLimit));
 	}
 
-	ACTOR static Future< Standalone< VectorRef< KeyValueRef > > > readRange_impl(KeyValueStoreRedwoodUnversioned *self, KeyRange keys, int rowLimit, int byteLimit) {
+	ACTOR static Future< Standalone< RangeResultRef > > readRange_impl(KeyValueStoreRedwoodUnversioned *self, KeyRange keys, int rowLimit, int byteLimit) {
 		self->m_tree->counts.getRanges++;
-		state Standalone<VectorRef<KeyValueRef>> result;
+		state Standalone<RangeResultRef> result;
 		state int accumulatedBytes = 0;
 		ASSERT( byteLimit > 0 );
+
+		if(rowLimit == 0) {
+			return result;
+		}
 
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 		// Prefetch is currently only done in the forward direction
 		state int prefetchBytes = rowLimit > 1 ? byteLimit : 0;
 
-		if(rowLimit >= 0) {
+		if(rowLimit > 0) {
 			wait(cur->findFirstEqualOrGreater(keys.begin, prefetchBytes));
 			while(cur->isValid() && cur->getKey() < keys.end) {
 				KeyValueRef kv(KeyRef(result.arena(), cur->getKey()), ValueRef(result.arena(), cur->getValue()));
@@ -4899,6 +4903,12 @@ public:
 				}
 				wait(cur->prev());
 			}
+		}
+
+		result.more = rowLimit == 0 || accumulatedBytes >= byteLimit;
+		if(result.more) {
+			ASSERT(result.size() > 0);
+			result.readThrough = result[result.size()-1].key;
 		}
 		return result;
 	}

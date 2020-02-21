@@ -122,6 +122,7 @@ public:
 
 	// INetwork interface
 	virtual double now() { return currentTime; };
+	virtual double timer() { return ::timer(); };
 	virtual Future<Void> delay( double seconds, TaskPriority taskId );
 	virtual Future<class Void> yield( TaskPriority taskID );
 	virtual bool check_yield(TaskPriority taskId);

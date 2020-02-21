@@ -285,7 +285,7 @@ A |database-blurb1| |database-blurb2|
             Only the first ``limit`` keys (and their values) in the range will be returned.
 
         ``:reverse``
-            If ``true``, then the keys in the range will be returned in reverse order.
+            If ``true``, then the keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
             If ``:limit`` is also specified, the *last* ``limit`` keys in the range will be returned in reverse order.
 
@@ -463,7 +463,7 @@ Reading data
             Only the first ``limit`` keys (and their values) in the range will be returned.
 
         ``:reverse``
-            If true, then the keys in the range will be returned in reverse order.
+            If ``true``, then the keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
             If ``:limit`` is also specified, the *last* ``limit`` keys in the range will be returned in reverse order.
 

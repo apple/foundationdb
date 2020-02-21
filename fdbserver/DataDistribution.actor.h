@@ -47,7 +47,7 @@ struct IDataDistributionTeam {
 	virtual int64_t getLoadBytes( bool includeInFlight = true, double inflightPenalty = 1.0 ) = 0;
 	virtual int64_t getMinAvailableSpace( bool includeInFlight = true ) = 0;
 	virtual double getMinAvailableSpaceRatio( bool includeInFlight = true ) = 0;
-	virtual bool hasHealthyAvailableSpace() = 0;
+	virtual bool hasHealthyAvailableSpace( double minRatio, int64_t minAvailableSpace ) = 0;
 	virtual Future<Void> updateStorageMetrics() = 0;
 	virtual void addref() = 0;
 	virtual void delref() = 0;
