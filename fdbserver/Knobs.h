@@ -497,6 +497,7 @@ public:
 	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
 	int64_t FASTRESTORE_APPLYING_PARALLELISM; // number of outstanding txns writing to dest. DB
 	int64_t FASTRESTORE_MONITOR_LEADER_DELAY;
+	int64_t FASTRESTORE_STRAGGLER_THRESHOLD;
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };

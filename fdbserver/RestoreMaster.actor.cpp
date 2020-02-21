@@ -722,7 +722,7 @@ ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInt
 	for (auto& applier : appliersInterf) {
 		requestsToAppliers.emplace_back(applier.first, RestoreVersionBatchRequest(batchIndex));
 	}
-	wait(sendBatchRequests(&RestoreApplierInterface::initVersionBatch, appliersInterf, requestsToAppliers));
+	wait(sendBatchRequestsV2(&RestoreApplierInterface::initVersionBatch, appliersInterf, requestsToAppliers));
 
 	TraceEvent("FastRestoreMasterPhaseInitVersionBatchForLoaders")
 	    .detail("BatchIndex", batchIndex)
@@ -731,7 +731,7 @@ ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInt
 	for (auto& loader : loadersInterf) {
 		requestsToLoaders.emplace_back(loader.first, RestoreVersionBatchRequest(batchIndex));
 	}
-	wait(sendBatchRequests(&RestoreLoaderInterface::initVersionBatch, loadersInterf, requestsToLoaders));
+	wait(sendBatchRequestsV2(&RestoreLoaderInterface::initVersionBatch, loadersInterf, requestsToLoaders));
 
 	TraceEvent("FastRestoreMasterPhaseInitVersionBatchForLoadersDone").detail("BatchIndex", batchIndex);
 	return Void();
