@@ -221,7 +221,7 @@ bool findBestPolicySet(std::vector<LocalityEntry>& bestResults, Reference<Locali
 		std::set<std::string> attributeKeys;
 		pa->attributeKeys(&attributeKeys);
 		if (pa->embeddedPolicyName() == "One" && attributeKeys.size() == 1 &&
-		    *attributeKeys.begin() == "zoneId" // This algorithm can actually apply to any field
+		    *attributeKeys.begin() == "zoneid" // This algorithm can actually apply to any field
 		) {
 			bestFound = findBestPolicySetSimple(pa, localitySet, bestResults, nMinItems);
 			if (bestFound && g_network->isSimulated()) {
