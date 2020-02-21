@@ -774,7 +774,6 @@ private:
 
 struct ISerializeSource {
 	virtual void serializePacketWriter(PacketWriter&) const = 0;
-	virtual void serializeBinaryWriter(BinaryWriter&) const = 0;
 	virtual void serializeObjectWriter(ObjectWriter&) const = 0;
 };
 
@@ -785,7 +784,6 @@ struct MakeSerializeSource : ISerializeSource {
 		ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));
 		writer.serialize(get()); // Writes directly into buffer supplied by |w|
 	}
-	virtual void serializeBinaryWriter(BinaryWriter& w) const { static_cast<T const*>(this)->serialize(w); }
 	virtual value_type const& get() const = 0;
 };
 
@@ -797,27 +795,7 @@ struct SerializeSource : MakeSerializeSource<SerializeSource<T>, T> {
 	virtual void serializeObjectWriter(ObjectWriter& w) const {
 		w.serialize(value);
 	}
-	template <class Ar> void serialize(Ar& ar) const {
-		ar << value;
-	}
 	virtual T const& get() const { return value; }
-};
-
-template <class T>
-struct SerializeBoolAnd : MakeSerializeSource<SerializeBoolAnd<T>, T> {
-	using value_type = T;
-	bool b;
-	T const& value;
-	SerializeBoolAnd( bool b, T const& value ) : b(b), value(value) {}
-	template <class Ar> void serialize(Ar& ar) const { ar << b << value; }
-	virtual void serializeObjectWriter(ObjectWriter& w) const {
-		ASSERT(false);
-	}
-	virtual T const& get() const {
-		// This is only used for the streaming serializer
-		ASSERT(false);
-		return value;
-	}
 };
 
 #endif

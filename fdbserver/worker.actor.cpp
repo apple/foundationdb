@@ -234,9 +234,8 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 		return joinPath( folder, sample_filename );
 	else if ( storeType == KeyValueStoreType::SSD_BTREE_V2 )
 		return joinPath(folder, sample_filename);
-	else if( storeType == KeyValueStoreType::MEMORY || KeyValueStoreType::MEMORY_RADIXTREE )
+	else if( storeType == KeyValueStoreType::MEMORY || storeType == KeyValueStoreType::MEMORY_RADIXTREE )
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
-	
 	else if ( storeType == KeyValueStoreType::SSD_REDWOOD_V1 )
 		return joinPath(folder, sample_filename);
 	UNREACHABLE();
@@ -793,7 +792,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 				TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
 				.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
 				.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
-				
+
 				localInfo.myLocality = locality;
 				dbInfo->set(localInfo);
 			}
@@ -1396,9 +1395,8 @@ ACTOR Future<Void> fileNotFoundToNever(Future<Void> f) {
 	try {
 		wait(f);
 		return Void();
-	}
-	catch(Error &e) {
-		if(e.code() == error_code_file_not_found) {
+	} catch (Error& e) {
+		if (e.code() == error_code_file_not_found) {
 			TraceEvent(SevWarn, "ClusterCoordinatorFailed").error(e);
 			return Never();
 		}
@@ -1516,10 +1514,14 @@ ACTOR Future<Void> fdbd(
 		TraceEvent("StartingFDBD").detail("ZoneID", localities.zoneId()).detail("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder).detail("WhiteListBinPath", whitelistBinPaths);
 
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
-		// Endpoints should be registered first before any process trying to connect to it. So coordinationServer actor should be the first one executed before any other.
-		if ( coordFolder.size() )
-			actors.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
-		
+		// Endpoints should be registered first before any process trying to connect to it.
+		// So coordinationServer actor should be the first one executed before any other.
+		if (coordFolder.size()) {
+			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
+			// their files
+			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder)));
+		}
+
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards

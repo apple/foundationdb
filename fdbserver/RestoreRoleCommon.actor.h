@@ -30,6 +30,7 @@
 
 #include <sstream>
 #include "flow/Stats.h"
+#include "flow/SystemMonitor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/Notified.h"
@@ -40,8 +41,6 @@
 #include "fdbserver/RestoreUtil.h"
 
 #include "flow/actorcompiler.h" // has to be last include
-
-extern bool debug_verbose;
 
 struct RestoreRoleInterface;
 struct RestoreLoaderInterface;
@@ -56,7 +55,7 @@ using VersionedMutationsMap = std::map<Version, MutationsVec>;
 
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
-void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self);
+void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<RestoreRoleData> self);
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
 // This struct is mostly copied from StringRefReader. We add a sanity check in this struct.
@@ -111,23 +110,26 @@ public:
 	UID nodeID;
 	int nodeIndex;
 
+	double cpuUsage;
+	double memory;
+	double residentMemory;
+
 	std::map<UID, RestoreLoaderInterface> loadersInterf; // UID: loaderInterf's id
 	std::map<UID, RestoreApplierInterface> appliersInterf; // UID: applierInterf's id
-	RestoreApplierInterface masterApplierInterf;
 
 	NotifiedVersion versionBatchId; // Continuously increase for each versionBatch
 
 	bool versionBatchStart = false;
 
-	uint32_t inProgressFlag = 0;
-
-	RestoreRoleData() : role(RestoreRole::Invalid){};
+	RestoreRoleData() : role(RestoreRole::Invalid), cpuUsage(0.0), memory(0.0), residentMemory(0.0){};
 
 	virtual ~RestoreRoleData() {}
 
 	UID id() const { return nodeID; }
 
-	virtual void resetPerVersionBatch() = 0;
+	virtual void initVersionBatch(int batchIndex) = 0;
+
+	virtual void resetPerRestoreRequest() = 0;
 
 	void clearInterfaces() {
 		loadersInterf.clear();
@@ -136,6 +138,9 @@ public:
 
 	virtual std::string describeNode() = 0;
 };
+
+void updateProcessStats(Reference<RestoreRoleData> self);
+ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role);
 
 #include "flow/unactorcompiler.h"
 #endif

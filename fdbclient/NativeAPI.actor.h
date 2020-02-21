@@ -55,7 +55,7 @@ struct NetworkOptions {
 	std::string clusterFile;
 	Optional<std::string> traceDirectory;
 	uint64_t traceRollSize;
-	uint64_t traceMaxLogsSize;	
+	uint64_t traceMaxLogsSize;
 	std::string traceLogGroup;
 	std::string traceFormat;
 	std::string traceClockSource;
