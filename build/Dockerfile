@@ -1,6 +1,4 @@
 FROM centos:6
-LABEL version=0.1.9
-ENV DOCKER_IMAGEVER=0.1.9
 
 # Install dependencies for developer tools, bindings,\
 # documentation, actorcompiler, and packaging tools\
@@ -8,8 +6,9 @@ RUN yum install -y yum-utils &&\
 	yum-config-manager --enable rhel-server-rhscl-7-rpms &&\
 	yum -y install centos-release-scl epel-release &&\
 		yum -y install devtoolset-8-8.1-1.el6 java-1.8.0-openjdk-devel \
+		devtoolset-8-gcc-8.3.1-3.1.el6 devtoolset-8-gcc-c++-8.3.1-3.1.el6 \
 		rh-python36-python-devel devtoolset-8-valgrind-devel \
-		mono-core rh-ruby24 golang python27 rpm-build debbuild \
+		mono-core rh-ruby24 golang rpm-build debbuild \
 		python-pip npm dos2unix valgrind-devel ccache distcc devtoolset-8-libubsan-devel libubsan-devel &&\
 	pip install boto3==1.1.1
 
@@ -19,11 +18,16 @@ RUN adduser --comment '' fdb && chown fdb /opt
 
 # wget of bintray without forcing UTF-8 encoding results in 403 Forbidden
 RUN cd /opt/ &&\
-    curl -L https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2 > boost_1_67_0.tar.bz2 &&\
-		echo "2684c972994ee57fc5632e03bf044746f6eb45d4920c343937a465fd67a5adba  boost_1_67_0.tar.bz2" > boost-sha.txt &&\
-		sha256sum -c boost-sha.txt &&\
+    curl -L https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2 -o boost_1_67_0.tar.bz2 &&\
+    echo "2684c972994ee57fc5632e03bf044746f6eb45d4920c343937a465fd67a5adba  boost_1_67_0.tar.bz2" > boost-sha-67.txt &&\
+    sha256sum -c boost-sha-67.txt &&\
     tar -xjf boost_1_67_0.tar.bz2 &&\
-    rm -rf boost_1_67_0.tar.bz2 boost-sha.txt boost_1_67_0/libs
+    rm -rf boost_1_67_0.tar.bz2 boost-sha-67.txt boost_1_67_0/libs &&\
+    curl -L https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2 -o boost_1_72_0.tar.bz2 &&\
+		echo "59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722  boost_1_72_0.tar.bz2" > boost-sha-72.txt &&\
+		sha256sum -c boost-sha-72.txt &&\
+    tar -xjf boost_1_72_0.tar.bz2 &&\
+    rm -rf boost_1_72_0.tar.bz2 boost-sha-72.txt boost_1_72_0/libs
 
 # install cmake
 RUN curl -L https://github.com/Kitware/CMake/releases/download/v3.13.4/cmake-3.13.4-Linux-x86_64.tar.gz > /tmp/cmake.tar.gz &&\
@@ -44,7 +48,9 @@ RUN cd /tmp && curl -L https://github.com/ninja-build/ninja/archive/v1.9.0.zip >
     cd /tmp/libressl-2.8.2 && scl enable devtoolset-8 -- make -j`nproc` install &&\
     rm -rf /tmp/libressl-2.8.2 /tmp/libressl.tar.gz
 
+LABEL version=0.1.10
+ENV DOCKER_IMAGEVER=0.1.10
 ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0
 ENV CC=/opt/rh/devtoolset-8/root/usr/bin/gcc
 ENV CXX=/opt/rh/devtoolset-8/root/usr/bin/g++
-CMD scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash
+CMD scl enable devtoolset-8 rh-python36 rh-ruby24 -- bash
