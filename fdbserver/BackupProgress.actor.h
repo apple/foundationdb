@@ -25,6 +25,8 @@
 #define FDBSERVER_BACKUPPROGRESS_ACTOR_H
 
 #include <map>
+#include <tuple>
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/LogSystem.h"
 #include "flow/Arena.h"
@@ -41,7 +43,7 @@ public:
 	// savedVersion is used.
 	void addBackupStatus(const WorkerBackupStatus& status);
 
-	// Returns a map of pair<Epoch, endVersion> : map<tag, savedVersion>, so that
+	// Returns a map of tuple<Epoch, endVersion, logRouterTags> : map<tag, savedVersion>, so that
 	// the backup range should be [savedVersion + 1, endVersion) for the "tag" of the "Epoch".
 	//
 	// Specifically, the backup ranges for each old epoch are:
@@ -49,7 +51,7 @@ public:
 	//        backup [epochBegin, endVersion)
 	//    else if savedVersion < endVersion - 1 = knownCommittedVersion
 	//        backup [savedVersion + 1, endVersion)
-	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> getUnfinishedBackup();
+	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> getUnfinishedBackup();
 
 	// Set the value for "backupStartedKey"
 	void setBackupStartedValue(Optional<Value> value) {

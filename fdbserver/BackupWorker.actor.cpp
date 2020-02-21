@@ -67,6 +67,7 @@ struct VersionedMessage {
 struct BackupData {
 	const UID myId;
 	const Tag tag; // LogRouter tag for this worker, i.e., (-2, i)
+	const int totalTags; // Total log router tags
 	const Version startVersion;
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch;
@@ -102,9 +103,9 @@ struct BackupData {
 	Future<Void> logger;
 
 	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo>> db, const InitializeBackupRequest& req)
-	  : myId(id), tag(req.routerTag), startVersion(req.startVersion), endVersion(req.endVersion),
-	    recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch), minKnownCommittedVersion(invalidVersion),
-	    savedVersion(invalidVersion), cc("BackupWorker", myId.toString()) {
+	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
+	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
+	    minKnownCommittedVersion(invalidVersion), savedVersion(invalidVersion), cc("BackupWorker", myId.toString()) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 		pullFinished.set(false);
 
@@ -417,7 +418,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 			it->second.lastSavedVersion = self->messages[0].getVersion();
 		}
 		logFileFutures.push_back(it->second.container.get().get()->writeTaggedLogFile(
-		    it->second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id));
+		    it->second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id, self->totalTags));
 		it++;
 	}
 	if (activeUids.empty()) {
@@ -648,6 +649,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 
 	TraceEvent("BackupWorkerStart", self.myId)
 	    .detail("Tag", req.routerTag.toString())
+	    .detail("TotalTags", req.totalTags)
 	    .detail("StartVersion", req.startVersion)
 	    .detail("EndVersion", req.endVersion.present() ? req.endVersion.get() : -1)
 	    .detail("LogEpoch", req.recruitedEpoch)

@@ -344,10 +344,11 @@ public:
 	}
 
 	Future<Reference<IBackupFile>> writeTaggedLogFile(Version beginVersion, Version endVersion, int blockSize,
-	                                                  uint16_t tagId) final {
+	                                                  uint16_t tagId, int totalTags) final {
 		return writeFile(logVersionFolderString(beginVersion, true) +
-		                 format("log,%lld,%lld,%s,%d,%d", beginVersion, endVersion,
-		                        deterministicRandom()->randomUniqueID().toString().c_str(), blockSize, tagId));
+		                 format("log,%lld,%lld,%s,%d,%d-of-%d", beginVersion, endVersion,
+		                        deterministicRandom()->randomUniqueID().toString().c_str(), blockSize, tagId,
+		                        totalTags));
 	}
 
 	Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion, int snapshotFileCount, Version fileVersion, int blockSize) override {
@@ -398,8 +399,8 @@ public:
 		if(sscanf(name.c_str(), "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%u%n", &f.beginVersion, &f.endVersion, &f.blockSize, &len) == 3 && len == name.size()) {
 			out = f;
 			return true;
-		} else if (sscanf(name.c_str(), "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%u,%d%n", &f.beginVersion, &f.endVersion,
-		                  &f.blockSize, &f.tagId, &len) == 4 &&
+		} else if (sscanf(name.c_str(), "log,%" SCNd64 ",%" SCNd64 ",%*[^,],%u,%d-of-%d%n", &f.beginVersion,
+		                  &f.endVersion, &f.blockSize, &f.tagId, &f.totalTags, &len) == 5 &&
 		           len == name.size() && f.tagId >= 0) {
 			out = f;
 			return true;
@@ -488,7 +489,6 @@ public:
 	ACTOR static Future<Void> writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem> bc, std::vector<std::string> fileNames, int64_t totalBytes) {
 		ASSERT(!fileNames.empty());
 
-
 		state Version minVer = std::numeric_limits<Version>::max();
 		state Version maxVer = 0;
 		state RangeFile rf;
@@ -528,7 +528,7 @@ public:
 		return Void();
 	}
 
-	Future<Void> writeKeyspaceSnapshotFile(std::vector<std::string> fileNames, int64_t totalBytes) override {
+	Future<Void> writeKeyspaceSnapshotFile(std::vector<std::string> fileNames, int64_t totalBytes) final {
 		return writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem>::addRef(this), fileNames, totalBytes);
 	};
 

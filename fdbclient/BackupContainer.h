@@ -75,6 +75,7 @@ struct LogFile {
 	std::string fileName;
 	int64_t fileSize;
 	int tagId = -1; // Log router tag. Non-negative for new backup format.
+	int totalTags = -1; // Total number of log router tags.
 
 	// Order by beginVersion, break ties with endVersion
 	bool operator< (const LogFile &rhs) const {
@@ -220,7 +221,7 @@ public:
 
 	// Open a tagged log file for writing, where tagId is the log router tag's id.
 	virtual Future<Reference<IBackupFile>> writeTaggedLogFile(Version beginVersion, Version endVersion, int blockSize,
-	                                                          uint16_t tagId) = 0;
+	                                                          uint16_t tagId, int totalTags) = 0;
 
 	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
 	// snapshot of the key ranges this backup is targeting.
