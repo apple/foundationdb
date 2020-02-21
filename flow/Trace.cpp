@@ -653,6 +653,50 @@ void removeTraceRole(std::string role) {
 	g_traceLog.removeRole(role);
 }
 
+TraceEvent::TraceEvent() : initialized(true), enabled(false), logged(true) {}
+
+TraceEvent::TraceEvent(TraceEvent &&ev) {
+	enabled = ev.enabled;
+	err = ev.err;
+	fields = std::move(ev.fields);
+	id = ev.id;
+	initialized = ev.initialized;
+	logged = ev.logged;
+	maxEventLength = ev.maxEventLength;
+	maxFieldLength = ev.maxFieldLength;
+	severity = ev.severity;
+	tmpEventMetric = ev.tmpEventMetric;
+	trackingKey = ev.trackingKey;
+	type = ev.type;
+
+	ev.initialized = true;
+	ev.enabled = false;
+	ev.logged = true;
+	ev.tmpEventMetric = nullptr;
+}
+
+TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
+	enabled = ev.enabled;
+	err = ev.err;
+	fields = std::move(ev.fields);
+	id = ev.id;
+	initialized = ev.initialized;
+	logged = ev.logged;
+	maxEventLength = ev.maxEventLength;
+	maxFieldLength = ev.maxFieldLength;
+	severity = ev.severity;
+	tmpEventMetric = ev.tmpEventMetric;
+	trackingKey = ev.trackingKey;
+	type = ev.type;
+
+	ev.initialized = true;
+	ev.enabled = false;
+	ev.logged = true;
+	ev.tmpEventMetric = nullptr;
+
+	return *this;
+}
+
 TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true), logged(false) {
 	g_trace_depth++;
 	setMaxFieldLength(0);
@@ -730,6 +774,8 @@ bool TraceEvent::init() {
 
 		detail("Severity", int(severity));
 		detailf("Time", "%.6f", getCurrentTime());
+		timeIndex = fields.size() - 1;
+
 		detail("Type", type);
 		if(g_network && g_network->isSimulated()) {
 			NetworkAddress local = g_network->getLocalAddress();
@@ -932,11 +978,14 @@ TraceEvent& TraceEvent::backtrace(const std::string& prefix) {
 	return detail(prefix + "Backtrace", platform::get_backtrace());
 }
 
-void TraceEvent::log() {
+void TraceEvent::log(bool useCurrentTime) {
 	if(!logged) {
 		init();
 		try {
 			if (enabled) {
+				if (useCurrentTime) {
+					fields.mutate(timeIndex).second = format("%.6f", TraceEvent::getCurrentTime());
+				}
 				if (this->severity == SevError) {
 					severity = SevInfo;
 					backtrace();
@@ -1148,6 +1197,10 @@ std::string TraceEventFields::getValue(std::string key) const {
 
 		throw attribute_not_found();
 	}
+}
+
+TraceEventFields::Field& TraceEventFields::mutate(int index) {
+	return fields.at(index);
 }
 
 namespace {
