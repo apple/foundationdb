@@ -59,7 +59,7 @@ endif()
 # Pip
 ################################################################################
 
-find_package(Python3)
+find_package(Python3 COMPONENTS Interpreter)
 if (Python3_Interpreter_FOUND)
   set(WITH_DOCUMENTATION ON)
 else()
