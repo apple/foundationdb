@@ -556,7 +556,9 @@ public:
 					if(iter->second.first >= FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS) {
 						TraceEvent("TLSIncomingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", peerIP.first.toString());
 						wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
-						throw connection_failed();
+						self->closeSocket();
+						connected.sendError(connection_failed());
+						return;
 					}
 				} else {
 					g_network->networkInfo.serverTLSConnectionThrottler.erase(peerIP);
@@ -761,15 +763,12 @@ private:
 	}
 
 	void closeSocket() {
-		try {
-			socket.cancel();
-		} catch(...) {}
-		try {
-			socket.close();
-		} catch(...) {}
-		try {
-			ssl_sock.shutdown();
-		} catch(...) {}
+		boost::system::error_code cancelError;
+		socket.cancel(cancelError);
+		boost::system::error_code closeError;
+		socket.close(closeError);
+		boost::system::error_code shutdownError;
+		ssl_sock.shutdown(shutdownError);
 	}
 
 	void onReadError( const boost::system::error_code& error ) {

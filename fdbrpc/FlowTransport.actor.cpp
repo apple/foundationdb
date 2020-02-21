@@ -997,7 +997,7 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 					.detail("ListenAddress", listenAddr.toString());
 				incoming.add( connectionIncoming(self, conn) );
 			}
-			wait(delay(0, decrementPriority(TaskPriority::ReadSocket)));
+			wait(delay(0, TaskPriority::AcceptSocket));
 		}
 	} catch (Error& e) {
 		TraceEvent(SevError, "ListenError").error(e);
