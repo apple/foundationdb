@@ -102,7 +102,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( BG_DD_DECREASE_RATE,                                  1.02 );
 	init( BG_DD_SATURATION_DELAY,                                1.0 );
 	init( INFLIGHT_PENALTY_HEALTHY,                              1.0 );
-	init( INFLIGHT_PENALTY_UNHEALTHY,                           10.0 );
+	init( INFLIGHT_PENALTY_UNHEALTHY,                          500.0 );
 	init( INFLIGHT_PENALTY_ONE_LEFT,                          1000.0 );
 	
 	init( PRIORITY_RECOVER_MOVE,                                 110 );
@@ -184,7 +184,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( DD_MERGE_COALESCE_DELAY,       isSimulated ?  30.0 : 300.0 ); if( randomize && BUGGIFY ) DD_MERGE_COALESCE_DELAY = 0.001;
 	init( STORAGE_METRICS_POLLING_DELAY,                         2.0 ); if( randomize && BUGGIFY ) STORAGE_METRICS_POLLING_DELAY = 15.0;
 	init( STORAGE_METRICS_RANDOM_DELAY,                          0.2 );
-	init( FREE_SPACE_RATIO_CUTOFF,                               0.1 );
+	init( FREE_SPACE_RATIO_CUTOFF,                              0.35 );
 	init( FREE_SPACE_RATIO_DD_CUTOFF,                            0.2 );
 	init( DESIRED_TEAMS_PER_SERVER,                                5 ); if( randomize && BUGGIFY ) DESIRED_TEAMS_PER_SERVER = 1;
 	init( MAX_TEAMS_PER_SERVER,           5*DESIRED_TEAMS_PER_SERVER );
@@ -428,7 +428,9 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( MAX_TRANSACTIONS_PER_BYTE,                            1000 );
 
 	init( MIN_FREE_SPACE,                                        1e8 );
-	init( MIN_FREE_SPACE_RATIO,                                 0.05 );
+	init( START_MIN_FREE_SPACE_RATIO,                           0.26 );
+	init( END_MIN_FREE_SPACE_RATIO,                             0.05 );
+	init( MIN_FREE_SPACE_RATIO_INCREMENT,                       0.03 );
 
 	init( MAX_TL_SS_VERSION_DIFFERENCE,                         1e99 ); // if( randomize && BUGGIFY ) MAX_TL_SS_VERSION_DIFFERENCE = std::max(1.0, 0.25 * VERSIONS_PER_SECOND); // spring starts at half this value //FIXME: this knob causes ratekeeper to clamp on idle cluster in simulation that have a large number of logs
 	init( MAX_TL_SS_VERSION_DIFFERENCE_BATCH,                   1e99 );
