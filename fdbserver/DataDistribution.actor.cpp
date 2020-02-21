@@ -756,9 +756,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 
 				size_t pivot = teamAvailableSpace.size()/2;
-				if (teamAvailableSpace.size()) {
+				if (teamAvailableSpace.size() > 1) {
 					std::nth_element(teamAvailableSpace.begin(), teamAvailableSpace.begin()+pivot, teamAvailableSpace.end());
 					self->medianAvailableSpace = std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO, std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[pivot]));
+				} else {
+					self->medianAvailableSpace = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
 				}
 			}
 
