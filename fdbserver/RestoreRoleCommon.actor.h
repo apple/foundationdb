@@ -51,9 +51,11 @@ struct RestoreMasterData;
 
 struct RestoreSimpleRequest;
 
-// VersionedMutationsMap: Key is the version of parsed backup mutations
-// Value MutationsVec is the vector of parsed backup mutations
-using VersionedMutationsMap = std::map<Version, MutationsVec>;
+// Key is the (version, subsequence) of parsed backup mutations.
+// Value MutationsVec is the vector of parsed backup mutations.
+// For old mutation logs, the subsequence number is always 0.
+// For partitioned mutation logs, each mutation has a unique LogMessageVersion.
+using VersionedMutationsMap = std::map<LogMessageVersion, MutationsVec>;
 
 ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex, std::string name);
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
