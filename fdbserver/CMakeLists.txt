@@ -201,6 +201,9 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
 target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
+if (HAVE_PTHREAD)
+  target_link_libraries (fdbserver SYSTEM PUBLIC ${CMAKE_THREAD_LIBS_INIT})
+endif (HAVE_PTHREAD)
 if (GPERFTOOLS_FOUND)
   add_compile_definitions(USE_GPERFTOOLS)
   target_link_libraries(fdbserver PRIVATE gperftools)
