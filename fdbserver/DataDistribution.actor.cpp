@@ -241,9 +241,14 @@ public:
 		double minAvailableSpaceRatio = getMinAvailableSpaceRatio(includeInFlight);
 		int64_t inFlightBytes = includeInFlight ? getDataInFlightToTeam() / servers.size() : 0;
 		double availableSpaceMultiplier = SERVER_KNOBS->FREE_SPACE_RATIO_CUTOFF / ( std::max( std::min( SERVER_KNOBS->FREE_SPACE_RATIO_CUTOFF, minAvailableSpaceRatio ), 0.000001 ) );
+		if(servers.size()>2) {
+			//make sure in triple replication the penalty is high enough that you will always avoid a team with a member at 20% free space
+			availableSpaceMultiplier = availableSpaceMultiplier * availableSpaceMultiplier;
+		}
 
-		if(availableSpaceMultiplier > 1 && deterministicRandom()->random01() < 0.001)
-			TraceEvent(SevWarn, "DiskNearCapacity").detail("AvailableSpaceRatio", minAvailableSpaceRatio);
+		if(minAvailableSpaceRatio < SERVER_KNOBS->START_MIN_FREE_SPACE_RATIO) {
+			TraceEvent(SevWarn, "DiskNearCapacity").suppressFor(1.0).detail("AvailableSpaceRatio", minAvailableSpaceRatio);
+		}
 
 		return (physicalBytes + (inflightPenalty*inFlightBytes)) * availableSpaceMultiplier;
 	}

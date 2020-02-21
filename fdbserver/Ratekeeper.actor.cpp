@@ -390,7 +390,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 		limitReason_t ssLimitReason = limitReason_t::unlimited;
 
-		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_FREE_SPACE, (int64_t)(SERVER_KNOBS->MIN_FREE_SPACE_RATIO * ss.smoothTotalSpace.smoothTotal()));
+		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_FREE_SPACE, (int64_t)(SERVER_KNOBS->END_MIN_FREE_SPACE_RATIO * ss.smoothTotalSpace.smoothTotal()));
 
 		worstFreeSpaceStorageServer = std::min(worstFreeSpaceStorageServer, (int64_t)ss.smoothFreeSpace.smoothTotal() - minFreeSpace);
 
@@ -574,7 +574,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 		limitReason_t tlogLimitReason = limitReason_t::log_server_write_queue;
 
-		int64_t minFreeSpace = std::max( SERVER_KNOBS->MIN_FREE_SPACE, (int64_t)(SERVER_KNOBS->MIN_FREE_SPACE_RATIO * tl.smoothTotalSpace.smoothTotal()));
+		int64_t minFreeSpace = std::max( SERVER_KNOBS->MIN_FREE_SPACE, (int64_t)(SERVER_KNOBS->END_MIN_FREE_SPACE_RATIO * tl.smoothTotalSpace.smoothTotal()));
 
 		worstFreeSpaceTLog = std::min(worstFreeSpaceTLog, (int64_t)tl.smoothFreeSpace.smoothTotal() - minFreeSpace);
 
