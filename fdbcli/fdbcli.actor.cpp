@@ -2557,7 +2557,7 @@ Future<T> stopNetworkAfter( Future<T> what ) {
 }
 
 ACTOR Future<Void> addInterface( std::map<Key,std::pair<Value,ClientLeaderRegInterface>>* address_interface, Reference<FlowLock> connectLock, KeyValue kv) {
-	wait(connectLock->take());		
+	wait(connectLock->take());
 	state FlowLock::Releaser releaser(*connectLock);
 	state ClientWorkerInterface workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
 	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
