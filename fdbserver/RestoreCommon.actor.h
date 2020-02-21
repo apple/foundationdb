@@ -389,7 +389,7 @@ Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::
 
 // Similar to sendBatchRequests except that the caller expect to process the reply.
 ACTOR template <class Interface, class Request>
-Future<Void> getBatchRepliesV2(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
+Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
                              std::vector<std::pair<UID, Request>> requests, std::vector<REPLY_TYPE(Request)>* replies,
                              TaskPriority taskID = TaskPriority::Low, bool trackRequestLatency = true) {
 	if (requests.empty()) {
@@ -492,7 +492,7 @@ Future<Void> getBatchRepliesV2(RequestStream<Request> Interface::*channel, std::
 // Similar to sendBatchRequests except that the caller expect to process the reply.
 // This actor can be combined with sendBatchRequests(...)
 ACTOR template <class Interface, class Request>
-Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
+Future<Void> getBatchRepliesToDelete(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
                              std::vector<std::pair<UID, Request>> requests, std::vector<REPLY_TYPE(Request)>* replies,
                              TaskPriority taskID = TaskPriority::Low) {
 
