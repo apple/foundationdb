@@ -64,9 +64,6 @@ else ifeq ($(PLATFORM),Darwin)
 
   .LIBPATTERNS := lib%.dylib lib%.a
 
-	# Temporarily disable TLS on OSX as libressl -> openssl transition happens
-	TLS_DISABLED := 1
-
   BOOST_BASEDIR ?= ${HOME}
   TLS_LIBDIR ?= /usr/local/lib
   DLEXT := dylib
