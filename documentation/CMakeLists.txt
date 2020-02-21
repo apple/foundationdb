@@ -86,7 +86,7 @@ else()
 endif()
 
 add_custom_target(docpreview
-  COMMAND ${python_command} -m SimpleHTTPServer ${port}
+  COMMAND ${python_command} -m http.server ${port}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/html
   USES_TERMINAL)
 add_dependencies(docpreview html)
