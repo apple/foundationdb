@@ -773,7 +773,7 @@ bool TraceEvent::init() {
 		}
 
 		detail("Severity", int(severity));
-		detailf("Time", "%.6f", getCurrentTime());
+		detail("Time", "0.000000");
 		timeIndex = fields.size() - 1;
 
 		detail("Type", type);
@@ -983,9 +983,8 @@ void TraceEvent::log(bool useCurrentTime) {
 		init();
 		try {
 			if (enabled) {
-				if (useCurrentTime) {
-					fields.mutate(timeIndex).second = format("%.6f", TraceEvent::getCurrentTime());
-				}
+				fields.mutate(timeIndex).second = format("%.6f", TraceEvent::getCurrentTime());
+
 				if (this->severity == SevError) {
 					severity = SevInfo;
 					backtrace();
