@@ -49,7 +49,7 @@ ifeq ($(PLATFORM),Linux)
   CXXFLAGS += -std=c++17
 
   BOOST_BASEDIR ?= /opt
-  TLS_LIBDIR ?= /usr/local/lib
+  TLS_LIBDIR ?= /usr/local/lib64
   DLEXT := so
   java_DLEXT := so
   TARGET_LIBC_VERSION ?= 2.11
@@ -65,7 +65,7 @@ else ifeq ($(PLATFORM),Darwin)
   .LIBPATTERNS := lib%.dylib lib%.a
 
   BOOST_BASEDIR ?= ${HOME}
-  TLS_LIBDIR ?= /usr/local/lib
+  TLS_LIBDIR ?= /usr/local/lib64
   DLEXT := dylib
   java_DLEXT := jnilib
 else
@@ -110,8 +110,8 @@ CFLAGS += -DTLS_DISABLED
 FDB_TLS_LIB :=
 TLS_LIBS :=
 else
-FDB_TLS_LIB := lib/libFDBLibTLS.a
-TLS_LIBS += $(addprefix $(TLS_LIBDIR)/,libtls.a libssl.a libcrypto.a)
+FDB_TLS_LIB :=
+TLS_LIBS += $(addprefix $(TLS_LIBDIR)/,libssl.a libcrypto.a)
 endif
 
 CXXFLAGS += -Wno-deprecated -DBOOST_ERROR_CODE_HEADER_ONLY -DBOOST_SYSTEM_NO_DEPRECATED
@@ -124,9 +124,6 @@ VPATH += $(addprefix :,$(filter-out lib,$(patsubst -L%,%,$(filter -L%,$(LDFLAGS)
 
 CS_PROJECTS := flow/actorcompiler flow/coveragetool fdbclient/vexillographer
 CPP_PROJECTS := flow fdbrpc fdbclient fdbbackup fdbserver fdbcli bindings/c bindings/java fdbmonitor bindings/flow/tester bindings/flow
-ifndef TLS_DISABLED
-CPP_PROJECTS += FDBLibTLS
-endif
 OTHER_PROJECTS := bindings/python bindings/ruby bindings/go
 
 CS_MK_GENERATED := $(CS_PROJECTS:=/generated.mk)

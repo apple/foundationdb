@@ -302,7 +302,7 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 			state double lastRefreshed = now();
 			state int64_t lastBytesReceived = peer->bytesReceived;
 			loop {
-				wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME));
+				wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME, TaskPriority::ReadSocket));
 				if (lastBytesReceived < peer->bytesReceived) {
 					lastRefreshed = now();
 					lastBytesReceived = peer->bytesReceived;
@@ -317,7 +317,7 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 
 		//We cannot let an error be thrown from connectionMonitor while still on the stack from scanPackets in connectionReader
 		//because then it would not call the destructor of connectionReader when connectionReader is cancelled.
-		wait(delay(0));
+		wait(delay(0, TaskPriority::ReadSocket));
 
 		if (peer->reliable.empty() && peer->unsent.empty() && peer->outstandingReplies==0) {
 			if (peer->peerReferences == 0 &&
@@ -332,7 +332,7 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 			}
 		}
 
-		wait (delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME));
+		wait (delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME, TaskPriority::ReadSocket));
 
 		// TODO: Stop monitoring and close the connection with no onDisconnect requests outstanding
 		state ReplyPromise<Void> reply;
@@ -432,15 +432,17 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				try {
 					choose {
 						when( Reference<IConnection> _conn = wait( INetworkConnections::net()->connect(self->destination) ) ) { 
+							conn = _conn;
+							wait(conn->connectHandshake());
 							if (FlowTransport::transport().isClient()) {
 								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 							}
 							if (self->unsent.empty()) {
-								_conn->close();
+								conn->close();
+								conn = Reference<IConnection>();
 								clientReconnectDelay = false;
 								continue;
 							} else {
-								conn = _conn;
 								TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
 										.suppressFor(1.0)
 										.detail("PeerAddr", self->destination);
@@ -962,6 +964,7 @@ ACTOR static Future<Void> connectionReader(
 
 ACTOR static Future<Void> connectionIncoming( TransportData* self, Reference<IConnection> conn ) {
 	try {
+		wait(conn->acceptHandshake());
 		state Promise<Reference<Peer>> onConnected;
 		state Future<Void> reader = connectionReader( self, conn, Reference<Peer>(), onConnected );
 		choose {
@@ -988,11 +991,13 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 	try {
 		loop {
 			Reference<IConnection> conn = wait( listener->accept() );
-			TraceEvent("ConnectionFrom", conn->getDebugID()).suppressFor(1.0)
-				.detail("FromAddress", conn->getPeerAddress())
-				.detail("ListenAddress", listenAddr.toString());
-			incoming.add( connectionIncoming(self, conn) );
-			wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskPriority::WriteSocket));
+			if(conn) {
+				TraceEvent("ConnectionFrom", conn->getDebugID()).suppressFor(1.0)
+					.detail("FromAddress", conn->getPeerAddress())
+					.detail("ListenAddress", listenAddr.toString());
+				incoming.add( connectionIncoming(self, conn) );
+			}
+			wait(delay(0, TaskPriority::AcceptSocket));
 		}
 	} catch (Error& e) {
 		TraceEvent(SevError, "ListenError").error(e);

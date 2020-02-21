@@ -1137,18 +1137,19 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::set<Optional<Key>> missingStorage;
 
 		for( int i = 0; i < workers.size(); i++ ) {
-			if( !configuration.isExcludedServer(workers[i].interf.address()) &&
+			NetworkAddress addr = workers[i].interf.tLog.getEndpoint().addresses.getTLSAddress();
+			if( !configuration.isExcludedServer(addr) &&
 				( workers[i].processClass == ProcessClass::StorageClass || workers[i].processClass == ProcessClass::UnsetClass ) ) {
 				bool found = false;
 				for( int j = 0; j < storageServers.size(); j++ ) {
-					if( storageServers[j].address() == workers[i].interf.address() ) {
+					if( storageServers[j].getVersion.getEndpoint().addresses.getTLSAddress() == addr ) {
 						found = true;
 						break;
 					}
 				}
 				if( !found ) {
 					TraceEvent("ConsistencyCheck_NoStorage")
-					    .detail("Address", workers[i].interf.address())
+					    .detail("Address", addr)
 					    .detail("ProcessClassEqualToStorageClass",
 					            (int)(workers[i].processClass == ProcessClass::StorageClass));
 					missingStorage.insert(workers[i].interf.locality.dcId());
@@ -1221,12 +1222,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::set<NetworkAddress> workerAddresses;
 
 		for (const auto& it : workers) {
-			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(it.interf.address());
+			NetworkAddress addr = it.interf.tLog.getEndpoint().addresses.getTLSAddress();
+			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(addr);
 			if(!info || info->failed) {
 				TraceEvent("ConsistencyCheck_FailedWorkerInList").detail("Addr", it.interf.address());
 				return false;
 			}
-			workerAddresses.insert( NetworkAddress(it.interf.address().ip, it.interf.address().port, true, false) );
+			workerAddresses.insert( NetworkAddress(addr.ip, addr.port, true, addr.isTLS()) );
 		}
 
 		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
