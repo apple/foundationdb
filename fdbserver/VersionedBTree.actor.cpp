@@ -5699,21 +5699,27 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 
 	// Test delete/insert behavior for each item, making no net changes
 	printf("Testing seek/delete/insert for existing keys with random values\n");
+	ASSERT(tree->numItems == items.size());
 	for(auto rec : items) {
 		// Insert existing should fail
 		ASSERT(!r.insert(rec));
+		ASSERT(tree->numItems == items.size());
 
 		// Erase existing should succeed
 		ASSERT(r.erase(rec));
+		ASSERT(tree->numItems == items.size() - 1);
 
 		// Erase deleted should fail
 		ASSERT(!r.erase(rec));
+		ASSERT(tree->numItems == items.size() - 1);
 
 		// Insert deleted should succeed
 		ASSERT(r.insert(rec));
+		ASSERT(tree->numItems == items.size());
 
 		// Insert existing should fail
 		ASSERT(!r.insert(rec));
+		ASSERT(tree->numItems == items.size());
 	}
 
 	DeltaTree<RedwoodRecordRef>::Cursor fwd = r.getCursor();

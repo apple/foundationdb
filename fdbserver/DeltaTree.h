@@ -370,6 +370,7 @@ public:
 						auto &d = n->raw->delta();
 						if(d.getDeleted()) {
 							d.setDeleted(false);
+							++tree->numItems;
 							return true;
 						}
 						else {
@@ -504,6 +505,7 @@ public:
 
 		void erase() {
 			node->setDeleted(true);
+			--mirror->tree->numItems;
 			moveNext();
 		}
 
