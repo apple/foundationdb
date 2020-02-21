@@ -3657,6 +3657,13 @@ int main(int argc, char* argv[]) {
 	} catch (Error& e) {
 		TraceEvent(SevError, "MainError").error(e);
 		status = FDB_EXIT_MAIN_ERROR;
+	} catch (boost::system::system_error& e) {
+		if (g_network) {
+			TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
+		} else {
+			fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code().value());
+		}
+		status = FDB_EXIT_MAIN_EXCEPTION;
 	} catch (std::exception& e) {
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		status = FDB_EXIT_MAIN_EXCEPTION;

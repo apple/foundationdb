@@ -1456,7 +1456,7 @@ INetwork* newNet2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> poli
 	}
 	catch(boost::system::system_error e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());
-		throw unknown_error();
+		throw;
 	}
 	catch(std::exception const& e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());

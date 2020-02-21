@@ -108,7 +108,12 @@ fdb_error_t fdb_network_set_option( FDBNetworkOption option,
 }
 
 fdb_error_t fdb_setup_network_impl() {
-	CATCH_AND_RETURN( API->setupNetwork(); );
+	CATCH_AND_RETURN(
+			try {
+				API->setupNetwork();
+			} catch (boost::system::system_error& e) {
+				return error_code_tls_error;
+			} );
 }
 
 fdb_error_t fdb_setup_network_v13( const char* localAddress ) {
