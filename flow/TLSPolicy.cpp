@@ -27,6 +27,7 @@ TLSPolicy::~TLSPolicy() {}
 #include <cstring>
 #include <exception>
 #include <map>
+#include <set>
 #include <openssl/objects.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
