@@ -170,25 +170,25 @@ public:
 		});
 	}
 
-	virtual int64_t getMinFreeSpace(bool includeInFlight = true) {
+	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) {
 		int64_t result = std::numeric_limits<int64_t>::max();
 		for (auto it = teams.begin(); it != teams.end(); it++) {
-			result = std::min(result, (*it)->getMinFreeSpace(includeInFlight));
+			result = std::min(result, (*it)->getMinAvailableSpace(includeInFlight));
 		}
 		return result;
 	}
 
-	virtual double getMinFreeSpaceRatio(bool includeInFlight = true) {
+	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) {
 		double result = std::numeric_limits<double>::max();
 		for (auto it = teams.begin(); it != teams.end(); it++) {
-			result = std::min(result, (*it)->getMinFreeSpaceRatio(includeInFlight));
+			result = std::min(result, (*it)->getMinAvailableSpaceRatio(includeInFlight));
 		}
 		return result;
 	}
 
-	virtual bool hasHealthyFreeSpace(double minRatio, int64_t minFreeSpace) {
-		return all([minRatio, minFreeSpace](Reference<IDataDistributionTeam> team) {
-			return team->hasHealthyFreeSpace(minRatio, minFreeSpace);
+	virtual bool hasHealthyAvailableSpace(double minRatio, int64_t minAvailableSpace) {
+		return all([minRatio, minAvailableSpace](Reference<IDataDistributionTeam> team) {
+			return team->hasHealthyAvailableSpace(minRatio, minAvailableSpace);
 		});
 	}
 
