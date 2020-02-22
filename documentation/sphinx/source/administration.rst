@@ -177,7 +177,7 @@ You can add new machines to a cluster at any time:
 
 5) If you have previously :ref:`excluded <removing-machines-from-a-cluster>` a machine from the cluster, you will need to take it off the exclusion list using the ``include <ip>`` command of fdbcli before it can be a full participant in the cluster.
 
-    .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
+.. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
 
 .. _removing-machines-from-a-cluster:
 
@@ -192,26 +192,26 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
 
 3) Use the ``exclude`` command in ``fdbcli`` on the machines you plan to remove:
     
-    ::
+::
 
-        user@host1$ fdbcli
-        Using cluster file `/etc/foundationdb/fdb.cluster'.
+    user@host1$ fdbcli
+    Using cluster file `/etc/foundationdb/fdb.cluster'.
 
-        The database is available.
+    The database is available.
 
-        Welcome to the fdbcli. For help, type `help'.
-        fdb> exclude 1.2.3.4 1.2.3.5 1.2.3.6
-        Waiting for state to be removed from all excluded servers.  This may take a while.
-        It is now safe to remove these machines or processes from the cluster.
+    Welcome to the fdbcli. For help, type `help'.
+    fdb> exclude 1.2.3.4 1.2.3.5 1.2.3.6
+    Waiting for state to be removed from all excluded servers.  This may take a while.
+    It is now safe to remove these machines or processes from the cluster.
 
-    
-    ``exclude`` can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an ``IP``:``PORT`` pair).
 
-    .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
-    
-    Excluding a server doesn't shut it down immediately; data on the machine is first moved away. When the ``exclude`` command completes successfully (by returning control to the command prompt), the machines that you specified are no longer required to maintain the configured redundancy mode. A large amount of data might need to be transferred first, so be patient. When the process is complete, the excluded machine or process can be shut down without fault tolerance or availability consequences.
-    
-    If you interrupt the exclude command with Ctrl-C after seeing the "waiting for state to be removed" message, the exclusion work will continue in the background. Repeating the command will continue waiting for the exclusion to complete. To reverse the effect of the ``exclude`` command, use the ``include`` command.
+``exclude`` can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an ``IP``:``PORT`` pair).
+
+.. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
+
+Excluding a server doesn't shut it down immediately; data on the machine is first moved away. When the ``exclude`` command completes successfully (by returning control to the command prompt), the machines that you specified are no longer required to maintain the configured redundancy mode. A large amount of data might need to be transferred first, so be patient. When the process is complete, the excluded machine or process can be shut down without fault tolerance or availability consequences.
+
+If you interrupt the exclude command with Ctrl-C after seeing the "waiting for state to be removed" message, the exclusion work will continue in the background. Repeating the command will continue waiting for the exclusion to complete. To reverse the effect of the ``exclude`` command, use the ``include`` command.
 
 4) On each removed machine, stop the FoundationDB server and prevent it from starting at the next boot. Follow the :ref:`instructions for your platform <administration-running-foundationdb>`. For example, on Ubuntu::
 
@@ -316,9 +316,9 @@ Running backups         Number of backups currently running. Different backups c
 Running DRs             Number of DRs currently running. Different DRs could be streaming different prefixes and/or to different DR clusters.
 ====================== ==========================================================================================================
 
-The "Memory availability" is a conservative estimate of the minimal RAM available to any ``fdbserver`` process across all machines in the cluster. This value is calculated in two steps. Memory available per process is first calculated *for each machine* by taking:
+The "Memory availability" is a conservative estimate of the minimal RAM available to any ``fdbserver`` process across all machines in the cluster. This value is calculated in two steps. Memory available per process is first calculated *for each machine* by taking::
 
-  availability = ((total - committed) + sum(processSize)) / processes
+    availability = ((total - committed) + sum(processSize)) / processes
 
 where:
 
