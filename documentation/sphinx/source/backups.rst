@@ -162,7 +162,7 @@ The Blob Credential File format is JSON with the following schema:
 TLS Support
 ===========
 
-In-flight traffic for blob store or disaster recovery backups can be encrypted with the following environment variables. They are also offered as command-line flags or can be specified in `foundationdb.conf` for backup agents.
+In-flight traffic for blob store or disaster recovery backups can be encrypted with the following environment variables. They are also offered as command-line flags or can be specified in ``foundationdb.conf`` for backup agents.
 
 ============================ ====================================================
 Environment Variable         Purpose
@@ -180,7 +180,7 @@ Environment Variable         Purpose
                              certificates and sessions.
 ============================ ====================================================
 
-Blob store backups can be configured to use HTTPS/TLS by setting the `secure_connection` or `sc` backup URL option to `1`, which is the default. Disaster recovery backups are secured by using TLS for both the source and target clusters and setting the TLS options for the `fdbdr` and `dr_agent` commands.
+Blob store backups can be configured to use HTTPS/TLS by setting the ``secure_connection`` or ``sc`` backup URL option to ``1``, which is the default. Disaster recovery backups are secured by using TLS for both the source and target clusters and setting the TLS options for the ``fdbdr`` and ``dr_agent`` commands.
 
 ``fdbbackup`` command line tool
 ===============================
