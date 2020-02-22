@@ -819,7 +819,7 @@ public class DirectoryLayer implements Directory {
 		assert bytes.length == 8;
 		long value = 0;
 		for(int i = 0; i < 8; ++i) {
-			value += ((long)bytes[i]&0xFF << (i * 8));
+			value += (Byte.toUnsignedLong(bytes[i]) << (i * 8));
 		}
 		return value;
 	}
