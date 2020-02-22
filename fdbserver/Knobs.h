@@ -82,7 +82,6 @@ public:
 	int64_t DISK_QUEUE_FILE_EXTENSION_BYTES; // When we grow the disk queue, by how many bytes should it grow?
 	int64_t DISK_QUEUE_FILE_SHRINK_BYTES; // When we shrink the disk queue, by how many bytes should it shrink?
 	int DISK_QUEUE_MAX_TRUNCATE_BYTES;  // A truncate larger than this will cause the file to be replaced instead.
-	int TLOG_DEGRADED_DELAY_COUNT;
 	double TLOG_DEGRADED_DURATION;
 	double TXS_POPPED_MAX_DELAY;
 
@@ -151,7 +150,7 @@ public:
 	double STORAGE_METRICS_POLLING_DELAY;
 	double STORAGE_METRICS_RANDOM_DELAY;
 	double FREE_SPACE_RATIO_CUTOFF;
-	double FREE_SPACE_RATIO_DD_CUTOFF;
+	double FREE_SPACE_CUTOFF_PENALTY;
 	int DESIRED_TEAMS_PER_SERVER;
 	int MAX_TEAMS_PER_SERVER;
 	int64_t DD_SHARD_SIZE_GRANULARITY;
@@ -264,6 +263,9 @@ public:
 	double REQUIRED_MIN_RECOVERY_DURATION;
 	bool ALWAYS_CAUSAL_READ_RISKY;
 	int MAX_COMMIT_UPDATES;
+	double MIN_PROXY_COMPUTE;
+	int PROXY_COMPUTE_BUCKETS;
+	double PROXY_COMPUTE_GROWTH_RATE;
 
 	// Master Server
 	double COMMIT_SLEEP_TIME;
@@ -364,8 +366,10 @@ public:
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
-	int64_t MIN_FREE_SPACE;
-	double MIN_FREE_SPACE_RATIO;
+	int64_t MIN_AVAILABLE_SPACE;
+	double MIN_AVAILABLE_SPACE_RATIO;
+	double TARGET_AVAILABLE_SPACE_RATIO;
+	double AVAILABLE_SPACE_UPDATE_DELAY;
 
 	double MAX_TL_SS_VERSION_DIFFERENCE; // spring starts at half this value
 	double MAX_TL_SS_VERSION_DIFFERENCE_BATCH;

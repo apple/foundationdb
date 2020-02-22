@@ -270,7 +270,7 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 		state Key k;
 		state double cst = timer();
 		while (true) {
-			Standalone<VectorRef<KeyValueRef>> kv = wait( test.store->readRange( KeyRangeRef(k, LiteralStringRef("\xff\xff\xff\xff")), 1000 ) );
+			Standalone<RangeResultRef> kv = wait( test.store->readRange( KeyRangeRef(k, LiteralStringRef("\xff\xff\xff\xff")), 1000 ) );
 			count += kv.size();
 			if (kv.size() < 1000) break;
 			k = keyAfter( kv[ kv.size()-1 ].key );

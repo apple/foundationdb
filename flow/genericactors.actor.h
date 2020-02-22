@@ -32,6 +32,7 @@
 #include "flow/flow.h"
 #include "flow/Knobs.h"
 #include "flow/Util.h"
+#include "flow/IndexedSet.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 #pragma warning( disable: 4355 )	// 'this' : used in base member initializer list
 
@@ -823,6 +824,7 @@ Future<Void> anyTrue( std::vector<Reference<AsyncVar<bool>>> const& input, Refer
 Future<Void> cancelOnly( std::vector<Future<Void>> const& futures );
 Future<Void> timeoutWarningCollector( FutureStream<Void> const& input, double const& logDelay, const char* const& context, UID const& id );
 Future<bool> quorumEqualsTrue( std::vector<Future<bool>> const& futures, int const& required );
+Future<Void> lowPriorityDelay( double const& waitTime );
 
 ACTOR template <class T>
 Future<Void> streamHelper( PromiseStream<T> output, PromiseStream<Error> errors, Future<T> input ) {
@@ -1336,6 +1338,110 @@ private:
 		wait(signal);
 		self->release(amount);
 		return Void();
+	}
+};
+
+struct NotifiedInt {
+	NotifiedInt( int64_t val = 0 ) : val(val) {}
+
+	Future<Void> whenAtLeast( int64_t limit ) {
+		if (val >= limit) 
+			return Void();
+		Promise<Void> p;
+		waiting.push( std::make_pair(limit,p) );
+		return p.getFuture();
+	}
+
+	int64_t get() const { return val; }
+
+	void set( int64_t v ) {
+		ASSERT( v >= val );
+		if (v != val) {
+			val = v;
+
+			std::vector<Promise<Void>> toSend;
+			while ( waiting.size() && v >= waiting.top().first ) {
+				Promise<Void> p = std::move(waiting.top().second);
+				waiting.pop();
+				toSend.push_back(p);
+			}
+			for(auto& p : toSend) {
+				p.send(Void());
+			}
+		}
+	}
+
+	void operator=( int64_t v ) {
+		set( v );
+	}
+
+	NotifiedInt(NotifiedInt&& r) BOOST_NOEXCEPT : waiting(std::move(r.waiting)), val(r.val) {}
+	void operator=(NotifiedInt&& r) BOOST_NOEXCEPT { waiting = std::move(r.waiting); val = r.val; }
+
+private:
+	typedef std::pair<int64_t,Promise<Void>> Item;
+	struct ItemCompare {
+		bool operator()(const Item& a, const Item& b) { return a.first > b.first; }
+	};
+	std::priority_queue<Item, std::vector<Item>, ItemCompare> waiting;
+	int64_t val;
+};
+
+struct BoundedFlowLock : NonCopyable, public ReferenceCounted<BoundedFlowLock> {
+	// BoundedFlowLock is different from a FlowLock in that it has a bound on how many locks can be taken from the oldest outstanding lock.
+	// For instance, with a FlowLock that has two permits, if one permit is taken but never released, the other permit can be reused an unlimited
+	// amount of times, but with a BoundedFlowLock, it can only be reused a fixed number of times.
+
+	struct Releaser : NonCopyable {
+		BoundedFlowLock* lock;
+		int64_t permitNumber;
+		Releaser() : lock(nullptr), permitNumber(0) {}
+		Releaser( BoundedFlowLock* lock, int64_t permitNumber ) : lock(lock), permitNumber(permitNumber) {}
+		Releaser(Releaser&& r) BOOST_NOEXCEPT : lock(r.lock), permitNumber(r.permitNumber) { r.permitNumber = 0; }
+		void operator=(Releaser&& r) { if (permitNumber) lock->release(permitNumber); lock = r.lock; permitNumber = r.permitNumber; r.permitNumber = 0; }
+
+		void release() {
+			if (permitNumber) {
+				lock->release(permitNumber);
+			}
+			permitNumber = 0;
+		}
+
+		~Releaser() { if (permitNumber) lock->release(permitNumber); }
+	};
+
+	BoundedFlowLock() : unrestrictedPermits(1), boundedPermits(0), nextPermitNumber(0), minOutstanding(0) {}
+	explicit BoundedFlowLock(int64_t unrestrictedPermits, int64_t boundedPermits) : unrestrictedPermits(unrestrictedPermits), boundedPermits(boundedPermits), nextPermitNumber(0), minOutstanding(0) {}
+
+	Future<int64_t> take() {
+		return takeActor(this);
+	}
+	void release( int64_t permitNumber ) {
+		outstanding.erase(permitNumber);
+		updateMinOutstanding();
+	}
+private:
+	IndexedSet<int64_t, int64_t> outstanding;
+	NotifiedInt minOutstanding;
+	int64_t nextPermitNumber;
+	const int64_t unrestrictedPermits;
+	const int64_t boundedPermits;
+
+	void updateMinOutstanding() {
+		auto it = outstanding.index(unrestrictedPermits-1);
+		if(it == outstanding.end()) {
+			minOutstanding.set(nextPermitNumber);
+		} else {
+			minOutstanding.set(*it);
+		}
+	}
+
+	ACTOR static Future<int64_t> takeActor(BoundedFlowLock* lock) {
+		state int64_t permitNumber = ++lock->nextPermitNumber;
+		lock->outstanding.insert(permitNumber, 1);
+		lock->updateMinOutstanding();
+		wait( lock->minOutstanding.whenAtLeast(std::max<int64_t>(0, permitNumber - lock->boundedPermits)) );
+		return permitNumber;
 	}
 };
 

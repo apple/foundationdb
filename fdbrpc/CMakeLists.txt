@@ -27,7 +27,6 @@ set(FDBRPC_SRCS
   sim2.actor.cpp
   sim_validation.cpp
   TimedRequest.h
-  TLSConnection.actor.cpp
   TraceFileIO.cpp)
 
 set(FDBRPC_THIRD_PARTY_SRCS

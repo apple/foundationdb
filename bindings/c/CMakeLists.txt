@@ -38,6 +38,21 @@ else()
 endif()
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 target_link_libraries(fdb_c PUBLIC $<BUILD_INTERFACE:fdbclient>)
+if(APPLE)
+  set(symbols ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.symbols)
+  add_custom_command(OUTPUT ${symbols}
+    COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h
+        ${symbols}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h
+    COMMENT "Generate exported_symbols_list")
+  add_custom_target(exported_symbols_list DEPENDS ${symbols})
+  add_dependencies(fdb_c exported_symbols_list)
+  target_link_options(fdb_c PRIVATE "LINKER:-no_weak_exports,-exported_symbols_list,${symbols}")
+elseif(WIN32)
+else()
+  target_link_options(fdb_c PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete")
+endif()
 target_include_directories(fdb_c PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>

@@ -390,14 +390,14 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 		limitReason_t ssLimitReason = limitReason_t::unlimited;
 
-		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_FREE_SPACE, (int64_t)(SERVER_KNOBS->MIN_FREE_SPACE_RATIO * ss.smoothTotalSpace.smoothTotal()));
+		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE, (int64_t)(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * ss.smoothTotalSpace.smoothTotal()));
 
 		worstFreeSpaceStorageServer = std::min(worstFreeSpaceStorageServer, (int64_t)ss.smoothFreeSpace.smoothTotal() - minFreeSpace);
 
 		int64_t springBytes = std::max<int64_t>(1, std::min<int64_t>(limits->storageSpringBytes, (ss.smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
 		int64_t targetBytes = std::max<int64_t>(1, std::min(limits->storageTargetBytes, (int64_t)ss.smoothFreeSpace.smoothTotal() - minFreeSpace));
 		if (targetBytes != limits->storageTargetBytes) {
-			if (minFreeSpace == SERVER_KNOBS->MIN_FREE_SPACE) {
+			if (minFreeSpace == SERVER_KNOBS->MIN_AVAILABLE_SPACE) {
 				ssLimitReason = limitReason_t::storage_server_min_free_space;
 			} else {
 				ssLimitReason = limitReason_t::storage_server_min_free_space_ratio;
@@ -574,14 +574,14 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 		limitReason_t tlogLimitReason = limitReason_t::log_server_write_queue;
 
-		int64_t minFreeSpace = std::max( SERVER_KNOBS->MIN_FREE_SPACE, (int64_t)(SERVER_KNOBS->MIN_FREE_SPACE_RATIO * tl.smoothTotalSpace.smoothTotal()));
+		int64_t minFreeSpace = std::max( SERVER_KNOBS->MIN_AVAILABLE_SPACE, (int64_t)(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * tl.smoothTotalSpace.smoothTotal()));
 
 		worstFreeSpaceTLog = std::min(worstFreeSpaceTLog, (int64_t)tl.smoothFreeSpace.smoothTotal() - minFreeSpace);
 
 		int64_t springBytes = std::max<int64_t>(1, std::min<int64_t>(limits->logSpringBytes, (tl.smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
 		int64_t targetBytes = std::max<int64_t>(1, std::min(limits->logTargetBytes, (int64_t)tl.smoothFreeSpace.smoothTotal() - minFreeSpace));
 		if (targetBytes != limits->logTargetBytes) {
-			if (minFreeSpace == SERVER_KNOBS->MIN_FREE_SPACE) {
+			if (minFreeSpace == SERVER_KNOBS->MIN_AVAILABLE_SPACE) {
 				tlogLimitReason = limitReason_t::log_server_min_free_space;
 			} else {
 				tlogLimitReason = limitReason_t::log_server_min_free_space_ratio;
