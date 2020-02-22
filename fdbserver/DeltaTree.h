@@ -323,6 +323,8 @@ public:
 	// structure but with fully reconstituted items (which reference DeltaTree bytes or Arena bytes, based
 	// on the behavior of T::Delta::apply())
 	struct Mirror : FastAllocated<Mirror> {
+		friend class Cursor;
+
 		Mirror(const void *treePtr = nullptr, const T *lowerBound = nullptr, const T *upperBound = nullptr)
 			: tree((DeltaTree *)treePtr), lower(lowerBound), upper(upperBound)
 		{
@@ -341,11 +343,13 @@ public:
 			return upper;
 		}
 
+private:
 		Arena arena;
 		DeltaTree *tree;
 		DecodedNode *root;
 		const T *lower;
 		const T *upper;
+public:
 
 		Cursor getCursor() {
 			return Cursor(this);
@@ -355,7 +359,7 @@ public:
 		// have changed (they won't if k already exists in the tree but was deleted).
 		// Returns true if successful, false if k does not fit in the space available
 		// or if k is already in the tree (and was not already deleted).
-		bool insert(const T &k, int skipLen = 0) {
+		bool insert(const T &k, int skipLen = 0, int maxHeightAllowed = std::numeric_limits<int>::max()) {
 			int height = 1;
 			DecodedNode *n = root;
 			bool addLeftChild = false;
@@ -397,6 +401,10 @@ public:
 					n = left;
 				}
 				++height;
+			}
+
+			if(height > maxHeightAllowed) {
+				return false;
 			}
 
 			// Insert k as the left or right child of n, depending on the value of addLeftChild
