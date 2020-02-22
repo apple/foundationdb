@@ -473,7 +473,7 @@ public:
 		return enabled;
 	}
 
-	void log(bool useCurrentTime = false);
+	void log();
 
 	~TraceEvent();  // Actually logs the event
 

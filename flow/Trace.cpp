@@ -978,7 +978,7 @@ TraceEvent& TraceEvent::backtrace(const std::string& prefix) {
 	return detail(prefix + "Backtrace", platform::get_backtrace());
 }
 
-void TraceEvent::log(bool useCurrentTime) {
+void TraceEvent::log() {
 	if(!logged) {
 		init();
 		try {
@@ -1327,6 +1327,9 @@ void TraceEventFields::validateFormat() const {
 }
 
 std::string traceableStringToString(const char* value, size_t S) {
-	ASSERT_WE_THINK(S > 0 && value[S - 1] == '\0');
+	if(g_network) {
+		ASSERT_WE_THINK(S > 0 && value[S - 1] == '\0');
+	}
+
 	return std::string(value, S - 1); // Exclude trailing \0 byte
 }

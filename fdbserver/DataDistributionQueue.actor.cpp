@@ -1284,7 +1284,7 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 		}
 
 		traceEvent.detail("Moved", moved);
-		traceEvent.log(true);
+		traceEvent.log();
 	}
 }
 
@@ -1381,7 +1381,7 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 		}
 
 		traceEvent.detail("Moved", moved);
-		traceEvent.log(true);
+		traceEvent.log();
 	}
 }
 
