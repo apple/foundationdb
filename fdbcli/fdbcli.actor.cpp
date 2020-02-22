@@ -540,7 +540,7 @@ void initHelp() {
 		"attempts to kill one or more processes in the cluster",
 		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS>*, attempt to kill the specified process.");
 	helpMap["profile"] = CommandHelp(
-		"<type> <action> <ARGS>",
+		"profile <type> <action> <ARGS>",
 		"namespace for all the profiling-related commands.",
 		"Different types support different actions.  Run `profile` to get a list of types, and iteratively explore the help.\n");
 	helpMap["force_recovery_with_data_loss"] = CommandHelp(
@@ -3654,6 +3654,14 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 			fdbcli_comp_cmd(line, completions);
 		},
 		[](std::string const& line)->LineNoise::Hint {
+			int firstWordIdx = line.find(' ');
+			if (firstWordIdx == std::string::npos) {
+				firstWordIdx = line.size();
+			}
+			auto iter = helpMap.find(line.substr(0, firstWordIdx));
+			if (iter != helpMap.end()) {
+				return LineNoise::Hint(iter->second.usage.substr(firstWordIdx), 0, false);
+			}
 			return LineNoise::Hint();
 		},
 		1000,
