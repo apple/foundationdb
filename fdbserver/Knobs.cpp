@@ -185,7 +185,6 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( STORAGE_METRICS_POLLING_DELAY,                         2.0 ); if( randomize && BUGGIFY ) STORAGE_METRICS_POLLING_DELAY = 15.0;
 	init( STORAGE_METRICS_RANDOM_DELAY,                          0.2 );
 	init( FREE_SPACE_RATIO_CUTOFF,                              0.35 );
-	init( FREE_SPACE_RATIO_DD_CUTOFF,                            0.2 );
 	init( DESIRED_TEAMS_PER_SERVER,                                5 ); if( randomize && BUGGIFY ) DESIRED_TEAMS_PER_SERVER = 1;
 	init( MAX_TEAMS_PER_SERVER,           5*DESIRED_TEAMS_PER_SERVER );
 	init( DD_SHARD_SIZE_GRANULARITY,                         5000000 );
@@ -427,10 +426,10 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 
 	init( MAX_TRANSACTIONS_PER_BYTE,                            1000 );
 
-	init( MIN_FREE_SPACE,                                        1e8 );
-	init( START_MIN_FREE_SPACE_RATIO,                           0.26 );
-	init( END_MIN_FREE_SPACE_RATIO,                             0.05 );
-	init( MIN_FREE_SPACE_RATIO_INCREMENT,                       0.03 );
+	init( MIN_AVAILABLE_SPACE,                                   1e8 );
+	init( MIN_AVAILABLE_SPACE_RATIO,                            0.05 );
+	init( TARGET_AVAILABLE_SPACE_RATIO,                         0.30 );
+	init( AVAILABLE_SPACE_UPDATE_DELAY,                          5.0 );
 
 	init( MAX_TL_SS_VERSION_DIFFERENCE,                         1e99 ); // if( randomize && BUGGIFY ) MAX_TL_SS_VERSION_DIFFERENCE = std::max(1.0, 0.25 * VERSIONS_PER_SECOND); // spring starts at half this value //FIXME: this knob causes ratekeeper to clamp on idle cluster in simulation that have a large number of logs
 	init( MAX_TL_SS_VERSION_DIFFERENCE_BATCH,                   1e99 );
