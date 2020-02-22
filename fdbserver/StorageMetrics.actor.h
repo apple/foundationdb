@@ -393,10 +393,10 @@ struct StorageServerMetrics {
 			    .detail("Load", rep.load.bytes);
 		}
 
-		rep.free.bytes = sb.free;
-		rep.free.iosPerKSecond = 10e6;
-		rep.free.bytesPerKSecond = 100e9;
-		rep.free.bytesReadPerKSecond = 100e9;
+		rep.available.bytes = sb.available;
+		rep.available.iosPerKSecond = 10e6;
+		rep.available.bytesPerKSecond = 100e9;
+		rep.available.bytesReadPerKSecond = 100e9;
 
 		rep.capacity.bytes = sb.total;
 		rep.capacity.iosPerKSecond = 10e6;

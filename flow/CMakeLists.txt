@@ -58,6 +58,8 @@ set(FLOW_SRCS
   ThreadSafeQueue.h
   Trace.cpp
   Trace.h
+  TLSPolicy.h
+  TLSPolicy.cpp
   UnitTest.cpp
   UnitTest.h
   XmlTraceLogFormatter.h
@@ -100,7 +102,11 @@ endif()
 if(NOT WITH_TLS OR OPEN_FOR_IDE)
   target_compile_definitions(flow PUBLIC TLS_DISABLED)
 else()
-  target_link_libraries(flow PUBLIC FDBLibTLS)
+  target_link_libraries(flow PUBLIC OpenSSL::SSL)
+endif()
+target_link_libraries(flow PUBLIC boost_target Threads::Threads ${CMAKE_DL_LIBS})
+if(USE_VALGRIND)
+  target_link_libraries(flow PUBLIC Valgrind)
 endif()
 
 if(APPLE)
