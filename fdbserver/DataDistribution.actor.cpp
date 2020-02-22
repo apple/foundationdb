@@ -246,7 +246,7 @@ public:
 			availableSpaceMultiplier = availableSpaceMultiplier * availableSpaceMultiplier;
 		}
 
-		if(minAvailableSpaceRatio < SERVER_KNOBS->START_MIN_FREE_SPACE_RATIO) {
+		if(minAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
 			TraceEvent(SevWarn, "DiskNearCapacity").suppressFor(1.0).detail("AvailableSpaceRatio", minAvailableSpaceRatio);
 		}
 
@@ -298,8 +298,8 @@ public:
 		return minRatio;
 	}
 
-	virtual bool hasHealthyAvailableSpace(double minRatio, int64_t minAvailableSpace) {
-		return (minRatio == 0 || getMinAvailableSpaceRatio() > minRatio) && (minAvailableSpace == std::numeric_limits<int64_t>::min() || getMinAvailableSpace() > minAvailableSpace);
+	virtual bool hasHealthyAvailableSpace(double minRatio) {
+		return getMinAvailableSpaceRatio() >= minRatio && getMinAvailableSpace() > SERVER_KNOBS->MIN_AVAILABLE_SPACE;
 	}
 
 	virtual Future<Void> updateStorageMetrics() {
@@ -624,6 +624,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::vector<DDTeamCollection*> teamCollections;
 	AsyncVar<Optional<Key>> healthyZone;
 	Future<bool> clearHealthyZoneFuture;
+	double medianAvailableSpace;
+	double lastMedianAvailableSpaceUpdate;
 
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
@@ -668,8 +670,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)),
 	    optimalTeamCount(0), recruitingStream(0), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
 	    unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs),
-	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary),
-	    processingUnhealthy(processingUnhealthy) {
+	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary), medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO),
+		lastMedianAvailableSpaceUpdate(0), processingUnhealthy(processingUnhealthy) {
 		if(!primary || configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", distributorId)
 				.detail( "State", "Inactive" )
@@ -743,6 +745,24 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	ACTOR static Future<Void> getTeam( DDTeamCollection* self, GetTeamRequest req ) {
 		try {
 			wait( self->checkBuildTeams( self ) );
+			if(now() - self->lastMedianAvailableSpaceUpdate > SERVER_KNOBS->AVAILABLE_SPACE_UPDATE_DELAY) {
+				self->lastMedianAvailableSpaceUpdate = now();
+				std::vector<double> teamAvailableSpace;
+				teamAvailableSpace.reserve(self->teams.size());
+				for( int i = 0; i < self->teams.size(); i++ ) {
+					if (self->teams[i]->isHealthy()) {
+						teamAvailableSpace.push_back(self->teams[i]->getMinAvailableSpaceRatio());
+					}
+				}
+
+				size_t pivot = teamAvailableSpace.size()/2;
+				if (teamAvailableSpace.size() > 1) {
+					std::nth_element(teamAvailableSpace.begin(), teamAvailableSpace.begin()+pivot, teamAvailableSpace.end());
+					self->medianAvailableSpace = std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO, std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[pivot]));
+				} else {
+					self->medianAvailableSpace = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
+				}
+			}
 
 			// Select the best team
 			// Currently the metric is minimum used disk space (adjusted for data in flight)
@@ -791,7 +811,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				ASSERT( !bestOption.present() );
 				for( int i = 0; i < self->teams.size(); i++ ) {
 					if (self->teams[i]->isHealthy() &&
-					    self->teams[i]->hasHealthyAvailableSpace(req.minAvailableSpaceRatio, req.preferLowerUtilization ? SERVER_KNOBS->MIN_FREE_SPACE : std::numeric_limits<int64_t>::min()) &&
+					    (!req.preferLowerUtilization || self->teams[i]->hasHealthyAvailableSpace(self->medianAvailableSpace)) &&
 					    (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(self->teams[i]->getServerIDs(), self->primary)).size() > 0))
 					{
 						int64_t loadBytes = self->teams[i]->getLoadBytes(true, req.inflightPenalty);
@@ -808,7 +828,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
 					bool ok = dest->isHealthy() &&
-					          dest->hasHealthyAvailableSpace(req.minAvailableSpaceRatio, req.preferLowerUtilization ? SERVER_KNOBS->MIN_FREE_SPACE : std::numeric_limits<int64_t>::min()) &&
+					          (!req.preferLowerUtilization || dest->hasHealthyAvailableSpace(self->medianAvailableSpace)) &&
 					          (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)).size() > 0);
 
 					for(int i=0; ok && i<randomTeams.size(); i++) {

@@ -35,7 +35,6 @@
     <ClCompile Include="ReplicationTypes.cpp" />
     <ClCompile Include="ReplicationPolicy.cpp" />
     <ClCompile Include="sim_validation.cpp" />
-    <ActorCompiler Include="TLSConnection.actor.cpp" />
     <ClCompile Include="TraceFileIO.cpp" />
     <ClCompile Include="zlib\gzwrite.c" />
     <ClCompile Include="zlib\gzclose.c" />
@@ -91,7 +90,6 @@
     <ClInclude Include="Platform.h" />
     <ClInclude Include="fdbrpc.h" />
     <ClInclude Include="FlowTransport.h" />
-    <ClInclude Include="ITLSPlugin.h" />
     <ClInclude Include="libcoroutine\Base.h" />
     <ClInclude Include="libcoroutine\Common.h" />
     <ClInclude Include="libcoroutine\Coro.h" />
@@ -110,7 +108,6 @@
     <ClInclude Include="sim_validation.h" />
     <ClInclude Include="Smoother.h" />
     <ClInclude Include="TimedRequest.h" />
-    <ClInclude Include="TLSConnection.h" />
     <ClInclude Include="TraceFileIO.h" />
     <ClInclude Include="zlib\zlib.h" />
     <ClInclude Include="zlib\deflate.h" />

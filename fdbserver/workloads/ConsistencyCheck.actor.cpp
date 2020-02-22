@@ -1137,18 +1137,19 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::set<Optional<Key>> missingStorage;
 
 		for( int i = 0; i < workers.size(); i++ ) {
-			if( !configuration.isExcludedServer(workers[i].interf.address()) &&
+			NetworkAddress addr = workers[i].interf.tLog.getEndpoint().addresses.getTLSAddress();
+			if( !configuration.isExcludedServer(addr) &&
 				( workers[i].processClass == ProcessClass::StorageClass || workers[i].processClass == ProcessClass::UnsetClass ) ) {
 				bool found = false;
 				for( int j = 0; j < storageServers.size(); j++ ) {
-					if( storageServers[j].address() == workers[i].interf.address() ) {
+					if( storageServers[j].getVersion.getEndpoint().addresses.getTLSAddress() == addr ) {
 						found = true;
 						break;
 					}
 				}
 				if( !found ) {
 					TraceEvent("ConsistencyCheck_NoStorage")
-					    .detail("Address", workers[i].interf.address())
+					    .detail("Address", addr)
 					    .detail("ProcessClassEqualToStorageClass",
 					            (int)(workers[i].processClass == ProcessClass::StorageClass));
 					missingStorage.insert(workers[i].interf.locality.dcId());
@@ -1196,8 +1197,15 @@ struct ConsistencyCheckWorkload : TestWorkload
 				if(!statefulProcesses[itr->interf.address()].count(id)) {
 					TraceEvent("ConsistencyCheck_ExtraDataStore").detail("Address", itr->interf.address()).detail("DataStoreID", id);
 					if(g_network->isSimulated()) {
-						TraceEvent("ConsistencyCheck_RebootProcess").detail("Address", itr->interf.address()).detail("DataStoreID", id);
-						g_simulator.rebootProcess(g_simulator.getProcessByAddress(itr->interf.address()), ISimulator::RebootProcess);
+						//FIXME: this is hiding the fact that we can recruit a new storage server on a location the has files left behind by a previous failure
+						// this means that the process is wasting disk space until the process is rebooting
+						auto p = g_simulator.getProcessByAddress(itr->interf.address());
+						TraceEvent("ConsistencyCheck_RebootProcess").detail("Address", itr->interf.address()).detail("DataStoreID", id).detail("Reliable", p->isReliable());
+						if(p->isReliable()) {
+							g_simulator.rebootProcess(p, ISimulator::RebootProcess);
+						} else {
+							g_simulator.killProcess(p, ISimulator::KillInstantly);
+						}
 					}
 
 					foundExtraDataStore = true;
@@ -1221,12 +1229,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::set<NetworkAddress> workerAddresses;
 
 		for (const auto& it : workers) {
-			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(it.interf.address());
+			NetworkAddress addr = it.interf.tLog.getEndpoint().addresses.getTLSAddress();
+			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(addr);
 			if(!info || info->failed) {
 				TraceEvent("ConsistencyCheck_FailedWorkerInList").detail("Addr", it.interf.address());
 				return false;
 			}
-			workerAddresses.insert( NetworkAddress(it.interf.address().ip, it.interf.address().port, true, false) );
+			workerAddresses.insert( NetworkAddress(addr.ip, addr.port, true, addr.isTLS()) );
 		}
 
 		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();

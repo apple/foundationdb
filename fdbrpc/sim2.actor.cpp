@@ -200,6 +200,9 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 	virtual void delref() { ReferenceCounted<Sim2Conn>::delref(); }
 	virtual void close() { closedByCaller = true; closeInternal(); }
 
+	virtual Future<Void> acceptHandshake() { return delay(0.01*deterministicRandom()->random01()); }
+	virtual Future<Void> connectHandshake() { return delay(0.01*deterministicRandom()->random01()); }
+
 	virtual Future<Void> onWritable() { return whenWritable(this); }
 	virtual Future<Void> onReadable() { return whenReadable(this); }
 
@@ -807,7 +810,7 @@ public:
 	}
 	// Sets the taskID/priority of the current task, without yielding
 	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host ) {
-		ASSERT( !toAddr.isTLS() && host.empty());
+		ASSERT( host.empty());
 		if (!addressMap.count( toAddr )) {
 			return waitForProcessAndConnect( toAddr, this );
 		}
@@ -825,7 +828,7 @@ public:
 		} else {
 			localIp = IPAddress(getCurrentProcess()->address.ip.toV4() + deterministicRandom()->randomInt(0, 256));
 		}
-		peerc->connect(myc, NetworkAddress(localIp, deterministicRandom()->randomInt(40000, 60000)));
+		peerc->connect(myc, NetworkAddress(localIp, deterministicRandom()->randomInt(40000, 60000), false, toAddr.isTLS()));
 
 		((Sim2Listener*)peerp->getListener(toAddr).getPtr())->incomingConnection( 0.5*deterministicRandom()->random01(), Reference<IConnection>(peerc) );
 		return onConnect( ::delay(0.5*deterministicRandom()->random01()), myc );
@@ -846,7 +849,6 @@ public:
 		return conn;
 	}
 	virtual Reference<IListener> listen( NetworkAddress localAddr ) {
-		ASSERT( !localAddr.isTLS() );
 		Reference<IListener> listener( getCurrentProcess()->getListener(localAddr) );
 		ASSERT(listener);
 		return listener;
@@ -1001,7 +1003,7 @@ public:
 	virtual void run() {
 		_run(this);
 	}
-	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
+	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
 	                                const char* coordinationFolder) {
 		ASSERT( locality.machineId().present() );
@@ -1030,14 +1032,14 @@ public:
 		}
 
 		NetworkAddressList addresses;
-		addresses.address = NetworkAddress(ip, port, true, false);
+		addresses.address = NetworkAddress(ip, port, true, sslEnabled);
 		if(listenPerProcess == 2) {
 			addresses.secondaryAddress = NetworkAddress(ip, port+1, true, false);
 		}
 
 		ProcessInfo* m = new ProcessInfo(name, locality, startingClass, addresses, this, dataFolder, coordinationFolder);
 		for (int processPort = port; processPort < port + listenPerProcess; ++processPort) {
-			NetworkAddress address(ip, processPort, true, false); // SOMEDAY see above about becoming SSL!
+			NetworkAddress address(ip, processPort, true, sslEnabled && processPort == port);
 			m->listenerMap[address] = Reference<IListener>( new Sim2Listener(m, address) );
 			addressMap[address] = m;
 		}
@@ -1570,7 +1572,7 @@ public:
 		return processes;
 	}
 	virtual ProcessInfo* getProcessByAddress( NetworkAddress const& address ) {
-		NetworkAddress normalizedAddress(address.ip, address.port, true, false);
+		NetworkAddress normalizedAddress(address.ip, address.port, true, address.isTLS());
 		ASSERT( addressMap.count( normalizedAddress ) );
 		return addressMap[ normalizedAddress ];
 	}

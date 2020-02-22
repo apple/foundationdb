@@ -186,9 +186,9 @@ public:
 		return result;
 	}
 
-	virtual bool hasHealthyAvailableSpace(double minRatio, int64_t minAvailableSpace) {
-		return all([minRatio, minAvailableSpace](Reference<IDataDistributionTeam> team) {
-			return team->hasHealthyAvailableSpace(minRatio, minAvailableSpace);
+	virtual bool hasHealthyAvailableSpace(double minRatio) {
+		return all([minRatio](Reference<IDataDistributionTeam> team) {
+			return team->hasHealthyAvailableSpace(minRatio);
 		});
 	}
 
@@ -929,8 +929,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					if(rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT) inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_UNHEALTHY;
 					if(rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
-					double targetFreeSpaceRatio = std::max(SERVER_KNOBS->START_MIN_FREE_SPACE_RATIO - stuckCount*SERVER_KNOBS->MIN_FREE_SPACE_RATIO_INCREMENT, SERVER_KNOBS->END_MIN_FREE_SPACE_RATIO);
-					auto req = GetTeamRequest(rd.wantsNewServers, rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, true, false, targetFreeSpaceRatio, inflightPenalty);
+					auto req = GetTeamRequest(rd.wantsNewServers, rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, true, false, inflightPenalty);
 					req.completeSources = rd.completeSources;
 					Optional<Reference<IDataDistributionTeam>> bestTeam = wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
 					// If a DC has no healthy team, we stop checking the other DCs until
@@ -1233,7 +1232,7 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(
-				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, true, false, SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF))));
+				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, true, false))));
 				
 				traceEvent.detail("DestTeam", printable(randomTeam.map<std::string>([](const Reference<IDataDistributionTeam>& team){
 					return team->getDesc();
@@ -1339,7 +1338,7 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 
 				if (randomTeam.present()) {
 					state Optional<Reference<IDataDistributionTeam>> unloadedTeam = wait(brokenPromiseToNever(
-					    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, true, true, false, SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF))));
+					    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, true, true, false))));
 
 					traceEvent.detail("DestTeam", printable(unloadedTeam.map<std::string>([](const Reference<IDataDistributionTeam>& team){
 						return team->getDesc();

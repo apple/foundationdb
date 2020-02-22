@@ -27,8 +27,12 @@
 #include <stdint.h>
 #include <variant>
 #include "boost/asio.hpp"
+#ifndef TLS_DISABLED
+#include "boost/asio/ssl.hpp"
+#endif
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
+#include "flow/TLSPolicy.h"
 
 enum class TaskPriority {
 	Max = 1000000,
@@ -40,6 +44,8 @@ enum class TaskPriority {
 	DiskIOComplete = 9150,
 	LoadBalancedEndpoint = 9000,
 	ReadSocket = 9000,
+	AcceptSocket = 8950,
+	Handshake = 8900,
 	CoordinationReply = 8810,
 	Coordination = 8800,
 	FailureMonitor = 8700,
@@ -281,6 +287,13 @@ struct NetworkAddressList {
 		return secondaryAddress < r.secondaryAddress;
 	}
 
+	NetworkAddress getTLSAddress() const {
+		if(!secondaryAddress.present() || address.isTLS()) {
+			return address;
+		}
+		return secondaryAddress.get();
+	}
+
 	std::string toString() const {
 		if(!secondaryAddress.present()) {
 			return address.toString();
@@ -319,6 +332,8 @@ struct NetworkMetrics {
 	NetworkMetrics() {}
 };
 
+struct BoundedFlowLock;
+
 struct NetworkInfo {
 	NetworkMetrics metrics;
 	double oldestAlternativesFailure = 0;
@@ -326,8 +341,9 @@ struct NetworkInfo {
 	double lastAlternativesFailureSkipDelay = 0;
 
 	std::map<std::pair<IPAddress, uint16_t>, std::pair<int,double>> serverTLSConnectionThrottler;
+	BoundedFlowLock* handshakeLock;
 
-	NetworkInfo() {}
+	NetworkInfo();
 };
 
 class IEventFD : public ReferenceCounted<IEventFD> {
@@ -345,6 +361,10 @@ public:
 
 	// Closes the underlying connection eventually if it is not already closed.
 	virtual void close() = 0;
+
+	virtual Future<Void> acceptHandshake() = 0;
+
+	virtual Future<Void> connectHandshake() = 0;
 
 	// returns when write() can write at least one byte (or may throw an error if the connection dies)
 	virtual Future<Void> onWritable() = 0;
@@ -389,7 +409,7 @@ typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
 class INetwork;
 extern INetwork* g_network;
-extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false);
+extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false, Reference<TLSPolicy> policy = Reference<TLSPolicy>(), const TLSParams& tlsParams = TLSParams());
 
 class INetwork {
 public:
