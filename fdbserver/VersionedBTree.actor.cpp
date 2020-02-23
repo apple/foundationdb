@@ -5398,7 +5398,7 @@ ACTOR Future<Void> verify(VersionedBTree *btree, FutureStream<Version> vStream, 
 
 			wait(success(fRangeAll) && success(fRangeRandom) && success(fSeekAll));
 
-			printf("Verified through version %" PRId64 ", %d errors\n", v, *pErrorCount);
+			printf("Verified version %" PRId64 ", %d errors\n", v, *pErrorCount);
 
 			if(*pErrorCount != 0)
 				break;
