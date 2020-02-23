@@ -1357,9 +1357,10 @@ public:
 		expireSnapshots(v);
 	};
 
-	// Get the oldest version set as of the last commit.
+	// Get the oldest *readable* version, which is not the same as the oldest retained version as the version
+	// returned could have been set as the oldest version in the pending commit
 	Version getOldestVersion() override {
-		return pLastCommittedHeader->oldestVersion;
+		return pHeader->oldestVersion;
 	};
 
 	// Calculate the *effective* oldest version, which can be older than the one set in the last commit since we
@@ -4312,7 +4313,7 @@ private:
 		Future<Void> previousCommit = self->m_latestCommit;
 		self->m_latestCommit = committed.getFuture();
 
-		// Wait for the latest commit that started to be finished.
+		// Wait for the latest commit to be finished.
 		wait(previousCommit);
 
 		self->m_pager->setOldestVersion(self->m_newOldestVersion);
@@ -5370,7 +5371,7 @@ ACTOR Future<Void> verify(VersionedBTree *btree, FutureStream<Version> vStream, 
 			}
 
 			// Choose a random committed version, or sometimes the latest (which could be ahead of the latest version from vStream)
-			v = (committedVersions.empty() || deterministicRandom()->coinflip()) ? btree->getLastCommittedVersion() : committedVersions[deterministicRandom()->randomInt(0, committedVersions.size())];
+			v = (committedVersions.empty() || deterministicRandom()->random01() < 0.25) ? btree->getLastCommittedVersion() : committedVersions[deterministicRandom()->randomInt(0, committedVersions.size())];
 			debug_printf("Using committed version %" PRId64 "\n", v);
 			// Get a cursor at v so that v doesn't get expired between the possibly serial steps below.
 			state Reference<IStoreCursor> cur = btree->readAtVersion(v);
