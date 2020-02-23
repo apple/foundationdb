@@ -46,12 +46,12 @@ RUN cd /tmp && curl -L https://github.com/ninja-build/ninja/archive/v1.9.0.zip -
 RUN cd /tmp && curl -L https://www.openssl.org/source/openssl-1.1.1d.tar.gz -o openssl.tar.gz &&\
     echo "1e3a91bc1f9dfce01af26026f856e064eab4c8ee0a8f457b5ae30b40b8b711f2  openssl.tar.gz" > openssl-sha.txt &&\
     sha256sum -c openssl-sha.txt && tar -xzf openssl.tar.gz &&\
-    cd openssl-1.1.1d && scl enable devtoolset-8 -- ./config --prefix=/usr/local/stow/openssl CFLAGS="-fPIC -O3" --prefix=/usr/local &&\
+    cd openssl-1.1.1d && scl enable devtoolset-8 -- ./config CFLAGS="-fPIC -O3" --prefix=/usr &&\
     scl enable devtoolset-8 -- make -j`nproc` && scl enable devtoolset-8 -- make -j1 install &&\
     cd /tmp/ && rm -rf /tmp/openssl-1.1.1d /tmp/openssl.tar.gz
 
-LABEL version=0.1.11
-ENV DOCKER_IMAGEVER=0.1.11
+LABEL version=0.1.12
+ENV DOCKER_IMAGEVER=0.1.12
 ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0
 ENV CC=/opt/rh/devtoolset-8/root/usr/bin/gcc
 ENV CXX=/opt/rh/devtoolset-8/root/usr/bin/g++
