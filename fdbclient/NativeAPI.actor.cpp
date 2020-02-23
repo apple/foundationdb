@@ -2544,8 +2544,8 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 				} else {
 					Optional<Value> val = wait( tr.get( it->range().begin ) );
 					if( !val.present() || val.get() != m.setValue ) {
-						TraceEvent evt = TraceEvent(SevError, "CheckWritesFailed")
-							.detail("Class", "Set")
+						TraceEvent evt(SevError, "CheckWritesFailed");
+						evt.detail("Class", "Set")
 							.detail("Key", it->range().begin)
 							.detail("Expected", m.setValue);
 						if( !val.present() )
