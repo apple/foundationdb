@@ -9,7 +9,7 @@ RUN yum install -y yum-utils &&\
 		devtoolset-8-gcc-8.3.1-3.1.el6 devtoolset-8-gcc-c++-8.3.1-3.1.el6 \
 		rh-python36-python-devel devtoolset-8-valgrind-devel \
 		mono-core rh-ruby24 golang python27 rpm-build debbuild \
-		python-pip npm dos2unix valgrind-devel ccache distcc devtoolset-8-libubsan-devel libubsan-devel &&\
+		python-pip dos2unix valgrind-devel ccache distcc devtoolset-8-libubsan-devel libubsan-devel &&\
 	pip install boto3==1.1.1
 
 USER root
@@ -46,8 +46,9 @@ RUN cd /tmp && curl -L https://github.com/ninja-build/ninja/archive/v1.9.0.zip -
 RUN cd /tmp && curl -L https://www.openssl.org/source/openssl-1.1.1d.tar.gz -o openssl.tar.gz &&\
     echo "1e3a91bc1f9dfce01af26026f856e064eab4c8ee0a8f457b5ae30b40b8b711f2  openssl.tar.gz" > openssl-sha.txt &&\
     sha256sum -c openssl-sha.txt && tar -xzf openssl.tar.gz &&\
-    cd openssl-1.1.1d && scl enable devtoolset-8 -- ./config CFLAGS="-fPIC -O3" --prefix=/usr &&\
+    cd openssl-1.1.1d && scl enable devtoolset-8 -- ./config CFLAGS="-fPIC -O3" --prefix=/usr/local &&\
     scl enable devtoolset-8 -- make -j`nproc` && scl enable devtoolset-8 -- make -j1 install &&\
+		ln -sv /usr/local/lib64/lib*.so.1.1 /usr/lib64/ &&\
     cd /tmp/ && rm -rf /tmp/openssl-1.1.1d /tmp/openssl.tar.gz
 
 LABEL version=0.1.12

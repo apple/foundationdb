@@ -49,7 +49,7 @@ ifeq ($(PLATFORM),Linux)
   CXXFLAGS += -std=c++17
 
   BOOST_BASEDIR ?= /opt
-  TLS_LIBDIR ?= /usr/lib64
+  TLS_LIBDIR ?= /usr/local/lib64
   DLEXT := so
   java_DLEXT := so
   TARGET_LIBC_VERSION ?= 2.11
@@ -65,7 +65,7 @@ else ifeq ($(PLATFORM),Darwin)
   .LIBPATTERNS := lib%.dylib lib%.a
 
   BOOST_BASEDIR ?= ${HOME}
-  TLS_LIBDIR ?= /usr/lib64
+  TLS_LIBDIR ?= /usr/local/lib64
   DLEXT := dylib
   java_DLEXT := jnilib
 else
