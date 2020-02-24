@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"

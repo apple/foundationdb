@@ -54,7 +54,7 @@ namespace ClientLogEventsParser {
 	void parseEventCommit(BinaryReader &reader) {
 		FdbClientLogEvents::EventCommit c;
 		reader >> c;
-		ASSERT(c.latency < 10000 && c.commitBytes < CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT && c.numMutations < 1000000);
+		ASSERT(c.latency() < 10000 && c.commitBytes() < CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT && c.numMutations() < 1000000);
 	}
 
 	void parseEventErrorGet(BinaryReader &reader) {
@@ -72,7 +72,7 @@ namespace ClientLogEventsParser {
 	void parseEventErrorCommit(BinaryReader &reader) {
 			FdbClientLogEvents::EventCommitError ce;
 			reader >> ce;
-			ASSERT(ce.errCode < 10000);
+			ASSERT(ce.errCode() < 10000);
 	}
 
 	struct ParserBase {

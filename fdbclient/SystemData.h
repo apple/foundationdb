@@ -25,12 +25,15 @@
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/RestoreWorkerInterface.actor.h"
 
+struct ProcessClass;
+struct ProcessData;
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
 struct RestoreMasterInterface;
+struct RestoreRequest;
+struct StorageServerInterface;
+struct RestoreWorkerInterface;
 
 extern const KeyRangeRef normalKeys; // '' to systemKeys.begin
 extern const KeyRangeRef systemKeys;  // [FF] to [FF][FF]
@@ -44,17 +47,17 @@ extern const KeyRef keyServersPrefix, keyServersEnd, keyServersKeyServersKey;
 const Key keyServersKey( const KeyRef& k );
 const KeyRef keyServersKey( const KeyRef& k, Arena& arena );
 const Value keyServersValue(
-	const vector<UID>& src,
-	const vector<UID>& dest = vector<UID>() );
+	const std::vector<UID>& src,
+	const std::vector<UID>& dest = std::vector<UID>() );
 void decodeKeyServersValue( const ValueRef& value,
-	vector<UID>& src, vector<UID>& dest  );
+                            std::vector<UID>& src, std::vector<UID>& dest  );
 
 //    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
 extern const KeyRangeRef storageCacheKeys;
 extern const KeyRef storageCachePrefix;
 const Key storageCacheKey( const KeyRef& k );
-const Value storageCacheValue( const vector<uint16_t>& serverIndices );
-void decodeStorageCacheValue( const ValueRef& value, vector<uint16_t>& serverIndices );
+const Value storageCacheValue( const std::vector<uint16_t>& serverIndices );
+void decodeStorageCacheValue( const ValueRef& value, std::vector<uint16_t>& serverIndices );
 
 //    "\xff/serverKeys/[[serverID]]/[[begin]]" := "" | "1" | "2"
 extern const KeyRef serverKeysPrefix;
@@ -140,7 +143,7 @@ extern const ValueRef processClassVersionValue;
 const Key processClassKeyFor(StringRef processID );
 const Value processClassValue( ProcessClass const& );
 Key decodeProcessClassKey( KeyRef const& );
-ProcessClass decodeProcessClassValue( ValueRef const& );
+void decodeProcessClassValue( ProcessClass&, ValueRef const& );
 UID decodeProcessClassKeyOld( KeyRef const& key );
 
 //   "\xff/conf/[[option]]" := "value"
@@ -172,7 +175,7 @@ extern const KeyRef workerListPrefix;
 const Key workerListKeyFor(StringRef processID );
 const Value workerListValue( ProcessData const& );
 Key decodeWorkerListKey( KeyRef const& );
-ProcessData decodeWorkerListValue( ValueRef const& );
+void decodeWorkerListValue( ProcessData&, ValueRef const& );
 
 //    "\xff/backupProgress/[[workerID]]" := "[[WorkerBackupStatus]]"
 extern const KeyRangeRef backupProgressKeys;
@@ -191,8 +194,8 @@ extern const KeyRef coordinatorsKey;
 extern const KeyRef logsKey;
 extern const KeyRef minRequiredCommitVersionKey;
 
-const Value logsValue( const vector<std::pair<UID, NetworkAddress>>& logs, const vector<std::pair<UID, NetworkAddress>>& oldLogs );
-std::pair<vector<std::pair<UID, NetworkAddress>>,vector<std::pair<UID, NetworkAddress>>> decodeLogsValue( const ValueRef& value );
+const Value logsValue( const std::vector<std::pair<UID, NetworkAddress>>& logs, const std::vector<std::pair<UID, NetworkAddress>>& oldLogs );
+std::pair<std::vector<std::pair<UID, NetworkAddress>>,std::vector<std::pair<UID, NetworkAddress>>> decodeLogsValue( const ValueRef& value );
 
 // The "global keys" are send to each storage server any time they are changed
 extern const KeyRef globalKeysPrefix;
@@ -341,7 +344,7 @@ const Value restoreRequestDoneVersionValue(Version readVersion);
 Version decodeRestoreRequestDoneVersionValue(ValueRef const& value);
 const Key restoreRequestKeyFor(int const& index);
 const Value restoreRequestValue(RestoreRequest const& server);
-RestoreRequest decodeRestoreRequestValue(ValueRef const& value);
+void decodeRestoreRequestValue(RestoreRequest&, ValueRef const& value);
 const Key restoreStatusKeyFor(StringRef statusType);
 const Value restoreStatusValue(double val);
 

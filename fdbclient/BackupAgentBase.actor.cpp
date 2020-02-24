@@ -22,6 +22,7 @@
 #include <time.h>
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/MasterProxyInterface.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include

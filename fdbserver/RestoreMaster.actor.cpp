@@ -631,7 +631,9 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 				ASSERT(!restoreRequestValues.more);
 				if (restoreRequestValues.size()) {
 					for (auto& it : restoreRequestValues) {
-						restoreRequests.push_back(restoreRequests.arena(), decodeRestoreRequestValue(it.value));
+						RestoreRequest rreq;
+						decodeRestoreRequestValue(rreq, it.value);
+						restoreRequests.push_back(restoreRequests.arena(), rreq);
 						TraceEvent("FastRestoreMasterPhaseCollectRestoreRequests")
 						    .detail("RestoreRequest", restoreRequests.back().toString());
 					}

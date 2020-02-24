@@ -20,6 +20,7 @@
 
 #include "fdbclient/SystemData.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "flow/TDMetric.actor.h"
 
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
@@ -417,11 +418,9 @@ UID decodeProcessClassKeyOld( KeyRef const& key ) {
 	return processID;
 }
 
-ProcessClass decodeProcessClassValue( ValueRef const& value ) {
-	ProcessClass s;
+void decodeProcessClassValue( ProcessClass& out,ValueRef const& value ) {
 	BinaryReader reader( value, IncludeVersion() );
-	reader >> s;
-	return s;
+	reader >> out;
 }
 
 const KeyRangeRef configKeys( LiteralStringRef("\xff/conf/"), LiteralStringRef("\xff/conf0") );
@@ -484,11 +483,9 @@ Key decodeWorkerListKey(KeyRef const& key) {
 	return processID;
 }
 
-ProcessData decodeWorkerListValue( ValueRef const& value ) {
-	ProcessData s;
+void decodeWorkerListValue( ProcessData& out, ValueRef const& value ) {
 	BinaryReader reader( value, IncludeVersion() );
-	reader >> s;
-	return s;
+	reader >> out;
 }
 
 const KeyRangeRef backupProgressKeys(LiteralStringRef("\xff\x02/backupProgress/"),
@@ -783,11 +780,9 @@ const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& cmdInterf)
 	return wr.toValue();
 }
 
-RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value) {
-	RestoreWorkerInterface s;
+void decodeRestoreWorkerInterfaceValue(RestoreWorkerInterface& out, ValueRef const& value) {
 	BinaryReader reader(value, IncludeVersion());
-	reader >> s;
-	return s;
+	reader >> out;
 }
 
 // Encode and decode restore request value
@@ -833,11 +828,9 @@ const Value restoreRequestValue(RestoreRequest const& request) {
 	return wr.toValue();
 }
 
-RestoreRequest decodeRestoreRequestValue(ValueRef const& value) {
-	RestoreRequest s;
+void decodeRestoreRequestValue(RestoreRequest& out, ValueRef const& value) {
 	BinaryReader reader(value, IncludeVersion());
-	reader >> s;
-	return s;
+	reader >> out;
 }
 
 // TODO: Register restore performance data to restoreStatus key

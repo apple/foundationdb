@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseContext.h"

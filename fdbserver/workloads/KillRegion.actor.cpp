@@ -19,6 +19,8 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/ClusterConnectionFile.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -89,15 +91,15 @@ struct KillRegionWorkload : TestWorkload {
 
 		TraceEvent("ForceRecovery_UsableRegions");
 
-		DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
+		Reference<DatabaseConfiguration> conf = wait(getDatabaseConfiguration(cx));
 
-		TraceEvent("ForceRecovery_GotConfig").detail("Conf", conf.toString());
+		TraceEvent("ForceRecovery_GotConfig").detail("Conf", conf->toString());
 
-		if(conf.usableRegions>1) {
+		if(conf->usableRegions>1) {
 			//only needed if force recovery was unnecessary and we killed the secondary
 			wait( success( changeConfig( cx, g_simulator.disablePrimary + " repopulate_anti_quorum=1", true ) ) );
-			while( self->dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED ) {
-				wait( self->dbInfo->onChange() );
+			while( ServerDBInfo::fromReference(self->dbInfo)->get().recoveryState < RecoveryState::STORAGE_RECOVERED ) {
+				wait( ServerDBInfo::fromReference(self->dbInfo)->onChange() );
 			}
 			wait( success( changeConfig( cx, "usable_regions=1", true ) ) );
 		}

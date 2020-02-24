@@ -85,7 +85,7 @@ public:
 
 class KeyRangeActorMap {
 public:
-	void getRangesAffectedByInsertion( const KeyRangeRef& keys, vector< KeyRange >& affectedRanges );
+	void getRangesAffectedByInsertion( const KeyRangeRef& keys, std::vector< KeyRange >& affectedRanges );
 	void insert( const KeyRangeRef& keys, const Future<Void>& value ) { map.insert( keys, value ); }
 	void cancel( const KeyRangeRef& keys ) { insert( keys, Future<Void>() ); }
 	bool liveActorAt( const KeyRef& key ) { Future<Void> actorAt = map[key]; return actorAt.isValid() && !actorAt.isReady(); }

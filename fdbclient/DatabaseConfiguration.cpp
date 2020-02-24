@@ -21,6 +21,9 @@
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/SystemData.h"
 
+template <> void addref( DatabaseConfiguration* ptr ) { ptr->addref(); }
+template <> void delref( DatabaseConfiguration* ptr ) { ptr->delref(); }
+
 DatabaseConfiguration::DatabaseConfiguration()
 {
 	resetInternal();

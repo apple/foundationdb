@@ -20,12 +20,15 @@
 
 #include <cinttypes>
 
+#include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ManagementAPI.actor.h"
 
 #include "fdbclient/SystemData.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/UnitTest.h"
@@ -273,15 +276,15 @@ bool isCompleteConfiguration( std::map<std::string, std::string> const& options 
 			options.count( p+"storage_engine" ) == 1;
 }
 
-ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
+ACTOR Future<Reference<DatabaseConfiguration>> getDatabaseConfiguration( Database cx ) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Standalone<RangeResultRef> res = wait( tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY) );
 			ASSERT( res.size() < CLIENT_KNOBS->TOO_MANY );
-			DatabaseConfiguration config;
-			config.fromKeyValues((VectorRef<KeyValueRef>) res);
+			Reference<DatabaseConfiguration> config(new DatabaseConfiguration{});
+			config->fromKeyValues((VectorRef<KeyValueRef>) res);
 			return config;
 		} catch( Error &e ) {
 			wait( tr.onError(e) );
@@ -859,13 +862,14 @@ ACTOR Future<vector<ProcessData>> getWorkers( Transaction* tr ) {
 
 	std::map<Optional<Standalone<StringRef>>,ProcessClass> id_class;
 	for( int i = 0; i < processClasses.get().size(); i++ ) {
-		id_class[decodeProcessClassKey(processClasses.get()[i].key)] = decodeProcessClassValue(processClasses.get()[i].value);
+		decodeProcessClassValue(id_class[decodeProcessClassKey(processClasses.get()[i].key)], processClasses.get()[i].value);
 	}
 
 	std::vector<ProcessData> results;
 
 	for( int i = 0; i < processData.get().size(); i++ ) {
-		ProcessData data = decodeWorkerListValue(processData.get()[i].value);
+		ProcessData data;
+		decodeWorkerListValue(data, processData.get()[i].value);
 		ProcessClass processClass = id_class[data.locality.processId()];
 
 		if(processClass.classSource() == ProcessClass::DBSource || data.processClass.classType() == ProcessClass::UnsetClass)

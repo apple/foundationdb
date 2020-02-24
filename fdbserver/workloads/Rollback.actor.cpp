@@ -56,7 +56,7 @@ struct RollbackWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> simulateFailure( Database cx, RollbackWorkload* self ) {
-		state ServerDBInfo system = self->dbInfo->get();
+		state ServerDBInfo system = ServerDBInfo::fromReference(self->dbInfo)->get();
 		auto tlogs = system.logSystemConfig.allPresentLogs();
 		
 		if( tlogs.empty() || system.client.proxies.empty() ) {
@@ -90,7 +90,7 @@ struct RollbackWorkload : TestWorkload {
 
 		// While the clogged machines are still clogged...
 		wait( delay( self->clogDuration/3 ) );
-		system = self->dbInfo->get();
+		system = ServerDBInfo::fromReference(self->dbInfo)->get();
 
 		// Kill the proxy and the unclogged tlog
 		if (self->enableFailures) {

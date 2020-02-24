@@ -19,8 +19,10 @@
  */
 
 #include "fdbserver/workloads/workloads.actor.h"
-#include <fdbserver/Knobs.h>
-#include <flow/actorcompiler.h>
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/SystemData.h"
+#include "fdbserver/Knobs.h"
+#include "flow/actorcompiler.h"
 
 namespace {
 

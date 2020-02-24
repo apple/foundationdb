@@ -1499,7 +1499,7 @@ void ReadYourWritesTransactionOptions::reset(Transaction const& tr) {
 	memset(this, 0, sizeof(*this));
 	timeoutInSeconds = 0.0;
 	maxRetries = -1;
-	snapshotRywEnabled = tr.getDatabase()->snapshotRywEnabled;
+	snapshotRywEnabled = tr.getDatabase()->snapshotRywEnabled();
 }
 
 bool ReadYourWritesTransactionOptions::getAndResetWriteConflictDisabled() {

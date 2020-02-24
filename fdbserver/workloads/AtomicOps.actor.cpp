@@ -20,6 +20,7 @@
 
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -101,7 +102,7 @@ struct AtomicOpsWorkload : TestWorkload {
 
 	virtual Future<Void> setup( Database const& cx ) {
 		if (apiVersion500)
-			cx->apiVersion = 500;
+			cx->apiVersion() = 500;
 
 		if(clientId != 0)
 			return Void();

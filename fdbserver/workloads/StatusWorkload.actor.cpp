@@ -19,12 +19,12 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/DatabaseContext.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 extern bool noUnseed;

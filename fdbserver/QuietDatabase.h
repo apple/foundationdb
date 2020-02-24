@@ -22,13 +22,14 @@
 #define FDBSERVER_QUIETDATABASE_H
 #pragma once
 
-#include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/DatabaseContext.h" // for clone()
-#include "fdbserver/TesterInterface.actor.h"
+#include "flow/flow.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbserver/QuietDatabaseFwd.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "flow/actorcompiler.h"
+#include <cstdint>
 
-Future<int64_t> getDataInFlight( Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const& );
+class Database;
+
 Future<std::pair<int64_t,int64_t>> getTLogQueueInfo( Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const& );
 Future<int64_t> getMaxStorageServerQueueSize( Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const& );
 Future<int64_t> getDataDistributionQueueSize( Database const &cx, Reference<AsyncVar<struct ServerDBInfo>> const&, bool const& reportInFlight );
@@ -41,5 +42,4 @@ Future<Void> repairDeadDatacenter(Database const& cx, Reference<AsyncVar<ServerD
 Future<vector<WorkerInterface>> getStorageWorkers( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo, bool const& localOnly );
 Future<vector<WorkerInterface>> getCoordWorkers( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo );
 
-#include "flow/unactorcompiler.h"
 #endif

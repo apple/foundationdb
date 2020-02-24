@@ -599,12 +599,12 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self) {
 				when(wait(self->cx->onMasterProxiesChanged())) {}
 				when(GetReadVersionReply reply = wait(loadBalance(self->cx->getMasterProxies(false),
 				                                                  &MasterProxyInterface::getConsistentReadVersion,
-				                                                  request, self->cx->taskID))) {
+				                                                  request, self->cx->taskID()))) {
 					self->savedVersion = std::max(reply.version, self->savedVersion);
 					self->minKnownCommittedVersion = std::max(reply.version, self->minKnownCommittedVersion);
 					TraceEvent("BackupWorkerNoopPop", self->myId).detail("SavedVersion", self->savedVersion);
 					self->pop(); // Pop while the worker is in this NOOP state.
-					wait(delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID));
+					wait(delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID()));
 				}
 			}
 		}

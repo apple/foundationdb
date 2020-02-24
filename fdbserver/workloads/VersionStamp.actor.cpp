@@ -20,6 +20,8 @@
 
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -78,7 +80,7 @@ struct VersionStampWorkload : TestWorkload {
 			apiVersion = Database::API_VERSION_LATEST;
 		}
 		TraceEvent("VersionStampApiVersion").detail("ApiVersion", apiVersion);
-		cx->apiVersion = apiVersion;
+		cx->apiVersion() = apiVersion;
 		if (clientId == 0)
 			return _start(cx, this, 1 / transactionsPerSecond);
 		return Void();

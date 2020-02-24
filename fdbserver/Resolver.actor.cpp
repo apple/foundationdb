@@ -21,6 +21,7 @@
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/ResolverInterface.h"
+#include "fdbclient/CommitTransaction.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/WaitFailure.h"

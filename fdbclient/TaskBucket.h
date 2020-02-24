@@ -25,6 +25,7 @@
 #include "flow/flow.h"
 #include "flow/IDispatched.h"
 #include "flow/genericactors.actor.h"
+#include "flow/Stats.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"

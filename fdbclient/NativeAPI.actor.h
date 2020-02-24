@@ -28,12 +28,11 @@
 
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
+#include "fdbrpc/Locality.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/CoordinationInterface.h"
-#include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClientLogEvents.h"
+#include "fdbclient/MutationRef.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // CLIENT_BUGGIFY should be used to randomly introduce failures at run time (like BUGGIFY but for client side testing)
@@ -42,33 +41,14 @@
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
 
 // Incomplete types that are reference counted
-class DatabaseContext;
-template <> void addref( DatabaseContext* ptr );
-template <> void delref( DatabaseContext* ptr );
+
+FWD_DECL_REF(DatabaseContext);
+FWD_DECL_REF(ClusterConnectionFile);
+struct CommitTransactionRequest;
 
 void validateOptionValue(Optional<StringRef> value, bool shouldBePresent);
 
 void enableClientInfoLogging();
-
-struct NetworkOptions {
-	std::string localAddress;
-	std::string clusterFile;
-	Optional<std::string> traceDirectory;
-	uint64_t traceRollSize;
-	uint64_t traceMaxLogsSize;
-	std::string traceLogGroup;
-	std::string traceFormat;
-	std::string traceClockSource;
-	Optional<bool> logClientInfo;
-	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
-	bool slowTaskProfilingEnabled;
-
-	// The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
-	NetworkOptions()
-	  : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
-	    traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	    traceFormat("xml"), traceClockSource("now"), slowTaskProfilingEnabled(false) {}
-};
 
 class Database {
 public:
@@ -305,10 +285,10 @@ private:
 
 	double backoff;
 	Version committedVersion;
-	CommitTransactionRequest tr;
+	CommitTransactionRequest* tr;
 	Future<Version> readVersion;
 	Promise<Optional<Value>> metadataVersion;
-	vector<Future<std::pair<Key, Key>>> extraConflictRanges;
+	std::vector<Future<std::pair<Key, Key>>> extraConflictRanges;
 	Promise<Void> commitResult;
 	Future<Void> committing;
 };
@@ -324,7 +304,7 @@ int64_t extractIntOption( Optional<StringRef> value, int64_t minValue = std::num
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
-ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions);
+ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
 
 #include "flow/unactorcompiler.h"
 #endif

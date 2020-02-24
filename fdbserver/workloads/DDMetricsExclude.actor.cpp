@@ -21,6 +21,8 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/ClusterConnectionFile.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbserver/workloads/workloads.actor.h"

@@ -29,8 +29,8 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	virtual std::string description() { return "TriggerRecoveryLoop"; }
 
 	ACTOR Future<Void> setOriginalNumOfResolvers(Database cx, TriggerRecoveryLoopWorkload* self) {
-		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-		self->originalNumOfResolvers = self->currentNumOfResolvers = config.getDesiredResolvers();
+		Reference<DatabaseConfiguration> config = wait(getDatabaseConfiguration(cx));
+		self->originalNumOfResolvers = self->currentNumOfResolvers = config->getDesiredResolvers();
 		return Void();
 	}
 

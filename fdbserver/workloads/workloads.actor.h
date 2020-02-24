@@ -19,16 +19,17 @@
  */
 
 #pragma once
+#include "FastRef.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_WORKLOADS_ACTOR_G_H)
 #define FDBSERVER_WORKLOADS_ACTOR_G_H
 #include "fdbserver/workloads/workloads.actor.g.h"
 #elif  !defined(FDBSERVER_WORKLOADS_ACTOR_H)
 #define FDBSERVER_WORKLOADS_ACTOR_H
 
+#include "fdbserver/ServerDBInfoRef.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/DatabaseContext.h" // for clone()
-#include "fdbserver/TesterInterface.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/PerfMetric.h"
 #include "flow/actorcompiler.h"
 
 /*
@@ -46,7 +47,7 @@ struct WorkloadContext {
 	Standalone<VectorRef<KeyValueRef>> options;
 	int clientId, clientCount;
 	int64_t sharedRandomNumber;
-	Reference<AsyncVar<struct ServerDBInfo>> dbInfo;
+	ServerDBInfoRef dbInfo;
 
 	WorkloadContext();
 	WorkloadContext( const WorkloadContext& );
@@ -197,8 +198,6 @@ public:
 	ISimulator::BackupAgentType simBackupAgents; //If set to true, then the simulation runs backup agents on the workers. Can only be used in simulation.
 	ISimulator::BackupAgentType simDrAgents;
 };
-
-ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<TesterInterface> testers, TestSpec spec);
 
 void logMetrics( vector<PerfMetric> metrics );
 

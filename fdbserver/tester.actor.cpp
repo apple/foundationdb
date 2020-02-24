@@ -39,7 +39,6 @@
 
 using namespace std;
 
-
 WorkloadContext::WorkloadContext() {}
 
 WorkloadContext::WorkloadContext( const WorkloadContext& r )
@@ -295,7 +294,7 @@ TestWorkload *getWorkloadIface( WorkloadRequest work, VectorRef<KeyValueRef> opt
 	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
 	wcx.clientCount = work.clientCount;
-	wcx.dbInfo = dbInfo;
+	wcx.dbInfo = ServerDBInfo::toReference(dbInfo);
 	wcx.options = options;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 

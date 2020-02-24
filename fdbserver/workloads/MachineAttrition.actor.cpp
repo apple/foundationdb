@@ -175,7 +175,7 @@ struct MachineAttritionWorkload : TestWorkload {
 		ASSERT(!g_network->isSimulated());
 		state int killedWorkers = 0;
 		state std::vector<WorkerDetails> allWorkers =
-		    wait(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest()));
+		    wait(ServerDBInfo::fromReference(self->dbInfo)->get().clusterInterface.getWorkers.getReply(GetWorkersRequest()));
 		// Can reuse reboot request to send to each interface since no reply promise needed
 		state RebootRequest rbReq;
 		if (self->reboot) {

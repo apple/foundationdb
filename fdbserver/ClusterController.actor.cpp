@@ -24,6 +24,7 @@
 #include <set>
 #include <vector>
 
+#include "MasterProxyInterface.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -118,12 +119,13 @@ public:
 		bool cachePopulated;
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 
-		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0), logGenerations(0), cachePopulated(false),
-			clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ),
-			serverInfo( new AsyncVar<CachedSerialization<ServerDBInfo>>( CachedSerialization<ServerDBInfo>() ) ),
-			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskPriority::DefaultEndpoint, true ) )  // SOMEDAY: Locality!
-		{
-		}
+		DBInfo()
+		  : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0),
+		    logGenerations(0), cachePopulated(false), clientInfo(new AsyncVar<ClientDBInfo>(ClientDBInfo())),
+		    serverInfo(new AsyncVar<CachedSerialization<ServerDBInfo>>(CachedSerialization<ServerDBInfo>())),
+		    db(DatabaseContext::create(ClientDBInfo::toReference(clientInfo), Future<Void>(), LocalityData(), true,
+		                               TaskPriority::DefaultEndpoint, true)) // SOMEDAY: Locality!
+		{}
 
 		void addRequiredAddresses(const std::vector<WorkerInterface>& interfaces) {
 			for(auto& it : interfaces) {
@@ -2490,7 +2492,8 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 				if(processClasses != self->lastProcessClasses || !self->gotProcessClasses) {
 					self->id_class.clear();
 					for( int i = 0; i < processClasses.size(); i++ ) {
-						auto c = decodeProcessClassValue( processClasses[i].value );
+						ProcessClass c;
+						decodeProcessClassValue( c, processClasses[i].value );
 						ASSERT( c.classSource() != ProcessClass::CommandLineSource );
 						self->id_class[decodeProcessClassKey( processClasses[i].key )] = c;
 					}

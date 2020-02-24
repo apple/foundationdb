@@ -22,6 +22,8 @@
 
 #include "flow/IRandom.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/IRateControl.h"
@@ -121,7 +123,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 
 			try {
-				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0),
+				wait(timeoutError(quietDatabase(cx, ServerDBInfo::fromReference(self->dbInfo), "ConsistencyCheckStart", 0, 1e5, 0, 0),
 				                  self->quiescentWaitTimeout)); // FIXME: should be zero?
 			}
 			catch (Error& e) {
@@ -240,7 +242,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					state bool hasUndesirableServers = wait(self->checkForUndesirableServers(cx, configuration, self));
 
 					//Check that nothing is in-flight or in queue in data distribution
-					int64_t inDataDistributionQueue = wait(getDataDistributionQueueSize(cx, self->dbInfo, true));
+					int64_t inDataDistributionQueue = wait(getDataDistributionQueueSize(cx, ServerDBInfo::fromReference(self->dbInfo), true));
 					if(inDataDistributionQueue > 0)
 					{
 						TraceEvent("ConsistencyCheck_NonZeroDataDistributionQueue").detail("QueueSize", inDataDistributionQueue);
@@ -249,14 +251,14 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 					// Check that the number of process (and machine) teams is no larger than
 					// the allowed maximum number of teams
-					bool teamCollectionValid = wait(getTeamCollectionValid(cx, self->dbInfo));
+					bool teamCollectionValid = wait(getTeamCollectionValid(cx, ServerDBInfo::fromReference(self->dbInfo)));
 					if (!teamCollectionValid) {
 						TraceEvent(SevError, "ConsistencyCheck_TooManyTeams");
 						self->testFailure("The number of process or machine teams is larger than the allowed maximum number of teams");
 					}
 
 					//Check that nothing is in the TLog queues
-					std::pair<int64_t,int64_t> maxTLogQueueInfo = wait(getTLogQueueInfo(cx, self->dbInfo));
+					std::pair<int64_t,int64_t> maxTLogQueueInfo = wait(getTLogQueueInfo(cx, ServerDBInfo::fromReference(self->dbInfo)));
 					if(maxTLogQueueInfo.first > 1e5)  // FIXME: Should be zero?
 					{
 						TraceEvent("ConsistencyCheck_NonZeroTLogQueue").detail("MaxQueueSize", maxTLogQueueInfo.first);
@@ -272,7 +274,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					//Check that nothing is in the storage server queues
 					try
 					{
-						int64_t maxStorageServerQueueSize = wait(getMaxStorageServerQueueSize(cx, self->dbInfo));
+						int64_t maxStorageServerQueueSize = wait(getMaxStorageServerQueueSize(cx, ServerDBInfo::fromReference(self->dbInfo)));
 						if (maxStorageServerQueueSize > 0) {
 							TraceEvent("ConsistencyCheck_ExceedStorageServerQueueLimit")
 							    .detail("MaxQueueSize", maxStorageServerQueueSize);
@@ -1131,7 +1133,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 	//Returns false if any worker that should have a storage server does not have one
 	ACTOR Future<bool> checkForStorage(Database cx, DatabaseConfiguration configuration, ConsistencyCheckWorkload *self)
 	{
-		state vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
+		state vector<WorkerDetails> workers = wait( getWorkers( ServerDBInfo::fromReference(self->dbInfo) ) );
 		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
 		std::set<Optional<Key>> missingStorage;
 
@@ -1167,9 +1169,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 	}
 
 	ACTOR Future<bool> checkForExtraDataStores(Database cx, ConsistencyCheckWorkload *self) {
-		state vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
+		state vector<WorkerDetails> workers = wait( getWorkers( ServerDBInfo::fromReference(self->dbInfo) ) );
 		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
-		auto& db = self->dbInfo->get();
+		auto& db = ServerDBInfo::fromReference(self->dbInfo)->get();
 		state std::vector<TLogInterface> logs = db.logSystemConfig.allPresentLogs();
 
 		state std::vector<WorkerDetails>::iterator itr;
@@ -1216,7 +1218,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		if(g_simulator.extraDB)
 			return true;
 
-		vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
+		vector<WorkerDetails> workers = wait( getWorkers( ServerDBInfo::fromReference(self->dbInfo) ) );
 		std::set<NetworkAddress> workerAddresses;
 
 		for (const auto& it : workers) {
@@ -1301,10 +1303,10 @@ struct ConsistencyCheckWorkload : TestWorkload
 	ACTOR Future<bool> checkUsingDesiredClasses(Database cx, ConsistencyCheckWorkload *self) {
 		state Optional<Key> expectedPrimaryDcId;
 		state Optional<Key> expectedRemoteDcId;
-		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-		state vector<WorkerDetails> allWorkers = wait(getWorkers(self->dbInfo));
-		state vector<WorkerDetails> nonExcludedWorkers = wait(getWorkers(self->dbInfo, GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY));
-		auto& db = self->dbInfo->get();
+		state Reference<DatabaseConfiguration> config = wait(getDatabaseConfiguration(cx));
+		state vector<WorkerDetails> allWorkers = wait(getWorkers(ServerDBInfo::fromReference(self->dbInfo)));
+		state vector<WorkerDetails> nonExcludedWorkers = wait(getWorkers(ServerDBInfo::fromReference(self->dbInfo), GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY));
+		auto& db = ServerDBInfo::fromReference(self->dbInfo)->get();
 
 		std::map<NetworkAddress, WorkerDetails> allWorkerProcessMap;
 		std::map<Optional<Key>, std::vector<ProcessClass::ClassType>> dcToAllClassTypes;
@@ -1344,14 +1346,14 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 		// Check if master and cluster controller are in the desired DC for fearless cluster when running under simulation
 		// FIXME: g_simulator.datacenterDead could return false positives. Relaxing checks until it is fixed.
-		if (g_network->isSimulated() && config.usableRegions> 1 && g_simulator.primaryDcId.present() &&
+		if (g_network->isSimulated() && config->usableRegions> 1 && g_simulator.primaryDcId.present() &&
 			!g_simulator.datacenterDead(g_simulator.primaryDcId) && !g_simulator.datacenterDead(g_simulator.remoteDcId)) {
-			expectedPrimaryDcId = config.regions[0].dcId;
-			expectedRemoteDcId = config.regions[1].dcId;
+			expectedPrimaryDcId = config->regions[0].dcId;
+			expectedRemoteDcId = config->regions[1].dcId;
 			// If the priorities are equal, either could be the primary
-			if (config.regions[0].priority == config.regions[1].priority) {
+			if (config->regions[0].priority == config->regions[1].priority) {
 				expectedPrimaryDcId = masterDcId;
-				expectedRemoteDcId = config.regions[0].dcId == expectedPrimaryDcId.get() ? config.regions[1].dcId : config.regions[0].dcId;
+				expectedRemoteDcId = config->regions[0].dcId == expectedPrimaryDcId.get() ? config->regions[1].dcId : config->regions[0].dcId;
 			}
 
 			if (ccDcId != expectedPrimaryDcId) {
@@ -1404,7 +1406,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 
 		// Check LogRouter
-		if (g_network->isSimulated() && config.usableRegions> 1 && g_simulator.primaryDcId.present() &&
+		if (g_network->isSimulated() && config->usableRegions> 1 && g_simulator.primaryDcId.present() &&
 			!g_simulator.datacenterDead(g_simulator.primaryDcId) && !g_simulator.datacenterDead(g_simulator.remoteDcId)) {
 			for (auto &tlogSet : db.logSystemConfig.tLogs) {
 				if (!tlogSet.isLocal && tlogSet.logRouters.size()) {

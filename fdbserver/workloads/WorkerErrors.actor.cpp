@@ -59,7 +59,7 @@ struct WorkerErrorsWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start(Database cx, WorkerErrorsWorkload *self) {
-		state vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
+		state vector<WorkerDetails> workers = wait( getWorkers( ServerDBInfo::fromReference(self->dbInfo) ) );
 		std::vector<TraceEventFields> errors = wait( self->latestEventOnWorkers( workers ) );
 		for(auto e : errors) {
 			printf("%s\n", e.toString().c_str());

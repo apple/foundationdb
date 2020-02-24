@@ -27,6 +27,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "genericactors.actor.h"
 
 struct MoveKeysWorkload : TestWorkload {
 	bool enabled;
@@ -137,7 +138,7 @@ struct MoveKeysWorkload : TestWorkload {
 			TraceEvent(relocateShardInterval.end()).detail("Result","Success");
 			return Void();
 		} catch (Error& e) {
-			TraceEvent(relocateShardInterval.end(), self->dbInfo->get().master.id()).error(e, true);
+			TraceEvent(relocateShardInterval.end(), ServerDBInfo::fromReference(self->dbInfo)->get().master.id()).error(e, true);
 			throw;
 		}
 	}
@@ -157,9 +158,10 @@ struct MoveKeysWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> forceMasterFailure( Database cx, MoveKeysWorkload *self ) {
+		state Reference<AsyncVar<ServerDBInfo>> dbInfo = ServerDBInfo::fromReference(self->dbInfo);
 		ASSERT( g_network->isSimulated() );
 		loop {
-			if( g_simulator.killZone( self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, true ) )
+			if( g_simulator.killZone( dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, true ) )
 				return Void();
 			wait( delay(1.0) );
 		}

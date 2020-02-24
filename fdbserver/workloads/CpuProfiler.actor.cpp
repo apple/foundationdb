@@ -69,7 +69,7 @@ struct CpuProfilerWorkload : TestWorkload
 			//If we are turning the profiler on, get a list of workers in the system
 			if(enabled)
 			{
-				vector<WorkerDetails> _workers = wait( getWorkers( self->dbInfo ) );
+				vector<WorkerDetails> _workers = wait( getWorkers( ServerDBInfo::fromReference( self->dbInfo ) ) );
 				vector<WorkerInterface> workers;
 				for(int i = 0; i < _workers.size(); i++) {
 					if (self->roles.empty() || std::find(self->roles.cbegin(), self->roles.cend(), _workers[i].processClass.toString()) != self->roles.cend()) {

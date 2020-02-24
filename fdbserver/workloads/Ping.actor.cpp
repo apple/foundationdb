@@ -180,7 +180,7 @@ struct PingWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> workerPinger( PingWorkload* self ) {
-		vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
+		vector<WorkerDetails> workers = wait( getWorkers( ServerDBInfo::fromReference(self->dbInfo) ) );
 		vector<RequestStream<LoadedPingRequest>> peers;
 		for(int i=0; i<workers.size(); i++)
 			peers.push_back( workers[i].interf.debugPing );
@@ -208,7 +208,7 @@ struct PingWorkload : TestWorkload {
 		state Future<Void> collection = actorCollection( addActor.getFuture() );
 
 		if( self->workerBroadcast ) {
-			vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
+			vector<WorkerDetails> workers = wait( getWorkers( ServerDBInfo::fromReference(self->dbInfo) ) );
 			for( int i=0; i<workers.size(); i++ )
 				endpoints.push_back( workers[i].interf.debugPing );
 		} else {

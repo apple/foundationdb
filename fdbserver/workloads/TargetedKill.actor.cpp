@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
@@ -28,6 +29,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "genericactors.actor.h"
 
 struct TargetedKillWorkload : TestWorkload {
 	std::string machineToKill;
@@ -61,7 +63,7 @@ struct TargetedKillWorkload : TestWorkload {
 			return Void();
 		}
 
-		state vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
+		state vector<WorkerDetails> workers = wait( getWorkers( ServerDBInfo::fromReference(self->dbInfo) ) );
 
 		int killed = 0;
 		for( int i = 0; i < workers.size(); i++ ) {
@@ -83,10 +85,11 @@ struct TargetedKillWorkload : TestWorkload {
 	ACTOR Future<Void> assassin( Database cx, TargetedKillWorkload* self ) {
 		wait( delay( self->killAt ) );
 		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
+		state Reference<AsyncVar<ServerDBInfo>> dbInfo = ServerDBInfo::fromReference(self->dbInfo);
 
 		NetworkAddress machine;
 		if( self->machineToKill == "master" ) {
-			machine = self->dbInfo->get().master.address();
+			machine = dbInfo->get().master.address();
 		}
 		else if( self->machineToKill == "masterproxy" ) {
 			auto proxies = cx->getMasterProxies(false);
@@ -94,18 +97,18 @@ struct TargetedKillWorkload : TestWorkload {
 			for( int i = 0; i < proxies->size(); i++) {
 				MasterProxyInterface mpi = proxies->getInterface(o);
 				machine = mpi.address();
-				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
+				if(machine != dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
 					break;
 				o = ++o%proxies->size();
 			}
 		}
 		else if( self->machineToKill == "tlog" ) {
-			auto tlogs = self->dbInfo->get().logSystemConfig.allPresentLogs();
+			auto tlogs = dbInfo->get().logSystemConfig.allPresentLogs();
 			int o = deterministicRandom()->randomInt(0, tlogs.size());
 			for( int i = 0; i < tlogs.size(); i++) {
 				TLogInterface tli = tlogs[o];
 				machine = tli.address();
-				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
+				if(machine != dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
 					break;
 				o = ++o%tlogs.size();
 			}
@@ -115,13 +118,13 @@ struct TargetedKillWorkload : TestWorkload {
 			for( int i = 0; i < storageServers.size(); i++) {
 				StorageServerInterface ssi = storageServers[o];
 				machine = ssi.address();
-				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
+				if(machine != dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
 					break;
 				o = ++o%storageServers.size();
 			}
 		}
 		else if( self->machineToKill == "clustercontroller" || self->machineToKill == "cc" ) {
-			machine = self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress();
+			machine = dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress();
 		}
 
 		TraceEvent("IsolatedMark").detail("TargetedMachine", machine).detail("Role", self->machineToKill);

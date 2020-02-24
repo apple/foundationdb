@@ -19,7 +19,6 @@
  */
 
 #include "fdbrpc/ActorFuzz.h"
-#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 

@@ -34,12 +34,13 @@ standard API and some knowledge of the contents of the system key space.
 
 #include <string>
 #include <map>
+#include "flow/FastRef.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // has to be last include
+
+FWD_DECL_REF(DatabaseConfiguration)
 
 // ConfigurationResult enumerates normal outcomes of changeConfig() and various error
 // conditions specific to it.  changeConfig may also throw an Error to report other problems.
@@ -124,7 +125,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig(
     Database cx, std::map<std::string, std::string> m,
     bool force); // Accepts a full configuration in key/value format (from buildConfiguration)
 
-ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx);
+ACTOR Future<Reference<DatabaseConfiguration>> getDatabaseConfiguration(Database cx);
 ACTOR Future<Void> waitForFullReplication(Database cx);
 
 struct IQuorumChange : ReferenceCounted<IQuorumChange> {

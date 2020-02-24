@@ -20,6 +20,7 @@
 
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -113,7 +114,7 @@ struct WatchAndWaitWorkload : TestWorkload {
 		try {
 			state ReadYourWritesTransaction tr(cx);
 			loop {
-				cx->maxOutstandingWatches = 1e6;
+				cx->maxOutstandingWatches() = 1e6;
 				try {
 					state Future<Void> watch = tr.watch( self->keyForIndex( index ) );
 					wait( tr.commit() );

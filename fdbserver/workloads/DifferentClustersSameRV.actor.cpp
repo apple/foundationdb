@@ -20,6 +20,8 @@
 
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/genericactors.actor.h"

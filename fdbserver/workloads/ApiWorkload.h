@@ -25,6 +25,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ThreadSafeTransaction.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbserver/workloads/MemoryKeyValueStore.h"
 #include "flow/actorcompiler.h"
 

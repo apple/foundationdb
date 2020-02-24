@@ -4299,7 +4299,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 	self->addActor.send( monitorBatchLimitedTime(self->dbInfo, &lastLimited) );
 
 	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, true, true);
-	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
+	cx->setLocationCacheSize(SERVER_KNOBS->DD_LOCATION_CACHE_SIZE);
 
 	//cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*) &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) );
 	//ASSERT( cx->locationCacheSize == SERVER_KNOBS->DD_LOCATION_CACHE_SIZE );
@@ -4318,8 +4318,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 				lock = lock_;
 				TraceEvent("DDInitTookMoveKeysLock", self->ddId);
 
-				DatabaseConfiguration configuration_ = wait( getDatabaseConfiguration(cx) );
-				configuration = configuration_;
+				Reference<DatabaseConfiguration> configuration_ = wait( getDatabaseConfiguration(cx) );
+				configuration = *configuration_;
 				primaryDcId.clear();
 				remoteDcIds.clear();
 				const std::vector<RegionInfo>& regions = configuration.regions;
@@ -4756,7 +4756,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 
 DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy> policy, int processCount) {
 	Database database = DatabaseContext::create(
-		Reference<AsyncVar<ClientDBInfo>>(new AsyncVar<ClientDBInfo>()),
+		ClientDBInfo::toReference(Reference<AsyncVar<ClientDBInfo>>(new AsyncVar<ClientDBInfo>())),
 		Never(),
 		LocalityData(),
 		false
@@ -4797,7 +4797,7 @@ DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy>
 }
 
 DDTeamCollection* testMachineTeamCollection(int teamSize, Reference<IReplicationPolicy> policy, int processCount) {
-	Database database = DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>>(new AsyncVar<ClientDBInfo>()),
+	Database database = DatabaseContext::create(ClientDBInfo::toReference(Reference<AsyncVar<ClientDBInfo>>(new AsyncVar<ClientDBInfo>())),
 	                                            Never(), LocalityData(), false);
 
 	DatabaseConfiguration conf;

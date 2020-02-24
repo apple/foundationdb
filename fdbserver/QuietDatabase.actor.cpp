@@ -19,6 +19,7 @@
  */
 
 #include <cinttypes>
+#include "ServerDBInfoRef.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Trace.h"
@@ -26,6 +27,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -109,8 +111,8 @@ ACTOR Future<int64_t> getDataInFlight( Database cx, WorkerInterface distributorW
 }
 
 // Gets the number of bytes in flight from the data distributor.
-ACTOR Future<int64_t> getDataInFlight( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
-	WorkerInterface distributorInterf = wait( getDataDistributorWorker(cx, dbInfo) );
+ACTOR Future<int64_t> getDataInFlight( Database cx, ServerDBInfoRef dbInfo ) {
+	WorkerInterface distributorInterf = wait( getDataDistributorWorker(cx, ServerDBInfo::fromReference(dbInfo)) );
 	int64_t dataInFlight = wait(getDataInFlight(cx, distributorInterf));
 	return dataInFlight;
 }

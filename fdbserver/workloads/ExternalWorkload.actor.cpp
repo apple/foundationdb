@@ -21,6 +21,7 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Platform.h"
 #include "fdbclient/ThreadSafeTransaction.h"
+#include "fdbclient/DatabaseContext.h"
 #include "bindings/c/foundationdb/ClientWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
 

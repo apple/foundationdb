@@ -28,7 +28,6 @@
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/Knobs.h"
-#include <iterator>
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
@@ -44,6 +43,8 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/RecoveryState.h"
+
+#include <iterator>
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::vector;

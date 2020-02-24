@@ -251,7 +251,7 @@ struct ReadWriteWorkload : KVWorkload {
 
 		g_traceBatch.dump();
 		if( clientId == 0 )
-			return traceDumpWorkers( dbInfo );
+			return traceDumpWorkers( ServerDBInfo::fromReference(dbInfo) );
 		else
 			return true;
 	}

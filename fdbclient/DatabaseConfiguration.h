@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_DATABASECONFIGURATION_H
 #define FDBCLIENT_DATABASECONFIGURATION_H
+#include "FastRef.h"
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -78,7 +79,17 @@ struct RegionInfo {
 };
 
 struct DatabaseConfiguration {
+	mutable int32_t referenceCount = 1;
 	DatabaseConfiguration();
+	DatabaseConfiguration(const DatabaseConfiguration&) = default;
+	void addref() const {
+		++referenceCount;
+	}
+	void delref() const {
+		if (--referenceCount == 0) {
+			delete this;
+		}
+	}
 
 	void applyMutation( MutationRef mutation );
 	bool set( KeyRef key, ValueRef value );  // Returns true if a configuration option that requires recovery to take effect is changed

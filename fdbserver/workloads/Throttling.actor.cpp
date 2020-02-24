@@ -21,6 +21,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last include
 
@@ -184,8 +185,8 @@ struct ThrottlingWorkload : KVWorkload {
 		if (!self->sendDetailedHealthMetrics) {
 			// Clear detailed health metrics that are already populated
 			wait(delay(2 * CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS));
-			cx->healthMetrics.storageStats.clear();
-			cx->healthMetrics.tLogQueue.clear();
+			cx->healthMetrics().storageStats.clear();
+			cx->healthMetrics().tLogQueue.clear();
 		}
 		return Void();
 	}

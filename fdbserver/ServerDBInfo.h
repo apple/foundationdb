@@ -20,6 +20,7 @@
 
 #ifndef FDBSERVER_SERVERDBINFO_H
 #define FDBSERVER_SERVERDBINFO_H
+#include "genericactors.actor.h"
 #pragma once
 
 #include "fdbserver/ClusterRecruitmentInterface.h"
@@ -29,6 +30,7 @@
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LatencyBandConfig.h"
+#include "fdbserver/ServerDBInfoRef.h"
 
 struct ServerDBInfo {
 	constexpr static FileIdentifier file_identifier = 13838807;
@@ -53,6 +55,8 @@ struct ServerDBInfo {
 	std::vector<std::pair<uint16_t,StorageServerInterface>> storageCaches;
 
 	explicit ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0) {}
+	static Reference<AsyncVar<ServerDBInfo>> fromReference(const ServerDBInfoRef& ref);
+	static ServerDBInfoRef toReference(const Reference<AsyncVar<ServerDBInfo>>& ref);
 
 	bool operator == (ServerDBInfo const& r) const { return id == r.id; }
 	bool operator != (ServerDBInfo const& r) const { return id != r.id; }

@@ -19,9 +19,9 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbclient/DatabaseContext.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct CycleWorkload : TestWorkload {

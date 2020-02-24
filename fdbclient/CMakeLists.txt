@@ -8,7 +8,9 @@ set(FDBCLIENT_SRCS
   BackupContainer.actor.cpp
   BackupContainer.h
   BlobStore.actor.cpp
+  ClientDBInfo.cpp
   ClientLogEvents.h
+  ClientLogEvents.cpp
   ClientWorkerInterface.h
   ClusterInterface.h
   CommitTransaction.h

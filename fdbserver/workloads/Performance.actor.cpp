@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
@@ -107,11 +106,16 @@ struct PerformanceWorkload : TestWorkload {
 
 		loop {
 			choose {
-				when( vector<WorkerDetails> w = wait( brokenPromiseToNever( self->dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest( GetWorkersRequest::TESTER_CLASS_ONLY | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY ) ) ) ) ) { 
+				when(vector<WorkerDetails> w =
+				         wait(brokenPromiseToNever(ServerDBInfo::fromReference(self->dbInfo)
+				                                       ->get()
+				                                       .clusterInterface.getWorkers.getReply(GetWorkersRequest(
+				                                           GetWorkersRequest::TESTER_CLASS_ONLY |
+				                                           GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY))))) {
 					workers = w;
-					break; 
+					break;
 				}
-				when( wait( self->dbInfo->onChange() ) ) {}
+				when( wait( ServerDBInfo::fromReference(self->dbInfo)->onChange() ) ) {}
 			}
 		}
 

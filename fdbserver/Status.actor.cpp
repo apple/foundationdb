@@ -19,6 +19,7 @@
  */
 
 #include <cinttypes>
+#include "fdbclient/DatabaseContext.h"
 #include "fdbserver/Status.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"

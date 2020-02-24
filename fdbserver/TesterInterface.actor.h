@@ -30,7 +30,9 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
+
 struct CheckReply {
 	constexpr static FileIdentifier file_identifier = 11;
 
@@ -111,6 +113,7 @@ enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK };
 ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile, test_type_t whatToRun,
                             test_location_t whereToRun, int minTestersExpected, std::string fileName = std::string(),
                             StringRef startingConfiguration = StringRef(), LocalityData locality = LocalityData());
+ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<TesterInterface> testers, TestSpec spec);
 
 #include "flow/unactorcompiler.h"
 #endif

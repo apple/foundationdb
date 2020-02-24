@@ -29,6 +29,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/ClientDBInfoRef.h"
 
 #include "flow/Stats.h"
 #include "fdbrpc/TimedRequest.h"
@@ -86,6 +87,8 @@ struct ClientDBInfo {
 	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;
 	ClientDBInfo() : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1) {}
+	static Reference<AsyncVar<ClientDBInfo>> fromReference(const ClientDBInfoRef& ref);
+	static ClientDBInfoRef toReference(const Reference<AsyncVar<ClientDBInfo>>& ref);
 
 	bool operator == (ClientDBInfo const& r) const { return id == r.id; }
 	bool operator != (ClientDBInfo const& r) const { return id != r.id; }
@@ -114,7 +117,7 @@ struct CommitID {
 	CommitID( Version version, uint16_t txnBatchId, const Optional<Value>& metadataVersion ) : version(version), txnBatchId(txnBatchId), metadataVersion(metadataVersion) {}
 };
 
-struct CommitTransactionRequest : TimedRequest {
+struct CommitTransactionRequest : TimedRequest, FastAllocated<CommitTransactionRequest> {
 	constexpr static FileIdentifier file_identifier = 93948;
 	enum { 
 		FLAG_IS_LOCK_AWARE = 0x1,

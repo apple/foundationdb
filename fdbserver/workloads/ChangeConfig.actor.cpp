@@ -19,6 +19,8 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/ClusterConnectionFile.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"

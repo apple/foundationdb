@@ -89,6 +89,10 @@ private:
 #define ReferenceCounted ThreadUnsafeReferenceCounted
 #endif
 
+#define FWD_DECL_REF(x) class x;       \
+	template <> void addref( x* ptr ); \
+	template <> void delref( x* ptr );
+
 template <class P>
 void addref( P* ptr ) { ptr->addref(); }
 

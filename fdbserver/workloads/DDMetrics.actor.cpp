@@ -38,7 +38,7 @@ struct DDMetricsWorkload : TestWorkload {
 	virtual std::string description() { return "Data Distribution Metrics"; }
 
 	ACTOR Future<int> getHighPriorityRelocationsInFlight( Database cx, DDMetricsWorkload *self ) {
-		WorkerInterface masterWorker = wait(getMasterWorker(cx, self->dbInfo));
+		WorkerInterface masterWorker = wait(getMasterWorker(cx, ServerDBInfo::fromReference(self->dbInfo)));
 
 		TraceEvent("GetHighPriorityReliocationsInFlight").detail("Stage", "ContactingMaster");
 		TraceEventFields md = wait( timeoutError(masterWorker.eventLogRequest.getReply(

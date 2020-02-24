@@ -1896,7 +1896,7 @@ ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version versi
 	if( *isTooOld )
 		throw transaction_too_old();
 
-	ASSERT(!cx->switchable);
+	ASSERT(!cx->switchable());
 	tr.setVersion( version );
 	tr.info.taskID = TaskPriority::FetchKeys;
 	limits.minRows = 0;
@@ -2143,7 +2143,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 					//FIXME: remove when we no longer support upgrades from 5.X
 					if(debug_getRangeRetries >= 100) {
-						data->cx->enableLocalityLoadBalance = false;
+						data->cx->enableLocalityLoadBalance() = false;
 					}
 
 					debug_getRangeRetries++;
@@ -2161,7 +2161,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 		}
 
 		//FIXME: remove when we no longer support upgrades from 5.X
-		data->cx->enableLocalityLoadBalance = true;
+		data->cx->enableLocalityLoadBalance() = true;
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
 		//  As we have finished this work, we will allow more work to start...

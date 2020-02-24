@@ -24,6 +24,7 @@
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/ThreadSafeTransaction.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -158,7 +159,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 		self->db = dbRef;
 
 		if(deterministicRandom()->coinflip()) {
-			MultiVersionApi::api->selectApiVersion(cx->apiVersion);
+			MultiVersionApi::api->selectApiVersion(cx->apiVersion());
 			self->db = MultiVersionDatabase::debugCreateFromExistingDatabase(dbRef);
 		}
 

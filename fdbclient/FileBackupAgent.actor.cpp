@@ -26,6 +26,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbclient/DatabaseConfiguration.h"
 
 #include <cinttypes>
 #include <ctime>
@@ -2387,8 +2388,8 @@ namespace fileBackup {
 			}
 
 			// Check if backup worker is enabled
-			DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
-			if (!dbConfig.backupWorkerEnabled) {
+			Reference<DatabaseConfiguration> dbConfig = wait(getDatabaseConfiguration(cx));
+			if (!dbConfig->backupWorkerEnabled) {
 				wait(success(changeConfig(cx, "backup_worker_enabled:=1", true)));
 			}
 
