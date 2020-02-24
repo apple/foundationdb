@@ -1959,8 +1959,8 @@ public:
 		}
 
 		if (!g_network->isSimulated() && !forceAction) {
-			state StatusObject srcStatus = wait(StatusClient::statusFetcher(backupAgent->taskBucket->src->getConnectionFile()));
-			StatusObject destStatus = wait(StatusClient::statusFetcher(dest->getConnectionFile()));
+			state StatusObject srcStatus = wait(StatusClient::statusFetcher(backupAgent->taskBucket->src));
+			StatusObject destStatus = wait(StatusClient::statusFetcher(dest));
 			checkAtomicSwitchOverConfig(srcStatus, destStatus, tagName);
 		}
 		

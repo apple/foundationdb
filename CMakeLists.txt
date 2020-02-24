@@ -179,9 +179,6 @@ set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
 ################################################################################
 
 include(CompileBoost)
-if(WITH_TLS)
-  add_subdirectory(FDBLibTLS)
-endif()
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
 add_subdirectory(fdbclient)

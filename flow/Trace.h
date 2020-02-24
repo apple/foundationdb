@@ -81,6 +81,8 @@ public:
 	int64_t getInt64(std::string key, bool permissive=false) const;
 	double getDouble(std::string key, bool permissive=false) const;
 
+	Field &mutate(int index);
+
 	std::string toString() const;
 	void validateFormat() const;
 	template<class Archiver>
@@ -374,10 +376,14 @@ struct SpecialTraceMetricType
 TRACE_METRIC_TYPE(double, double);
 
 struct TraceEvent {
+	TraceEvent();
 	TraceEvent( const char* type, UID id = UID() );   // Assumes SevInfo severity
 	TraceEvent( Severity, const char* type, UID id = UID() );
 	TraceEvent( struct TraceInterval&, UID id = UID() );
 	TraceEvent( Severity severity, struct TraceInterval& interval, UID id = UID() );
+
+	TraceEvent( TraceEvent &&ev );
+	TraceEvent& operator=( TraceEvent &&ev );
 
 	static void setNetworkThread();
 	static bool isNetworkThread();
@@ -490,6 +496,7 @@ private:
 
 	int maxFieldLength;
 	int maxEventLength;
+	int timeIndex;
 
 	void setSizeLimits();
 
