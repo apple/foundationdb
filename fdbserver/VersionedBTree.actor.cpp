@@ -2814,7 +2814,7 @@ public:
 	// A write shall not become durable until the following call to commit() begins, and shall be durable once the following call to commit() returns
 	void set(KeyValueRef keyValue) {
 		++counts.sets;
-		m_pBuffer->insertMutationBoundary(keyValue.key)->second.setBoundaryValue(m_pBuffer->copyToArena(keyValue.value));
+		m_pBuffer->insert(keyValue.key)->second.setBoundaryValue(m_pBuffer->copyToArena(keyValue.value));
 	}
 
 	void clear(KeyRangeRef clearedRange) {
@@ -2825,13 +2825,13 @@ public:
 		) {
 			++counts.clears;
 			++counts.clearSingleKey;
-			m_pBuffer->insertMutationBoundary(clearedRange.begin)->second.clearBoundary();
+			m_pBuffer->insert(clearedRange.begin)->second.clearBoundary();
 			return;
 		}
 
 		++counts.clears;
-		MutationBuffer::MutationsT::iterator iBegin = m_pBuffer->insertMutationBoundary(clearedRange.begin);
-		MutationBuffer::MutationsT::iterator iEnd = m_pBuffer->insertMutationBoundary(clearedRange.end);
+		MutationBuffer::iterator iBegin = m_pBuffer->insert(clearedRange.begin);
+		MutationBuffer::iterator iEnd = m_pBuffer->insert(clearedRange.end);
 
 		iBegin->second.clearAll();
 		++iBegin;
@@ -3294,15 +3294,16 @@ private:
 			mutations[dbEnd.key].clearBoundary();
 		}
 
-		typedef std::map<KeyRef, RangeMutation> MutationsT;
-		typedef MutationsT::iterator iterator;
-		typedef MutationsT::const_iterator const_iterator;
-
 	private:
+		typedef std::map<KeyRef, RangeMutation> MutationsT;
 		Arena arena;
 		MutationsT mutations;
 
 	public:
+		typedef MutationsT::iterator iterator;
+		typedef MutationsT::const_iterator const_iterator;
+
+		// Return a T constructed in arena
 		template<typename T> T copyToArena(const T &object) {
 			return T(arena, object);
 		}
@@ -3315,12 +3316,13 @@ private:
 			return mutations.lower_bound(k);
 		}
 
+		// erase [begin, end) from the mutation map
 		void erase(const const_iterator &begin, const const_iterator &end) {
 			mutations.erase(begin, end);
 		}
 
 		// Find or create a mutation buffer boundary for bound and return an iterator to it
-		iterator insertMutationBoundary(KeyRef boundary) {
+		iterator insert(KeyRef boundary) {
 			// Find the first split point in buffer that is >= key
 			// Since the initial state of the mutation buffer contains the range '' through
 			// the maximum possible key, our search had to have found something so we
