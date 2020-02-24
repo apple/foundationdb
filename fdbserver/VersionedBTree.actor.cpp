@@ -2746,6 +2746,7 @@ public:
 		int64_t extPageWrites;
 		int64_t sets;
 		int64_t clears;
+		int64_t clearSingleKey;
 		int64_t commits;
 		int64_t gets;
 		int64_t getRanges;
@@ -2755,8 +2756,8 @@ public:
 		double startTime;
 
 		std::string toString(bool clearAfter = false) {
-			const char *labels[] = {"set", "clear", "get", "getRange", "commit", "pageReads", "extPageRead", "pagePreloads", "extPagePreloads", "pageWrite", "extPageWrite", "commitPage", "commitPageStart", "pageUpdates"};
-			const int64_t values[] = {sets, clears, gets, getRanges, commits, pageReads, extPageReads, pagePreloads, extPagePreloads, pageWrites, extPageWrites, commitToPage, commitToPageStart, pageUpdates};
+			const char *labels[] = {"set", "clear", "clearSingleKey", "get", "getRange", "commit", "pageReads", "extPageRead", "pagePreloads", "extPagePreloads", "pageWrite", "extPageWrite", "commitPage", "commitPageStart", "pageUpdates"};
+			const int64_t values[] = {sets, clears, clearSingleKey, gets, getRanges, commits, pageReads, extPageReads, pagePreloads, extPagePreloads, pageWrites, extPageWrites, commitToPage, commitToPageStart, pageUpdates};
 
 			double elapsed = now() - startTime;
 			std::string s;
@@ -2813,17 +2814,28 @@ public:
 	// A write shall not become durable until the following call to commit() begins, and shall be durable once the following call to commit() returns
 	void set(KeyValueRef keyValue) {
 		++counts.sets;
-		m_pBuffer->insertMutationBoundary(keyValue.key)->second.setBoundaryValue(ValueRef(m_pBuffer->arena, keyValue.value));
+		m_pBuffer->insertMutationBoundary(keyValue.key)->second.setBoundaryValue(m_pBuffer->copyToArena(keyValue.value));
 	}
 
 	void clear(KeyRangeRef clearedRange) {
+		// Optimization for single key clears to create just one mutation boundary instead of two
+		if(clearedRange.begin.size() == clearedRange.end.size() - 1
+			&& clearedRange.end[clearedRange.end.size() - 1] == 0
+			&& clearedRange.end.startsWith(clearedRange.begin)
+		) {
+			++counts.clears;
+			++counts.clearSingleKey;
+			m_pBuffer->insertMutationBoundary(clearedRange.begin)->second.clearBoundary();
+			return;
+		}
+
 		++counts.clears;
 		MutationBuffer::MutationsT::iterator iBegin = m_pBuffer->insertMutationBoundary(clearedRange.begin);
 		MutationBuffer::MutationsT::iterator iEnd = m_pBuffer->insertMutationBoundary(clearedRange.end);
 
 		iBegin->second.clearAll();
 		++iBegin;
-		m_pBuffer->mutations.erase(iBegin, iEnd);
+		m_pBuffer->erase(iBegin, iEnd);
 	}
 
 	void mutate(int op, StringRef param1, StringRef param2) NOT_IMPLEMENTED
@@ -3282,18 +3294,29 @@ private:
 			mutations[dbEnd.key].clearBoundary();
 		}
 
-		Arena arena;
 		typedef std::map<KeyRef, RangeMutation> MutationsT;
 		typedef MutationsT::iterator iterator;
 		typedef MutationsT::const_iterator const_iterator;
+
+	private:
+		Arena arena;
 		MutationsT mutations;
-		
-		const_iterator upper_bound(KeyRef k) const {
+
+	public:
+		template<typename T> T copyToArena(const T &object) {
+			return T(arena, object);
+		}
+
+		const_iterator upper_bound(const KeyRef &k) const {
 			return mutations.upper_bound(k);
 		}
 
-		const_iterator lower_bound(KeyRef k) const {
+		const_iterator lower_bound(const KeyRef &k) const {
 			return mutations.lower_bound(k);
+		}
+
+		void erase(const const_iterator &begin, const const_iterator &end) {
+			mutations.erase(begin, end);
 		}
 
 		// Find or create a mutation buffer boundary for bound and return an iterator to it
@@ -6227,6 +6250,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state int maxCommitSize = shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6));
 	state int mutationBytesTarget = shortTest ? 5000 : randomSize(std::min<int>(maxCommitSize * 100, 100e6));
 	state double clearProbability = deterministicRandom()->random01() * .1;
+	state double clearSingleKeyProbability = deterministicRandom()->random01();
 	state double clearPostSetProbability = deterministicRandom()->random01() * .1;
 	state double coldStartProbability = deterministicRandom()->random01();
 	state double advanceOldVersionProbability = deterministicRandom()->random01();
@@ -6241,6 +6265,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	printf("maxCommitSize: %d\n", maxCommitSize);
 	printf("mutationBytesTarget: %d\n", mutationBytesTarget);
 	printf("clearProbability: %f\n", clearProbability);
+	printf("clearSingleKeyProbability: %f\n", clearSingleKeyProbability);
 	printf("clearPostSetProbability: %f\n", clearPostSetProbability);
 	printf("coldStartProbability: %f\n", coldStartProbability);
 	printf("advanceOldVersionProbability: %f\n", advanceOldVersionProbability);
@@ -6308,12 +6333,15 @@ TEST_CASE("!/redwood/correctness/btree") {
 					end = *i;
 			}
 
-			if(end == start)
+			// Do a single key clear based on probability or end being randomly chosen to be the same as begin (unlikely)
+			if(deterministicRandom()->random01() < clearSingleKeyProbability || end == start) {
 				end = keyAfter(start);
+			}
 			else if(end < start) {
 				std::swap(end, start);
 			}
 
+			// Apply clear range to verification map
 			++rangeClears;
 			KeyRangeRef range(start, end);
 			debug_printf("      Mutation:  Clear '%s' to '%s' @%" PRId64 "\n", start.toString().c_str(), end.toString().c_str(), version);
@@ -6350,14 +6378,6 @@ TEST_CASE("!/redwood/correctness/btree") {
 			if(deterministicRandom()->random01() < clearPostSetProbability) {
 				KeyValue kv = randomKV(0, maxValueSize);
 				kv.key = range.begin;
-				btree->set(kv);
-				written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
-			}
-
-			// Sometimes set the range end after the clear
-			if(deterministicRandom()->random01() < clearPostSetProbability) {
-				KeyValue kv = randomKV(0, maxValueSize);
-				kv.key = range.end;
 				btree->set(kv);
 				written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
 			}
