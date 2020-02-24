@@ -65,7 +65,7 @@ public:
 			errors.sendError( unknown_error() );
 		}
 	}
-	Future<Void> stop() {
+	Future<Void> stop(Error const& e) {
 		return Void();
 	}
 	void addref() {
