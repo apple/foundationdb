@@ -94,8 +94,61 @@ struct ProxyStats {
 	}
 };
 
-ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, double* outTransactionRate,
-						   double* outBatchTransactionRate, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply) {
+struct TransactionRateInfo {
+	double rate;
+	double limit;
+	double budget;
+
+	bool disabled;
+
+	Smoother smoothRate;
+	Smoother smoothReleased;
+
+	TransactionRateInfo(double rate) : rate(rate), limit(0), budget(0), disabled(true), smoothRate(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW), 
+	                                   smoothReleased(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW) {}
+
+	void reset(double elapsed) {
+		double releaseRate = smoothRate.smoothTotal() - smoothReleased.smoothRate();
+		limit = SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW * releaseRate;
+	}
+
+	bool canStart(int64_t numAlreadyStarted, int64_t count) {
+		return numAlreadyStarted + count <= std::min(limit + budget, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
+	}
+
+	void updateBudget(int64_t numStartedAtPriority, bool queueEmptyAtPriority, double elapsed) {
+		budget = std::max(0.0, budget + elapsed * (limit - numStartedAtPriority) / SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW);
+
+		if(queueEmptyAtPriority) {
+			budget = std::min(budget, SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET);
+		}
+
+		smoothReleased.addDelta(numStartedAtPriority);
+	}
+
+	void disable() {
+		disabled = true;
+		rate = 0;
+		smoothRate.reset(0);
+	}
+
+	void setRate(double rate) {
+		ASSERT(rate != std::numeric_limits<double>::infinity());
+
+		this->rate = rate;
+		if(disabled) {
+			smoothRate.reset(rate);
+			disabled = false;
+		}
+		else {
+			smoothRate.setTotal(rate);
+		}
+	}
+};
+
+
+ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, TransactionRateInfo *transactionRateInfo,
+						   TransactionRateInfo *batchTransactionRateInfo, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -124,8 +177,9 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		}
 		when ( GetRateInfoReply rep = wait(reply) ) {
 			reply = Never();
-			*outTransactionRate = rep.transactionRate;
-			*outBatchTransactionRate = rep.batchTransactionRate;
+
+			transactionRateInfo->setRate(rep.transactionRate);
+			batchTransactionRateInfo->setRate(rep.batchTransactionRate);
 			//TraceEvent("MasterProxyRate", myID).detail("Rate", rep.transactionRate).detail("BatchRate", rep.batchTransactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
 			lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
@@ -137,34 +191,14 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			}
 		}
 		when ( wait( leaseTimeout ) ) {
-			*outTransactionRate = 0;
-			*outBatchTransactionRate = 0;
-			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", "Expired");
+			transactionRateInfo->disable();
+			batchTransactionRateInfo->disable();
+			TraceEvent(SevWarn, "MasterProxyRateLeaseExpired", myID).suppressFor(5.0);
+			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", 0);
 			leaseTimeout = Never();
 		}
 	}
 }
-
-struct TransactionRateInfo {
-	double rate;
-	double limit;
-
-	TransactionRateInfo(double rate) : rate(rate), limit(0) {}
-
-	void reset(double elapsed) {
-		limit = std::min(0.0, limit) + rate * elapsed; // Adjust the limit based on the full elapsed interval in order to properly erase a deficit
-		limit = std::min(limit, rate * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MAX); // Don't allow the rate to exceed what would be allowed in the maximum batch interval
-		limit = std::min(limit, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
-	}
-
-	bool canStart(int64_t numAlreadyStarted) {
-		return numAlreadyStarted < limit;
-	}
-
-	void updateBudget(int64_t numStarted) {
-		limit -= numStarted;
-	}
-};
 
 ACTOR Future<Void> queueTransactionStartRequests(
     Reference<AsyncVar<ServerDBInfo>> db,
@@ -1240,7 +1274,7 @@ ACTOR static Future<Void> transactionStarter(
 	state vector<MasterProxyInterface> otherProxies;
 
 	state PromiseStream<double> replyTimes;
-	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate, &batchRateInfo.rate, healthMetricsReply, detailedHealthMetricsReply));
+	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply));
 	addActor.send(queueTransactionStartRequests(db, &transactionQueue, proxy.getConsistentReadVersion.getFuture(),
 	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(),
 	                                            &commitData->stats, &batchRateInfo));
@@ -1282,12 +1316,11 @@ ACTOR static Future<Void> transactionStarter(
 			auto& req = transactionQueue.top().first;
 			int tc = req.transactionCount;
 
-			if (req.priority() < GetReadVersionRequest::PRIORITY_DEFAULT &&
-			    !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1])) {
+			if(req.priority() < GetReadVersionRequest::PRIORITY_DEFAULT && !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
 				break;
-			} else if (req.priority() < GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE &&
-			           !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1])) {
-				break;
+			}
+			else if(req.priority() < GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE && !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
+				break;	
 			}
 
 			if (req.debugID.present()) {
@@ -1323,11 +1356,15 @@ ACTOR static Future<Void> transactionStarter(
 		.detail("TransactionBudget", transactionBudget)
 		.detail("BatchTransactionBudget", batchTransactionBudget);*/
 
-		transactionCount += transactionsStarted[0] + transactionsStarted[1];
-		batchTransactionCount += batchPriTransactionsStarted[0] + batchPriTransactionsStarted[1];
+		int systemTotalStarted = systemTransactionsStarted[0] + systemTransactionsStarted[1];
+		int normalTotalStarted = defaultPriTransactionsStarted[0] + defaultPriTransactionsStarted[1];
+		int batchTotalStarted = batchPriTransactionsStarted[0] + batchPriTransactionsStarted[1];
 
-		normalRateInfo.updateBudget(transactionsStarted[0] + transactionsStarted[1]);
-		batchRateInfo.updateBudget(transactionsStarted[0] + transactionsStarted[1]);
+		transactionCount += transactionsStarted[0] + transactionsStarted[1];
+		batchTransactionCount += batchTotalStarted;
+
+		normalRateInfo.updateBudget(systemTotalStarted + normalTotalStarted, transactionQueue.empty() || transactionQueue.top().first.priority() < GetReadVersionRequest::PRIORITY_DEFAULT, elapsed);
+		batchRateInfo.updateBudget(systemTotalStarted + normalTotalStarted + batchTotalStarted, transactionQueue.empty(), elapsed);
 
 		if (debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.masterProxyServerCore.Broadcast");
