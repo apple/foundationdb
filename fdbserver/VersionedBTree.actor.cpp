@@ -3284,6 +3284,7 @@ private:
 		}
 	};
 
+public:
 	struct MutationBuffer {
 		MutationBuffer() {
 			// Create range representing the entire keyspace.  This reduces edge cases to applying mutations
@@ -3382,6 +3383,7 @@ private:
 
 	};
 
+private:
 	/* Mutation Buffer Overview
 	 *
 	 * This structure's organization is meant to put pending updates for the btree in an order
@@ -6264,6 +6266,34 @@ struct SimpleCounter {
 	int64_t xt;
 	std::string toString() { return format("%" PRId64 "/%.2f/%.2f", x, rate() / 1e6, avgRate() / 1e6); }
 };
+
+TEST_CASE("!/redwood/performance/mutationBuffer") {
+	// This test uses pregenerated short random keys
+	int count = 10e6;
+
+	printf("Generating %d strings...\n", count);
+	Arena arena;
+	std::vector<KeyRef> strings;
+	while(strings.size() < count) {
+		strings.push_back(randomString(arena, 5));
+	}
+
+	printf("Inserting and then finding each string...\n", count);
+	double start = timer();
+	VersionedBTree::MutationBuffer m;
+	for(int i = 0; i < count; ++i) {
+		KeyRef key = strings[i];
+		auto a = m.insert(key);
+		auto b = m.lower_bound(key);
+		ASSERT(a == b);
+		m.erase(a, b);
+	}
+
+	double elapsed = timer() - start;
+	printf("count=%d elapsed=%f\n", count, elapsed);
+
+	return Void();
+}
 
 TEST_CASE("!/redwood/correctness/btree") {
 	state std::string pagerFile = "unittest_pageFile.redwood";
