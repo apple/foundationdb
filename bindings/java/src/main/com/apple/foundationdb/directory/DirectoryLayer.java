@@ -817,9 +817,9 @@ public class DirectoryLayer implements Directory {
 
 	private static long unpackLittleEndian(byte[] bytes) {
 		assert bytes.length == 8;
-		int value = 0;
+		long value = 0;
 		for(int i = 0; i < 8; ++i) {
-			value += (bytes[i] << (i * 8));
+			value += (Byte.toUnsignedLong(bytes[i]) << (i * 8));
 		}
 		return value;
 	}

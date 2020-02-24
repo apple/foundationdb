@@ -33,7 +33,6 @@
 
 #include "flow/DeterministicRandom.h"
 #include "flow/SignalSafeUnwind.h"
-#include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Platform.h"
 
 #include "flow/SimpleOpt.h"
@@ -2507,22 +2506,22 @@ struct CLIOptions {
 
 #ifndef TLS_DISABLED
 			// TLS Options
-		    case TLSOptions::OPT_TLS_PLUGIN:
+		    case TLSParams::OPT_TLS_PLUGIN:
 			    args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_CERTIFICATES:
+		    case TLSParams::OPT_TLS_CERTIFICATES:
 			    tlsCertPath = args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_CA_FILE:
+		    case TLSParams::OPT_TLS_CA_FILE:
 			    tlsCAPath = args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_KEY:
+		    case TLSParams::OPT_TLS_KEY:
 			    tlsKeyPath = args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_PASSWORD:
+		    case TLSParams::OPT_TLS_PASSWORD:
 			    tlsPassword = args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_VERIFY_PEERS:
+		    case TLSParams::OPT_TLS_VERIFY_PEERS:
 			    tlsVerifyPeers = args.OptionArg();
 			    break;
 #endif
@@ -2573,7 +2572,7 @@ ACTOR Future<Void> addInterface( std::map<Key,std::pair<Value,ClientLeaderRegInt
 				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
 			}
 		}
-		when( wait(delay(1.0)) ) {}
+		when( wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT)) ) {}
 	}
 	return Void();
 }
@@ -3757,6 +3756,9 @@ int main(int argc, char **argv) {
 		}
 	} catch (Error& e) {
 		printf("ERROR: %s (%d)\n", e.what(), e.code());
+		return 1;
+	} catch (boost::system::system_error& e) {
+		printf("ERROR: %s (%d)\n", e.what(), e.code().value());
 		return 1;
 	}
 }

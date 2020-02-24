@@ -1403,9 +1403,16 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 				int64_t fileSize = wait(lockFile.get()->size());
 				state Key fileData = makeString(fileSize);
 				wait(success(lockFile.get()->read(mutateString(fileData), fileSize, 0)));
-				processIDUid = BinaryReader::fromStringRef<UID>(fileData, IncludeVersion());
+				try {
+					processIDUid = BinaryReader::fromStringRef<UID>(fileData, IncludeVersion());
+					return processIDUid;
+				} catch (Error& e) {
+					if(!g_network->isSimulated()) {
+						throw;
+					}
+					deleteFile(lockFilePath);
+				}
 			}
-			return processIDUid;
 		}
 		catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
@@ -1415,12 +1422,7 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 				fprintf(stderr, "ERROR: error creating or opening process id file `%s'.\n", joinPath(folder, "processId").c_str());
 			}
 			TraceEvent(SevError, "OpenProcessIdError").error(e);
-			
-			if(!g_network->isSimulated()) {
-				throw;
-			}
-
-			deleteFile(lockFilePath);
+			throw;
 		}
 	}
 }

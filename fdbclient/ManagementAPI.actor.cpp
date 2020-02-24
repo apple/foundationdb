@@ -982,9 +982,13 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 
 			if(g_network->isSimulated()) {
 				for(int i = 0; i < (desiredCoordinators.size()/2)+1; i++) {
-					auto address = NetworkAddress(desiredCoordinators[i].ip,desiredCoordinators[i].port,true,false);
-					g_simulator.protectedAddresses.insert(address);
-					TraceEvent("ProtectCoordinator").detail("Address", address).backtrace();
+					auto addresses = g_simulator.getProcessByAddress(desiredCoordinators[i])->addresses;
+					
+					g_simulator.protectedAddresses.insert(addresses.address);
+					if(addresses.secondaryAddress.present()) {
+						g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
+					}
+					TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 				}
 			}
 
@@ -1143,8 +1147,7 @@ struct AutoQuorumChange : IQuorumChange {
 				*err = CoordinatorsResult::NOT_ENOUGH_MACHINES;
 				return vector<NetworkAddress>();
 			}
-			desiredCount = std::max(oldCoordinators.size(), (workers.size() - 1) | 1);
-			chosen.resize(desiredCount);
+			chosen.resize((chosen.size() - 1) | 1);
 		}
 
 		return chosen;
@@ -1518,10 +1521,14 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 			state bool ok = true;
 			inProgressExclusion.clear();
 			for(auto& s : serverList) {
-				auto addr = decodeServerListValue( s.value ).address();
-				if ( addressExcluded(exclusions, addr) ) {
+				auto addresses = decodeServerListValue( s.value ).getKeyValues.getEndpoint().addresses;
+				if ( addressExcluded(exclusions, addresses.address) ) {
 					ok = false;
-					inProgressExclusion.insert(addr);
+					inProgressExclusion.insert(addresses.address);
+				}
+				if ( addresses.secondaryAddress.present() && addressExcluded(exclusions, addresses.secondaryAddress.get()) ) {
+					ok = false;
+					inProgressExclusion.insert(addresses.secondaryAddress.get());
 				}
 			}
 
