@@ -2814,7 +2814,7 @@ public:
 	// A write shall not become durable until the following call to commit() begins, and shall be durable once the following call to commit() returns
 	void set(KeyValueRef keyValue) {
 		++counts.sets;
-		m_pBuffer->insert(keyValue.key)->second.setBoundaryValue(m_pBuffer->copyToArena(keyValue.value));
+		m_pBuffer->insert(keyValue.key).mutation().setBoundaryValue(m_pBuffer->copyToArena(keyValue.value));
 	}
 
 	void clear(KeyRangeRef clearedRange) {
@@ -2825,7 +2825,7 @@ public:
 		) {
 			++counts.clears;
 			++counts.clearSingleKey;
-			m_pBuffer->insert(clearedRange.begin)->second.clearBoundary();
+			m_pBuffer->insert(clearedRange.begin).mutation().clearBoundary();
 			return;
 		}
 
@@ -2833,7 +2833,7 @@ public:
 		MutationBuffer::iterator iBegin = m_pBuffer->insert(clearedRange.begin);
 		MutationBuffer::iterator iEnd = m_pBuffer->insert(clearedRange.end);
 
-		iBegin->second.clearAll();
+		iBegin.mutation().clearAll();
 		++iBegin;
 		m_pBuffer->erase(iBegin, iEnd);
 	}
@@ -3300,8 +3300,37 @@ private:
 		MutationsT mutations;
 
 	public:
-		typedef MutationsT::iterator iterator;
-		typedef MutationsT::const_iterator const_iterator;
+		struct iterator : public MutationsT::iterator {
+			typedef MutationsT::iterator Base;
+			iterator() = default;
+			iterator(const MutationsT::iterator &i) : Base(i) {
+			}
+
+			const KeyRef & key() {
+				return (*this)->first;
+			}
+
+			RangeMutation & mutation() {
+				return (*this)->second;
+			}
+		};
+
+		struct const_iterator : public MutationsT::const_iterator {
+			typedef MutationsT::const_iterator Base;
+			const_iterator() = default;
+			const_iterator(const MutationsT::const_iterator &i) : Base(i) {
+			}
+			const_iterator(const MutationsT::iterator &i) : Base(i) {
+			}
+
+			const KeyRef & key() {
+				return (*this)->first;
+			}
+
+			const RangeMutation & mutation() {
+				return (*this)->second;
+			}
+		};
 
 		// Return a T constructed in arena
 		template<typename T> T copyToArena(const T &object) {
@@ -3330,7 +3359,7 @@ private:
 			iterator ib = mutations.lower_bound(boundary);
 
 			// If we found the boundary we are looking for, return its iterator
-			if(ib->first == boundary) {
+			if(ib.key() == boundary) {
 				return ib;
 			}
 
@@ -3344,8 +3373,8 @@ private:
 			iterator iPrevious = ib;
 			--iPrevious;
 			// If the range we just divided was being cleared, then the dividing boundary key and range after it must also be cleared
-			if(iPrevious->second.clearAfterBoundary) {
-				ib->second.clearAll();
+			if(iPrevious.mutation().clearAfterBoundary) {
+				ib.mutation().clearAll();
 			}
 
 			return ib;
@@ -3838,7 +3867,7 @@ private:
 			debug_printf("%s ---------MUTATION BUFFER SLICE ---------------------\n", context.c_str());
 			auto begin = iMutationBoundary;
 			while(1) {
-				debug_printf("%s Mutation: '%s':  %s\n", context.c_str(), printable(begin->first).c_str(), begin->second.toString().c_str());
+				debug_printf("%s Mutation: '%s':  %s\n", context.c_str(), printable(begin.key()).c_str(), begin.mutation().toString().c_str());
 				if(begin == iMutationBoundaryEnd) {
 					break;
 				}
@@ -3855,7 +3884,7 @@ private:
 		// If there are any changes to the one key then the entire subtree should be deleted as the changes for the key
 		// do not go into this subtree.
 		if(iMutationBoundary == iMutationBoundaryEnd) {
-			if(iMutationBoundary->second.boundaryChanged) {
+			if(iMutationBoundary.mutation().boundaryChanged) {
 				debug_printf("%s lower and upper bound key/version match and key is modified so deleting page, returning %s\n", context.c_str(), toString(results).c_str());
 				if(isLeaf) {
 					self->freeBtreePage(rootID, writeVersion);
@@ -3880,7 +3909,7 @@ private:
 			// Cleared means the entire range covering the subtree was cleared.  It is assumed true
 			// if the range starting after the lower mutation boundary was cleared, and then proven false
 			// below if possible.
-			bool cleared = iMutationBoundary->second.clearAfterBoundary;
+			bool cleared = iMutationBoundary.mutation().clearAfterBoundary;
 			// Unchanged means the entire range covering the subtree was unchanged, it is assumed to be the
 			// opposite of cleared() and then proven false below if possible.
 			bool unchanged = !cleared;
@@ -3888,14 +3917,14 @@ private:
 
 			// If the lower mutation boundary key is the same as the subtree lower bound then whether or not
 			// that key is being changed or cleared affects this subtree.
-			if(iMutationBoundary->first == lowerBound->key) {
+			if(iMutationBoundary.key() == lowerBound->key) {
 				// If subtree will be cleared (so far) but the lower boundary key is not cleared then the subtree is not cleared
-				if(cleared && !iMutationBoundary->second.boundaryCleared()) {
+				if(cleared && !iMutationBoundary.mutation().boundaryCleared()) {
 					cleared = false;
 					debug_printf("%s cleared=%d unchanged=%d\n", context.c_str(), cleared, unchanged);
 				}
 				// If the subtree looked unchanged (so far) but the lower boundary is is changed then the subtree is changed
-				if(unchanged && iMutationBoundary->second.boundaryChanged) {
+				if(unchanged && iMutationBoundary.mutation().boundaryChanged) {
 					unchanged = false;
 					debug_printf("%s cleared=%d unchanged=%d\n", context.c_str(), cleared, unchanged);
 				}
@@ -3903,10 +3932,10 @@ private:
 
 			// If the higher mutation boundary key is the same as the subtree upper bound key then whether 
 			// or not it is being changed or cleared affects this subtree.
-			if((cleared || unchanged) && iMutationBoundaryEnd->first == upperBound->key) {
+			if((cleared || unchanged) && iMutationBoundaryEnd.key() == upperBound->key) {
 				// If the key is being changed then the records in this subtree with the same key must be removed
 				// so the subtree is definitely not unchanged, though it may be cleared to achieve the same effect.
-				if(iMutationBoundaryEnd->second.boundaryChanged) {
+				if(iMutationBoundaryEnd.mutation().boundaryChanged) {
 					unchanged = false;
 					debug_printf("%s cleared=%d unchanged=%d\n", context.c_str(), cleared, unchanged);
 				}
@@ -3953,7 +3982,7 @@ private:
 			debug_printf("%s ---------MUTATION BUFFER SLICE ---------------------\n", context.c_str());
 			auto begin = iMutationBoundary;
 			while(1) {
-				debug_printf("%s Mutation: '%s':  %s\n", context.c_str(), printable(begin->first).c_str(), begin->second.toString().c_str());
+				debug_printf("%s Mutation: '%s':  %s\n", context.c_str(), printable(begin.key()).c_str(), begin.mutation().toString().c_str());
 				if(begin == iMutationBoundaryEnd) {
 					break;
 				}
@@ -4004,16 +4033,16 @@ private:
 			// Now, process each mutation range and merge changes with existing data.
 			bool firstMutationBoundary = true;
 			while(iMutationBoundary != iMutationBoundaryEnd) {
-				debug_printf("%s New mutation boundary: '%s': %s\n", context.c_str(), printable(iMutationBoundary->first).c_str(), iMutationBoundary->second.toString().c_str());
+				debug_printf("%s New mutation boundary: '%s': %s\n", context.c_str(), printable(iMutationBoundary.key()).c_str(), iMutationBoundary.mutation().toString().c_str());
 
 				// Apply the change to the mutation buffer start boundary key only if
 				//   - there actually is a change (whether a set or a clear, old records are to be removed)
 				//   - either this is not the first boundary or it is but its key matches our lower bound key
-				bool applyBoundaryChange = iMutationBoundary->second.boundaryChanged && (!firstMutationBoundary || iMutationBoundary->first >= lowerBound->key);
+				bool applyBoundaryChange = iMutationBoundary.mutation().boundaryChanged && (!firstMutationBoundary || iMutationBoundary.key() >= lowerBound->key);
 				firstMutationBoundary = false;
 	
 				// Iterate over records for the mutation boundary key, keep them unless the boundary key was changed or we are not applying it
-				while(cursor.valid() && cursor.get().key == iMutationBoundary->first) {
+				while(cursor.valid() && cursor.get().key == iMutationBoundary.key()) {
 					// If there were no changes to the key or we're not applying it
 					if(!applyBoundaryChange) {
 						// If not updating, add to the output set, otherwise skip ahead past the records for the mutation boundary
@@ -4041,8 +4070,8 @@ private:
 
 				// Write the new record(s) for the mutation boundary start key if its value has been set
 				// Clears of this key will have been processed above by not being erased from the updated page or excluded from the merge output
-				if(applyBoundaryChange && iMutationBoundary->second.boundarySet()) {
-					RedwoodRecordRef rec(iMutationBoundary->first, 0, iMutationBoundary->second.boundaryValue.get());
+				if(applyBoundaryChange && iMutationBoundary.mutation().boundarySet()) {
+					RedwoodRecordRef rec(iMutationBoundary.key(), 0, iMutationBoundary.mutation().boundaryValue.get());
 					changesMade = true;
 
 					if(rec.value.get().size() <= self->m_maxPartSize) {
@@ -4092,17 +4121,17 @@ private:
 				}
 
 				// Before advancing the iterator, get whether or not the records in the following range must be removed
-				bool remove = iMutationBoundary->second.clearAfterBoundary;
+				bool remove = iMutationBoundary.mutation().clearAfterBoundary;
 				// Advance to the next boundary because we need to know the end key for the current range.
 				++iMutationBoundary;
 				if(iMutationBoundary == iMutationBoundaryEnd) {
 					skipLen = 0;
 				}
 
-				debug_printf("%s Mutation range end: '%s'\n", context.c_str(), printable(iMutationBoundary->first).c_str());
+				debug_printf("%s Mutation range end: '%s'\n", context.c_str(), printable(iMutationBoundary.key()).c_str());
 
 				// Now handle the records up through but not including the next mutation boundary key
-				RedwoodRecordRef end(iMutationBoundary->first);
+				RedwoodRecordRef end(iMutationBoundary.key());
 
 				// If the records are being removed and we're not doing an in-place update
 				// OR if we ARE doing an update but the records are NOT being removed, then just skip them.
@@ -4113,7 +4142,7 @@ private:
 						changesMade = true;
 					}
 
-					debug_printf("%s Seeking forward to next boundary (remove=%d updating=%d) %s\n", context.c_str(), remove, updating, iMutationBoundary->first.toString().c_str());
+					debug_printf("%s Seeking forward to next boundary (remove=%d updating=%d) %s\n", context.c_str(), remove, updating, iMutationBoundary.key().toString().c_str());
 					cursor.seekGreaterThanOrEqual(end, skipLen);
 				}
 				else {
@@ -4137,7 +4166,7 @@ private:
 			// If there are still more records, they have the same key as the end boundary
 			if(cursor.valid()) {
 				// If the end boundary is changing, we must remove the remaining records in this page
-				bool remove = iMutationBoundaryEnd->second.boundaryChanged;
+				bool remove = iMutationBoundaryEnd.mutation().boundaryChanged;
 				if(remove) {
 					changesMade = true;
 				}
