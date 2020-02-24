@@ -11,12 +11,18 @@ class ReadYourWritesTransaction;
 class PrivateKeyRangeBaseImpl {
 public:
 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const = 0;
+
+	KeyRangeRef getKeyRange() const {
+		return range;
+	}
+protected:
+	KeyRangeRef range;
 };
 
 // This class 
 class PrivateKeyRangeSimpleImpl : public PrivateKeyRangeBaseImpl {
 public:
-	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, const KeyRange& keys) const = 0;
+	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const;
 };
 
@@ -29,24 +35,21 @@ class PrivateKeySpace {
 public:
 	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key, bool snapshot = false);
 
-	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const;
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false);
 
 	void registerKeyRange(const KeyRange& kr, PrivateKeyRangeBaseImpl* impl) {
 		impls.insert(kr, impl);
 	}
 
-private:
+	RangeMap<Key, PrivateKeyRangeBaseImpl*, KeyRangeRef>::Iterator getIteratorForKey(const Key& key) {
+		return impls.rangeContaining(key);
+	}
 
-	// ACTOR Future<Optional<Value>> getActor(ReadYourWritesTransaction* ryw, const Key& key, bool snapshot) {
-	// 	// use getRange to workaround this
-	// 	Standalone<RangeResultRef> result = wait(getRange(ryw, KeySelector( firstGreaterOrEqual(key), key.arena() ),
-	// 			KeySelector( firstGreaterOrEqual(keyAfter(key)), key.arena() ), GetRangeLimits(1), snapshot));
-	// 	if (result.size()) {
-	// 		return Optional<Value>(result[0].value);
-	// 	} else {
-	// 		return Optional<Value>();
-	// 	}
-	// };
+	KeyRangeMap<PrivateKeyRangeBaseImpl*>* getKeyRangeMap(){
+		return &impls;
+	}
+
+private:
 	KeyRangeMap<PrivateKeyRangeBaseImpl*> impls;
 };
 
