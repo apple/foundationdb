@@ -801,7 +801,9 @@ public:
 			if (wasBelow && isBelow) {
 				Version v = it->second;
 				it = btree.erase(it);
-				it->second = max(v, it->second);
+				if (it != btree.end()) {
+					it->second = max(v, it->second);
+				}
 			}
 			wasBelow = isBelow;
 		}
