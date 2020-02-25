@@ -792,21 +792,22 @@ public:
 		}
 	}
 
+	// When we find consecutive nodes with `version <= oldest`, merge those nodes into one.
+	//
 	// TODO: Consider using a hint to stop iteration early when we've deleted as many keys as
 	// we could.
 	void removeBefore(Version oldest) {
 		bool wasAbove = true;
-		auto it = btree.begin();
-		while (it != btree.end()) {
+		auto it = btree.rbegin();
+		while (it != btree.rend()) {
 			bool isAbove = it->second >= oldest;
 			if (isAbove || wasAbove) {
 				++it;
 			} else {
 				Version v = it->second;
-				it = btree.erase(it);
-				if (it != btree.end()) {
-					it->second = max(v, it->second);
-				}
+				it = std::reverse_iterator(btree.erase(it.base()));
+				it->second = max(v, it->second);
+				++it;
 			}
 			wasAbove = isAbove;
 		}
