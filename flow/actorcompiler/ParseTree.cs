@@ -226,6 +226,7 @@ namespace actorcompiler
         public List<string> attributes = new List<string>();
         public string returnType;
         public string name;
+        public string enclosingClass = null;
         public VarDeclaration[] parameters;
         public VarDeclaration[] templateFormals;  //< null if not a template
         public CodeBlock body;

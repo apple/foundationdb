@@ -44,3 +44,7 @@ FDB_CLUSTER_FILE=./docker.cluster fdbcli
 ```
 docker-compose down
 ```
+
+## Use outside of docker-compose
+
+The client application is also available as a standalone image: `foundationdb/foundationdb-sample-python-app:latest`.

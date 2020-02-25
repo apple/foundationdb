@@ -88,6 +88,13 @@ func (o NetworkOptions) SetTraceFormat(param string) error {
 	return o.setOpt(34, []byte(param))
 }
 
+// Select clock source for trace files. now (default) or realtime are supported.
+//
+// Parameter: Trace clock source
+func (o NetworkOptions) SetTraceClockSource(param string) error {
+	return o.setOpt(35, []byte(param))
+}
+
 // Set internal tuning or debugging knobs
 //
 // Parameter: knob_name=knob_value

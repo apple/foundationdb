@@ -69,7 +69,7 @@ testTitle=BackupAndRestore
  ;    testDuration=90.0
 
  ; Disable buggify for parallel restore
- buggify=off
+ ;buggify=off
  ;testDuration=360000 ;not work
  ;timeout is in seconds
  timeout=360000

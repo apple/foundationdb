@@ -2,7 +2,7 @@ version: "3"
 
 services:
   common: &common
-    image: foundationdb/foundationdb-build:0.1.9
+    image: foundationdb/foundationdb-build:0.1.12
 
   build-setup: &build-setup
     <<: *common
@@ -36,11 +36,11 @@ services:
 
   release-packages: &release-packages
     <<: *release-setup
-    command: scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash -c 'make -j "$${MAKEJOBS}" packages'
+    command: scl enable devtoolset-8 rh-python36 rh-ruby24 -- bash -c 'make -j "$${MAKEJOBS}" packages'
 
   snapshot-packages: &snapshot-packages
     <<: *build-setup
-    command: scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash -c 'make -j "$${MAKEJOBS}" packages'
+    command: scl enable devtoolset-8 rh-python36 rh-ruby24 -- bash -c 'make -j "$${MAKEJOBS}" packages'
 
   prb-packages:
     <<: *snapshot-packages
@@ -48,11 +48,11 @@ services:
 
   release-bindings: &release-bindings
     <<: *release-setup
-    command: scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash -c 'make -j "$${MAKEJOBS}" bindings'
+    command: scl enable devtoolset-8 rh-python36 rh-ruby24 -- bash -c 'make -j "$${MAKEJOBS}" bindings'
 
   snapshot-bindings: &snapshot-bindings
     <<: *build-setup
-    command: scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash -c 'make -j "$${MAKEJOBS}" bindings'
+    command: scl enable devtoolset-8 rh-python36 rh-ruby24 -- bash -c 'make -j "$${MAKEJOBS}" bindings'
 
   prb-bindings:
     <<: *snapshot-bindings
@@ -60,7 +60,7 @@ services:
 
   snapshot-cmake: &snapshot-cmake
     <<: *build-setup
-    command: scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -G "Ninja" -DCMAKE_COLOR_MAKEFILE=0 -DFDB_RELEASE=0 -DVALGRIND=0 /__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb && ninja -v -j "$${MAKEJOBS}" "packages" "strip_targets" && cpack'
+    command: scl enable devtoolset-8 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -G "Ninja" -DCMAKE_COLOR_MAKEFILE=0 -DFDB_RELEASE=0 -DVALGRIND=0 /__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb && ninja -v -j "$${MAKEJOBS}" "packages" "strip_targets" && cpack'
 
   prb-cmake:
     <<: *snapshot-cmake
@@ -68,7 +68,7 @@ services:
 
   snapshot-ctest: &snapshot-ctest
     <<: *build-setup
-    command: scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -G "Ninja" -DCMAKE_COLOR_MAKEFILE=0 -DFDB_RELEASE=1 /__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb && ninja -v -j "$${MAKEJOBS}" && ctest -L fast -j "$${MAKEJOBS}" --output-on-failure'
+    command: scl enable devtoolset-8 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -G "Ninja" -DCMAKE_COLOR_MAKEFILE=0 -DFDB_RELEASE=1 /__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb && ninja -v -j "$${MAKEJOBS}" && ctest -L fast -j "$${MAKEJOBS}" --output-on-failure'
 
   prb-ctest:
     <<: *snapshot-ctest
@@ -76,7 +76,7 @@ services:
 
   snapshot-correctness: &snapshot-correctness
     <<: *build-setup
-    command: scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -G "Ninja" -DCMAKE_COLOR_MAKEFILE=0 -DFDB_RELEASE=1 /__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb && ninja -v -j "$${MAKEJOBS}" && ctest -j "$${MAKEJOBS}" --output-on-failure'
+    command: scl enable devtoolset-8 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -G "Ninja" -DCMAKE_COLOR_MAKEFILE=0 -DFDB_RELEASE=1 /__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb && ninja -v -j "$${MAKEJOBS}" && ctest -j "$${MAKEJOBS}" --output-on-failure'
 
   prb-correctness:
     <<: *snapshot-correctness

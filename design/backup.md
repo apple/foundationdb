@@ -17,7 +17,7 @@
  KV ranges {(a-b, v0), (c-d, v1), (e-f, v2) ... (y-z, v10)}. With mutation log recorded all along, we can still use
  the simple backup-restore scheme described above on sub keyspaces seperately. Assuming we did record mutation log from
  v0 to vn, that allows us to restore
-  
+
 * Keyspace a-b to any version between v0 and vn
 * Keyspace c-d to any version between v1 and vn
 * Keyspace y-z to any version between v10 and vn

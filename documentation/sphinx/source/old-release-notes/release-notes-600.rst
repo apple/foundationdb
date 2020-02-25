@@ -156,6 +156,7 @@ Other Changes
 
 * Does not support upgrades from any version older than 5.0.
 * Normalized the capitalization of trace event names and attributes. `(PR #455) <https://github.com/apple/foundationdb/pull/455>`_
+* Various stateless processes now have a higher affinity for running on processes with unset process class, which may result in those roles changing location upon upgrade. See :ref:`version-specific-upgrading` for details. `(PR #526) <https://github.com/apple/foundationdb/pull/526>`_
 * Increased the memory requirements of the transaction log by 400MB. [6.0.5] `(PR #673) <https://github.com/apple/foundationdb/pull/673>`_
 
 Earlier release notes

@@ -37,12 +37,12 @@
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/TLSConnection.h"
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
+#include "flow/TLSPolicy.h"
 #include "flow/UnitTest.h"
 
 #if defined(CMAKE_BUILD) || !defined(WIN32)
@@ -66,12 +66,15 @@ using std::min;
 using std::pair;
 
 NetworkOptions networkOptions;
-Reference<TLSOptions> tlsOptions;
+TLSParams tlsParams;
+static Reference<TLSPolicy> tlsPolicy;
 
-static void initTLSOptions() {
-	if (!tlsOptions) {
-		tlsOptions = Reference<TLSOptions>(new TLSOptions());
+static void initTLSPolicy() {
+#ifndef TLS_DISABLED
+	if (!tlsPolicy) {
+		tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(TLSPolicy::Is::CLIENT));
 	}
+#endif
 }
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
@@ -776,6 +779,7 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 
 			auto publicIP = determinePublicIPAutomatically( connFile->getConnectionString() );
 			selectTraceFormatter(networkOptions.traceFormat);
+			selectTraceClockSource(networkOptions.traceClockSource);
 			openTraceFile(NetworkAddress(publicIP, ::getpid()), networkOptions.traceRollSize, networkOptions.traceMaxLogsSize, networkOptions.traceDirectory.get(), "trace", networkOptions.traceLogGroup);
 
 			TraceEvent("ClientStart")
@@ -848,6 +852,14 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 				throw invalid_option_value();
 			}
 			break;
+		case FDBNetworkOptions::TRACE_CLOCK_SOURCE:
+			validateOptionValue(value, true);
+			networkOptions.traceClockSource = value.get().toString();
+			if (!validateTraceClockSource(networkOptions.traceClockSource)) {
+				fprintf(stderr, "Unrecognized trace clock source: `%s'\n", networkOptions.traceClockSource.c_str());
+				throw invalid_option_value();
+			}
+			break;
 		case FDBNetworkOptions::KNOB: {
 			validateOptionValue(value, true);
 
@@ -875,49 +887,46 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			break;
 		case FDBNetworkOptions::TLS_CERT_PATH:
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_cert_file( value.get().toString() );
+			tlsParams.tlsCertPath = value.get().toString();
 			break;
-		case FDBNetworkOptions::TLS_CERT_BYTES:
-			initTLSOptions();
-			tlsOptions->set_cert_data( value.get().toString() );
-			break;
-		case FDBNetworkOptions::TLS_CA_PATH:
+		case FDBNetworkOptions::TLS_CERT_BYTES: {
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_ca_file( value.get().toString() );
+			tlsParams.tlsCertBytes = value.get().toString();
 			break;
-		case FDBNetworkOptions::TLS_CA_BYTES:
+		}
+		case FDBNetworkOptions::TLS_CA_PATH: {
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_ca_data(value.get().toString());
+			tlsParams.tlsCAPath = value.get().toString();
 			break;
+		}
+		case FDBNetworkOptions::TLS_CA_BYTES: {
+			validateOptionValue(value, true);
+			tlsParams.tlsCABytes = value.get().toString();
+			break;
+		}
 		case FDBNetworkOptions::TLS_PASSWORD:
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_key_password(value.get().toString());
+			tlsParams.tlsPassword = value.get().toString();
 			break;
 		case FDBNetworkOptions::TLS_KEY_PATH:
-			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_key_file( value.get().toString() );
+			validateOptionValue(value, true);		
+			tlsParams.tlsKeyPath = value.get().toString();
 			break;
-		case FDBNetworkOptions::TLS_KEY_BYTES:
+		case FDBNetworkOptions::TLS_KEY_BYTES: {
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_key_data( value.get().toString() );
+			tlsParams.tlsKeyBytes = value.get().toString();
 			break;
+		}
 		case FDBNetworkOptions::TLS_VERIFY_PEERS:
 			validateOptionValue(value, true);
-			initTLSOptions();
-			try {
-				tlsOptions->set_verify_peers({ value.get().toString() });
-			} catch( Error& e ) {
+			initTLSPolicy();
+#ifndef TLS_DISABLED
+			if (!tlsPolicy->set_verify_peers({ value.get().toString() })) {
 				TraceEvent(SevWarnAlways, "TLSValidationSetError")
-					.error( e )
 					.detail("Input", value.get().toString() );
 				throw invalid_option_value();
 			}
+#endif
 			break;
 		case FDBNetworkOptions::CLIENT_BUGGIFY_ENABLE:
 			enableBuggify(true, BuggifyType::Client);
@@ -975,15 +984,11 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
-	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present());
+	initTLSPolicy();
+
+	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present(), tlsPolicy, tlsParams);
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
-
-	initTLSOptions();
-
-#ifndef TLS_DISABLED
-	tlsOptions->register_network();
-#endif
 }
 
 void runNetwork() {
@@ -2541,8 +2546,8 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 				} else {
 					Optional<Value> val = wait( tr.get( it->range().begin ) );
 					if( !val.present() || val.get() != m.setValue ) {
-						TraceEvent evt = TraceEvent(SevError, "CheckWritesFailed")
-							.detail("Class", "Set")
+						TraceEvent evt(SevError, "CheckWritesFailed");
+						evt.detail("Class", "Set")
 							.detail("Key", it->range().begin)
 							.detail("Expected", m.setValue);
 						if( !val.present() )
@@ -3168,6 +3173,46 @@ Future<Void> Transaction::onError( Error const& e ) {
 
 	return e;
 }
+ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRangeRef keys);
+
+ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRangeRef keys, Reference<LocationInfo> locationInfo) {
+	loop {
+		try {
+			WaitMetricsRequest req(keys, StorageMetrics(), StorageMetrics());
+			req.min.bytes = 0;
+			req.max.bytes = -1;
+			StorageMetrics m = wait(
+			    loadBalance(locationInfo, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
+			return m;
+		} catch (Error& e) {
+			if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+				TraceEvent(SevError, "WaitStorageMetricsError").error(e);
+				throw;
+			}
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+			cx->invalidateCache(keys);
+			StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys));
+			return m;
+		}
+	}
+}
+
+ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRangeRef keys) {
+
+	vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
+	    cx, keys, std::numeric_limits<int>::max(), false, &StorageServerInterface::waitMetrics, TransactionInfo(TaskPriority::DataDistribution)));
+	state int nLocs = locations.size();
+	state vector<Future<StorageMetrics>> fx(nLocs);
+	state StorageMetrics total;
+	for (int i = 0; i < nLocs; i++) {
+		fx[i] = doGetStorageMetrics(cx, locations[i].first, locations[i].second);
+	}
+	wait(waitForAll(fx));
+	for (int i = 0; i < nLocs; i++) {
+		total += fx[i].get();
+	}
+	return total;
+}
 
 ACTOR Future<Void> trackBoundedStorageMetrics(
 	KeyRange keys,
@@ -3189,14 +3234,11 @@ ACTOR Future<Void> trackBoundedStorageMetrics(
 	}
 }
 
-ACTOR Future< StorageMetrics > waitStorageMetricsMultipleLocations(
-	vector< pair<KeyRange,Reference<LocationInfo>> > locations,
-	StorageMetrics min,
-	StorageMetrics max,
-	StorageMetrics permittedError)
-{
+ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(
+    vector<pair<KeyRange, Reference<LocationInfo>>> locations, StorageMetrics min, StorageMetrics max,
+    StorageMetrics permittedError) {
 	state int nLocs = locations.size();
-	state vector<Future<StorageMetrics>> fx( nLocs );
+	state vector<Future<StorageMetrics>> fx(nLocs);
 	state StorageMetrics total;
 	state PromiseStream<StorageMetrics> deltas;
 	state vector<Future<Void>> wx( fx.size() );
@@ -3204,17 +3246,17 @@ ACTOR Future< StorageMetrics > waitStorageMetricsMultipleLocations(
 	state StorageMetrics maxPlus = max + halfErrorPerMachine * (nLocs-1);
 	state StorageMetrics minMinus = min - halfErrorPerMachine * (nLocs-1);
 
-	for(int i=0; i<nLocs; i++) {
+	for (int i = 0; i < nLocs; i++) {
 		WaitMetricsRequest req(locations[i].first, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
 		req.max.bytes = -1;
-		fx[i] = loadBalance( locations[i].second, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution );
+		fx[i] =
+		    loadBalance(locations[i].second, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution);
 	}
-	wait( waitForAll(fx) );
+	wait(waitForAll(fx));
 
 	// invariant: true total is between (total-permittedError/2, total+permittedError/2)
-	for(int i=0; i<nLocs; i++)
-		total += fx[i].get();
+	for (int i = 0; i < nLocs; i++) total += fx[i].get();
 
 	if (!total.allLessOrEqual( maxPlus )) return total;
 	if (!minMinus.allLessOrEqual( total )) return total;
@@ -3255,7 +3297,7 @@ ACTOR Future< std::pair<Optional<StorageMetrics>, int> > waitStorageMetrics(
 			try {
 				Future<StorageMetrics> fx;
 				if (locations.size() > 1) {
-					fx = waitStorageMetricsMultipleLocations( locations, min, max, permittedError );
+					fx = waitStorageMetricsMultipleLocations(locations, min, max, permittedError);
 				} else {
 					WaitMetricsRequest req( keys, min, max );
 					fx = loadBalance( locations[0].second, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution );
@@ -3294,9 +3336,13 @@ Future< std::pair<Optional<StorageMetrics>, int> > Transaction::waitStorageMetri
 }
 
 Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, int shardLimit ) {
-	StorageMetrics m;
-	m.bytes = -1;
-	return extractMetrics( ::waitStorageMetrics( cx, keys, StorageMetrics(), m, StorageMetrics(), shardLimit, -1 ) );
+	if (shardLimit > 0) {
+		StorageMetrics m;
+		m.bytes = -1;
+		return extractMetrics(::waitStorageMetrics(cx, keys, StorageMetrics(), m, StorageMetrics(), shardLimit, -1));
+	} else {
+		return ::getStorageMetricsLargeKeyRange(cx, keys);
+	}
 }
 
 ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, KeyRange keys, StorageMetrics limit, StorageMetrics estimated )

@@ -19,6 +19,10 @@ Requires: foundationdb-clients = %{version}-%{release}
 Conflicts: foundationdb < 0.1.4
 ifdef(`RHEL6', `Requires(post): chkconfig >= 0.9, /sbin/service')
 Requires(pre): /usr/sbin/useradd, /usr/sbin/groupadd, /usr/bin/getent
+# This is a heavy hammer, to remove /usr/bin/python as a dependency,
+# as it also removes dependencies like glibc. However, none of the
+# other strategies (__requires_exclude) seem to work.
+AutoReq: 0
 
 %package clients
 Summary: FoundationDB clients and library
