@@ -33,6 +33,10 @@ CMake-based build system. Both of them should currently work for most users,
 and CMake should be the preferred choice as it will eventually become the only
 build system available.
 
+If compiling for local development, please set -DUSE_WERROR=ON in
+cmake. Our CI compiles with -Werror on, so this way you'll find out about
+compiler warnings that break the build earlier.
+
 ## CMake
 
 To build with CMake, generally the following is required (works on Linux and
@@ -129,9 +133,9 @@ If you want to create a package you have to tell cmake what platform it is for.
 And then you can build by simply calling `cpack`. So for debian, call:
 
 ```
-cmake -DINSTALL_LAYOUT=DEB  <FDB_SOURCE_DIR>
+cmake <FDB_SOURCE_DIR>
 make
-cpack
+cpack -G DEB
 ```
 
 For RPM simply replace `DEB` with `RPM`.
@@ -151,9 +155,9 @@ To generate a installable package, you have to call CMake with the corresponding
 arguments and then use cpack to generate the package:
 
 ```sh
-cmake -DINSTALL_LAYOUT=OSX  <FDB_SOURCE_DIR>
+cmake <FDB_SOURCE_DIR>
 make
-cpack
+cpack -G productbuild
 ```
 
 ### Windows

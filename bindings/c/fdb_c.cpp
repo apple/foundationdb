@@ -107,7 +107,12 @@ fdb_error_t fdb_network_set_option( FDBNetworkOption option,
 }
 
 fdb_error_t fdb_setup_network_impl() {
-	CATCH_AND_RETURN( API->setupNetwork(); );
+	CATCH_AND_RETURN(
+			try {
+				API->setupNetwork();
+			} catch (boost::system::system_error& e) {
+				return error_code_tls_error;
+			} );
 }
 
 fdb_error_t fdb_setup_network_v13( const char* localAddress ) {
@@ -625,6 +630,13 @@ fdb_error_t fdb_transaction_add_conflict_range( FDBTransaction*tr, uint8_t const
 			return error_code_client_invalid_operation;
 	);
 
+}
+
+extern "C" DLLEXPORT 
+FDBFuture* fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, uint8_t const* begin_key_name,
+        int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length ) {
+	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	return (FDBFuture*)(TXN(tr)->getEstimatedRangeSizeBytes(range).extractPtr());
 }
 
 #include "fdb_c_function_pointers.g.h"

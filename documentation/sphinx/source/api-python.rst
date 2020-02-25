@@ -143,6 +143,10 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
 
        |option-trace-format-blurb|
 
+    .. method :: fdb.options.set_trace_clock_source(source)
+
+       |option-trace-clock-source-blurb|
+
     .. method :: fdb.options.set_disable_multi_version_client_api()
 
        |option-disable-multi-version-client-api|
@@ -289,7 +293,7 @@ A |database-blurb1| |database-blurb2|
 
     If ``limit`` is specified, then only the first ``limit`` keys (and their values) in the range will be returned.
 
-    If ``reverse`` is True, then the last ``limit`` keys in the range will be returned in reverse order.
+    If ``reverse`` is True, then the last ``limit`` keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
     If ``streaming_mode`` is specified, it must be a value from the :data:`StreamingMode` enumeration. It provides a hint to FoundationDB about how to retrieve the specified range. This option should generally not be specified, allowing FoundationDB to retrieve the full range very efficiently.
 
@@ -501,7 +505,7 @@ Reading data
 
     If ``limit`` is specified, then only the first ``limit`` keys (and their values) in the range will be returned.
 
-    If ``reverse`` is True, then the last ``limit`` keys in the range will be returned in reverse order.
+    If ``reverse`` is True, then the last ``limit`` keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
     If ``streaming_mode`` is specified, it must be a value from the :data:`StreamingMode` enumeration. It provides a hint to FoundationDB about how the returned container is likely to be used.  The default is :data:`StreamingMode.iterator`.
 
