@@ -55,6 +55,9 @@ struct RestoreSimpleRequest;
 // Value MutationsVec is the vector of parsed backup mutations.
 // For old mutation logs, the subsequence number is always 0.
 // For partitioned mutation logs, each mutation has a unique LogMessageVersion.
+// Note for partitioned logs, one LogMessageVersion can have multiple mutations,
+// because a clear mutation may be split into several smaller clear mutations by
+// backup workers.
 using VersionedMutationsMap = std::map<LogMessageVersion, MutationsVec>;
 
 ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex, std::string name);
