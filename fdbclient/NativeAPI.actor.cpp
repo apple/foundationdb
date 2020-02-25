@@ -55,8 +55,8 @@
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
 #include "flow/UnitTest.h"
-#include "genericactors.actor.h"
-#include "serialize.h"
+#include "flow/genericactors.actor.h"
+#include "flow/serialize.h"
 
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
