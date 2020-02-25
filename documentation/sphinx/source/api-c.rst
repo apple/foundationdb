@@ -528,8 +528,7 @@ Applications must provide error handling and an appropriate retry loop around th
       |snapshot|
 
    ``reverse``
-
-      If non-zero, key-value pairs will be returned in reverse lexicographical order beginning at the end of the range.
+      If non-zero, key-value pairs will be returned in reverse lexicographical order beginning at the end of the range. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
 .. type:: FDBStreamingMode
 

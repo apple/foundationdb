@@ -219,7 +219,8 @@ struct RestoreFileFR {
 	}
 
 	bool operator<(const RestoreFileFR& rhs) const {
-		return std::tie(beginVersion, endVersion, fileIndex) < std::tie(rhs.beginVersion, rhs.endVersion, rhs.fileIndex);
+		return std::tie(beginVersion, endVersion, fileIndex, fileName) <
+		       std::tie(rhs.beginVersion, rhs.endVersion, rhs.fileIndex, rhs.fileName);
 	}
 
 	RestoreFileFR()
@@ -254,7 +255,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 // The UID in a request is the UID of the interface to handle the request
 ACTOR template <class Interface, class Request>
 Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
-                               std::vector<std::pair<UID, Request>> requests) {
+                               std::vector<std::pair<UID, Request>> requests, TaskPriority taskID = TaskPriority::Low) {
 
 	if (requests.empty()) {
 		return Void();
@@ -265,7 +266,7 @@ Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::
 			std::vector<Future<REPLY_TYPE(Request)>> cmdReplies;
 			for (auto& request : requests) {
 				RequestStream<Request> const* stream = &(interfaces[request.first].*channel);
-				cmdReplies.push_back(stream->getReply(request.second));
+				cmdReplies.push_back(stream->getReply(request.second, taskID));
 			}
 
 			// Alex: Unless you want to do some action when it timeout multiple times, you should use timout. Otherwise,
@@ -293,7 +294,8 @@ Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::
 // This actor can be combined with sendBatchRequests(...)
 ACTOR template <class Interface, class Request>
 Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
-                             std::vector<std::pair<UID, Request>> requests, std::vector<REPLY_TYPE(Request)>* replies) {
+                             std::vector<std::pair<UID, Request>> requests, std::vector<REPLY_TYPE(Request)>* replies,
+                             TaskPriority taskID = TaskPriority::Low) {
 
 	if (requests.empty()) {
 		return Void();
@@ -304,7 +306,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 			std::vector<Future<REPLY_TYPE(Request)>> cmdReplies;
 			for (auto& request : requests) {
 				RequestStream<Request> const* stream = &(interfaces[request.first].*channel);
-				cmdReplies.push_back(stream->getReply(request.second));
+				cmdReplies.push_back(stream->getReply(request.second, taskID));
 			}
 
 			// Alex: Unless you want to do some action when it timeout multiple times, you should use timout. Otherwise,

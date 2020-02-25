@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbserver/Knobs.h"
 
 // The versioned message has wire format : -1, version, messages
 static const int32_t VERSION_HEADER = -1;
@@ -49,7 +50,7 @@ static const char* typeString[] = { "SetValue",
 	                                "AndV2",
 	                                "CompareAndClear"};
 
-struct MutationRef { 
+struct MutationRef {
 	static const int OVERHEAD_BYTES = 12; //12 is the size of Header in MutationList entries
 	enum Type : uint8_t {
 		SetValue = 0,
@@ -82,8 +83,18 @@ struct MutationRef {
 	MutationRef() {}
 	MutationRef( Type t, StringRef a, StringRef b ) : type(t), param1(a), param2(b) {}
 	MutationRef( Arena& to, const MutationRef& from ) : type(from.type), param1( to, from.param1 ), param2( to, from.param2 ) {}
-	int totalSize() const { return OVERHEAD_BYTES + param1.size() + param2.size(); } 
+	int totalSize() const { return OVERHEAD_BYTES + param1.size() + param2.size(); }
 	int expectedSize() const { return param1.size() + param2.size(); }
+	int weightedTotalSize() const {
+		// AtomicOp can cause more workload to FDB cluster than the same-size set mutation;
+		// Amplify atomicOp size to consider such extra workload.
+		// A good value for FASTRESTORE_ATOMICOP_WEIGHT needs experimental evaluations.
+		if (isAtomicOp()) {
+			return totalSize() * SERVER_KNOBS->FASTRESTORE_ATOMICOP_WEIGHT;
+		} else {
+			return totalSize();
+		}
+	}
 
 	std::string toString() const {
 		if (type < MutationRef::MAX_ATOMIC_OP) {
@@ -93,6 +104,8 @@ struct MutationRef {
 			return format("code: Invalid param1: %s param2: %s", printable(param1).c_str(), printable(param2).c_str());
 		}
 	}
+
+	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
 
 	template <class Ar>
 	void serialize( Ar& ar ) {

@@ -693,12 +693,18 @@ Upgrades from 6.1.x will keep all your old data and configuration settings. Data
 Upgrading from 6.0.x
 --------------------
 
-Upgrades from 6.0.x will keep all your old data and configuration settings. Data distribution will slowly reorganize how data is spread across storage servers.
+Upgrades from 6.0.x will keep all your old data and configuration settings.
 
 Upgrading from 5.2.x
 --------------------
 
-Upgrades from 5.2.x will keep all your old data and configuration settings. 
+Upgrades from 5.2.x will keep all your old data and configuration settings. Some affinities that certain roles have for running on processes that haven't set a process class have changed, which may result in these processes running in different locations after upgrading. To avoid this, set process classes as needed. The following changes were made:
+
+* The proxies and master no longer prefer ``resolution`` or ``transaction`` class processes to processes with unset class.
+* The resolver no longer prefers ``transaction`` class processes to processes with unset class.
+* The cluster controller no longer prefers ``master``, ``resolution`` or ``proxy`` class processes to processes with unset class.
+
+See :ref:`guidelines-process-class-config` for recommendations on setting process classes. All of the above roles will prefer ``stateless`` class processes to ones that don't set a class.
 
 Upgrading from 5.0.x - 5.1.x
 ----------------------------
