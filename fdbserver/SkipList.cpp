@@ -922,8 +922,6 @@ void ConflictBatch::GetTooOldTransactions(std::vector<int>& tooOldTransactions) 
 
 void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::vector<int>& nonConflicting,
                                     std::vector<int>* tooOldTransactions) {
-	std::cout << "Skip: " << cs->versionHistory.count() << " BTree: " << cs->bConflicts.btree.size() << std::endl;
-
 	double t = timer();
 	sortPoints(points);
 	g_sort += timer() - t;
@@ -957,11 +955,6 @@ void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::
 	t = timer();
 	if (newOldestVersion > cs->oldestVersion) {
 		cs->oldestVersion = newOldestVersion;
-		SkipList::Finger finger;
-		int temp;
-		cs->versionHistory.find(&cs->removalKey, &finger, &temp, 1);
-		cs->versionHistory.removeBefore(cs->oldestVersion, finger, combinedWriteConflictRanges.size() * 3 + 10);
-		cs->removalKey = finger.getValue();
 		cs->bConflicts.removeBefore(cs->oldestVersion);
 	}
 	g_removeBefore += timer() - t;
@@ -970,40 +963,12 @@ void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::
 void ConflictBatch::checkReadConflictRanges() {
 	if (!combinedReadConflictRanges.size()) return;
 
-	cs->versionHistory.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(),
-	                                   transactionConflictStatus);
-	auto bConflictStatus = new bool[transactionCount];
-	memset(bConflictStatus, 0, transactionCount * sizeof(bool));
-	cs->bConflicts.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(), bConflictStatus);
-	for (int i = 0; i < transactionCount; i++) {
-		if (transactionConflictStatus[i] != bConflictStatus[i]) {
-			std::cout << "i: " << i << " Skip: " << transactionConflictStatus[i] << " BTree: " << bConflictStatus[i]
-			          << std::endl;
-		}
-	}
-	delete[] bConflictStatus;
+	cs->bConflicts.detectConflicts(&combinedReadConflictRanges[0], combinedReadConflictRanges.size(),
+	                               transactionConflictStatus);
 }
 
 void ConflictBatch::addConflictRanges(Version now, std::vector<std::pair<StringRef, StringRef>>::iterator begin,
                                       std::vector<std::pair<StringRef, StringRef>>::iterator end, SkipList* part) {
-	int count = end - begin;
-	static_assert(sizeof(begin[0]) == sizeof(StringRef) * 2,
-	              "Write Conflict Range type not convertible to two StringPtrs");
-	const StringRef* strings = reinterpret_cast<const StringRef*>(&*begin);
-	int stringCount = count * 2;
-
-	static const int stripeSize = 16;
-	SkipList::Finger fingers[stripeSize];
-	int temp[stripeSize];
-	int stripes = (stringCount + stripeSize - 1) / stripeSize;
-
-	int ss = stringCount - (stripes - 1) * stripeSize;
-	for (int s = stripes - 1; s >= 0; s--) {
-		part->find(&strings[s * stripeSize], &fingers[0], temp, ss);
-		part->addConflictRanges(&fingers[0], ss / 2, now);
-		ss = stripeSize;
-	}
-
 	cs->bConflicts.addConflictRanges(now, begin, end);
 }
 
