@@ -23,7 +23,7 @@
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbrpc/genericactors.actor.h"
+#include "flow/genericactors.actor.h"
 #include <vector>
 #pragma once
 
