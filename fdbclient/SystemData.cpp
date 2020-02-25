@@ -19,8 +19,8 @@
  */
 
 #include "fdbclient/SystemData.h"
-#include "Arena.h"
-#include "FDBTypes.h"
+#include "flow/Arena.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/TDMetric.actor.h"
 #include "serialize.h"
