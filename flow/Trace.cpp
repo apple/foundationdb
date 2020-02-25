@@ -732,7 +732,6 @@ void removeTraceRole(std::string role) {
 	g_traceLog.removeRole(role);
 }
 
-<<<<<<< HEAD
 TraceEvent::TraceEvent() : initialized(true), enabled(false), logged(true) {}
 
 TraceEvent::TraceEvent(TraceEvent &&ev) {

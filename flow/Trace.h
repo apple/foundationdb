@@ -532,8 +532,6 @@ struct ITraceLogIssuesReporter {
 	virtual void addIssue(std::string issue) = 0;
 	virtual void resolveIssue(std::string issue) = 0;
 
-	// When called, this function will first clean up expired issues.
-	// If it's never called somehow and the trace log thread is struggling, the memory usage may build up.
 	virtual void retrieveIssues(std::set<std::string>& out) = 0;
 
 	virtual void addref() = 0;
