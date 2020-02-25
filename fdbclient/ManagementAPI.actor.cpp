@@ -21,10 +21,10 @@
 #include <cinttypes>
 #include <vector>
 
-#include "Arena.h"
-#include "FDBOptions.g.h"
-#include "FDBTypes.h"
-#include "ReadYourWrites.h"
+#include "flow/Arena.h"
+#include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ManagementAPI.actor.h"
 
 #include "fdbclient/SystemData.h"

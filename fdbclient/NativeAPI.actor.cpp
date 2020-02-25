@@ -26,12 +26,12 @@
 #include <utility>
 #include <vector>
 
-#include "Arena.h"
-#include "Error.h"
-#include "FDBTypes.h"
-#include "FailureMonitor.h"
-#include "MultiInterface.h"
-#include "Trace.h"
+#include "flow/Arena.h"
+#include "flow/Error.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/MultiInterface.h"
+#include "flow/Trace.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/CoordinationInterface.h"
