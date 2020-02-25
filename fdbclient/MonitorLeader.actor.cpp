@@ -685,6 +685,7 @@ void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::ve
 				TraceEvent("ConnectedProxy").detail("Proxy", lastProxies[i].id());
 			}
 		}
+		ni.firstProxy = ni.proxies[0];
 		ni.proxies = lastProxies;
 	}
 }
