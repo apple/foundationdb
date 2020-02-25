@@ -60,21 +60,7 @@ struct StagingKey {
 	// Assume: SetVersionstampedKey and SetVersionstampedValue have been converted to set
 	void add(const MutationRef& m, LogMessageVersion newVersion) {
 		ASSERT(m.type != MutationRef::SetVersionstampedKey && m.type != MutationRef::SetVersionstampedValue);
-		if (version < newVersion) {
-			if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
-				key = m.param1;
-				val = m.param2;
-				type = (MutationRef::Type)m.type;
-				version = newVersion;
-			} else {
-				if (pendingMutations.find(newVersion) == pendingMutations.end()) {
-					pendingMutations.emplace(newVersion, MutationsVec());
-				}
-				// TODO: Do we really need deep copy?
-				MutationsVec& mutations = pendingMutations[newVersion];
-				mutations.push_back_deep(mutations.arena(), m);
-			}
-		} else if (version == newVersion) { // Sanity check
+		if (version == newVersion) { // Sanity check
 			TraceEvent("FastRestoreApplierStagingKeyMutationAtSameVersion")
 			    .detail("Version", newVersion.toString())
 			    .detail("NewMutation", m.toString())
@@ -106,7 +92,25 @@ struct StagingKey {
 				    .detail("ExistingKeyType", typeString[type])
 				    .detail("ExitingKeyValue", val);
 			}
-		} // else  input mutation is old and can be ignored
+		}
+		// newVersion can be smaller than version as different loaders can send
+		// mutations out of order.
+		if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
+			if (version < newVersion) {
+				key = m.param1;
+				val = m.param2;
+				type = (MutationRef::Type)m.type;
+				version = newVersion;
+			}
+		} else {
+			auto it = pendingMutations.find(newVersion);
+			if (it == pendingMutations.end()) {
+				bool inserted;
+				std::tie(it, inserted) = pendingMutations.emplace(newVersion, MutationsVec());
+			}
+			// TODO: Do we really need deep copy?
+			it->second.push_back_deep(it->second.arena(), m);
+		}
 	}
 
 	// Precompute the final value of the key.
