@@ -795,8 +795,16 @@ public:
 	// TODO: Consider using a hint to stop iteration early when we've deleted as many keys as
 	// we could.
 	void removeBefore(Version oldest) {
-		// This needs to replicate the logic in the SkipList `removeBefore`.
-		ASSERT(false);
+		bool wasBelow = false;
+		for (auto it = btree.begin(); it != btree.end(); ++it) {
+			bool isBelow = it->second < oldest;
+			if (wasBelow && isBelow) {
+				Version v = it->second;
+				it = btree.erase(it);
+				it->second = max(v, it->second);
+			}
+			wasBelow = isBelow;
+		}
 	}
 };
 
