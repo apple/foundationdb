@@ -282,7 +282,7 @@ struct _IncludeVersion {
 		ar >> v;
 		if (!v.isValid()) {
 			auto err = incompatible_protocol_version();
-			TraceEvent(SevError, "InvalidSerializationVersion").error(err).detailf("Version", "%llx", v.versionWithFlags());
+			TraceEvent(SevWarnAlways, "InvalidSerializationVersion").error(err).detailf("Version", "%llx", v.versionWithFlags());
 			throw err;
 		}
 		if (v > currentProtocolVersion) {
