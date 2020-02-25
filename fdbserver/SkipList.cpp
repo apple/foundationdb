@@ -795,17 +795,20 @@ public:
 	// TODO: Consider using a hint to stop iteration early when we've deleted as many keys as
 	// we could.
 	void removeBefore(Version oldest) {
-		bool wasBelow = false;
-		for (auto it = btree.begin(); it != btree.end(); ++it) {
-			bool isBelow = it->second < oldest;
-			if (wasBelow && isBelow) {
+		bool wasAbove = true;
+		auto it = btree.begin();
+		while (it != btree.end()) {
+			bool isAbove = it->second >= oldest;
+			if (isAbove || wasAbove) {
+				++it;
+			} else {
 				Version v = it->second;
 				it = btree.erase(it);
 				if (it != btree.end()) {
 					it->second = max(v, it->second);
 				}
 			}
-			wasBelow = isBelow;
+			wasAbove = isAbove;
 		}
 	}
 };
