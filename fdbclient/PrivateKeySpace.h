@@ -10,27 +10,30 @@ class ReadYourWritesTransaction;
 
 class PrivateKeyRangeBaseImpl {
 public:
-	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const = 0;
+	// virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const = 0;
+	// TODO : My opinion is that having this interface is enough for underlying keyrange implemention
+	// A key range doesn't have any knowledge about other key range, parameters like KeySelector, GetRangeLimits should be handled in PrivateKeySpace
+	// Thus, it is no need to have them here
+	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
 
+	explicit PrivateKeyRangeBaseImpl(KeyRef start, KeyRef end) {
+		// TODO : checker: make sure it is in valid key range
+		range = KeyRangeRef(start, end);
+	}
 	KeyRangeRef getKeyRange() const {
 		return range;
 	}
 protected:
-	KeyRangeRef range;
+	KeyRangeRef range; // underlying key range for this function
 };
 
-// This class 
-class PrivateKeyRangeSimpleImpl : public PrivateKeyRangeBaseImpl {
-public:
-	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
-	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const;
-};
 
-// class PrivateKeyRangeGetAllImpl : public PrivateKeyRangeSimpleGetRangeImpl {
+// class PrivateKeyRangeSimpleImpl : public PrivateKeyRangeBaseImpl {
 // public:
-// 	virtual Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys, ReadYourWritesTransaction* ryw) const;
-// 	virtual Future<Standalone<RangeResultRef>> get(ReadYourWritesTransaction* ryw) const = 0;
+// 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
+// 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const;
 // };
+
 class PrivateKeySpace {
 public:
 	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key, bool snapshot = false);
@@ -39,10 +42,6 @@ public:
 
 	void registerKeyRange(const KeyRange& kr, PrivateKeyRangeBaseImpl* impl) {
 		impls.insert(kr, impl);
-	}
-
-	RangeMap<Key, PrivateKeyRangeBaseImpl*, KeyRangeRef>::Iterator getIteratorForKey(const Key& key) {
-		return impls.rangeContaining(key);
 	}
 
 	KeyRangeMap<PrivateKeyRangeBaseImpl*>* getKeyRangeMap(){
