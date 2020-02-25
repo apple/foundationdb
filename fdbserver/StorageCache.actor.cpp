@@ -386,7 +386,7 @@ void validate(StorageCacheData* data, bool force = false) {
 			validateCacheRange(latest, allKeys, data->version.get(), data->thisServerID, data->oldestVersion.get());
 
 			data->debug_lastValidateTime = now();
-			TraceEvent(SevError, "SCValidationDone", data->thisServerID).detail("LastValidTime", data->debug_lastValidateTime);
+			TraceEvent(SevDebug, "SCValidationDone", data->thisServerID).detail("LastValidTime", data->debug_lastValidateTime);
 		}
 	} catch (...) {
 		TraceEvent(SevError, "SCValidationFailure", data->thisServerID).detail("LastValidTime", data->debug_lastValidateTime);
@@ -452,7 +452,6 @@ ACTOR Future<Version> waitForVersionNoTooOld( StorageCacheData* data, Version ve
 
 ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 	state int64_t resultSize = 0;
-	//printf("\nSCGetValueQ\n");
 
 	try {
 		++data->counters.getValueQueries;
@@ -511,7 +510,7 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 		GetValueReply reply(v, true);
 		req.reply.send(reply);
 	} catch (Error& e) {
-		TraceEvent("SCGetValueQError", data->thisServerID).detail("Code",e.code()).detail("Version", version).detail("ReqKey",req.key);
+		TraceEvent("SCGetValueQError", data->thisServerID).detail("Code",e.code()).detail("ReqKey",req.key);
 		if(!canReplyWith(e))
 			throw;
 		req.reply.sendError(e);
@@ -756,8 +755,7 @@ ACTOR Future<Void> getKeyValues( StorageCacheData* data, GetKeyValuesRequest req
 			data->counters.rowsQueried += r.data.size();
 		}
 	} catch (Error& e) {
-		TraceEvent("SCGetKeyValuesError", data->thisServerID).detail("Code",e.code()).detail("Version", version).
-			detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end).detail("ReqBegin", req.begin.getKey()).detail("ReqEnd", req.end.getKey());
+		TraceEvent("SCGetKeyValuesError", data->thisServerID).detail("Code",e.code()).detail("ReqBegin", req.begin.getKey()).detail("ReqEnd", req.end.getKey());
 		if(!canReplyWith(e))
 			throw;
 		req.reply.sendError(e);
@@ -1874,9 +1872,9 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 
 		validate(data);
 
-		TraceEvent("UpdatedVersions", data->thisServerID).detail("DataVersion", data->version.get()).detail("Version", ver);
+		//TraceEvent("UpdatedVersions", data->thisServerID).detail("DataVersion", data->version.get()).detail("Version", ver);
 		data->lastTLogVersion = cloneCursor2->getMaxKnownVersion();
-		TraceEvent("CursorVersions", data->thisServerID).detail("CursorVersion", cursor->version().version).detail("CloneCurserVersion", cloneCursor2->version().version).detail("TLogVersion", data->lastTLogVersion);
+		//TraceEvent("CursorVersions", data->thisServerID).detail("CursorVersion", cursor->version().version).detail("CloneCurserVersion", cloneCursor2->version().version).detail("TLogVersion", data->lastTLogVersion);
 		cursor->advanceTo( cloneCursor2->version() );
 		data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
 		if(cursor->version().version >= data->lastTLogVersion) {

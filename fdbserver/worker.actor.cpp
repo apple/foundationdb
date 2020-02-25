@@ -20,8 +20,8 @@
 
 #include <boost/lexical_cast.hpp>
 
-#include "Locality.h"
-#include "StorageServerInterface.h"
+#include "fdbrpc/Locality.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
