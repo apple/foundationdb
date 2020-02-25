@@ -756,7 +756,7 @@ public:
 
 	// timer() can be up to one second ahead of now()
 	virtual double timer() {
-		timerTime += deterministicRandom()->random01()*(time+1.0-timerTime)/2.0;
+		timerTime += deterministicRandom()->random01()*(time+0.1-timerTime)/2.0;
 		return timerTime; 
 	}
 
