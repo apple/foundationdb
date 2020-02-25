@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "Arena.h"
-#include "FDBOptions.g.h"
-#include "NativeAPI.actor.h"
-#include "SystemData.h"
+#include "flow/Arena.h"
+#include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/StorageServerInterface.h"

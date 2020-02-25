@@ -48,7 +48,7 @@
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/TLSConnection.h"
-#include "flow.h"
+#include "flow/flow.h"
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Knobs.h"
