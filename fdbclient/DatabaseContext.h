@@ -20,10 +20,10 @@
 
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
-#include "FastAlloc.h"
-#include "FastRef.h"
-#include "StorageServerInterface.h"
-#include "genericactors.actor.h"
+#include "flow/FastAlloc.h"
+#include "flow/FastRef.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbrpc/genericactors.actor.h"
 #include <vector>
 #pragma once
 
