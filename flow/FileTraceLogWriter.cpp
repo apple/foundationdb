@@ -74,6 +74,7 @@ void FileTraceLogWriter::lastError(int err) {
 void FileTraceLogWriter::write(const std::string& str) {
 	auto ptr = str.c_str();
 	int remaining = str.size();
+	bool needsResolve = false;
 
 	while ( remaining ) {
 		int ret = __write( traceFileFD, ptr, remaining );
@@ -81,8 +82,13 @@ void FileTraceLogWriter::write(const std::string& str) {
 			lastError(0);
 			remaining -= ret;
 			ptr += ret;
+			if (needsResolve) {
+				issues->resolveIssue("trace_log_file_write_error");
+				needsResolve = false;
+			}
 		} else {
-			issues->addAndExpire("trace_log_file_write_error");
+			issues->addIssue("trace_log_file_write_error");
+			needsResolve = true;
 			fprintf(stderr, "Unexpected error [%d] when flushing trace log.\n", errno);
 			lastError(errno);
 			threadSleep(0.1);
@@ -92,6 +98,7 @@ void FileTraceLogWriter::write(const std::string& str) {
 
 void FileTraceLogWriter::open() {
 	cleanupTraceFiles();
+	bool needsResolve = false;
 
 	++index;
 
@@ -116,7 +123,8 @@ void FileTraceLogWriter::open() {
 		}
 		else {
 			fprintf(stderr, "ERROR: could not create trace log file `%s' (%d: %s)\n", finalname.c_str(), errno, strerror(errno));
-			issues->addAndExpire("trace_log_could_not_create_file");
+			issues->addIssue("trace_log_could_not_create_file");
+			needsResolve = true;
 
 			int errorNum = errno;
 			onMainThreadVoid([finalname, errorNum]{
@@ -129,6 +137,9 @@ void FileTraceLogWriter::open() {
 		}
 	}
 	onMainThreadVoid([]{ latestEventCache.clear("TraceFileOpenError"); }, NULL);
+	if (needsResolve) {
+		issues->resolveIssue("trace_log_could_not_create_file");
+	}
 	lastError(0);
 }
 

@@ -529,13 +529,12 @@ struct ITraceLogFormatter {
 };
 
 struct ITraceLogIssuesReporter {
-	// The issue will expire after (now + expirationInterval) seconds
-	virtual void addAndExpire(std::string issue,
-	                          double expirationInterval = FLOW_KNOBS->TRACE_LOG_ISSUE_EXPIRATION_INTERVAL) = 0;
+	virtual void addIssue(std::string issue) = 0;
+	virtual void resolveIssue(std::string issue) = 0;
 
 	// When called, this function will first clean up expired issues.
 	// If it's never called somehow and the trace log thread is struggling, the memory usage may build up.
-	virtual void retrieveIssues(std::vector<std::string>& out) = 0;
+	virtual void retrieveIssues(std::set<std::string>& out) = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -599,7 +598,7 @@ bool validateTraceClockSource(std::string source);
 
 void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
-void retriveTraceLogIssues(std::vector<std::string>& out);
+void retriveTraceLogIssues(std::set<std::string>& out);
 template <class T>
 struct ThreadFuture;
 void pingTraceLogWriterThread(ThreadFuture<struct Void>& p);

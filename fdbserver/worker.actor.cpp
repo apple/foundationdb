@@ -747,7 +747,7 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFol
 	return Void();
 }
 
-ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::vector<std::string>>>> issues) {
+ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::set<std::string>>>> issues) {
 	state bool pingTimeout = false;
 	loop {
 		wait(delay(SERVER_KNOBS->TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS));
@@ -767,11 +767,11 @@ ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::vector
 			}
 		}
 		if (issues.present()) {
-			std::vector<std::string> _issues;
+			std::set<std::string> _issues;
 			retriveTraceLogIssues(_issues);
 			if (pingTimeout) {
 				// Ping trace log writer thread timeout.
-				_issues.push_back("trace_log_writer_thread_unresponsive");
+				_issues.insert("trace_log_writer_thread_unresponsive");
 				pingTimeout = false;
 			}
 			issues.get()->set(_issues);
@@ -785,7 +785,7 @@ ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::vector
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                        Reference<ClusterConnectionFile> connFile, LocalityData locality,
                                        Reference<AsyncVar<ServerDBInfo>> dbInfo,
-                                       Optional<Reference<AsyncVar<std::vector<std::string>>>> issues) {
+                                       Optional<Reference<AsyncVar<std::set<std::string>>>> issues) {
 	// Initially most of the serverDBInfo is not known, but we know our locality right away
 	ServerDBInfo localInfo;
 	localInfo.myLocality = locality;
@@ -914,7 +914,7 @@ ACTOR Future<Void> workerServer(
 	state WorkerInterface interf( locality );
 	interf.initEndpoints();
 
-	state Reference<AsyncVar<std::vector<std::string>>> issues(new AsyncVar<std::vector<std::string>>());
+	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
 
 	folder = abspath(folder);
 

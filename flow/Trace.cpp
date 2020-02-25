@@ -223,30 +223,19 @@ public:
 
 	struct IssuesList : ITraceLogIssuesReporter, ThreadSafeReferenceCounted<IssuesList> {
 		IssuesList(){};
-		void addAndExpire(std::string issue, double expirationInterval) override {
+		void addIssue(std::string issue) override { issues.insert(issue); }
+
+		void retrieveIssues(std::set<std::string>& out) override {
 			MutexHolder h(mutex);
-			auto now = ::now();
-			if (issues.find(issue) != issues.end()) {
-				issues[issue]++;
-			} else {
-				issues[issue] = 1;
+			for (auto const& i : issues) {
+				out.insert(i);
 			}
-			queue.emplace_back(now + expirationInterval, issue);
 		}
 
-		void retrieveIssues(std::vector<std::string>& out) override {
+		void resolveIssue(std::string issue) override {
 			MutexHolder h(mutex);
-			// clean up any expired events first
-			auto now = ::now();
-			while (queue.size() > 0 && queue.front().first <= now) {
-				ASSERT(issues.find(queue.front().second) != issues.end());
-				if (--issues[queue.front().second] == 0) {
-					issues.erase(queue.front().second);
-				}
-				queue.pop_front();
-			}
-			for (auto const& i : issues) {
-				out.push_back(i.first);
+			if (issues.find(issue) != issues.end()) {
+				issues.erase(issue);
 			}
 		}
 
@@ -255,8 +244,7 @@ public:
 
 	private:
 		Mutex mutex;
-		std::unordered_map<std::string, int64_t> issues;
-		Deque<std::pair<double, std::string>> queue;
+		std::set<std::string> issues;
 	};
 
 	Reference<IssuesList> issues;
@@ -551,7 +539,7 @@ public:
 		writer->post(a);
 	}
 
-	void retriveTraceLogIssues(std::vector<std::string>& out) { return issues->retrieveIssues(out); }
+	void retriveTraceLogIssues(std::set<std::string>& out) { return issues->retrieveIssues(out); }
 
 	~TraceLog() {
 		close();
@@ -744,6 +732,7 @@ void removeTraceRole(std::string role) {
 	g_traceLog.removeRole(role);
 }
 
+<<<<<<< HEAD
 TraceEvent::TraceEvent() : initialized(true), enabled(false), logged(true) {}
 
 TraceEvent::TraceEvent(TraceEvent &&ev) {
@@ -788,7 +777,7 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 	return *this;
 }
 
-void retriveTraceLogIssues(std::vector<std::string>& out) {
+void retriveTraceLogIssues(std::set<std::string>& out) {
 	return g_traceLog.retriveTraceLogIssues(out);
 }
 
