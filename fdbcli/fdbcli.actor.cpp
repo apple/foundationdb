@@ -66,6 +66,7 @@ enum {
 	OPT_TIMEOUT,
 	OPT_EXEC,
 	OPT_NO_STATUS,
+	OPT_NO_HINTS,
 	OPT_STATUS_FROM_JSON,
 	OPT_VERSION,
 	OPT_TRACE_FORMAT
@@ -79,6 +80,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_TIMEOUT, "--timeout", SO_REQ_SEP },
 	                                  { OPT_EXEC, "--exec", SO_REQ_SEP },
 	                                  { OPT_NO_STATUS, "--no-status", SO_NONE },
+	                                  { OPT_NO_HINTS, "--no-hints", SO_NONE },
 	                                  { OPT_HELP, "-?", SO_NONE },
 	                                  { OPT_HELP, "-h", SO_NONE },
 	                                  { OPT_HELP, "--help", SO_NONE },
@@ -2461,17 +2463,18 @@ void LogCommand(std::string line, UID randomID, std::string errMsg) {
 
 struct CLIOptions {
 	std::string program_name;
-	int exit_code;
+	int exit_code = -1;
 
 	std::string commandLine;
 
 	std::string clusterFile;
-	bool trace;
+	bool trace = false;
 	std::string traceDir;
 	std::string traceFormat;
-	int exit_timeout;
+	int exit_timeout = 0;
 	Optional<std::string> exec;
-	bool initialStatusCheck;
+	bool initialStatusCheck = true;
+	bool cliHints = true;
 	std::string tlsCertPath;
 	std::string tlsKeyPath;
 	std::string tlsVerifyPeers;
@@ -2479,10 +2482,6 @@ struct CLIOptions {
 	std::string tlsPassword;
 
 	CLIOptions( int argc, char* argv[] )
-		: trace(false),
-		 exit_timeout(0),
-		 initialStatusCheck(true),
-		 exit_code(-1)
 	{
 		program_name = argv[0];
 		for (int a = 0; a<argc; a++) {
@@ -2537,6 +2536,8 @@ struct CLIOptions {
 			case OPT_NO_STATUS:
 				initialStatusCheck = false;
 				break;
+			case OPT_NO_HINTS:
+				cliHints = false;
 
 #ifndef TLS_DISABLED
 			// TLS Options
@@ -3656,14 +3657,16 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 		[](std::string const& line, std::vector<std::string>& completions) {
 			fdbcli_comp_cmd(line, completions);
 		},
-		[](std::string const& line)->LineNoise::Hint {
-			int firstWordIdx = line.find(' ');
-			if (firstWordIdx == std::string::npos) {
-				firstWordIdx = line.size();
-			}
-			auto iter = helpMap.find(line.substr(0, firstWordIdx));
-			if (iter != helpMap.end()) {
-				return LineNoise::Hint(iter->second.usage.substr(firstWordIdx), 0, false);
+		[enabled=opt.cliHints](std::string const& line)->LineNoise::Hint {
+			if (enabled) {
+				int firstWordIdx = line.find(' ');
+				if (firstWordIdx == std::string::npos) {
+					firstWordIdx = line.size();
+				}
+				auto iter = helpMap.find(line.substr(0, firstWordIdx));
+				if (iter != helpMap.end()) {
+					return LineNoise::Hint(iter->second.usage.substr(firstWordIdx), 0, false);
+				}
 			}
 			return LineNoise::Hint();
 		},
