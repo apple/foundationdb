@@ -1840,6 +1840,9 @@ public:
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		
+		//This commit must happen on the first proxy to ensure that the applier has flushed all mutations from previous DRs
+		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 
 		// We will use the global status for now to ensure that multiple backups do not start place with different tags
 		state int status = wait(backupAgent->getStateValue(tr, logUidCurrent));
