@@ -1964,6 +1964,7 @@ int main(int argc, char* argv[]) {
 		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
 	} catch (boost::system::system_error& e) {
+		ASSERT_WE_THINK(false); // boost errors shouldn't leak
 		fprintf(stderr, "boost::system::system_error: %s (%d)", e.what(), e.code().value());
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
