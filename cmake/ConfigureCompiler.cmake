@@ -1,5 +1,6 @@
 set(USE_GPERFTOOLS OFF CACHE BOOL "Use gperfools for profiling")
 set(USE_VALGRIND OFF CACHE BOOL "Compile for valgrind usage")
+set(USE_VALGRIND_FOR_CTEST ${USE_VALGRIND} CACHE BOOL "Use valgrind for ctest")
 set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
 set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
 set(USE_ASAN OFF CACHE BOOL "Compile with address sanitizer")
@@ -10,6 +11,7 @@ set(USE_LIBCXX OFF CACHE BOOL "Use libc++")
 set(USE_CCACHE OFF CACHE BOOL "Use ccache for compilation if available")
 set(RELATIVE_DEBUG_PATHS OFF CACHE BOOL "Use relative file paths in debug info")
 set(STATIC_LINK_LIBCXX ON CACHE BOOL "Statically link libstdcpp/libc++")
+set(USE_WERROR OFF CACHE BOOL "Compile with -Werror. Recommended for local development and CI.")
 
 set(rel_debug_paths OFF)
 if(RELATIVE_DEBUG_PATHS)
@@ -96,8 +98,11 @@ if(WIN32)
 else()
   set(GCC NO)
   set(CLANG NO)
+  set(ICC NO)
   if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
     set(CLANG YES)
+  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
+    set(ICC YES)
   else()
     # This is not a very good test. However, as we do not really support many architectures
     # this is good enough for now
@@ -202,12 +207,20 @@ else()
   endif()
   if (CLANG)
     add_compile_options()
+    # Clang has link errors unless `atomic` is specifically requested.
+    if(NOT APPLE)
+      add_link_options(-latomic)
+    endif()
     if (APPLE OR USE_LIBCXX)
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
       add_compile_definitions(WITH_LIBCXX)
       if (NOT APPLE)
         add_link_options(-lc++ -lc++abi -Wl,-build-id=sha1)
       endif()
+    endif()
+    if (OPEN_FOR_IDE)
+      add_compile_options(
+        -Wno-unknown-attributes)
     endif()
     add_compile_options(
       -Wno-unknown-warning-option
@@ -217,7 +230,6 @@ else()
       -Wno-unknown-pragmas
       -Wno-delete-non-virtual-dtor
       -Wno-undefined-var-template
-      -Wno-unused-value
       -Wno-tautological-pointer-compare
       -Wno-format)
     if (USE_CCACHE)
@@ -226,11 +238,19 @@ else()
         -Wno-error=unused-command-line-argument)
     endif()
   endif()
-  if (CMAKE_GENERATOR STREQUAL Xcode)
-  else()
+  if (USE_WERROR)
     add_compile_options(-Werror)
   endif()
-  add_compile_options($<$<BOOL:${GCC}>:-Wno-pragmas>)
+  if (GCC)
+    add_compile_options(-Wno-pragmas)
+
+    # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
+    # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
+    add_compile_options(-Wno-attributes)
+  elseif(ICC)
+    add_compile_options(-wd1879 -wd1011)
+    add_link_options(-static-intel)
+  endif()
   add_compile_options(-Wno-error=format
     -Wunused-variable
     -Wno-deprecated

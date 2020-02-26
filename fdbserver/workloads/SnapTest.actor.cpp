@@ -159,7 +159,6 @@ public: // workload functions
 			keys.push_back(deterministicRandom()->randomInt64(0, INT64_MAX - 2));
 		}
 
-		state int retry = 0;
 		tr.reset();
 		loop {
 			try {
@@ -190,6 +189,7 @@ public: // workload functions
 
 	ACTOR Future<Void> _start(Database cx, SnapTestWorkload* self) {
 		state Transaction tr(cx);
+		state bool snapFailed = false;
 
 		if (self->testID == 0) {
 			// create even keys before the snapshot
@@ -202,7 +202,6 @@ public: // workload functions
 			wait(delay(toDelay));
 
 			state int retry = 0;
-			state bool snapFailed = false;
 			loop {
 				self->snapUID = deterministicRandom()->randomUniqueID();
 				try {

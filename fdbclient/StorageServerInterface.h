@@ -54,7 +54,6 @@ struct StorageServerInterface {
 	LocalityData locality;
 	UID uniqueID;
 
-	RequestStream<ReplyPromise<VersionReply>> getVersion;
 	RequestStream<struct GetValueRequest> getValue;
 	RequestStream<struct GetKeyRequest> getKey;
 
@@ -74,7 +73,7 @@ struct StorageServerInterface {
 
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
 	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
-	NetworkAddress address() const { return getVersion.getEndpoint().getPrimaryAddress(); }
+	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
 	template <class Ar> 
@@ -83,11 +82,11 @@ struct StorageServerInterface {
 		// versioned carefully!
 
 		if constexpr (!is_fb_function<Ar>) {
-			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
+			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
 		} else {
-			serializer(ar, uniqueID, locality, getVersion, getValue, getKey, getKeyValues, getShardState, waitMetrics,
+			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
 			           watchValue);
 		}
@@ -190,8 +189,9 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 	VectorRef<KeyValueRef, VecSerStrategy::String> data;
 	Version version; // useful when latestVersion was requested
 	bool more;
+	bool cached;
 
-	GetKeyValuesReply() : version(invalidVersion), more(false) {}
+	GetKeyValuesReply() : version(invalidVersion), more(false), cached(false) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -267,7 +267,7 @@ struct GetShardStateRequest {
 		FETCHING = 1,
 		READABLE = 2
 	};
-	
+
 	KeyRange keys;
 	int32_t mode;
 	ReplyPromise<GetShardStateReply> reply;
@@ -285,33 +285,38 @@ struct StorageMetrics {
 	int64_t bytes = 0;				// total storage
 	int64_t bytesPerKSecond = 0;	// network bandwidth (average over 10s)
 	int64_t iosPerKSecond = 0;
+	int64_t bytesReadPerKSecond = 0;
 
 	static const int64_t infinity = 1LL<<60;
 
 	bool allLessOrEqual( const StorageMetrics& rhs ) const {
-		return bytes <= rhs.bytes && bytesPerKSecond <= rhs.bytesPerKSecond && iosPerKSecond <= rhs.iosPerKSecond;
+		return bytes <= rhs.bytes && bytesPerKSecond <= rhs.bytesPerKSecond && iosPerKSecond <= rhs.iosPerKSecond &&
+		       bytesReadPerKSecond <= rhs.bytesReadPerKSecond;
 	}
 	void operator += ( const StorageMetrics& rhs ) {
 		bytes += rhs.bytes;
 		bytesPerKSecond += rhs.bytesPerKSecond;
 		iosPerKSecond += rhs.iosPerKSecond;
+		bytesReadPerKSecond += rhs.bytesReadPerKSecond;
 	}
 	void operator -= ( const StorageMetrics& rhs ) {
 		bytes -= rhs.bytes;
 		bytesPerKSecond -= rhs.bytesPerKSecond;
 		iosPerKSecond -= rhs.iosPerKSecond;
+		bytesReadPerKSecond -= rhs.bytesReadPerKSecond;
 	}
 	template <class F>
 	void operator *= ( F f ) {
 		bytes *= f;
 		bytesPerKSecond *= f;
 		iosPerKSecond *= f;
+		bytesReadPerKSecond *= f;
 	}
-	bool allZero() const { return !bytes && !bytesPerKSecond && !iosPerKSecond; }
+	bool allZero() const { return !bytes && !bytesPerKSecond && !iosPerKSecond && !bytesReadPerKSecond; }
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, bytes, bytesPerKSecond, iosPerKSecond);
+		serializer(ar, bytes, bytesPerKSecond, iosPerKSecond, bytesReadPerKSecond);
 	}
 
 	void negate() { operator*=(-1.0); }
@@ -321,11 +326,13 @@ struct StorageMetrics {
 	template <class F> StorageMetrics operator * ( F f ) const { StorageMetrics x(*this); x*=f; return x; }
 
 	bool operator == ( StorageMetrics const& rhs ) const {
-		return bytes == rhs.bytes && bytesPerKSecond == rhs.bytesPerKSecond && iosPerKSecond == rhs.iosPerKSecond;
+		return bytes == rhs.bytes && bytesPerKSecond == rhs.bytesPerKSecond && iosPerKSecond == rhs.iosPerKSecond &&
+		       bytesReadPerKSecond == rhs.bytesReadPerKSecond;
 	}
 
 	std::string toString() const {
-		return format("Bytes: %lld, BPerKSec: %lld, iosPerKSec: %lld", bytes, bytesPerKSecond, iosPerKSecond);
+		return format("Bytes: %lld, BPerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld", bytes, bytesPerKSecond,
+		              iosPerKSecond, bytesReadPerKSecond);
 	}
 };
 

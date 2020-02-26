@@ -148,7 +148,7 @@ IPv6 Support
 
 FoundationDB (since v6.1) can accept network connections from clients connecting over IPv6. IPv6 address/port pair is represented as ``[IP]:PORT``, e.g. "[::1]:4800", "[abcd::dead:beef]:4500".
 
-1) The cluster file can contain mix of IPv6 and IPv6 addresses. For example::
+1) The cluster file can contain mix of IPv4 and IPv6 addresses. For example::
 
      description:ID@127.0.0.1:4500,[::1]:4500,...
 
@@ -177,7 +177,7 @@ You can add new machines to a cluster at any time:
 
 5) If you have previously :ref:`excluded <removing-machines-from-a-cluster>` a machine from the cluster, you will need to take it off the exclusion list using the ``include <ip>`` command of fdbcli before it can be a full participant in the cluster.
 
-    .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
+.. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
 
 .. _removing-machines-from-a-cluster:
 
@@ -192,26 +192,30 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
 
 3) Use the ``exclude`` command in ``fdbcli`` on the machines you plan to remove:
     
-    ::
+::
 
-        user@host1$ fdbcli
-        Using cluster file `/etc/foundationdb/fdb.cluster'.
+    user@host1$ fdbcli
+    Using cluster file `/etc/foundationdb/fdb.cluster'.
 
-        The database is available.
+    The database is available.
 
-        Welcome to the fdbcli. For help, type `help'.
-        fdb> exclude 1.2.3.4 1.2.3.5 1.2.3.6
-        Waiting for state to be removed from all excluded servers.  This may take a while.
-        It is now safe to remove these machines or processes from the cluster.
+    Welcome to the fdbcli. For help, type `help'.
+    fdb> exclude 1.2.3.4 1.2.3.5 1.2.3.6
+    Waiting for state to be removed from all excluded servers.  This may take a while.
+    It is now safe to remove these machines or processes from the cluster.
 
-    
-    ``exclude`` can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an ``IP``:``PORT`` pair).
 
-    .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
-    
-    Excluding a server doesn't shut it down immediately; data on the machine is first moved away. When the ``exclude`` command completes successfully (by returning control to the command prompt), the machines that you specified are no longer required to maintain the configured redundancy mode. A large amount of data might need to be transferred first, so be patient. When the process is complete, the excluded machine or process can be shut down without fault tolerance or availability consequences.
-    
-    If you interrupt the exclude command with Ctrl-C after seeing the "waiting for state to be removed" message, the exclusion work will continue in the background. Repeating the command will continue waiting for the exclusion to complete. To reverse the effect of the ``exclude`` command, use the ``include`` command.
+``exclude`` can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an ``IP``:``PORT`` pair).
+
+.. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
+
+Excluding a server doesn't shut it down immediately; data on the machine is first moved away. When the ``exclude`` command completes successfully (by returning control to the command prompt), the machines that you specified are no longer required to maintain the configured redundancy mode. A large amount of data might need to be transferred first, so be patient. When the process is complete, the excluded machine or process can be shut down without fault tolerance or availability consequences.
+
+If you interrupt the exclude command with Ctrl-C after seeing the "waiting for state to be removed" message, the exclusion work will continue in the background. Repeating the command will continue waiting for the exclusion to complete. To reverse the effect of the ``exclude`` command, use the ``include`` command.
+
+    Excluding a server with the ``failed`` flag will shut it down immediately; it will assume that it has already become unrecoverable or unreachable, and will not attempt to move the data on the machine away. This may break the guarantee required to maintain the configured redundancy mode, which will be checked internally, and the command may be denied if the guarantee is violated. This safety check can be ignored by using the command ``exclude FORCE failed``.
+
+    In case you want to include a new machine with the same address as a server previously marked as failed, you can allow it to join by using the ``include failed`` command.
 
 4) On each removed machine, stop the FoundationDB server and prevent it from starting at the next boot. Follow the :ref:`instructions for your platform <administration-running-foundationdb>`. For example, on Ubuntu::
 
@@ -222,7 +226,7 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
 
 6) You can optionally :ref:`uninstall <administration-removing>` the FoundationDB server package entirely and/or delete database files on removed servers.
 
-7) If you ever want to add a removed machine back to the cluster, you will have to take it off the excluded servers list to which it was added in step 3. This can be done using the ``include`` command of ``fdbcli``. Typing ``exclude`` with no parameters will tell you the current list of excluded machines.
+7) If you ever want to add a removed machine back to the cluster, you will have to take it off the excluded servers list to which it was added in step 3. This can be done using the ``include`` command of ``fdbcli``. If attempting to re-include a failed server, this can be done using the ``include failed`` command of ``fdbcli``. Typing ``exclude`` with no parameters will tell you the current list of excluded and failed machines.
 
 Moving a cluster
 ================
@@ -316,9 +320,9 @@ Running backups         Number of backups currently running. Different backups c
 Running DRs             Number of DRs currently running. Different DRs could be streaming different prefixes and/or to different DR clusters.
 ====================== ==========================================================================================================
 
-The "Memory availability" is a conservative estimate of the minimal RAM available to any ``fdbserver`` process across all machines in the cluster. This value is calculated in two steps. Memory available per process is first calculated *for each machine* by taking:
+The "Memory availability" is a conservative estimate of the minimal RAM available to any ``fdbserver`` process across all machines in the cluster. This value is calculated in two steps. Memory available per process is first calculated *for each machine* by taking::
 
-  availability = ((total - committed) + sum(processSize)) / processes
+    availability = ((total - committed) + sum(processSize)) / processes
 
 where:
 
@@ -514,7 +518,7 @@ To make configuring, starting, stopping, and restarting ``fdbserver`` processes 
 
 During normal operation, ``fdbmonitor`` is transparent, and you interact with it only by modifying the configuration in :ref:`foundationdb.conf <foundationdb-conf>` and perhaps occasionally by :ref:`starting and stopping <administration-running-foundationdb>` it manually. If some problem prevents an ``fdbserver`` or ``backup-agent`` process from starting or causes it to stop unexpectedly, ``fdbmonitor`` will log errors to the system log.
 
-If ``kill_on_configuration_change`` parameter is unset or set to ``true`` in foundationdb.conf then fdbmonitor will restart on changes automatically. If this parameter is set to ``false`` it will not restart on changes.
+If ``kill_on_configuration_change`` parameter is unset or set to ``true`` in foundationdb.conf then fdbmonitor will restart monitored processes on changes automatically. If this parameter is set to ``false`` it will not restart any monitored processes on changes.
 
 .. _administration-managing-trace-files:
 
@@ -659,7 +663,7 @@ For **RHEL/CentOS**, perform the upgrade using the rpm command:
     user@host$ sudo rpm -Uvh |package-rpm-clients| \\
     |package-rpm-server|
 
-The ``foundationdb-clients`` package also installs the :doc:`Python <api-python>` and :doc:`C <api-c>` APIs. If your clients use :doc:`Ruby <api-ruby>`, `Java <javadoc/index.html>`_, or `Go <https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb>`_, follow the instructions in the corresponding language documentation to install the APIs.
+The ``foundationdb-clients`` package also installs the :doc:`C <api-c>` API. If your clients use :doc:`Ruby <api-ruby>`, :doc:`Python <api-python>`, `Java <javadoc/index.html>`_, or `Go <https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb>`_, follow the instructions in the corresponding language documentation to install the APIs.
 
 Test the database
 -----------------

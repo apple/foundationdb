@@ -84,6 +84,52 @@ ACTOR Future<bool> quorumEqualsTrue( std::vector<Future<bool>> futures, int requ
 	}
 }
 
+ACTOR Future<bool> shortCircuitAny( std::vector<Future<bool>> f )
+{
+	std::vector<Future<Void>> sc;
+	for(Future<bool> fut : f) {
+		sc.push_back(returnIfTrue(fut));
+	}
+
+	choose {
+		when( wait( waitForAll( f ) ) ) {
+			// Handle a possible race condition? If the _last_ term to
+			// be evaluated triggers the waitForAll before bubbling
+			// out of the returnIfTrue quorum
+			for ( auto fut : f ) {
+				if ( fut.get() ) {
+					return true;
+				}
+			}
+			return false;
+		}
+		when( wait( waitForAny( sc ) ) ) {
+			return true;
+		}
+	}
+}
+
+Future<Void> orYield( Future<Void> f ) {
+	if(f.isReady()) {
+		if(f.isError())
+			return tagError<Void>(yield(), f.getError());
+		else
+			return yield();
+	}
+	else
+		return f;
+}
+
+ACTOR Future<Void> returnIfTrue( Future<bool> f )
+{
+	bool b = wait( f );
+	if ( b ) {
+		return Void();
+	}
+	wait( Never() );
+	throw internal_error();
+}
+
 ACTOR Future<Void> lowPriorityDelay( double waitTime ) {
 	state int loopCount = 0;
 	while(loopCount < FLOW_KNOBS->LOW_PRIORITY_DELAY_COUNT) {

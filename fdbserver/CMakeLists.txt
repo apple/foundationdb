@@ -1,6 +1,10 @@
 set(FDBSERVER_SRCS
   ApplyMetadataMutation.h
   ApplyMetadataMutation.cpp
+  BackupInterface.h
+  BackupProgress.actor.cpp
+  BackupProgress.actor.h
+  BackupWorker.actor.cpp
   ClusterController.actor.cpp
   ClusterRecruitmentInterface.h
   ConflictSet.h
@@ -49,6 +53,7 @@ set(FDBSERVER_SRCS
   NetworkTest.h
   OldTLogServer_4_6.actor.cpp
   OldTLogServer_6_0.actor.cpp
+  OldTLogServer_6_2.actor.cpp
   Orderer.actor.h
   pubsub.actor.cpp
   pubsub.h
@@ -57,8 +62,20 @@ set(FDBSERVER_SRCS
   Ratekeeper.actor.cpp
   RatekeeperInterface.h
   RecoveryState.h
-  Restore.actor.cpp
-  RestoreInterface.h
+  RestoreCommon.actor.h
+  RestoreCommon.actor.cpp
+  RestoreUtil.h
+  RestoreUtil.actor.cpp
+  RestoreRoleCommon.actor.h
+  RestoreRoleCommon.actor.cpp
+  RestoreMaster.actor.h
+  RestoreMaster.actor.cpp
+  RestoreApplier.actor.h
+  RestoreApplier.actor.cpp
+  RestoreLoader.actor.h
+  RestoreLoader.actor.cpp
+  RestoreWorker.actor.h
+  RestoreWorker.actor.cpp
   Resolver.actor.cpp
   ResolverInterface.h
   ServerDBInfo.h
@@ -67,6 +84,7 @@ set(FDBSERVER_SRCS
   SkipList.cpp
   Status.actor.cpp
   Status.h
+  StorageCache.actor.cpp
   StorageMetrics.actor.h
   StorageMetrics.h
   storageserver.actor.cpp
@@ -96,6 +114,8 @@ set(FDBSERVER_SRCS
   workloads/AtomicSwitchover.actor.cpp
   workloads/BackgroundSelectors.actor.cpp
   workloads/BackupCorrectness.actor.cpp
+  workloads/BackupAndParallelRestoreCorrectness.actor.cpp
+  workloads/ParallelRestore.actor.cpp
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
   workloads/BackupToDBUpgrade.actor.cpp

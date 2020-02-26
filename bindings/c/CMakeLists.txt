@@ -68,9 +68,7 @@ if(NOT WIN32)
     test/mako/mako.c
     test/mako/mako.h
     test/mako/utils.c
-    test/mako/utils.h
-    test/mako/zipf.c
-    test/mako/zipf.h)
+    test/mako/utils.h)
 
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)

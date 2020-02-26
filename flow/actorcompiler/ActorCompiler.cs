@@ -213,7 +213,6 @@ namespace actorcompiler
         public void Write(TextWriter writer, out int lines)
         {
             lines = 0;
-            //if (isTopLevel) writer.WriteLine("namespace {");
 
             writer.WriteLine(memberIndentStr + "template<> struct Descriptor<struct {0}> {{", descr.name);
             writer.WriteLine(memberIndentStr + "\tstatic StringRef typeName() {{ return LiteralStringRef(\"{0}\"); }}", descr.name);
@@ -265,7 +264,6 @@ namespace actorcompiler
                 lines++;
             }
 
-            //if (isTopLevel) writer.WriteLine("}");  // namespace
         }
     }
 
@@ -295,9 +293,6 @@ namespace actorcompiler
             this.LineNumbersEnabled = lineNumbersEnabled;
             this.generateProbes = generateProbes;
 
-            if (actor.returnType == null)
-                actor.isUncancellable = true;
-
             FindState();
         }
         public void Write(TextWriter writer)
@@ -305,18 +300,16 @@ namespace actorcompiler
             string fullReturnType =
                 actor.returnType != null ? string.Format("Future<{0}>", actor.returnType)
                 : "void";
-            if (actor.isForwardDeclaration) {
-                if (actor.isStatic) writer.Write("static ");
-                writer.WriteLine("{0} {3}{1}( {2} );", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
-                return;
-            }
             for (int i = 0; ; i++)
             {
-                className = string.Format("{0}{1}Actor{2}",
+                className = string.Format("{3}{0}{1}Actor{2}",
                     actor.name.Substring(0, 1).ToUpper(),
                     actor.name.Substring(1),
-                    i!=0 ? i.ToString() : "");
-                if (usedClassNames.Add(className))
+                    i != 0 ? i.ToString() : "",
+                      actor.enclosingClass != null && actor.isForwardDeclaration ? actor.enclosingClass.Replace("::", "_") + "_"
+                    : actor.nameSpace != null                                    ? actor.nameSpace.Replace("::", "_") + "_"
+                    : "");
+                if (actor.isForwardDeclaration || usedClassNames.Add(className))
                     break;
             }
 
@@ -325,6 +318,18 @@ namespace actorcompiler
             This = string.Format("static_cast<{0}*>(this)", actorClassFormal.name);
             stateClassName = className + "State";
             var fullStateClassName = stateClassName + GetTemplateActuals(new VarDeclaration { type = "class", name = fullClassName });
+
+            if (actor.isForwardDeclaration) {
+                foreach (string attribute in actor.attributes) {
+                    writer.Write(attribute + " ");
+                }
+                if (actor.isStatic) writer.Write("static ");
+                writer.WriteLine("{0} {3}{1}( {2} );", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
+                if (actor.enclosingClass != null) {
+                    writer.WriteLine("template <class> friend class {0};", stateClassName);
+                }
+                return;
+            }
 
             var body = getFunction("", "body", loopDepth0);
             var bodyContext = new Context { 
@@ -353,7 +358,7 @@ namespace actorcompiler
             }
             bodyContext.catchFErr.WriteLine("loopDepth = 0;");
 
-            if (isTopLevel) writer.WriteLine("namespace {");
+            if (isTopLevel && actor.nameSpace == null) writer.WriteLine("namespace {");
 
             // The "State" class contains all state and user code, to make sure that state names are accessible to user code but
             // inherited members of Actor, Callback etc are not.
@@ -399,9 +404,12 @@ namespace actorcompiler
             //WriteStartFunc(body, writer);
             WriteCancelFunc(writer);
             writer.WriteLine("};");
-            if (isTopLevel) writer.WriteLine("}");  // namespace
+            if (isTopLevel && actor.nameSpace == null) writer.WriteLine("}"); // namespace
             WriteTemplate(writer);
             LineNumber(writer, actor.SourceLine);
+            foreach (string attribute in actor.attributes) {
+                writer.Write(attribute + " ");
+            }
             if (actor.isStatic) writer.Write("static ");
             writer.WriteLine("{0} {3}{1}( {2} ) {{", fullReturnType, actor.name, string.Join(", ", ParameterList()), actor.nameSpace==null ? "" : actor.nameSpace + "::");
             LineNumber(writer, actor.SourceLine);
@@ -853,7 +861,7 @@ namespace actorcompiler
                     // not evaluate `expr2()`.
                     firstChoice = false;
                     LineNumber(cx.target, stmt.FirstSourceLine);
-                    if (!actor.isUncancellable)
+                    if (actor.IsCancellable())
                         cx.target.WriteLine("if ({1}->actor_wait_state < 0) return {0};", cx.catchFErr.call("actor_cancelled()", AdjustLoopDepth(cx.tryLoopDepth)), This);
                 }
 
@@ -1150,7 +1158,7 @@ namespace actorcompiler
         }
         void WriteCancelFunc(TextWriter writer)
         {
-            if (!actor.isUncancellable)
+            if (actor.IsCancellable())
             {
                 Function cancelFunc = new Function
                 {

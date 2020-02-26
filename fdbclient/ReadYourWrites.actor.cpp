@@ -1343,6 +1343,16 @@ Future< Standalone<VectorRef<const char*> >> ReadYourWritesTransaction::getAddre
 	return result;
 }
 
+Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
+	if(checkUsedDuringCommit()) {
+		throw used_during_commit();
+	}
+	if( resetPromise.isSet() )
+		return resetPromise.getFuture().getError();
+
+	return map(waitOrError(tr.getStorageMetrics(keys, -1), resetPromise.getFuture()), [](const StorageMetrics& m) { return m.bytes; });
+}
+
 void ReadYourWritesTransaction::addReadConflictRange( KeyRangeRef const& keys ) {
 	if(checkUsedDuringCommit()) {
 		throw used_during_commit();
@@ -1565,11 +1575,16 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	}
 
 	if(operationType == MutationRef::SetVersionstampedKey) {
-		KeyRangeRef range = getVersionstampKeyRange(arena, k, getMaxReadKey()); // this does validation of the key and needs to be performed before the readYourWritesDisabled path
+		// this does validation of the key and needs to be performed before the readYourWritesDisabled path
+		KeyRangeRef range = getVersionstampKeyRange(arena, k, tr.getCachedReadVersion().orDefault(0), getMaxReadKey());
 		if(!options.readYourWritesDisabled) {
 			writeRangeToNativeTransaction(range);
 			writes.addUnmodifiedAndUnreadableRange(range);
 		}
+		// k is the unversionstamped key provided by the user.  If we've filled in a minimum bound
+		// for the versionstamp, we need to make sure that's reflected when we insert it into the
+		// WriteMap below.
+		transformVersionstampKey( k, tr.getCachedReadVersion().orDefault(0), 0 );
 	}
 
 	if(operationType == MutationRef::SetVersionstampedValue) {

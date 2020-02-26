@@ -29,7 +29,8 @@
                   "resolution",
                   "proxy",
                   "master",
-                  "test"
+                  "test",
+                  "storage_cache"
                ]
             },
             "degraded":true,
@@ -66,6 +67,7 @@
                         "cluster_controller",
                         "data_distributor",
                         "ratekeeper",
+                        "storage_cache",
                         "router",
                         "coordinator"
                      ]
@@ -291,7 +293,10 @@
       },
       "degraded_processes":0,
       "database_available":true,
-      "database_locked":false,
+      "database_lock_state":{
+         "locked":true,
+         "lock_uid":"00000000000000000000000000000000" // Only present when database is locked
+      }
       "generation":2,
       "latency_probe":{ // all measurements are based on running sample transactions
          "read_seconds":7, // time to perform a single read
@@ -552,6 +557,7 @@
          "auto_proxies":3,
          "auto_resolvers":1,
          "auto_logs":3,
+         "backup_worker_enabled":1,
          "proxies":5 // this field will be absent if a value has not been explicitly set
       },
       "data":{

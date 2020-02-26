@@ -26,6 +26,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/Knobs.h"
@@ -197,6 +198,7 @@ private:
 static const KeyValueRef persistFormat( LiteralStringRef( "Format" ), LiteralStringRef("FoundationDB/LogServer/3/0") );
 static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/LogServer/3/0"), LiteralStringRef("FoundationDB/LogServer/4/0") );
 static const KeyRangeRef persistProtocolVersionKeys( LiteralStringRef( "ProtocolVersion/" ), LiteralStringRef( "ProtocolVersion0" ) );
+static const KeyRangeRef persistTLogSpillTypeKeys( LiteralStringRef( "TLogSpillType/" ), LiteralStringRef( "TLogSpillType0" ) );
 static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef( LiteralStringRef( "DbRecoveryCount/" ), LiteralStringRef( "DbRecoveryCount0" ) );
 
 // Updated on updatePersistentData()
@@ -255,10 +257,6 @@ static StringRef stripTagMessagesKey( StringRef key ) {
 	return key.substr( sizeof(UID) + sizeof(Tag) + persistTagMessagesKeys.begin.size() );
 }
 
-static StringRef stripTagMessageRefsKey( StringRef key ) {
-	return key.substr( sizeof(UID) + sizeof(Tag) + persistTagMessageRefsKeys.begin.size() );
-}
-
 static Version decodeTagMessagesKey( StringRef key ) {
 	return bigEndian64( BinaryReader::fromStringRef<Version>( stripTagMessagesKey(key), Unversioned() ) );
 }
@@ -282,6 +280,11 @@ struct SpilledData {
 
 struct TLogData : NonCopyable {
 	AsyncTrigger newLogData;
+	// A process has only 1 SharedTLog, which holds data for multiple logs, so that it obeys its assigned memory limit.
+	// A process has only 1 active log and multiple non-active log from old generations.
+	// In the figure below, TLog [1-4] are logs from old generations.
+	// Because SS may need to pull data from old generation log, we keep Tlog [1-4].
+	//
 	//  We always pop the disk queue from the oldest TLog, spill from the oldest TLog that still has
 	//  data in memory, and commits to the disk queue come from the most recent TLog.
 	//
@@ -290,6 +293,9 @@ struct TLogData : NonCopyable {
 	//  | TLog 1 | TLog 2 | TLog 3 | TLog 4 | TLog 5 |
 	//  +--------+--------+--------+--------+--------+
 	//    ^ popOrder         ^spillOrder         ^committing
+	// 
+	// ^popOrder is the location where SS reads the to-be-read data from tlog.
+	// ^committing is the location where the active TLog accepts the pushed data.
 	Deque<UID> popOrder;
 	Deque<UID> spillOrder;
 	std::map<UID, Reference<struct LogData>> id_data;
@@ -297,9 +303,9 @@ struct TLogData : NonCopyable {
 	UID dbgid;
 	UID workerID;
 
-	IKeyValueStore* persistentData;
-	IDiskQueue* rawPersistentQueue;
-	TLogQueue *persistentQueue;
+	IKeyValueStore* persistentData; // Durable data on disk that were spilled.
+	IDiskQueue* rawPersistentQueue; // The physical queue the persistentQueue below stores its data. Ideally, log interface should work without directly accessing rawPersistentQueue
+	TLogQueue *persistentQueue;	// Logical queue the log operates on and persist its data.
 
 	int64_t diskQueueCommitBytes;
 	AsyncVar<bool> largeDiskQueueCommitBytes; //becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
@@ -357,20 +363,22 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		bool nothingPersistent;				// true means tag is *known* to have no messages in persistentData.  false means nothing.
 		bool poppedRecently;					// `popped` has changed since last updatePersistentData
 		Version popped;				// see popped version tracking contract below
-		bool requiresPoppedLocationUpdate;					// `popped` has changed since last updatePoppedLocation
+		Version persistentPopped;  // The popped version recorded in the btree.
+		Version versionForPoppedLocation;  // `poppedLocation` was calculated at this popped version
 		IDiskQueue::location poppedLocation;  // The location of the earliest commit with data for this tag.
 		bool unpoppedRecovered;
 		Tag tag;
 
-		TagData( Tag tag, Version popped, IDiskQueue::location poppedLocation, bool nothingPersistent, bool poppedRecently, bool unpoppedRecovered ) : tag(tag), nothingPersistent(nothingPersistent), poppedRecently(poppedRecently), popped(popped), requiresPoppedLocationUpdate(false), poppedLocation(poppedLocation), unpoppedRecovered(unpoppedRecovered) {}
+		TagData( Tag tag, Version popped, IDiskQueue::location poppedLocation, bool nothingPersistent, bool poppedRecently, bool unpoppedRecovered ) : tag(tag), nothingPersistent(nothingPersistent), poppedRecently(poppedRecently), popped(popped), persistentPopped(0), versionForPoppedLocation(0), poppedLocation(poppedLocation), unpoppedRecovered(unpoppedRecovered) {}
 
-		TagData(TagData&& r) BOOST_NOEXCEPT : versionMessages(std::move(r.versionMessages)), nothingPersistent(r.nothingPersistent), poppedRecently(r.poppedRecently), popped(r.popped), requiresPoppedLocationUpdate(r.requiresPoppedLocationUpdate), poppedLocation(r.poppedLocation), tag(r.tag), unpoppedRecovered(r.unpoppedRecovered) {}
+		TagData(TagData&& r) BOOST_NOEXCEPT : versionMessages(std::move(r.versionMessages)), nothingPersistent(r.nothingPersistent), poppedRecently(r.poppedRecently), popped(r.popped), persistentPopped(r.persistentPopped), versionForPoppedLocation(r.versionForPoppedLocation), poppedLocation(r.poppedLocation), tag(r.tag), unpoppedRecovered(r.unpoppedRecovered) {}
 		void operator= (TagData&& r) BOOST_NOEXCEPT {
 			versionMessages = std::move(r.versionMessages);
 			nothingPersistent = r.nothingPersistent;
 			poppedRecently = r.poppedRecently;
 			popped = r.popped;
-			requiresPoppedLocationUpdate = r.requiresPoppedLocationUpdate;
+			persistentPopped = r.persistentPopped;
+			versionForPoppedLocation = r.versionForPoppedLocation;
 			poppedLocation = r.poppedLocation;
 			tag = r.tag;
 			unpoppedRecovered = r.unpoppedRecovered;
@@ -494,15 +502,16 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Version logRouterPoppedVersion, logRouterPopToVersion;
 	int8_t locality;
 	UID recruitmentID;
+	TLogSpillType logSpillType;
 	std::set<Tag> allTags;
 	Future<Void> terminated;
 	FlowLock execOpLock;
 	bool execOpCommitInProgress;
 	int txsTags;
 
-	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, int txsTags, UID recruitmentID, ProtocolVersion protocolVersion, std::vector<Tag> tags, std::string context) 
+	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, int txsTags, UID recruitmentID, ProtocolVersion protocolVersion, TLogSpillType logSpillType, std::vector<Tag> tags, std::string context) 
 			: tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
-			  cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), txsTags(txsTags), recruitmentID(recruitmentID), protocolVersion(protocolVersion),
+			  cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), txsTags(txsTags), recruitmentID(recruitmentID), protocolVersion(protocolVersion), logSpillType(logSpillType),
 			  logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()),
 			  minPoppedTagVersion(0), minPoppedTag(invalidTag),
 			// These are initialized differently on init() or recovery
@@ -558,6 +567,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistTxsTagsKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistProtocolVersionKeys.begin)) );
+			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistTLogSpillTypeKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistRecoveryLocationKey)) );
 			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
 			tLogData->persistentData->clear( KeyRangeRef( msgKey, strinc(msgKey) ) );
@@ -577,6 +587,22 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	}
 
 	LogEpoch epoch() const { return recoveryCount; }
+
+	bool shouldSpillByValue( Tag t ) const {
+		switch (logSpillType) {
+		case TLogSpillType::VALUE:
+			return true;
+		case TLogSpillType::REFERENCE:
+			return t.locality == tagLocalityTxs || t == txsTag;
+		default:
+			ASSERT(false);
+			return false;
+		}
+	}
+
+	bool shouldSpillByReference( Tag t ) const {
+		return !shouldSpillByValue( t );
+	}
 };
 
 template <class T>
@@ -630,7 +656,6 @@ ACTOR Future<Void> tLogLock( TLogData* self, ReplyPromise< TLogLockResult > repl
 	TEST( !logData->stopped );
 
 	TraceEvent("TLogStop", logData->logId).detail("Ver", stopVersion).detail("IsStopped", logData->stopped).detail("QueueCommitted", logData->queueCommittedVersion.get());
-	unregisterTLog(logData->logId);
 
 	logData->stopped = true;
 	if(!logData->recoveryComplete.isSet()) {
@@ -656,10 +681,11 @@ void updatePersistentPopped( TLogData* self, Reference<LogData> logData, Referen
 	if (!data->poppedRecently) return;
 	self->persistentData->set(KeyValueRef( persistTagPoppedKey(logData->logId, data->tag), persistTagPoppedValue(data->popped) ));
 	data->poppedRecently = false;
+	data->persistentPopped = data->popped;
 
 	if (data->nothingPersistent) return;
 
-	if (data->tag.locality == tagLocalityTxs || data->tag == txsTag) {
+	if (logData->shouldSpillByValue(data->tag)) {
 		self->persistentData->clear( KeyRangeRef(
 					persistTagMessagesKey( logData->logId, data->tag, Version(0) ),
 					persistTagMessagesKey( logData->logId, data->tag, data->popped ) ) );
@@ -675,19 +701,21 @@ void updatePersistentPopped( TLogData* self, Reference<LogData> logData, Referen
 }
 
 ACTOR Future<Void> updatePoppedLocation( TLogData* self, Reference<LogData> logData, Reference<LogData::TagData> data ) {
-	// txsTag is spilled by value, so we do not need to track its popped location.
-	if (data->tag.locality == tagLocalityTxs || data->tag == txsTag) {
+	// For anything spilled by value, we do not need to track its popped location.
+	if (logData->shouldSpillByValue(data->tag)) {
 		return Void();
 	}
 
-	if (!data->requiresPoppedLocationUpdate) return Void();
-	data->requiresPoppedLocationUpdate = false;
+	if (data->versionForPoppedLocation >= data->persistentPopped) return Void();
+	data->versionForPoppedLocation = data->persistentPopped;
 
-	if (data->popped <= logData->persistentDataVersion) {
+	// Use persistentPopped and not popped, so that a pop update received after spilling doesn't cause
+	// us to remove data that still is pointed to by SpilledData in the btree.
+	if (data->persistentPopped <= logData->persistentDataVersion) {
 		// Recover the next needed location in the Disk Queue from the index.
 		Standalone<RangeResultRef> kvrefs = wait(
 				self->persistentData->readRange(KeyRangeRef(
-						persistTagMessageRefsKey(logData->logId, data->tag, data->popped),
+						persistTagMessageRefsKey(logData->logId, data->tag, data->persistentPopped),
 						persistTagMessageRefsKey(logData->logId, data->tag, logData->persistentDataVersion + 1)), 1));
 
 		if (kvrefs.empty()) {
@@ -699,19 +727,21 @@ ACTOR Future<Void> updatePoppedLocation( TLogData* self, Reference<LogData> logD
 			r >> spilledData;
 
 			for (const SpilledData& sd : spilledData) {
-				if (sd.version >= data->popped) {
+				if (sd.version >= data->persistentPopped) {
 					data->poppedLocation = sd.start;
+					data->versionForPoppedLocation = sd.version;
 					break;
 				}
 			}
 		}
 	}
 
-	if (data->popped >= logData->persistentDataVersion || data->nothingPersistent) {
+	if (data->persistentPopped >= logData->persistentDataVersion || data->nothingPersistent) {
 		// Then the location must be in memory.
-		auto locationIter = logData->versionLocation.lower_bound(data->popped);
+		auto locationIter = logData->versionLocation.lower_bound(data->persistentPopped);
 		if (locationIter != logData->versionLocation.end()) {
 			data->poppedLocation = locationIter->value.first;
+			data->versionForPoppedLocation = locationIter->key;
 		} else {
 			// No data on disk and no data in RAM.
 			// This TLog instance will be removed soon anyway, so we temporarily freeze our poppedLocation
@@ -748,7 +778,7 @@ ACTOR Future<Void> popDiskQueue( TLogData* self, Reference<LogData> logData ) {
 	for(int tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for(int tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 			Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
-			if (tagData && tagData->tag.locality != tagLocalityTxs && tagData->tag != txsTag) {
+			if (tagData && logData->shouldSpillByReference(tagData->tag)) {
 				if(!tagData->nothingPersistent) {
 					minLocation = std::min(minLocation, tagData->poppedLocation);
 					minVersion = std::min(minVersion, tagData->popped);
@@ -813,8 +843,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 					anyData = true;
 					tagData->nothingPersistent = false;
 
-					if (tagData->tag.locality == tagLocalityTxs || tagData->tag == txsTag) {
-						// spill txsTag by value
+					if (logData->shouldSpillByValue(tagData->tag)) {
 						wr = BinaryWriter( Unversioned() );
 						for(; msg != tagData->versionMessages.end() && msg->first == currentVersion; ++msg) {
 							wr << msg->second.toStringRef();
@@ -919,7 +948,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 			for(tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 				Reference<LogData::TagData> tagData = logData->tag_data[tagLocality][tagId];
 				if (tagData) {
-					if (tagData->tag.locality == tagLocalityTxs || tagData->tag == txsTag) {
+					if (logData->shouldSpillByValue(tagData->tag)) {
 						minVersion = std::min(minVersion, newPersistentDataVersion);
 					} else {
 						minVersion = std::min(minVersion, tagData->popped);
@@ -933,6 +962,85 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 	}
 	logData->newPersistentDataVersion = invalidVersion;
 
+	return Void();
+}
+
+ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Reference<LogData> logData ) {
+	if (self->ignorePopRequest) {
+		TraceEvent(SevDebug, "IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
+
+		if (self->toBePopped.find(inputTag) == self->toBePopped.end()
+			|| to > self->toBePopped[inputTag]) {
+			self->toBePopped[inputTag] = to;
+		}
+		// add the pop to the toBePopped map
+		TraceEvent(SevDebug, "IgnoringPopRequest")
+			.detail("IgnorePopDeadline", self->ignorePopDeadline)
+			.detail("Tag", inputTag.toString())
+			.detail("Version", to);
+		return Void();
+	}
+	state Version upTo = to;
+	int8_t tagLocality = inputTag.locality;
+	if (isPseudoLocality(tagLocality)) {
+		if (logData->logSystem->get().isValid()) {
+			upTo = logData->logSystem->get()->popPseudoLocalityTag(inputTag, to);
+			tagLocality = tagLocalityLogRouter;
+		} else {
+			TraceEvent(SevWarn, "TLogPopNoLogSystem", self->dbgid).detail("Locality", tagLocality).detail("Version", upTo);
+			return Void();
+		}
+	}
+	state Tag tag(tagLocality, inputTag.id);
+	auto tagData = logData->getTagData(tag);
+	if (!tagData) {
+		tagData = logData->createTagData(tag, upTo, true, true, false);
+	} else if (upTo > tagData->popped) {
+		tagData->popped = upTo;
+		tagData->poppedRecently = true;
+
+		if(tagData->unpoppedRecovered && upTo > logData->recoveredAt) {
+			tagData->unpoppedRecovered = false;
+			logData->unpoppedRecoveredTags--;
+			TraceEvent("TLogPoppedTag", logData->logId).detail("Tags", logData->unpoppedRecoveredTags).detail("Tag", tag.toString()).detail("DurableKCVer", logData->durableKnownCommittedVersion).detail("RecoveredAt", logData->recoveredAt);
+			if(logData->unpoppedRecoveredTags == 0 && logData->durableKnownCommittedVersion >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
+				logData->recoveryComplete.send(Void());
+			}
+		}
+
+		if (upTo > logData->persistentDataDurableVersion)
+			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskPriority::TLogPop));
+		//TraceEvent("TLogPop", logData->logId).detail("Tag", tag.toString()).detail("To", upTo);
+	}
+	return Void();
+}
+
+ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogData> logData ) {
+	// timeout check for ignorePopRequest
+	if (self->ignorePopRequest && (g_network->now() > self->ignorePopDeadline)) {
+
+		TraceEvent("EnableTLogPlayAllIgnoredPops");
+		// use toBePopped and issue all the pops
+		std::map<Tag, Version>::iterator it;
+		vector<Future<Void>> ignoredPops;
+		self->ignorePopRequest = false;
+		self->ignorePopUid = "";
+		self->ignorePopDeadline = 0.0;
+		for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
+			TraceEvent("PlayIgnoredPop")
+				.detail("Tag", it->first.toString())
+				.detail("Version", it->second);
+			ignoredPops.push_back(tLogPopCore(self, it->first, it->second, logData));
+		}
+		self->toBePopped.clear();
+		wait(waitForAll(ignoredPops));
+		TraceEvent("ResetIgnorePopRequest")
+		    .detail("Now", g_network->now())
+		    .detail("IgnorePopRequest", self->ignorePopRequest)
+		    .detail("IgnorePopDeadline", self->ignorePopDeadline);
+	}
+	wait(tLogPopCore(self, req.tag, req.to, logData));
+	req.reply.send(Void());
 	return Void();
 }
 
@@ -954,6 +1062,26 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 	state int totalSize = 0;
 
 	state FlowLock::Releaser commitLockReleaser;
+
+	//FIXME: This policy for calculating the cache pop version could end up popping recent data in the remote DC after two consecutive recoveries.
+	// It also does not protect against spilling the cache tag directly, so it is theoretically possible to spill this tag; which is not intended to ever happen.
+	Optional<Version> cachePopVersion;
+	for(auto& it : self->id_data) {
+		if(!it.second->stopped) {
+			if(it.second->version.get() - it.second->unrecoveredBefore > SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT + SERVER_KNOBS->MAX_CACHE_VERSIONS) {
+				cachePopVersion = it.second->version.get() - SERVER_KNOBS->MAX_CACHE_VERSIONS;
+			}
+			break;
+		}
+	}
+
+	if(cachePopVersion.present()) {
+		state std::vector<Future<Void>> cachePopFutures;
+		for(auto& it : self->id_data) {
+			cachePopFutures.push_back(tLogPop(self, TLogPopRequest(cachePopVersion.get(),0,cacheTag), it.second));
+		}
+		wait( waitForAll(cachePopFutures) );
+	}
 
 	if(logData->stopped) {
 		if (self->bytesInput - self->bytesDurable >= self->targetVolatileBytes) {
@@ -1087,7 +1215,7 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 
 	for(auto& msg : taggedMessages) {
 		if(msg.message.size() > block.capacity() - block.size()) {
-			logData->messageBlocks.push_back( std::make_pair(version, block) );
+			logData->messageBlocks.emplace_back(version, block);
 			addedBytes += int64_t(block.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 			block = Standalone<VectorRef<uint8_t>>();
 			block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
@@ -1122,7 +1250,7 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 			}
 
 			if (version >= tagData->popped) {
-				tagData->versionMessages.push_back(std::make_pair(version, LengthPrefixedStringRef((uint32_t*)(block.end() - msg.message.size()))));
+				tagData->versionMessages.emplace_back(version, LengthPrefixedStringRef((uint32_t*)(block.end() - msg.message.size())));
 				if(tagData->versionMessages.back().second.expectedSize() > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
 					TraceEvent(SevWarnAlways, "LargeMessage").detail("Size", tagData->versionMessages.back().second.expectedSize());
 				}
@@ -1142,7 +1270,7 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 
 		msgSize -= msg.message.size();
 	}
-	logData->messageBlocks.push_back( std::make_pair(version, block) );
+	logData->messageBlocks.emplace_back(version, block);
 	addedBytes += int64_t(block.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 	addedBytes += overheadBytes;
 
@@ -1156,18 +1284,10 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 
 void commitMessages( TLogData *self, Reference<LogData> logData, Version version, Arena arena, StringRef messages ) {
 	ArenaReader rd( arena, messages, Unversioned() );
-	int32_t messageLength, rawLength;
-	uint16_t tagCount;
-	uint32_t sub;
 	self->tempTagMessages.clear();
 	while(!rd.empty()) {
 		TagsAndMessage tagsAndMsg;
-		rd.checkpoint();
-		rd >> messageLength >> sub >> tagCount;
-		tagsAndMsg.tags = VectorRef<Tag>((Tag*)rd.readBytes(tagCount*sizeof(Tag)), tagCount);
-		rawLength = messageLength + sizeof(messageLength);
-		rd.rewind();
-		tagsAndMsg.message = StringRef((uint8_t const*)rd.readBytes(rawLength), rawLength);
+		tagsAndMsg.loadFromArena(&rd, nullptr);
 		self->tempTagMessages.push_back(std::move(tagsAndMsg));
 	}
 	commitMessages(self, logData, version, self->tempTagMessages);
@@ -1193,81 +1313,6 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>> & getVersionMessages( Re
 	return tagData->versionMessages;
 };
 
-ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Reference<LogData> logData ) {
-	if (self->ignorePopRequest) {
-		TraceEvent(SevDebug, "IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
-
-		if (self->toBePopped.find(inputTag) == self->toBePopped.end()
-			|| to > self->toBePopped[inputTag]) {
-			self->toBePopped[inputTag] = to;
-		}
-		// add the pop to the toBePopped map
-		TraceEvent(SevDebug, "IgnoringPopRequest")
-			.detail("IgnorePopDeadline", self->ignorePopDeadline)
-			.detail("Tag", inputTag.toString())
-			.detail("Version", to);
-		return Void();
-	}
-	state Version upTo = to;
-	int8_t tagLocality = inputTag.locality;
-	if (logData->logSystem->get().isValid() && logData->logSystem->get()->isPseudoLocality(tagLocality)) {
-		upTo = logData->logSystem->get()->popPseudoLocalityTag(tagLocality, to);
-		tagLocality = tagLocalityLogRouter;
-	}
-	state Tag tag(tagLocality, inputTag.id);
-	auto tagData = logData->getTagData(tag);
-	if (!tagData) {
-		tagData = logData->createTagData(tag, upTo, true, true, false);
-	} else if (upTo > tagData->popped) {
-		tagData->popped = upTo;
-		tagData->poppedRecently = true;
-		tagData->requiresPoppedLocationUpdate = true;
-
-		if(tagData->unpoppedRecovered && upTo > logData->recoveredAt) {
-			tagData->unpoppedRecovered = false;
-			logData->unpoppedRecoveredTags--;
-			TraceEvent("TLogPoppedTag", logData->logId).detail("Tags", logData->unpoppedRecoveredTags).detail("Tag", tag.toString()).detail("DurableKCVer", logData->durableKnownCommittedVersion).detail("RecoveredAt", logData->recoveredAt);
-			if(logData->unpoppedRecoveredTags == 0 && logData->durableKnownCommittedVersion >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
-				logData->recoveryComplete.send(Void());
-			}
-		}
-
-		if (upTo > logData->persistentDataDurableVersion)
-			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskPriority::TLogPop));
-		//TraceEvent("TLogPop", self->dbgid).detail("Tag", tag.toString()).detail("To", upTo);
-	}
-	return Void();
-}
-
-ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogData> logData ) {
-	// timeout check for ignorePopRequest
-	if (self->ignorePopRequest && (g_network->now() > self->ignorePopDeadline)) {
-
-		TraceEvent("EnableTLogPlayAllIgnoredPops");
-		// use toBePopped and issue all the pops
-		std::map<Tag, Version>::iterator it;
-		vector<Future<Void>> ignoredPops;
-		self->ignorePopRequest = false;
-		self->ignorePopUid = "";
-		self->ignorePopDeadline = 0.0;
-		for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
-			TraceEvent("PlayIgnoredPop")
-				.detail("Tag", it->first.toString())
-				.detail("Version", it->second);
-			ignoredPops.push_back(tLogPopCore(self, it->first, it->second, logData));
-		}
-		self->toBePopped.clear();
-		wait(waitForAll(ignoredPops));
-		TraceEvent("ResetIgnorePopRequest")
-		    .detail("Now", g_network->now())
-		    .detail("IgnorePopRequest", self->ignorePopRequest)
-		    .detail("IgnorePopDeadline", self->ignorePopDeadline);
-	}
-	wait(tLogPopCore(self, req.tag, req.to, logData));
-	req.reply.send(Void());
-	return Void();
-}
-
 void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req, BinaryWriter& messages, Version& endVersion ) {
 	ASSERT( !messages.getLength() );
 
@@ -1287,7 +1332,7 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 			}
 
 			currentVersion = it->first;
-			messages << int32_t(-1) << currentVersion;
+			messages << VERSION_HEADER << currentVersion;
 		}
 
 		messages << it->second.toStringRef();
@@ -1299,31 +1344,17 @@ ACTOR Future<std::vector<StringRef>> parseMessagesForTag( StringRef commitBlob, 
 	state std::vector<StringRef> relevantMessages;
 	state BinaryReader rd(commitBlob, AssumeVersion(currentProtocolVersion));
 	while (!rd.empty()) {
-		uint32_t messageLength = 0;
-		uint32_t subsequence = 0;
-		uint16_t tagCount = 0;
-		rd >> messageLength;
-		rd.checkpoint();
-		rd >> subsequence >> tagCount;
-		Tag msgtag;
-		bool match = false;
-		for (int i = 0; i < tagCount; i++) {
-			rd >> msgtag;
-			if (msgtag == tag) {
-				match = true;
-				break;
-			} else if (tag.locality == tagLocalityLogRouter && msgtag.locality == tagLocalityLogRouter &&
-			           msgtag.id % logRouters == tag.id) {
+		TagsAndMessage tagsAndMessage;
+		tagsAndMessage.loadFromArena(&rd, nullptr);
+		for (Tag t : tagsAndMessage.tags) {
+			if (t == tag || (tag.locality == tagLocalityLogRouter && t.locality == tagLocalityLogRouter &&
+			                 t.id % logRouters == tag.id)) {
 				// Mutations that are in the partially durable span between known comitted version and
 				// recovery version get copied to the new log generation.  These commits might have had more
 				// log router tags than what now exist, so we mod them down to what we have.
-				match = true;
+				relevantMessages.push_back(tagsAndMessage.getRawMessage());
+				break;
 			}
-		}
-		rd.rewind();
-		const void* begin = rd.readBytes(messageLength);
-		if (match) {
-			relevantMessages.push_back( StringRef((uint8_t*)begin, messageLength) );
 		}
 		wait(yield());
 	}
@@ -1341,7 +1372,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			peekId = req.sequence.get().first;
 			sequence = req.sequence.get().second;
 			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && logData->peekTracker.find(peekId) == logData->peekTracker.end()) {
-				throw timed_out();
+				throw operation_obsolete();
 			}
 			auto& trackerData = logData->peekTracker[peekId];
 			if (sequence == 0 && trackerData.sequence_version.find(0) == trackerData.sequence_version.end()) {
@@ -1351,24 +1382,24 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			// The peek cursor and this comparison need to agree about the maximum number of in-flight requests.
 			while(trackerData.sequence_version.size() && seqBegin->first <= sequence - SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS) {
 				if(seqBegin->second.canBeSet()) {
-					seqBegin->second.sendError(timed_out());
+					seqBegin->second.sendError(operation_obsolete());
 				}
 				trackerData.sequence_version.erase(seqBegin);
 				seqBegin = trackerData.sequence_version.begin();
 			}
 
 			if(trackerData.sequence_version.size() && sequence < seqBegin->first) {
-				throw timed_out();
+				throw operation_obsolete();
 			}
 
 			trackerData.lastUpdate = now();
 			std::pair<Version, bool> prevPeekData = wait(trackerData.sequence_version[sequence].getFuture());
-			req.begin = prevPeekData.first;
+			req.begin = std::max(prevPeekData.first, req.begin);
 			req.onlySpilled = prevPeekData.second;
 			wait(yield());
 		} catch( Error &e ) {
-			if(e.code() == error_code_timed_out) {
-				req.reply.sendError(timed_out());
+			if(e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
+				req.reply.sendError(e);
 				return Void();
 			} else {
 				throw;
@@ -1381,6 +1412,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		if(req.sequence.present()) {
 			auto& trackerData = logData->peekTracker[peekId];
 			auto& sequenceData = trackerData.sequence_version[sequence+1];
+			trackerData.lastUpdate = now();
 			if (!sequenceData.isSet()) {
 				sequenceData.send(std::make_pair(req.begin, req.onlySpilled));
 			}
@@ -1424,15 +1456,15 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			auto& sequenceData = trackerData.sequence_version[sequence+1];
 			trackerData.lastUpdate = now();
 			if(trackerData.sequence_version.size() && sequence+1 < trackerData.sequence_version.begin()->first) {
-				req.reply.sendError(timed_out());
+				req.reply.sendError(operation_obsolete());
 				if (!sequenceData.isSet())
-					sequenceData.sendError(timed_out());
+					sequenceData.sendError(operation_obsolete());
 				return Void();
 			}
 			if(sequenceData.isSet()) {
 				if(sequenceData.getFuture().get().first != rep.end) {
 					TEST(true); //tlog peek second attempt ended at a different version
-					req.reply.sendError(timed_out());
+					req.reply.sendError(operation_obsolete());
 					return Void();
 				}
 			} else {
@@ -1462,7 +1494,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			peekMessagesFromMemory( logData, req, messages2, endVersion );
 		}
 
-		if (req.tag.locality == tagLocalityTxs || req.tag == txsTag) {
+		if ( logData->shouldSpillByValue(req.tag) ) {
 			Standalone<RangeResultRef> kvs = wait(
 					self->persistentData->readRange(KeyRangeRef(
 							persistTagMessagesKey(logData->logId, req.tag, req.begin),
@@ -1470,7 +1502,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 
 			for (auto &kv : kvs) {
 				auto ver = decodeTagMessagesKey(kv.key);
-				messages << int32_t(-1) << ver;
+				messages << VERSION_HEADER << ver;
 				messages.serializeBytes(kv.value);
 			}
 
@@ -1508,7 +1540,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 					if (sd.version >= req.begin) {
 						firstVersion = std::min(firstVersion, sd.version);
 						const IDiskQueue::location end = sd.start.lo + sd.length;
-						commitLocations.push_back( std::make_pair(sd.start, end) );
+						commitLocations.emplace_back(sd.start, end);
 						// This isn't perfect, because we aren't accounting for page boundaries, but should be
 						// close enough.
 						commitBytes += sd.length;
@@ -1542,11 +1574,12 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 				ASSERT( valid == 0x01 );
 				ASSERT( length + sizeof(valid) == queueEntryData.size() );
 
-				messages << int32_t(-1) << entry.version;
+				messages << VERSION_HEADER << entry.version;
 
-				std::vector<StringRef> parsedMessages = wait(parseMessagesForTag(entry.messages, req.tag, logData->logRouterTags));
-				for (StringRef msg : parsedMessages) {
-					messages << msg;
+				std::vector<StringRef> rawMessages =
+				    wait(parseMessagesForTag(entry.messages, req.tag, logData->logRouterTags));
+				for (const StringRef& msg : rawMessages) {
+					messages.serializeBytes(msg);
 				}
 
 				lastRefMessageVersion = entry.version;
@@ -1584,18 +1617,23 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 
 	if(req.sequence.present()) {
 		auto& trackerData = logData->peekTracker[peekId];
-		trackerData.lastUpdate = now();
 		auto& sequenceData = trackerData.sequence_version[sequence+1];
+		trackerData.lastUpdate = now();
 		if(trackerData.sequence_version.size() && sequence+1 < trackerData.sequence_version.begin()->first) {
-			req.reply.sendError(timed_out());
-			if(!sequenceData.isSet())
-				sequenceData.sendError(timed_out());
+			req.reply.sendError(operation_obsolete());
+			if(!sequenceData.isSet()) {
+				// It would technically be more correct to .send({req.begin, req.onlySpilled}), as the next
+				// request might still be in the window of active requests, but LogSystemPeekCursor will
+				// throw away all future responses upon getting an operation_obsolete(), so computing a
+				// response will probably be a waste of CPU.
+				sequenceData.sendError(operation_obsolete());
+			}
 			return Void();
 		}
 		if(sequenceData.isSet()) {
 			if(sequenceData.getFuture().get().first != reply.end) {
 				TEST(true); //tlog peek second attempt ended at a different version
-				req.reply.sendError(timed_out());
+				req.reply.sendError(operation_obsolete());
 				return Void();
 			}
 		} else {
@@ -1816,6 +1854,7 @@ ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logDa
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistTxsTagsKeys.begin), BinaryWriter::toValue(logData->txsTags, Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistRecoveryCountKeys.begin), BinaryWriter::toValue(logData->recoveryCount, Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistProtocolVersionKeys.begin), BinaryWriter::toValue(logData->protocolVersion, Unversioned()) ) );
+	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistTLogSpillTypeKeys.begin), BinaryWriter::toValue(logData->logSpillType, AssumeVersion(logData->protocolVersion)) ) );
 
 	for(auto tag : logData->allTags) {
 		ASSERT(!logData->getTagData(tag));
@@ -1838,28 +1877,16 @@ ACTOR Future<Void> rejoinMasters( TLogData* self, TLogInterface tli, DBRecoveryC
 		} else {
 			isDisplaced = isDisplaced && ( ( inf.recoveryCount > recoveryCount && inf.recoveryState != RecoveryState::UNINITIALIZED ) || ( inf.recoveryCount == recoveryCount && inf.recoveryState == RecoveryState::FULLY_RECOVERED ) );
 		}
-		if(isDisplaced) {
-			for(auto& log : inf.logSystemConfig.tLogs) {
-				 if( std::count( log.tLogs.begin(), log.tLogs.end(), tli.id() ) ) {
-					isDisplaced = false;
-					break;
-				 }
-			}
-		}
-		if(isDisplaced) {
-			for(auto& old : inf.logSystemConfig.oldTLogs) {
-				for(auto& log : old.tLogs) {
-					 if( std::count( log.tLogs.begin(), log.tLogs.end(), tli.id() ) ) {
-						isDisplaced = false;
-						break;
-					 }
-				}
-			}
-		}
-		if ( isDisplaced )
-		{
-			TraceEvent("TLogDisplaced", tli.id()).detail("Reason", "DBInfoDoesNotContain").detail("RecoveryCount", recoveryCount).detail("InfRecoveryCount", inf.recoveryCount).detail("RecoveryState", (int)inf.recoveryState)
-				.detail("LogSysConf", describe(inf.logSystemConfig.tLogs)).detail("PriorLogs", describe(inf.priorCommittedLogServers)).detail("OldLogGens", inf.logSystemConfig.oldTLogs.size());
+		isDisplaced = isDisplaced && !inf.logSystemConfig.hasTLog(tli.id());
+		if (isDisplaced) {
+			TraceEvent("TLogDisplaced", tli.id())
+			    .detail("Reason", "DBInfoDoesNotContain")
+			    .detail("RecoveryCount", recoveryCount)
+			    .detail("InfRecoveryCount", inf.recoveryCount)
+			    .detail("RecoveryState", (int)inf.recoveryState)
+			    .detail("LogSysConf", describe(inf.logSystemConfig.tLogs))
+			    .detail("PriorLogs", describe(inf.priorCommittedLogServers))
+			    .detail("OldLogGens", inf.logSystemConfig.oldTLogs.size());
 			if (BUGGIFY) wait( delay( SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01() ) );
 			throw worker_removed();
 		}
@@ -2108,7 +2135,6 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 void removeLog( TLogData* self, Reference<LogData> logData ) {
 	TraceEvent("TLogRemoved", self->dbgid).detail("LogId", logData->logId).detail("Input", logData->bytesInput.getValue()).detail("Durable", logData->bytesDurable.getValue());
 	logData->stopped = true;
-	unregisterTLog(logData->logId);
 	if(!logData->recoveryComplete.isSet()) {
 		logData->recoveryComplete.sendError(end_of_stream());
 	}
@@ -2120,9 +2146,7 @@ void removeLog( TLogData* self, Reference<LogData> logData ) {
 			self->popOrder.pop_front();
 	}
 
-	if(self->id_data.size()) {
-		return;
-	} else {
+	if (self->id_data.size() == 0) {
 		throw worker_removed();
 	}
 }
@@ -2246,7 +2270,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 				}
 			}
 
-			messages.push_back( TagsAndMessage(r->getMessageWithTags(), r->getTags()) );
+			messages.emplace_back(r->getMessageWithTags(), r->getTags());
 			r->nextMessage();
 		}
 
@@ -2319,6 +2343,7 @@ ACTOR Future<Void> checkRecovered(TLogData* self) {
 	return Void();
 }
 
+// Recovery persistent state of tLog from disk
 ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality, Promise<Void> oldLog, Promise<Void> recovered, PromiseStream<InitializeTLogRequest> tlogRequests ) {
 	state double startt = now();
 	state Reference<LogData> logData;
@@ -2338,11 +2363,12 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	state Future<Standalone<RangeResultRef>> fTxsTags = storage->readRange(persistTxsTagsKeys);
 	state Future<Standalone<RangeResultRef>> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
 	state Future<Standalone<RangeResultRef>> fProtocolVersions = storage->readRange(persistProtocolVersionKeys);
+	state Future<Standalone<RangeResultRef>> fTLogSpillTypes = storage->readRange(persistTLogSpillTypeKeys);
 
 	// FIXME: metadata in queue?
 
 	wait( waitForAll( std::vector{fFormat, fRecoveryLocation} ) );
-	wait( waitForAll( std::vector{fVers, fKnownCommitted, fLocality, fLogRouterTags, fTxsTags, fRecoverCounts, fProtocolVersions} ) );
+	wait( waitForAll( std::vector{fVers, fKnownCommitted, fLocality, fLogRouterTags, fTxsTags, fRecoverCounts, fProtocolVersions, fTLogSpillTypes} ) );
 
 	if (fFormat.get().present() && !persistFormatReadableRange.contains( fFormat.get().get() )) {
 		//FIXME: remove when we no longer need to test upgrades from 4.X releases
@@ -2420,9 +2446,10 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.confirmRunning );
 
 		ProtocolVersion protocolVersion = BinaryReader::fromStringRef<ProtocolVersion>( fProtocolVersions.get()[idx].value, Unversioned() );
+		TLogSpillType logSpillType = BinaryReader::fromStringRef<TLogSpillType>( fTLogSpillTypes.get()[idx].value, AssumeVersion(protocolVersion) );
 
 		//We do not need the remoteTag, because we will not be loading any additional data
-		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], id_txsTags[id1], UID(), protocolVersion, std::vector<Tag>(), "Restored") );
+		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], id_txsTags[id1], UID(), protocolVersion, logSpillType, std::vector<Tag>(), "Restored") );
 		logData->locality = id_locality[id1];
 		logData->stopped = true;
 		self->id_data[id1] = logData;
@@ -2436,7 +2463,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		logData->recoveryCount = BinaryReader::fromStringRef<DBRecoveryCount>( fRecoverCounts.get()[idx].value, Unversioned() );
 		logData->removed = rejoinMasters(self, recruited, logData->recoveryCount, registerWithMaster.getFuture(), false);
 		removed.push_back(errorOr(logData->removed));
-		logsByVersion.push_back(std::make_pair(ver, id1));
+		logsByVersion.emplace_back(ver, id1);
 
 		TraceEvent("TLogPersistentStateRestore", self->dbgid).detail("LogId", logData->logId).detail("Ver", ver);
 		// Restore popped keys.  Pop operations that took place after the last (committed) updatePersistentDataVersion might be lost, but
@@ -2455,6 +2482,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 				auto tagData = logData->getTagData(tag);
 				ASSERT( !tagData );
 				logData->createTagData(tag, popped, false, false, false);
+				logData->getTagData(tag)->persistentPopped = popped;
 			}
 		}
 	}
@@ -2569,27 +2597,25 @@ bool tlogTerminated( TLogData* self, IKeyValueStore* persistentData, TLogQueue* 
 
 ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, LogSystemConfig recoverFrom, Reference<AsyncVar<Reference<ILogSystem>>> logSystem) {
 	loop {
-		bool found = false;
-		if(self->dbInfo->get().logSystemConfig.recruitmentID == logData->recruitmentID) {
-			if( self->dbInfo->get().logSystemConfig.isNextGenerationOf(recoverFrom) ) {
+		bool found = self->dbInfo->get().logSystemConfig.recruitmentID == logData->recruitmentID;
+		if (found) {
+			if (self->dbInfo->get().logSystemConfig.isNextGenerationOf(recoverFrom)) {
 				logSystem->set(ILogSystem::fromOldLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
-				found = true;
-			} else if( self->dbInfo->get().logSystemConfig.isEqualIds(recoverFrom) ) {
+			} else if (self->dbInfo->get().logSystemConfig.isEqualIds(recoverFrom)) {
 				logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig, false, true ));
-				found = true;
-			}
-			else if( self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS ) {
+			} else if (self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 				logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig, true ));
-				found = true;
+			} else {
+				found = false;
 			}
 		}
-		if( !found ) {
+		if (!found) {
 			logSystem->set(Reference<ILogSystem>());
 		} else {
 			logData->logSystem->get()->pop(logData->logRouterPoppedVersion, logData->remoteTag, logData->durableKnownCommittedVersion, logData->locality);
 		}
 		TraceEvent("TLogUpdate", self->dbgid).detail("LogId", logData->logId).detail("RecruitmentID", logData->recruitmentID).detail("DbRecruitmentID", self->dbInfo->get().logSystemConfig.recruitmentID).detail("RecoverFrom", recoverFrom.toString()).detail("DbInfo", self->dbInfo->get().logSystemConfig.toString()).detail("Found", found).detail("LogSystem", (bool) logSystem->get() ).detail("RecoveryState", (int)self->dbInfo->get().recoveryState);
-		for(auto it : self->dbInfo->get().logSystemConfig.oldTLogs) {
+		for (const auto& it : self->dbInfo->get().logSystemConfig.oldTLogs) {
 			TraceEvent("TLogUpdateOld", self->dbgid).detail("LogId", logData->logId).detail("DbInfo", it.toString());
 		}
 		wait( self->dbInfo->onChange() );
@@ -2630,7 +2656,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 	stopAllTLogs(self, recruited.id());
 
 	bool recovering = (req.recoverFrom.logSystemType == LogSystemType::tagPartitioned);
-	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags, req.txsTags, req.recruitmentID, currentProtocolVersion, req.allTags, recovering ? "Recovered" : "Recruited") );
+	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags, req.txsTags, req.recruitmentID, currentProtocolVersion, req.spillType, req.allTags, recovering ? "Recovered" : "Recruited") );
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;
@@ -2639,7 +2665,6 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 	self->spillOrder.push_back(recruited.id());
 
 	TraceEvent("TLogStart", logData->logId);
-	registerTLog(logData->logId);
 
 	state Future<Void> updater;
 	state bool pulledRecoveryVersions = false;

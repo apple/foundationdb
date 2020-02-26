@@ -22,6 +22,7 @@
 #define FDBSERVER_LOGSYSTEMCONFIG_H
 #pragma once
 
+#include "fdbserver/BackupInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbclient/DatabaseConfiguration.h"
@@ -82,6 +83,7 @@ struct TLogSet {
 	constexpr static FileIdentifier file_identifier = 6302317;
 	std::vector<OptionalInterface<TLogInterface>> tLogs;
 	std::vector<OptionalInterface<TLogInterface>> logRouters;
+	std::vector<OptionalInterface<BackupInterface>> backupWorkers;
 	int32_t tLogWriteAntiQuorum, tLogReplicationFactor;
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
 	TLogVersion tLogVersion;
@@ -95,12 +97,16 @@ struct TLogSet {
 	explicit TLogSet(const LogSet& rhs);
 
 	std::string toString() const {
-		return format("anti: %d replication: %d local: %d routers: %d tLogs: %s locality: %d", tLogWriteAntiQuorum, tLogReplicationFactor, isLocal, logRouters.size(), describe(tLogs).c_str(), locality);
+		return format("anti: %d replication: %d local: %d routers: %d tLogs: %s backupWorkers: %s locality: %d",
+		              tLogWriteAntiQuorum, tLogReplicationFactor, isLocal, logRouters.size(), describe(tLogs).c_str(),
+		              describe(backupWorkers).c_str(), locality);
 	}
 
 	bool operator == ( const TLogSet& rhs ) const {
-		if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor || isLocal != rhs.isLocal || satelliteTagLocations != rhs.satelliteTagLocations ||
-			startVersion != rhs.startVersion || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality || logRouters.size() != rhs.logRouters.size()) {
+		if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor ||
+		    isLocal != rhs.isLocal || satelliteTagLocations != rhs.satelliteTagLocations ||
+		    startVersion != rhs.startVersion || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality ||
+		    logRouters.size() != rhs.logRouters.size() || backupWorkers.size() != rhs.backupWorkers.size()) {
 			return false;
 		}
 		if ((tLogPolicy && !rhs.tLogPolicy) || (!tLogPolicy && rhs.tLogPolicy) || (tLogPolicy && (tLogPolicy->info() != rhs.tLogPolicy->info()))) {
@@ -113,6 +119,14 @@ struct TLogSet {
 		}
 		for(int j = 0; j < logRouters.size(); j++ ) {
 			if (logRouters[j].id() != rhs.logRouters[j].id() || logRouters[j].present() != rhs.logRouters[j].present() || ( logRouters[j].present() && logRouters[j].interf().commit.getEndpoint().token != rhs.logRouters[j].interf().commit.getEndpoint().token ) ) {
+				return false;
+			}
+		}
+		for (int j = 0; j < backupWorkers.size(); j++) {
+			if (backupWorkers[j].id() != rhs.backupWorkers[j].id() ||
+			    backupWorkers[j].present() != rhs.backupWorkers[j].present() ||
+			    (backupWorkers[j].present() &&
+			     backupWorkers[j].interf().getToken() != rhs.backupWorkers[j].interf().getToken())) {
 				return false;
 			}
 		}
@@ -137,38 +151,31 @@ struct TLogSet {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		if constexpr (is_fb_function<Ar>) {
-			serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities,
-			           isLocal, locality, startVersion, satelliteTagLocations, tLogVersion);
-		} else {
-			serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities, isLocal, locality, startVersion, satelliteTagLocations);
-			if (ar.isDeserializing && !ar.protocolVersion().hasTLogVersion()) {
-				tLogVersion = TLogVersion::V2;
-			} else {
-				serializer(ar, tLogVersion);
-			}
-			ASSERT(tLogPolicy.getPtr() == nullptr || tLogVersion != TLogVersion::UNSET);
-		}
+		serializer(ar, tLogs, logRouters, tLogWriteAntiQuorum, tLogReplicationFactor, tLogPolicy, tLogLocalities,
+		           isLocal, locality, startVersion, satelliteTagLocations, tLogVersion, backupWorkers);
 	}
 };
 
 struct OldTLogConf {
 	constexpr static FileIdentifier file_identifier = 16233772;
 	std::vector<TLogSet> tLogs;
-	Version epochEnd;
+	Version epochBegin, epochEnd;
 	int32_t logRouterTags;
 	int32_t txsTags;
-	std::set<int8_t> pseudoLocalities;
+	std::set<int8_t> pseudoLocalities; // Tracking pseudo localities, e.g., tagLocalityLogRouterMapped, used in the old epoch.
+	LogEpoch epoch;
 
-	OldTLogConf() : epochEnd(0), logRouterTags(0), txsTags(0) {}
+	OldTLogConf() : epochBegin(0), epochEnd(0), logRouterTags(0), txsTags(0), epoch(0) {}
 	explicit OldTLogConf(const OldLogData&);
 
 	std::string toString() const {
 		return format("end: %d tags: %d %s", epochEnd, logRouterTags, describe(tLogs).c_str());
 	}
 
-	bool operator == ( const OldTLogConf& rhs ) const {
-		return tLogs == rhs.tLogs && epochEnd == rhs.epochEnd && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags && pseudoLocalities == rhs.pseudoLocalities;
+	bool operator==(const OldTLogConf& rhs) const {
+		return tLogs == rhs.tLogs && epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd &&
+		       logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
+		       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
 	}
 
 	bool isEqualIds(OldTLogConf const& r) const {
@@ -185,12 +192,15 @@ struct OldTLogConf {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, tLogs, epochEnd, logRouterTags, pseudoLocalities, txsTags);
+		serializer(ar, tLogs, epochBegin, epochEnd, logRouterTags, pseudoLocalities, txsTags, epoch);
 	}
 };
 
+// LogSystemType is always 2 (tagPartitioned). There is no other tag partitioned system.
+// This type is supposed to be removed. However, because the serialized value of the type is stored in coordinators,
+// removing it is complex in order to support forward and backward compatibility.
 enum class LogSystemType {
-	empty = 0,
+	empty = 0, // Never used.
 	tagPartitioned = 2,
 };
 BINARY_SERIALIZABLE(LogSystemType);
@@ -207,8 +217,12 @@ struct LogSystemConfig {
 	bool stopped;
 	Optional<Version> recoveredAt;
 	std::set<int8_t> pseudoLocalities;
+	LogEpoch epoch;
+	LogEpoch oldestBackupEpoch;
 
-	LogSystemConfig() : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false) {}
+	LogSystemConfig(LogEpoch e = 0)
+	  : logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), stopped(false), epoch(e),
+	    oldestBackupEpoch(e) {}
 
 	std::string toString() const {
 		return format("type: %d oldGenerations: %d tags: %d %s", logSystemType, oldTLogs.size(), logRouterTags, describe(tLogs).c_str());
@@ -346,7 +360,10 @@ struct LogSystemConfig {
 	bool operator == ( const LogSystemConfig& rhs ) const { return isEqual(rhs); }
 
 	bool isEqual(LogSystemConfig const& r) const {
-		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && txsTags == r.txsTags && recruitmentID == r.recruitmentID && stopped == r.stopped && recoveredAt == r.recoveredAt && pseudoLocalities == r.pseudoLocalities;
+		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs &&
+		       expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
+		       recruitmentID == r.recruitmentID && stopped == r.stopped && recoveredAt == r.recoveredAt &&
+		       pseudoLocalities == r.pseudoLocalities && epoch == r.epoch && oldestBackupEpoch == r.oldestBackupEpoch;
 	}
 
 	bool isEqualIds(LogSystemConfig const& r) const {
@@ -375,9 +392,67 @@ struct LogSystemConfig {
 		return false;
 	}
 
+	bool hasTLog(UID tid) const {
+		for (const auto& log : tLogs) {
+			if (std::count(log.tLogs.begin(), log.tLogs.end(), tid) > 0) {
+				return true;
+			}
+		}
+		for (const auto& old : oldTLogs) {
+			for (const auto& log : old.tLogs) {
+				if (std::count(log.tLogs.begin(), log.tLogs.end(), tid) > 0) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	bool hasLogRouter(UID rid) const {
+		for (const auto& log : tLogs) {
+			if (std::count(log.logRouters.begin(), log.logRouters.end(), rid) > 0) {
+				return true;
+			}
+		}
+		for (const auto& old : oldTLogs) {
+			for (const auto& log : old.tLogs) {
+				if (std::count(log.logRouters.begin(), log.logRouters.end(), rid) > 0) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	bool hasBackupWorker(UID bid) const {
+		for (const auto& log : tLogs) {
+			if (std::count(log.backupWorkers.begin(), log.backupWorkers.end(), bid) > 0) {
+				return true;
+			}
+		}
+		for (const auto& old : oldTLogs) {
+			for (const auto& log : old.tLogs) {
+				if (std::count(log.backupWorkers.begin(), log.backupWorkers.end(), bid) > 0) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	Version getEpochEndVersion(LogEpoch epoch) const {
+		for (const auto& old : oldTLogs) {
+			if (old.epoch == epoch) {
+				return old.epochEnd;
+			}
+		}
+		return invalidVersion;
+	}
+
 	template <class Ar>
-	void serialize( Ar& ar ) {
-		serializer(ar, logSystemType, tLogs, logRouterTags, oldTLogs, expectedLogSets, recruitmentID, stopped, recoveredAt, pseudoLocalities, txsTags);
+	void serialize(Ar& ar) {
+		serializer(ar, logSystemType, tLogs, logRouterTags, oldTLogs, expectedLogSets, recruitmentID, stopped,
+		           recoveredAt, pseudoLocalities, txsTags, epoch, oldestBackupEpoch);
 	}
 };
 

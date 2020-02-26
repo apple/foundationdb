@@ -24,14 +24,14 @@ Backup vs DR
 
 FoundationDB can backup a database to local disks, a blob store (such as Amazon S3), or to another FoundationDB database.  
 
-Backing up one database to another is a special form of backup is called DR backup or just DR for short.  DR stands for Disaster Recovery, as it can be used to keep two geographically separated databases in close synchronization to recover from a catastrophic disaster.  Once a DR  operation has reached 'differential' mode, the secondary database (the destination of the DR job) will always contains a *consistent* copy of the primary database (the source of the DR job) but it will be from some past point in time.  If the primary database is lost and applications continue using the secondary database, the "ACI" in ACID is preserved but D (Durability) is lost for some amount of most recent changes.  When DR is operating normally, the secondary database will lag behind the primary database by as little as a few seconds worth of database commits.
+Backing up one database to another is a special form of backup is called DR backup or just DR for short.  DR stands for Disaster Recovery, as it can be used to keep two geographically separated databases in close synchronization to recover from a catastrophic disaster.  Once a DR  operation has reached 'differential' mode, the secondary database (the destination of the DR job) will always contain a *consistent* copy of the primary database (the source of the DR job) but it will be from some past point in time.  If the primary database is lost and applications continue using the secondary database, the "ACI" in ACID is preserved but D (Durability) is lost for some amount of most recent changes.  When DR is operating normally, the secondary database will lag behind the primary database by as little as a few seconds worth of database commits.
 
 While a cluster is being used as the destination for a DR operation it will be locked to prevent accidental use or modification.
 
 Limitations
 ===========
 
-Backup data is not encrypted on disk, in a blob store account, or in transit to a destination blob store account or database.
+Backup data is not encrypted at rest on disk or in a blob store account.
 
 Tools
 ===========
@@ -159,15 +159,14 @@ The Blob Credential File format is JSON with the following schema:
     }
   }
 
-SSL Support
+TLS Support
 ===========
 
-By default, backup will communicate over https. To configure https, the following environment variables are used:
+In-flight traffic for blob store or disaster recovery backups can be encrypted with the following environment variables. They are also offered as command-line flags or can be specified in ``foundationdb.conf`` for backup agents.
 
 ============================ ====================================================
 Environment Variable         Purpose
 ============================ ====================================================
-``FDB_TLS_PLUGIN``           Path to the file to be loaded as the TLS plugin
 ``FDB_TLS_CERTIFICATE_FILE`` Path to the file from which the local certificates
                              can be loaded, used by the plugin
 ``FDB_TLS_KEY_FILE``         Path to the file from which to load the private
@@ -177,8 +176,11 @@ Environment Variable         Purpose
 ``FDB_TLS_CA_FILE``          Path to the file containing the CA certificates
                              to trust. Specify to override the default openssl
                              location.
+``FDB_TLS_VERIFY_PEERS``     The byte-string for the verification of peer
+                             certificates and sessions.
 ============================ ====================================================
 
+Blob store backups can be configured to use HTTPS/TLS by setting the ``secure_connection`` or ``sc`` backup URL option to ``1``, which is the default. Disaster recovery backups are secured by using TLS for both the source and target clusters and setting the TLS options for the ``fdbdr`` and ``dr_agent`` commands.
 
 ``fdbbackup`` command line tool
 ===============================

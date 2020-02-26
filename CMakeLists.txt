@@ -16,9 +16,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.13)
 project(foundationdb
-  VERSION 6.2.16
+  VERSION 7.0.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
@@ -29,17 +29,22 @@ if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
   message(FATAL_ERROR "In-source builds are forbidden")
 endif()
 
+set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  message(STATUS "Setting build type to 'Release' as none was specified")
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build" FORCE)
-  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
-    "MinSizeRel" "RelWithDebInfo")
+  if (OPEN_FOR_IDE)
+    message(STATUS "Defaulting build type to 'Debug' for OPEN_FOR_IDE")
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build" FORCE)
+  else()
+    message(STATUS "Setting build type to 'Release' as none was specified")
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
+      "MinSizeRel" "RelWithDebInfo")
+  endif()
 endif()
 
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
-
-set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
 
 ################################################################################
 # Packages used for bindings
@@ -192,7 +197,7 @@ add_subdirectory(tests)
 if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
 endif()
-add_subdirectory(monitoring)
+add_subdirectory(contrib/monitoring)
 
 if(WIN32)
   add_subdirectory(packaging/msi)

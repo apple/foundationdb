@@ -511,7 +511,7 @@ ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> s
 													Reference<AsyncVar<Optional<ClusterInterface>>> outKnownLeader) {
 	state Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader(
 		new AsyncVar<Optional<ClusterControllerClientInterface>>{});
-	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
+	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader);
 	loop {
 		choose {
 			when(wait(deserializer)) { UNSTOPPABLE_ASSERT(false); }
@@ -655,15 +655,10 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 			}
 
 			if (leader.get().first.serializedInfo.size()) {
-				if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
-					ObjectReader reader(leader.get().first.serializedInfo.begin(), IncludeVersion());
-					ClusterControllerClientInterface res;
-					reader.deserialize(res);
-					knownLeader->set(res);
-				} else {
-					ClusterControllerClientInterface res =  BinaryReader::fromStringRef<ClusterControllerClientInterface>( leader.get().first.serializedInfo, IncludeVersion() );
-					knownLeader->set(res);
-				}
+				ObjectReader reader(leader.get().first.serializedInfo.begin(), IncludeVersion());
+				ClusterControllerClientInterface res;
+				reader.deserialize(res);
+				knownLeader->set(res);
 			}
 		}
 		wait( nomineeChange.onTrigger() || allActors );
@@ -685,6 +680,7 @@ void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::ve
 				TraceEvent("ConnectedProxy").detail("Proxy", lastProxies[i].id());
 			}
 		}
+		ni.firstProxy = ni.proxies[0];
 		ni.proxies = lastProxies;
 	}
 }

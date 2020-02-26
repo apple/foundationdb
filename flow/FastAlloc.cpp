@@ -24,6 +24,7 @@
 #include "flow/Trace.h"
 #include "flow/Error.h"
 #include "flow/Knobs.h"
+#include "flow/crc32c.h"
 #include "flow/flow.h"
 
 #include <cstdint>
@@ -46,6 +47,9 @@
 // warning 4073 warns about "initializers put in library initialization area", which is our intent
 #pragma warning (disable: 4073)
 #pragma init_seg(lib)
+#define INIT_SEG
+#elif defined(__INTEL_COMPILER)
+// intel compiler ignored INIT_SEG for thread local variables
 #define INIT_SEG
 #elif defined(__GNUG__)
 #ifdef __linux__
@@ -143,9 +147,9 @@ void recordAllocation( void *ptr, size_t size ) {
 #error Instrumentation not supported on this platform
 #endif
 
-		uint32_t a = 0, b = 0;
+		uint32_t a = 0;
 		if( nptrs > 0 ) {
-			hashlittle2( buffer, nptrs * sizeof(void *), &a, &b );
+			a = crc32c_append( 0xfdbeefdb, buffer, nptrs * sizeof(void *));
 		}
 
 		double countDelta = std::max(1.0, ((double)SAMPLE_BYTES) / size);
@@ -260,6 +264,10 @@ void *FastAllocator<Size>::allocate() {
 		initThread();
 	}
 
+#ifdef USE_GPERFTOOLS
+	return malloc(Size);
+#endif
+
 #if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData;
 	if (!thr.freelist) {
@@ -302,6 +310,10 @@ void FastAllocator<Size>::release(void *ptr) {
 	if(!threadInitialized) {
 		initThread();
 	}
+
+#ifdef USE_GPERFTOOLS
+	return free(ptr);
+#endif
 
 #if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData;
@@ -538,4 +550,3 @@ template class FastAllocator<1024>;
 template class FastAllocator<2048>;
 template class FastAllocator<4096>;
 template class FastAllocator<8192>;
-

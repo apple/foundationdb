@@ -73,7 +73,7 @@ struct struct_like_traits<std::tuple<Ts...>> : std::true_type {
 	}
 
 	template <int i, class Type, class Context>
-	static const void assign(Member& m, const Type& t, Context&) {
+	static void assign(Member& m, const Type& t, Context&) {
 		std::get<i>(m) = t;
 	}
 };
@@ -286,6 +286,11 @@ private:
 		} else {
 			return struct_offset_impl<RightAlign(o, fb_scalar_size<T>) + fb_scalar_size<T>, index - 1, Ts...>::offset;
 		}
+#ifdef __INTEL_COMPILER
+		// ICC somehow thinks that this method does not return
+		// see: https://software.intel.com/en-us/forums/intel-c-compiler/topic/799473
+		return 1;
+#endif
 	}
 
 public:

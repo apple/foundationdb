@@ -46,7 +46,7 @@ A basic interaction with the FoundationDB API is demonstrated below:
 
     func main() {
         // Different API versions may expose different runtime behaviors.
-        fdb.MustAPIVersion(620)
+        fdb.MustAPIVersion(700)
 
         // Open the default database from the system cluster
         db := fdb.MustOpenDefault()
@@ -138,6 +138,16 @@ error. The above example may be rewritten as:
         // Return the two values
         return []string{valueOne, valueTwo}, nil
     })
+
+MustGet returns nil (which is different from empty slice []byte{}), when the
+key doesn't exist, and hence non-existence can be checked as follows:
+
+    val := tr.Get(fdb.Key("foobar")).MustGet()
+    if val == nil {
+      fmt.Println("foobar does not exist.")
+    } else {
+      fmt.Println("foobar exists.")
+    }
 
 Any panic that occurs during execution of the caller-provided function will be
 recovered by the (Database).Transact method. If the error is an FDB Error, it

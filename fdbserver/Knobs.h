@@ -83,6 +83,7 @@ public:
 	int64_t DISK_QUEUE_FILE_SHRINK_BYTES; // When we shrink the disk queue, by how many bytes should it shrink?
 	int DISK_QUEUE_MAX_TRUNCATE_BYTES;  // A truncate larger than this will cause the file to be replaced instead.
 	double TLOG_DEGRADED_DURATION;
+	int64_t MAX_CACHE_VERSIONS;
 	double TXS_POPPED_MAX_DELAY;
 
 	// Data distribution queue
@@ -104,7 +105,7 @@ public:
 	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
-	
+
 	// Higher priorities are executed first
 	// Priority/100 is the "priority group"/"superpriority".  Priority inversion
 	//   is possible within but not between priority groups; fewer priority groups
@@ -120,6 +121,7 @@ public:
 	int PRIORITY_TEAM_UNHEALTHY;
 	int PRIORITY_TEAM_2_LEFT;
 	int PRIORITY_TEAM_1_LEFT;
+	int PRIORITY_TEAM_FAILED;         // Priority when a server in the team is excluded as failed
 	int PRIORITY_TEAM_0_LEFT;
 	int PRIORITY_SPLIT_SHARD;
 
@@ -130,6 +132,8 @@ public:
 	int64_t SHARD_MAX_BYTES_PER_KSEC, // Shards with more than this bandwidth will be split immediately
 		SHARD_MIN_BYTES_PER_KSEC,     // Shards with more than this bandwidth will not be merged
 		SHARD_SPLIT_BYTES_PER_KSEC;   // When splitting a shard, it is split into pieces with less than this bandwidth
+	int64_t SHARD_MAX_BYTES_READ_PER_KSEC;
+	double SHARD_MAX_BYTES_READ_PER_KSEC_JITTER;
 	double STORAGE_METRIC_TIMEOUT;
 	double METRIC_DELAY;
 	double ALL_DATA_REMOVED_DELAY;
@@ -149,8 +153,7 @@ public:
 	double DD_MERGE_COALESCE_DELAY;
 	double STORAGE_METRICS_POLLING_DELAY;
 	double STORAGE_METRICS_RANDOM_DELAY;
-	double FREE_SPACE_RATIO_CUTOFF;
-	double FREE_SPACE_CUTOFF_PENALTY;
+	double AVAILABLE_SPACE_RATIO_CUTOFF;
 	int DESIRED_TEAMS_PER_SERVER;
 	int MAX_TEAMS_PER_SERVER;
 	int64_t DD_SHARD_SIZE_GRANULARITY;
@@ -163,6 +166,7 @@ public:
 	double DEBOUNCE_RECRUITING_DELAY;
 	int REBALANCE_MAX_RETRIES;
 	int DD_OVERLAP_PENALTY;
+	int DD_EXCLUDE_MIN_REPLICAS;
 	bool DD_VALIDATE_LOCALITY;
 	int DD_CHECK_INVALID_LOCALITY_DELAY;
 
@@ -174,6 +178,9 @@ public:
 	bool TR_FLAG_DISABLE_SERVER_TEAM_REMOVER; // disable the serverTeamRemover actor
 	double TR_REMOVE_SERVER_TEAM_DELAY; // wait for the specified time before try to remove next server team
 	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthyness again to ensure it runs after machineTeamRemover
+
+	// Remove wrong storage engines
+	double DD_REMOVE_STORE_ENGINE_DELAY; // wait for the specified time before remove the next batch
 
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
@@ -264,6 +271,7 @@ public:
 	bool ALWAYS_CAUSAL_READ_RISKY;
 	int MAX_COMMIT_UPDATES;
 	double MIN_PROXY_COMPUTE;
+	double MAX_PROXY_COMPUTE;
 	int PROXY_COMPUTE_BUCKETS;
 	double PROXY_COMPUTE_GROWTH_RATE;
 
@@ -285,6 +293,11 @@ public:
 	double SAMPLE_EXPIRATION_TIME;
 	double SAMPLE_POLL_TIME;
 	int64_t RESOLVER_STATE_MEMORY_LIMIT;
+
+	// Backup Worker
+	double BACKUP_TIMEOUT;  // master's reaction time for backup failure
+	double BACKUP_NOOP_POP_DELAY;
+	int BACKUP_FILE_BLOCK_BYTES;
 
 	//Cluster Controller
 	double CLUSTER_CONTROLLER_LOGGING_DELAY;
@@ -346,6 +359,7 @@ public:
 	double METRIC_UPDATE_RATE;
 	double DETAILED_METRIC_UPDATE_RATE;
 	double LAST_LIMITED_RATIO;
+	double RATEKEEPER_DEFAULT_LIMIT;
 
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER;
 	int64_t SPRING_BYTES_STORAGE_SERVER;
@@ -383,15 +397,18 @@ public:
 	double INITIAL_DURABILITY_LAG_MULTIPLIER;
 	double DURABILITY_LAG_REDUCTION_RATE;
 	double DURABILITY_LAG_INCREASE_RATE;
-	
+
 	double STORAGE_SERVER_LIST_FETCH_TIMEOUT;
-	
+
 	//Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;
 	double STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	double SPLIT_JITTER_AMOUNT;
 	int64_t IOPS_UNITS_PER_SAMPLE;
 	int64_t BANDWIDTH_UNITS_PER_SAMPLE;
+	int64_t BYTES_READ_UNITS_PER_SAMPLE;
+	int64_t EMPTY_READ_PENALTY;
+	bool READ_SAMPLING_ENABLED;
 
 	//Storage Server
 	double STORAGE_LOGGING_DELAY;
@@ -465,6 +482,25 @@ public:
 	int64_t TIME_KEEPER_DELAY;
 	int64_t TIME_KEEPER_MAX_ENTRIES;
 
+	// Fast Restore
+	int64_t FASTRESTORE_FAILURE_TIMEOUT;
+	int64_t FASTRESTORE_HEARTBEAT_INTERVAL;
+	double FASTRESTORE_SAMPLING_PERCENT;
+	int64_t FASTRESTORE_NUM_LOADERS;
+	int64_t FASTRESTORE_NUM_APPLIERS;
+	// FASTRESTORE_TXN_BATCH_MAX_BYTES is target txn size used by appliers to apply mutations
+	double FASTRESTORE_TXN_BATCH_MAX_BYTES;
+	// FASTRESTORE_VERSIONBATCH_MAX_BYTES is the maximum data size in each version batch
+	double FASTRESTORE_VERSIONBATCH_MAX_BYTES;
+	// FASTRESTORE_VB_PARALLELISM is the number of concurrently running version batches
+	int64_t FASTRESTORE_VB_PARALLELISM;
+	int64_t FASTRESTORE_VB_MONITOR_DELAY; // How quickly monitor finished version batch
+	int64_t FASTRESTORE_VB_LAUNCH_DELAY;
+	int64_t FASTRESTORE_ROLE_LOGGING_DELAY;
+	int64_t FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL; // How quickly to update process metrics for restore
+	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
+	int64_t FASTRESTORE_APPLYING_PARALLELISM; // number of outstanding txns writing to dest. DB
+	int64_t FASTRESTORE_MONITOR_LEADER_DELAY;
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };

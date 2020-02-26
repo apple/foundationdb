@@ -20,8 +20,6 @@
     <ActorCompiler Include="genericactors.actor.cpp" />
     <ActorCompiler Include="FlowTransport.actor.cpp" />
     <ActorCompiler Include="IAsyncFile.actor.cpp" />
-    <ClCompile Include="crc32c.cpp" />
-    <ClCompile Include="generated-constants.cpp" />
     <ClCompile Include="Platform.cpp" />
     <ClCompile Include="AsyncFileWriteChecker.cpp" />
     <ClCompile Include="libcoroutine\Common.c" />
@@ -72,7 +70,6 @@
     </ActorCompiler>
     <ClInclude Include="AsyncFileWriteChecker.h" />
     <ClInclude Include="ContinuousSample.h" />
-    <ClInclude Include="crc32c.h" />
     <ClInclude Include="FailureMonitor.h" />
     <ActorCompiler Include="LoadBalance.actor.h">
       <EnableCompile>false</EnableCompile>
@@ -160,8 +157,8 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <CustomBuildStep>
-      <Command>echo const char *hgVersion = "Current version id not currently supported within Windows."; &gt; hgVersion.temp.h &amp;&amp; fc /b hgVersion.temp.h hgVersion.h &gt; nul || copy hgVersion.temp.h hgVersion.h &gt; nul</Command>
-      <Message>Checking HG source version</Message>
+      <Command>echo const char *sourceVersion = "Current version id not currently supported within Windows."; &gt; SourceVersion.temp.h &amp;&amp; fc /b SourceVersion.temp.h SourceVersion.h &gt; nul || copy SourceVersion.temp.h SourceVersion.h &gt; nul</Command>
+      <Message>Checking source version</Message>
       <Outputs>fake.out</Outputs>
     </CustomBuildStep>
   </ItemDefinitionGroup>

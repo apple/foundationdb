@@ -107,12 +107,15 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	} else if (mode == "memory-1") {
 		logType = KeyValueStoreType::MEMORY;
 		storeType= KeyValueStoreType::MEMORY;
+	} else if (mode == "memory-radixtree-beta") {
+		logType = KeyValueStoreType::SSD_BTREE_V2;
+		storeType= KeyValueStoreType::MEMORY_RADIXTREE;
 	}
 	// Add any new store types to fdbserver/workloads/ConfigureDatabase, too
 
 	if (storeType.present()) {
-		out[p+"log_engine"] = format("%d", logType.get());
-		out[p+"storage_engine"] = format("%d", storeType.get());
+		out[p+"log_engine"] = format("%d", logType.get().storeType());
+		out[p+"storage_engine"] = format("%d", KeyValueStoreType::StoreType(storeType.get()));
 		return out;
 	}
 
@@ -492,7 +495,6 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 					}
 				}
 			}
-
 			if (creating) {
 				tr.setOption( FDBTransactionOptions::INITIALIZE_NEW_DATABASE );
 				tr.addReadConflictRange( singleKeyRange( initIdKey ) );
@@ -511,8 +513,9 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 				            MutationRef::SetVersionstampedValue);
 			}
 
-			for (auto i = m.begin(); i != m.end(); ++i)
+			for (auto i = m.begin(); i != m.end(); ++i) {
 				tr.set( StringRef(i->first), StringRef(i->second) );
+			}
 
 			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
 			tr.set( moveKeysLockOwnerKey, versionKey );
@@ -1226,7 +1229,7 @@ struct AutoQuorumChange : IQuorumChange {
 };
 Reference<IQuorumChange> autoQuorumChange( int desired ) { return Reference<IQuorumChange>(new AutoQuorumChange(desired)); }
 
-ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers ) {
+ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
 	state Transaction tr(cx);
 	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
 	state std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
@@ -1237,13 +1240,18 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
+			auto serversVersionKey = failed ? failedServersVersionKey : excludedServersVersionKey;
+			tr.addReadConflictRange( singleKeyRange(serversVersionKey) ); //To conflict with parallel includeServers
+			tr.set( serversVersionKey, excludeVersionKey );
+			for(auto& s : servers) {
+				if (failed) {
+					tr.set( encodeFailedServersKey(s), StringRef() );
+				} else {
+					tr.set( encodeExcludedServersKey(s), StringRef() );
+				}
+			}
 
-			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) ); //To conflict with parallel includeServers
-			tr.set( excludedServersVersionKey, excludeVersionKey );
-			for(auto& s : servers)
-				tr.set( encodeExcludedServersKey(s), StringRef() );
-
-			TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers));
+			TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers)).detail("ExcludeFailed", failed);
 
 			wait( tr.commit() );
 			return Void();
@@ -1253,12 +1261,9 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 	}
 }
 
-ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers ) {
-	state bool includeAll = false;
+ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
 	state Transaction tr(cx);
-	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
-	state std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
-
+	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
@@ -1268,13 +1273,21 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 
 			// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
 			tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
-			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) );
-			tr.set( excludedServersVersionKey, excludeVersionKey );
+			if (failed) {
+				tr.addReadConflictRange(singleKeyRange(failedServersVersionKey));
+				tr.set(failedServersVersionKey, versionKey);
+			} else {
+				tr.addReadConflictRange(singleKeyRange(excludedServersVersionKey));
+				tr.set(excludedServersVersionKey, versionKey);
+			}
 
 			for(auto& s : servers ) {
 				if (!s.isValid()) {
-					tr.clear( excludedServersKeys );
-					includeAll = true;
+					if (failed) {
+						tr.clear(failedServersKeys);
+					} else {
+						tr.clear(excludedServersKeys);
+					}
 				} else if (s.isWholeMachine()) {
 					// Eliminate both any ip-level exclusion (1.2.3.4) and any
 					// port-level exclusions (1.2.3.4:5)
@@ -1284,15 +1297,19 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 					//
 					// This is why we now make two clears: first only of the ip
 					// address, the second will delete all ports.
-					auto addr = encodeExcludedServersKey(s);
+					auto addr = failed ? encodeFailedServersKey(s) : encodeExcludedServersKey(s);
 					tr.clear(singleKeyRange(addr));
 					tr.clear(KeyRangeRef(addr + ':', addr + char(':' + 1)));
 				} else {
-					tr.clear( encodeExcludedServersKey(s) );
+					if (failed) {
+						tr.clear(encodeFailedServersKey(s));
+					} else {
+						tr.clear(encodeExcludedServersKey(s));
+					}
 				}
 			}
 
-			TraceEvent("IncludeServersCommit").detail("Servers", describe(servers));
+			TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
 
 			wait( tr.commit() );
 			return Void();
@@ -1338,8 +1355,10 @@ ACTOR Future<Void> setClass( Database cx, AddressExclusion server, ProcessClass 
 }
 
 ACTOR static Future<vector<AddressExclusion>> getExcludedServers( Transaction* tr ) {
-	Standalone<RangeResultRef> r = wait( tr->getRange( excludedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
+	state Standalone<RangeResultRef> r = wait( tr->getRange( excludedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
 	ASSERT( !r.more && r.size() < CLIENT_KNOBS->TOO_MANY );
+	state Standalone<RangeResultRef> r2 = wait( tr->getRange( failedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
+	ASSERT( !r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY );
 
 	vector<AddressExclusion> exclusions;
 	for(auto i = r.begin(); i != r.end(); ++i) {
@@ -1347,6 +1366,12 @@ ACTOR static Future<vector<AddressExclusion>> getExcludedServers( Transaction* t
 		if (a.isValid())
 			exclusions.push_back( a );
 	}
+	for(auto i = r2.begin(); i != r2.end(); ++i) {
+		auto a = decodeFailedServersKey( i->key );
+		if (a.isValid())
+			exclusions.push_back( a );
+	}
+	uniquify(exclusions);
 	return exclusions;
 }
 

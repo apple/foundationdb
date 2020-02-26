@@ -18,9 +18,16 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+#include <iterator>
+#include <map>
+#include <set>
+#include <vector>
+
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/BackupInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/Knobs.h"
@@ -34,7 +41,6 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/LatencyBandConfig.h"
-#include <algorithm>
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -56,13 +62,15 @@ struct WorkerInfo : NonCopyable {
 	WorkerDetails details;
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
+	Optional<uint16_t> storageCacheInfo;
 
 	WorkerInfo() : gen(-1), reboots(0), priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
 	WorkerInfo( Future<Void> watcher, ReplyPromise<RegisterWorkerReply> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, bool degraded ) :
 		watcher(watcher), reply(reply), gen(gen), reboots(0), initialClass(initialClass), priorityInfo(priorityInfo), details(interf, processClass, degraded) {}
 
 	WorkerInfo( WorkerInfo&& r ) BOOST_NOEXCEPT : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen),
-		reboots(r.reboots), initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)) {}
+		reboots(r.reboots), initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
+		haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor), storageCacheInfo(r.storageCacheInfo) {}
 	void operator=( WorkerInfo&& r ) BOOST_NOEXCEPT {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
@@ -71,6 +79,9 @@ struct WorkerInfo : NonCopyable {
 		initialClass = r.initialClass;
 		priorityInfo = r.priorityInfo;
 		details = std::move(r.details);
+		haltRatekeeper = r.haltRatekeeper;
+		haltDistributor = r.haltDistributor;
+		storageCacheInfo = r.storageCacheInfo;
 	}
 };
 
@@ -101,9 +112,11 @@ public:
 		Database db;
 		int unfinishedRecoveries;
 		int logGenerations;
+		std::map<uint16_t, std::pair<Optional<StorageServerInterface>, Optional<Key>>> cacheInterfaces;
+		bool cachePopulated;
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 
-		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0), logGenerations(0),
+		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0), logGenerations(0), cachePopulated(false),
 			clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ),
 			serverInfo( new AsyncVar<CachedSerialization<ServerDBInfo>>( CachedSerialization<ServerDBInfo>() ) ),
 			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskPriority::DefaultEndpoint, true ) )  // SOMEDAY: Locality!
@@ -132,6 +145,27 @@ public:
 			serverInfo->set( newInfoCache );
 		}
 
+		void setStorageCache(uint16_t id, const StorageServerInterface& interf) {
+			CachedSerialization<ServerDBInfo> newInfoCache = serverInfo->get();
+			auto& newInfo = newInfoCache.mutate();
+			bool found = false;
+			for(auto& it : newInfo.storageCaches) {
+				if(it.first == id) {
+					if(it.second != interf) {
+						newInfo.id = deterministicRandom()->randomUniqueID();
+						it.second = interf;
+					}
+					found = true;
+					break;
+				}
+			}
+			if(!found) {
+				newInfo.id = deterministicRandom()->randomUniqueID();
+				newInfo.storageCaches.push_back(std::make_pair(id, interf));
+			}
+			serverInfo->set( newInfoCache );
+		}
+
 		void clearInterf(ProcessClass::ClassType t) {
 			CachedSerialization<ServerDBInfo> newInfoCache = serverInfo->get();
 			auto& newInfo = newInfoCache.mutate();
@@ -143,6 +177,20 @@ public:
 			}
 			serverInfo->set( newInfoCache );
 		}
+
+		void clearStorageCache(uint16_t id) {
+			CachedSerialization<ServerDBInfo> newInfoCache = serverInfo->get();
+			auto& newInfo = newInfoCache.mutate();
+			for(auto it = newInfo.storageCaches.begin(); it != newInfo.storageCaches.end(); ++it) {
+				if(it->first == id) {
+					newInfo.id = deterministicRandom()->randomUniqueID();
+					newInfo.storageCaches.erase(it);
+					break;
+				}
+			}
+			serverInfo->set( newInfoCache );
+		}
+
 	};
 
 	struct UpdateWorkerList {
@@ -205,6 +253,11 @@ public:
 
 	bool workerAvailable( WorkerInfo const& worker, bool checkStable ) {
 		return ( now() - startTime < 2 * FLOW_KNOBS->SERVER_REQUEST_INTERVAL ) || ( IFailureMonitor::failureMonitor().getState(worker.details.interf.storage.getEndpoint()).isAvailable() && ( !checkStable || worker.reboots < 2 ) );
+	}
+
+	bool isLongLivedStateless( Optional<Key> const& processId ) {
+		return (db.serverInfo->get().read().distributor.present() && db.serverInfo->get().read().distributor.get().locality.processId() == processId) ||
+				   (db.serverInfo->get().read().ratekeeper.present() && db.serverInfo->get().read().ratekeeper.get().locality.processId() == processId);
 	}
 
 	WorkerDetails getStorageWorker( RecruitStorageRequest const& req ) {
@@ -458,8 +511,7 @@ public:
 				fitness = std::max(fitness, ProcessClass::ExcludeFit);
 			}
 			if( workerAvailable(it.second, checkStable) && fitness < unacceptableFitness && it.second.details.interf.locality.dcId()==dcId ) {
-				if ((db.serverInfo->get().read().distributor.present() && db.serverInfo->get().read().distributor.get().locality.processId() == it.first) ||
-				    (db.serverInfo->get().read().ratekeeper.present() && db.serverInfo->get().read().ratekeeper.get().locality.processId() == it.first)) {
+				if (isLongLivedStateless(it.first)) {
 					fitness_workers[ std::make_pair(fitness, id_used[it.first]) ].second.push_back(it.second.details);
 				} else {
 					fitness_workers[ std::make_pair(fitness, id_used[it.first]) ].first.push_back(it.second.details);
@@ -491,8 +543,7 @@ public:
 			auto fitness = it.second.details.processClass.machineClassFitness( role );
 			if( workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.details.interf.address()) && it.second.details.interf.locality.dcId() == dcId &&
 			  ( !minWorker.present() || ( it.second.details.interf.id() != minWorker.get().worker.interf.id() && ( fitness < minWorker.get().fitness || (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used ) ) ) ) ) {
-				if ((db.serverInfo->get().read().distributor.present() && db.serverInfo->get().read().distributor.get().locality.processId() == it.first) ||
-				    (db.serverInfo->get().read().ratekeeper.present() && db.serverInfo->get().read().ratekeeper.get().locality.processId() == it.first)) {
+				if (isLongLivedStateless(it.first)) {
 					fitness_workers[ std::make_pair(fitness, id_used[it.first]) ].second.push_back(it.second.details);
 				} else {
 					fitness_workers[ std::make_pair(fitness, id_used[it.first]) ].first.push_back(it.second.details);
@@ -716,6 +767,16 @@ public:
 			}
 		}
 
+		if (req.configuration.backupWorkerEnabled) {
+			const int nBackup = std::max<int>(
+			    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tlogs.size()),
+			    req.maxOldLogRouters);
+			auto backupWorkers =
+			    getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup, req.configuration, id_used);
+			std::transform(backupWorkers.begin(), backupWorkers.end(), std::back_inserter(result.backupWorkers),
+			               [](const WorkerDetails& w) { return w.interf; });
+		}
+
 		if( !goodRecruitmentTime.isReady() &&
 			( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
 			  ( region.satelliteTLogReplicationFactor > 0 && RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId), ProcessClass::TLog).betterCount(RoleFitness(satelliteLogs, ProcessClass::TLog)) ) ||
@@ -841,6 +902,16 @@ public:
 							result.resolvers.push_back(resolvers[i].interf);
 						for(int i = 0; i < proxies.size(); i++)
 							result.proxies.push_back(proxies[i].interf);
+
+						if (req.configuration.backupWorkerEnabled) {
+							const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
+							auto backupWorkers = getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup,
+							                                                   req.configuration, id_used);
+							std::transform(backupWorkers.begin(), backupWorkers.end(),
+							               std::back_inserter(result.backupWorkers),
+							               [](const WorkerDetails& w) { return w.interf; });
+						}
+
 						break;
 					} else {
 						if(fitness < bestFitness) {
@@ -957,6 +1028,8 @@ public:
 		std::vector<WorkerDetails> satellite_tlogs;
 		std::vector<WorkerDetails> log_routers;
 		std::set<NetworkAddress> logRouterAddresses;
+		std::vector<WorkerDetails> backup_workers;
+		std::set<NetworkAddress> backup_addresses;
 
 		for( auto& logSet : dbi.logSystemConfig.tLogs ) {
 			for( auto& it : logSet.tLogs ) {
@@ -985,6 +1058,16 @@ public:
 				if( !logRouterAddresses.count( tlogWorker->second.details.interf.address() ) ) {
 					logRouterAddresses.insert( tlogWorker->second.details.interf.address() );
 					log_routers.push_back(tlogWorker->second.details);
+				}
+			}
+
+			for (const auto& worker : logSet.backupWorkers) {
+				auto workerIt = id_worker.find(worker.interf().locality.processId());
+				if (workerIt == id_worker.end()) return false;
+				if (workerIt->second.priorityInfo.isExcluded) return true;
+				if (backup_addresses.count(workerIt->second.details.interf.address()) == 0) {
+					backup_addresses.insert(workerIt->second.details.interf.address());
+					backup_workers.push_back(workerIt->second.details);
 				}
 			}
 		}
@@ -1144,15 +1227,36 @@ public:
 		if(oldInFit.proxy.betterFitness(newInFit.proxy) || oldInFit.resolver.betterFitness(newInFit.resolver)) {
 			return false;
 		}
-		if(oldTLogFit > newTLogFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLogFit || oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit) {
-			TraceEvent("BetterMasterExists", id).detail("OldMasterFit", oldMasterFit).detail("NewMasterFit", newMasterFit)
-				.detail("OldTLogFit", oldTLogFit.toString()).detail("NewTLogFit", newTLogFit.toString())
-				.detail("OldProxyFit", oldInFit.proxy.toString()).detail("NewProxyFit", newInFit.proxy.toString())
-				.detail("OldResolverFit", oldInFit.resolver.toString()).detail("NewResolverFit", newInFit.resolver.toString())
-				.detail("OldSatelliteFit", oldSatelliteTLogFit.toString()).detail("NewSatelliteFit", newSatelliteTLogFit.toString())
-				.detail("OldRemoteFit", oldRemoteTLogFit.toString()).detail("NewRemoteFit", newRemoteTLogFit.toString())
-				.detail("OldRouterFit", oldLogRoutersFit.toString()).detail("NewRouterFit", newLogRoutersFit.toString())
-				.detail("OldSatelliteFallback", oldSatelliteFallback).detail("NewSatelliteFallback", newSatelliteFallback);
+
+		// Check backup worker fitness
+		RoleFitness oldBackupWorkersFit(backup_workers, ProcessClass::Backup);
+		const int nBackup = backup_addresses.size();
+		RoleFitness newBackupWorkersFit(
+		    getWorkersForRoleInDatacenter(clusterControllerDcId, ProcessClass::Backup, nBackup, db.config, id_used),
+		    ProcessClass::Backup);
+
+		if (oldTLogFit > newTLogFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLogFit ||
+		    oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit ||
+		    oldBackupWorkersFit > newBackupWorkersFit) {
+			TraceEvent("BetterMasterExists", id)
+			    .detail("OldMasterFit", oldMasterFit)
+			    .detail("NewMasterFit", newMasterFit)
+			    .detail("OldTLogFit", oldTLogFit.toString())
+			    .detail("NewTLogFit", newTLogFit.toString())
+			    .detail("OldProxyFit", oldInFit.proxy.toString())
+			    .detail("NewProxyFit", newInFit.proxy.toString())
+			    .detail("OldResolverFit", oldInFit.resolver.toString())
+			    .detail("NewResolverFit", newInFit.resolver.toString())
+			    .detail("OldSatelliteFit", oldSatelliteTLogFit.toString())
+			    .detail("NewSatelliteFit", newSatelliteTLogFit.toString())
+			    .detail("OldRemoteFit", oldRemoteTLogFit.toString())
+			    .detail("NewRemoteFit", newRemoteTLogFit.toString())
+			    .detail("OldRouterFit", oldLogRoutersFit.toString())
+			    .detail("NewRouterFit", newLogRoutersFit.toString())
+			    .detail("OldBackupWorkerFit", oldBackupWorkersFit.toString())
+			    .detail("NewBackupWorkerFit", newBackupWorkersFit.toString())
+			    .detail("OldSatelliteFallback", oldSatelliteFallback)
+			    .detail("NewSatelliteFallback", newSatelliteFallback);
 			return true;
 		}
 
@@ -1238,8 +1342,8 @@ public:
 	Future<Void> goodRecruitmentTime;
 	Future<Void> goodRemoteRecruitmentTime;
 	Version datacenterVersionDifference;
-	bool versionDifferenceUpdated;
 	PromiseStream<Future<Void>> addActor;
+	bool versionDifferenceUpdated;
 	bool recruitingDistributor;
 	Optional<UID> recruitingRatekeeperID;
 	AsyncVar<bool> recruitRatekeeper;
@@ -1346,6 +1450,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				dbInfo.clusterInterface = db->serverInfo->get().read().clusterInterface;
 				dbInfo.distributor = db->serverInfo->get().read().distributor;
 				dbInfo.ratekeeper = db->serverInfo->get().read().ratekeeper;
+				dbInfo.storageCaches = db->serverInfo->get().read().storageCaches;
 				dbInfo.latencyBandConfig = db->serverInfo->get().read().latencyBandConfig;
 
 				TraceEvent("CCWDB", cluster->id).detail("Lifetime", dbInfo.masterLifetime.toString()).detail("ChangeID", dbInfo.id);
@@ -1494,7 +1599,11 @@ void checkOutstandingStorageRequests( ClusterControllerData* self ) {
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {
-				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id).error(e);
+				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
+				    .suppressFor(1.0)
+				    .detail("OutstandingReq", i)
+				    .detail("IsCriticalRecruitment", req.first.criticalRecruitment)
+				    .error(e);
 			} else {
 				TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
 				throw;
@@ -1671,8 +1780,27 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 			}
 			when( wait( failed ) ) {  // remove workers that have failed
 				WorkerInfo& failedWorkerInfo = cluster->id_worker[ worker.locality.processId() ];
+				if(failedWorkerInfo.storageCacheInfo.present()) {
+					bool found = false;
+					for(auto& it : cluster->id_worker) {
+						if(!it.second.storageCacheInfo.present() && it.second.details.processClass == ProcessClass::StorageCacheClass) {
+							found = true;
+							it.second.storageCacheInfo = failedWorkerInfo.storageCacheInfo;
+							cluster->db.cacheInterfaces[failedWorkerInfo.storageCacheInfo.get()] = std::make_pair(Optional<StorageServerInterface>(), it.first);
+							if(!it.second.reply.isSet()) {
+								it.second.reply.send( RegisterWorkerReply(it.second.details.processClass, it.second.priorityInfo, failedWorkerInfo.storageCacheInfo) );
+							}
+							break;
+						}
+					}
+					if(!found) {
+						cluster->db.cacheInterfaces[failedWorkerInfo.storageCacheInfo.get()] = std::make_pair(Optional<StorageServerInterface>(), Optional<Key>());
+					}
+					cluster->db.clearStorageCache(failedWorkerInfo.storageCacheInfo.get());
+				}
+				
 				if (!failedWorkerInfo.reply.isSet()) {
-					failedWorkerInfo.reply.send( RegisterWorkerReply(failedWorkerInfo.details.processClass, failedWorkerInfo.priorityInfo) );
+					failedWorkerInfo.reply.send( RegisterWorkerReply(failedWorkerInfo.details.processClass, failedWorkerInfo.priorityInfo, Optional<uint16_t>()) );
 				}
 				if (worker.locality.processId() == cluster->masterProcessId) {
 					cluster->masterProcessId = Optional<Key>();
@@ -1712,6 +1840,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData* 
 
 	loop choose {
 		when ( FailureMonitoringRequest req = waitNext( requests ) ) {
+			// TODO: Handling this request should no longer be necessary.
 			++self->failureMonitoringRequests;
 			if ( req.senderStatus.present() ) {
 				// Update the status of requester, if necessary
@@ -1854,7 +1983,9 @@ void clusterRecruitStorage( ClusterControllerData* self, RecruitStorageRequest r
 	} catch ( Error& e ) {
 		if (e.code() == error_code_no_more_servers) {
 			self->outstandingStorageRequests.push_back( std::make_pair(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT) );
-			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id).error(e);
+			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
+			    .detail("IsCriticalRecruitment", req.criticalRecruitment)
+			    .error(e);
 		} else {
 			TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
 			throw;  // Any other error will bring down the cluster controller
@@ -1955,7 +2086,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 				if ( it.second.priorityInfo.isExcluded != isExcludedFromConfig ) {
 					it.second.priorityInfo.isExcluded = isExcludedFromConfig;
 					if( !it.second.reply.isSet() ) {
-						it.second.reply.send( RegisterWorkerReply( it.second.details.processClass, it.second.priorityInfo ) );
+						it.second.reply.send( RegisterWorkerReply( it.second.details.processClass, it.second.priorityInfo, it.second.storageCacheInfo ) );
 					}
 				}
 			}
@@ -2059,11 +2190,6 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		if ( self->gotFullyRecoveredConfig ) {
 			newPriorityInfo.isExcluded = self->db.fullyRecoveredConfig.isExcludedServer(w.address());
 		}
-
-		// Notify the worker to register again with new process class/exclusive property
-		if ( !req.reply.isSet() && newPriorityInfo != req.priorityInfo ) {
-			req.reply.send( RegisterWorkerReply(newProcessClass, newPriorityInfo) );
-		}
 	}
 
 	if( info == self->id_worker.end() ) {
@@ -2102,12 +2228,15 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	if (req.ratekeeperInterf.present()) {
 		if((self->recruitingRatekeeperID.present() && self->recruitingRatekeeperID.get() != req.ratekeeperInterf.get().id()) ||
 			self->clusterControllerDcId != w.locality.dcId()) {
-				TraceEvent("CCHaltRegisteringRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id())
-			.detail("DcID", printable(self->clusterControllerDcId))
-			.detail("ReqDcID", printable(w.locality.dcId()))
-			.detail("RecruitingRKID", self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
-			self->id_worker[w.locality.processId()].haltRatekeeper = brokenPromiseToNever(req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
-		} else if(!self->recruitingRatekeeperID.present()) {
+			TraceEvent("CCHaltRegisteringRatekeeper", self->id)
+			    .detail("RKID", req.ratekeeperInterf.get().id())
+			    .detail("DcID", printable(self->clusterControllerDcId))
+			    .detail("ReqDcID", printable(w.locality.dcId()))
+			    .detail("RecruitingRKID",
+			            self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
+			self->id_worker[w.locality.processId()].haltRatekeeper = brokenPromiseToNever(
+			    req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
+		} else if (!self->recruitingRatekeeperID.present()) {
 			const RatekeeperInterface& rki = req.ratekeeperInterf.get();
 			const auto& ratekeeper = self->db.serverInfo->get().read().ratekeeper;
 			TraceEvent("CCRegisterRatekeeper", self->id).detail("RKID", rki.id());
@@ -2122,6 +2251,57 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 				self->db.setRatekeeper(rki);
 			}
 		}
+	}
+	Optional<uint16_t> newStorageCache = req.storageCacheInterf.present() ? req.storageCacheInterf.get().first : Optional<uint16_t>();
+	auto& cacheInfo = self->id_worker[w.locality.processId()].storageCacheInfo;
+	if (req.storageCacheInterf.present()) {
+		auto it = self->db.cacheInterfaces.find(req.storageCacheInterf.get().first);
+		if(it == self->db.cacheInterfaces.end()) {
+			if(self->db.cachePopulated) {
+				if(cacheInfo.present()) {
+					self->db.clearStorageCache(cacheInfo.get());
+				}
+				newStorageCache = Optional<uint16_t>();
+				cacheInfo = Optional<uint16_t>();
+			} else {
+				self->db.setStorageCache(req.storageCacheInterf.get().first, req.storageCacheInterf.get().second);
+				self->db.cacheInterfaces[req.storageCacheInterf.get().first] = std::make_pair(req.storageCacheInterf.get().second, w.locality.processId());
+				cacheInfo = req.storageCacheInterf.get().first;
+			}
+		} else {
+			if(!it->second.second.present() || (cacheInfo.present() && cacheInfo.get() == it->first) ) {
+				self->db.setStorageCache(req.storageCacheInterf.get().first, req.storageCacheInterf.get().second);
+				it->second = std::make_pair(req.storageCacheInterf.get().second, w.locality.processId());
+				cacheInfo = req.storageCacheInterf.get().first;
+			}
+			else {
+				if(cacheInfo.present()) {
+					self->db.clearStorageCache(cacheInfo.get());
+				}
+				newStorageCache = Optional<uint16_t>();
+				cacheInfo = Optional<uint16_t>();
+			}
+		}
+	} else {
+		newStorageCache = cacheInfo;
+	}
+
+	if(self->gotProcessClasses && newProcessClass == ProcessClass::StorageCacheClass && !newStorageCache.present()) {
+		for(auto& it : self->db.cacheInterfaces) {
+			if(!it.second.second.present()) {
+				it.second.second = w.locality.processId();
+				self->id_worker[w.locality.processId()].storageCacheInfo = it.first;
+				newStorageCache = it.first;
+				break;
+			}
+		}
+	}
+
+	// Notify the worker to register again with new process class/exclusive property
+	if ( !req.reply.isSet() && ( newPriorityInfo != req.priorityInfo || 
+				newStorageCache.present() != req.storageCacheInterf.present() ||
+				(newStorageCache.present() && newStorageCache.get() != req.storageCacheInterf.get().first) ) ) {
+		req.reply.send( RegisterWorkerReply(newProcessClass, newPriorityInfo, newStorageCache) );
 	}
 }
 
@@ -2342,7 +2522,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 							w.second.details.processClass = newProcessClass;
 							w.second.priorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
 							if (!w.second.reply.isSet()) {
-								w.second.reply.send( RegisterWorkerReply(w.second.details.processClass, w.second.priorityInfo) );
+								w.second.reply.send( RegisterWorkerReply(w.second.details.processClass, w.second.priorityInfo, w.second.storageCacheInfo) );
 							}
 						}
 					}
@@ -2390,6 +2570,80 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 
 				state Future<Void> configChangeFuture = tr.watch(latencyBandConfigKey);
 
+				wait(tr.commit());
+				wait(configChangeFuture);
+
+				break;
+			}
+			catch (Error &e) {
+				wait(tr.onError(e));		
+			}
+		}
+	}
+}
+
+ACTOR Future<Void> monitorStorageCache(ClusterControllerData* self) {
+	loop {
+		state ReadYourWritesTransaction tr(self->db.db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+				Optional<Value> changeVal = wait(tr.get(cacheChangeKey));
+				Standalone<RangeResultRef> changeKeys = wait(tr.getRange(cacheChangeKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT( !changeKeys.more && changeKeys.size() < CLIENT_KNOBS->TOO_MANY );
+
+				std::set<uint16_t> changeIDs;
+				for(auto& it : changeKeys) {
+					changeIDs.insert(cacheChangeKeyDecodeIndex(it.key));
+				}
+
+				for(auto& it : changeIDs) {
+					if(!self->db.cacheInterfaces.count(it)) {
+						self->db.cacheInterfaces[it] = std::make_pair(Optional<StorageServerInterface>(), Optional<Key>());
+					}
+				}
+
+				std::vector<uint16_t> removeIDs;
+				for(auto& it : self->db.cacheInterfaces) {
+					if(!changeIDs.count(it.first)) {
+						removeIDs.push_back(it.first);
+						if(it.second.second.present()) {
+							self->id_worker[it.second.second.get()].storageCacheInfo = Optional<uint16_t>();
+						}
+						self->db.clearStorageCache(it.first);
+					}
+				}
+
+				for(auto& it : removeIDs) {
+					self->db.cacheInterfaces.erase(it);
+				}
+
+				for(auto& c : self->db.cacheInterfaces) {
+					if(!c.second.second.present()) {
+						bool found = false;
+						for(auto& it : self->id_worker) {
+							if(!it.second.storageCacheInfo.present() && it.second.details.processClass == ProcessClass::StorageCacheClass) {
+								found = true;
+								it.second.storageCacheInfo = c.first;
+								c.second.second = it.first;
+								if(!it.second.reply.isSet()) {
+									it.second.reply.send( RegisterWorkerReply(it.second.details.processClass, it.second.priorityInfo, c.first) );
+								}
+								break;
+							}
+						}
+						if(!found) {
+							break;
+						}
+					}
+				}
+
+				state Future<Void> configChangeFuture = tr.watch(cacheChangeKey);
+
+				self->db.cachePopulated = true;
 				wait(tr.commit());
 				wait(configChangeFuture);
 
@@ -2452,7 +2706,7 @@ ACTOR Future<Void> updatedChangingDatacenters(ClusterControllerData *self) {
 			if ( worker.priorityInfo.dcFitness > newFitness ) {
 				worker.priorityInfo.dcFitness = newFitness;
 				if(!worker.reply.isSet()) {
-					worker.reply.send( RegisterWorkerReply( worker.details.processClass, worker.priorityInfo ) );
+					worker.reply.send( RegisterWorkerReply( worker.details.processClass, worker.priorityInfo, worker.storageCacheInfo ) );
 				}
 			} else {
 				state int currentFit = ProcessClass::BestFit;
@@ -2465,7 +2719,7 @@ ACTOR Future<Void> updatedChangingDatacenters(ClusterControllerData *self) {
 								updated = true;
 								it.second.priorityInfo.dcFitness = fitness;
 								if(!it.second.reply.isSet()) {
-									it.second.reply.send( RegisterWorkerReply( it.second.details.processClass, it.second.priorityInfo ) );
+									it.second.reply.send( RegisterWorkerReply( it.second.details.processClass, it.second.priorityInfo, it.second.storageCacheInfo ) );
 								}
 							}
 						}
@@ -2504,7 +2758,7 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData *self) {
 						if( worker.priorityInfo.dcFitness != newFitness ) {
 							worker.priorityInfo.dcFitness = newFitness;
 							if(!worker.reply.isSet()) {
-								worker.reply.send( RegisterWorkerReply( worker.details.processClass, worker.priorityInfo ) );
+								worker.reply.send( RegisterWorkerReply( worker.details.processClass, worker.priorityInfo, worker.storageCacheInfo ) );
 							}
 						}
 					} else {
@@ -2518,7 +2772,7 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData *self) {
 										updated = true;
 										it.second.priorityInfo.dcFitness = fitness;
 										if(!it.second.reply.isSet()) {
-											it.second.reply.send( RegisterWorkerReply( it.second.details.processClass, it.second.priorityInfo ) );
+											it.second.reply.send( RegisterWorkerReply( it.second.details.processClass, it.second.priorityInfo, it.second.storageCacheInfo ) );
 										}
 									}
 								}
@@ -2805,8 +3059,8 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	self.addActor.send( handleForcedRecoveries(&self, interf) );
 	self.addActor.send( monitorDataDistributor(&self) );
 	self.addActor.send( monitorRatekeeper(&self) );
+	self.addActor.send( monitorStorageCache(&self) );
 	self.addActor.send( traceCounters("ClusterControllerMetrics", self.id, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self.clusterControllerMetrics, self.id.toString() + "/ClusterControllerMetrics") );
-	
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {

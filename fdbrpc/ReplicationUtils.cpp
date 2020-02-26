@@ -388,10 +388,10 @@ bool validateAllCombinations(
 		for (int i = 0; i < newItems.size(); ++i) {
 			localGroup->add(newItems[i]);
 		}
-		
+
 		std::string bitmask(nCombinationSize, 1); // K leading 1's
 		bitmask.resize(newItems.size(), 0); // N-K trailing 0's
-		
+
 		std::vector<LocalityEntry> resultEntries;
 		do
 		{

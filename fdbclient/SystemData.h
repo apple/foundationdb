@@ -26,6 +26,11 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
+
+struct RestoreLoaderInterface;
+struct RestoreApplierInterface;
+struct RestoreMasterInterface;
 
 extern const KeyRangeRef normalKeys; // '' to systemKeys.begin
 extern const KeyRangeRef systemKeys;  // [FF] to [FF][FF]
@@ -44,6 +49,13 @@ const Value keyServersValue(
 void decodeKeyServersValue( const ValueRef& value,
 	vector<UID>& src, vector<UID>& dest  );
 
+//    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
+extern const KeyRangeRef storageCacheKeys;
+extern const KeyRef storageCachePrefix;
+const Key storageCacheKey( const KeyRef& k );
+const Value storageCacheValue( const vector<uint16_t>& serverIndices );
+void decodeStorageCacheValue( const ValueRef& value, vector<uint16_t>& serverIndices );
+
 //    "\xff/serverKeys/[[serverID]]/[[begin]]" := "" | "1" | "2"
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysFalse;
@@ -51,6 +63,19 @@ const Key serverKeysKey( UID serverID, const KeyRef& keys );
 const Key serverKeysPrefixFor( UID serverID );
 UID serverKeysDecodeServer( const KeyRef& key );
 bool serverHasKey( ValueRef storedValue );
+
+extern const KeyRef cacheKeysPrefix;
+
+const Key cacheKeysKey( uint16_t idx, const KeyRef& key );
+const Key cacheKeysPrefixFor( uint16_t idx );
+uint16_t cacheKeysDecodeIndex( const KeyRef& key );
+KeyRef cacheKeysDecodeKey( const KeyRef& key );
+
+extern const KeyRef cacheChangeKey;
+extern const KeyRangeRef cacheChangeKeys;
+extern const KeyRef cacheChangePrefix;
+const Key cacheChangeKeyFor( uint16_t idx );
+uint16_t cacheChangeKeyDecodeIndex( const KeyRef& key );
 
 extern const KeyRangeRef serverTagKeys;
 extern const KeyRef serverTagPrefix;
@@ -133,6 +158,12 @@ extern const KeyRef excludedServersVersionKey;  // The value of this key shall b
 const AddressExclusion decodeExcludedServersKey( KeyRef const& key ); // where key.startsWith(excludedServersPrefix)
 std::string encodeExcludedServersKey( AddressExclusion const& );
 
+extern const KeyRef failedServersPrefix;
+extern const KeyRangeRef failedServersKeys;
+extern const KeyRef failedServersVersionKey;  // The value of this key shall be changed by any transaction that modifies the failed servers list
+const AddressExclusion decodeFailedServersKey( KeyRef const& key ); // where key.startsWith(failedServersPrefix)
+std::string encodeFailedServersKey( AddressExclusion const& );
+
 //    "\xff/workers/[[processID]]" := ""
 //    Asynchronously updated by the cluster controller, this is a list of fdbserver processes that have joined the cluster
 //    and are currently (recently) available
@@ -142,6 +173,19 @@ const Key workerListKeyFor(StringRef processID );
 const Value workerListValue( ProcessData const& );
 Key decodeWorkerListKey( KeyRef const& );
 ProcessData decodeWorkerListValue( ValueRef const& );
+
+//    "\xff/backupProgress/[[workerID]]" := "[[WorkerBackupStatus]]"
+extern const KeyRangeRef backupProgressKeys;
+extern const KeyRef backupProgressPrefix;
+const Key backupProgressKeyFor(UID workerID);
+const Value backupProgressValue(const WorkerBackupStatus& status);
+UID decodeBackupProgressKey(const KeyRef& key);
+WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value);
+
+//    "\xff/backupStarted" := "[[vector<UID,Version1>]]"
+extern const KeyRef backupStartedKey;
+Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids);
+std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& value);
 
 extern const KeyRef coordinatorsKey;
 extern const KeyRef logsKey;
@@ -276,10 +320,30 @@ extern const KeyRef mustContainSystemMutationsKey;
 // Key range reserved for storing changes to monitor conf files
 extern const KeyRangeRef monitorConfKeys;
 
+// Fast restore
 extern const KeyRef restoreLeaderKey;
 extern const KeyRangeRef restoreWorkersKeys;
+extern const KeyRef restoreStatusKey; // To be used when we measure fast restore performance
+extern const KeyRef restoreRequestTriggerKey;
+extern const KeyRef restoreRequestDoneKey;
+extern const KeyRangeRef restoreRequestKeys;
+extern const KeyRangeRef restoreApplierKeys;
+extern const KeyRef restoreApplierTxnValue;
 
-const Key restoreWorkerKeyFor( UID const& agentID );
+const Key restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version);
+std::tuple<UID, int64_t, Version> decodeRestoreApplierKey(ValueRef const& key);
+const Key restoreWorkerKeyFor(UID const& workerID);
+const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server);
+RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value);
+const Value restoreRequestTriggerValue(UID randomUID, int const numRequests);
+int decodeRestoreRequestTriggerValue(ValueRef const& value);
+const Value restoreRequestDoneVersionValue(Version readVersion);
+Version decodeRestoreRequestDoneVersionValue(ValueRef const& value);
+const Key restoreRequestKeyFor(int const& index);
+const Value restoreRequestValue(RestoreRequest const& server);
+RestoreRequest decodeRestoreRequestValue(ValueRef const& value);
+const Key restoreStatusKeyFor(StringRef statusType);
+const Value restoreStatusValue(double val);
 
 extern const KeyRef healthyZoneKey;
 extern const StringRef ignoreSSFailuresZoneString;

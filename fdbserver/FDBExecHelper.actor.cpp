@@ -1,4 +1,4 @@
-#if !defined(_WIN32) && !defined(__APPLE__)
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__INTEL_COMPILER)
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
@@ -72,7 +72,7 @@ void ExecCmdValueString::dbgPrint() {
 	return;
 }
 
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(_WIN32) || defined(__APPLE__) || defined(__INTEL_COMPILER)
 ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> paramList, double maxWaitTime, bool isSync, double maxSimDelayTime)
 {
 	wait(delay(0.0));
@@ -142,7 +142,7 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 #endif
 
 ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role) {
-	state Standalone<StringRef> uidStr = snapUID.toString();
+	state Standalone<StringRef> uidStr(snapUID.toString());
 	state int err = 0;
 	state Future<int> cmdErr;
 	state double maxWaitTime = SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;
@@ -192,44 +192,6 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::stri
 		}
 	}
 	return err;
-}
-
-std::map<NetworkAddress, std::set<UID>> execOpsInProgress;
-
-bool isExecOpInProgress(UID execUID) {
-	NetworkAddress addr = g_network->getLocalAddress();
-	return (execOpsInProgress[addr].find(execUID) != execOpsInProgress[addr].end());
-}
-
-void setExecOpInProgress(UID execUID) {
-	NetworkAddress addr = g_network->getLocalAddress();
-	ASSERT(execOpsInProgress[addr].find(execUID) == execOpsInProgress[addr].end());
-	execOpsInProgress[addr].insert(execUID);
-	return;
-}
-
-void clearExecOpInProgress(UID execUID) {
-	NetworkAddress addr = g_network->getLocalAddress();
-	ASSERT(execOpsInProgress[addr].find(execUID) != execOpsInProgress[addr].end());
-	execOpsInProgress[addr].erase(execUID);
-	return;
-}
-
-std::map<NetworkAddress, std::set<UID>> tLogsAlive;
-
-void registerTLog(UID uid) {
-	NetworkAddress addr = g_network->getLocalAddress();
-	tLogsAlive[addr].insert(uid);
-}
-void unregisterTLog(UID uid) {
-	NetworkAddress addr = g_network->getLocalAddress();
-	if (tLogsAlive[addr].find(uid) != tLogsAlive[addr].end()) {
-		tLogsAlive[addr].erase(uid);
-	}
-}
-bool isTLogInSameNode() {
-	NetworkAddress addr = g_network->getLocalAddress();
-	return tLogsAlive[addr].size() >= 1;
 }
 
 struct StorageVersionInfo {

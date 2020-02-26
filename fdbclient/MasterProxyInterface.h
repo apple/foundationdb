@@ -52,6 +52,7 @@ struct MasterProxyInterface {
 	RequestStream< struct TxnStateRequest >  txnState;
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
 	RequestStream< struct ProxySnapRequest > proxySnapReq;
+	RequestStream< struct ExclusionSafetyCheckRequest > exclusionSafetyCheckReq;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -63,7 +64,7 @@ struct MasterProxyInterface {
 	void serialize(Archive& ar) {
 		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
 				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics, proxySnapReq);
+				   txnState, getHealthMetrics, proxySnapReq, exclusionSafetyCheckReq);
 	}
 
 	void initEndpoints() {
@@ -81,6 +82,7 @@ struct ClientDBInfo {
 	constexpr static FileIdentifier file_identifier = 5355080;
 	UID id;  // Changes each time anything else changes
 	vector< MasterProxyInterface > proxies;
+	Optional<MasterProxyInterface> firstProxy; //not serialized, used for commitOnFirstProxy when the proxies vector has been shrunk
 	double clientTxnInfoSampleRate;
 	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;
@@ -172,6 +174,7 @@ struct GetReadVersionRequest : TimedRequest {
 		PRIORITY_BATCH = 1 << 24
 	};
 	enum {
+		FLAG_USE_MIN_KNOWN_COMMITTED_VERSION = 4,
 		FLAG_USE_PROVISIONAL_PROXIES = 2,
 		FLAG_CAUSAL_READ_RISKY = 1,
 		FLAG_PRIORITY_MASK = PRIORITY_SYSTEM_IMMEDIATE,
@@ -339,6 +342,35 @@ struct ProxySnapRequest
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, snapPayload, snapUID, reply, arena, debugID);
+	}
+};
+
+struct ExclusionSafetyCheckReply
+{
+	constexpr static FileIdentifier file_identifier = 11;
+	bool safe;
+
+	ExclusionSafetyCheckReply() : safe(false) {}
+	explicit ExclusionSafetyCheckReply(bool safe) : safe(safe) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, safe);
+	}
+};
+
+struct ExclusionSafetyCheckRequest
+{
+	constexpr static FileIdentifier file_identifier = 13852702;
+	vector<AddressExclusion> exclusions;
+	ReplyPromise<ExclusionSafetyCheckReply> reply;
+
+	ExclusionSafetyCheckRequest() {}
+	explicit ExclusionSafetyCheckRequest(vector<AddressExclusion> exclusions) : exclusions(exclusions) {}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, exclusions, reply);
 	}
 };
 

@@ -65,7 +65,10 @@ set(FLOW_SRCS
   XmlTraceLogFormatter.h
   XmlTraceLogFormatter.cpp
   actorcompiler.h
+	crc32c.h
+  crc32c.cpp
   error_definitions.h
+  ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h
   flat_buffers.h
   flat_buffers.cpp
   flow.cpp
@@ -80,7 +83,7 @@ set(FLOW_SRCS
   stacktrace.h
   version.cpp)
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/hgVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/hgVersion.h)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)
 
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
 target_include_directories(flow SYSTEM PUBLIC ${CMAKE_THREAD_LIBS_INIT})
@@ -92,7 +95,11 @@ elseif(WIN32)
   target_link_libraries(flow PUBLIC psapi.lib)
 endif()
 target_link_libraries(flow PRIVATE ${FLOW_LIBS})
-if(NOT WITH_TLS)
+if(USE_VALGRIND)
+  target_link_libraries(flow PUBLIC Valgrind)
+endif()
+# TODO(atn34) Re-enable TLS for OPEN_FOR_IDE build once #2201 is resolved
+if(NOT WITH_TLS OR OPEN_FOR_IDE)
   target_compile_definitions(flow PUBLIC TLS_DISABLED)
 else()
   target_link_libraries(flow PUBLIC OpenSSL::SSL)

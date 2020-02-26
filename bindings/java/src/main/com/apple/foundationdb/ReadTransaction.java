@@ -424,6 +424,26 @@ public interface ReadTransaction extends ReadTransactionContext {
 	AsyncIterable<KeyValue> getRange(Range range,
 			int limit, boolean reverse, StreamingMode mode);
 
+
+	/**
+	 * Gets an estimate for the number of bytes stored in the given range.
+	 *
+	 * @param begin the beginning of the range (inclusive)
+	 * @param end the end of the range (exclusive)
+	 *
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	CompletableFuture<Long> getEstimatedRangeSizeBytes(byte[] begin, byte[] end);
+
+	/**
+	 * Gets an estimate for the number of bytes stored in the given range.
+	 *
+	 * @param range the range of the keys
+	 *
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	CompletableFuture<Long> getEstimatedRangeSizeBytes(Range range);
+
 	/**
 	 * Returns a set of options that can be set on a {@code Transaction}
 	 *

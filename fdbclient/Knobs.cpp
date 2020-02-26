@@ -71,7 +71,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BROADCAST_BATCH_SIZE,                     20 ); if( randomize && BUGGIFY ) BROADCAST_BATCH_SIZE = 1;
 	init( TRANSACTION_TIMEOUT_DELAY_INTERVAL,     10.0 ); if( randomize && BUGGIFY ) TRANSACTION_TIMEOUT_DELAY_INTERVAL = 1.0;
 
-	init( LOCATION_CACHE_EVICTION_SIZE,         300000 );
+	init( LOCATION_CACHE_EVICTION_SIZE,         600000 );
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );

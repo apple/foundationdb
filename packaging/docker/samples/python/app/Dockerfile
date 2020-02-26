@@ -17,16 +17,28 @@
 # limitations under the License.
 #
 
-FROM python:3.6
+ARG FDB_VERSION
+
+FROM foundationdb/foundationdb:${FDB_VERSION} as fdb
+FROM python:3.8
 
 RUN apt-get update; apt-get install -y dnsutils
 
 RUN mkdir -p /app
 WORKDIR /app
 
-COPY --from=foundationdb:6.1.8 /usr/lib/libfdb_c.so /usr/lib
-COPY --from=foundationdb:6.1.8 /usr/bin/fdbcli /usr/bin/
-COPY --from=foundationdb:6.1.8 /var/fdb/scripts/create_cluster_file.bash /app
+COPY --from=fdb /usr/lib/libfdb_c.so /usr/lib
+COPY --from=fdb /usr/bin/fdbcli /usr/bin/
+COPY --from=fdb /var/fdb/scripts/create_cluster_file.bash /app
+
+ARG FDB_WEBSITE=https://foundationdb.org
+ARG FDB_OLDER_VERSIONS=""
+ENV FDB_NETWORK_OPTION_EXTERNAL_CLIENT_DIRECTORY=/usr/lib/fdb-multiversion
+RUN \
+	mkdir /usr/lib/fdb-multiversion; \
+	for version in ${FDB_OLDER_VERSIONS}; do \
+		wget ${FDB_WEBSITE}/downloads/$version/linux/libfdb_c_$version.so -O /usr/lib/fdb-multiversion/libfdb_c_$version.so; \
+	done
 
 COPY requirements.txt /app
 RUN pip install -r requirements.txt

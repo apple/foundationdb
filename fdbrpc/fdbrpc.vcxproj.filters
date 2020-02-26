@@ -77,7 +77,6 @@
     <ClCompile Include="ReplicationTypes.cpp" />
     <ClCompile Include="ReplicationPolicy.cpp" />
     <ClCompile Include="crc32c.cpp" />
-    <ClCompile Include="generated-constants.cpp" />
     <ClCompile Include="AsyncFileWriteChecker.cpp" />
     <ClCompile Include="ReplicationUtils.cpp" />
   </ItemGroup>
