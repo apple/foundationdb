@@ -27,6 +27,7 @@
 #include <stdint.h>
 #include <string>
 #include <map>
+#include <set>
 #include <type_traits>
 #include "flow/IRandom.h"
 #include "flow/Error.h"
