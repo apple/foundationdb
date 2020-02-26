@@ -115,7 +115,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	    .detail("Request", req.toString())
 		.detail("CurrentMemory", getSystemStatistics().processMemory);
 
-	wait(isSchedulable(self, req.batchIndex, __FUNCTION__);
+	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 
 	wait(curFilePos.whenAtLeast(req.prevVersion));
 

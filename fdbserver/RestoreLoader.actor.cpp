@@ -204,7 +204,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	    .detail("Processed", isReady)
 		.detail("CurrentMemory", getSystemStatistics().processMemory);
 
-	wait(isSchedulable(self, req.batchIndex, __FUNCTION__);
+	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 
 	if (batchData->processedFileParams.find(req.param) == batchData->processedFileParams.end()) {
 		TraceEvent("FastRestoreLoadFile", self->id())

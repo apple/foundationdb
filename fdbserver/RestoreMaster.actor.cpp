@@ -516,6 +516,9 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 
 	self->runningVersionBatches.set(self->runningVersionBatches.get() + 1);
 
+	// In case sampling data takes too much memory on master
+	wait(isSchedulable(self, batchIndex, __FUNCTION__));
+
 	wait(initializeVersionBatch(self->appliersInterf, self->loadersInterf, batchIndex));
 
 	ASSERT(!versionBatch.isEmpty());
@@ -547,6 +550,10 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	wait(notifyLoadersVersionBatchFinished(self->loadersInterf, batchIndex));
 
 	self->runningVersionBatches.set(self->runningVersionBatches.get() - 1);
+
+	if (self->delayedActors > 0) {
+		self->checkMemory.trigger();
+	}
 	return Void();
 }
 

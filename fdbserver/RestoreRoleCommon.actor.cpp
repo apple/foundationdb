@@ -101,6 +101,11 @@ ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatch
 	self->delayedActors++;
 	loop {
 		double memory = getSystemStatistics().processMemory;
+		if (g_network->isSimulated() && BUGGIFY) {
+			// Intentionally randomly block actors for low memory reason.
+			// memory will be larger than threshold when deterministicRandom()->random01() > 1/2
+			memory = SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT * 2 * deterministicRandom()->random01();
+		}
 		if (memory < SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT ||
 		    self->finishedBatch.get() + 1 == actorBatchIndex) {
 			if (memory >= SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT) {
