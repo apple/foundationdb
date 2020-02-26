@@ -803,7 +803,7 @@ public:
 				Version v = it->second;
 				auto toErase = it.base();
 				--toErase;
-				auto previous = btree.erase(to_erase);
+				auto previous = btree.erase(toErase);
 				previous->second = max(v, previous->second);
 				it = std::reverse_iterator(previous);
 			}
