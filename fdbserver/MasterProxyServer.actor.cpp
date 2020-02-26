@@ -666,7 +666,7 @@ ACTOR Future<Void> commitBatch(
 	// Queuing pre-resolution commit processing
 	TEST(self->latestLocalCommitBatchResolving.get() < localBatchNumber - 1);
 	wait(self->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber-1));
-	state Future<Void> releaseDelay = delay(batchOperations*self->commitComputePerOperation[latencyBucket], TaskPriority::ProxyMasterVersionReply);
+	state Future<Void> releaseDelay = delay(std::min(SERVER_KNOBS->MAX_PROXY_COMPUTE, batchOperations*self->commitComputePerOperation[latencyBucket]), TaskPriority::ProxyMasterVersionReply);
 
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.GettingCommitVersion");
