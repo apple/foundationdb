@@ -800,7 +800,7 @@ public:
 	// we could.
 	std::string removeBefore(Version oldest, absl::string_view key, int nodeCount) {
 		bool wasAbove = true;
-		auto it = key.empty() ? btree.rend() : std::reverse_iterator(btree.upper_bound(key));
+		auto it = key.empty() ? btree.rbegin() : std::reverse_iterator(btree.upper_bound(key));
 		while (nodeCount--) {
 			// If we've hit the end, just stop this time around.
 			if (it == btree.rend()) {
