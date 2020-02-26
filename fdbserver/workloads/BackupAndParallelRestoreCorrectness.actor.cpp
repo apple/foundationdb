@@ -209,7 +209,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 					state bool restorable = false;
 					if(lastBackupContainer) {
-						state Future<BackupDescription> fdesc = lastBackupContainer->describeBackup();
+						state Future<BackupDescription> fdesc = lastBackupContainer->describePartitionedBackup();
 						wait(ready(fdesc));
 
 						if(!fdesc.isError()) {
@@ -430,7 +430,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				    .detail("BackupTag", printable(self->backupTag));
 
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
-				BackupDescription desc = wait(container->describeBackup());
+				BackupDescription desc = wait(container->describePartitionedBackup());
 
 				state Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {

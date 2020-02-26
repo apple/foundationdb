@@ -255,6 +255,9 @@ public:
 	// be after deleting all data prior to logStartVersionOverride.
 	virtual Future<BackupDescription> describeBackup(bool deepScan = false, Version logStartVersionOverride = invalidVersion) = 0;
 
+	// The same as above, except using partitioned mutation logs.
+	virtual Future<BackupDescription> describePartitionedBackup(bool deepScan = false, Version logStartVersionOverride = invalidVersion) = 0;
+
 	virtual Future<BackupFileList> dumpFileList(Version begin = 0, Version end = std::numeric_limits<Version>::max()) = 0;
 
 	// Get exactly the files necessary to restore to targetVersion.  Returns non-present if

@@ -676,7 +676,7 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* rangeFiles,
                                              std::vector<RestoreFileFR>* logFiles, Database cx,
                                              RestoreRequest request) {
-	state BackupDescription desc = wait(bc->describeBackup());
+	state BackupDescription desc = wait(bc->describePartitionedBackup());
 
 	// Convert version to real time for operators to read the BackupDescription desc.
 	wait(desc.resolveVersionTimes(cx));
