@@ -753,15 +753,21 @@ class BConflicts {
 
 		// Insert or update the node for `end`.
 		auto end_it = btree.lower_bound(end);
+		bool inserted = false;
 		if (end_it != btree.end() && end_it->first == end) {
 			end_it->second = now;
 		} else {
+			inserted = true;
 			end_it = btree.insert(end_it, { std::string(end), now });
 		}
 
 		// Clear the interior of the range.
-		// TODO: We only need this lookup if we insert for `end`.
-		begin_it = btree.upper_bound(begin);
+		if (inserted) {
+			begin_it = btree.upper_bound(begin);
+		} else {
+			// Increment the iterator since the erase is inclusive.
+			begin_it++;
+		}
 		if (begin_it != end_it) {
 			btree.erase(begin_it, end_it);
 		}
