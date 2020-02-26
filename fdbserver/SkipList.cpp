@@ -801,9 +801,10 @@ public:
 				++it;
 			} else {
 				Version v = it->second;
-				it = std::reverse_iterator(btree.erase(it.base()));
-				it->second = max(v, it->second);
-				++it;
+				auto previous = btree.erase(it.base());
+				previous->second = max(v, previous->second);
+				// `std::reverse_iterator` increments the `previous` by one towards the beginning.
+				it = std::reverse_iterator(previous);
 			}
 			wasAbove = isAbove;
 		}
