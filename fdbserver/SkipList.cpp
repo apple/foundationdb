@@ -805,6 +805,7 @@ public:
 			// If we've hit the end, just start over.
 			if (it == btree.rend()) {
 				it = btree.rbegin();
+				wasAbove = true;
 			}
 			bool isAbove = it->second >= oldest;
 			if (isAbove || wasAbove) {
