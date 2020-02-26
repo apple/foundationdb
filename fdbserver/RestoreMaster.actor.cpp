@@ -61,16 +61,22 @@ ACTOR static Future<Void> notifyLoadersVersionBatchFinished(std::map<UID, Restor
                                                             int batchIndex);
 ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, bool terminate);
 ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreMasterData> self, Database cx);
+ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreMasterData> self);
+ACTOR static Future<Void> checkRolesLiveness(Reference<RestoreMasterData> self);
 
 void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
                               std::map<UID, RestoreApplierInterface> appliersInterf, int batchIndex);
 
 ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker, Database cx) {
 	state Reference<RestoreMasterData> self = Reference<RestoreMasterData>(new RestoreMasterData());
+	state ActorCollectionNoErrors actors;
 
 	try {
 		// recruitRestoreRoles must come after masterWorker has finished collectWorkerInterface
 		wait(recruitRestoreRoles(masterWorker, self));
+
+		actors.add(updateHeartbeatTime(self));
+		actors.add(checkRolesLiveness(self));
 
 		wait(distributeRestoreSysInfo(masterWorker, self));
 
@@ -885,4 +891,51 @@ ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreMasterData> se
 	TraceEvent("FastRestore").detail("RestoreMaster", "AllRestoreCompleted");
 
 	return Void();
+}
+
+// Update the most recent time when master receives hearbeat from each loader and applier
+ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreMasterData> self) {
+	state std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
+	state std::map<UID, RestoreApplierInterface>::iterator applier = self->appliersInterf.begin();
+	state std::vector<Future<RestoreCommonReply>> fReplies;
+	state std::vector<UID> nodes;
+	loop {
+		loader = self->loadersInterf.begin();
+		applier = self->appliersInterf.begin();
+		fReplies.clear();
+		nodes.clear();
+		// ping loaders and appliers
+		while(loader != self->loadersInterf.end()) {
+			fReplies.push_back(loader->second.heartbeat.getReply(RestoreSimpleRequest()));
+			nodes.push_back(loader->first);
+			loader++;
+		}
+		while(applier != self->appliersInterf.end()) {
+			fReplies.push_back(applier->second.heartbeat.getReply(RestoreSimpleRequest()));
+			nodes.push_back(applier->first);
+			applier++;
+		}
+
+		wait(waitForAll(fReplies) || delay(SERVER_KNOBS->FASTRESTORE_HEARTBEAT_DELAY));
+		// Update the most recent heart beat time for each role
+		for (int i = 0; i < fReplies.size(); ++i) {
+			if (fReplies[i].isReady()) {
+				double currentTime = now();
+				auto item = self->rolesHeartBeatTime.emplace(nodes[i], currentTime);
+				item.first->second = currentTime;
+			}
+		}
+	}
+}
+
+// Check if a restore role dies or disconnected
+ACTOR static Future<Void> checkRolesLiveness(Reference<RestoreMasterData> self) {
+	loop {
+		wait(delay(SERVER_KNOBS->FASTRESTORE_HEARTBEAT_MAX_DELAY));
+		for (auto& role : self->rolesHeartBeatTime) {
+			if (now() - role.second > SERVER_KNOBS->FASTRESTORE_HEARTBEAT_MAX_DELAY) {
+				TraceEvent(SevWarnAlways, "FastRestoreUnavailableRole", role.first).detail("Delta", now() - role.second).detail("LastAliveTime", role.second);
+			}
+		}
+	}
 }

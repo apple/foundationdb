@@ -144,6 +144,8 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	AsyncVar<int> runningVersionBatches; // Currently running version batches
 
+	std::map<UID, double> rolesHeartBeatTime; // Key: role id; Value: most recent time master receives heart beat
+
 	void addref() { return ReferenceCounted<RestoreMasterData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreMasterData>::delref(); }
 
