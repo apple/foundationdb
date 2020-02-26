@@ -218,13 +218,14 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 		Counter receivedBytes, receivedWeightedBytes, receivedMutations, receivedAtomicOps;
 		Counter appliedWeightedBytes, appliedMutations, appliedAtomicOps;
 		Counter appliedTxns;
+		Counter fetchKeys; // number of keys to fetch from dest. FDB cluster.
 
 		Counters(ApplierBatchData* self, UID applierInterfID, int batchIndex)
 		  : cc("ApplierBatch", applierInterfID.toString() + ":" + std::to_string(batchIndex)),
 		    receivedBytes("ReceivedBytes", cc), receivedMutations("ReceivedMutations", cc),
 		    receivedAtomicOps("ReceivedAtomicOps", cc), receivedWeightedBytes("ReceivedWeightedMutations", cc),
 		    appliedWeightedBytes("AppliedWeightedBytes", cc), appliedMutations("AppliedMutations", cc),
-		    appliedAtomicOps("AppliedAtomicOps", cc), appliedTxns("AppliedTxns", cc) {}
+		    appliedAtomicOps("AppliedAtomicOps", cc), appliedTxns("AppliedTxns", cc), fetchKeys("FetchKeys", cc) {}
 	} counters;
 
 	void addref() { return ReferenceCounted<ApplierBatchData>::addref(); }

@@ -306,6 +306,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	for (; stagingKeyIter != batchData->stagingKeys.end(); stagingKeyIter++) {
 		if (!stagingKeyIter->second.hasBaseValue()) {
 			imcompleteStagingKeys.emplace(stagingKeyIter->first, stagingKeyIter);
+			batchData->counters.fetchKeys++;
 		}
 	}
 

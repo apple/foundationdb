@@ -45,8 +45,6 @@
 // TODO: Merge this RestoreConfig with the original RestoreConfig in FileBackupAgent.actor.cpp
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
-// template <> Tuple Codec<ERestoreState>::pack(ERestoreState const& val);
-// template <> ERestoreState Codec<ERestoreState>::unpack(Tuple const& val);
 template<> inline Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return Tuple().append(val); }
 template<> inline ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
 
@@ -365,4 +363,4 @@ Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::
 }
 
 #include "flow/unactorcompiler.h"
-#endif // FDBCLIENT_Restore_H
+#endif // FDBSERVER_RESTORECOMMON_ACTOR_H
