@@ -28,7 +28,7 @@ testTitle=BackupAndParallelRestoreWithAtomicOp
 
     testName=RandomClogging
     testDuration=90.0
-	
+
 ;    testName=Rollback
 ;    meanDelay=90.0
 ;    testDuration=90.0
@@ -47,7 +47,7 @@ testTitle=BackupAndParallelRestoreWithAtomicOp
 ;    testDuration=90.0
 
 ; Disable buggify for parallel restore
-buggify=off
+;buggify=on
 ;testDuration=360000 ;not work
 ;timeout is in seconds
 timeout=360000

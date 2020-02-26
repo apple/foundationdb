@@ -51,11 +51,11 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include <time.h>
 #include "fdbserver/Status.h"
-#include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Platform.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
+#include "flow/TLSPolicy.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
@@ -79,13 +79,14 @@
 #include "flow/SimpleOpt.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+// clang-format off
 enum {
-	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, 
-	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID, 
-	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, 
-	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, 
-	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, 
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH
+	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE,
+	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
+	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK,
+	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
+	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -164,6 +165,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_IO_TRUST_WARN_ONLY,    "--io_trust_warn_only",        SO_NONE },
 	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob_credential_file",      SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -171,6 +173,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 
 	SO_END_OF_OPTIONS
 };
+
+// clang-format on
 
 GlobalCounters g_counters;
 
@@ -938,12 +942,14 @@ struct CLIOptions {
 	int minTesterCount = 1;
 	bool testOnServers = false;
 
-	Reference<TLSOptions> tlsOptions = Reference<TLSOptions>(new TLSOptions);
-	std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
+	Reference<TLSPolicy> tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(TLSPolicy::Is::SERVER));
+	TLSParams tlsParams;
 	std::vector<std::string> tlsVerifyPeers;
 	double fileIoTimeout = 0.0;
 	bool fileIoWarnOnly = false;
 	uint64_t rsssize = -1;
+	std::vector<std::string> blobCredentials; // used for fast restore workers
+	const char* blobCredsFromENV = nullptr;
 
 	Reference<ClusterConnectionFile> connectionFile;
 	Standalone<StringRef> machineId;
@@ -1344,23 +1350,43 @@ private:
 			case OPT_WHITELIST_BINPATH:
 				whitelistBinPaths = args.OptionArg();
 				break;
+			case OPT_BLOB_CREDENTIAL_FILE:
+				// Add blob credential following backup agent example
+				blobCredentials.push_back(args.OptionArg());
+				printf("blob credential file:%s\n", blobCredentials.back().c_str());
+
+				blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
+				if (blobCredsFromENV != nullptr) {
+					fprintf(stderr, "[WARNING] Set blob credetial via env variable is not tested yet\n");
+					TraceEvent(SevError, "FastRestoreGetBlobCredentialFile")
+					    .detail("Reason", "Set blob credetial via env variable is not tested yet");
+					StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
+					do {
+						StringRef file = t.eat(":");
+						if (file.size() != 0) {
+							blobCredentials.push_back(file.toString());
+						}
+					} while (t.size() != 0);
+				}
+				break;
+
 #ifndef TLS_DISABLED
-			case TLSOptions::OPT_TLS_PLUGIN:
+			case TLSParams::OPT_TLS_PLUGIN:
 				args.OptionArg();
 				break;
-			case TLSOptions::OPT_TLS_CERTIFICATES:
-				tlsCertPath = args.OptionArg();
+			case TLSParams::OPT_TLS_CERTIFICATES:
+				tlsParams.tlsCertPath = args.OptionArg();
 				break;
-			case TLSOptions::OPT_TLS_PASSWORD:
-				tlsPassword = args.OptionArg();
+			case TLSParams::OPT_TLS_PASSWORD:
+				tlsParams.tlsPassword = args.OptionArg();
 				break;
-			case TLSOptions::OPT_TLS_CA_FILE:
-				tlsCAPath = args.OptionArg();
+			case TLSParams::OPT_TLS_CA_FILE:
+				tlsParams.tlsCAPath = args.OptionArg();
 				break;
-			case TLSOptions::OPT_TLS_KEY:
-				tlsKeyPath = args.OptionArg();
+			case TLSParams::OPT_TLS_KEY:
+				tlsParams.tlsKeyPath = args.OptionArg();
 				break;
-			case TLSOptions::OPT_TLS_VERIFY_PEERS:
+			case TLSParams::OPT_TLS_VERIFY_PEERS:
 				tlsVerifyPeers.push_back(args.OptionArg());
 				break;
 #endif
@@ -1600,7 +1626,12 @@ int main(int argc, char* argv[]) {
 			startNewSimulator();
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 		} else {
-			g_network = newNet2(opts.useThreadPool, true);
+#ifndef TLS_DISABLED
+			if ( opts.tlsVerifyPeers.size() ) {
+			  opts.tlsPolicy->set_verify_peers( opts.tlsVerifyPeers );
+			}
+#endif
+			g_network = newNet2(opts.useThreadPool, true, opts.tlsPolicy, opts.tlsParams);
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
@@ -1615,18 +1646,6 @@ int main(int argc, char* argv[]) {
 			openTraceFile(opts.publicAddresses.address, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace",
 			              opts.logGroup);
 
-#ifndef TLS_DISABLED
-			if (opts.tlsCertPath.size()) opts.tlsOptions->set_cert_file(opts.tlsCertPath);
-			if (opts.tlsCAPath.size()) opts.tlsOptions->set_ca_file(opts.tlsCAPath);
-			if (opts.tlsKeyPath.size()) {
-				if (opts.tlsPassword.size()) opts.tlsOptions->set_key_password(opts.tlsPassword);
-
-				opts.tlsOptions->set_key_file(opts.tlsKeyPath);
-			}
-			if (opts.tlsVerifyPeers.size()) opts.tlsOptions->set_verify_peers(opts.tlsVerifyPeers);
-
-			opts.tlsOptions->register_network();
-#endif
 			if (expectsPublicAddress) {
 				for (int ii = 0; ii < (opts.publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
 					const NetworkAddress& publicAddress =
@@ -1718,8 +1737,7 @@ int main(int argc, char* argv[]) {
 			std::vector<std::string> directories = platform::listDirectories( dataFolder );
 			for(int i = 0; i < directories.size(); i++)
 				if (directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." &&
-				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos &&
-				    directories[i] != "mutation_backups") {
+				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos) {
 					TraceEvent(SevError, "IncompatibleDirectoryFound")
 					    .detail("DataFolder", dataFolder)
 					    .detail("SuspiciousFile", directories[i]);
@@ -1828,26 +1846,50 @@ int main(int argc, char* argv[]) {
 					}
 				}
 			}
-			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths,
-			            opts.tlsOptions);
+			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator.run();
 		} else if (role == FDBD) {
-			ASSERT(opts.connectionFile);
+			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
+			if (opts.processClass == ProcessClass::FastRestoreClass) {
+				printf("Run as fast restore worker\n");
+				ASSERT(opts.connectionFile);
+				auto dataFolder = opts.dataFolder;
+				if (!dataFolder.size())
+					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
-			setupSlowTaskProfiler();
+				// Update the global blob credential files list
+				std::vector<std::string>* pFiles =
+				    (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
+				if (pFiles != nullptr) {
+					for (auto& f : opts.blobCredentials) {
+						pFiles->push_back(f);
+					}
+				}
 
-			auto dataFolder = opts.dataFolder;
-			if (!dataFolder.size())
-				dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+				actors.push_back(restoreWorker(opts.connectionFile, opts.localities, dataFolder));
+				f = stopAfter(waitForAll(actors));
+				printf("Fast restore worker exits\n");
+				g_network->run();
+				printf("g_network->run() done\n");
+			} else { // Call fdbd roles in conventional way
+				ASSERT(opts.connectionFile);
 
-			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-			actors.push_back(fdbd(opts.connectionFile, opts.localities, opts.processClass, dataFolder, dataFolder,
-			                      opts.storageMemLimit, opts.metricsConnFile, opts.metricsPrefix, opts.rsssize,
-			                      opts.whitelistBinPaths));
-			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
+				setupSlowTaskProfiler();
 
-			f = stopAfter( waitForAll(actors) );
-			g_network->run();
+				auto dataFolder = opts.dataFolder;
+				if (!dataFolder.size())
+					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+
+				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+				actors.push_back(fdbd(opts.connectionFile, opts.localities, opts.processClass, dataFolder, dataFolder,
+				                      opts.storageMemLimit, opts.metricsConnFile, opts.metricsPrefix, opts.rsssize,
+				                      opts.whitelistBinPaths));
+				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
+
+				f = stopAfter(waitForAll(actors));
+				g_network->run();
+			}
 		} else if (role == MultiTester) {
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_FROM_FILE,
 			                       opts.testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, opts.minTesterCount,
@@ -1874,7 +1916,7 @@ int main(int argc, char* argv[]) {
 			f = stopAfter( networkTestServer() );
 			g_network->run();
 		} else if (role == Restore) {
-			f = stopAfter(restoreWorker(opts.connectionFile, opts.localities));
+			f = stopAfter(restoreWorker(opts.connectionFile, opts.localities, opts.dataFolder));
 			g_network->run();
 		} else if (role == KVFileIntegrityCheck) {
 			f = stopAfter(KVFileCheck(opts.kvFile, true));
@@ -2020,6 +2062,11 @@ int main(int argc, char* argv[]) {
 		TraceEvent(SevError, "MainError").error(e);
 		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
+	} catch (boost::system::system_error& e) {
+		fprintf(stderr, "boost::system::system_error: %s (%d)", e.what(), e.code().value());
+		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
+		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
+		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	} catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());

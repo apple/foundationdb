@@ -129,8 +129,7 @@ public:
 	std::vector<LocalityEntry> const&	getEntries() const
 	{	return _entryArray; }
 
-	std::vector<LocalityEntry> const&	getMutableEntries() const
-	{	return _mutableEntryArray; }
+	std::vector<LocalityEntry>& getMutableEntries() { return _mutableEntryArray; }
 
 	std::vector<LocalityEntry> const&	getGroupEntries() const
 	{	return _localitygroup->_entryArray; }
@@ -253,7 +252,7 @@ public:
 
 		while (nRandomItems > 0)
 		{
-			if (nItemsLeft <= 0) {
+			if (nRandomItems > nItemsLeft || nItemsLeft <= 0) {
 				bComplete = false;
 				break;
 			}
@@ -478,6 +477,8 @@ public:
 	{	return _localitygroup->getGroupKeyMap(); }
 
 	Reference<StringToIntMap> _keymap;
+
+	virtual std::vector<std::vector<AttribValue>> const& getKeyValueArray() const { return _keyValueArray; }
 
 protected:
 	virtual Reference<StringToIntMap>&	getGroupValueMap()

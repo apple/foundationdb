@@ -585,6 +585,24 @@ bool traceFormatImpl(std::string& format) {
 		return false;
 	}
 }
+
+template <bool validate>
+bool traceClockSource(std::string& source) {
+	std::transform(source.begin(), source.end(), source.begin(), ::tolower);
+	if (source == "now") {
+		if (!validate) {
+			g_trace_clock.store(TRACE_CLOCK_NOW);
+		}
+		return true;
+	} else if (source == "realtime") {
+		if (!validate) {
+			g_trace_clock.store(TRACE_CLOCK_REALTIME);
+		}
+		return true;
+	} else {
+		return false;
+	}
+}
 } // namespace
 
 bool selectTraceFormatter(std::string format) {
@@ -598,6 +616,19 @@ bool selectTraceFormatter(std::string format) {
 
 bool validateTraceFormat(std::string format) {
 	return traceFormatImpl</*validate*/ true>(format);
+}
+
+bool selectTraceClockSource(std::string source) {
+	ASSERT(!g_traceLog.isOpen());
+	bool recognized = traceClockSource</*validate*/ false>(source);
+	if (!recognized) {
+		TraceEvent(SevWarnAlways, "UnrecognizedTraceClockSource").detail("source", source);
+	}
+	return recognized;
+}
+
+bool validateTraceClockSource(std::string source) {
+	return traceClockSource</*validate*/ true>(source);
 }
 
 ThreadFuture<Void> flushTraceFile() {
@@ -651,6 +682,50 @@ void addTraceRole(std::string role) {
 
 void removeTraceRole(std::string role) {
 	g_traceLog.removeRole(role);
+}
+
+TraceEvent::TraceEvent() : initialized(true), enabled(false), logged(true) {}
+
+TraceEvent::TraceEvent(TraceEvent &&ev) {
+	enabled = ev.enabled;
+	err = ev.err;
+	fields = std::move(ev.fields);
+	id = ev.id;
+	initialized = ev.initialized;
+	logged = ev.logged;
+	maxEventLength = ev.maxEventLength;
+	maxFieldLength = ev.maxFieldLength;
+	severity = ev.severity;
+	tmpEventMetric = ev.tmpEventMetric;
+	trackingKey = ev.trackingKey;
+	type = ev.type;
+
+	ev.initialized = true;
+	ev.enabled = false;
+	ev.logged = true;
+	ev.tmpEventMetric = nullptr;
+}
+
+TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
+	enabled = ev.enabled;
+	err = ev.err;
+	fields = std::move(ev.fields);
+	id = ev.id;
+	initialized = ev.initialized;
+	logged = ev.logged;
+	maxEventLength = ev.maxEventLength;
+	maxFieldLength = ev.maxFieldLength;
+	severity = ev.severity;
+	tmpEventMetric = ev.tmpEventMetric;
+	trackingKey = ev.trackingKey;
+	type = ev.type;
+
+	ev.initialized = true;
+	ev.enabled = false;
+	ev.logged = true;
+	ev.tmpEventMetric = nullptr;
+
+	return *this;
 }
 
 TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true), logged(false) {
@@ -729,7 +804,9 @@ bool TraceEvent::init() {
 		}
 
 		detail("Severity", int(severity));
-		detailf("Time", "%.6f", getCurrentTime());
+		detail("Time", "0.000000");
+		timeIndex = fields.size() - 1;
+
 		detail("Type", type);
 		if(g_network && g_network->isSimulated()) {
 			NetworkAddress local = g_network->getLocalAddress();
@@ -937,6 +1014,8 @@ void TraceEvent::log() {
 		init();
 		try {
 			if (enabled) {
+				fields.mutate(timeIndex).second = format("%.6f", TraceEvent::getCurrentTime());
+
 				if (this->severity == SevError) {
 					severity = SevInfo;
 					backtrace();
@@ -1150,6 +1229,10 @@ std::string TraceEventFields::getValue(std::string key) const {
 	}
 }
 
+TraceEventFields::Field& TraceEventFields::mutate(int index) {
+	return fields.at(index);
+}
+
 namespace {
 void parseNumericValue(std::string const& s, double &outValue, bool permissive = false) {
 	double d = 0;
@@ -1275,6 +1358,9 @@ void TraceEventFields::validateFormat() const {
 }
 
 std::string traceableStringToString(const char* value, size_t S) {
-	ASSERT_WE_THINK(S > 0 && value[S - 1] == '\0');
+	if(g_network) {
+		ASSERT_WE_THINK(S > 0 && value[S - 1] == '\0');
+	}
+
 	return std::string(value, S - 1); // Exclude trailing \0 byte
 }

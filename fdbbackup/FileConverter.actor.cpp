@@ -172,7 +172,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 					int msgSize = bigEndian32(reader.consume<int>());
 					const uint8_t* message = reader.consume(msgSize);
 
-					BinaryReader rd(message, msgSize, AssumeVersion(currentProtocolVersion));
+					ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(currentProtocolVersion));
 					MutationRef m;
 					rd >> m;
 					count++;
@@ -468,7 +468,7 @@ ACTOR Future<Void> convert(ConvertParams params) {
 			arena = Arena();
 		}
 
-		BinaryReader rd(data.message, AssumeVersion(currentProtocolVersion));
+		ArenaReader rd(data.arena, data.message, AssumeVersion(currentProtocolVersion));
 		MutationRef m;
 		rd >> m;
 		std::cout << data.version.toString() << " m = " << m.toString() << "\n";

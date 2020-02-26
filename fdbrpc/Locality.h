@@ -70,7 +70,7 @@ public:
 		else if (s=="log") _class = LogClass;
 		else if (s=="router") _class = LogRouterClass;
 		else if (s=="cluster_controller") _class = ClusterControllerClass;
-		else if (s == "fast_restore") _class = FastRestoreClass;
+		else if (s=="fast_restore") _class = FastRestoreClass;
 		else if (s=="data_distributor") _class = DataDistributorClass;
 		else if (s=="coordinator") _class = CoordinatorClass;
 		else if (s=="ratekeeper") _class = RatekeeperClass;
@@ -283,10 +283,10 @@ static std::string describe(
 	}
 	return s;
 }
-static 	std::string describeZones( std::vector<LocalityData> const& items, int max_items = -1 ) {
+inline std::string describeZones( std::vector<LocalityData> const& items, int max_items = -1 ) {
 	return describe(items, LocalityData::keyZoneId, max_items);
 }
-static 	std::string describeDataHalls( std::vector<LocalityData> const& items, int max_items = -1 ) {
+inline std::string describeDataHalls( std::vector<LocalityData> const& items, int max_items = -1 ) {
 	return describe(items, LocalityData::keyDataHallId, max_items);
 }
 

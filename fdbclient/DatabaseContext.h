@@ -216,6 +216,10 @@ public:
 	Future<Void> clientInfoMonitor;
 	Future<Void> connected;
 
+	Reference<AsyncVar<Optional<ClusterInterface>>> statusClusterInterface;
+	Future<Void> statusLeaderMon;
+	double lastStatusFetch;
+
 	int apiVersion;
 
 	int mvCacheInsertLocation;

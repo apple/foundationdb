@@ -179,9 +179,6 @@ set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
 ################################################################################
 
 include(CompileBoost)
-if(WITH_TLS)
-  add_subdirectory(FDBLibTLS)
-endif()
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
 add_subdirectory(fdbclient)
@@ -192,7 +189,9 @@ if(NOT WIN32)
 else()
   add_subdirectory(fdbservice)
 endif()
-add_subdirectory(bindings)
+if(WITH_PYTHON)
+  add_subdirectory(bindings)
+endif()
 add_subdirectory(fdbbackup)
 add_subdirectory(tests)
 if(WITH_DOCUMENTATION)
@@ -210,13 +209,13 @@ endif()
 # process compile commands for IDE
 ################################################################################
 
-if (CMAKE_EXPORT_COMPILE_COMMANDS)
+if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
   add_custom_command(
-	OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
-	COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/gen_compile_db.py
-	ARGS -b ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
-	DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/build/gen_compile_db.py ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
-	COMMENT "Build compile commands for IDE"
+	  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
+	  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/build/gen_compile_db.py
+	  ARGS -b ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
+	  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/build/gen_compile_db.py ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
+	  COMMENT "Build compile commands for IDE"
 	)
   add_custom_target(processed_compile_commands ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json)
 endif()
