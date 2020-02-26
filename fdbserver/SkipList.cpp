@@ -801,9 +801,11 @@ public:
 				++it;
 			} else {
 				Version v = it->second;
-				it = std::reverse_iterator(btree.erase(it.base()));
-				it->second = max(v, it->second);
-				++it;
+				auto toErase = it.base();
+				--toErase;
+				auto previous = btree.erase(to_erase);
+				previous->second = max(v, previous->second);
+				it = std::reverse_iterator(previous);
 			}
 			wasAbove = isAbove;
 		}
@@ -918,7 +920,11 @@ void ConflictBatch::GetTooOldTransactions(std::vector<int>& tooOldTransactions) 
 
 void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::vector<int>& nonConflicting,
                                     std::vector<int>* tooOldTransactions) {
-	std::cout << "Skip: " << cs->versionHistory.count() << " BTree: " << cs->bConflicts.btree.size() << std::endl;
+	auto count = cs->versionHistory.count();
+	auto size = cs->bConflicts.btree.size();
+	if (count != size) {
+		std::cout << "Skip: " << count << " BTree: " << size << std::endl;
+	}
 
 	double t = timer();
 	sortPoints(points);
