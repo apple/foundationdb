@@ -130,6 +130,7 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 	RequestStream<RestoreLoadFileRequest> loadFile;
 	RequestStream<RestoreSendMutationsToAppliersRequest> sendMutations;
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
+	RequestStream<RestoreVersionBatchRequest> finishVersionBatch;
 	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
 	RequestStream<RestoreFinishRequest> finishRestore;
 
@@ -149,6 +150,7 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 		loadFile.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		sendMutations.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		initVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		finishVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		collectRestoreRoleInterfaces.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		finishRestore.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 	}
@@ -156,7 +158,7 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, updateRestoreSysInfo, loadFile, sendMutations,
-		           initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
+		           initVersionBatch, finishVersionBatch, collectRestoreRoleInterfaces, finishRestore);
 	}
 };
 

@@ -57,6 +57,8 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
                                                         Reference<MasterBatchStatus> batchStatus,
                                                         std::map<UID, RestoreApplierInterface> appliersInterf,
                                                         int batchIndex, NotifiedVersion* finishedBatch);
+ACTOR static Future<Void> notifyLoadersVersionBatchFinished(std::map<UID, RestoreLoaderInterface> loadersInterf,
+                                                            int batchIndex);
 ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, bool terminate);
 ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreMasterData> self, Database cx);
 
@@ -542,6 +544,8 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 
 	wait(notifyApplierToApplyMutations(batchData, batchStatus, self->appliersInterf, batchIndex, &self->finishedBatch));
 
+	wait(notifyLoadersVersionBatchFinished(self->loadersInterf, batchIndex));
+
 	self->runningVersionBatches.set(self->runningVersionBatches.get() - 1);
 	return Void();
 }
@@ -802,6 +806,18 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 	TraceEvent("FastRestoreMasterPhaseApplyToDBDone")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("FinishedBatch", finishedBatch->get());
+
+	return Void();
+}
+
+// Notify loaders that all data in the version batch has been applied to DB.
+ACTOR static Future<Void> notifyLoadersVersionBatchFinished(std::map<UID, RestoreLoaderInterface> loadersInterf,
+                                                            int batchIndex) {
+	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requestsToLoaders;
+	for (auto& loader : loadersInterf) {
+		requestsToLoaders.emplace_back(loader.first, RestoreVersionBatchRequest(batchIndex));
+	}
+	wait(sendBatchRequests(&RestoreLoaderInterface::finishVersionBatch, loadersInterf, requestsToLoaders));
 
 	return Void();
 }

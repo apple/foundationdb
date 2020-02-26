@@ -500,6 +500,8 @@ public:
 	int64_t FASTRESTORE_STRAGGLER_THRESHOLD;
 	bool FASTRESTORE_TRACK_REQUEST_LATENCY;
 	bool FASTRESTORE_TRACK_LOADER_SEND_REQUESTS; // track requests of load send mutations to appliers?
+	int64_t FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT; // threshold when pipelined actors should be delayed
+	int64_t FASTRESTORE_WAIT_FOR_MEMORY_LATENCY;
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };

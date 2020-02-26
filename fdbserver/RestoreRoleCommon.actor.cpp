@@ -91,6 +91,32 @@ void updateProcessStats(Reference<RestoreRoleData> self) {
 	}
 }
 
+// An actor is schedulable to run if the current worker has enough resourc, i.e.,
+// the worker's memory usage is below the threshold;
+// Exception: If the actor is working on the current version batch, we have to schedule
+// the actor to run to avoid dead-lock.
+// Future: When we release the actors that are blocked by memory usage, we should release them
+// in increasing order of their version batch.
+ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex, std::string name) {
+	self->delayedActors++;
+	loop {
+		double memory = getSystemStatistics().processMemory;
+		if (memory < SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT ||
+		    self->finishedBatch.get() + 1 == actorBatchIndex) {
+			if (memory >= SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT) {
+				TraceEvent(SevWarn, "FastRestoreMemoryUsageAboveThreshold")
+				    .detail("BatchIndex", actorBatchIndex)
+				    .detail("Actor", name);
+			}
+			self->delayedActors--;
+			break;
+		} else {
+			wait(delay(SERVER_KNOBS->FASTRESTORE_WAIT_FOR_MEMORY_LATENCY) || self->checkMemory.onTrigger());
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role) {
 	loop {
 		TraceEvent("FastRestoreTraceProcessMetrics")

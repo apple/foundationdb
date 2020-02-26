@@ -329,7 +329,6 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreApplierData> {
 	// Buffer for uncommitted data at ongoing version batches
 	std::map<int, Reference<ApplierBatchData>> batch;
-	NotifiedVersion finishedBatch; // The version batch that has been applied to DB
 
 	void addref() { return ReferenceCounted<RestoreApplierData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreApplierData>::delref(); }

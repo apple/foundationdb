@@ -56,6 +56,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
     std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc, Reference<IBackupContainer> bc,
     Version version, RestoreAsset asset);
+ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreLoaderData> self);
 
 ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx) {
 	state Reference<RestoreLoaderData> self =
@@ -91,6 +92,10 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				when(RestoreVersionBatchRequest req = waitNext(loaderInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
 					actors.add(handleInitVersionBatchRequest(req, self));
+				}
+				when(RestoreVersionBatchRequest req = waitNext(loaderInterf.finishVersionBatch.getFuture())) {
+					requestTypeStr = "finishVersionBatch";
+					actors.add(handleFinishVersionBatchRequest(req, self));
 				}
 				when(RestoreFinishRequest req = waitNext(loaderInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
@@ -727,4 +732,19 @@ std::vector<UID> getApplierIDs(std::map<Key, UID>& rangeToApplier) {
 
 	ASSERT(!applierIDs.empty());
 	return applierIDs;
+}
+
+// Notify loaders that the version batch (index) has been applied.
+// This affects which version batch each loader can release actors even when the worker has low memory
+ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreLoaderData> self) {
+	// Ensure batch (i-1) is applied before batch i
+	TraceEvent("FastRestoreLoaderHandleFinishVersionBatch", self->id())
+	    .detail("FinishedBatchIndex", self->finishedBatch.get())
+	    .detail("RequestedBatchIndex", req.batchIndex);
+	wait(self->finishedBatch.whenAtLeast(req.batchIndex - 1));
+	if (self->finishedBatch.get() == req.batchIndex - 1) {
+		self->finishedBatch.set(req.batchIndex);
+	}
+	req.reply.send(RestoreCommonReply(self->id(), false));
+	return Void();
 }

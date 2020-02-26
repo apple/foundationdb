@@ -141,7 +141,6 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	std::map<int, Reference<MasterBatchData>> batch;
 	std::map<int, Reference<MasterBatchStatus>> batchStatus;
-	NotifiedVersion finishedBatch; // The highest batch index all appliers have applied mutations
 
 	AsyncVar<int> runningVersionBatches; // Currently running version batches
 
