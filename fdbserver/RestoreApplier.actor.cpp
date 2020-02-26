@@ -112,7 +112,10 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
 	    .detail("ProcessedFileVersion", curFilePos.get())
-	    .detail("Request", req.toString());
+	    .detail("Request", req.toString())
+		.detail("CurrentMemory", getSystemStatistics().processMemory);
+
+	wait(isSchedulable(self, req.batchIndex, __FUNCTION__);
 
 	wait(curFilePos.whenAtLeast(req.prevVersion));
 

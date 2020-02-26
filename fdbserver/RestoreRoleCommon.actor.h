@@ -53,6 +53,7 @@ struct RestoreSimpleRequest;
 
 using VersionedMutationsMap = std::map<Version, MutationsVec>;
 
+ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex, std::string name);
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
 void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<RestoreRoleData> self);
