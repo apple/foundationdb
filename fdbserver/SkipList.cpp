@@ -821,7 +821,7 @@ public:
 			}
 			wasAbove = isAbove;
 		}
-		return it == btree.rend() ? std::string() : it->second;
+		return it == btree.rend() ? std::string() : it->first;
 	}
 };
 
