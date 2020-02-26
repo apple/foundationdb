@@ -798,10 +798,14 @@ public:
 	//
 	// TODO: Consider using a hint to stop iteration early when we've deleted as many keys as
 	// we could.
-	void removeBefore(Version oldest) {
+  std::string removeBefore(Version oldest, absl::string_view key, int nodeCount) {
 		bool wasAbove = true;
-		auto it = btree.rbegin();
-		while (it != btree.rend()) {
+		auto it = std::reverse_iterator(btree.upper_bound(key));
+		while (nodeCount--) {
+      // If we've hit the end, just start over.
+      if (it == btree.rend()) {
+        it = btree.rbegin();
+      }
 			bool isAbove = it->second >= oldest;
 			if (isAbove || wasAbove) {
 				++it;
@@ -818,6 +822,7 @@ public:
 			wasAbove = isAbove;
 		}
 	}
+  return it == btree.rend() ? std::string() : it->second;
 };
 
 #include "fdbserver/ConflictSet.h"
@@ -827,7 +832,7 @@ struct ConflictSet {
 	~ConflictSet() {}
 
 	SkipList versionHistory;
-	Key removalKey;
+  std::string removalKey;
 	Version oldestVersion;
 	BConflicts bConflicts;
 };
@@ -961,7 +966,7 @@ void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::
 	t = timer();
 	if (newOldestVersion > cs->oldestVersion) {
 		cs->oldestVersion = newOldestVersion;
-		cs->bConflicts.removeBefore(cs->oldestVersion);
+		cs->removalKey = cs->bConflicts.removeBefore(cs->oldestVersion, cs->removalKey, combinedWriteConflictRanges.size() * 3 + 10);
 	}
 	g_removeBefore += timer() - t;
 }
