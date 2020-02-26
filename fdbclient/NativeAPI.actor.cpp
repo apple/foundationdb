@@ -3401,7 +3401,7 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRangeRef keys, 
 			req.min.bytes = 0;
 			req.max.bytes = -1;
 			StorageMetrics m = wait(
-			    loadBalance(locationInfo, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
+			    loadBalance(locationInfo->locations(), &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
 			return m;
 		} catch (Error& e) {
 			if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
