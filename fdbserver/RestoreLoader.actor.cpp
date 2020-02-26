@@ -201,7 +201,11 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("ProcessLoadParam", req.param.toString())
 	    .detail("NotProcessed", !paramExist)
-	    .detail("Processed", isReady);
+	    .detail("Processed", isReady)
+		.detail("CurrentMemory", getSystemStatistics().processMemory);
+
+	wait(isSchedulable(self, req.batchIndex, __FUNCTION__);
+
 	if (batchData->processedFileParams.find(req.param) == batchData->processedFileParams.end()) {
 		TraceEvent("FastRestoreLoadFile", self->id())
 		    .detail("BatchIndex", req.batchIndex)
@@ -226,6 +230,8 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	return Void();
 }
 
+// Send buffered mutations to appliers.
+// Do not need to block on low memory usage because this actor should not increase memory usage.
 ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequest req,
                                               Reference<RestoreLoaderData> self) {
 	state Reference<LoaderBatchData> batchData = self->batch[req.batchIndex];
@@ -744,6 +750,9 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 	wait(self->finishedBatch.whenAtLeast(req.batchIndex - 1));
 	if (self->finishedBatch.get() == req.batchIndex - 1) {
 		self->finishedBatch.set(req.batchIndex);
+	}
+	if (self->delayedActors > 0) {
+		self->checkMemory.trigger();
 	}
 	req.reply.send(RestoreCommonReply(self->id(), false));
 	return Void();

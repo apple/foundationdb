@@ -457,6 +457,10 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 			self->finishedBatch.set(req.batchIndex);
 		}
 	}
+
+	if (self->delayedActors > 0) {
+		self->checkMemory.trigger();
+	}
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 
 	return Void();
