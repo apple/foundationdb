@@ -890,20 +890,24 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			break;
 		case FDBNetworkOptions::TLS_CERT_PATH:
 			validateOptionValue(value, true);
+			tlsParams.tlsCertBytes = "";
 			tlsParams.tlsCertPath = value.get().toString();
 			break;
 		case FDBNetworkOptions::TLS_CERT_BYTES: {
 			validateOptionValue(value, true);
+			tlsParams.tlsCertPath = "";
 			tlsParams.tlsCertBytes = value.get().toString();
 			break;
 		}
 		case FDBNetworkOptions::TLS_CA_PATH: {
 			validateOptionValue(value, true);
+			tlsParams.tlsCABytes = "";
 			tlsParams.tlsCAPath = value.get().toString();
 			break;
 		}
 		case FDBNetworkOptions::TLS_CA_BYTES: {
 			validateOptionValue(value, true);
+			tlsParams.tlsCAPath = "";
 			tlsParams.tlsCABytes = value.get().toString();
 			break;
 		}
@@ -912,11 +916,13 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			tlsParams.tlsPassword = value.get().toString();
 			break;
 		case FDBNetworkOptions::TLS_KEY_PATH:
-			validateOptionValue(value, true);		
+			validateOptionValue(value, true);
+			tlsParams.tlsKeyBytes = "";
 			tlsParams.tlsKeyPath = value.get().toString();
 			break;
 		case FDBNetworkOptions::TLS_KEY_BYTES: {
 			validateOptionValue(value, true);
+			tlsParams.tlsKeyPath = "";
 			tlsParams.tlsKeyBytes = value.get().toString();
 			break;
 		}

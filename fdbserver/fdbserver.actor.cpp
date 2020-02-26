@@ -1553,7 +1553,11 @@ int main(int argc, char* argv[]) {
 		} else {
 #ifndef TLS_DISABLED
 			if ( tlsVerifyPeers.size() ) {
-			  tlsPolicy->set_verify_peers( tlsVerifyPeers );
+				if (!tlsPolicy->set_verify_peers( tlsVerifyPeers )) {
+					fprintf(stderr, "ERROR: The format of the --tls_verify_peers option is incorrect.\n");
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
 			}
 #endif
 			g_network = newNet2(useThreadPool, true, tlsPolicy, tlsParams);
