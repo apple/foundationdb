@@ -3552,6 +3552,7 @@ public:
 	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 
 		TraceEvent(SevInfo, "FBA_SubmitBackup")
 				.detail("TagName", tagName.c_str())
