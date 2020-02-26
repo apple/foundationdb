@@ -802,7 +802,9 @@ public:
 			} else {
 				Version v = it->second;
 				// Subtract 1 to offset from the reverse iterator.
-				auto previous = btree.erase(it.base() - 1);
+				auto toErase = it.base();
+				--toErase;
+				auto previous = btree.erase(toErase);
 				previous->second = max(v, previous->second);
 				// `std::reverse_iterator` increments the `previous` by one towards the beginning.
 				it = std::reverse_iterator(previous);
