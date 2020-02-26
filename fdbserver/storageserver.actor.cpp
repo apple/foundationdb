@@ -892,8 +892,8 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 		// Check if the desired key might be cached
 		auto cached = data->cachedRangeMap[req.key];
-		if (cached)
-			TraceEvent(SevDebug, "SSGetValueCached").detail("Key", req.key);
+		//if (cached)
+		//	TraceEvent(SevDebug, "SSGetValueCached").detail("Key", req.key);
 
 		GetValueReply reply(v, cached);
 		reply.penalty = data->getPenalty();
@@ -1544,8 +1544,8 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 
 		// Check if the desired key might be cached
 		auto cached = data->cachedRangeMap[k];
-		if (cached)
-			TraceEvent(SevDebug, "SSGetKeyCached").detail("Key", k).detail("Begin", shard.begin.printable()).detail("End", shard.end.printable());
+		//if (cached)
+		//	TraceEvent(SevDebug, "SSGetKeyCached").detail("Key", k).detail("Begin", shard.begin.printable()).detail("End", shard.end.printable());
 
 		GetKeyReply reply(updated, cached);
 		reply.penalty = data->getPenalty();

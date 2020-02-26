@@ -255,8 +255,8 @@ public:
 	void addCacheRange( CacheRangeInfo* newCacheRange ) {
 		ASSERT( !newCacheRange->keys.empty() );
 		newCacheRange->changeCounter = ++cacheRangeChangeCounter;
-		TraceEvent("AddCacheRange", this->thisServerID).detail("KeyBegin", newCacheRange->keys.begin).detail("KeyEnd", newCacheRange->keys.end).
-		detail("State", newCacheRange->isReadable() ? "Readable" : newCacheRange->notAssigned() ? "NotAssigned" : "Adding").detail("Version", this->version.get());
+		//TraceEvent(SevDebug, "AddCacheRange", this->thisServerID).detail("KeyBegin", newCacheRange->keys.begin).detail("KeyEnd", newCacheRange->keys.end).
+		//detail("State", newCacheRange->isReadable() ? "Readable" : newCacheRange->notAssigned() ? "NotAssigned" : "Adding").detail("Version", this->version.get());
 		cachedRangeMap.insert( newCacheRange->keys, Reference<CacheRangeInfo>(newCacheRange) );
 	}
 	void addMutation(KeyRangeRef const& cachedKeyRange, Version version, MutationRef const& mutation);
@@ -327,7 +327,7 @@ bool validateCacheRange( StorageCacheData::VersionedData::ViewAtVersion const& v
 	// * Nonoverlapping: No clear overlaps a set or another clear, or adjoins another clear.
 	// * Old mutations are erased: All items in versionedData.atLatest() have insertVersion() > oldestVersion()
 
-	//TraceEvent("ValidateRange", id).detail("KeyBegin", range.begin).detail("KeyEnd", range.end).detail("Version", version);
+	//TraceEvent(SevDebug, "ValidateRange", id).detail("KeyBegin", range.begin).detail("KeyEnd", range.end).detail("Version", version);
 	KeyRef k;
 	bool ok = true;
 	bool kIsClear = false;
@@ -501,7 +501,7 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 			++data->counters.rowsQueried;
 			resultSize = v.get().size();
 			data->counters.bytesQueried += resultSize;
-			TraceEvent("SCGetValueQPresent", data->thisServerID).detail("ResultSize",resultSize).detail("Version", version).detail("ReqKey",req.key);
+			//TraceEvent(SevDebug, "SCGetValueQPresent", data->thisServerID).detail("ResultSize",resultSize).detail("Version", version).detail("ReqKey",req.key);
 		}
 
 		if( req.debugID.present() )
@@ -510,7 +510,7 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 		GetValueReply reply(v, true);
 		req.reply.send(reply);
 	} catch (Error& e) {
-		TraceEvent("SCGetValueQError", data->thisServerID).detail("Code",e.code()).detail("ReqKey",req.key);
+		TraceEvent(SevError, "SCGetValueQError", data->thisServerID).detail("Code",e.code()).detail("ReqKey",req.key);
 		if(!canReplyWith(e))
 			throw;
 		req.reply.sendError(e);
@@ -642,7 +642,7 @@ KeyRange getCachedKeyRange( StorageCacheData* data, const KeySelectorRef& sel )
 	auto i = sel.isBackward() ? data->cachedRangeMap.rangeContainingKeyBefore( sel.getKey() ) :
 		data->cachedRangeMap.rangeContaining( sel.getKey() );
 
-	TraceEvent("SCGetCachedKeyRange", data->thisServerID).detail("SelKey", sel.getKey()).detail("Begin", i->range().begin).detail("End", i->range().end).detail("Value", i->value()->debugDescribeState());
+	//TraceEvent(SevDebug, "SCGetCachedKeyRange", data->thisServerID).detail("SelKey", sel.getKey()).detail("Begin", i->range().begin).detail("End", i->range().end).detail("Value", i->value()->debugDescribeState());
 	if (i->value()->notAssigned())
 		throw wrong_shard_server();
 	else if (!i->value()->isReadable())
@@ -684,15 +684,15 @@ ACTOR Future<Void> getKeyValues( StorageCacheData* data, GetKeyValuesRequest req
 
 		state KeyRange cachedKeyRange = getCachedKeyRange( data, req.begin );
 
-		TraceEvent("SCGetKeyValues1", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
-			detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end);
+		//TraceEvent(SevDebug, "SCGetKeyValues1", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
+		//	detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end);
 
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storagecache.getKeyValues.AfterVersion");
 		//.detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end);
 
 		if ( !selectorInRange(req.end, cachedKeyRange) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == cachedKeyRange.end) ) {
-			TraceEvent("WrongCacheRangeServer1", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
+			TraceEvent(SevDebug, "WrongCacheRangeServer1", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
 			detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end).detail("In", "getKeyValues>checkShardExtents");
 			throw wrong_shard_server();
 		}
@@ -713,14 +713,14 @@ ACTOR Future<Void> getKeyValues( StorageCacheData* data, GetKeyValuesRequest req
 			// We could detect when offset1 takes us off the beginning of the database or offset2 takes us off the end, and return a clipped range rather
 			// than an error (since that is what the NativeAPI.getRange will do anyway via its "slow path"), but we would have to add some flags to the response
 			// to encode whether we went off the beginning and the end, since it needs that information.
-			TraceEvent("WrongCacheRangeServer2", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
+			TraceEvent(SevDebug, "WrongCacheRangeServer2", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
 			detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end).detail("In", "getKeyValues>checkOffsets").
 			detail("BeginKey", begin).detail("EndKey", end).detail("BeginOffset", offset1).detail("EndOffset", offset2);
 			throw wrong_shard_server();
 		}
-		TraceEvent("SCGetKeyValues", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
-			detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end).detail("In", "getKeyValues>checkOffsets").
-			detail("BeginKey", begin).detail("EndKey", end).detail("BeginOffset", offset1).detail("EndOffset", offset2);
+		//TraceEvent(SevDebug, "SCGetKeyValues", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
+		//	detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end).detail("In", "getKeyValues>checkOffsets").
+		//	detail("BeginKey", begin).detail("EndKey", end).detail("BeginOffset", offset1).detail("EndOffset", offset2);
 
 		if (begin >= end) {
 			if( req.debugID.present() )
@@ -755,7 +755,7 @@ ACTOR Future<Void> getKeyValues( StorageCacheData* data, GetKeyValuesRequest req
 			data->counters.rowsQueried += r.data.size();
 		}
 	} catch (Error& e) {
-		TraceEvent("SCGetKeyValuesError", data->thisServerID).detail("Code",e.code()).detail("ReqBegin", req.begin.getKey()).detail("ReqEnd", req.end.getKey());
+		TraceEvent(SevDebug, "SCGetKeyValuesError", data->thisServerID).detail("Code",e.code()).detail("ReqBegin", req.begin.getKey()).detail("ReqEnd", req.end.getKey());
 		if(!canReplyWith(e))
 			throw;
 		req.reply.sendError(e);
@@ -1447,14 +1447,14 @@ void cacheWarmup( StorageCacheData *data, StorageCacheUpdater* updater, const Ke
 	for( auto it = existingCacheRanges.begin(); it != existingCacheRanges.end(); ++it ) {
 		if( nowAssigned != it->value()->assigned() ) {
 			isDifferent = true;
-			TraceEvent("CWRangeDifferent", data->thisServerID)
+			TraceEvent("SCWRangeDifferent", data->thisServerID)
 			  .detail("KeyBegin", it->range().begin)
 			  .detail("KeyEnd", it->range().end);
 			break;
 		}
 	}
 	if( !isDifferent ) {
-		TraceEvent("CWShortCircuit", data->thisServerID)
+		TraceEvent("SCWShortCircuit", data->thisServerID)
 			.detail("KeyBegin", keys.begin)
 			.detail("KeyEnd", keys.end);
 		return;
@@ -1915,7 +1915,7 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, R
 	state ActorCollection actors(false);
 	state Future<Void> dbInfoChange = Void();
 
-	TraceEvent("StorageCache_CacheServerInterface", self.thisServerID).detail("UID", ssi.uniqueID).detail("IsCacheServer", ssi.isCacheServer);
+	//TraceEvent("StorageCache_CacheServerInterface", self.thisServerID).detail("UID", ssi.uniqueID).detail("IsCacheServer", ssi.isCacheServer);
 	// This helps identify the private mutations meant for this cache server
 	self.ck = cacheKeysPrefixFor( id ).withPrefix(systemKeys.begin);  // FFFF/02cacheKeys/[this server]/
 
