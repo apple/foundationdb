@@ -999,7 +999,7 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 					.detail("ListenAddress", listenAddr.toString());
 				incoming.add( connectionIncoming(self, conn) );
 			}
-			wait(delay(0, TaskPriority::AcceptSocket));
+			wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskPriority::WriteSocket));
 		}
 	} catch (Error& e) {
 		TraceEvent(SevError, "ListenError").error(e);

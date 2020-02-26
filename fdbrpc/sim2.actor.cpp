@@ -759,9 +759,9 @@ public:
 	// Everything actually network related is delegated to the Sim2Net class; Sim2 is only concerned with simulating machines and time
 	virtual double now() { return time; }
 
-	// timer() can be up to one second ahead of now()
+	// timer() can be up to 0.1 seconds ahead of now()
 	virtual double timer() {
-		timerTime += deterministicRandom()->random01()*(time+1.0-timerTime)/2.0;
+		timerTime += deterministicRandom()->random01()*(time+0.1-timerTime)/2.0;
 		return timerTime; 
 	}
 
