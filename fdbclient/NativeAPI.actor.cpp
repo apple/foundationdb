@@ -930,11 +930,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			validateOptionValue(value, true);
 			initTLSPolicy();
 #ifndef TLS_DISABLED
-			if (!tlsPolicy->set_verify_peers({ value.get().toString() })) {
-				TraceEvent(SevWarnAlways, "TLSValidationSetError")
-					.detail("Input", value.get().toString() );
-				throw invalid_option_value();
-			}
+			tlsPolicy->set_verify_peers({ value.get().toString() });
 #endif
 			break;
 		case FDBNetworkOptions::CLIENT_BUGGIFY_ENABLE:
