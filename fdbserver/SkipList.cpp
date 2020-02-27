@@ -780,7 +780,8 @@ public:
 		// TODO: Try out the job queueing logic from SkipList.
 		for (int i = 0; i < count; i++) {
 			const auto& range = ranges[i];
-			transactionConflictStatus[range.transaction] |=
+			transactionConflictStatus[range.transaction] =
+			    transactionConflictStatus[range.transaction] ||
 			    detectConflict(convertRef(range.begin), convertRef(range.end), range.version);
 		}
 	}
