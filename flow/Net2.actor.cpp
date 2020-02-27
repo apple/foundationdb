@@ -111,7 +111,8 @@ thread_local INetwork* thread_network = 0;
 class Net2 sealed : public INetwork, public INetworkConnections {
 
 public:
-	Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, TLSParams tlsParams);
+	Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> tlsPolicy, const TLSParams& tlsParams);
+	void initTLS();
 	void run();
 	void initMetrics();
 
@@ -158,10 +159,12 @@ public:
 #ifndef TLS_DISABLED
 	boost::asio::ssl::context sslContext;
 #endif
-	std::string tlsPassword;
+	Reference<TLSPolicy> tlsPolicy;
+	TLSParams tlsParams;
+	bool tlsInitialized;
 
 	std::string get_password() const {
-		return tlsPassword;
+		return tlsParams.tlsPassword;
 	}
 
 	INetworkConnections *network;  // initially this, but can be changed
@@ -844,7 +847,7 @@ bool insecurely_always_accept(bool _1, boost::asio::ssl::verify_context& _2) {
 }
 #endif
 
-Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, TLSParams tlsParams)
+Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> tlsPolicy, const TLSParams& tlsParams)
 	: useThreadPool(useThreadPool),
 	  network(this),
 	  reactor(this),
@@ -854,7 +857,9 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, TLS
 	  tsc_begin(0), tsc_end(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield),
 	  lastMinTaskID(TaskPriority::Zero),
 	  numYields(0),
-	  tlsPassword(tlsParams.tlsPassword)
+	  tlsInitialized(false),
+	  tlsPolicy(tlsPolicy),
+	  tlsParams(tlsParams)
 #ifndef TLS_DISABLED
 	  ,sslContext(boost::asio::ssl::context(boost::asio::ssl::context::tlsv12))
 #endif
@@ -862,30 +867,55 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, TLS
 {
 	TraceEvent("Net2Starting");
 
+	// Set the global members
+	if(useMetrics) {
+		setGlobal(INetwork::enTDMetrics, (flowGlobalType) &tdmetrics);
+	}
+	setGlobal(INetwork::enNetworkConnections, (flowGlobalType) network);
+	setGlobal(INetwork::enASIOService, (flowGlobalType) &reactor.ios);
+	setGlobal(INetwork::enBlobCredentialFiles, &blobCredentialFiles);
+
+#ifdef __linux__
+	setGlobal(INetwork::enEventFD, (flowGlobalType) N2::ASIOReactor::newEventFD(reactor));
+#endif
+
+
+	int priBins[] = { 1, 2050, 3050, 4050, 4950, 5050, 7050, 8050, 10050 };
+	static_assert( sizeof(priBins) == sizeof(int)*NetworkMetrics::PRIORITY_BINS, "Fix priority bins");
+	for(int i=0; i<NetworkMetrics::PRIORITY_BINS; i++)
+		networkInfo.metrics.priorityBins[i] = static_cast<TaskPriority>(priBins[i]);
+	updateNow();
+
+}
+
+void Net2::initTLS() {
+	if(tlsInitialized) {
+		return;
+	}
 #ifndef TLS_DISABLED
 	const char *defaultCertFileName = "fdb.pem";
 
-	if( policy && !policy->rules.size() ) {
+	if( tlsPolicy && !tlsPolicy->rules.size() ) {
 		std::string verify_peers;
 		if (platform::getEnvironmentVar("FDB_TLS_VERIFY_PEERS", verify_peers)) {
-			policy->set_verify_peers({ verify_peers });
+			tlsPolicy->set_verify_peers({ verify_peers });
 		} else {
-			policy->set_verify_peers({ std::string("Check.Valid=1")});
+			tlsPolicy->set_verify_peers({ std::string("Check.Valid=1")});
 		}
 	}
 
 	sslContext.set_options(boost::asio::ssl::context::default_workarounds);
 	sslContext.set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
-	if (policy) {
-		sslContext.set_verify_callback([policy](bool preverified, boost::asio::ssl::verify_context& ctx) {
-			return policy->verify_peer(preverified, ctx.native_handle());
+	if (tlsPolicy) {
+		sslContext.set_verify_callback([this](bool preverified, boost::asio::ssl::verify_context& ctx) {
+			return tlsPolicy->verify_peer(preverified, ctx.native_handle());
 		});
 	} else {
 		sslContext.set_verify_callback(boost::bind(&insecurely_always_accept, _1, _2));
 	}
 
-	if ( !tlsPassword.size() ) {
-		platform::getEnvironmentVar( "FDB_TLS_PASSWORD", tlsPassword );
+	if ( !tlsParams.tlsPassword.size() ) {
+		platform::getEnvironmentVar( "FDB_TLS_PASSWORD", tlsParams.tlsPassword );
 	}
 	sslContext.set_password_callback(std::bind(&Net2::get_password, this));
 
@@ -896,7 +926,7 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, TLS
 		if ( !tlsParams.tlsCertPath.size() ) {
 			if ( !platform::getEnvironmentVar( "FDB_TLS_CERTIFICATE_FILE", tlsParams.tlsCertPath ) ) {
 				if( fileExists(defaultCertFileName) ) {
-					tlsParams.tlsCertPath = fileExists(defaultCertFileName);
+					tlsParams.tlsCertPath = defaultCertFileName;
 				} else if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
 					tlsParams.tlsCertPath = joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
 				}
@@ -932,7 +962,7 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, TLS
 		if (!tlsParams.tlsKeyPath.size()) {
 			if(!platform::getEnvironmentVar( "FDB_TLS_KEY_FILE", tlsParams.tlsKeyPath)) {
 				if( fileExists(defaultCertFileName) ) {
-					tlsParams.tlsKeyPath = fileExists(defaultCertFileName);
+					tlsParams.tlsKeyPath = defaultCertFileName;
 				} else if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
 					tlsParams.tlsKeyPath = joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
 				}
@@ -942,28 +972,8 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, TLS
 			sslContext.use_private_key_file(tlsParams.tlsKeyPath, boost::asio::ssl::context::pem);
 		}
 	}
-	
 #endif
-
-	// Set the global members
-	if(useMetrics) {
-		setGlobal(INetwork::enTDMetrics, (flowGlobalType) &tdmetrics);
-	}
-	setGlobal(INetwork::enNetworkConnections, (flowGlobalType) network);
-	setGlobal(INetwork::enASIOService, (flowGlobalType) &reactor.ios);
-	setGlobal(INetwork::enBlobCredentialFiles, &blobCredentialFiles);
-
-#ifdef __linux__
-	setGlobal(INetwork::enEventFD, (flowGlobalType) N2::ASIOReactor::newEventFD(reactor));
-#endif
-
-
-	int priBins[] = { 1, 2050, 3050, 4050, 4950, 5050, 7050, 8050, 10050 };
-	static_assert( sizeof(priBins) == sizeof(int)*NetworkMetrics::PRIORITY_BINS, "Fix priority bins");
-	for(int i=0; i<NetworkMetrics::PRIORITY_BINS; i++)
-		networkInfo.metrics.priorityBins[i] = static_cast<TaskPriority>(priBins[i]);
-	updateNow();
-
+	tlsInitialized = true;
 }
 
 ACTOR Future<Void> Net2::logTimeOffset() {
@@ -1322,6 +1332,7 @@ THREAD_HANDLE Net2::startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg )
 
 Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::string host ) {
 #ifndef TLS_DISABLED
+	initTLS();
 	if ( toAddr.isTLS() ) {
 		return SSLConnection::connect(&this->reactor.ios, &this->sslContext, toAddr);
 	}
@@ -1401,6 +1412,7 @@ bool Net2::isAddressOnThisHost( NetworkAddress const& addr ) {
 Reference<IListener> Net2::listen( NetworkAddress localAddr ) {
 	try {
 #ifndef TLS_DISABLED
+		initTLS();
 		if ( localAddr.isTLS() ) {
 			return Reference<IListener>(new SSLListener( reactor.ios, &this->sslContext, localAddr ));
 		}
