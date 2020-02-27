@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.2.17
+======
+
+Fixes
+-----
+
+* Restored the ability to set TLS configuration using environment variables. `(PR #2755) <https://github.com/apple/foundationdb/pull/2755>`_.
+
 6.2.16
 ======
 
