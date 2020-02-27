@@ -18,7 +18,6 @@ public:
 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
 
 	explicit PrivateKeyRangeBaseImpl(KeyRef start, KeyRef end) {
-		// TODO : checker: make sure it is in valid key range
 		range = KeyRangeRef(range.arena(), KeyRangeRef(start, end));
 	}
 	KeyRangeRef getKeyRange() const {
@@ -41,11 +40,12 @@ public:
 
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false);
 
-	PrivateKeySpace() {
-		impls = KeyRangeMap<PrivateKeyRangeBaseImpl*>(NULL, LiteralStringRef("\xff\xff\xff"));
+	PrivateKeySpace(KeyRef rangeEndKey = allKeys.end) {
+		// Default value is NULL
+		impls = KeyRangeMap<PrivateKeyRangeBaseImpl*>(NULL, rangeEndKey);
 	}
 	void registerKeyRange(const KeyRangeRef& kr, PrivateKeyRangeBaseImpl* impl) {
-		// TODO : range checker
+		// TODO : range check
 		impls.insert(kr, impl);
 	}
 

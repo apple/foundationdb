@@ -18,10 +18,10 @@ ACTOR Future<Optional<Value>> getActor(
     }
 }
 
-// This function will move the given KeySelector to toward a standard KeySelector:
-// orEqual == false && offset == 1
+// This function will normalize the given KeySelector to a standard KeySelector:
+// orEqual == false && offset == 1 (Standard form)
 // If the corresponding key is not in this private key range, it will move as far as possible to adjust the offset to 1
-// It looks like taking more time here since we query all keys twice in the worst case.
+// It does have overhead here since we query all keys twice in the worst case.
 // However, moving the KeySelector while handling other parameters like limits makes the code much more complex and hard to maintain
 // Seperate each part to make the code easy to understand and more compact
 ACTOR Future<Void> normalizeKeySelectorActor(
@@ -47,8 +47,14 @@ ACTOR Future<Void> normalizeKeySelectorActor(
             startKey = ks->getKey();
     }
 
+    TraceEvent("NormalizeKeySelector").
+        detail("OriginalKey", ks->getKey()).
+        detail("OriginalOffset", ks->offset).
+        detail("PrivateKeyRangeStart", range.begin).
+        detail("PrivateKeyRangeEnd", range.end);
+    
     Standalone<RangeResultRef> result = wait(pkrImpl->getRange(ryw, KeyRangeRef(startKey, endKey)));
-    // TODO : KeySelector::setKey has bytes limit according to the knob, customize it if needed
+    // TODO : KeySelector::setKey has byte limit according to the knobs, customize it if needed
     if (ks->offset < 1) {
         if (result.size() >= 1 - ks->offset) {
             ks->setKey(KeyRef(ks->arena(), result[result.size()-(1-ks->offset)].key));
@@ -62,10 +68,15 @@ ACTOR Future<Void> normalizeKeySelectorActor(
             ks->setKey(KeyRef(ks->arena(), result[ks->offset - 1].key));
             ks->offset = 1;
         } else {
-            ks->setKey(KeyRef(ks->arena(), result[result.size()-1].key));
+            ks->setKey(KeyRef(ks->arena(), keyAfter(result[result.size()-1].key)));
             ks->offset -= result.size();
         }
     }
+    TraceEvent("NormalizeKeySelector").
+        detail("NormalizedKey", ks->getKey()).
+        detail("NormalizedOffset", ks->offset).
+        detail("PrivateKeyRangeStart", range.begin).
+        detail("PrivateKeyRangeEnd", range.end);
     return Void();
 }
 
@@ -96,10 +107,10 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
     }
     if (begin.offset != 1) {
         // The Key Selector points to key outside the whole private key space
-        // TODO : Throw error here to indicate the case
-        TEST(true);
+        TraceEvent(SevError, "IllegalBeginKeySelector").
+            detail("TerminateKey", begin.getKey()).
+            detail("TerminateOffset", begin.offset);
     }
-    // state Key keyStartCopy(begin.getKey());
     iter = pks->getKeyRangeMap()->rangeContaining(end.getKey());
     while (end.offset != 1 && iter != pks->getKeyRangeMap()->ranges().end()) {
         if (iter->value() != NULL)
@@ -108,21 +119,20 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
     }
     if (end.offset != 1) {
         // The Key Selector points to key outside the whole private key space
-        // TODO : Throw error here to indicate the case
-        TEST(true);
+        TraceEvent(SevError, "IllegalEndKeySelector").
+            detail("TerminateKey", end.getKey()).
+            detail("TerminateOffset", end.offset);
     }
     // return if range inverted
     if( begin.offset >= end.offset && begin.getKey() >= end.getKey() ) {
 		TEST(true);
 		return Standalone<RangeResultRef>();
 	}
-    // state Key keyEndCopy(end.getKey());
     state Standalone<RangeResultRef> result;
     state RangeMap<Key, PrivateKeyRangeBaseImpl*, KeyRangeRef>::Ranges ranges =
         pks->getKeyRangeMap()->intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
-    // reverse handler
     // TODO : workaround to write this two together to make the code compact
-    // The issue here is boost::iterator_range<> doest not provide rbegin, rend
+    // The issue here is boost::iterator_range<> doest not provide rbegin(), rend()
     iter = reverse ? ranges.end() : ranges.begin();
     if (reverse) {
         while (iter != ranges.begin()) {
@@ -136,6 +146,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
             // limits handler
             for (int i = pairs.size() - 1; i >= 0; --i) {
                 result.push_back_deep(result.arena(), pairs[i]);
+                // TODO : the behavior here is even the last kv makes bytes larger than specified, 
+                // it is still returned and set limits.bytes to zero
                 limits.decrement(pairs[i]);
                 if (limits.isReached())
                     return result;
@@ -152,6 +164,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
             // limits handler
             for (const KeyValueRef & kv : pairs) {
                 result.push_back_deep(result.arena(), kv);
+                // TODO : behavior here is even the last kv makes bytes larger than specified,
+                // it is still returned and set limits.bytes to zero
                 limits.decrement(kv);
                 if (limits.isReached())
                     return result;
