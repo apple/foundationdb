@@ -868,10 +868,7 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, TLS
 	if( policy && !policy->rules.size() ) {
 		std::string verify_peers;
 		if (platform::getEnvironmentVar("FDB_TLS_VERIFY_PEERS", verify_peers)) {
-			if(!policy->set_verify_peers({ verify_peers })) {
-				TraceEvent(SevWarnAlways, "TLSVerifySetError").detail("Input", verify_peers );
-				throw tls_error();
-			}
+			policy->set_verify_peers({ verify_peers });
 		} else {
 			policy->set_verify_peers({ std::string("Check.Valid=1")});
 		}
@@ -898,8 +895,14 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, TLS
 	else {
 		if ( !tlsParams.tlsCertPath.size() ) {
 			if ( !platform::getEnvironmentVar( "FDB_TLS_CERTIFICATE_FILE", tlsParams.tlsCertPath ) ) {
-				tlsParams.tlsCertPath = fileExists(defaultCertFileName) ? defaultCertFileName : joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+				if( fileExists(defaultCertFileName) ) {
+					tlsParams.tlsCertPath = fileExists(defaultCertFileName);
+				} else if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
+					tlsParams.tlsCertPath = joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+				}
 			}
+		}
+		if ( tlsParams.tlsCertPath.size() ) {
 			sslContext.use_certificate_chain_file(tlsParams.tlsCertPath);
 		}
 	}
@@ -912,8 +915,14 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, TLS
 			platform::getEnvironmentVar("FDB_TLS_CA_FILE", tlsParams.tlsCAPath);
 		}
 		if ( tlsParams.tlsCAPath.size() ) {
-			std::string cert = readFileBytes(tlsParams.tlsCAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
-			sslContext.add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
+			try {
+				std::string cert = readFileBytes(tlsParams.tlsCAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
+				sslContext.add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
+			}
+			catch (Error& e) {
+				fprintf(stderr, "Error reading CA file %s: %s\n", tlsParams.tlsCAPath.c_str(), e.name());
+				throw;
+			}
 		}
 	}
 
@@ -922,10 +931,16 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, TLS
 	} else {
 		if (!tlsParams.tlsKeyPath.size()) {
 			if(!platform::getEnvironmentVar( "FDB_TLS_KEY_FILE", tlsParams.tlsKeyPath)) {
-				tlsParams.tlsKeyPath = fileExists(defaultCertFileName) ? defaultCertFileName : joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+				if( fileExists(defaultCertFileName) ) {
+					tlsParams.tlsKeyPath = fileExists(defaultCertFileName);
+				} else if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
+					tlsParams.tlsKeyPath = joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+				}
 			}
 		}
-		sslContext.use_private_key_file(tlsParams.tlsKeyPath, boost::asio::ssl::context::pem);
+		if (tlsParams.tlsKeyPath.size()) {
+			sslContext.use_private_key_file(tlsParams.tlsKeyPath, boost::asio::ssl::context::pem);
+		}
 	}
 	
 #endif
