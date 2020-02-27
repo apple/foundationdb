@@ -811,6 +811,8 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 		}
 	}
 
+	g_network->initTLS();
+
 	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile(new AsyncVar<Reference<ClusterConnectionFile>>());
 	connectionFile->set(connFile);

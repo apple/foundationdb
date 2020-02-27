@@ -1575,7 +1575,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			openTraceFile(publicAddresses.address, rollsize, maxLogsSize, logFolder, "trace", logGroup);
-
+			g_network->initTLS();
 
 			if (expectsPublicAddress) {
 				for (int ii = 0; ii < (publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {

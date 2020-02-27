@@ -953,7 +953,7 @@ void Net2::initTLS() {
 				catch (Error& e) {
 					fprintf(stderr, "Error reading CA file %s: %s\n", tlsParams.tlsCAPath.c_str(), e.what());
 					TraceEvent("Net2TLSReadCAError").error(e);
-					throw;
+					throw tls_error();
 				}
 			}
 		}
