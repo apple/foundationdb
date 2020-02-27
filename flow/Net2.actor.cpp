@@ -863,36 +863,42 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, con
 	TraceEvent("Net2Starting");
 
 #ifndef TLS_DISABLED
-	sslContext.set_options(boost::asio::ssl::context::default_workarounds);
-	sslContext.set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
-	if (policy) {
-		sslContext.set_verify_callback([policy](bool preverified, boost::asio::ssl::verify_context& ctx) {
-			return policy->verify_peer(preverified, ctx.native_handle());
-		});
-	} else {
-		sslContext.set_verify_callback(boost::bind(&insecurely_always_accept, _1, _2));
-	}
+	try {
+		sslContext.set_options(boost::asio::ssl::context::default_workarounds);
+		sslContext.set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
+		if (policy) {
+			sslContext.set_verify_callback([policy](bool preverified, boost::asio::ssl::verify_context& ctx) {
+				return policy->verify_peer(preverified, ctx.native_handle());
+			});
+		} else {
+			sslContext.set_verify_callback(boost::bind(&insecurely_always_accept, _1, _2));
+		}
 
-	sslContext.set_password_callback(std::bind(&Net2::get_password, this));
+		sslContext.set_password_callback(std::bind(&Net2::get_password, this));
 
-	if (tlsParams.tlsCertPath.size() ) {
-		sslContext.use_certificate_chain_file(tlsParams.tlsCertPath);
+		if (tlsParams.tlsCertPath.size() ) {
+			sslContext.use_certificate_chain_file(tlsParams.tlsCertPath);
+		}
+		if (tlsParams.tlsCertBytes.size() ) {
+			sslContext.use_certificate(boost::asio::buffer(tlsParams.tlsCertBytes.data(), tlsParams.tlsCertBytes.size()), boost::asio::ssl::context::pem);
+		}
+		if (tlsParams.tlsCAPath.size()) {
+			std::string cert = readFileBytes(tlsParams.tlsCAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
+			sslContext.add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
+		}
+		if (tlsParams.tlsCABytes.size()) {
+			sslContext.add_certificate_authority(boost::asio::buffer(tlsParams.tlsCABytes.data(), tlsParams.tlsCABytes.size()));
+		}
+		if (tlsParams.tlsKeyPath.size()) {
+			sslContext.use_private_key_file(tlsParams.tlsKeyPath, boost::asio::ssl::context::pem);
+		}
+		if (tlsParams.tlsKeyBytes.size()) {
+			sslContext.use_private_key(boost::asio::buffer(tlsParams.tlsKeyBytes.data(), tlsParams.tlsKeyBytes.size()), boost::asio::ssl::context::pem);
+		}
 	}
-	if (tlsParams.tlsCertBytes.size() ) {
-		sslContext.use_certificate(boost::asio::buffer(tlsParams.tlsCertBytes.data(), tlsParams.tlsCertBytes.size()), boost::asio::ssl::context::pem);
-	}
-	if (tlsParams.tlsCAPath.size()) {
-		std::string cert = readFileBytes(tlsParams.tlsCAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
-		sslContext.add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
-	}
-	if (tlsParams.tlsCABytes.size()) {
-		sslContext.add_certificate_authority(boost::asio::buffer(tlsParams.tlsCABytes.data(), tlsParams.tlsCABytes.size()));
-	}
-	if (tlsParams.tlsKeyPath.size()) {
-		sslContext.use_private_key_file(tlsParams.tlsKeyPath, boost::asio::ssl::context::pem);
-	}
-	if (tlsParams.tlsKeyBytes.size()) {
-		sslContext.use_private_key(boost::asio::buffer(tlsParams.tlsKeyBytes.data(), tlsParams.tlsKeyBytes.size()), boost::asio::ssl::context::pem);
+	catch(boost::system::system_error e) {
+		TraceEvent("Net2TLSInitError").detail("Message", e.what());
+		throw tls_error();
 	}
 #endif
 
@@ -1456,7 +1462,7 @@ INetwork* newNet2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> poli
 	}
 	catch(boost::system::system_error e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());
-		throw;
+		throw unknown_error();
 	}
 	catch(std::exception const& e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());
