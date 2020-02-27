@@ -120,7 +120,8 @@ static int perfectSubtreeSplitPointCached(int subtree_size) {
 //    void writeDelta(dT &d, const T &base, int commonPrefix = -1) const;
 //
 //    // Compare *this to t, returns < 0 for less than, 0 for equal, > 0 for greater than
-//    int compare(const T &rhs) const;
+//    // The first skipLen bytes can be assumed to be equal
+//    int compare(const T &rhs, int skipLen) const;
 //
 //    // Get the common prefix bytes between *this and base
 //    // skip is a hint of how many prefix bytes are already known to be the same
@@ -167,12 +168,12 @@ struct DeltaTree {
 
 		Node * rightChild() const {
 			//printf("Node(%p): leftOffset=%d  rightOffset=%d  deltaSize=%d\n", this, (int)leftChildOffset, (int)rightChildOffset, (int)delta().size());
-			return rightChildOffset == 0 ? nullptr : (Node *)((uint8_t *)&delta() + rightChildOffset);
+			return rightChildOffset == 0 ? nullptr : (Node *)((uint8_t *)this + rightChildOffset);
 		}
 
 		Node * leftChild() const {
 			//printf("Node(%p): leftOffset=%d  rightOffset=%d  deltaSize=%d\n", this, (int)leftChildOffset, (int)rightChildOffset, (int)delta().size());
-			return leftChildOffset == 0 ? nullptr : (Node *)((uint8_t *)&delta() + leftChildOffset);
+			return leftChildOffset == 0 ? nullptr : (Node *)((uint8_t *)this + leftChildOffset);
 		}
 
 		int size() const {
@@ -181,8 +182,12 @@ struct DeltaTree {
 	};
 
 	struct {
-		OffsetT nodeBytes;     // Total size of all Nodes including the root
-		uint8_t initialDepth;  // Levels in the tree as of the last rebuild
+		OffsetT numItems;         // Number of items in the tree.
+		OffsetT nodeBytesUsed;    // Bytes in use by tree, exluding overhead
+		OffsetT nodeBytesFree;    // Bytes left at end of tree to expand into
+		OffsetT nodeBytesDeleted; // Delta bytes deleted from tree.  Note that some of these bytes could be borrowed by descendents.
+		uint8_t initialHeight;    // Height of tree as originally built
+		uint8_t maxHeight;        // Maximum height of tree after any insertion.  Value of 0 means no insertions done.
 	};
 #pragma pack(pop)
 
@@ -195,7 +200,11 @@ struct DeltaTree {
 	}
 
 	int size() const {
-		return sizeof(DeltaTree) + nodeBytes; 
+		return sizeof(DeltaTree) + nodeBytesUsed; 
+	}
+
+	inline Node & newNode() {
+		return *(Node *)((uint8_t *)this + size());
 	}
 
 public:
@@ -205,65 +214,125 @@ public:
 	}
 
 	struct DecodedNode {
+		DecodedNode() {}
+
+		// construct root node
 		DecodedNode(Node *raw, const T *prev, const T *next, Arena &arena)
-		  : raw(raw), parent(nullptr), left(nullptr), right(nullptr), prev(prev), next(next),
+		  : raw(raw), parent(nullptr), otherAncestor(nullptr), leftChild(nullptr), rightChild(nullptr), prev(prev), next(next),
 		    item(raw->delta().apply(raw->delta().getPrefixSource() ? *prev : *next, arena))
 		{
 			//printf("DecodedNode1 raw=%p delta=%s\n", raw, raw->delta().toString().c_str());
 		}
 		  
-		DecodedNode(Node *raw, DecodedNode *parent, bool left, Arena &arena)
-		  : parent(parent), raw(raw), left(nullptr), right(nullptr),
-		    prev(left ? parent->prev : &parent->item),
-		    next(left ? &parent->item : parent->next),
-		    item(raw->delta().apply(raw->delta().getPrefixSource() ? *prev : *next, arena))
+		// Construct non-root node
+		// wentLeft indicates that we've gone left to get to the raw node.		  
+		DecodedNode(Node *raw, DecodedNode *parent, bool wentLeft, Arena &arena)
+		  : parent(parent), otherAncestor(wentLeft ? parent->getPrevAncestor() : parent->getNextAncestor()),
+		  	prev(wentLeft ? parent->prev : &parent->item),
+			next(wentLeft ? &parent->item : parent->next),
+			leftChild(nullptr), rightChild(nullptr),
+			raw(raw), item(raw->delta().apply(raw->delta().getPrefixSource() ? *prev : *next, arena))
 		{
 			//printf("DecodedNode2 raw=%p delta=%s\n", raw, raw->delta().toString().c_str());
 		}
 
-		Node *raw;
-		DecodedNode *parent;
-		DecodedNode *left;
-		DecodedNode *right;
-		const T *prev;  // greatest ancestor to the left
-		const T *next;  // least ancestor to the right
-		T item;
-
-		DecodedNode *getRight(Arena &arena) {
-			if(right == nullptr) {
-				Node *n = raw->rightChild();
-				if(n != nullptr) {
-					right = new (arena) DecodedNode(n, this, false, arena);
-				}
-			}
-			return right;
+		// Returns true if otherAncestor is the previous ("greatest lesser") ancestor
+		bool otherAncestorPrev() const {
+			return parent && parent->leftChild == this;
 		}
 
-		DecodedNode *getLeft(Arena &arena) {
-			if(left == nullptr) {
-				Node *n = raw->leftChild();
+		// Returns true if otherAncestor is the next ("least greator") ancestor
+		bool otherAncestorNext() const {
+			return parent && parent->rightChild == this;
+		}
+
+		DecodedNode * getPrevAncestor() const {
+			return otherAncestorPrev() ? otherAncestor : parent;
+		}
+
+		DecodedNode * getNextAncestor() const {
+			return otherAncestorNext() ? otherAncestor : parent;
+		}
+
+		DecodedNode * jumpNext(DecodedNode *root) const {
+			if(otherAncestorNext()) {
+				return (otherAncestor != nullptr) ? otherAncestor : rightChild;
+			}
+			else {
+				if(this == root) {
+					return rightChild;
+				}
+				return (otherAncestor != nullptr) ? otherAncestor->rightChild : root;
+			}
+		}
+
+		DecodedNode * jumpPrev(DecodedNode *root) const {
+			if(otherAncestorPrev()) {
+				return (otherAncestor != nullptr) ? otherAncestor : leftChild;
+			}
+			else {
+				if(this == root) {
+					return leftChild;
+				}
+				return (otherAncestor != nullptr) ? otherAncestor->leftChild : root;
+			}
+		}
+
+		void setDeleted(bool deleted) {
+			raw->delta().setDeleted(deleted);
+		}
+
+		bool isDeleted() const {
+			return raw->delta().getDeleted();
+		}
+
+		Node *raw;
+		DecodedNode *parent;
+		DecodedNode *otherAncestor;
+		DecodedNode *leftChild;
+		DecodedNode *rightChild;
+		const T *prev;  // greatest ancestor to the left, or tree lower bound
+		const T *next;  // least ancestor to the right, or tree upper bound
+		T item;
+
+		DecodedNode *getRightChild(Arena &arena) {
+			if(rightChild == nullptr) {
+				Node *n = raw->rightChild();
 				if(n != nullptr) {
-					left = new (arena) DecodedNode(n, this, true, arena);
+					rightChild = new (arena) DecodedNode(n, this, false, arena);
 				}
 			}
-			return left;
+			return rightChild;
+		}
+
+		DecodedNode *getLeftChild(Arena &arena) {
+			if(leftChild == nullptr) {
+				Node *n = raw->leftChild();
+				if(n != nullptr) {
+					leftChild = new (arena) DecodedNode(n, this, true, arena);
+				}
+			}
+			return leftChild;
 		}
 	};
 
 	struct Cursor;
 
-	// A Reader is used to read a Tree by getting cursors into it.
-	// Any node decoded by any cursor is placed in cache for use
-	// by other cursors.
-	struct Reader : FastAllocated<Reader> {
-		Reader(const void *treePtr = nullptr, const T *lowerBound = nullptr, const T *upperBound = nullptr)
-			: tree((DeltaTree *)treePtr), lower(lowerBound), upper(upperBound)  {
+	// A Mirror is an accessor for a DeltaTree which allows insertion and reading.  Both operations are done
+	// using cursors which point to and share nodes in an tree that is built on-demand and mirrors the compressed
+	// structure but with fully reconstituted items (which reference DeltaTree bytes or Arena bytes, based
+	// on the behavior of T::Delta::apply())
+	struct Mirror : FastAllocated<Mirror> {
+		friend class Cursor;
 
-			// TODO: Remove these copies into arena and require users of Reader to keep prev and next alive during its lifetime
+		Mirror(const void *treePtr = nullptr, const T *lowerBound = nullptr, const T *upperBound = nullptr)
+			: tree((DeltaTree *)treePtr), lower(lowerBound), upper(upperBound)
+		{
+			// TODO: Remove these copies into arena and require users of Mirror to keep prev and next alive during its lifetime
 			lower = new(arena) T(arena, *lower);
 			upper = new(arena) T(arena, *upper);
 
-			root = (tree->nodeBytes == 0) ? nullptr : new (arena) DecodedNode(&tree->root(), lower, upper, arena);
+			root = (tree->nodeBytesUsed == 0) ? nullptr : new (arena) DecodedNode(&tree->root(), lower, upper, arena);
 		}
 
 		const T *lowerBound() const {
@@ -274,27 +343,152 @@ public:
 			return upper;
 		}
 
+private:
 		Arena arena;
 		DeltaTree *tree;
 		DecodedNode *root;
 		const T *lower;
 		const T *upper;
+public:
 
 		Cursor getCursor() {
 			return Cursor(this);
 		}
+
+		// Try to insert k into the DeltaTree, updating byte counts and initialHeight if they
+		// have changed (they won't if k already exists in the tree but was deleted).
+		// Returns true if successful, false if k does not fit in the space available
+		// or if k is already in the tree (and was not already deleted).
+		bool insert(const T &k, int skipLen = 0, int maxHeightAllowed = std::numeric_limits<int>::max()) {
+			int height = 1;
+			DecodedNode *n = root;
+			bool addLeftChild = false;
+
+			while(n != nullptr) {
+				int cmp = k.compare(n->item, skipLen);
+
+				if(cmp >= 0) {
+					// If we found an item identical to k then if it is deleted, undeleted it,
+					// otherwise fail
+					if(cmp == 0) {
+						auto &d = n->raw->delta();
+						if(d.getDeleted()) {
+							d.setDeleted(false);
+							++tree->numItems;
+							return true;
+						}
+						else {
+							return false;
+						}
+					}
+
+					DecodedNode *right = n->getRightChild(arena);
+
+					if(right == nullptr) {
+						break;
+					}
+
+					n = right;
+				}
+				else {
+					DecodedNode *left = n->getLeftChild(arena);
+
+					if(left == nullptr) {
+						addLeftChild = true;
+						break;
+					}
+
+					n = left;
+				}
+				++height;
+			}
+
+			if(height > maxHeightAllowed) {
+				return false;
+			}
+
+			// Insert k as the left or right child of n, depending on the value of addLeftChild
+			// First, see if it will fit.
+			const T *prev = addLeftChild ? n->prev : &n->item;
+			const T *next = addLeftChild ? &n->item : n->next;
+
+			int common = prev->getCommonPrefixLen(*next, skipLen);
+			int commonWithPrev = k.getCommonPrefixLen(*prev, common);
+			int commonWithNext = k.getCommonPrefixLen(*next, common);
+			bool basePrev = commonWithPrev >= commonWithNext;
+
+			int commonPrefix = basePrev ? commonWithPrev : commonWithNext;
+			const T *base = basePrev ? prev : next;
+
+			int deltaSize = k.deltaSize(*base, false, commonPrefix);
+			int nodeSpace = deltaSize + sizeof(Node);
+			if(nodeSpace > tree->nodeBytesFree) {
+				return false;
+			}
+
+			DecodedNode *newNode = new (arena) DecodedNode();
+			Node *raw = &tree->newNode();
+			raw->leftChildOffset = 0;
+			raw->rightChildOffset = 0;
+			int newOffset = (uint8_t *)raw - (uint8_t *)n->raw;
+			//printf("Inserting %s at offset %d\n", k.toString().c_str(), newOffset);
+
+			if(addLeftChild) {
+				n->leftChild = newNode;
+				n->raw->leftChildOffset = newOffset;
+			}
+			else {
+				n->rightChild = newNode;
+				n->raw->rightChildOffset = newOffset;
+			}
+
+			newNode->parent = n;
+			newNode->leftChild = nullptr;
+			newNode->rightChild = nullptr;
+			newNode->raw = raw;
+			newNode->otherAncestor = addLeftChild ? n->getPrevAncestor() : n->getNextAncestor();
+			newNode->prev = prev;
+			newNode->next = next;
+
+			ASSERT(deltaSize == k.writeDelta(raw->delta(), *base, commonPrefix));
+			raw->delta().setPrefixSource(basePrev);
+
+			// Initialize node's item from the delta (instead of copying into arena) to avoid unnecessary arena space usage
+			newNode->item = raw->delta().apply(*base, arena);
+
+			tree->nodeBytesUsed += nodeSpace;
+			tree->nodeBytesFree -= nodeSpace;
+			++tree->numItems;
+
+			// Update max height of the tree if necessary
+			if(height > tree->maxHeight) {
+				tree->maxHeight = height;
+			}
+
+			return true;
+		}
+
+		// Erase k by setting its deleted flag to true.  Returns true only if k existed
+		bool erase(const T &k, int skipLen = 0) {
+			Cursor c = getCursor();
+			bool r = c.seek(k);
+			if(r) {
+				c.erase();
+			}
+			return r;
+		}
 	};
 
 	// Cursor provides a way to seek into a DeltaTree and iterate over its contents
-	// All Cursors from a Reader share the same decoded node 'cache' (tree of DecodedNodes)
+	// All Cursors from a Mirror share the same decoded node 'cache' (tree of DecodedNodes)
 	struct Cursor {
-		Cursor() : reader(nullptr), node(nullptr) {
+		Cursor() : mirror(nullptr), node(nullptr) {
 		}
 
-		Cursor(Reader *r) : reader(r), node(reader->root) {
+		Cursor(Mirror *r) : mirror(r), node(mirror->root) {
 		}
 
-		Reader *reader;
+		Mirror *mirror;
 		DecodedNode *node;
 
 		bool valid() const {
@@ -306,123 +500,265 @@ public:
 		}
 
 		const T & getOrUpperBound() const {
-			return valid() ? node->item : *reader->upperBound();
+			return valid() ? node->item : *mirror->upperBound();
+		}
+
+		bool operator==(const Cursor &rhs) const {
+			return node == rhs.node;
+		}
+
+		bool operator!=(const Cursor &rhs) const {
+			return node != rhs.node;
+		}
+
+		void erase() {
+			node->setDeleted(true);
+			--mirror->tree->numItems;
+			moveNext();
+		}
+
+		bool seekLessThanOrEqual(const T &s, int skipLen = 0) {
+			return seekLessThanOrEqual(s, skipLen, nullptr, 0);
+		}
+
+		bool seekLessThanOrEqual(const T &s, int skipLen, const Cursor *pHint) {
+			if(pHint->valid()) {
+				return seekLessThanOrEqual(s, skipLen, pHint, s.compare(pHint->get(), skipLen));
+			}
+			return seekLessThanOrEqual(s, skipLen, nullptr, 0);
 		}
 
 		// Moves the cursor to the node with the greatest key less than or equal to s.  If successful,
-		// returns true, otherwise returns false and the cursor will be at the node with the next key
-		// greater than s.
-		bool seekLessThanOrEqual(const T &s) {
-			node = nullptr;
-			DecodedNode *n = reader->root;
+		// returns true, otherwise returns false and the cursor position will be invalid.
+		// If pHint is given then initialCmp must be logically equivalent to s.compare(pHint->get())
+		// If hintFwd is omitted, it will be calculated (see other definitions above)
+		bool seekLessThanOrEqual(const T &s, int skipLen, const Cursor *pHint, int initialCmp) {
+			DecodedNode *n;
+
+			// If there's a hint position, use it
+			// At the end of using the hint, if n is valid it should point to a node which has not yet been compared to.
+			if(pHint != nullptr && pHint->node != nullptr) {
+				n = pHint->node;
+				if(initialCmp == 0) {
+					node = n;
+					return _hideDeletedBackward();
+				}
+				if(initialCmp > 0) {
+					node = n;
+					while(n != nullptr) {
+						n = n->jumpNext(mirror->root);
+						if(n == nullptr) {
+							break;
+						}
+
+						int cmp = s.compare(n->item, skipLen);
+						if(cmp > 0) {
+							node = n;
+							continue;
+						}
+						if(cmp == 0) {
+							node = n;
+							n = nullptr;
+						}
+						else {
+							n = n->leftChild;
+						}
+						break;
+					}
+				}
+				else {
+					while(n != nullptr) {
+						n = n->jumpPrev(mirror->root);
+						if(n == nullptr) {
+							break;
+						}
+						int cmp = s.compare(n->item, skipLen);
+						if(cmp >= 0) {
+							node = n;
+							n = (cmp == 0) ? nullptr : n->rightChild;
+							break;
+						}
+					}
+				}
+			}
+			else {
+				// Start at root, clear current position
+				n = mirror->root;
+				node = nullptr;
+			}
 
 			while(n != nullptr) {
-				int cmp = s.compare(n->item);
+				int cmp = s.compare(n->item, skipLen);
+
+				if(cmp < 0) {
+					n = n->getLeftChild(mirror->arena);
+				}
+				else {
+					// n <= s so store it in node as a potential result
+					node = n;
+
+					if(cmp == 0) {
+						break;
+					}
+
+					n = n->getRightChild(mirror->arena);
+				}
+			}
+
+			return _hideDeletedBackward();
+		}
+
+		// Moves the cursor to the node with the lowest key greater than or equal to s.  If successful,
+		// returns true, otherwise returns false and the cursor position will be invalid.
+		bool seekGreaterThanOrEqual(const T &s, int skipLen = 0) {
+			DecodedNode *n = mirror->root;
+			node = nullptr;
+
+			while(n != nullptr) {
+				int cmp = s.compare(n->item, skipLen);
+
+				if(cmp > 0) {
+					n = n->getRightChild(mirror->arena);
+				}
+				else {
+					// n >= s so store it in node as a potential result
+					node = n;
+
+					if(cmp == 0) {
+						break;
+					}
+
+					n = n->getLeftChild(mirror->arena);
+				}
+			}
+
+			return _hideDeletedForward();
+		}
+
+		// Moves the cursor to the node with exactly item s
+		// If successful, returns true, otherwise returns false and the cursor position will be invalid.
+		bool seek(const T &s, int skipLen = 0) {
+			DecodedNode *n = mirror->root;
+			node = nullptr;
+
+			while(n != nullptr) {
+				int cmp = s.compare(n->item, skipLen);
 
 				if(cmp == 0) {
+					if(n->isDeleted()) {
+						return false;
+					}
 					node = n;
 					return true;
 				}
 
-				if(cmp < 0) {
-					n = n->getLeft(reader->arena);
-				}
-				else {
-					// n < s so store it in node as a potential result
-					node = n;
-					n = n->getRight(reader->arena);
-				}
+				n = (cmp > 0) ? n->getRightChild(mirror->arena) : n->getLeftChild(mirror->arena);
 			}
 
-			return node != nullptr;
+			return false;
 		}
 
 		bool moveFirst() {
-			DecodedNode *n = reader->root;
+			DecodedNode *n = mirror->root;
 			node = n;
 			while(n != nullptr) {
-				n = n->getLeft(reader->arena);
+				n = n->getLeftChild(mirror->arena);
 				if(n != nullptr)
 					node = n;
 			}
-			return node != nullptr;
+			return _hideDeletedForward();
 		}
 
 		bool moveLast() {
-			DecodedNode *n = reader->root;
+			DecodedNode *n = mirror->root;
 			node = n;
 			while(n != nullptr) {
-				n = n->getRight(reader->arena);
+				n = n->getRightChild(mirror->arena);
 				if(n != nullptr)
 					node = n;
+			}
+			return _hideDeletedBackward();
+		}
+
+		// Try to move to next node, sees deleted nodes.
+		void _moveNext() {
+			// Try to go right
+			DecodedNode *n = node->getRightChild(mirror->arena);
+
+			// If we couldn't go right, then the answer is our next ancestor
+			if(n == nullptr) {
+				node = node->getNextAncestor();
+			}
+			else {
+				// Go left as far as possible
+				while(n != nullptr) {
+					node = n;
+					n = n->getLeftChild(mirror->arena);
+				}
+			}
+		}
+
+		// Try to move to previous node, sees deleted nodes.
+		void _movePrev() {
+			// Try to go left
+			DecodedNode *n = node->getLeftChild(mirror->arena);
+
+			// If we couldn't go left, then the answer is our prev ancestor
+			if(n == nullptr) {
+				node = node->getPrevAncestor();
+			}
+			else {
+				// Go right as far as possible
+				while(n != nullptr) {
+					node = n;
+					n = n->getRightChild(mirror->arena);
+				}
+			}
+		}
+
+		bool moveNext() {
+			_moveNext();
+			return _hideDeletedForward();
+		}
+
+		bool movePrev() {
+			_movePrev();
+			return _hideDeletedBackward();
+		}
+
+	private:
+		bool _hideDeletedBackward() {
+			while(node != nullptr && node->isDeleted()) {
+				_movePrev();
 			}
 			return node != nullptr;
 		}
 
-		bool moveNext() {
-			// Try to go right
-			DecodedNode *n = node->getRight(reader->arena);
-			if(n != nullptr) {
-				// Go left as far as possible
-				while(n != nullptr) {
-					node = n;
-					n = n->getLeft(reader->arena);
-				}
-				return true;
+		bool _hideDeletedForward() {
+			while(node != nullptr && node->isDeleted()) {
+				_moveNext();
 			}
-
-			// Follow parent links until a greater parent is found
-			while(node->parent != nullptr) {
-				bool greaterParent = node->parent->left == node;
-				node = node->parent;
-				if(greaterParent) {
-					return true;
-				}
-			}
-
-			node = nullptr;
-			return false;
-		}
-
-		bool movePrev() {
-			// Try to go left
-			DecodedNode *n = node->getLeft(reader->arena);
-			if(n != nullptr) {
-				// Go right as far as possible
-				while(n != nullptr) {
-					node = n;
-					n = n->getRight(reader->arena);
-				}
-				return true;
-			}
-
-			// Follow parent links until a lesser parent is found
-			while(node->parent != nullptr) {
-				bool lesserParent = node->parent->right == node;
-				node = node->parent;
-				if(lesserParent) {
-					return true;
-				}
-			}
-
-			node = nullptr;
-			return false;
+			return node != nullptr;
 		}
 	};
 
 	// Returns number of bytes written
-	int build(const T *begin, const T *end, const T *prev, const T *next) {
+	int build(int spaceAvailable, const T *begin, const T *end, const T *prev, const T *next) {
 		//printf("tree size: %d   node size: %d\n", sizeof(DeltaTree), sizeof(Node));
 		int count = end - begin;
-		initialDepth = (uint8_t)log2(count) + 1;
+		numItems = count;
+		nodeBytesDeleted = 0;
+		initialHeight = (uint8_t)log2(count) + 1;
+		maxHeight = 0;
 
 		// The boundary leading to the new page acts as the last time we branched right
 		if(begin != end) {
-			nodeBytes = build(root(), begin, end, prev, next, prev->getCommonPrefixLen(*next, 0));
+			nodeBytesUsed = build(root(), begin, end, prev, next, prev->getCommonPrefixLen(*next, 0));
 		}
 		else {
-			nodeBytes = 0;
+			nodeBytesUsed = 0;
 		}
+		nodeBytesFree = spaceAvailable - size();
 		return size();
 	}
 
@@ -464,7 +800,7 @@ private:
 		// Serialize left child
 		if(count > 1) {
 			wptr += build(*(Node *)wptr, begin, begin + mid, prev, &item, commonWithPrev);
-			root.leftChildOffset = deltaSize;
+			root.leftChildOffset = sizeof(Node) + deltaSize;
 		}
 		else {
 			root.leftChildOffset = 0;
@@ -472,7 +808,7 @@ private:
 
 		// Serialize right child
 		if(count > 2) {
-			root.rightChildOffset = wptr - (uint8_t *)&root.delta();
+			root.rightChildOffset = wptr - (uint8_t *)&root;
 			wptr += build(*(Node *)wptr, begin + mid + 1, end, &item, next, commonWithNext);
 		}
 		else {
