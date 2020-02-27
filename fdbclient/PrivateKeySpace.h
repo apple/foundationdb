@@ -3,6 +3,7 @@
 #pragma once
 
 #include "flow/flow.h"
+#include "flow/Arena.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 
@@ -21,10 +22,10 @@ public:
 		range = KeyRangeRef(start, end);
 	}
 	KeyRangeRef getKeyRange() const {
-		return range;
+		return KeyRangeRef(range.begin, range.end);
 	}
 protected:
-	KeyRangeRef range; // underlying key range for this function
+	KeyRange range; // underlying key range for this function
 };
 
 
@@ -40,7 +41,11 @@ public:
 
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false);
 
-	void registerKeyRange(const KeyRange& kr, PrivateKeyRangeBaseImpl* impl) {
+	PrivateKeySpace() {
+		impls = KeyRangeMap<PrivateKeyRangeBaseImpl*>(NULL, LiteralStringRef("\xff\xff\xff"));
+	}
+	void registerKeyRange(const KeyRangeRef& kr, PrivateKeyRangeBaseImpl* impl) {
+		// TODO : range checker
 		impls.insert(kr, impl);
 	}
 

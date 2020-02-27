@@ -30,6 +30,7 @@ ACTOR Future<Void> normalizeKeySelectorActor(
     KeySelector* ks )
 {
     ASSERT(!ks->orEqual); // should be removed before calling
+    ASSERT(ks->offset != 1); // The function is never called when KeySelector is already normalized
     
     state KeyRangeRef range = pkrImpl->getKeyRange();
     state KeyRef startKey = range.begin;
@@ -50,18 +51,18 @@ ACTOR Future<Void> normalizeKeySelectorActor(
     // TODO : KeySelector::setKey has bytes limit according to the knob, customize it if needed
     if (ks->offset < 1) {
         if (result.size() >= 1 - ks->offset) {
-            ks->setKey(result[result.size()-(1-ks->offset)].key);
+            ks->setKey(KeyRef(ks->arena(), result[result.size()-(1-ks->offset)].key));
             ks->offset = 1;
         } else {
-            ks->setKey(result[0].key);
+            ks->setKey(KeyRef(ks->arena(), result[0].key));
             ks->offset += result.size();
         }
     } else {
-        if (result.size() >= ks->offset - 1) {
-            ks->setKey(result[ks->offset - 2].key);
+        if (result.size() >= ks->offset) {
+            ks->setKey(KeyRef(ks->arena(), result[ks->offset - 1].key));
             ks->offset = 1;
         } else {
-            ks->setKey(result[result.size()-1].key);
+            ks->setKey(KeyRef(ks->arena(), result[result.size()-1].key));
             ks->offset -= result.size();
         }
     }
@@ -89,18 +90,21 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
     state RangeMap<Key, PrivateKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter =
         pks->getKeyRangeMap()->rangeContaining(begin.getKey());
     while (begin.offset != 1 && iter != pks->getKeyRangeMap()->ranges().begin()) {
-        wait(normalizeKeySelectorActor(iter->value(), ryw, &begin));
-        --iter;
+        if (iter->value() != NULL)
+            wait(normalizeKeySelectorActor(iter->value(), ryw, &begin));
+        begin.offset < 1 ? --iter : ++iter;
     }
     if (begin.offset != 1) {
         // The Key Selector points to key outside the whole private key space
         // TODO : Throw error here to indicate the case
         TEST(true);
     }
+    // state Key keyStartCopy(begin.getKey());
     iter = pks->getKeyRangeMap()->rangeContaining(end.getKey());
     while (end.offset != 1 && iter != pks->getKeyRangeMap()->ranges().end()) {
-        wait(normalizeKeySelectorActor(iter->value(), ryw, &end));
-        ++iter;
+        if (iter->value() != NULL)
+            wait(normalizeKeySelectorActor(iter->value(), ryw, &end));
+        end.offset < 1 ? --iter : ++iter;
     }
     if (end.offset != 1) {
         // The Key Selector points to key outside the whole private key space
@@ -112,7 +116,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
 		TEST(true);
 		return Standalone<RangeResultRef>();
 	}
-    
+    // state Key keyEndCopy(end.getKey());
     state Standalone<RangeResultRef> result;
     state RangeMap<Key, PrivateKeyRangeBaseImpl*, KeyRangeRef>::Ranges ranges =
         pks->getKeyRangeMap()->intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
@@ -156,77 +160,6 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
     return result;
 }
 
-// ACTOR Future<bool> moveKeySelectorActor(
-//     const PrivateKeyRangeBaseImpl* pkrImpl,
-//     ReadYourWritesTransaction* ryw,
-//     KeySelector* begin,
-//     KeySelector* end,
-//     std::deque<KeyValueRef>& result )
-// {
-//     ASSERT(!begin->orEqual && !end->orEqual);
-//     // If the start key or end key lies outside this keyrange, it cannot handle the case.
-//     // Thus, it is forced for the quired range lies the this keyrange
-//     // It assumes the begin of the range is never used as a key
-//     state KeyRangeRef range = pkrImpl->getKeyRange();
-//     state KeyRef startKey = range.begin;
-//     state KeyRef endKey = range.end;
-//     state int choice;
-//     if (begin->offset != 1) {
-//         if (begin->offset < 1) {
-//             choice = 0;
-//             if (range.contains(begin->getKey()))
-//                 endKey = keyAfter(begin->getKey());
-//         else {
-//             choice = 1;
-//             if (range.contains(begin->getKey()))
-//                 startKey = begin->getKey();
-//         }
-//     } else {
-//         if (end->offset <= 1) {
-//             choice = 2;
-//             if (range.contains(begin->getKey()))
-//                 startKey = begin->getKey();
-//             if (range.contains(end->getKey()))
-//                 endKey = end->getKey();
-//         } else {
-//             choice = 3;
-//             if (range.contains(end->getKey()))
-//                 startKey = end->getKey();
-//         }
-//     }
-
-//     state Standalone<RangeResultRef> temp = wait(pkrImpl->getRange(ryw, KeyRangeRef(startKey, endKey)));
-
-//     if (choice == 0) {
-//         for (int i = temp.size() - 1; i >= 0; --i) {
-//             result.push_front(temp[i]);
-//             ++begin->offset;
-//             if (begin->offset == 1) return false; // TODO : add getLimits check here
-//         }
-//         return true;
-//     } else if (choice == 1) {
-//         if (begin->offset > 1) {
-//             if (begin->offset - 1 <= temp.size()) {
-//                 temp.pop_front(begin->offset - 1);
-//                 begin->offset = 1;
-//             } else {
-//                 begin->offset -= temp.size();
-//                 return true;
-//             }
-//         }
-//         for (const KeyValueRef & kv : temp)
-//             result.push_back(kv);
-        
-//         if ()
-//     } else {
-//         for (const KeyValueRef & kv : temp) {
-//             result.push_back(kv);
-//             --end->offset;
-//             if (end->offset == 1) return false;
-//         }
-//         return true;
-//     }
-// }
 } // namespace end
 Future<Standalone<RangeResultRef>> PrivateKeySpace::getRange(
     ReadYourWritesTransaction* ryw,
