@@ -88,7 +88,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
     GetRangeLimits limits,
     bool reverse )
 {   
-    // This function handles ranges cover more than one keyrange and aggregates all results
+    // This function handles ranges which cover more than one keyrange and aggregates all results
     // KeySelector, GetRangeLimits and reverse are all handled here
     
     // make sure orEqual == false

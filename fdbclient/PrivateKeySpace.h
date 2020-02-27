@@ -11,10 +11,13 @@ class ReadYourWritesTransaction;
 
 class PrivateKeyRangeBaseImpl {
 public:
+	// TO DISCUSS : do we need this general getRange interface here?
+	// Since a keyRange doesn't have any knowledge about other keyRanges, parameters like KeySelector,
+	// GetRangeLimits should be handled together in PrivateKeySpace
+	// Thus, having this general interface looks unnessary.
 	// virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const = 0;
-	// TODO : My opinion is that having this interface is enough for underlying keyrange implemention
-	// A key range doesn't have any knowledge about other key range, parameters like KeySelector, GetRangeLimits should be handled in PrivateKeySpace
-	// Thus, it is no need to have them here
+
+	// Each derived class only needs to implement this simple version of getRange
 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
 
 	explicit PrivateKeyRangeBaseImpl(KeyRef start, KeyRef end) {
