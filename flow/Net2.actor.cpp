@@ -893,84 +893,91 @@ void Net2::initTLS() {
 		return;
 	}
 #ifndef TLS_DISABLED
-	const char *defaultCertFileName = "fdb.pem";
+	try {
+		const char *defaultCertFileName = "fdb.pem";
 
-	if( tlsPolicy && !tlsPolicy->rules.size() ) {
-		std::string verify_peers;
-		if (platform::getEnvironmentVar("FDB_TLS_VERIFY_PEERS", verify_peers)) {
-			tlsPolicy->set_verify_peers({ verify_peers });
+		if( tlsPolicy && !tlsPolicy->rules.size() ) {
+			std::string verify_peers;
+			if (platform::getEnvironmentVar("FDB_TLS_VERIFY_PEERS", verify_peers)) {
+				tlsPolicy->set_verify_peers({ verify_peers });
+			} else {
+				tlsPolicy->set_verify_peers({ std::string("Check.Valid=1")});
+			}
+		}
+
+		sslContext.set_options(boost::asio::ssl::context::default_workarounds);
+		sslContext.set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
+		if (tlsPolicy) {
+			sslContext.set_verify_callback([this](bool preverified, boost::asio::ssl::verify_context& ctx) {
+				return tlsPolicy->verify_peer(preverified, ctx.native_handle());
+			});
 		} else {
-			tlsPolicy->set_verify_peers({ std::string("Check.Valid=1")});
+			sslContext.set_verify_callback(boost::bind(&insecurely_always_accept, _1, _2));
 		}
-	}
 
-	sslContext.set_options(boost::asio::ssl::context::default_workarounds);
-	sslContext.set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
-	if (tlsPolicy) {
-		sslContext.set_verify_callback([this](bool preverified, boost::asio::ssl::verify_context& ctx) {
-			return tlsPolicy->verify_peer(preverified, ctx.native_handle());
-		});
-	} else {
-		sslContext.set_verify_callback(boost::bind(&insecurely_always_accept, _1, _2));
-	}
+		if ( !tlsParams.tlsPassword.size() ) {
+			platform::getEnvironmentVar( "FDB_TLS_PASSWORD", tlsParams.tlsPassword );
+		}
+		sslContext.set_password_callback(std::bind(&Net2::get_password, this));
 
-	if ( !tlsParams.tlsPassword.size() ) {
-		platform::getEnvironmentVar( "FDB_TLS_PASSWORD", tlsParams.tlsPassword );
-	}
-	sslContext.set_password_callback(std::bind(&Net2::get_password, this));
+		if ( tlsParams.tlsCertBytes.size() ) {
+			sslContext.use_certificate_chain(boost::asio::buffer(tlsParams.tlsCertBytes.data(), tlsParams.tlsCertBytes.size()));
+		}
+		else {
+			if ( !tlsParams.tlsCertPath.size() ) {
+				if ( !platform::getEnvironmentVar( "FDB_TLS_CERTIFICATE_FILE", tlsParams.tlsCertPath ) ) {
+					if( fileExists(defaultCertFileName) ) {
+						tlsParams.tlsCertPath = defaultCertFileName;
+					} else if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
+						tlsParams.tlsCertPath = joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+					}
+				}
+			}
+			if ( tlsParams.tlsCertPath.size() ) {
+				sslContext.use_certificate_chain_file(tlsParams.tlsCertPath);
+			}
+		}
 
-	if ( tlsParams.tlsCertBytes.size() ) {
-		sslContext.use_certificate_chain(boost::asio::buffer(tlsParams.tlsCertBytes.data(), tlsParams.tlsCertBytes.size()));
-	}
-	else {
-		if ( !tlsParams.tlsCertPath.size() ) {
-			if ( !platform::getEnvironmentVar( "FDB_TLS_CERTIFICATE_FILE", tlsParams.tlsCertPath ) ) {
-				if( fileExists(defaultCertFileName) ) {
-					tlsParams.tlsCertPath = defaultCertFileName;
-				} else if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
-					tlsParams.tlsCertPath = joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+		if ( tlsParams.tlsCABytes.size() ) {
+			sslContext.add_certificate_authority(boost::asio::buffer(tlsParams.tlsCABytes.data(), tlsParams.tlsCABytes.size()));
+		}
+		else {
+			if ( !tlsParams.tlsCAPath.size() ) {
+				platform::getEnvironmentVar("FDB_TLS_CA_FILE", tlsParams.tlsCAPath);
+			}
+			if ( tlsParams.tlsCAPath.size() ) {
+				try {
+					std::string cert = readFileBytes(tlsParams.tlsCAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
+					sslContext.add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
+				}
+				catch (Error& e) {
+					fprintf(stderr, "Error reading CA file %s: %s\n", tlsParams.tlsCAPath.c_str(), e.what());
+					TraceEvent("Net2TLSReadCAError").error(e);
+					throw;
 				}
 			}
 		}
-		if ( tlsParams.tlsCertPath.size() ) {
-			sslContext.use_certificate_chain_file(tlsParams.tlsCertPath);
-		}
-	}
-	
-	if ( tlsParams.tlsCABytes.size() ) {
-		sslContext.add_certificate_authority(boost::asio::buffer(tlsParams.tlsCABytes.data(), tlsParams.tlsCABytes.size()));
-	}
-	else {
-		if ( !tlsParams.tlsCAPath.size() ) {
-			platform::getEnvironmentVar("FDB_TLS_CA_FILE", tlsParams.tlsCAPath);
-		}
-		if ( tlsParams.tlsCAPath.size() ) {
-			try {
-				std::string cert = readFileBytes(tlsParams.tlsCAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
-				sslContext.add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
-			}
-			catch (Error& e) {
-				fprintf(stderr, "Error reading CA file %s: %s\n", tlsParams.tlsCAPath.c_str(), e.name());
-				throw;
-			}
-		}
-	}
 
-	if (tlsParams.tlsKeyBytes.size()) {
-		sslContext.use_private_key(boost::asio::buffer(tlsParams.tlsKeyBytes.data(), tlsParams.tlsKeyBytes.size()), boost::asio::ssl::context::pem);
-	} else {
-		if (!tlsParams.tlsKeyPath.size()) {
-			if(!platform::getEnvironmentVar( "FDB_TLS_KEY_FILE", tlsParams.tlsKeyPath)) {
-				if( fileExists(defaultCertFileName) ) {
-					tlsParams.tlsKeyPath = defaultCertFileName;
-				} else if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
-					tlsParams.tlsKeyPath = joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+		if (tlsParams.tlsKeyBytes.size()) {
+			sslContext.use_private_key(boost::asio::buffer(tlsParams.tlsKeyBytes.data(), tlsParams.tlsKeyBytes.size()), boost::asio::ssl::context::pem);
+		} else {
+			if (!tlsParams.tlsKeyPath.size()) {
+				if(!platform::getEnvironmentVar( "FDB_TLS_KEY_FILE", tlsParams.tlsKeyPath)) {
+					if( fileExists(defaultCertFileName) ) {
+						tlsParams.tlsKeyPath = defaultCertFileName;
+					} else if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
+						tlsParams.tlsKeyPath = joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+					}
 				}
 			}
+			if (tlsParams.tlsKeyPath.size()) {
+				sslContext.use_private_key_file(tlsParams.tlsKeyPath, boost::asio::ssl::context::pem);
+			}
 		}
-		if (tlsParams.tlsKeyPath.size()) {
-			sslContext.use_private_key_file(tlsParams.tlsKeyPath, boost::asio::ssl::context::pem);
-		}
+	} catch(boost::system::system_error e) {
+		fprintf(stderr, "Error initializing TLS: %s\n", e.what());
+		TraceEvent("Net2TLSInitError").detail("Message", e.what());
+		throw tls_error();
 	}
 #endif
 	tlsInitialized = true;
@@ -1432,6 +1439,9 @@ Reference<IListener> Net2::listen( NetworkAddress localAddr ) {
 		Error x = unknown_error();
 		TraceEvent("Net2ListenError").error(x).detail("Message", e.what());
 		throw x;
+	} catch (Error &e ) {
+		TraceEvent("Net2ListenError").error(e);
+		throw e;
 	} catch (...) {
 		Error x = unknown_error();
 		TraceEvent("Net2ListenError").error(x);
@@ -1517,7 +1527,7 @@ INetwork* newNet2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> poli
 	}
 	catch(boost::system::system_error e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());
-		throw;
+		throw unknown_error();
 	}
 	catch(std::exception const& e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());
