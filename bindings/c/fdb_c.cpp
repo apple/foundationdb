@@ -108,7 +108,7 @@ fdb_error_t fdb_network_set_option( FDBNetworkOption option,
 }
 
 fdb_error_t fdb_setup_network_impl() {
-	CATCH_AND_RETURN( API->setupNetwork() );
+	CATCH_AND_RETURN( API->setupNetwork(); );
 }
 
 fdb_error_t fdb_setup_network_v13( const char* localAddress ) {
