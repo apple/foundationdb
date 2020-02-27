@@ -1553,7 +1553,13 @@ int main(int argc, char* argv[]) {
 		} else {
 #ifndef TLS_DISABLED
 			if ( tlsVerifyPeers.size() ) {
-			  tlsPolicy->set_verify_peers( tlsVerifyPeers );
+				try {
+					tlsPolicy->set_verify_peers( tlsVerifyPeers );
+				} catch( Error &e ) {
+					fprintf(stderr, "ERROR: The format of the --tls_verify_peers option is incorrect.\n");
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
 			}
 #endif
 			g_network = newNet2(useThreadPool, true, tlsPolicy, tlsParams);
@@ -1569,7 +1575,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			openTraceFile(publicAddresses.address, rollsize, maxLogsSize, logFolder, "trace", logGroup);
-
+			g_network->initTLS();
 
 			if (expectsPublicAddress) {
 				for (int ii = 0; ii < (publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
