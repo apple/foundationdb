@@ -26,7 +26,6 @@
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 
-#include <set>
 #include <functional>
 
 class FileTraceLogWriter : public ITraceLogWriter, ReferenceCounted<FileTraceLogWriter> {

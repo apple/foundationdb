@@ -237,9 +237,7 @@ public:
 
 		void resolveIssue(std::string issue) override {
 			MutexHolder h(mutex);
-			if (issues.find(issue) != issues.end()) {
-				issues.erase(issue);
-			}
+			issues.erase(issue);
 		}
 
 		void addref() { ThreadSafeReferenceCounted<IssuesList>::addref(); }
