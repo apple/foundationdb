@@ -908,8 +908,9 @@ void Net2::initTLS() {
 		sslContext.set_options(boost::asio::ssl::context::default_workarounds);
 		sslContext.set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
 		if (tlsPolicy) {
-			sslContext.set_verify_callback([this](bool preverified, boost::asio::ssl::verify_context& ctx) {
-				return tlsPolicy->verify_peer(preverified, ctx.native_handle());
+			Reference<TLSPolicy> policy = tlsPolicy;
+			sslContext.set_verify_callback([policy](bool preverified, boost::asio::ssl::verify_context& ctx) {
+				return policy->verify_peer(preverified, ctx.native_handle());
 			});
 		} else {
 			sslContext.set_verify_callback(boost::bind(&insecurely_always_accept, _1, _2));
