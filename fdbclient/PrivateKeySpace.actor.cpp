@@ -33,8 +33,8 @@ ACTOR Future<Void> normalizeKeySelectorActor(
     ASSERT(ks->offset != 1); // The function is never called when KeySelector is already normalized
     
     state KeyRangeRef range = pkrImpl->getKeyRange();
-    state KeyRef startKey = range.begin;
-    state KeyRef endKey = range.end;
+    state Key startKey(range.begin);
+    state Key endKey(range.end);
 
     if (ks->offset < 1) {
         // less than the given key
@@ -122,6 +122,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
         pks->getKeyRangeMap()->intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
     // reverse handler
     // TODO : workaround to write this two together to make the code compact
+    // The issue here is boost::iterator_range<> doest not provide rbegin, rend
     iter = reverse ? ranges.end() : ranges.begin();
     if (reverse) {
         while (iter != ranges.begin()) {

@@ -1275,17 +1275,17 @@ TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 
 class PrivateKeyRangeTestImpl : public PrivateKeyRangeBaseImpl {
 public:
-	explicit PrivateKeyRangeTestImpl(KeyRef start, KeyRef end, KeyRef prefix, int size) : PrivateKeyRangeBaseImpl(start, end) {
+	explicit PrivateKeyRangeTestImpl(KeyRef start, KeyRef end, std::string prefix, int size) : PrivateKeyRangeBaseImpl(start, end) {
 		this->prefix = prefix;
 		this->size = size;
 		ASSERT(size > 0);
 		for (int i = 0; i < size; ++i) {
-			kvs.push_back_deep(kvs.arena(), KeyValueRef(getKeyForIndex(i), Value(std::to_string(i))));
+			kvs.push_back_deep(kvs.arena(), KeyValueRef(getKeyForIndex(i), deterministicRandom()->randomAlphaNumeric(16)));
 		}
 	}
 
 	Key getKeyForIndex( int idx ) {
-		return Key( format( "%010d", idx ) ).withPrefix(prefix).withPrefix(range.begin);
+		return Key( prefix + format("%010d", idx)).withPrefix(range.begin);
 	}
 
 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
@@ -1296,33 +1296,44 @@ public:
 			--endIndex;
 		if (startIndex == endIndex)
 			return Standalone<RangeResultRef>();
-		else {
-			Standalone<RangeResultRef> result;
-			for (int i = startIndex; i < endIndex; ++i)
-				result.push_back_deep(result.arena(), kvs[i]);
-			return result;
-		}
+		else
+			return Standalone<RangeResultRef>(RangeResultRef(kvs.slice(startIndex, endIndex), false));
 	}
 private:
 	Standalone<VectorRef<KeyValueRef>> kvs;
-	Key prefix;
+	std::string prefix;
 	int size;
 };
 
 TEST_CASE("/fdbclient/PrivateKeySpace/Aggregation") {
 	PrivateKeySpace pks;
-	PrivateKeyRangeTestImpl pkr1(LiteralStringRef("\xff\xff/cat/"), LiteralStringRef("\xff\xff/cat/\xff"), LiteralStringRef("small"), 10);
-	PrivateKeyRangeTestImpl pkr2(LiteralStringRef("\xff\xff/dog/"), LiteralStringRef("\xff\xff/dog/\xff"), LiteralStringRef("medium"), 100);
-	PrivateKeyRangeTestImpl pkr3(LiteralStringRef("\xff\xff/pig/"), LiteralStringRef("\xff\xff/pig/\xff"), LiteralStringRef("large"), 1000);
+	PrivateKeyRangeTestImpl pkr1(LiteralStringRef("\xff\xff/cat/"), LiteralStringRef("\xff\xff/cat/\xff"), "small", 10);
+	PrivateKeyRangeTestImpl pkr2(LiteralStringRef("\xff\xff/dog/"), LiteralStringRef("\xff\xff/dog/\xff"), "medium", 100);
+	PrivateKeyRangeTestImpl pkr3(LiteralStringRef("\xff\xff/pig/"), LiteralStringRef("\xff\xff/pig/\xff"), "large", 1000);
 	pks.registerKeyRange(pkr1.getKeyRange(), &pkr1);
 	pks.registerKeyRange(pkr2.getKeyRange(), &pkr2);
 	pks.registerKeyRange(pkr3.getKeyRange(), &pkr3);
-	KeySelector start = KeySelectorRef(LiteralStringRef("\xff\xff/elepant"), false, -10);
-	KeySelector end = KeySelectorRef(LiteralStringRef("\xff\xff/frog"), false, +10);
-	auto resultFuture = pks.getRange(NULL, start, end, GetRangeLimits());
-	ASSERT(resultFuture.isReady());
-	auto result = resultFuture.getValue();
-	ASSERT(result.size() == 20);
-	ASSERT(result[0].key.endsWith(Key( format( "%010d", 89) ).withPrefix(LiteralStringRef("medium"))));
+	// test case 1
+	{
+		KeySelector start = KeySelectorRef(LiteralStringRef("\xff\xff/elepant"), false, -10);
+		KeySelector end = KeySelectorRef(LiteralStringRef("\xff\xff/frog"), false, +10);
+		auto resultFuture = pks.getRange(NULL, start, end, GetRangeLimits());
+		ASSERT(resultFuture.isReady());
+		auto result = resultFuture.getValue();
+		ASSERT(result.size() == 20);
+		ASSERT(result[0].key == pkr2.getKeyForIndex(89)) ;
+		ASSERT(result[result.size()-1].key == pkr3.getKeyForIndex(8));
+	}
+	// test case 2
+	{
+		KeySelector start = KeySelectorRef(pkr3.getKeyForIndex(999), true, -1109);
+		KeySelector end = KeySelectorRef(pkr1.getKeyForIndex(0), false, +1110);
+		auto resultFuture = pks.getRange(NULL, start, end, GetRangeLimits());
+		ASSERT(resultFuture.isReady());
+		auto result = resultFuture.getValue();
+		ASSERT(result.size() == 1109);
+		ASSERT(result[0].key == pkr1.getKeyForIndex(0)) ;
+		ASSERT(result[result.size()-1].key == pkr3.getKeyForIndex(998));
+	}
 	return Void();
 }

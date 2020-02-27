@@ -19,10 +19,10 @@ public:
 
 	explicit PrivateKeyRangeBaseImpl(KeyRef start, KeyRef end) {
 		// TODO : checker: make sure it is in valid key range
-		range = KeyRangeRef(start, end);
+		range = KeyRangeRef(range.arena(), KeyRangeRef(start, end));
 	}
 	KeyRangeRef getKeyRange() const {
-		return KeyRangeRef(range.begin, range.end);
+		return range;
 	}
 protected:
 	KeyRange range; // underlying key range for this function
