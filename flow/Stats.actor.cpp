@@ -47,10 +47,10 @@ double Counter::getRate() const {
 double Counter::getRoughness() const {
 	double elapsed = now() - roughness_interval_start;
 	if(elapsed == 0) {
-		return 0;
+		return -1;
 	}
 
-	// If we have time samples t in T, and let:
+	// If we have time interval samples t in T, and let:
 	// n = size(T) = interval_delta
 	// m = mean(T) = elapsed / interval_delta
 	// v = sum(t^2) for t in T = interval_sq_time

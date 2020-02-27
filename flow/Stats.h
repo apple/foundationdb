@@ -100,11 +100,11 @@ public:
 	// A delta of N is treated as N distinct increments, with N-1 increments having time span 0.
 	// Normalization is performed by dividing each time sample by the mean time before taking variance.
 	//
-	// roughness = Variance(t/mean(T)) for time samples t in T
+	// roughness = Variance(t/mean(T)) for time interval samples t in T
 	//
 	// A uniformly periodic counter will have roughness of 0
 	// A uniformly periodic counter that increases in clumps of N will have roughness of N-1
-	// A poisson distributed counter will have roughness of 1
+	// A counter with exponentially distributed incrementations will have roughness of 1
 	double getRoughness() const;
 
 	bool hasRate() const { return true; }
