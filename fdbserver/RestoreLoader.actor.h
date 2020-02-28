@@ -59,17 +59,6 @@ public:
 	virtual void operator=(int newState) { vbState = newState; }
 
 	virtual int get() { return vbState; }
-
-	// static std::string getVersionBatchState(int vbState) {
-	// 	switch(vbSTate) {
-	// 		case NOT_INIT: return "NOT_INIT";
-	// 		case INIT: return "INIT";
-	// 		case LOAD_FILE: return "LOAD_FILE";
-	// 		case SEND_MUTATIONS: return "SEND_MUTATIONS";
-	// 		case INVALID: return "INVALID";
-	// 		default: return "UNKNOWN";
-	// 	}
-	// }
 };
 
 struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
@@ -163,8 +152,11 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	int getVersionBatchState(int batchIndex) {
 		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
-		ASSERT(item != batch.end());
-		return item->second->vbState.get();
+		if (item != batch.end()) {
+			return LoaderVersionBatchState::INVALID;
+		} else {
+			return item->second->vbState.get();
+		}
 	}
 	void setVersionBatchState(int batchIndex, int vbState) {
 		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);

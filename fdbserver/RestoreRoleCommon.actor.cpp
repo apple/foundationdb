@@ -56,8 +56,7 @@ ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req,
 	TraceEvent("FastRestoreRolePhaseInitVersionBatch", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("Role", getRoleStr(self->role))
-	    .detail("VersionBatchNotifiedVersion", self->versionBatchId.get())
-	    .detail("PreviousVersionBatchState", self->getVersionBatchState(req.batchIndex));
+	    .detail("VersionBatchNotifiedVersion", self->versionBatchId.get());
 	// batchId is continuous. (req.batchIndex-1) is the id of the just finished batch.
 	wait(self->versionBatchId.whenAtLeast(req.batchIndex - 1));
 
