@@ -52,8 +52,8 @@ public:
 		impls.insert(kr, impl);
 	}
 
-	KeyRangeMap<PrivateKeyRangeBaseImpl*>* getKeyRangeMap(){
-		return &impls;
+	KeyRangeMap<PrivateKeyRangeBaseImpl*>& getKeyRangeMap(){
+		return impls;
 	}
 
 private:

@@ -99,8 +99,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
 
     // make sure offset == 1
     state RangeMap<Key, PrivateKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter =
-        pks->getKeyRangeMap()->rangeContaining(begin.getKey());
-    while (begin.offset != 1 && iter != pks->getKeyRangeMap()->ranges().begin()) {
+        pks->getKeyRangeMap().rangeContaining(begin.getKey());
+    while (begin.offset != 1 && iter != pks->getKeyRangeMap().ranges().begin()) {
         if (iter->value() != NULL)
             wait(normalizeKeySelectorActor(iter->value(), ryw, &begin));
         begin.offset < 1 ? --iter : ++iter;
@@ -111,8 +111,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
             detail("TerminateKey", begin.getKey()).
             detail("TerminateOffset", begin.offset);
     }
-    iter = pks->getKeyRangeMap()->rangeContaining(end.getKey());
-    while (end.offset != 1 && iter != pks->getKeyRangeMap()->ranges().end()) {
+    iter = pks->getKeyRangeMap().rangeContaining(end.getKey());
+    while (end.offset != 1 && iter != pks->getKeyRangeMap().ranges().end()) {
         if (iter->value() != NULL)
             wait(normalizeKeySelectorActor(iter->value(), ryw, &end));
         end.offset < 1 ? --iter : ++iter;
@@ -130,7 +130,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
 	}
     state Standalone<RangeResultRef> result;
     state RangeMap<Key, PrivateKeyRangeBaseImpl*, KeyRangeRef>::Ranges ranges =
-        pks->getKeyRangeMap()->intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
+        pks->getKeyRangeMap().intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
     // TODO : workaround to write this two together to make the code compact
     // The issue here is boost::iterator_range<> doest not provide rbegin(), rend()
     iter = reverse ? ranges.end() : ranges.begin();
