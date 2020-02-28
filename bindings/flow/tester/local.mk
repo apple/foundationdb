@@ -23,6 +23,7 @@
 fdb_flow_tester_CFLAGS := -Ibindings/c $(fdbrpc_CFLAGS)
 fdb_flow_tester_LDFLAGS := -Llib $(fdbrpc_LDFLAGS) -lfdb_c
 fdb_flow_tester_LIBS := lib/libfdb_flow.a lib/libflow.a lib/libfdb_c.$(DLEXT)
+fdb_flow_tester_STATIC_LIBS := $(TLS_LIBS)
 
 fdb_flow_tester: lib/libfdb_c.$(DLEXT)
 	@mkdir -p bindings/flow/bin

@@ -213,21 +213,21 @@ Key selectors
 
     Creates a key selector with the given reference key, equality flag, and offset. It is usually more convenient to obtain a key selector with one of the following methods:
 
-        .. classmethod:: last_less_than(key) -> KeySelector
+    .. classmethod:: last_less_than(key) -> KeySelector
 
-            Returns a key selector referencing the last (greatest) key in the database less than the specified key.
+        Returns a key selector referencing the last (greatest) key in the database less than the specified key.
 
-        .. classmethod:: KeySelector.last_less_or_equal(key) -> KeySelector
+    .. classmethod:: KeySelector.last_less_or_equal(key) -> KeySelector
 
-            Returns a key selector referencing the last (greatest) key less than, or equal to, the specified key.
+        Returns a key selector referencing the last (greatest) key less than, or equal to, the specified key.
 
-        .. classmethod:: KeySelector.first_greater_than(key) -> KeySelector
+    .. classmethod:: KeySelector.first_greater_than(key) -> KeySelector
 
-            Returns a key selector referencing the first (least) key greater than the specified key.
+        Returns a key selector referencing the first (least) key greater than the specified key.
 
-        .. classmethod:: KeySelector.first_greater_or_equal(key) -> KeySelector
+    .. classmethod:: KeySelector.first_greater_or_equal(key) -> KeySelector
 
-            Returns a key selector referencing the first key greater than, or equal to, the specified key.
+        Returns a key selector referencing the first key greater than, or equal to, the specified key.
 
 .. method:: KeySelector.+(offset) -> KeySelector
 
@@ -283,16 +283,16 @@ A |database-blurb1| |database-blurb2|
 
     The ``options`` hash accepts the following optional parameters:
 
-        ``:limit``
-            Only the first ``limit`` keys (and their values) in the range will be returned.
+    ``:limit``
+        Only the first ``limit`` keys (and their values) in the range will be returned.
 
-        ``:reverse``
-            If ``true``, then the keys in the range will be returned in reverse order.
+    ``:reverse``
+        If ``true``, then the keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
-            If ``:limit`` is also specified, the *last* ``limit`` keys in the range will be returned in reverse order.
+        If ``:limit`` is also specified, the *last* ``limit`` keys in the range will be returned in reverse order.
 
-        ``:streaming_mode``
-            A valid |streaming-mode|, which provides a hint to FoundationDB about how to retrieve the specified range. This option should generally not be specified, allowing FoundationDB to retrieve the full range very efficiently.
+    ``:streaming_mode``
+        A valid |streaming-mode|, which provides a hint to FoundationDB about how to retrieve the specified range. This option should generally not be specified, allowing FoundationDB to retrieve the full range very efficiently.
 
 .. method:: Database.get_range(begin, end, options={}) {|kv| block } -> nil
 
@@ -457,16 +457,16 @@ Reading data
 
     The ``options`` hash accepts the following optional parameters:
 
-        ``:limit``
-            Only the first ``limit`` keys (and their values) in the range will be returned.
+    ``:limit``
+        Only the first ``limit`` keys (and their values) in the range will be returned.
 
-        ``:reverse``
-            If true, then the keys in the range will be returned in reverse order.
+    ``:reverse``
+        If ``true``, then the keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
-            If ``:limit`` is also specified, the *last* ``limit`` keys in the range will be returned in reverse order.
+        If ``:limit`` is also specified, the *last* ``limit`` keys in the range will be returned in reverse order.
 
-        ``:streaming_mode``
-            A valid |streaming-mode|, which provides a hint to FoundationDB about how the returned enumerable is likely to be used.  The default is ``:iterator``.
+    ``:streaming_mode``
+        A valid |streaming-mode|, which provides a hint to FoundationDB about how the returned enumerable is likely to be used.  The default is ``:iterator``.
 
 .. method:: Transaction.get_range(begin, end, options={}) {|kv| block } -> nil
 

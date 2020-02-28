@@ -45,9 +45,9 @@ struct IDataDistributionTeam {
 	virtual void addDataInFlightToTeam( int64_t delta ) = 0;
 	virtual int64_t getDataInFlightToTeam() = 0;
 	virtual int64_t getLoadBytes( bool includeInFlight = true, double inflightPenalty = 1.0 ) = 0;
-	virtual int64_t getMinFreeSpace( bool includeInFlight = true ) = 0;
-	virtual double getMinFreeSpaceRatio( bool includeInFlight = true ) = 0;
-	virtual bool hasHealthyFreeSpace() = 0;
+	virtual int64_t getMinAvailableSpace( bool includeInFlight = true ) = 0;
+	virtual double getMinAvailableSpaceRatio( bool includeInFlight = true ) = 0;
+	virtual bool hasHealthyAvailableSpace( double minRatio ) = 0;
 	virtual Future<Void> updateStorageMetrics() = 0;
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -75,18 +75,22 @@ struct GetTeamRequest {
 	bool wantsNewServers;
 	bool wantsTrueBest;
 	bool preferLowerUtilization;
+	bool teamMustHaveShards;
 	double inflightPenalty;
 	std::vector<UID> completeSources;
 	Promise< Optional< Reference<IDataDistributionTeam> > > reply;
 
 	GetTeamRequest() {}
-	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, double inflightPenalty = 1.0 ) : wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), inflightPenalty( inflightPenalty ) {}
-
+	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, bool teamMustHaveShards, double inflightPenalty = 1.0 ) 
+		: wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), teamMustHaveShards( teamMustHaveShards ), inflightPenalty( inflightPenalty ) {}
+	
 	std::string getDesc() {
 		std::stringstream ss;
 
 		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
-		   << " PreferLowerUtilization:" << preferLowerUtilization << " inflightPenalty:" << inflightPenalty << ";";
+		   << " PreferLowerUtilization:" << preferLowerUtilization 
+		   << " teamMustHaveShards:" << teamMustHaveShards
+		   << " inflightPenalty:" << inflightPenalty << ";";
 		ss << "CompleteSources:";
 		for (auto& cs : completeSources) {
 			ss << cs.toString() << ",";

@@ -27,6 +27,7 @@
 #include <stdint.h>
 #include <string>
 #include <map>
+#include <set>
 #include <type_traits>
 #include "flow/IRandom.h"
 #include "flow/Error.h"
@@ -80,6 +81,8 @@ public:
 	int getInt(std::string key, bool permissive=false) const;
 	int64_t getInt64(std::string key, bool permissive=false) const;
 	double getDouble(std::string key, bool permissive=false) const;
+
+	Field &mutate(int index);
 
 	std::string toString() const;
 	void validateFormat() const;
@@ -374,10 +377,14 @@ struct SpecialTraceMetricType
 TRACE_METRIC_TYPE(double, double);
 
 struct TraceEvent {
+	TraceEvent();
 	TraceEvent( const char* type, UID id = UID() );   // Assumes SevInfo severity
 	TraceEvent( Severity, const char* type, UID id = UID() );
 	TraceEvent( struct TraceInterval&, UID id = UID() );
 	TraceEvent( Severity severity, struct TraceInterval& interval, UID id = UID() );
+
+	TraceEvent( TraceEvent &&ev );
+	TraceEvent& operator=( TraceEvent &&ev );
 
 	static void setNetworkThread();
 	static bool isNetworkThread();
@@ -490,6 +497,7 @@ private:
 
 	int maxFieldLength;
 	int maxEventLength;
+	int timeIndex;
 
 	void setSizeLimits();
 
@@ -516,6 +524,16 @@ struct ITraceLogFormatter {
 	virtual const char* getHeader() = 0; // Called when starting a new file
 	virtual const char* getFooter() = 0; // Called when ending a file
 	virtual std::string formatEvent(const TraceEventFields&) = 0; // Called for each event
+
+	virtual void addref() = 0;
+	virtual void delref() = 0;
+};
+
+struct ITraceLogIssuesReporter {
+	virtual void addIssue(std::string issue) = 0;
+	virtual void resolveIssue(std::string issue) = 0;
+
+	virtual void retrieveIssues(std::set<std::string>& out) = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -579,6 +597,10 @@ bool validateTraceClockSource(std::string source);
 
 void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
+void retriveTraceLogIssues(std::set<std::string>& out);
+template <class T>
+struct ThreadFuture;
+void pingTraceLogWriterThread(ThreadFuture<struct Void>& p);
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
 extern std::atomic<trace_clock_t> g_trace_clock;
