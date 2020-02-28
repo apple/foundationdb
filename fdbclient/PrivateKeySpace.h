@@ -43,12 +43,14 @@ public:
 
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false);
 
-	PrivateKeySpace(KeyRef rangeEndKey = allKeys.end) {
-		// Default value is NULL
-		impls = KeyRangeMap<PrivateKeyRangeBaseImpl*>(NULL, rangeEndKey);
+	PrivateKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = allKeys.end) {
+		// Default value is NULL, begin of KeyRangeMap is Key() 
+		impls = KeyRangeMap<PrivateKeyRangeBaseImpl*>(NULL, spaceEndKey);
+		range = KeyRangeRef(spaceStartKey, spaceEndKey);
 	}
 	void registerKeyRange(const KeyRangeRef& kr, PrivateKeyRangeBaseImpl* impl) {
-		// TODO : range check
+		// range check
+		ASSERT(kr.begin >= range.begin && kr.end <= range.end);
 		impls.insert(kr, impl);
 	}
 
@@ -58,6 +60,7 @@ public:
 
 private:
 	KeyRangeMap<PrivateKeyRangeBaseImpl*> impls;
+	KeyRange range;
 };
 
 #endif

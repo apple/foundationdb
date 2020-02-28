@@ -1308,7 +1308,7 @@ private:
 };
 
 TEST_CASE("/fdbclient/PrivateKeySpace/Aggregation") {
-	PrivateKeySpace pks(LiteralStringRef("\xff\xff\xff"));
+	PrivateKeySpace pks(LiteralStringRef("\xff\xff"), LiteralStringRef("\xff\xff\xff"));
 	PrivateKeyRangeTestImpl pkr1(LiteralStringRef("\xff\xff/cat/"), LiteralStringRef("\xff\xff/cat/\xff"), "small", 10);
 	PrivateKeyRangeTestImpl pkr2(LiteralStringRef("\xff\xff/dog/"), LiteralStringRef("\xff\xff/dog/\xff"), "medium", 100);
 	PrivateKeyRangeTestImpl pkr3(LiteralStringRef("\xff\xff/pig/"), LiteralStringRef("\xff\xff/pig/\xff"), "large", 1000);
