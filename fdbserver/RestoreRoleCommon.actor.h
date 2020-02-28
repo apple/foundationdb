@@ -113,10 +113,11 @@ public:
 		return vbState;
 	}
 
-	operator = (int newState) {
+	void operator = (int newState) {
 		vbState = newState;
 	}
 
+	explicit RoleVersionBatchState() : vbState(INVALID) {}
 	explicit RoleVersionBatchState(int newState) : vbState(newState) {}
 
 	int vbState;

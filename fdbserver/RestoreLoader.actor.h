@@ -43,13 +43,16 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 class LoaderVersionBatchState : RoleVersionBatchState {
+public:
 	static const int NOT_INIT = 0;
 	static const int INIT = 1;
 	static const int LOAD_FILE = 2;
 	static const int SEND_MUTATIONS = 3;
 	static const int INVALID = 4;
 
-	explicit LoaderVersionBatchState(int newState) : vbState(newState) {}
+	explicit LoaderVersionBatchState(int newState) {
+		vbState = newState;
+	}
 
 	// static std::string getVersionBatchState(int vbState) {
 	// 	switch(vbSTate) {
@@ -152,15 +155,15 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		return ss.str();
 	}
 
-	std::string getVersionBatchState(int batchIndex) {
+	int getVersionBatchState(int batchIndex) {
 		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
 		ASSERT(item != batch.end());
-		return item->second->vbState;
+		return item->second->vbState.get();
 	}
-	void setVersionBatchState(int batchIndex, RoleVersionBatchState vbState) {
+	void setVersionBatchState(int batchIndex, int vbState) {
 		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
 		ASSERT(item != batch.end());
-		item->second->vbState = (LoaderVersionBatchState) vbState;
+		item->second->vbState = vbState;
 	}
 
 	void initVersionBatch(int batchIndex) {

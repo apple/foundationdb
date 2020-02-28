@@ -203,13 +203,16 @@ struct StagingKeyRange {
 
 // Applier state in each verion batch
 class ApplierVersionBatchState : RoleVersionBatchState {
+public:
 	static const int NOT_INIT = 0;
 	static const int INIT = 1;
 	static const int RECEIVE_MUTATIONS = 2;
 	static const int WRITE_TO_DB = 3;
 	static const int INVALID = 4;
 
-	explicit ApplierVersionBatchState(int newState) : vbState(newState) {}
+	explicit ApplierVersionBatchState(int newState) {
+		vbState = newState;
+	}
 };
 
 struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
