@@ -897,9 +897,11 @@ ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreMasterData> se
 ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreMasterData> self) {
 	state std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
 	state std::map<UID, RestoreApplierInterface>::iterator applier = self->appliersInterf.begin();
-	state std::vector<Future<RestoreCommonReply>> fReplies;
+	state std::vector<Future<RestoreCommonReply>> fReplies; // TODO: Reserve memory for this vector
 	state std::vector<UID> nodes;
+
 	loop {
+		wait(delay(SERVER_KNOBS->FASTRESTORE_HEARTBEAT_DELAY));
 		loader = self->loadersInterf.begin();
 		applier = self->appliersInterf.begin();
 		fReplies.clear();
