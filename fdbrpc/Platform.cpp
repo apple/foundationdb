@@ -112,24 +112,6 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	return __eraseDirectoryRecurseiveCount;
 }
 
-std::string getDefaultConfigPath() {
-#ifdef _WIN32
-	TCHAR szPath[MAX_PATH];
-	if( SHGetFolderPath(NULL, CSIDL_COMMON_APPDATA, NULL, 0, szPath)  != S_OK ) {
-		TraceEvent(SevError, "WindowsAppDataError").GetLastError();
-		throw platform_error();
-	}
-	std::string _filepath(szPath);
-	return _filepath + "\\foundationdb";
-#elif defined(__linux__)
-	return "/etc/foundationdb";
-#elif defined(__APPLE__)
-	return "/usr/local/etc/foundationdb";
-#else
-	#error Port me!
-#endif
-}
-
 bool isSse42Supported()
 {
 #if defined(_WIN32)
@@ -145,7 +127,4 @@ bool isSse42Supported()
 #endif
 }
 
-std::string getDefaultClusterFilePath() {
-	return joinPath(platform::getDefaultConfigPath(), "fdb.cluster");
-}
 } // namespace platform

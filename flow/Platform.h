@@ -375,8 +375,11 @@ int setEnvironmentVar(const char *name, const char *value, int overwrite);
 
 std::string getWorkingDirectory();
 
-// Returns the ... something something figure out plugin locations
-std::string getDefaultPluginPath( const char* plugin_name );
+// Returns the absolute platform-dependant path for server-based files
+std::string getDefaultConfigPath();
+
+// Returns the absolute platform-dependant path for the default fdb.cluster file
+std::string getDefaultClusterFilePath();
 
 void *getImageOffset();
 

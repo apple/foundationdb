@@ -1628,7 +1628,13 @@ int main(int argc, char* argv[]) {
 		} else {
 #ifndef TLS_DISABLED
 			if ( opts.tlsVerifyPeers.size() ) {
-			  opts.tlsPolicy->set_verify_peers( opts.tlsVerifyPeers );
+				try {
+					opts.tlsPolicy->set_verify_peers( opts.tlsVerifyPeers );
+				} catch( Error &e ) {
+					fprintf(stderr, "ERROR: The format of the --tls_verify_peers option is incorrect.\n");
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
 			}
 #endif
 			g_network = newNet2(opts.useThreadPool, true, opts.tlsPolicy, opts.tlsParams);
@@ -1645,6 +1651,7 @@ int main(int argc, char* argv[]) {
 
 			openTraceFile(opts.publicAddresses.address, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace",
 			              opts.logGroup);
+			g_network->initTLS();
 
 			if (expectsPublicAddress) {
 				for (int ii = 0; ii < (opts.publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
@@ -2063,6 +2070,7 @@ int main(int argc, char* argv[]) {
 		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
 	} catch (boost::system::system_error& e) {
+		ASSERT_WE_THINK(false); // boost errors shouldn't leak
 		fprintf(stderr, "boost::system::system_error: %s (%d)", e.what(), e.code().value());
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);

@@ -3790,8 +3790,5 @@ int main(int argc, char **argv) {
 	} catch (Error& e) {
 		printf("ERROR: %s (%d)\n", e.what(), e.code());
 		return 1;
-	} catch (boost::system::system_error& e) {
-		printf("ERROR: %s (%d)\n", e.what(), e.code().value());
-		return 1;
 	}
 }

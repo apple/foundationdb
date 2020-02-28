@@ -30,12 +30,6 @@ namespace platform {
 // Avoid in production code: not atomic, not fast, not reliable in all environments
 int eraseDirectoryRecursive(std::string const& directory);
 
-// Returns the absolute platform-dependant path for the default fdb.cluster file
-std::string getDefaultClusterFilePath();
-
-// Returns the absolute platform-dependant path for server-based files
-std::string getDefaultConfigPath();
-
 bool isSse42Supported();
 
 } // namespace platform

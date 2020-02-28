@@ -215,7 +215,7 @@ static X509Location locationForNID(NID nid) {
 	}
 }
 
-bool TLSPolicy::set_verify_peers(std::vector<std::string> verify_peers) {
+void TLSPolicy::set_verify_peers(std::vector<std::string> verify_peers) {
 	for (int i = 0; i < verify_peers.size(); i++) {
 		try {
 			std::string& verifyString = verify_peers[i];
@@ -235,10 +235,9 @@ bool TLSPolicy::set_verify_peers(std::vector<std::string> verify_peers) {
 			rules.clear();
 			std::string& verifyString = verify_peers[i];
 			TraceEvent(SevError, "FDBLibTLSVerifyPeersParseError").detail("Config", verifyString);
-			return false;
+			throw tls_error();
 		}
 	}
-	return true;
 }
 
 TLSPolicy::Rule::Rule(std::string input) {
