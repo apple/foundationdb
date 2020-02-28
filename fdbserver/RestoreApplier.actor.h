@@ -368,10 +368,11 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 
 	~RestoreApplierData() = default;
 
+	// getVersionBatchState may be called periodically to dump version batch state,
+	// even when no version batch has been started.
 	int getVersionBatchState(int batchIndex) {
 		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
-		if (item == batch.end()) {
-			ASSERT_WE_THINK(false);
+		if (item == batch.end()) { // Simply caller's effort in when it can call this func.
 			return ApplierVersionBatchState::INVALID;
 		} else {
 			return item->second->vbState.get();
