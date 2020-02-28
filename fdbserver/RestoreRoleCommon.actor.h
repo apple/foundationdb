@@ -154,8 +154,8 @@ public:
 
 	virtual void initVersionBatch(int batchIndex) = 0;
 	virtual void resetPerRestoreRequest() = 0;
-	virtual int getVersionBatchState(int batchIndex);
-	virtual void setVersionBatchState(int batchIndex, int vbState);
+	virtual int getVersionBatchState(int batchIndex) = 0;
+	virtual void setVersionBatchState(int batchIndex, int vbState) = 0;
 
 	void clearInterfaces() {
 		loadersInterf.clear();

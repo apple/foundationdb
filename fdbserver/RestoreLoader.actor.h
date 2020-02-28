@@ -54,15 +54,11 @@ public:
 		vbState = newState;
 	}
 
-	~LoaderVersionBatchState() = default;
+	virtual ~LoaderVersionBatchState() = default;
 
-	void operator = (int newState) {
-		vbState = newState;
-	}
+	virtual void operator=(int newState) { vbState = newState; }
 
-	int get() {
-		return RoleVersionBatchState::get();
-	}
+	virtual int get() { return vbState; }
 
 	// static std::string getVersionBatchState(int vbState) {
 	// 	switch(vbSTate) {

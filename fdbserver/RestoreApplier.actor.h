@@ -214,15 +214,11 @@ public:
 		vbState = newState;
 	}
 
-	~ApplierVersionBatchState() = default;
+	virtual ~ApplierVersionBatchState() = default;
 
-	void operator = (int newState) {
-		vbState = newState;
-	}
+	virtual void operator=(int newState) { vbState = newState; }
 
-	int get() {
-		return RoleVersionBatchState::get();
-	}
+	virtual int get() { return vbState; }
 };
 
 struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
