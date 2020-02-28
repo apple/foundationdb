@@ -116,6 +116,10 @@ ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatch
 			self->delayedActors--;
 			break;
 		} else {
+			TraceEvent(SevDebug, "FastRestoreMemoryUsageAboveThresholdWait")
+			    .detail("BatchIndex", actorBatchIndex)
+			    .detail("Actor", name)
+			    .detail("CurrentMemory", memory);
 			wait(delay(SERVER_KNOBS->FASTRESTORE_WAIT_FOR_MEMORY_LATENCY) || self->checkMemory.onTrigger());
 		}
 	}
