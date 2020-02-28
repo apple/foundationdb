@@ -78,13 +78,28 @@ struct BackupData {
 	Database cx;
 	std::vector<VersionedMessage> messages;
 	AsyncVar<bool> pullFinished;
+	NotifiedVersion pulledVersion;
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
 		PerBackupInfo(BackupData* data, Version v) : self(data), startVersion(v) {}
 
-		bool isRunning() {
+		bool isReady() const {
+			return stopped || (container.isReady() && ranges.isReady());
+		}
+
+		bool isRunning() const {
 			return container.isReady() && ranges.isReady() && !stopped;
+		}
+
+		Future<Void> waitReady() {
+			if (stopped) return Void();
+			return _waitReady(this);
+		}
+
+		ACTOR static Future<Void> _waitReady(PerBackupInfo* info) {
+			wait(success(info->container) && success(info->ranges));
+			return Void();
 		}
 
 		BackupData* self = nullptr;
@@ -105,7 +120,8 @@ struct BackupData {
 	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo>> db, const InitializeBackupRequest& req)
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
-	    minKnownCommittedVersion(invalidVersion), savedVersion(invalidVersion), cc("BackupWorker", myId.toString()) {
+	    minKnownCommittedVersion(invalidVersion), savedVersion(invalidVersion), cc("BackupWorker", myId.toString()),
+	    pulledVersion(0) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 		pullFinished.set(false);
 
@@ -204,11 +220,38 @@ struct BackupData {
 		}
 		if (modified) changedTrigger.trigger();
 	}
+
+	ACTOR static Future<Void> _waitAllInfoReady(BackupData* self) {
+		std::vector<Future<Void>> all;
+		for (auto it = self->backups.begin(); it != self->backups.end(); ) {
+			if (it->second.stopped) {
+				TraceEvent("BackupWorkerRemoveStoppedContainer", self->myId).detail("BackupId", it->first);
+				it = self->backups.erase(it);
+				continue;
+			}
+			all.push_back(it->second.waitReady());
+			it++;
+		}
+		wait(waitForAll(all));
+		return Void();
+	}
+
+	Future<Void> waitAllInfoReady() {
+		return _waitAllInfoReady(this);
+	}
+
+	bool isAllInfoReady() const {
+		for (const auto& [uid, info] : backups) {
+			if (!info.isReady()) return false;
+		}
+		return true;
+	}
 };
 
 // Monitors "backupStartedKey". If "started" is true, wait until the key is set;
-// otherwise, wait until the key is cleared.
-ACTOR Future<Void> monitorBackupStartedKeyChanges(BackupData* self, bool started) {
+// otherwise, wait until the key is cleared. If "watch" is false, do not perform
+// the wait for key set/clear events. Returns if key present.
+ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool started, bool watch) {
 	loop {
 		state ReadYourWritesTransaction tr(self->cx);
 
@@ -228,13 +271,13 @@ ACTOR Future<Void> monitorBackupStartedKeyChanges(BackupData* self, bool started
 						i++;
 					}
 					self->onBackupChanges(uidVersions);
-					if (started) return Void();
+					if (started || !watch) return true;
 				} else {
 					TraceEvent("BackupWorkerEmptyStartKey", self->myId);
 					self->onBackupChanges(uidVersions);
 
-					if (!started) {
-						return Void();
+					if (!started || !watch) {
+						return false;
 					}
 				}
 
@@ -383,7 +426,6 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile, VersionedMessage 
 
 // Saves messages in the range of [0, numMsg) to a file and then remove these
 // messages. The file format is a sequence of (Version, sub#, msgSize, message).
-// Note only ready backups are saved.
 ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
 	state int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
 	state std::vector<Future<Reference<IBackupFile>>> logFileFutures;
@@ -394,36 +436,24 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	state std::vector<Standalone<StringRef>> mutations;
 	state int idx;
 
-	for (auto it = self->backups.begin(); it != self->backups.end();) {
-		if (!it->second.isRunning()) {
-			if (it->second.stopped) {
-				TraceEvent("BackupWorkerRemoveStoppedContainer", self->myId).detail("BackupId", it->first);
-				it = self->backups.erase(it);
-			} else {
-				it++;
-			}
-			continue;
-		}
-		if (!it->second.container.get().present()) {
-			TraceEvent("BackupWorkerNoContainer", self->myId).detail("BackupId", it->first);
-			it = self->backups.erase(it);
-			continue;
-		}
+	// Make sure all backups are ready, otherwise mutations will be lost.
+	while (!self->isAllInfoReady()) {
+		wait(self->waitAllInfoReady());
+	}
+
+	for (auto it = self->backups.begin(); it != self->backups.end(); it++) {
+		ASSERT(it->second.container.get().present());
 		const int index = logFileFutures.size();
 		activeUids.insert(it->first);
 		self->insertRanges(keyRangeMap, it->second.ranges.get(), index);
 		if (it->second.lastSavedVersion == invalidVersion) {
-			it->second.lastSavedVersion = self->messages[0].getVersion();
+			it->second.lastSavedVersion = self->messages.empty() ? self->savedVersion : self->messages[0].getVersion();
 		}
 		logFileFutures.push_back(it->second.container.get().get()->writeTaggedLogFile(
 		    it->second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id, self->totalTags));
-		it++;
 	}
-	if (activeUids.empty()) {
-		// stop early if there is no active backups
-		TraceEvent("BackupWorkerSkip", self->myId).detail("Count", numMsg);
-		return Void();
-	}
+	ASSERT(!activeUids.empty());
+
 	keyRangeMap.coalesce(allKeys);
 	wait(waitForAll(logFileFutures));
 
@@ -504,25 +534,27 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 
 		const Version maxPopVersion =
 		    self->endVersion.present() ? self->endVersion.get() : self->minKnownCommittedVersion;
+		state int numMsg = 0;
 		if (self->messages.empty()) {
 			// Even though messages is empty, we still want to advance popVersion.
 			popVersion = std::max(popVersion, maxPopVersion);
 		} else {
-			state int numMsg = 0;
 			for (const auto& message : self->messages) {
 				if (message.getVersion() > maxPopVersion) break;
 				popVersion = std::max(popVersion, message.getVersion());
 				numMsg++;
-			}
-			if (numMsg > 0) {
-				wait(saveMutationsToFile(self, popVersion, numMsg));
-				self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
 			}
 		}
 		if (self->pullFinished.get() && self->messages.empty()) {
 			// Advance popVersion to the endVersion to avoid gap between last
 			// message version and the endVersion.
 			popVersion = self->endVersion.get();
+		}
+		if (numMsg > 0 || self->endVersion.present()) {
+			// save an empty file for old epochs so that log file versions are continuous
+			TraceEvent("BackupWorkerSave", self->myId).detail("PopVersion", popVersion).detail("MsgQ", self->messages.size());
+			wait(saveMutationsToFile(self, popVersion, numMsg));
+			self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
 		}
 
 		if (popVersion > self->savedVersion) {
@@ -572,6 +604,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		}
 
 		tagAt = r->version().version;
+		self->pulledVersion = tagAt;
 		TraceEvent("BackupWorkerGot", self->myId).suppressFor(1.0).detail("V", tagAt);
 		if (self->endVersion.present() && tagAt > self->endVersion.get()) {
 			self->eraseMessagesAfterEndVersion();
@@ -588,13 +621,17 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 }
 
 ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self) {
-	state Future<Void> started, pullFinished;
+	state Future<Void> pullFinished = Void();
+	state Future<bool> started;
 	state Future<GetReadVersionReply> replyFuture = Never();
 
 	loop {
-		started = monitorBackupStartedKeyChanges(self, true);
+		started = monitorBackupStartedKeyChanges(self, true, true);
 		loop choose {
-			when(wait(started)) { break; }
+			when(bool present = wait(started)) {
+				replyFuture = Never();
+				break;
+			}
 			when(wait(self->cx->onMasterProxiesChanged() ||
 			          delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID))) {
 				GetReadVersionRequest request(1, GetReadVersionRequest::PRIORITY_DEFAULT |
@@ -611,10 +648,28 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self) {
 			}
 		}
 
-		Future<Void> stopped = monitorBackupStartedKeyChanges(self, false);
+		Future<bool> stopped = monitorBackupStartedKeyChanges(self, false, true);
 		pullFinished = pullAsyncData(self);
-		wait(stopped || pullFinished);
+		wait(success(stopped) || pullFinished);
 		if (pullFinished.isReady()) return Void(); // backup is done for some old epoch.
+
+		// Even though the snapshot is done, mutation logs may not be written
+		// out yet. We need to make usre mutations up to this point is written.
+		state Version currentVersion;
+		loop {
+			GetReadVersionRequest request(1, GetReadVersionRequest::PRIORITY_DEFAULT |
+			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
+			choose {
+				when(wait(self->cx->onMasterProxiesChanged())) {}
+				when(GetReadVersionReply reply = wait(loadBalance(self->cx->getMasterProxies(false),
+				                                                  &MasterProxyInterface::getConsistentReadVersion,
+				                                                  request, self->cx->taskID))) {
+					currentVersion = reply.version;
+					break;
+				}
+			}
+		}
+		wait(self->pulledVersion.whenAtLeast(currentVersion));
 		pullFinished = Future<Void>(); // cancels pullAsyncData()
 		TraceEvent("BackupWorkerPaused", self->myId);
 	}
@@ -653,13 +708,19 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 	    .detail("LogEpoch", req.recruitedEpoch)
 	    .detail("BackupEpoch", req.backupEpoch);
 	try {
-		addActor.send(monitorBackupKeyOrPullData(&self));
 		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
 		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
 		if (req.recruitedEpoch == req.backupEpoch && req.routerTag.id == 0) {
 			addActor.send(monitorAllWorkerStarted(&self));
 		}
 
+		// Check if backup key is present to avoid race between this check and
+		// noop pop as well as upload data: pop or skip upload before knowing
+		// there are backup keys.
+		bool present = wait(monitorBackupStartedKeyChanges(&self, true, false));
+		TraceEvent("BackupWorkerWaitKey", self.myId).detail("Present", present);
+
+		addActor.send(monitorBackupKeyOrPullData(&self));
 		state Future<Void> done = uploadData(&self);
 
 		loop choose {
