@@ -105,7 +105,22 @@ struct BackupStringRefReader {
 	Error failure_error;
 };
 
-enum class RoleVersionBatchState {INVALID};
+class RoleVersionBatchState {
+public:
+	static const int INVALID = -1;
+
+	int get() {
+		return vbState;
+	}
+
+	operator = (int newState) {
+		vbState = newState;
+	}
+
+	explicit RoleVersionBatchState(int newState) : vbState(newState) {}
+
+	int vbState;
+};
 
 struct RestoreRoleData : NonCopyable, public ReferenceCounted<RestoreRoleData> {
 public:
@@ -136,8 +151,8 @@ public:
 
 	virtual void initVersionBatch(int batchIndex) = 0;
 	virtual void resetPerRestoreRequest() = 0;
-	virtual RoleVersionBatchState getVersionBatchState(int batchIndex);
-	virtual void setVersionBatchState(int batchIndex, RoleVersionBatchState vbState);
+	virtual int getVersionBatchState(int batchIndex);
+	virtual void setVersionBatchState(int batchIndex, int vbState);
 
 	void clearInterfaces() {
 		loadersInterf.clear();

@@ -202,7 +202,15 @@ struct StagingKeyRange {
 };
 
 // Applier state in each verion batch
-enum class ApplierVersionBatchState : RoleVersionBatchState { NOT_INIT = 0, INIT = 1, RECEIVE_MUTATIONS = 2, WRITE_TO_DB = 3, INVALID = 4 };
+class ApplierVersionBatchState : RoleVersionBatchState {
+	static const int NOT_INIT = 0;
+	static const int INIT = 1;
+	static const int RECEIVE_MUTATIONS = 2;
+	static const int WRITE_TO_DB = 3;
+	static const int INVALID = 4;
+
+	explicit ApplierVersionBatchState(int newState) : vbState(newState) {}
+};
 
 struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	// processedFileState: key: RestoreAsset; value: largest version of mutation received on the applier
@@ -351,18 +359,15 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 
 	~RestoreApplierData() = default;
 
-	RoleVersionBatchState getVersionBatchState(int batchIndex) {
-		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
-		if ( item == batch.end()) {
-			return ApplierVersionBatchState::INVALID;
-		} else {
-			return item->second->vbState;
-		}
-	}
-	void setVersionBatchState(int batchIndex, RoleVersionBatchState vbState) {
+	int getVersionBatchState(int batchIndex) {
 		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
 		ASSERT(item != batch.end());
-		item->second->vbState = (ApplierVersionBatchState) vbState;
+		return item->second->vbState.get();
+	}
+	void setVersionBatchState(int batchIndex, int vbState) {
+		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
+		ASSERT(item != batch.end());
+		item->second->vbState = vbState;
 	}
 
 	void initVersionBatch(int batchIndex) {

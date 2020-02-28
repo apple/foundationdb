@@ -42,12 +42,25 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-enum class LoaderVersionBatchState : RoleVersionBatchState {
-	NOT_INIT,
-	INIT,
-	LOAD_FILE,
-	SEND_MUTATIONS,
-	INVALID
+class LoaderVersionBatchState : RoleVersionBatchState {
+	static const int NOT_INIT = 0;
+	static const int INIT = 1;
+	static const int LOAD_FILE = 2;
+	static const int SEND_MUTATIONS = 3;
+	static const int INVALID = 4;
+
+	explicit LoaderVersionBatchState(int newState) : vbState(newState) {}
+
+	// static std::string getVersionBatchState(int vbState) {
+	// 	switch(vbSTate) {
+	// 		case NOT_INIT: return "NOT_INIT";
+	// 		case INIT: return "INIT";
+	// 		case LOAD_FILE: return "LOAD_FILE";
+	// 		case SEND_MUTATIONS: return "SEND_MUTATIONS";
+	// 		case INVALID: return "INVALID";
+	// 		default: return "UNKNOWN";
+	// 	}
+	// }
 };
 
 struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
@@ -139,13 +152,10 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		return ss.str();
 	}
 
-	RoleVersionBatchState getVersionBatchState(int batchIndex) {
+	std::string getVersionBatchState(int batchIndex) {
 		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
-		if ( item == batch.end()) {
-			return LoaderVersionBatchState::INVALID;
-		} else {
-			return item->second->vbState;
-		}
+		ASSERT(item != batch.end());
+		return item->second->vbState;
 	}
 	void setVersionBatchState(int batchIndex, RoleVersionBatchState vbState) {
 		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);

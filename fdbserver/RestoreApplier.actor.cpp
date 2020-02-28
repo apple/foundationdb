@@ -115,7 +115,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	    .detail("ProcessedFileVersion", curFilePos.get())
 	    .detail("Request", req.toString())
 	    .detail("CurrentMemory", getSystemStatistics().processMemory)
-	    .detail("PreviousVersionBatchState", batchData->vbState);
+	    .detail("PreviousVersionBatchState", batchData->vbState.get());
 
 	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 
@@ -442,7 +442,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("FinishedBatch", self->finishedBatch.get())
 	    .detail("HasStarted", batchData->dbApplier.present())
-	    .detail("PreviousVersionBatchState", batchData->vbState);
+	    .detail("PreviousVersionBatchState", batchData->vbState.get());
 	batchData->vbState = ApplierVersionBatchState::WRITE_TO_DB;
 	if (self->finishedBatch.get() == req.batchIndex - 1) {
 		ASSERT(batchData.isValid());
