@@ -20,8 +20,85 @@
 
 #include "Arena.h"
 
+#if defined(__SANITIZE_ADDRESS__) || defined(__has_feature) && __has_feature(address_sanitizer)
+#include <sanitizer/asan_interface.h>
+#define ASAN_POISON_MEMORY_REGION(addr, size) __asan_poison_memory_region((addr), (size))
+#define ASAN_UNPOISON_MEMORY_REGION(addr, size) __asan_unpoison_memory_region((addr), (size))
+#else
+#define ASAN_POISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
+#define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
+#endif
+
+namespace {
+void unpoison(ArenaBlock* b) {
+	if (b) {
+		ASAN_UNPOISON_MEMORY_REGION(b, ArenaBlock::TINY_HEADER);
+		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
+		ASAN_UNPOISON_MEMORY_REGION(b, headerSize);
+	}
+}
+void poison(ArenaBlock* b) {
+	if (b) {
+		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
+		ASAN_POISON_MEMORY_REGION(b, headerSize);
+	}
+}
+} // namespace
+
+Arena::Arena() : impl(NULL) {}
+Arena::Arena(size_t reservedSize) : impl(0) {
+	UNSTOPPABLE_ASSERT(reservedSize < std::numeric_limits<int>::max());
+	if (reservedSize) {
+		unpoison(impl.getPtr());
+		ArenaBlock::create((int)reservedSize, impl);
+		poison(impl.getPtr());
+	}
+}
+Arena::Arena(const Arena& r) = default;
+Arena::Arena(Arena&& r) noexcept = default;
+Arena& Arena::operator=(const Arena& r) = default;
+Arena& Arena::operator=(Arena&& r) noexcept = default;
+void Arena::dependsOn(const Arena& p) {
+	if (p.impl) {
+		unpoison(impl.getPtr());
+		unpoison(p.impl.getPtr());
+		ArenaBlock::dependOn(impl, p.impl.getPtr());
+		poison(p.impl.getPtr());
+		poison(impl.getPtr());
+	}
+}
+size_t Arena::getSize() const {
+	if (impl) {
+		unpoison(impl.getPtr());
+		auto result = impl->totalSize();
+		poison(impl.getPtr());
+		return result;
+	}
+	return 0;
+}
+bool Arena::hasFree(size_t size, const void* address) {
+	if (impl) {
+		unpoison(impl.getPtr());
+		auto result = impl->unused() >= size && impl->getNextData() == address;
+		poison(impl.getPtr());
+		return result;
+	}
+	return false;
+}
+
+void ArenaBlock::addref() {
+	ASAN_UNPOISON_MEMORY_REGION(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+	ThreadSafeReferenceCounted<ArenaBlock>::addref();
+	ASAN_POISON_MEMORY_REGION(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+}
+
 void ArenaBlock::delref() {
-	if (delref_no_destroy()) destroy();
+	ASAN_UNPOISON_MEMORY_REGION(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+	if (delref_no_destroy()) {
+		destroy();
+	} else {
+		ASAN_POISON_MEMORY_REGION(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+	}
 }
 
 bool ArenaBlock::isTiny() const {
@@ -52,14 +129,20 @@ const void* ArenaBlock::getNextData() const {
 	return (const uint8_t*)getData() + used();
 }
 size_t ArenaBlock::totalSize() {
-	if (isTiny()) return size();
+	if (isTiny()) {
+		return size();
+	}
 
 	size_t s = size();
 	int o = nextBlockOffset;
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
+		ASAN_UNPOISON_MEMORY_REGION(r, sizeof(ArenaBlockRef));
+		unpoison(r->next);
 		s += r->next->totalSize();
+		poison(r->next);
 		o = r->nextBlockOffset;
+		ASAN_POISON_MEMORY_REGION(r, sizeof(ArenaBlockRef));
 	}
 	return s;
 }
@@ -71,8 +154,10 @@ void ArenaBlock::getUniqueBlocks(std::set<ArenaBlock*>& a) {
 	int o = nextBlockOffset;
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
+		ASAN_UNPOISON_MEMORY_REGION(r, sizeof(ArenaBlockRef));
 		r->next->getUniqueBlocks(a);
 		o = r->nextBlockOffset;
+		ASAN_POISON_MEMORY_REGION(r, sizeof(ArenaBlockRef));
 	}
 	return;
 }
@@ -91,8 +176,10 @@ int ArenaBlock::addUsed(int bytes) {
 
 void ArenaBlock::makeReference(ArenaBlock* next) {
 	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
+	ASAN_UNPOISON_MEMORY_REGION(r, sizeof(ArenaBlockRef));
 	r->next = next;
 	r->nextBlockOffset = nextBlockOffset;
+	ASAN_POISON_MEMORY_REGION(r, sizeof(ArenaBlockRef));
 	nextBlockOffset = bigUsed;
 	bigUsed += sizeof(ArenaBlockRef);
 }
@@ -107,9 +194,16 @@ void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
 
 void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 	ArenaBlock* b = self.getPtr();
-	if (!self || self->unused() < bytes) b = create(bytes, self);
+	unpoison(b);
+	if (!self || self->unused() < bytes) {
+		auto* tmp = b;
+		b = create(bytes, self);
+		poison(tmp);
+	}
 
-	return (char*)b->getData() + b->addUsed(bytes);
+	void* result = (char*)b->getData() + b->addUsed(bytes);
+	poison(b);
+	return result;
 }
 
 // Return an appropriately-sized ArenaBlock to store the given data
@@ -210,18 +304,23 @@ void ArenaBlock::destroy() {
 	// If the stack never contains more than one item, nothing will be allocated from stackArena.
 	// If stackArena is used, it will always be a linked list, so destroying *it* will not create another arena
 	ArenaBlock* tinyStack = this;
+	unpoison(this);
 	Arena stackArena;
 	VectorRef<ArenaBlock*> stack(&tinyStack, 1);
 
 	while (stack.size()) {
 		ArenaBlock* b = stack.end()[-1];
 		stack.pop_back();
+		unpoison(b);
 
 		if (!b->isTiny()) {
 			int o = b->nextBlockOffset;
 			while (o) {
 				ArenaBlockRef* br = (ArenaBlockRef*)((char*)b->getData() + o);
+				ASAN_UNPOISON_MEMORY_REGION(br, sizeof(ArenaBlockRef));
+				unpoison(br->next);
 				if (br->next->delref_no_destroy()) stack.push_back(stackArena, br->next);
+				poison(br->next);
 				o = br->nextBlockOffset;
 			}
 		}
