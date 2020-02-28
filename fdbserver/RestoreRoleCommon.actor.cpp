@@ -60,9 +60,9 @@ ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req,
 	// batchId is continuous. (req.batchIndex-1) is the id of the just finished batch.
 	wait(self->versionBatchId.whenAtLeast(req.batchIndex - 1));
 
-	self->setVersionBatchState(req.batchIndex, ApplierVersionBatchState::INIT);
 	if (self->versionBatchId.get() == req.batchIndex - 1) {
 		self->initVersionBatch(req.batchIndex);
+		self->setVersionBatchState(req.batchIndex, ApplierVersionBatchState::INIT);
 		TraceEvent("FastRestoreInitVersionBatch")
 		    .detail("BatchIndex", req.batchIndex)
 		    .detail("Role", getRoleStr(self->role))
