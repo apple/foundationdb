@@ -201,6 +201,9 @@ struct StagingKeyRange {
 	}
 };
 
+// Applier state in each verion batch
+enum class ApplierVersionBatchState : RoleVersionBatchState { NOT_INIT = 0, INIT = 1, RECEIVE_MUTATIONS = 2, WRITE_TO_DB = 3, INVALID = 4 };
+
 struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	// processedFileState: key: RestoreAsset; value: largest version of mutation received on the applier
 	std::map<RestoreAsset, NotifiedVersion> processedFileState;
@@ -211,6 +214,8 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	FlowLock applyStagingKeysBatchLock;
 
 	Future<Void> pollMetrics;
+
+	RoleVersionBatchState vbState;
 
 	// Status counters
 	struct Counters {
@@ -232,7 +237,8 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	void delref() { return ReferenceCounted<ApplierBatchData>::delref(); }
 
 	explicit ApplierBatchData(UID nodeID, int batchIndex)
-	  : counters(this, nodeID, batchIndex), applyStagingKeysBatchLock(SERVER_KNOBS->FASTRESTORE_APPLYING_PARALLELISM) {
+	  : counters(this, nodeID, batchIndex), applyStagingKeysBatchLock(SERVER_KNOBS->FASTRESTORE_APPLYING_PARALLELISM),
+	    vbState(ApplierVersionBatchState::NOT_INIT) {
 		pollMetrics =
 		    traceCounters("FastRestoreApplierMetrics", nodeID, SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
 		                  &counters.cc, nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
@@ -344,6 +350,20 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	}
 
 	~RestoreApplierData() = default;
+
+	RoleVersionBatchState getVersionBatchState(int batchIndex) {
+		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
+		if ( item == batch.end()) {
+			return ApplierVersionBatchState::INVALID;
+		} else {
+			return item->second->vbState;
+		}
+	}
+	void setVersionBatchState(int batchIndex, RoleVersionBatchState vbState) {
+		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
+		ASSERT(item != batch.end());
+		item->second->vbState = (ApplierVersionBatchState) vbState;
+	}
 
 	void initVersionBatch(int batchIndex) {
 		TraceEvent("FastRestoreApplierInitVersionBatch", id()).detail("BatchIndex", batchIndex);

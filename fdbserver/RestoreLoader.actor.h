@@ -42,6 +42,14 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+enum class LoaderVersionBatchState : RoleVersionBatchState {
+	NOT_INIT,
+	INIT,
+	LOAD_FILE,
+	SEND_MUTATIONS,
+	INVALID
+};
+
 struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	std::map<LoadingParam, Future<Void>> processedFileParams;
 	std::map<LoadingParam, VersionedMutationsMap> kvOpsPerLP; // Buffered kvOps for each loading param
@@ -56,6 +64,8 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 
 	Future<Void> pollMetrics;
 
+	LoaderVersionBatchState vbState;
+
 	// Status counters
 	struct Counters {
 		CounterCollection cc;
@@ -68,7 +78,7 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 		    sampledRangeBytes("SampledRangeBytes", cc), sampledLogBytes("SampledLogBytes", cc) {}
 	} counters;
 
-	explicit LoaderBatchData(UID nodeID, int batchIndex) : counters(this, nodeID, batchIndex) {
+	explicit LoaderBatchData(UID nodeID, int batchIndex) : counters(this, nodeID, batchIndex), vbState(LoaderVersionBatchState::NOT_INIT) {
 		pollMetrics =
 		    traceCounters("FastRestoreLoaderMetrics", nodeID, SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
 		                  &counters.cc, nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
@@ -127,6 +137,20 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		ss << "[Role: Loader] [NodeID:" << nodeID.toString().c_str() << "] [NodeIndex:" << std::to_string(nodeIndex)
 		   << "]";
 		return ss.str();
+	}
+
+	RoleVersionBatchState getVersionBatchState(int batchIndex) {
+		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
+		if ( item == batch.end()) {
+			return LoaderVersionBatchState::INVALID;
+		} else {
+			return item->second->vbState;
+		}
+	}
+	void setVersionBatchState(int batchIndex, RoleVersionBatchState vbState) {
+		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
+		ASSERT(item != batch.end());
+		item->second->vbState = (LoaderVersionBatchState) vbState;
 	}
 
 	void initVersionBatch(int batchIndex) {

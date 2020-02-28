@@ -56,10 +56,12 @@ ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req,
 	TraceEvent("FastRestoreRolePhaseInitVersionBatch", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("Role", getRoleStr(self->role))
-	    .detail("VersionBatchNotifiedVersion", self->versionBatchId.get());
+	    .detail("VersionBatchNotifiedVersion", self->versionBatchId.get())
+	    .detail("PreviousVersionBatchState", batchData->vbState);
 	// batchId is continuous. (req.batchIndex-1) is the id of the just finished batch.
 	wait(self->versionBatchId.whenAtLeast(req.batchIndex - 1));
 
+	batchData->vbState = ApplierVersionBatchState::INIT;
 	if (self->versionBatchId.get() == req.batchIndex - 1) {
 		self->initVersionBatch(req.batchIndex);
 		TraceEvent("FastRestoreInitVersionBatch")
@@ -134,6 +136,24 @@ ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::str
 		    .detail("CpuUsage", self->cpuUsage)
 		    .detail("UsedMemory", self->memory)
 		    .detail("ResidentMemory", self->residentMemory);
+		wait(delay(SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY));
+	}
+}
+
+ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self, std::string role) {
+	loop {
+		int batchIndex = self->finishedBatch.get();
+		int maxBatchIndex = self->versionBatchId.get();
+
+		TraceEvent ev("FastRestoreVersionBatchProgress", self->nodeID);
+		ev.detail("Role", role)
+		ev.detail("Node", self->nodeID);
+		while (batchIndex <= maxBatchIndex) {
+			ev.detail("BatchIndex", batchIndex);
+			ev.detail("VersionBatchState", self->batch[batchIndex]->vbState);
+			batchIndex++;
+		}
+
 		wait(delay(SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY));
 	}
 }

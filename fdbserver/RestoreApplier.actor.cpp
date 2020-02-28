@@ -47,6 +47,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
 	actors.add(traceProcessMetrics(self, "Applier"));
+	actors.add(traceRoleVersionBatchProgress(self, "Applier"));
 
 	loop {
 		state std::string requestTypeStr = "[Init]";
@@ -113,11 +114,13 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	    .detail("RestoreAsset", req.asset.toString())
 	    .detail("ProcessedFileVersion", curFilePos.get())
 	    .detail("Request", req.toString())
-		.detail("CurrentMemory", getSystemStatistics().processMemory);
+	    .detail("CurrentMemory", getSystemStatistics().processMemory)
+	    .detail("PreviousVersionBatchState", batchData->vbState);
 
 	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 
 	wait(curFilePos.whenAtLeast(req.prevVersion));
+	batchData->vbState = ApplierVersionBatchState::RECEIVE_MUTATIONS;
 
 	state bool isDuplicated = true;
 	if (curFilePos.get() == req.prevVersion) {
@@ -438,7 +441,9 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 	TraceEvent("FastRestoreApplierPhaseHandleApplyToDB", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("FinishedBatch", self->finishedBatch.get())
-	    .detail("HasStarted", batchData->dbApplier.present());
+	    .detail("HasStarted", batchData->dbApplier.present())
+	    .detail("PreviousVersionBatchState", batchData->vbState);
+	batchData->vbState = ApplierVersionBatchState::WRITE_TO_DB;
 	if (self->finishedBatch.get() == req.batchIndex - 1) {
 		ASSERT(batchData.isValid());
 		if (!batchData->dbApplier.present()) {

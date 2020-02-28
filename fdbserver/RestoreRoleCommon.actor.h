@@ -105,6 +105,8 @@ struct BackupStringRefReader {
 	Error failure_error;
 };
 
+enum class RoleVersionBatchState {INVALID};
+
 struct RestoreRoleData : NonCopyable, public ReferenceCounted<RestoreRoleData> {
 public:
 	RestoreRole role;
@@ -133,8 +135,9 @@ public:
 	UID id() const { return nodeID; }
 
 	virtual void initVersionBatch(int batchIndex) = 0;
-
 	virtual void resetPerRestoreRequest() = 0;
+	virtual RoleVersionBatchState getVersionBatchState(int batchIndex);
+	virtual void setVersionBatchState(int batchIndex, RoleVersionBatchState vbState);
 
 	void clearInterfaces() {
 		loadersInterf.clear();
@@ -146,6 +149,7 @@ public:
 
 void updateProcessStats(Reference<RestoreRoleData> self);
 ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role);
+ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self, std::string role);
 
 #include "flow/unactorcompiler.h"
 #endif
