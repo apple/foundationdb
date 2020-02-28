@@ -55,6 +55,7 @@
     <ClInclude Include="CompressedInt.h" />
     <ClInclude Include="ActorCollection.h" />
     <ClInclude Include="actorcompiler.h" />
+    <ClInclude Include="Arena.cpp" />
     <ClInclude Include="Arena.h" />
     <ClInclude Include="AsioReactor.h" />
     <ClInclude Include="Deque.h" />
