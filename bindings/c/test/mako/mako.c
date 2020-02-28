@@ -1711,7 +1711,7 @@ int main(int argc, char *argv[]) {
   shm->readycount = 0;
 
   /* fork worker processes */
-  worker_pids = (pid_t *)calloc(sizeof(pid_t), args.num_processes);
+  worker_pids = (pid_t*)calloc(sizeof(pid_t), args.num_processes + 1);
   if (!worker_pids) {
     fprintf(stderr, "ERROR: cannot allocate worker_pids (%d processes)\n",
             args.num_processes);
