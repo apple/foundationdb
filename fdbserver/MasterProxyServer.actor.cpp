@@ -107,7 +107,15 @@ struct TransactionRateInfo {
 	TransactionRateInfo(double rate) : rate(rate), limit(0), budget(0), disabled(true), smoothRate(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW), 
 	                                   smoothReleased(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW) {}
 
-	void reset(double elapsed) {
+	void reset() {
+		// Determine the number of transactions that this proxy is allowed to release
+		// Roughly speaking, this is done by computing the number of transactions over some historical window that we could
+		// have started but didn't, and making that our limit. More precisely, we track a smoothed rate limit and release rate,
+		// the difference of which is the rate of additional transactions that we could have released based on that window.
+		// Then we multiply by the window size to get a number of transactions.
+		// 
+		// Limit can be negative in the event that we are releasing more transactions than we are allowed (due to the use of
+		// our budget or because of higher priority transactions).
 		double releaseRate = smoothRate.smoothTotal() - smoothReleased.smoothRate();
 		limit = SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW * releaseRate;
 	}
@@ -117,8 +125,21 @@ struct TransactionRateInfo {
 	}
 
 	void updateBudget(int64_t numStartedAtPriority, bool queueEmptyAtPriority, double elapsed) {
+		// Update the budget to accumulate any extra capacity available or remove any excess that was used.
+		// The actual delta is the portion of the limit we didn't use multiplied by the fraction of the window that elapsed.
+		// 
+		// We may have exceeded our limit due to the budget or because of higher priority transactions, in which case this 
+		// delta will be negative. The delta can also be negative in the event that our limit was negative, which can happen 
+		// if we had already started more transactions in our window than our rate would have allowed.
+		//
+		// This budget has the property that when the budget is required to start transactions (because batches are big),
+		// the sum limit+budget will increase linearly from 0 to the batch size over time and decrease by the batch size
+		// upon starting a batch. In other words, this works equivalently to a model where we linearly accumulate budget over 
+		// time in the case that our batches are too big to take advantage of the window based limits.
 		budget = std::max(0.0, budget + elapsed * (limit - numStartedAtPriority) / SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW);
 
+		// If we are emptying out the queue of requests, then we don't need to carry much budget forward
+		// If we did keep accumulating budget, then our responsiveness to changes in workflow could be compromised
 		if(queueEmptyAtPriority) {
 			budget = std::min(budget, SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET);
 		}
@@ -133,7 +154,7 @@ struct TransactionRateInfo {
 	}
 
 	void setRate(double rate) {
-		ASSERT(rate != std::numeric_limits<double>::infinity());
+		ASSERT(rate >= 0 && rate != std::numeric_limits<double>::infinity() && !isnan(rate));
 
 		this->rate = rate;
 		if(disabled) {
@@ -1300,8 +1321,8 @@ ACTOR static Future<Void> transactionStarter(
 
 		if(elapsed == 0) elapsed = 1e-15; // resolve a possible indeterminant multiplication with infinite transaction rate
 
-		normalRateInfo.reset(elapsed);
-		batchRateInfo.reset(elapsed);
+		normalRateInfo.reset();
+		batchRateInfo.reset();
 
 		int transactionsStarted[2] = {0,0};
 		int systemTransactionsStarted[2] = {0,0};
