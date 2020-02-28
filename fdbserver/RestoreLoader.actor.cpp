@@ -202,7 +202,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	    .detail("ProcessLoadParam", req.param.toString())
 	    .detail("NotProcessed", !paramExist)
 	    .detail("Processed", isReady)
-		.detail("CurrentMemory", getSystemStatistics().processMemory);
+	    .detail("CurrentMemory", getSystemStatistics().processMemory);
 
 	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 

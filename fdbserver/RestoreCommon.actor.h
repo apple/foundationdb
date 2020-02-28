@@ -303,7 +303,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 				for (int i = 0; i < replyDurations.size(); ++i) {
 					double endTime = std::get<2>(replyDurations[i]);
 					TraceEvent(SevInfo, "ProfileSendRequestBatchLatency", bathcID)
-						.detail("NodeID", std::get<0>(replyDurations[i]))
+						.detail("Node", std::get<0>(replyDurations[i]))
 						.detail("Request", std::get<1>(replyDurations[i]).toString())
 						.detail("Duration", endTime - start);
 					auto item = maxEndTime.emplace(std::get<0>(replyDurations[i]), endTime);
@@ -327,7 +327,9 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 				if (latest - earliest > SERVER_KNOBS->FASTRESTORE_STRAGGLER_THRESHOLD) {
 					TraceEvent(SevWarn, "ProfileSendRequestBatchLatencyFoundStraggler", bathcID)
 						.detail("SlowestNode", latestNode)
-						.detail("FatestNode", earliestNode);
+						.detail("FatestNode", earliestNode)
+						.detail("EarliestEndtime", earliest)
+						.detail("LagTime", latest - earliest);
 				}
 			}
 			// Update replies

@@ -82,10 +82,12 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker,
 
 		wait(startProcessRestoreRequests(self, cx));
 	} catch (Error& e) {
-		TraceEvent(SevError, "FastRestore")
-		    .detail("StartRestoreMaster", "Unexpectedly unhandled error")
-		    .detail("Error", e.what())
-		    .detail("ErrorCode", e.code());
+		if (e.code() != error_code_operation_cancelled) {
+			TraceEvent(SevError, "FastRestoreMasterStart")
+			    .detail("Reason", "Unexpected unhandled error")
+			    .detail("ErrorCode", e.code())
+			    .detail("Error", e.what());
+		}
 	}
 
 	return Void();
@@ -237,8 +239,17 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	try {
 		wait(unlockDatabase(cx, randomUID));
 	} catch (Error& e) {
-		TraceEvent(SevError, "FastRestoreMasterUnlockDBFailed", self->id()).detail("UID", randomUID.toString());
-		ASSERT_WE_THINK(false); // This unlockDatabase should always succeed, we think.
+		if (e.code() == error_code_operation_cancelled) { // Should only happen in simulation
+			TraceEvent(SevWarnAlways, "FastRestoreMasterOnCancelingActor", self->id())
+			    .detail("DBLock", randomUID)
+			    .detail("ManualCheck", "Is DB locked");
+		} else {
+			TraceEvent(SevError, "FastRestoreMasterUnlockDBFailed", self->id())
+			    .detail("DBLock", randomUID)
+			    .detail("ErrorCode", e.code())
+			    .detail("Error", e.what());
+			ASSERT_WE_THINK(false); // This unlockDatabase should always succeed, we think.
+		}
 	}
 
 	TraceEvent("FastRestoreMasterRestoreCompleted", self->id());
@@ -551,6 +562,8 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	wait(sendMutationsFromLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, false));
 	wait(sendMutationsFromLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, true));
 
+	// Synchronization point for version batch pipelining.
+	// self->finishedBatch will continuously increase by 1 per version batch.
 	wait(notifyApplierToApplyMutations(batchData, batchStatus, self->appliersInterf, batchIndex, &self->finishedBatch));
 
 	wait(notifyLoadersVersionBatchFinished(self->loadersInterf, batchIndex));

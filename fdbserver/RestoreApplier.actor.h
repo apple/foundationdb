@@ -371,6 +371,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	int getVersionBatchState(int batchIndex) {
 		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
 		if (item == batch.end()) {
+			ASSERT_WE_THINK(false);
 			return ApplierVersionBatchState::INVALID;
 		} else {
 			return item->second->vbState.get();
