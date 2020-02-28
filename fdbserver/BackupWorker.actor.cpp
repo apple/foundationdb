@@ -591,25 +591,25 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 
 ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self) {
 	state Future<Void> started, pullFinished;
+	state Future<GetReadVersionReply> replyFuture = Never();
 
 	loop {
 		started = monitorBackupStartedKeyChanges(self, true);
-		loop {
-			GetReadVersionRequest request(1, GetReadVersionRequest::PRIORITY_DEFAULT |
-			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
-
-			choose {
-				when(wait(started)) { break; }
-				when(wait(self->cx->onMasterProxiesChanged())) {}
-				when(GetReadVersionReply reply = wait(loadBalance(self->cx->getMasterProxies(false),
-				                                                  &MasterProxyInterface::getConsistentReadVersion,
-				                                                  request, self->cx->taskID))) {
-					self->savedVersion = std::max(reply.version, self->savedVersion);
-					self->minKnownCommittedVersion = std::max(reply.version, self->minKnownCommittedVersion);
-					TraceEvent("BackupWorkerNoopPop", self->myId).detail("SavedVersion", self->savedVersion);
-					self->pop(); // Pop while the worker is in this NOOP state.
-					wait(delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID));
-				}
+		loop choose {
+			when(wait(started)) { break; }
+			when(wait(self->cx->onMasterProxiesChanged() ||
+			          delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID))) {
+				GetReadVersionRequest request(1, GetReadVersionRequest::PRIORITY_DEFAULT |
+				                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
+				replyFuture = loadBalance(self->cx->getMasterProxies(false),
+				                          &MasterProxyInterface::getConsistentReadVersion, request, self->cx->taskID);
+			}
+			when(GetReadVersionReply reply = wait(replyFuture)) {
+				replyFuture = Never();
+				self->savedVersion = std::max(reply.version, self->savedVersion);
+				self->minKnownCommittedVersion = std::max(reply.version, self->minKnownCommittedVersion);
+				TraceEvent("BackupWorkerNoopPop", self->myId).detail("SavedVersion", self->savedVersion);
+				self->pop(); // Pop while the worker is in this NOOP state.
 			}
 		}
 
