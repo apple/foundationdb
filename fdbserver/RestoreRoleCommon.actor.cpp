@@ -144,12 +144,11 @@ ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self
 		int batchIndex = self->finishedBatch.get();
 		int maxBatchIndex = self->versionBatchId.get();
 
-		TraceEvent ev("FastRestoreVersionBatchProgress", self->nodeID);
+		TraceEvent ev("FastRestoreVersionBatchProgressState", self->nodeID);
 		ev.detail("Role", role);
 		ev.detail("Node", self->nodeID);
 		while (batchIndex <= maxBatchIndex) {
-			ev.detail("BatchIndex", batchIndex);
-			ev.detail("VersionBatchState", self->getVersionBatchState(batchIndex));
+			ev.detail("VersionBatch" + batchIndex, self->getVersionBatchState(batchIndex));
 			batchIndex++;
 		}
 
