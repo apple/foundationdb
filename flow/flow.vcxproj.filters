@@ -14,6 +14,7 @@
     <ActorCompiler Include="TDMetric.actor.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Arena.cpp" />
     <ClCompile Include="DeterministicRandom.cpp" />
     <ClCompile Include="Error.cpp" />
     <ClCompile Include="FastAlloc.cpp" />
@@ -43,7 +44,6 @@
   <ItemGroup>
     <ClInclude Include="ActorCollection.h" />
     <ClInclude Include="actorcompiler.h" />
-    <ClInclude Include="Arena.cpp" />
     <ClInclude Include="Arena.h" />
     <ClInclude Include="DeterministicRandom.h" />
     <ClInclude Include="Error.h" />
