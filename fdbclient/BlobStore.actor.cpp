@@ -507,6 +507,7 @@ ACTOR Future<BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<BlobS
 	if (service.empty())
 		service = b->knobs.secure_connection ? "https" : "http";
 	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(b->host, service, b->knobs.secure_connection ? true : false));
+	wait(conn->connectHandshake());
 
 	TraceEvent("BlobStoreEndpointNewConnection").suppressFor(60)
 		.detail("RemoteEndpoint", conn->getPeerAddress())
