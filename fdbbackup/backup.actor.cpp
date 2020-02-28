@@ -36,7 +36,7 @@
 #include "fdbclient/BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
-#include "fdbrpc/Platform.h"
+#include "flow/Platform.h"
 
 #include <stdarg.h>
 #include <stdio.h>

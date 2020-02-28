@@ -95,10 +95,6 @@ public:
 };
 }
 
-bool onlyBeforeSimulatorInit() {
-	return g_network->isSimulated() && g_simulator.getAllProcesses().empty();
-}
-
 const UID TOKEN_ENDPOINT_NOT_FOUND(-1, -1);
 
 ISimulator* g_pSimulator = 0;

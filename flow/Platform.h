@@ -388,6 +388,11 @@ size_t raw_backtrace(void** addresses, int maxStackDepth);
 std::string get_backtrace();
 std::string format_backtrace(void **addresses, int numAddresses);
 
+// Avoid in production code: not atomic, not fast, not reliable in all environments
+int eraseDirectoryRecursive(std::string const& directory);
+
+bool isSse42Supported();
+
 } // namespace platform
 
 #ifdef __linux__

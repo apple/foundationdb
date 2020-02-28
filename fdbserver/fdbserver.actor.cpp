@@ -52,7 +52,6 @@
 #include <time.h>
 #include "fdbserver/Status.h"
 #include "fdbrpc/Net2FileSystem.h"
-#include "fdbrpc/Platform.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/TLSPolicy.h"

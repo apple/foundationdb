@@ -32,7 +32,7 @@
 #include "fdbclient/FDBOptions.g.h"
 
 #include "flow/DeterministicRandom.h"
-#include "fdbrpc/Platform.h"
+#include "flow/Platform.h"
 
 #include "flow/SimpleOpt.h"
 
