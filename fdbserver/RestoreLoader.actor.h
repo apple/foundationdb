@@ -54,6 +54,16 @@ public:
 		vbState = newState;
 	}
 
+	~LoaderVersionBatchState() = default;
+
+	void operator = (int newState) {
+		vbState = newState;
+	}
+
+	int get() {
+		return RoleVersionBatchState::get();
+	}
+
 	// static std::string getVersionBatchState(int vbState) {
 	// 	switch(vbSTate) {
 	// 		case NOT_INIT: return "NOT_INIT";

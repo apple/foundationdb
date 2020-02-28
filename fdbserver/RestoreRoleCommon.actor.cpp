@@ -57,11 +57,11 @@ ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req,
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("Role", getRoleStr(self->role))
 	    .detail("VersionBatchNotifiedVersion", self->versionBatchId.get())
-	    .detail("PreviousVersionBatchState", batchData->vbState);
+	    .detail("PreviousVersionBatchState", self->getVersionBatchState(req.batchIndex));
 	// batchId is continuous. (req.batchIndex-1) is the id of the just finished batch.
 	wait(self->versionBatchId.whenAtLeast(req.batchIndex - 1));
 
-	batchData->vbState = ApplierVersionBatchState::INIT;
+	self->setVersionBatchState(req.batchIndex, ApplierVersionBatchState::INIT);
 	if (self->versionBatchId.get() == req.batchIndex - 1) {
 		self->initVersionBatch(req.batchIndex);
 		TraceEvent("FastRestoreInitVersionBatch")
@@ -146,11 +146,11 @@ ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self
 		int maxBatchIndex = self->versionBatchId.get();
 
 		TraceEvent ev("FastRestoreVersionBatchProgress", self->nodeID);
-		ev.detail("Role", role)
+		ev.detail("Role", role);
 		ev.detail("Node", self->nodeID);
 		while (batchIndex <= maxBatchIndex) {
 			ev.detail("BatchIndex", batchIndex);
-			ev.detail("VersionBatchState", self->batch[batchIndex]->vbState);
+			ev.detail("VersionBatchState", self->getVersionBatchState(batchIndex));
 			batchIndex++;
 		}
 

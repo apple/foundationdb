@@ -109,16 +109,18 @@ class RoleVersionBatchState {
 public:
 	static const int INVALID = -1;
 
-	int get() {
+	virtual int get() {
 		return vbState;
 	}
 
-	void operator = (int newState) {
+	virtual void operator = (int newState) {
 		vbState = newState;
 	}
 
 	explicit RoleVersionBatchState() : vbState(INVALID) {}
 	explicit RoleVersionBatchState(int newState) : vbState(newState) {}
+
+	virtual ~RoleVersionBatchState() = default;
 
 	int vbState;
 };
@@ -146,7 +148,7 @@ public:
 
 	RestoreRoleData() : role(RestoreRole::Invalid), cpuUsage(0.0), memory(0.0), residentMemory(0.0), delayedActors(0){};
 
-	virtual ~RestoreRoleData() {}
+	virtual ~RestoreRoleData() = default;
 
 	UID id() const { return nodeID; }
 
