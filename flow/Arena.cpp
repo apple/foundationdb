@@ -203,6 +203,7 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 
 	void* result = (char*)b->getData() + b->addUsed(bytes);
 	poison(b);
+	ASAN_UNPOISON_MEMORY_REGION(result, bytes);
 	return result;
 }
 
@@ -297,6 +298,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	}
 	b->setrefCountUnsafe(1);
 	next.setPtrUnsafe(b);
+	ASAN_POISON_MEMORY_REGION(reinterpret_cast<uint8_t*>(b) + b->used(), b->unused());
 	return b;
 }
 
@@ -331,35 +333,45 @@ void ArenaBlock::destroy() {
 void ArenaBlock::destroyLeaf() {
 	if (isTiny()) {
 		if (tinySize <= 16) {
+			ASAN_UNPOISON_MEMORY_REGION(this, 16);
 			FastAllocator<16>::release(this);
 			INSTRUMENT_RELEASE("Arena16");
 		} else if (tinySize <= 32) {
+			ASAN_UNPOISON_MEMORY_REGION(this, 32);
 			FastAllocator<32>::release(this);
 			INSTRUMENT_RELEASE("Arena32");
 		} else {
+			ASAN_UNPOISON_MEMORY_REGION(this, 64);
 			FastAllocator<64>::release(this);
 			INSTRUMENT_RELEASE("Arena64");
 		}
 	} else {
 		if (bigSize <= 128) {
+			ASAN_UNPOISON_MEMORY_REGION(this, 128);
 			FastAllocator<128>::release(this);
 			INSTRUMENT_RELEASE("Arena128");
 		} else if (bigSize <= 256) {
+			ASAN_UNPOISON_MEMORY_REGION(this, 256);
 			FastAllocator<256>::release(this);
 			INSTRUMENT_RELEASE("Arena256");
 		} else if (bigSize <= 512) {
+			ASAN_UNPOISON_MEMORY_REGION(this, 512);
 			FastAllocator<512>::release(this);
 			INSTRUMENT_RELEASE("Arena512");
 		} else if (bigSize <= 1024) {
+			ASAN_UNPOISON_MEMORY_REGION(this, 1024);
 			FastAllocator<1024>::release(this);
 			INSTRUMENT_RELEASE("Arena1024");
 		} else if (bigSize <= 2048) {
+			ASAN_UNPOISON_MEMORY_REGION(this, 2048);
 			FastAllocator<2048>::release(this);
 			INSTRUMENT_RELEASE("Arena2048");
 		} else if (bigSize <= 4096) {
+			ASAN_UNPOISON_MEMORY_REGION(this, 4096);
 			FastAllocator<4096>::release(this);
 			INSTRUMENT_RELEASE("Arena4096");
 		} else if (bigSize <= 8192) {
+			ASAN_UNPOISON_MEMORY_REGION(this, 8192);
 			FastAllocator<8192>::release(this);
 			INSTRUMENT_RELEASE("Arena8192");
 		} else {
