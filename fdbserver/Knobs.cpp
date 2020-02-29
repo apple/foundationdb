@@ -562,6 +562,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( FASTRESTORE_WAIT_FOR_MEMORY_LATENCY,                    10 ); if( randomize && BUGGIFY ) { FASTRESTORE_WAIT_FOR_MEMORY_LATENCY = 60; }
 	init( FASTRESTORE_HEARTBEAT_DELAY,                            10 ); if( randomize && BUGGIFY ) { FASTRESTORE_HEARTBEAT_DELAY = deterministicRandom()->random01() * 120; }
 	init( FASTRESTORE_HEARTBEAT_MAX_DELAY,                        10 ); if( randomize && BUGGIFY ) { FASTRESTORE_HEARTBEAT_MAX_DELAY = FASTRESTORE_HEARTBEAT_DELAY * 10; }
+	init( FASTRESTORE_APPLIER_FETCH_KEYS_SIZE,                   100 ); if( randomize && BUGGIFY ) { FASTRESTORE_APPLIER_FETCH_KEYS_SIZE =  deterministicRandom()->random01() * 10240 + 1; }
 
 	// clang-format on
 

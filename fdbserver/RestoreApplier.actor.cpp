@@ -27,6 +27,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
@@ -202,6 +203,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state std::vector<Future<Optional<Value>>> fValues;
 	state int i = 0;
+	state int retries = 0;
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysStart", applierID)
 	    .detail("GetKeys", imcompleteStagingKeys.size());
 	loop {
@@ -215,7 +217,8 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			wait(waitForAll(fValues));
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevError, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
+			retries++;
+			TraceEvent(retries > 10 ? SevError : SevWarn, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
 			    .detail("GetKeys", imcompleteStagingKeys.size())
 			    .detail("Error", e.what())
 			    .detail("ErrorCode", e.code());
@@ -307,16 +310,25 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	    .detail("StagingKeys", batchData->stagingKeys.size());
 
 	// Get keys in stagingKeys which does not have a baseline key by reading database cx, and precompute the key's value
+	std::vector<Future<Void>> fGetAndComputeKeys;
 	std::map<Key, std::map<Key, StagingKey>::iterator> imcompleteStagingKeys;
 	std::map<Key, StagingKey>::iterator stagingKeyIter = batchData->stagingKeys.begin();
+	int numKeysInBatch = 0;
 	for (; stagingKeyIter != batchData->stagingKeys.end(); stagingKeyIter++) {
 		if (!stagingKeyIter->second.hasBaseValue()) {
 			imcompleteStagingKeys.emplace(stagingKeyIter->first, stagingKeyIter);
 			batchData->counters.fetchKeys += 1;
+			numKeysInBatch++;
+		}
+		if (numKeysInBatch == SERVER_KNOBS->FASTRESTORE_APPLIER_FETCH_KEYS_SIZE) {
+			fGetAndComputeKeys.push_back(getAndComputeStagingKeys(imcompleteStagingKeys, cx, applierID));
+			numKeysInBatch = 0;
+			imcompleteStagingKeys.clear();
 		}
 	}
-
-	Future<Void> fGetAndComputeKeys = getAndComputeStagingKeys(imcompleteStagingKeys, cx, applierID);
+	if (numKeysInBatch > 0) {
+		fGetAndComputeKeys.push_back(getAndComputeStagingKeys(imcompleteStagingKeys, cx, applierID));
+	}
 
 	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResult", applierID)
 	    .detail("BatchIndex", batchIndex)
@@ -331,7 +343,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	}
 
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysWaitOn", applierID);
-	wait(fGetAndComputeKeys);
+	wait(waitForAll(fGetAndComputeKeys));
 
 	// Sanity check all stagingKeys have been precomputed
 	ASSERT_WE_THINK(batchData->allKeysPrecomputed());
