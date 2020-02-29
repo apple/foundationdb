@@ -1019,10 +1019,23 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			//FIXME: do not add data in flight to servers that were already in the src.
 			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
 
-			TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId)
-				.detail("PairId", relocateShardInterval.pairID)
-				.detail("DestinationTeam", describe(destIds))
-				.detail("ExtraIds", describe(extraIds));
+			if (SERVER_KNOBS->DD_ENABLE_VERBOSE_TRACING) {
+				// StorageMetrics is the rd shard's metrics, e.g., bytes and write bandwidth
+				TraceEvent(SevInfo, "RelocateShardDecision", distributorId)
+				    .detail("PairId", relocateShardInterval.pairID)
+				    .detail("Priority", rd.priority)
+				    .detail("KeyBegin", rd.keys.begin)
+				    .detail("KeyEnd", rd.keys.end)
+				    .detail("StorageMetrics", metrics.toString())
+				    .detail("SourceServers", describe(rd.src))
+				    .detail("DestinationTeam", describe(destIds))
+				    .detail("ExtraIds", describe(extraIds));
+			} else {
+				TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId)
+				    .detail("PairId", relocateShardInterval.pairID)
+				    .detail("DestinationTeam", describe(destIds))
+				    .detail("ExtraIds", describe(extraIds));
+			}
 
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
