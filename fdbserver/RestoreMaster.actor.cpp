@@ -908,27 +908,41 @@ ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreMasterData> se
 
 // Update the most recent time when master receives hearbeat from each loader and applier
 ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreMasterData> self) {
+	int numRoles = self->loadersInterf.size() + self->appliersInterf.size();
 	state std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
 	state std::map<UID, RestoreApplierInterface>::iterator applier = self->appliersInterf.begin();
-	state std::vector<Future<RestoreCommonReply>> fReplies; // TODO: Reserve memory for this vector
+	state std::vector<Future<RestoreCommonReply>> fReplies(numRoles, Never()); // TODO: Reserve memory for this vector
 	state std::vector<UID> nodes;
+	state int index = 0;
+
+	// Initialize nodes only once
+	loader = self->loadersInterf.begin();
+	applier = self->appliersInterf.begin();
+	while (loader != self->loadersInterf.end()) {
+		nodes.push_back(loader->first);
+		loader++;
+	}
+	while (applier != self->appliersInterf.end()) {
+		nodes.push_back(applier->first);
+		applier++;
+	}
 
 	loop {
 		wait(delay(SERVER_KNOBS->FASTRESTORE_HEARTBEAT_DELAY));
 		loader = self->loadersInterf.begin();
 		applier = self->appliersInterf.begin();
-		fReplies.clear();
-		nodes.clear();
+		index = 0;
+		std::fill(fReplies.begin(), fReplies.end(), Never());
 		// ping loaders and appliers
 		while(loader != self->loadersInterf.end()) {
-			fReplies.push_back(loader->second.heartbeat.getReply(RestoreSimpleRequest()));
-			nodes.push_back(loader->first);
+			fReplies[index] = loader->second.heartbeat.getReply(RestoreSimpleRequest());
 			loader++;
+			index++;
 		}
 		while(applier != self->appliersInterf.end()) {
-			fReplies.push_back(applier->second.heartbeat.getReply(RestoreSimpleRequest()));
-			nodes.push_back(applier->first);
+			fReplies[index] = applier->second.heartbeat.getReply(RestoreSimpleRequest());
 			applier++;
+			index++;
 		}
 
 		wait(waitForAll(fReplies) || delay(SERVER_KNOBS->FASTRESTORE_HEARTBEAT_DELAY));
