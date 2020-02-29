@@ -490,7 +490,7 @@ void initHelp() {
 		"change the class of a process",
 		"If no address and class are specified, lists the classes of all servers.\n\nSetting the class to `default' resets the process class to the class specified on the command line.");
 	helpMap["status"] = CommandHelp(
-		"status [minimal] [details] [json]",
+		"status [minimal|details|json]",
 		"get the status of a FoundationDB cluster",
 		"If the cluster is down, this command will print a diagnostic which may be useful in figuring out what is wrong. If the cluster is running, this command will print cluster statistics.\n\nSpecifying 'minimal' will provide a minimal description of the status of your database.\n\nSpecifying 'details' will provide load information for individual workers.\n\nSpecifying 'json' will provide status information in a machine readable JSON format.");
 	helpMap["exit"] = CommandHelp("exit", "exit the CLI", "");
@@ -541,7 +541,7 @@ void initHelp() {
 		"attempts to kill one or more processes in the cluster",
 		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS>*, attempt to kill the specified process.");
 	helpMap["profile"] = CommandHelp(
-		"profile <type> <action> <ARGS>",
+		"profile <client|list|flow|heap> <action> <ARGS>",
 		"namespace for all the profiling-related commands.",
 		"Different types support different actions.  Run `profile` to get a list of types, and iteratively explore the help.\n");
 	helpMap["force_recovery_with_data_loss"] = CommandHelp(
@@ -3659,13 +3659,26 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 		},
 		[enabled=opt.cliHints](std::string const& line)->LineNoise::Hint {
 			if (enabled) {
-				int firstWordIdx = line.find(' ');
-				if (firstWordIdx == std::string::npos) {
-					firstWordIdx = line.size();
-				}
-				auto iter = helpMap.find(line.substr(0, firstWordIdx));
+				bool error = false;
+				bool partial = false;
+				std::string linecopy = line;
+				std::vector<std::vector<StringRef>> parsed = parseLine(linecopy, error, partial);
+				if (parsed.size() == 0 || parsed.back().size() == 0) return LineNoise::Hint();
+				StringRef command = parsed.back().front();
+				int finishedParameters = parsed.back().size() + error;
+
+				// We don't want the hint to flip to parse error and back, e.g. while \" is being typed.
+				if (error && line.back() != '\\') return LineNoise::Hint(std::string(" {parse error}"), 90, false);
+
+				auto iter = helpMap.find(command.toString());
 				if (iter != helpMap.end()) {
-					return LineNoise::Hint(iter->second.usage.substr(firstWordIdx), 0, false);
+					std::string helpLine = iter->second.usage;
+					std::vector<std::vector<StringRef>> parsedHelp = parseLine(helpLine, error, partial);
+					std::string hintLine = (*(line.end() - 1) == ' ' ? "" : " ");
+					for (int i = finishedParameters; i < parsedHelp.back().size(); i++) {
+						hintLine = hintLine + parsedHelp.back()[i].toString() + " ";
+					}
+					return LineNoise::Hint(hintLine, 90, false);
 				}
 			}
 			return LineNoise::Hint();
