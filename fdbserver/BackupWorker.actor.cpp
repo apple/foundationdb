@@ -88,10 +88,6 @@ struct BackupData {
 			return stopped || (container.isReady() && ranges.isReady());
 		}
 
-		bool isRunning() const {
-			return container.isReady() && ranges.isReady() && !stopped;
-		}
-
 		Future<Void> waitReady() {
 			if (stopped) return Void();
 			return _waitReady(this);
@@ -229,6 +225,7 @@ struct BackupData {
 				it = self->backups.erase(it);
 				continue;
 			}
+
 			all.push_back(it->second.waitReady());
 			it++;
 		}
@@ -441,8 +438,12 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		wait(self->waitAllInfoReady());
 	}
 
-	for (auto it = self->backups.begin(); it != self->backups.end(); it++) {
-		ASSERT(it->second.container.get().present());
+	for (auto it = self->backups.begin(); it != self->backups.end();) {
+		if (!it->second.container.get().present()) {
+			TraceEvent("BackupWorkerNoContainer", self->myId).detail("BackupId", it->first);
+			it = self->backups.erase(it);
+			continue;
+		}
 		const int index = logFileFutures.size();
 		activeUids.insert(it->first);
 		self->insertRanges(keyRangeMap, it->second.ranges.get(), index);
@@ -451,6 +452,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		}
 		logFileFutures.push_back(it->second.container.get().get()->writeTaggedLogFile(
 		    it->second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id, self->totalTags));
+		it++;
 	}
 	ASSERT(!activeUids.empty());
 
