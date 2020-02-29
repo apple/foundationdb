@@ -20,27 +20,26 @@
 
 #include "Arena.h"
 
-#if defined(__SANITIZE_ADDRESS__) || defined(__has_feature) && __has_feature(address_sanitizer)
-#include <sanitizer/asan_interface.h>
-#define ASAN_POISON_MEMORY_REGION(addr, size) __asan_poison_memory_region((addr), (size))
-#define ASAN_UNPOISON_MEMORY_REGION(addr, size) __asan_unpoison_memory_region((addr), (size))
+#ifdef USE_VALGRIND
+#include <memcheck.h>
 #else
-#define ASAN_POISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
-#define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
+#define VALGRIND_MAKE_MEM_NOACCESS(addr, size) ((void)(addr), (void)(size))
+#define VALGRIND_MAKE_MEM_DEFINED(addr, size) ((void)(addr), (void)(size))
+#define VALGRIND_MAKE_MEM_UNDEFINED(addr, size) ((void)(addr), (void)(size))
 #endif
 
 namespace {
 void unpoison(ArenaBlock* b) {
 	if (b) {
-		ASAN_UNPOISON_MEMORY_REGION(b, ArenaBlock::TINY_HEADER);
+		VALGRIND_MAKE_MEM_DEFINED(b, ArenaBlock::TINY_HEADER);
 		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
-		ASAN_UNPOISON_MEMORY_REGION(b, headerSize);
+		VALGRIND_MAKE_MEM_DEFINED(b, headerSize);
 	}
 }
 void poison(ArenaBlock* b) {
 	if (b) {
 		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
-		ASAN_POISON_MEMORY_REGION(b, headerSize);
+		VALGRIND_MAKE_MEM_NOACCESS(b, headerSize);
 	}
 }
 } // namespace
@@ -87,17 +86,17 @@ bool Arena::hasFree(size_t size, const void* address) {
 }
 
 void ArenaBlock::addref() {
-	ASAN_UNPOISON_MEMORY_REGION(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+	VALGRIND_MAKE_MEM_DEFINED(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
 	ThreadSafeReferenceCounted<ArenaBlock>::addref();
-	ASAN_POISON_MEMORY_REGION(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+	VALGRIND_MAKE_MEM_NOACCESS(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
 }
 
 void ArenaBlock::delref() {
-	ASAN_UNPOISON_MEMORY_REGION(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+	VALGRIND_MAKE_MEM_DEFINED(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
 	if (delref_no_destroy()) {
 		destroy();
 	} else {
-		ASAN_POISON_MEMORY_REGION(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+		VALGRIND_MAKE_MEM_NOACCESS(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
 	}
 }
 
@@ -137,12 +136,12 @@ size_t ArenaBlock::totalSize() {
 	int o = nextBlockOffset;
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
-		ASAN_UNPOISON_MEMORY_REGION(r, sizeof(ArenaBlockRef));
+		VALGRIND_MAKE_MEM_DEFINED(r, sizeof(ArenaBlockRef));
 		unpoison(r->next);
 		s += r->next->totalSize();
 		poison(r->next);
 		o = r->nextBlockOffset;
-		ASAN_POISON_MEMORY_REGION(r, sizeof(ArenaBlockRef));
+		VALGRIND_MAKE_MEM_NOACCESS(r, sizeof(ArenaBlockRef));
 	}
 	return s;
 }
@@ -154,10 +153,10 @@ void ArenaBlock::getUniqueBlocks(std::set<ArenaBlock*>& a) {
 	int o = nextBlockOffset;
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
-		ASAN_UNPOISON_MEMORY_REGION(r, sizeof(ArenaBlockRef));
+		VALGRIND_MAKE_MEM_DEFINED(r, sizeof(ArenaBlockRef));
 		r->next->getUniqueBlocks(a);
 		o = r->nextBlockOffset;
-		ASAN_POISON_MEMORY_REGION(r, sizeof(ArenaBlockRef));
+		VALGRIND_MAKE_MEM_NOACCESS(r, sizeof(ArenaBlockRef));
 	}
 	return;
 }
@@ -176,10 +175,10 @@ int ArenaBlock::addUsed(int bytes) {
 
 void ArenaBlock::makeReference(ArenaBlock* next) {
 	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
-	ASAN_UNPOISON_MEMORY_REGION(r, sizeof(ArenaBlockRef));
+	VALGRIND_MAKE_MEM_DEFINED(r, sizeof(ArenaBlockRef));
 	r->next = next;
 	r->nextBlockOffset = nextBlockOffset;
-	ASAN_POISON_MEMORY_REGION(r, sizeof(ArenaBlockRef));
+	VALGRIND_MAKE_MEM_NOACCESS(r, sizeof(ArenaBlockRef));
 	nextBlockOffset = bigUsed;
 	bigUsed += sizeof(ArenaBlockRef);
 }
@@ -203,7 +202,7 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 
 	void* result = (char*)b->getData() + b->addUsed(bytes);
 	poison(b);
-	ASAN_UNPOISON_MEMORY_REGION(result, bytes);
+	VALGRIND_MAKE_MEM_UNDEFINED(result, bytes);
 	return result;
 }
 
@@ -298,7 +297,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	}
 	b->setrefCountUnsafe(1);
 	next.setPtrUnsafe(b);
-	ASAN_POISON_MEMORY_REGION(reinterpret_cast<uint8_t*>(b) + b->used(), b->unused());
+	VALGRIND_MAKE_MEM_NOACCESS(reinterpret_cast<uint8_t*>(b) + b->used(), b->unused());
 	return b;
 }
 
@@ -319,7 +318,7 @@ void ArenaBlock::destroy() {
 			int o = b->nextBlockOffset;
 			while (o) {
 				ArenaBlockRef* br = (ArenaBlockRef*)((char*)b->getData() + o);
-				ASAN_UNPOISON_MEMORY_REGION(br, sizeof(ArenaBlockRef));
+				VALGRIND_MAKE_MEM_DEFINED(br, sizeof(ArenaBlockRef));
 				unpoison(br->next);
 				if (br->next->delref_no_destroy()) stack.push_back(stackArena, br->next);
 				poison(br->next);
@@ -333,45 +332,45 @@ void ArenaBlock::destroy() {
 void ArenaBlock::destroyLeaf() {
 	if (isTiny()) {
 		if (tinySize <= 16) {
-			ASAN_UNPOISON_MEMORY_REGION(this, 16);
+			VALGRIND_MAKE_MEM_UNDEFINED(this, 16);
 			FastAllocator<16>::release(this);
 			INSTRUMENT_RELEASE("Arena16");
 		} else if (tinySize <= 32) {
-			ASAN_UNPOISON_MEMORY_REGION(this, 32);
+			VALGRIND_MAKE_MEM_UNDEFINED(this, 32);
 			FastAllocator<32>::release(this);
 			INSTRUMENT_RELEASE("Arena32");
 		} else {
-			ASAN_UNPOISON_MEMORY_REGION(this, 64);
+			VALGRIND_MAKE_MEM_UNDEFINED(this, 64);
 			FastAllocator<64>::release(this);
 			INSTRUMENT_RELEASE("Arena64");
 		}
 	} else {
 		if (bigSize <= 128) {
-			ASAN_UNPOISON_MEMORY_REGION(this, 128);
+			VALGRIND_MAKE_MEM_UNDEFINED(this, 128);
 			FastAllocator<128>::release(this);
 			INSTRUMENT_RELEASE("Arena128");
 		} else if (bigSize <= 256) {
-			ASAN_UNPOISON_MEMORY_REGION(this, 256);
+			VALGRIND_MAKE_MEM_UNDEFINED(this, 256);
 			FastAllocator<256>::release(this);
 			INSTRUMENT_RELEASE("Arena256");
 		} else if (bigSize <= 512) {
-			ASAN_UNPOISON_MEMORY_REGION(this, 512);
+			VALGRIND_MAKE_MEM_UNDEFINED(this, 512);
 			FastAllocator<512>::release(this);
 			INSTRUMENT_RELEASE("Arena512");
 		} else if (bigSize <= 1024) {
-			ASAN_UNPOISON_MEMORY_REGION(this, 1024);
+			VALGRIND_MAKE_MEM_UNDEFINED(this, 1024);
 			FastAllocator<1024>::release(this);
 			INSTRUMENT_RELEASE("Arena1024");
 		} else if (bigSize <= 2048) {
-			ASAN_UNPOISON_MEMORY_REGION(this, 2048);
+			VALGRIND_MAKE_MEM_UNDEFINED(this, 2048);
 			FastAllocator<2048>::release(this);
 			INSTRUMENT_RELEASE("Arena2048");
 		} else if (bigSize <= 4096) {
-			ASAN_UNPOISON_MEMORY_REGION(this, 4096);
+			VALGRIND_MAKE_MEM_UNDEFINED(this, 4096);
 			FastAllocator<4096>::release(this);
 			INSTRUMENT_RELEASE("Arena4096");
 		} else if (bigSize <= 8192) {
-			ASAN_UNPOISON_MEMORY_REGION(this, 8192);
+			VALGRIND_MAKE_MEM_UNDEFINED(this, 8192);
 			FastAllocator<8192>::release(this);
 			INSTRUMENT_RELEASE("Arena8192");
 		} else {
