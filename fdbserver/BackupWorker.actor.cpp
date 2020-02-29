@@ -607,7 +607,9 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		}
 
 		tagAt = r->version().version;
-		self->pulledVersion = tagAt;
+		if (tagAt > self->pulledVersion.get()) {
+			self->pulledVersion.set(tagAt);
+		}
 		TraceEvent("BackupWorkerGot", self->myId).suppressFor(1.0).detail("V", tagAt);
 		if (self->endVersion.present() && tagAt > self->endVersion.get()) {
 			self->eraseMessagesAfterEndVersion();
