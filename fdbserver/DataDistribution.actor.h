@@ -83,6 +83,21 @@ struct GetTeamRequest {
 	GetTeamRequest() {}
 	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, bool teamMustHaveShards, double inflightPenalty = 1.0 ) 
 		: wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), teamMustHaveShards( teamMustHaveShards ), inflightPenalty( inflightPenalty ) {}
+	
+	std::string getDesc() {
+		std::stringstream ss;
+
+		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
+		   << " PreferLowerUtilization:" << preferLowerUtilization 
+		   << " teamMustHaveShards:" << teamMustHaveShards
+		   << " inflightPenalty:" << inflightPenalty << ";";
+		ss << "CompleteSources:";
+		for (auto& cs : completeSources) {
+			ss << cs.toString() << ",";
+		}
+
+		return ss.str();
+	}
 };
 
 struct GetMetricsRequest {
@@ -143,6 +158,7 @@ public:
 	void moveShard( KeyRangeRef keys, std::vector<Team> destinationTeam );
 	void finishMove( KeyRangeRef keys );
 	void check();
+	void eraseServer(UID ssID);
 private:
 	struct OrderByTeamKey {
 		bool operator()( const std::pair<Team,KeyRange>& lhs, const std::pair<Team,KeyRange>& rhs ) const {

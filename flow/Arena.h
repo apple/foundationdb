@@ -350,7 +350,7 @@ inline void save( Archive& ar, const Arena& p ) {
 template <class T>
 class Optional : public ComposedIdentifier<T, 0x10> {
 public:
-	Optional() : valid(false) {}
+	Optional() : valid(false) { memset(&value, 0, sizeof(value)); }
 	Optional(const Optional<T>& o) : valid(o.valid) {
 		if (valid) new (&value) T(o.get());
 	}
@@ -476,7 +476,7 @@ struct union_like_traits<Optional<T>> : std::true_type {
 	}
 
 	template <size_t i, class U, class Context>
-	static const void assign(Member& member, const U& t, Context&) {
+	static void assign(Member& member, const U& t, Context&) {
 		member = t;
 	}
 };

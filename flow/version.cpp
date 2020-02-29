@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "flow/hgVersion.h"
+#include "flow/SourceVersion.h"
 
-const char* getHGVersion() {
-	return hgVersion;
+const char* getSourceVersion() {
+	return sourceVersion;
 }

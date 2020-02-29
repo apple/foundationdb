@@ -29,7 +29,7 @@ Before using the API, we need to specify the API version. This allows programs t
 
 .. code-block:: go
 
-  fdb.MustAPIVersion(620)
+  fdb.MustAPIVersion(700)
 
 Next, we open a FoundationDB database.  The API will connect to the FoundationDB cluster indicated by the :ref:`default cluster file <default-cluster-file>`.
 
@@ -78,7 +78,7 @@ If this is all working, it looks like we are ready to start building a real appl
 
   func main() {
       // Different API versions may expose different runtime behaviors.
-      fdb.MustAPIVersion(620)
+      fdb.MustAPIVersion(700)
 
       // Open the default database from the system cluster
       db := fdb.MustOpenDefault()
@@ -229,7 +229,7 @@ Furthermore, this version can only be called with a ``Database``, making it impo
 Note that by default, the operation will be retried an infinite number of times and the transaction will never time out. It is therefore recommended that the client choose a default transaction retry limit or timeout value that is suitable for their application. This can be set either at the transaction level using the ``SetRetryLimit`` or ``SetTimeout`` transaction options or at the database level with the ``SetTransactionRetryLimit`` or ``SetTransactionTimeout`` database options. For example, one can set a one minute timeout on each transaction and a default retry limit of 100 by calling::
 
     db.Options().SetTransactionTimeout(60000)  // 60,000 ms = 1 minute
-    db.Options().SetRetryLimit(100)
+    db.Options().SetTransactionRetryLimit(100)
 
 Making some sample classes
 --------------------------
@@ -666,7 +666,7 @@ Here's the code for the scheduling tutorial:
   }
 
   func main() {
-    fdb.MustAPIVersion(620)
+    fdb.MustAPIVersion(700)
     db := fdb.MustOpenDefault()
     db.Options().SetTransactionTimeout(60000)  // 60,000 ms = 1 minute
     db.Options().SetTransactionRetryLimit(100)

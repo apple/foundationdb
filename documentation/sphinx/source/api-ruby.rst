@@ -24,7 +24,6 @@
 .. |max-retry-delay-database-option| replace:: :meth:`Database.options.set_transaction_max_retry_delay`
 .. |transaction-size-limit-database-option| replace:: :func:`Database.options.set_transaction_size_limit`
 .. |causal-read-risky-database-option| replace:: :meth:`Database.options.set_transaction_causal_read_risky`
-.. |include-port-in-address-database-option| replace:: :meth:`Database.options.set_transaction_include_port_in_address`
 .. |snapshot-ryw-enable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_disable`
 .. |transaction-logging-max-field-length-database-option| replace:: :meth:`Database.options.set_transaction_logging_max_field_length`
@@ -37,7 +36,6 @@
 .. |snapshot-ryw-enable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_disable`
 .. |causal-read-risky-transaction-option| replace:: :meth:`Transaction.options.set_causal_read_risky`
-.. |include-port-in-address-transaction-option| replace:: :meth:`Transaction.options.set_include_port_in_address`
 .. |transaction-logging-max-field-length-transaction-option| replace:: :meth:`Transaction.options.set_transaction_logging_max_field_length`
 .. |lazy-iterator-object| replace:: :class:`Enumerator`
 .. |key-meth| replace:: :meth:`Subspace.key`
@@ -95,7 +93,7 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 620
+    FDB.api_version 700
     db = FDB.open
 
 .. function:: open( cluster_file=nil ) -> Database
@@ -127,6 +125,10 @@ After requiring the ``FDB`` gem and selecting an API version, you probably want 
     .. method:: FDB.options.set_trace_format(format) -> nil
 
        |option-trace-format-blurb|
+
+    .. method:: FDB.options.set_trace_clock_source(source) -> nil
+
+       |option-trace-clock-source-blurb|
 
     .. method:: FDB.options.set_disable_multi_version_client_api() -> nil
 
@@ -391,10 +393,6 @@ Database options
 .. method:: Database.options.set_transaction_causal_read_risky() -> nil
 
     |option-db-causal-read-risky-blurb|
-
-.. method:: Database.options.set_transaction_include_port_in_address() -> nil
-
-    |option-db-include-port-in-address-blurb|
 
 .. method:: Database.options.set_transaction_logging_max_field_length(size_limit) -> nil
 
@@ -770,10 +768,6 @@ Transaction options
 .. method:: Transaction.options.set_causal_read_risky() -> nil
 
     |option-causal-read-risky-blurb|
-
-.. method:: Transaction.options.set_include_port_in_address() -> nil
-
-    |option-include-port-in-address-blurb|
 
 .. method:: Transaction.options.set_causal_write_risky() -> nil
 

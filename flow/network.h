@@ -88,8 +88,13 @@ enum class TaskPriority {
 	DataDistribution = 3500,
 	DiskWrite = 3010,
 	UpdateStorage = 3000,
+	CompactCache = 2900,
 	TLogSpilledPeekReply = 2800,
 	FetchKeys = 2500,
+	RestoreApplierWriteDB = 2400,
+	RestoreApplierReceiveMutations = 2310,
+	RestoreLoaderSendMutations = 2300,
+	RestoreLoaderLoadFiles = 2200,
 	Low = 2000,
 
 	Min = 1000,
@@ -228,7 +233,8 @@ struct NetworkAddress {
 	bool isTLS() const { return (flags & FLAG_TLS) != 0; }
 	bool isV6() const { return ip.isV6(); }
 
-	static NetworkAddress parse( std::string const& );
+	static NetworkAddress parse(std::string const&); // May throw connection_string_invalid
+	static Optional<NetworkAddress> parseOptional(std::string const&);
 	static std::vector<NetworkAddress> parseList( std::string const& );
 	std::string toString() const;
 

@@ -26,7 +26,7 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
-#include "flow/Hash3.h"
+#include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
 #include "flow/network.h"
@@ -90,7 +90,7 @@ class hash<Endpoint> {
 public:
 	size_t operator()(const Endpoint &s) const
 	{
-		return hashlittle(&s, sizeof(s), 0);
+		return crc32c_append(0, (const uint8_t*)&s, sizeof(s));
 	}
 };
 }
@@ -373,7 +373,13 @@ private:
 			g_simulator.lastConnectionFailure = now();
 			double a = deterministicRandom()->random01(), b = deterministicRandom()->random01();
 			TEST(true);  // Simulated connection failure
-			TraceEvent("ConnectionFailure", dbgid).detail("MyAddr", process->address).detail("PeerAddr", peerProcess->address).detail("SendClosed", a > .33).detail("RecvClosed", a < .66).detail("Explicit", b < .3);
+			TraceEvent("ConnectionFailure", dbgid)
+			    .detail("MyAddr", process->address)
+			    .detail("PeerAddr", peerProcess->address)
+			    .detail("PeerIsValid", peer.isValid())
+			    .detail("SendClosed", a > .33)
+			    .detail("RecvClosed", a < .66)
+			    .detail("Explicit", b < .3);
 			if (a < .66 && peer) peer->closeInternal();
 			if (a > .33) closeInternal();
 			// At the moment, we occasionally notice the connection failed immediately.  In principle, this could happen but only after a delay.
@@ -385,7 +391,8 @@ private:
 	ACTOR static Future<Void> trackLeakedConnection( Sim2Conn* self ) {
 		wait( g_simulator.onProcess( self->process ) );
 		if (self->process->address.isPublic()) {
-			wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 ) );
+			wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 +
+			           FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME * 2.1 + FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
 		} else {
 			wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 ) );
 		}
@@ -564,8 +571,7 @@ private:
 		}
 
 		if (randLog) {
-			uint32_t a=0, b=0;
-			hashlittle2( data, read_bytes, &a, &b );
+			uint32_t a = crc32c_append( 0, (const uint8_t*)data, read_bytes );
 			fprintf( randLog, "SFR2 %s %s %s %d %d\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), read_bytes, a );
 		}
 
@@ -580,8 +586,7 @@ private:
 	ACTOR static Future<Void> write_impl( SimpleFile* self, StringRef data, int64_t offset ) {
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog) {
-			uint32_t a=0, b=0;
-			hashlittle2( data.begin(), data.size(), &a, &b );
+			uint32_t a = crc32c_append( 0, data.begin(), data.size() );
 			fprintf( randLog, "SFW1 %s %s %s %d %d %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), a, data.size(), offset );
 		}
 
@@ -992,16 +997,10 @@ public:
 		return Void();
 	}
 
-	ACTOR Future<Void> _run(Sim2 *self) {
-		Future<Void> loopFuture = self->runLoop(self);
-		self->net2->run();
-		wait( loopFuture );
-		return Void();
-	}
-
 	// Implement ISimulator interface
 	virtual void run() {
-		_run(this);
+		Future<Void> loopFuture = runLoop(this);
+		net2->run();
 	}
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,

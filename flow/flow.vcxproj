@@ -13,6 +13,8 @@
   <ItemGroup>
     <ActorCompiler Include="ActorCollection.actor.cpp" />
     <ActorCompiler Include="CompressedInt.actor.cpp" />
+    <ClCompile Include="crc32c.cpp" />
+    <ClCompile Include="crc32c-generated-constants.cpp" />
     <ClCompile Include="DeterministicRandom.cpp" />
     <ClCompile Include="Deque.cpp" />
     <ClCompile Include="Error.cpp" />
@@ -57,6 +59,7 @@
     <ClInclude Include="actorcompiler.h" />
     <ClInclude Include="Arena.h" />
     <ClInclude Include="AsioReactor.h" />
+    <ClInclude Include="crc32c.h" />
     <ClInclude Include="Deque.h" />
     <ClInclude Include="DeterministicRandom.h" />
     <ClInclude Include="Error.h" />
@@ -145,8 +148,8 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <PreBuildEvent>
-      <Command>echo const char *hgVersion = "Current version id not currently supported within Windows."; &gt; hgVersion.temp.h &amp;&amp; fc /b hgVersion.temp.h hgVersion.h &gt; nul || copy hgVersion.temp.h hgVersion.h &gt; nul</Command>
-      <Message>Checking HG source version</Message>
+      <Command>echo const char *sourceVersion = "Current version id not currently supported within Windows."; &gt; SourceVersion.temp.h &amp;&amp; fc /b SourceVersion.temp.h SourceVersion.h &gt; nul || copy SourceVersion.temp.h SourceVersion.h &gt; nul</Command>
+      <Message>Checking source version</Message>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">

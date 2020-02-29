@@ -27,7 +27,7 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // "ssd" is an alias to the preferred type which skews the random distribution toward it but that's okay.
-static const char* storeTypes[] = { "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2" };
+static const char* storeTypes[] = { "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "memory-radixtree-beta" };
 static const char* logTypes[] = {
 	"log_engine:=1", "log_engine:=2",
 	"log_spill:=1", "log_spill:=2",
@@ -267,7 +267,6 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 	ACTOR Future<Void> singleDB( ConfigureDatabaseWorkload *self, Database cx ) {
 		state Transaction tr;
-		state int i;
 		loop {
 			if(g_simulator.speedUpSimulation) {
 				return Void();
@@ -285,49 +284,6 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				double waitDuration = 3.0 * deterministicRandom()->random01();
 				//TraceEvent("ConfigureTestWaitAfter").detail("WaitDuration",waitDuration);
 				wait( delay( waitDuration ) );
-			}
-			else if( randomChoice == 1 ) {
-				tr = Transaction( cx );
-				loop {
-					try {
-						tr.clear( normalKeys );
-						wait( tr.commit() );
-						break;
-					} catch( Error &e ) {
-						wait( tr.onError(e) );
-					}
-				}
-			}
-			else if( randomChoice == 2 ) {
-				state double loadDuration = deterministicRandom()->random01() * 10.0;
-				state double startTime = now();
-				state int amtLoaded = 0;
-
-				loop {
-					if( now() - startTime > loadDuration )
-						break;
-					loop {
-						tr = Transaction( cx );
-						try {
-							for( i = 0; i < 10; i++ ) {
-								state Key randomKey( "ConfigureTest" + deterministicRandom()->randomUniqueID().toString() );
-								Optional<Value> val = wait( tr.get( randomKey ) );
-								uint64_t nextVal = val.present() ? valueToUInt64( val.get() ) + 1 : 0;
-								tr.set( randomKey, format( "%016llx", nextVal ) );
-							}
-							wait( tr.commit() );
-							amtLoaded += 10;
-							break;
-						}
-						catch( Error& e ) {
-							wait( tr.onError( e ) );
-							++self->retries;
-						}
-					}
-					wait( delay( 0.1 ) );
-				}
-
-				//TraceEvent("ConfigureTestLoadData").detail("LoadTime", now() - startTime).detail("AmountLoaded",amtLoaded);
 			}
 			else if( randomChoice == 3 ) {
 				//TraceEvent("ConfigureTestConfigureBegin").detail("NewConfig", newConfig);
@@ -366,8 +322,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			else if ( randomChoice == 6 ) {
 				// Some configurations will be invalid, and that's fine.
 				wait(success( IssueConfigurationChange( cx, logTypes[deterministicRandom()->randomInt( 0, sizeof(logTypes)/sizeof(logTypes[0]))], false ) ));
-			}
-			else {
+			} else {
 				ASSERT(false);
 			}
 		}

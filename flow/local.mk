@@ -28,12 +28,12 @@ ifeq ($(PLATFORM),osx)
   flow_LDFLAGS += -framework CoreFoundation -framework IOKit
 endif
 
-GENERATED_SOURCES += flow/hgVersion.h versions.h
+flow_GENERATED_SOURCES += flow/SourceVersion.h versions.h
 
-flow/hgVersion.h: FORCE
-	@echo "Checking       hgVersion.h"
-	@echo "const char *hgVersion = \"$(VERSION_ID)\";" > flow/hgVersion.h.new
-	@([ -e flow/hgVersion.h ] && diff -q flow/hgVersion.h flow/hgVersion.h.new >/dev/null && rm flow/hgVersion.h.new) || mv flow/hgVersion.h.new flow/hgVersion.h
+flow/SourceVersion.h: FORCE
+	@echo "Checking       SourceVersion.h"
+	@echo "const char *sourceVersion = \"$(VERSION_ID)\";" > flow/SourceVersion.h.new
+	@([ -e flow/SourceVersion.h ] && diff -q flow/SourceVersion.h flow/SourceVersion.h.new >/dev/null && rm flow/SourceVersion.h.new) || mv flow/SourceVersion.h.new flow/SourceVersion.h
 
 lib/libflow.a: bin/coverage.flow.xml
 

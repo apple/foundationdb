@@ -251,6 +251,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					state UID lastBackupUID;
 					state int resultWait = wait(backupAgent->waitBackup(cx, backupTag.tagName, false, &lastBackupContainer, &lastBackupUID));
 
+					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName).detail("Result", resultWait);
+
 					state bool restorable = false;
 					if(lastBackupContainer) {
 						state Future<BackupDescription> fdesc = lastBackupContainer->describeBackup();
@@ -457,6 +459,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					}
 				}
 
+				TraceEvent("BARW_RestoreDebug").detail("TargetVersion", targetVersion);
+
 				state std::vector<Future<Version>> restores;
 				state std::vector<Standalone<StringRef>> restoreTags;
 				state bool multipleRangesInOneTag = false;
@@ -466,6 +470,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						auto range = self->restoreRanges[restoreIndex];
 						Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 						restoreTags.push_back(restoreTag);
+						printf("BackupCorrectness, restore for each range: backupAgent.restore is called for "
+						       "restoreIndex:%d tag:%s ranges:%s\n",
+						       restoreIndex, range.toString().c_str(), restoreTag.toString().c_str());
 						restores.push_back(backupAgent.restore(cx, cx, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion, true, range, Key(), Key(), self->locked));
 					}
 				}
@@ -473,6 +480,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					multipleRangesInOneTag = true;
 					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 					restoreTags.push_back(restoreTag);
+					printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
+					       restoreIndex, restoreTag.toString().c_str());
 					restores.push_back(backupAgent.restore(cx, cx, restoreTag, KeyRef(lastBackupContainer->getURL()), self->restoreRanges, true, targetVersion, true, Key(), Key(), self->locked));
 				}
 
@@ -575,7 +584,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						printf("%.6f %-10s Wait #%4d for %lld tasks to end\n", now(), randomID.toString().c_str(), waitCycles, (long long) taskCount);
 
 						wait(delay(5.0));
-						tr->commit();
 						tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 						int64_t _taskCount = wait( backupAgent.getTaskCount(tr) );
 						taskCount = _taskCount;

@@ -46,14 +46,15 @@ inline static bool TRACE_SAMPLE() { return false; }
 extern thread_local int g_trace_depth;
 
 enum Severity {
-	SevSample=1,
-	SevDebug=5,
-	SevInfo=10,
-	SevWarn=20,
-	SevWarnAlways=30,
-	SevError=40,
-	SevMaxUsed=SevError,
-	SevMax=1000000
+	SevVerbose = 0,
+	SevSample = 1,
+	SevDebug = 5,
+	SevInfo = 10,
+	SevWarn = 20,
+	SevWarnAlways = 30,
+	SevError = 40,
+	SevMaxUsed = SevError,
+	SevMax = 1000000
 };
 
 class TraceEventFields {
@@ -577,11 +578,20 @@ bool selectTraceFormatter(std::string format);
 // Returns true iff format is recognized.
 bool validateTraceFormat(std::string format);
 
+// Select the clock source for trace files. Returns false if the format is unrecognized. No longer safe to call after a call
+// to openTraceFile.
+bool selectTraceClockSource(std::string source);
+// Returns true iff source is recognized.
+bool validateTraceClockSource(std::string source);
+
 void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
 extern std::atomic<trace_clock_t> g_trace_clock;
 extern TraceBatch g_traceBatch;
+
+#define DUMPTOKEN(name)                                                                                                \
+	TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
 
 #endif

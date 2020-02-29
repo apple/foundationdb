@@ -43,7 +43,7 @@ struct ExtStringRef {
 	StringRef toArenaOrRef( Arena& a ) {
 		if (extra_zero_bytes) {
 			StringRef dest = StringRef( new(a) uint8_t[ size() ], size() );
-			if (base.size()) {
+			if (base.size() > 0) {
 				memcpy(mutateString(dest), base.begin(), base.size());
 			}
 			memset( mutateString(dest)+base.size(), 0, extra_zero_bytes );

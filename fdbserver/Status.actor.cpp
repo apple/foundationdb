@@ -449,6 +449,9 @@ struct RolesInfo {
 			obj.setKeyRawNumber("kvstore_free_bytes", storageMetrics.getValue("KvstoreBytesFree"));
 			obj.setKeyRawNumber("kvstore_available_bytes", storageMetrics.getValue("KvstoreBytesAvailable"));
 			obj.setKeyRawNumber("kvstore_total_bytes", storageMetrics.getValue("KvstoreBytesTotal"));
+			obj.setKeyRawNumber("kvstore_total_size", storageMetrics.getValue("KvstoreSizeTotal"));
+			obj.setKeyRawNumber("kvstore_total_nodes", storageMetrics.getValue("KvstoreNodeTotal"));
+			obj.setKeyRawNumber("kvstore_inline_keys", storageMetrics.getValue("KvstoreInlineKey"));
 			obj["input_bytes"] = StatusCounter(storageMetrics.getValue("BytesInput")).getStatus();
 			obj["durable_bytes"] = StatusCounter(storageMetrics.getValue("BytesDurable")).getStatus();
 			obj.setKeyRawNumber("query_queue_max", storageMetrics.getValue("QueryQueueMax"));
@@ -571,7 +574,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     WorkerEvents programStarts, std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
     vector<std::pair<StorageServerInterface, EventMap>> storageServers,
     vector<std::pair<TLogInterface, EventMap>> tLogs, vector<std::pair<MasterProxyInterface, EventMap>> proxies,
-    ServerCoordinators coordinators, Database cx, Optional<DatabaseConfiguration> configuration, 
+    ServerCoordinators coordinators, Database cx, Optional<DatabaseConfiguration> configuration,
     Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
 
 	state JsonBuilderObject processMap;
@@ -1157,10 +1160,10 @@ struct LogRangeAndUID {
 
 	LogRangeAndUID(KeyRange const& range, UID const& destID) : range(range), destID(destID) {}
 
-	bool operator < (LogRangeAndUID const& r) const { 
+	bool operator < (LogRangeAndUID const& r) const {
 		if(range.begin != r.range.begin) return range.begin < r.range.begin;
 		if(range.end != r.range.end) return range.end < r.range.end;
-		return destID < r.destID; 
+		return destID < r.destID;
 	}
 };
 
@@ -1277,7 +1280,7 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored) && success(ddModeKey))) {
 					int unreplicated = 0;
 					for(int i = 0; i < result.get().regions.size(); i++) {
-						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) { 
+						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) {
 							unreplicated++;
 						}
 					}
@@ -2096,10 +2099,19 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<CachedSer
 
 	loop {
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		try {
 			choose{
-				when(wait(success(tr.getReadVersion()))) { statusObj["database_locked"] = false; }
-
+				when(Optional<Value> lockUID = wait(tr.get(databaseLockedKey))) {
+					if (lockUID.present()) {
+						statusObj["locked"] = true;
+						statusObj["lock_uid"] =
+						    BinaryReader::fromStringRef<UID>(lockUID.get().substr(10), Unversioned()).toString();
+					} else {
+						statusObj["locked"] = false;
+					}
+				}
 				when(wait(getTimeout)) {
 					incomplete_reasons->insert(format("Unable to determine if database is locked after %d seconds.", timeoutSeconds));
 				}
@@ -2107,18 +2119,11 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<CachedSer
 			break;
 		}
 		catch (Error &e) {
-			if (e.code() == error_code_database_locked) {
-				statusObj["database_locked"] = true;
+			try {
+				wait(tr.onError(e));
+			} catch (Error& e) {
+				incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));
 				break;
-			}
-			else {
-				try {
-					wait(tr.onError(e));
-				}
-				catch (Error &e) {
-					incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));
-					break;
-				}
 			}
 		}
 	}
@@ -2347,9 +2352,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!clusterDataSection.empty())
 				statusObj["data"] = clusterDataSection;
 
-			// Insert database_locked section
+			// Insert database_lock_state section
 			if(!workerStatuses[3].empty()) {
-				statusObj.addContents(workerStatuses[3]);
+				statusObj["database_lock_state"] = workerStatuses[3];
 			}
 
 			// Insert cluster summary statistics
@@ -2395,8 +2400,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, networkMetrics,
 		                                                            latestError, traceFileOpenErrors, programStarts,
-		                                                            processIssues, storageServers, tLogs, proxies, 
-		                                                            coordinators, cx, configuration, 
+		                                                            processIssues, storageServers, tLogs, proxies,
+		                                                            coordinators, cx, configuration,
 		                                                            loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
 		                                                            &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;

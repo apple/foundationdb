@@ -426,7 +426,16 @@ private:
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
 		socket.non_blocking(true);
-		socket.set_option(boost::asio::ip::tcp::no_delay(true));
+		if (FLOW_KNOBS->FLOW_TCP_NODELAY & 1) {
+		  socket.set_option(boost::asio::ip::tcp::no_delay(true));
+		}
+		if (FLOW_KNOBS->FLOW_TCP_QUICKACK & 1) {
+#ifdef __linux__
+		  socket.set_option(boost::asio::detail::socket_option::boolean<IPPROTO_TCP, TCP_QUICKACK>(true));
+#else
+		  TraceEvent(SevWarn, "N2_InitWarn").detail("Message", "TCP_QUICKACK not supported");
+#endif
+		}
 		platform::setCloseOnExec(socket.native_handle());
 	}
 

@@ -34,6 +34,8 @@
     <ActorCompiler Include="worker.actor.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ActorCompiler Include="BackupProgress.actor.cpp" />
+    <ActorCompiler Include="BackupWorker.actor.cpp" />
     <ActorCompiler Include="VersionedBTree.actor.cpp" />
     <ActorCompiler Include="Coordination.actor.cpp" />
     <ActorCompiler Include="CoordinatedState.actor.cpp" />
@@ -53,13 +55,21 @@
     <ActorCompiler Include="workloads\Unreadable.actor.cpp" />
     <ActorCompiler Include="workloads\SaveAndKill.actor.cpp" />
     <ActorCompiler Include="Resolver.actor.cpp" />
-    <ActorCompiler Include="Restore.actor.cpp" />
+    <ActorCompiler Include="StorageCache.actor.cpp" />
+    <ActorCompiler Include="RestoreWorker.actor.cpp" />
+    <ActorCompiler Include="RestoreUtil.actor.cpp" />
+    <ActorCompiler Include="RestoreCommon.actor.cpp" />
+    <ActorCompiler Include="RestoreRoleCommon.actor.cpp" />
+    <ActorCompiler Include="RestoreMaster.actor.cpp" />
+    <ActorCompiler Include="RestoreLoader.actor.cpp" />
+    <ActorCompiler Include="RestoreApplier.actor.cpp" />
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
     <ActorCompiler Include="LogSystemPeekCursor.actor.cpp" />
     <ActorCompiler Include="LogRouter.actor.cpp" />
     <ClCompile Include="LatencyBandConfig.cpp" />
     <ActorCompiler Include="OldTLogServer_4_6.actor.cpp" />
     <ActorCompiler Include="OldTLogServer_6_0.actor.cpp" />
+    <ActorCompiler Include="OldTLogServer_6_2.actor.cpp" />
     <ClCompile Include="SkipList.cpp" />
     <ActorCompiler Include="WaitFailure.actor.cpp" />
     <ActorCompiler Include="tester.actor.cpp" />
@@ -103,6 +113,8 @@
     <ActorCompiler Include="workloads\DiskDurabilityTest.actor.cpp" />
     <ActorCompiler Include="workloads\DummyWorkload.actor.cpp" />
     <ActorCompiler Include="workloads\BackupCorrectness.actor.cpp" />
+    <ActorCompiler Include="workloads\BackupAndParallelRestoreCorrectness.actor.cpp" />
+    <ActorCompiler Include="workloads\ParallelRestore.actor.cpp" />
     <ActorCompiler Include="workloads\AtomicOps.actor.cpp" />
     <ActorCompiler Include="workloads\AtomicOpsApiCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\ClientTransactionProfileCorrectness.actor.cpp" />
@@ -162,6 +174,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ApplyMetadataMutation.h" />
+    <ClInclude Include="BackupInterface.h" />
+    <ActorCompiler Include="BackupProgress.actor.h">
+          <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="ClusterRecruitmentInterface.h" />
     <ClInclude Include="ConflictSet.h" />
     <ClInclude Include="CoordinatedState.h" />
@@ -203,7 +219,25 @@
     <ClInclude Include="RatekeeperInterface.h" />
     <ClInclude Include="RecoveryState.h" />
     <ClInclude Include="ResolverInterface.h" />
-    <ClInclude Include="RestoreInterface.h" />
+    <ClInclude Include="RestoreUtil.h" />
+    <ActorCompiler Include="RestoreWorker.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
+    <ActorCompiler Include="RestoreRoleCommon.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
+    <ActorCompiler Include="RestoreMaster.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
+    <ActorCompiler Include="RestoreLoader.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
+    <ActorCompiler Include="RestoreApplier.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
+    <ActorCompiler Include="RestoreCommon.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="ServerDBInfo.h" />
     <ClInclude Include="SimulatedCluster.h" />
     <ClInclude Include="sqlite\btree.h" />

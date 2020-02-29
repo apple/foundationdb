@@ -2561,7 +2561,9 @@ static int newDatabase(BtShared *pBt){
 ** proceed.
 */
 SQLITE_PRIVATE int sqlite3BtreeBeginTrans(Btree *p, int wrflag){
+#ifndef SQLITE_OMIT_SHARED_CACHE
   sqlite3 *pBlock = 0;
+#endif
   BtShared *pBt = p->pBt;
   int rc = SQLITE_OK;
 
@@ -4549,13 +4551,13 @@ SQLITE_PRIVATE int sqlite3BtreeMovetoUnpacked(
     MemPage *pPage = pCur->apPage[pCur->iPage];
     int c;
 
-    /* pPage->nCell must be greater than zero. If this is the root-page
-    ** the cursor would have been INVALID above and this for(;;) loop
-    ** not run. If this is not the root-page, then the moveToChild() routine
-    ** would have already detected db corruption. Similarly, pPage must
-    ** be the right kind (index or table) of b-tree page. Otherwise
-    ** a moveToChild() or moveToRoot() call would have detected corruption.  */
-    assert( pPage->nCell>0 );
+	/* pPage->nCell must be greater than zero. If this is the root-page
+	** the cursor would have been Invalid above and this for(;;) loop
+	** not run. If this is not the root-page, then the moveToChild() routine
+	** would have already detected db corruption. Similarly, pPage must
+	** be the right kind (index or table) of b-tree page. Otherwise
+	** a moveToChild() or moveToRoot() call would have detected corruption.  */
+	assert( pPage->nCell>0 );
     assert( pPage->intKey==(pIdxKey==0) );
     lwr = 0;
     upr = pPage->nCell-1;
@@ -4650,8 +4652,10 @@ SQLITE_PRIVATE int sqlite3BtreeMovetoUnpacked(
               sqlite3_free(pCellKey);
               goto moveto_finish;
             }
-            
+
+            #if SQLITE3_BTREE_FORCE_FULL_COMPARISONS
             int partial_c = c;
+            #endif
             c = sqlite3VdbeRecordCompare(nCell, pCellKey, pIdxKey, (SQLITE3_BTREE_FORCE_FULL_COMPARISONS ? 0 : nextStartField), NULL);
 
             #if SQLITE3_BTREE_FORCE_FULL_COMPARISONS

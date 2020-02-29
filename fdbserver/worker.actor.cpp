@@ -26,6 +26,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/MetricLogger.h"
+#include "fdbserver/BackupInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/WaitFailure.h"
@@ -37,7 +38,6 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"
@@ -224,6 +224,7 @@ StringRef tlogQueueExtension = LiteralStringRef("fdq");
 std::pair<KeyValueStoreType, std::string> bTreeV1Suffix  = std::make_pair( KeyValueStoreType::SSD_BTREE_V1, ".fdb" );
 std::pair<KeyValueStoreType, std::string> bTreeV2Suffix = std::make_pair(KeyValueStoreType::SSD_BTREE_V2,   ".sqlite");
 std::pair<KeyValueStoreType, std::string> memorySuffix = std::make_pair( KeyValueStoreType::MEMORY,         "-0.fdq" );
+std::pair<KeyValueStoreType, std::string> memoryRTSuffix = std::make_pair( KeyValueStoreType::MEMORY_RADIXTREE, "-0.fdr" );
 std::pair<KeyValueStoreType, std::string> redwoodSuffix = std::make_pair( KeyValueStoreType::SSD_REDWOOD_V1,   ".redwood" );
 
 std::string validationFilename = "_validate";
@@ -233,20 +234,19 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 		return joinPath( folder, sample_filename );
 	else if ( storeType == KeyValueStoreType::SSD_BTREE_V2 )
 		return joinPath(folder, sample_filename);
-	else if( storeType == KeyValueStoreType::MEMORY )
+	else if( storeType == KeyValueStoreType::MEMORY || storeType == KeyValueStoreType::MEMORY_RADIXTREE )
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
-	
 	else if ( storeType == KeyValueStoreType::SSD_REDWOOD_V1 )
 		return joinPath(folder, sample_filename);
 	UNREACHABLE();
 }
 
 std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std::string prefix, UID id ) {
-	if( storeType == KeyValueStoreType::SSD_BTREE_V1)
+	if(storeType == KeyValueStoreType::SSD_BTREE_V1)
 		return joinPath( folder, prefix + id.toString() + ".fdb" );
 	else if (storeType == KeyValueStoreType::SSD_BTREE_V2)
 		return joinPath(folder, prefix + id.toString() + ".sqlite");
-	else if( storeType == KeyValueStoreType::MEMORY )
+	else if(storeType == KeyValueStoreType::MEMORY || storeType == KeyValueStoreType::MEMORY_RADIXTREE)
 		return joinPath( folder, prefix + id.toString() + "-" );
 	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
 		return joinPath(folder, prefix + id.toString() + ".redwood");
@@ -260,7 +260,7 @@ struct TLogOptions {
 	TLogOptions( TLogVersion v, TLogSpillType s ) : version(v), spillType(s) {}
 
 	TLogVersion version = TLogVersion::DEFAULT;
-	TLogSpillType spillType = TLogSpillType::DEFAULT;
+	TLogSpillType spillType = TLogSpillType::UNSET;
 
 	static ErrorOr<TLogOptions> FromStringRef( StringRef s ) {
 		TLogOptions options;
@@ -285,45 +285,50 @@ struct TLogOptions {
 	}
 
 	bool operator == ( const TLogOptions& o ) {
-		return version == o.version && spillType == o.spillType;
+		return version == o.version &&
+			(spillType == o.spillType || version >= TLogVersion::V5);
 	}
 
 	std::string toPrefix() const {
-		if (version == TLogVersion::V2) return "";
-
-		std::string toReturn =
-			"V_" + boost::lexical_cast<std::string>(version) +
-			"_LS_" + boost::lexical_cast<std::string>(spillType);
+		std::string toReturn = "";
+		switch (version) {
+		case TLogVersion::UNSET:
+			ASSERT(false);
+		case TLogVersion::V2:
+			return "";
+		case TLogVersion::V3:
+		case TLogVersion::V4:
+			toReturn =
+				"V_" + boost::lexical_cast<std::string>(version) +
+				"_LS_" + boost::lexical_cast<std::string>(spillType);
+			break;
+		case TLogVersion::V5:
+			toReturn = "V_" + boost::lexical_cast<std::string>(version);
+			break;
+		}
 		ASSERT_WE_THINK( FromStringRef( toReturn ).get() == *this );
 		return toReturn + "-";
 	}
 };
 
 TLogFn tLogFnForOptions( TLogOptions options ) {
-	auto tLogFn = tLog;
-	if ( options.spillType == TLogSpillType::VALUE ) {
-		switch (options.version) {
+	switch (options.version) {
 		case TLogVersion::V2:
-		case TLogVersion::V3:
-		case TLogVersion::V4:
+			if (options.spillType == TLogSpillType::REFERENCE)
+				ASSERT(false);
 			return oldTLog_6_0::tLog;
-		default:
-			ASSERT(false);
-		}
-	}
-	if ( options.spillType == TLogSpillType::REFERENCE ) {
-		switch (options.version) {
-		case TLogVersion::V2:
-			ASSERT(false);
 		case TLogVersion::V3:
 		case TLogVersion::V4:
+			if (options.spillType == TLogSpillType::VALUE)
+				return oldTLog_6_0::tLog;
+			else
+				return oldTLog_6_2::tLog;
+		case TLogVersion::V5:
 			return tLog;
 		default:
 			ASSERT(false);
-		}
 	}
-	ASSERT(false);
-	return tLogFn;
+	return tLog;
 }
 
 struct DiskStore {
@@ -390,6 +395,8 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	result.insert( result.end(), result2.begin(), result2.end() );
 	auto result3 = getDiskStores( folder, redwoodSuffix.second, redwoodSuffix.first);
 	result.insert( result.end(), result3.begin(), result3.end() );
+    auto result4 = getDiskStores( folder, memoryRTSuffix.second, memoryRTSuffix.first );
+    result.insert( result.end(), result4.begin(), result4.end() );
 	return result;
 }
 
@@ -400,23 +407,59 @@ ACTOR Future<Void> registrationClient(
 		ProcessClass initialClass,
 		Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf,
 		Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf,
-		Reference<AsyncVar<bool>> degraded) {
+		Reference<AsyncVar<bool>> degraded,
+		PromiseStream< ErrorInfo > errors,
+		LocalityData locality,
+		Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply (requiring us to re-register)
 	// The registration request piggybacks optional distributor interface if it exists.
 	state Generation requestGeneration = 0;
 	state ProcessClass processClass = initialClass;
+	state Reference<AsyncVar<Optional<std::pair<uint16_t,StorageServerInterface>>>> scInterf( new AsyncVar<Optional<std::pair<uint16_t,StorageServerInterface>>>() );
+	state Future<Void> cacheProcessFuture;
+	state Future<Void> cacheErrorsFuture;
 	loop {
-		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), degraded->get());
+		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), scInterf->get(), degraded->get());
 		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply(request) ) : Never();
 		choose {
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
 				processClass = reply.processClass;	
 				asyncPriorityInfo->set( reply.priorityInfo );
+
+				if(!reply.storageCache.present()) {
+					cacheProcessFuture.cancel();
+					scInterf->set(Optional<std::pair<uint16_t,StorageServerInterface>>());
+				} else if (!scInterf->get().present() || scInterf->get().get().first != reply.storageCache.get()) {
+					StorageServerInterface recruited;
+					recruited.locality = locality;
+					recruited.initEndpoints();
+					
+					std::map<std::string, std::string> details;
+					startRole( Role::STORAGE_CACHE, recruited.id(), interf.id(), details );
+
+					//DUMPTOKEN(recruited.getVersion);
+					DUMPTOKEN(recruited.getValue);
+					DUMPTOKEN(recruited.getKey);
+					DUMPTOKEN(recruited.getKeyValues);
+					DUMPTOKEN(recruited.getShardState);
+					DUMPTOKEN(recruited.waitMetrics);
+					DUMPTOKEN(recruited.splitMetrics);
+					DUMPTOKEN(recruited.getStorageMetrics);
+					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.getQueuingMetrics);
+					DUMPTOKEN(recruited.getKeyValueStoreType);
+					DUMPTOKEN(recruited.watchValue);
+
+					cacheProcessFuture = storageCache( recruited, reply.storageCache.get(), dbInfo );
+					cacheErrorsFuture = forwardError(errors, Role::STORAGE_CACHE, recruited.id(), setWhenDoneOrError(cacheProcessFuture, scInterf, Optional<std::pair<uint16_t,StorageServerInterface>>()));
+					scInterf->set(std::make_pair(reply.storageCache.get(), recruited));
+				}
 			}
 			when ( wait( ccInterface->onChange() )) {}
 			when ( wait( ddInterf->onChange() ) ) {}
 			when ( wait( rkInterf->onChange() ) ) {}
+			when ( wait( scInterf->onChange() ) ) {}
 			when ( wait( degraded->onChange() ) ) {}
 		}
 	}
@@ -583,7 +626,6 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 		recruited.locality = locality;
 		recruited.initEndpoints();
 
-		DUMPTOKEN(recruited.getVersion);
 		DUMPTOKEN(recruited.getValue);
 		DUMPTOKEN(recruited.getKey);
 		DUMPTOKEN(recruited.getKeyValues);
@@ -750,7 +792,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 				TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
 				.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
 				.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
-				
+
 				localInfo.myLocality = locality;
 				dbInfo->set(localInfo);
 			}
@@ -761,6 +803,24 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 		}
 	}
 }
+
+class SharedLogsKey {
+	TLogVersion logVersion;
+	TLogSpillType spillType;
+	KeyValueStoreType storeType;
+
+public:
+	SharedLogsKey( const TLogOptions& options, KeyValueStoreType kvst )
+			: logVersion(options.version), spillType(options.spillType), storeType(kvst) {
+		if (logVersion >= TLogVersion::V5)
+			spillType = TLogSpillType::UNSET;
+	}
+
+	bool operator<(const SharedLogsKey& other) const {
+		return std::tie(logVersion, spillType, storeType) <
+			std::tie(other.logVersion, other.spillType, other.storeType);
+	}
+};
 
 struct SharedLogsValue {
 	Future<Void> actor = Void();
@@ -800,8 +860,7 @@ ACTOR Future<Void> workerServer(
 	// As (store type, spill type) can map to the same TLogFn across multiple TLogVersions, we need to
 	// decide if we should collapse them into the same SharedTLog instance as well.  The answer
 	// here is no, so that when running with log_version==3, all files should say V=3.
-	state std::map<std::tuple<TLogVersion, KeyValueStoreType::StoreType, TLogSpillType>,
-	               SharedLogsValue> sharedLogs;
+	state std::map<SharedLogsKey, SharedLogsValue> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 
 	state std::string coordFolder = abspath(_coordFolder);
@@ -853,10 +912,11 @@ ACTOR Future<Void> workerServer(
 		DUMPTOKEN(recruited.traceBatchDumpRequest);
 	}
 
+	state std::vector<Future<Void>> recoveries;
+
 	try {
 		std::vector<DiskStore> stores = getDiskStores( folder );
 		bool validateDataFiles = deleteFile(joinPath(folder, validationFilename));
-		std::vector<Future<Void>> recoveries;
 		for( int f = 0; f < stores.size(); f++ ) {
 			DiskStore s = stores[f];
 			// FIXME: Error handling
@@ -874,7 +934,6 @@ ACTOR Future<Void> workerServer(
 				details["StorageEngine"] = s.storeType.toString();
 				startRole( Role::STORAGE_SERVER, recruited.id(), interf.id(), details, "Restored" );
 
-				DUMPTOKEN(recruited.getVersion);
 				DUMPTOKEN(recruited.getValue);
 				DUMPTOKEN(recruited.getKey);
 				DUMPTOKEN(recruited.getKeyValues);
@@ -918,7 +977,7 @@ ACTOR Future<Void> workerServer(
 				Promise<Void> oldLog;
 				Promise<Void> recovery;
 				TLogFn tLogFn = tLogFnForOptions(s.tLogOptions);
-				auto& logData = sharedLogs[std::make_tuple(s.tLogOptions.version, s.storeType, s.tLogOptions.spillType)];
+				auto& logData = sharedLogs[SharedLogsKey(s.tLogOptions, s.storeType)];
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
 				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !logData.actor.isValid() || logData.actor.isReady() ? logData.requests : PromiseStream<InitializeTLogRequest>(), s.storeID, interf.id(), true, oldLog, recovery, folder, degraded, activeSharedTLog );
@@ -944,7 +1003,7 @@ ACTOR Future<Void> workerServer(
 		wait(waitForAll(recoveries));
 		recoveredDiskFiles.send(Void());
 
-		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, ddInterf, rkInterf, degraded ) );
+		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, ddInterf, rkInterf, degraded, errors, locality, dbInfo ) );
 
 		TraceEvent("RecoveriesComplete", interf.id());
 
@@ -952,8 +1011,10 @@ ACTOR Future<Void> workerServer(
 
 			when( RebootRequest req = waitNext( interf.clientInterface.reboot.getFuture() ) ) {
 				state RebootRequest rebootReq = req;
+				// If suspendDuration is INT_MAX, the trace will not be logged if it was inside the next block
+				// Also a useful trace to have even if suspendDuration is 0
+				TraceEvent("RebootRequestSuspendingProcess").detail("Duration", req.waitForDuration);
 				if(req.waitForDuration) {
-					TraceEvent("RebootRequestSuspendingProcess").detail("Duration", req.waitForDuration);
 					flushTraceFileVoid();
 					setProfilingEnabled(0);
 					g_network->stop();
@@ -1055,6 +1116,19 @@ ACTOR Future<Void> workerServer(
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
 				req.reply.send(recruited);
 			}
+			when (InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
+				BackupInterface recruited(locality);
+				recruited.initEndpoints();
+
+				startRole(Role::BACKUP, recruited.id(), interf.id());
+				DUMPTOKEN(recruited.waitFailure);
+
+				Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
+				errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
+				TraceEvent("Backup_InitRequest", req.reqId).detail("BackupId", recruited.id());
+				InitializeBackupReply reply(recruited, req.backupEpoch);
+				req.reply.send(reply);
+			}
 			when( InitializeTLogRequest req = waitNext(interf.tLog.getFuture()) ) {
 				// For now, there's a one-to-one mapping of spill type to TLogVersion.
 				// With future work, a particular version of the TLog can support multiple
@@ -1068,7 +1142,7 @@ ACTOR Future<Void> workerServer(
 				}
 				TLogOptions tLogOptions(req.logVersion, req.spillType);
 				TLogFn tLogFn = tLogFnForOptions(tLogOptions);
-				auto& logData = sharedLogs[std::make_tuple(req.logVersion, req.storeType, req.spillType)];
+				auto& logData = sharedLogs[SharedLogsKey(tLogOptions, req.storeType)];
 				logData.requests.send(req);
 				if(!logData.actor.isValid() || logData.actor.isReady()) {
 					UID logId = deterministicRandom()->randomUniqueID();
@@ -1106,7 +1180,6 @@ ACTOR Future<Void> workerServer(
 					details["StorageEngine"] = req.storeType.toString();
 					startRole( Role::STORAGE_SERVER, recruited.id(), interf.id(), details );
 
-					DUMPTOKEN(recruited.getVersion);
 					DUMPTOKEN(recruited.getValue);
 					DUMPTOKEN(recruited.getKey);
 					DUMPTOKEN(recruited.getKeyValues);
@@ -1227,10 +1300,11 @@ ACTOR Future<Void> workerServer(
 						}
 						else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
 							included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
-						}
-						else {
-							ASSERT(d.storeType == KeyValueStoreType::MEMORY);
+						} else if (d.storeType == KeyValueStoreType::MEMORY) {
 							included = fileExists(d.filename + "1.fdq");
+						} else {
+							ASSERT(d.storeType == KeyValueStoreType::MEMORY_RADIXTREE);
+							included = fileExists(d.filename + "1.fdr");
 						}
 						if(d.storedComponent == DiskStore::COMPONENT::TLogData && included) {
 							included = false;
@@ -1278,6 +1352,8 @@ ACTOR Future<Void> workerServer(
 			when( wait( handleErrors ) ) {}
 		}
 	} catch (Error& err) {
+		// Make sure actors are cancelled before "recovery" promises are destructed.
+		for (auto f : recoveries) f.cancel();
 		state Error e = err;
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_actor_cancelled || e.code() == error_code_please_reboot_delete;
 
@@ -1319,9 +1395,8 @@ ACTOR Future<Void> fileNotFoundToNever(Future<Void> f) {
 	try {
 		wait(f);
 		return Void();
-	}
-	catch(Error &e) {
-		if(e.code() == error_code_file_not_found) {
+	} catch (Error& e) {
+		if (e.code() == error_code_file_not_found) {
 			TraceEvent(SevWarn, "ClusterCoordinatorFailed").error(e);
 			return Never();
 		}
@@ -1439,8 +1514,10 @@ ACTOR Future<Void> fdbd(
 	int64_t memoryProfileThreshold,
 	std::string whitelistBinPaths)
 {
-	try {
+	state vector<Future<Void>> actors;
+	state Promise<Void> recoveredDiskFiles;
 
+	try {
 		ServerCoordinators coordinators( connFile );
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
@@ -1448,11 +1525,14 @@ ACTOR Future<Void> fdbd(
 		TraceEvent("StartingFDBD").detail("ZoneID", localities.zoneId()).detail("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder).detail("WhiteListBinPath", whitelistBinPaths);
 
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
-		state vector<Future<Void>> v;
-		// Endpoints should be registered first before any process trying to connect to it. So coordinationServer actor should be the first one executed before any other.
-		if ( coordFolder.size() )
-			v.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
-		
+		// Endpoints should be registered first before any process trying to connect to it.
+		// So coordinationServer actor should be the first one executed before any other.
+		if (coordFolder.size()) {
+			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
+			// their files
+			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder)));
+		}
+
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards
@@ -1461,19 +1541,20 @@ ACTOR Future<Void> fdbd(
 		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc(new AsyncVar<Optional<ClusterControllerFullInterface>>);
 		Reference<AsyncVar<Optional<ClusterInterface>>> ci(new AsyncVar<Optional<ClusterInterface>>);
 		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo(new AsyncVar<ClusterControllerPriorityInfo>(getCCPriorityInfo(fitnessFilePath, processClass)));
-		Promise<Void> recoveredDiskFiles;
 
-		v.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
-		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
-		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
-		v.push_back( reportErrors(failureMonitorClient( ci, true ), "FailureMonitorClient") );
-		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold, coordFolder, whitelistBinPaths), "WorkerServer", UID(), &normalWorkerErrors()) );
+		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
+		actors.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
+		actors.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
+		actors.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold, coordFolder, whitelistBinPaths), "WorkerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
-		wait( quorum(v,1) );
+		wait( quorum(actors,1) );
 		ASSERT(false);  // None of these actors should terminate normally
 		throw internal_error();
-	} catch(Error &e) {
+	} catch (Error& e) {
+		// Make sure actors are cancelled before recoveredDiskFiles is destructed.
+		// Otherwise, these actors may get a broken promise error.
+		for (auto f : actors) f.cancel();
 		Error err = checkIOTimeout(e);
 		throw err;
 	}
@@ -1491,4 +1572,6 @@ const Role Role::TESTER("Tester", "TS");
 const Role Role::LOG_ROUTER("LogRouter", "LR");
 const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
+const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
+const Role Role::BACKUP("Backup", "BK");

@@ -724,7 +724,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 								if(!self->useSystemKeys && deterministicRandom()->random01() < 0.01) {
 									Key versionStampKey = self->getRandomVersionStampKey();
 									Value value = self->getRandomValue();
-									KeyRangeRef range = getVersionstampKeyRange(versionStampKey.arena(), versionStampKey, normalKeys.end);
+									KeyRangeRef range = getVersionstampKeyRange(versionStampKey.arena(), versionStampKey, tr.getCachedReadVersion().orDefault(0), normalKeys.end);
 									self->changeCount.insert( range, changeNum++ );
 									//TraceEvent("WDRVersionStamp").detail("VersionStampKey", printable(versionStampKey)).detail("Range", printable(range));
 									tr.atomicOp( versionStampKey, value, MutationRef::SetVersionstampedKey );

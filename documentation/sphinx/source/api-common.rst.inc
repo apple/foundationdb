@@ -97,7 +97,7 @@
     If a transaction uses both an atomic operation and a strictly serializable read on the same key, the benefits of using the atomic operation (for both conflict checking and performance) are lost.
 
 .. |atomic-add1| replace::
-    Performs an addition of little-endian integers. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
+    Performs an addition of little-endian integers. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. In case of overflow, the result is truncated to the width of ``param``.
 
 .. |atomic-add2| replace::
     The integers to be added must be stored in a little-endian representation. They can be signed in two's complement representation or unsigned. You can add to an integer at a known offset in the value by prepending the appropriate number of zero bytes to ``param`` and padding with zero bytes to match the length of the value. However, this offset technique requires that you know the addition will not cause the integer field within the value to overflow.
@@ -142,7 +142,7 @@
     A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions.
 
 .. |atomic-versionstamps-2| replace::
-    A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an error.
+    A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an ``accessed_unreadable`` error.  The range of keys marked unreadable when setting a versionstamped key begins at the transactions's read version if it is known, otherwise a versionstamp of all ``0x00`` bytes is conservatively assumed.  The upper bound of the unreadable range is a versionstamp of all ``0xFF`` bytes.
 
 .. |atomic-versionstamps-tuple-warning-key| replace::
     At this time, versionstamped keys are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages.
@@ -150,7 +150,7 @@
 .. |atomic-versionstamps-tuple-warning-value| replace::
     At this time, versionstamped values are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped values may not be used with the Subspace and Directory layers except in those languages.
 
-.. |api-version| replace:: 620
+.. |api-version| replace:: 700
 
 .. |streaming-mode-blurb1| replace::
     When using |get-range-func| and similar interfaces, API clients can request large ranges of the database to iterate over.  Making such a request doesn't necessarily mean that the client will consume all of the data in the range - sometimes the client doesn't know how far it intends to iterate in advance.  FoundationDB tries to balance latency and bandwidth by requesting data for iteration in batches.
@@ -242,6 +242,9 @@
 .. |option-trace-format-blurb| replace::
     Select the format of the trace files for this FoundationDB client. xml (the default) and json are supported.
 
+.. |option-trace-clock-source-blurb| replace::
+    Select clock source for trace files. now (the default) or realtime are supported.
+
 .. |network-options-warning| replace::
 
     It is an error to set these options after the first call to |open-func| anywhere in your application.
@@ -329,10 +332,6 @@
 
     Transactions do not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock. Enabling this option is equivalent to calling |causal-read-risky-transaction-option| on each transaction created by this database.
 
-.. |option-db-include-port-in-address-blurb| replace::
-
-    Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated. Enabling this option is equivalent to calling |include-port-in-address-transaction-option| on each transaction created by this database.
-
 .. |option-db-snapshot-ryw-enable-blurb| replace::
 
     If this option has been set an equal or more times with this database than the disable option, snapshot reads *will* see the effects of prior writes in the same transaction. Enabling this option is equivalent to calling |snapshot-ryw-enable-transaction-option| on each transaction created by this database.
@@ -371,10 +370,6 @@
 .. |option-causal-read-risky-blurb| replace::
 
     This transaction does not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock. One can set this for all transactions by calling |causal-read-risky-database-option|.
-
-.. |option-include-port-in-address-blurb| replace::
-
-    Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated. One can set this for all transactions by calling |include-port-in-address-database-option|.
 
 .. |option-causal-write-risky-blurb| replace::
 

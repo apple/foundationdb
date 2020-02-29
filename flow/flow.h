@@ -133,8 +133,8 @@ class Never {};
 template <class T>
 class ErrorOr : public ComposedIdentifier<T, 0x1> {
 public:
-	ErrorOr() : error(default_error_or()) {}
-	ErrorOr(Error const& error) : error(error) {}
+	ErrorOr() : ErrorOr(default_error_or()) {}
+	ErrorOr(Error const& error) : error(error) { memset(&value, 0, sizeof(value)); }
 	ErrorOr(const ErrorOr<T>& o) : error(o.error) {
 		if (present()) new (&value) T(o.get());
 	}
@@ -225,7 +225,7 @@ struct union_like_traits<ErrorOr<T>> : std::true_type {
 	}
 
 	template <int i, class Alternative, class Context>
-	static const void assign(Member& m, const Alternative& a, Context&) {
+	static void assign(Member& m, const Alternative& a, Context&) {
 		if constexpr (i == 0) {
 			m = a;
 		} else {
@@ -240,13 +240,13 @@ class CachedSerialization {
 public:
 	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
 
-	//FIXME: this code will not work for caching a direct serialization from ObjectWriter, because it adds an ErrorOr, 
+	//FIXME: this code will not work for caching a direct serialization from ObjectWriter, because it adds an ErrorOr,
 	// we should create a separate SerializeType for direct serialization
 	enum class SerializeType { None, Binary, Object };
 
 	CachedSerialization() : cacheType(SerializeType::None) {}
 	explicit CachedSerialization(const T& data) : data(data), cacheType(SerializeType::None) {}
-	
+
 	const T& read() const { return data; }
 
 	T& mutate() {
@@ -406,6 +406,7 @@ struct SingleCallback {
 	}
 };
 
+// SAV is short for Single Assigment Variable: It can be assigned for only once!
 template <class T>
 struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
 	int promises; // one for each promise (and one for an active actor if this is an actor)

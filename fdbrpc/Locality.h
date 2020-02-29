@@ -27,9 +27,29 @@
 struct ProcessClass {
 	constexpr static FileIdentifier file_identifier = 6697257;
 	// This enum is stored in restartInfo.ini for upgrade tests, so be very careful about changing the existing items!
-	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, LogRouterClass, DataDistributorClass, CoordinatorClass, RatekeeperClass, InvalidClass = -1 };
+	enum ClassType {
+		UnsetClass,
+		StorageClass,
+		TransactionClass,
+		ResolutionClass,
+		TesterClass,
+		ProxyClass,
+		MasterClass,
+		StatelessClass,
+		LogClass,
+		ClusterControllerClass,
+		LogRouterClass,
+		FastRestoreClass,
+		DataDistributorClass,
+		CoordinatorClass,
+		RatekeeperClass,
+		StorageCacheClass,
+		BackupClass,
+		InvalidClass = -1
+	};
+
 	enum Fitness { BestFit, GoodFit, UnsetFit, OkayFit, WorstFit, ExcludeFit, NeverAssign }; //cannot be larger than 7 because of leader election mask
-	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, DataDistributor, Ratekeeper, NoRole };
+	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, DataDistributor, Ratekeeper, StorageCache, Backup, NoRole };
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;
 	int16_t _source;
@@ -37,6 +57,7 @@ struct ProcessClass {
 public:
 	ProcessClass() : _class( UnsetClass ), _source( CommandLineSource ) {}
 	ProcessClass( ClassType type, ClassSource source ) : _class( type ), _source( source ) {}
+	// clang-format off
 	explicit ProcessClass( std::string s, ClassSource source ) : _source( source ) {
 		if (s=="storage") _class = StorageClass;
 		else if (s=="transaction") _class = TransactionClass;
@@ -49,9 +70,12 @@ public:
 		else if (s=="log") _class = LogClass;
 		else if (s=="router") _class = LogRouterClass;
 		else if (s=="cluster_controller") _class = ClusterControllerClass;
+		else if (s=="fast_restore") _class = FastRestoreClass;
 		else if (s=="data_distributor") _class = DataDistributorClass;
 		else if (s=="coordinator") _class = CoordinatorClass;
 		else if (s=="ratekeeper") _class = RatekeeperClass;
+		else if (s=="storage_cache") _class = StorageCacheClass;
+		else if (s=="backup") _class = BackupClass;
 		else _class = InvalidClass;
 	}
 
@@ -67,9 +91,12 @@ public:
 		else if (classStr=="log") _class = LogClass;
 		else if (classStr=="router") _class = LogRouterClass;
 		else if (classStr=="cluster_controller") _class = ClusterControllerClass;
+		else if (classStr == "fast_restore") _class = FastRestoreClass;
 		else if (classStr=="data_distributor") _class = DataDistributorClass;
 		else if (classStr=="coordinator") _class = CoordinatorClass;
 		else if (classStr=="ratekeeper") _class = RatekeeperClass;
+		else if (classStr=="storage_cache") _class = StorageCacheClass;
+		else if (classStr=="backup") _class = BackupClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -100,12 +127,16 @@ public:
 			case LogClass: return "log";
 			case LogRouterClass: return "router";
 			case ClusterControllerClass: return "cluster_controller";
+			case FastRestoreClass: return "fast_restore";
 			case DataDistributorClass: return "data_distributor";
 			case CoordinatorClass: return "coordinator";
 			case RatekeeperClass: return "ratekeeper";
+			case StorageCacheClass: return "storage_cache";
+			case BackupClass: return "backup";
 			default: return "invalid";
 		}
 	}
+	// clang-format on
 
 	std::string sourceString() const {
 		switch (_source) {
@@ -252,10 +283,10 @@ static std::string describe(
 	}
 	return s;
 }
-static 	std::string describeZones( std::vector<LocalityData> const& items, int max_items = -1 ) {
+inline std::string describeZones( std::vector<LocalityData> const& items, int max_items = -1 ) {
 	return describe(items, LocalityData::keyZoneId, max_items);
 }
-static 	std::string describeDataHalls( std::vector<LocalityData> const& items, int max_items = -1 ) {
+inline std::string describeDataHalls( std::vector<LocalityData> const& items, int max_items = -1 ) {
 	return describe(items, LocalityData::keyDataHallId, max_items);
 }
 
