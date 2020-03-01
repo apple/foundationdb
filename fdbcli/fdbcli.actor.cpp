@@ -3668,7 +3668,7 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 				int finishedParameters = parsed.back().size() + error;
 
 				// We don't want the hint to flip to parse error and back, e.g. while \" is being typed.
-				if (error && line.back() != '\\') return LineNoise::Hint(std::string(" {parse error}"), 90, false);
+				if (error && line.back() != '\\') return LineNoise::Hint(std::string(" {malformed escape sequence}"), 90, false);
 
 				auto iter = helpMap.find(command.toString());
 				if (iter != helpMap.end()) {
