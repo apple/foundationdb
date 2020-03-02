@@ -42,6 +42,25 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+class LoaderVersionBatchState : RoleVersionBatchState {
+public:
+	static const int NOT_INIT = 0;
+	static const int INIT = 1;
+	static const int LOAD_FILE = 2;
+	static const int SEND_MUTATIONS = 3;
+	static const int INVALID = 4;
+
+	explicit LoaderVersionBatchState(int newState) {
+		vbState = newState;
+	}
+
+	virtual ~LoaderVersionBatchState() = default;
+
+	virtual void operator=(int newState) { vbState = newState; }
+
+	virtual int get() { return vbState; }
+};
+
 struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	std::map<LoadingParam, Future<Void>> processedFileParams;
 	std::map<LoadingParam, VersionedMutationsMap> kvOpsPerLP; // Buffered kvOps for each loading param
@@ -56,6 +75,8 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 
 	Future<Void> pollMetrics;
 
+	LoaderVersionBatchState vbState;
+
 	// Status counters
 	struct Counters {
 		CounterCollection cc;
@@ -68,7 +89,7 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 		    sampledRangeBytes("SampledRangeBytes", cc), sampledLogBytes("SampledLogBytes", cc) {}
 	} counters;
 
-	explicit LoaderBatchData(UID nodeID, int batchIndex) : counters(this, nodeID, batchIndex) {
+	explicit LoaderBatchData(UID nodeID, int batchIndex) : counters(this, nodeID, batchIndex), vbState(LoaderVersionBatchState::NOT_INIT) {
 		pollMetrics =
 		    traceCounters("FastRestoreLoaderMetrics", nodeID, SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
 		                  &counters.cc, nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
@@ -127,6 +148,20 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		ss << "[Role: Loader] [NodeID:" << nodeID.toString().c_str() << "] [NodeIndex:" << std::to_string(nodeIndex)
 		   << "]";
 		return ss.str();
+	}
+
+	int getVersionBatchState(int batchIndex) final {
+		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
+		if (item != batch.end()) { // Simply caller's effort in when it can call this func.
+			return LoaderVersionBatchState::INVALID;
+		} else {
+			return item->second->vbState.get();
+		}
+	}
+	void setVersionBatchState(int batchIndex, int vbState) final {
+		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
+		ASSERT(item != batch.end());
+		item->second->vbState = vbState;
 	}
 
 	void initVersionBatch(int batchIndex) {

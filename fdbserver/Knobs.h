@@ -503,6 +503,14 @@ public:
 	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
 	int64_t FASTRESTORE_APPLYING_PARALLELISM; // number of outstanding txns writing to dest. DB
 	int64_t FASTRESTORE_MONITOR_LEADER_DELAY;
+	int64_t FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS;
+	bool FASTRESTORE_TRACK_REQUEST_LATENCY; // true to track reply latency of each request in a request batch
+	bool FASTRESTORE_TRACK_LOADER_SEND_REQUESTS; // track requests of load send mutations to appliers?
+	int64_t FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT; // threshold when pipelined actors should be delayed
+	int64_t FASTRESTORE_WAIT_FOR_MEMORY_LATENCY;
+	int64_t FASTRESTORE_HEARTBEAT_DELAY; // interval for master to ping loaders and appliers
+	int64_t FASTRESTORE_HEARTBEAT_MAX_DELAY; // master claim a node is down if no heart beat from the node for this delay
+	int64_t FASTRESTORE_APPLIER_FETCH_KEYS_SIZE; // number of keys to fetch in a txn on applier
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
