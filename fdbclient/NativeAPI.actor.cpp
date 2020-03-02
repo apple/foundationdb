@@ -37,12 +37,12 @@
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/TLSConnection.h"
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
+#include "flow/TLSPolicy.h"
 #include "flow/UnitTest.h"
 
 #if defined(CMAKE_BUILD) || !defined(WIN32)
@@ -66,12 +66,15 @@ using std::min;
 using std::pair;
 
 NetworkOptions networkOptions;
-Reference<TLSOptions> tlsOptions;
+TLSParams tlsParams;
+static Reference<TLSPolicy> tlsPolicy;
 
-static void initTLSOptions() {
-	if (!tlsOptions) {
-		tlsOptions = Reference<TLSOptions>(new TLSOptions());
+static void initTLSPolicy() {
+#ifndef TLS_DISABLED
+	if (!tlsPolicy) {
+		tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(TLSPolicy::Is::CLIENT));
 	}
+#endif
 }
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
@@ -797,6 +800,8 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 		}
 	}
 
+	g_network->initTLS();
+
 	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile(new AsyncVar<Reference<ClusterConnectionFile>>());
 	connectionFile->set(connFile);
@@ -884,49 +889,48 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			break;
 		case FDBNetworkOptions::TLS_CERT_PATH:
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_cert_file( value.get().toString() );
+			tlsParams.tlsCertBytes = "";
+			tlsParams.tlsCertPath = value.get().toString();
 			break;
-		case FDBNetworkOptions::TLS_CERT_BYTES:
-			initTLSOptions();
-			tlsOptions->set_cert_data( value.get().toString() );
-			break;
-		case FDBNetworkOptions::TLS_CA_PATH:
+		case FDBNetworkOptions::TLS_CERT_BYTES: {
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_ca_file( value.get().toString() );
+			tlsParams.tlsCertPath = "";
+			tlsParams.tlsCertBytes = value.get().toString();
 			break;
-		case FDBNetworkOptions::TLS_CA_BYTES:
+		}
+		case FDBNetworkOptions::TLS_CA_PATH: {
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_ca_data(value.get().toString());
+			tlsParams.tlsCABytes = "";
+			tlsParams.tlsCAPath = value.get().toString();
 			break;
+		}
+		case FDBNetworkOptions::TLS_CA_BYTES: {
+			validateOptionValue(value, true);
+			tlsParams.tlsCAPath = "";
+			tlsParams.tlsCABytes = value.get().toString();
+			break;
+		}
 		case FDBNetworkOptions::TLS_PASSWORD:
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_key_password(value.get().toString());
+			tlsParams.tlsPassword = value.get().toString();
 			break;
 		case FDBNetworkOptions::TLS_KEY_PATH:
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_key_file( value.get().toString() );
+			tlsParams.tlsKeyBytes = "";
+			tlsParams.tlsKeyPath = value.get().toString();
 			break;
-		case FDBNetworkOptions::TLS_KEY_BYTES:
+		case FDBNetworkOptions::TLS_KEY_BYTES: {
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_key_data( value.get().toString() );
+			tlsParams.tlsKeyPath = "";
+			tlsParams.tlsKeyBytes = value.get().toString();
 			break;
+		}
 		case FDBNetworkOptions::TLS_VERIFY_PEERS:
 			validateOptionValue(value, true);
-			initTLSOptions();
-			try {
-				tlsOptions->set_verify_peers({ value.get().toString() });
-			} catch( Error& e ) {
-				TraceEvent(SevWarnAlways, "TLSValidationSetError")
-					.error( e )
-					.detail("Input", value.get().toString() );
-				throw invalid_option_value();
-			}
+			initTLSPolicy();
+#ifndef TLS_DISABLED
+			tlsPolicy->set_verify_peers({ value.get().toString() });
+#endif
 			break;
 		case FDBNetworkOptions::CLIENT_BUGGIFY_ENABLE:
 			enableBuggify(true, BuggifyType::Client);
@@ -984,15 +988,11 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
-	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present());
+	initTLSPolicy();
+
+	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present(), tlsPolicy, tlsParams);
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
-
-	initTLSOptions();
-
-#ifndef TLS_DISABLED
-	tlsOptions->register_network();
-#endif
 }
 
 void runNetwork() {
@@ -2550,8 +2550,8 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 				} else {
 					Optional<Value> val = wait( tr.get( it->range().begin ) );
 					if( !val.present() || val.get() != m.setValue ) {
-						TraceEvent evt = TraceEvent(SevError, "CheckWritesFailed")
-							.detail("Class", "Set")
+						TraceEvent evt(SevError, "CheckWritesFailed");
+						evt.detail("Class", "Set")
 							.detail("Key", it->range().begin)
 							.detail("Expected", m.setValue);
 						if( !val.present() )
@@ -2645,8 +2645,12 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		req.debugID = commitID;
 		state Future<CommitID> reply;
 		if (options.commitOnFirstProxy) {
-			const std::vector<MasterProxyInterface>& proxies = cx->clientInfo->get().proxies;
-			reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
+			if(cx->clientInfo->get().firstProxy.present()) {
+				reply = throwErrorOr ( brokenPromiseToMaybeDelivered ( cx->clientInfo->get().firstProxy.get().commit.tryGetReply(req) ) );
+			} else {
+				const std::vector<MasterProxyInterface>& proxies = cx->clientInfo->get().proxies;
+				reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
+			}
 		} else {
 			reply = loadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::commit, req, TaskPriority::DefaultPromiseEndpoint, true );
 		}

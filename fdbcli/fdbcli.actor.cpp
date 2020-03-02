@@ -32,8 +32,7 @@
 #include "fdbclient/FDBOptions.g.h"
 
 #include "flow/DeterministicRandom.h"
-#include "fdbrpc/TLSConnection.h"
-#include "fdbrpc/Platform.h"
+#include "flow/Platform.h"
 
 #include "flow/SimpleOpt.h"
 
@@ -1602,9 +1601,9 @@ ACTOR Future<Void> timeWarning( double when, const char* msg ) {
 	return Void();
 }
 
-ACTOR Future<Void> checkStatus(Future<Void> f, Reference<ClusterConnectionFile> clusterFile, bool displayDatabaseAvailable = true) {
+ACTOR Future<Void> checkStatus(Future<Void> f, Database db, bool displayDatabaseAvailable = true) {
 	wait(f);
-	StatusObject s = wait(StatusClient::statusFetcher(clusterFile));
+	StatusObject s = wait(StatusClient::statusFetcher(db));
 	printf("\n");
 	printStatus(s, StatusClient::MINIMAL, displayDatabaseAvailable);
 	printf("\n");
@@ -1646,7 +1645,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 
 		state Optional<ConfigureAutoResult> conf;
 		if( tokens[startToken] == LiteralStringRef("auto") ) {
-			StatusObject s = wait( makeInterruptable(StatusClient::statusFetcher( ccf )) );
+			StatusObject s = wait( makeInterruptable(StatusClient::statusFetcher( db )) );
 			if(warn.isValid())
 				warn.cancel();
 
@@ -1775,6 +1774,10 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 	case ConfigurationResult::SUCCESS:
 		printf("Configuration changed\n");
 		ret=false;
+		break;
+	case ConfigurationResult::LOCKED_NOT_NEW:
+		printf("ERROR: `only new databases can be configured as locked`\n");
+		ret = true;
 		break;
 	default:
 		ASSERT(false);
@@ -2091,7 +2094,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 					return true;
 				}
 			}
-			StatusObject status = wait( makeInterruptable( StatusClient::statusFetcher( ccf ) ) );
+			StatusObject status = wait( makeInterruptable( StatusClient::statusFetcher( db ) ) );
 
 			state std::string errorString = "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
 											"Please try the exclude again in 30 seconds.\n"
@@ -2537,22 +2540,22 @@ struct CLIOptions {
 
 #ifndef TLS_DISABLED
 			// TLS Options
-		    case TLSOptions::OPT_TLS_PLUGIN:
+		    case TLSParams::OPT_TLS_PLUGIN:
 			    args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_CERTIFICATES:
+		    case TLSParams::OPT_TLS_CERTIFICATES:
 			    tlsCertPath = args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_CA_FILE:
+		    case TLSParams::OPT_TLS_CA_FILE:
 			    tlsCAPath = args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_KEY:
+		    case TLSParams::OPT_TLS_KEY:
 			    tlsKeyPath = args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_PASSWORD:
+		    case TLSParams::OPT_TLS_PASSWORD:
 			    tlsPassword = args.OptionArg();
 			    break;
-		    case TLSOptions::OPT_TLS_VERIFY_PEERS:
+		    case TLSParams::OPT_TLS_VERIFY_PEERS:
 			    tlsVerifyPeers = args.OptionArg();
 			    break;
 #endif
@@ -2603,7 +2606,7 @@ ACTOR Future<Void> addInterface( std::map<Key,std::pair<Value,ClientLeaderRegInt
 				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
 			}
 		}
-		when( wait(delay(1.0)) ) {}
+		when( wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT)) ) {}
 	}
 	return Void();
 }
@@ -2666,7 +2669,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	if (!opt.exec.present()) {
 		if(opt.initialStatusCheck) {
-			Future<Void> checkStatusF = checkStatus(Void(), db->getConnectionFile());
+			Future<Void> checkStatusF = checkStatus(Void(), db);
 			wait(makeInterruptable(success(checkStatusF)));
 		}
 		else {
@@ -2704,7 +2707,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				linenoise.historyAdd(line);
 		}
 
-		warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db->getConnectionFile());
+		warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db);
 
 		try {
 			state UID randomID = deterministicRandom()->randomUniqueID();
@@ -2849,7 +2852,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						continue;
 					}
 
-					StatusObject s = wait(makeInterruptable(StatusClient::statusFetcher(db->getConnectionFile())));
+					StatusObject s = wait(makeInterruptable(StatusClient::statusFetcher(db)));
 
 					if (!opt.exec.present()) printf("\n");
 					printStatus(s, level);

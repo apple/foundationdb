@@ -541,25 +541,25 @@ How you map your application data to keys and values can have a dramatic impact 
 
 * Structure keys so that range reads can efficiently retrieve the most frequently accessed data.
 
-    * If you perform a range read that is, in total, much more than 1 kB, try to restrict your range as much as you can while still retrieving the needed data.
+  * If you perform a range read that is, in total, much more than 1 kB, try to restrict your range as much as you can while still retrieving the needed data.
 
 * Structure keys so that no single key needs to be updated too frequently, which can cause transaction conflicts.
 
-    * If a key is updated more than 10-100 times per second, try to split it into multiple keys.
-    * For example, if a key is storing a counter, split the counter into N separate counters that are randomly incremented by clients. The total value of the counter can then read by adding up the N individual ones.
+  * If a key is updated more than 10-100 times per second, try to split it into multiple keys.
+  * For example, if a key is storing a counter, split the counter into N separate counters that are randomly incremented by clients. The total value of the counter can then read by adding up the N individual ones.
 
 * Keep key sizes small.
 
-    * Try to keep key sizes below 1 kB. (Performance will be best with key sizes below 32 bytes and *cannot* be more than 10 kB.)
-    * When using the tuple layer to encode keys (as is recommended), select short strings or small integers for tuple elements. Small integers will encode to just two bytes.
-    * If your key sizes are above 1 kB, try either to move data from the key to the value, split the key into multiple keys, or encode the parts of the key more efficiently (remembering to preserve any important ordering).
+  * Try to keep key sizes below 1 kB. (Performance will be best with key sizes below 32 bytes and *cannot* be more than 10 kB.)
+  * When using the tuple layer to encode keys (as is recommended), select short strings or small integers for tuple elements. Small integers will encode to just two bytes.
+  * If your key sizes are above 1 kB, try either to move data from the key to the value, split the key into multiple keys, or encode the parts of the key more efficiently (remembering to preserve any important ordering).
 
 * Keep value sizes moderate.
 
-    * Try to keep value sizes below 10 kB. (Value sizes *cannot* be more than 100 kB.)
-    * If your value sizes are above 10 kB, consider splitting the value across multiple keys.
-    * If you read values with sizes above 1 kB but use only a part of each value, consider splitting the values using multiple keys.
-    * If you frequently perform individual reads on a set of values that total to fewer than 200 bytes, try either to combine the values into a single value or to store the values in adjacent keys and use a range read.
+  * Try to keep value sizes below 10 kB. (Value sizes *cannot* be more than 100 kB.)
+  * If your value sizes are above 10 kB, consider splitting the value across multiple keys.
+  * If you read values with sizes above 1 kB but use only a part of each value, consider splitting the values using multiple keys.
+  * If you frequently perform individual reads on a set of values that total to fewer than 200 bytes, try either to combine the values into a single value or to store the values in adjacent keys and use a range read.
 
 Large Values and Blobs
 ----------------------

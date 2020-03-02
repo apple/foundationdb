@@ -209,15 +209,18 @@ public:
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	virtual Future<Standalone<VectorRef<KeyValueRef>>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
-	                                                             int byteLimit = 1 << 30) {
-		if (recovering.isError()) throw recovering.getError();
+	virtual Future<Standalone<RangeResultRef>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 ) {
+		if(recovering.isError()) throw recovering.getError();
 		if (!recovering.isReady()) return waitAndReadRange(this, keys, rowLimit, byteLimit);
 
-		Standalone<VectorRef<KeyValueRef>> result;
-		if (rowLimit >= 0) {
+		Standalone<RangeResultRef> result;
+		if (rowLimit == 0) {
+			return result;
+		} 
+		
+		if (rowLimit > 0) {
 			auto it = data.lower_bound(keys.begin);
-			while (it != data.end() && rowLimit && byteLimit >= 0) {
+			while (it != data.end() && rowLimit && byteLimit > 0) {
 				StringRef tempKey = it.getKey(reserved_buffer);
 				if (tempKey >= keys.end) break;
 
@@ -229,7 +232,7 @@ public:
 		} else {
 			rowLimit = -rowLimit;
 			auto it = data.previous(data.lower_bound(keys.end));
-			while (it != data.end() && rowLimit && byteLimit >= 0) {
+			while (it != data.end() && rowLimit && byteLimit > 0) {
 				StringRef tempKey = it.getKey(reserved_buffer);
 				if (tempKey < keys.begin) break;
 
@@ -238,6 +241,12 @@ public:
 				it = data.previous(it);
 				--rowLimit;
 			}
+		}
+
+		result.more = rowLimit == 0 || byteLimit <= 0;
+		if(result.more) {
+			ASSERT(result.size() > 0);
+			result.readThrough = result[result.size()-1].key;
 		}
 		return result;
 	}
@@ -689,7 +698,7 @@ private:
 		wait( self->recovering );
 		return self->readValuePrefix(key, maxLength).get();
 	}
-	ACTOR static Future<Standalone<VectorRef<KeyValueRef>>> waitAndReadRange( KeyValueStoreMemory* self, KeyRange keys, int rowLimit, int byteLimit ) {
+	ACTOR static Future<Standalone<RangeResultRef>> waitAndReadRange( KeyValueStoreMemory* self, KeyRange keys, int rowLimit, int byteLimit ) {
 		wait( self->recovering );
 		return self->readRange(keys, rowLimit, byteLimit).get();
 	}

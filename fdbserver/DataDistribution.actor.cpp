@@ -251,63 +251,68 @@ public:
 
 	virtual int64_t getLoadBytes( bool includeInFlight = true, double inflightPenalty = 1.0 ) {
 		int64_t physicalBytes = getLoadAverage();
-		double minFreeSpaceRatio = getMinFreeSpaceRatio(includeInFlight);
+		double minAvailableSpaceRatio = getMinAvailableSpaceRatio(includeInFlight);
 		int64_t inFlightBytes = includeInFlight ? getDataInFlightToTeam() / servers.size() : 0;
-		double freeSpaceMultiplier = SERVER_KNOBS->FREE_SPACE_RATIO_CUTOFF / ( std::max( std::min( SERVER_KNOBS->FREE_SPACE_RATIO_CUTOFF, minFreeSpaceRatio ), 0.000001 ) );
+		double availableSpaceMultiplier = SERVER_KNOBS->AVAILABLE_SPACE_RATIO_CUTOFF / ( std::max( std::min( SERVER_KNOBS->AVAILABLE_SPACE_RATIO_CUTOFF, minAvailableSpaceRatio ), 0.000001 ) );
+		if(servers.size()>2) {
+			//make sure in triple replication the penalty is high enough that you will always avoid a team with a member at 20% free space
+			availableSpaceMultiplier = availableSpaceMultiplier * availableSpaceMultiplier;
+		}
 
-		if(freeSpaceMultiplier > 1 && deterministicRandom()->random01() < 0.001)
-			TraceEvent(SevWarn, "DiskNearCapacity").detail("FreeSpaceRatio", minFreeSpaceRatio);
+		if(minAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
+			TraceEvent(SevWarn, "DiskNearCapacity").suppressFor(1.0).detail("AvailableSpaceRatio", minAvailableSpaceRatio);
+		}
 
-		return (physicalBytes + (inflightPenalty*inFlightBytes)) * freeSpaceMultiplier;
+		return (physicalBytes + (inflightPenalty*inFlightBytes)) * availableSpaceMultiplier;
 	}
 
-	virtual int64_t getMinFreeSpace( bool includeInFlight = true ) {
-		int64_t minFreeSpace = std::numeric_limits<int64_t>::max();
+	virtual int64_t getMinAvailableSpace( bool includeInFlight = true ) {
+		int64_t minAvailableSpace = std::numeric_limits<int64_t>::max();
 		for(int i=0; i<servers.size(); i++) {
 			if( servers[i]->serverMetrics.present() ) {
 				auto& replyValue = servers[i]->serverMetrics.get();
 
-				ASSERT(replyValue.free.bytes >= 0);
+				ASSERT(replyValue.available.bytes >= 0);
 				ASSERT(replyValue.capacity.bytes >= 0);
 
-				int64_t bytesFree = replyValue.free.bytes;
+				int64_t bytesAvailable = replyValue.available.bytes;
 				if(includeInFlight) {
-					bytesFree -= servers[i]->dataInFlightToServer;
+					bytesAvailable -= servers[i]->dataInFlightToServer;
 				}
 
-				minFreeSpace = std::min(bytesFree, minFreeSpace);
+				minAvailableSpace = std::min(bytesAvailable, minAvailableSpace);
 			}
 		}
 
-		return minFreeSpace; // Could be negative
+		return minAvailableSpace; // Could be negative
 	}
 
-	virtual double getMinFreeSpaceRatio( bool includeInFlight = true ) {
+	virtual double getMinAvailableSpaceRatio( bool includeInFlight = true ) {
 		double minRatio = 1.0;
 		for(int i=0; i<servers.size(); i++) {
 			if( servers[i]->serverMetrics.present() ) {
 				auto& replyValue = servers[i]->serverMetrics.get();
 
-				ASSERT(replyValue.free.bytes >= 0);
+				ASSERT(replyValue.available.bytes >= 0);
 				ASSERT(replyValue.capacity.bytes >= 0);
 
-				int64_t bytesFree = replyValue.free.bytes;
+				int64_t bytesAvailable = replyValue.available.bytes;
 				if(includeInFlight) {
-					bytesFree = std::max((int64_t)0, bytesFree - servers[i]->dataInFlightToServer);
+					bytesAvailable = std::max((int64_t)0, bytesAvailable - servers[i]->dataInFlightToServer);
 				}
 
 				if(replyValue.capacity.bytes == 0)
 					minRatio = 0;
 				else
-					minRatio = std::min( minRatio, ((double)bytesFree) / replyValue.capacity.bytes );
+					minRatio = std::min( minRatio, ((double)bytesAvailable) / replyValue.capacity.bytes );
 			}
 		}
 
 		return minRatio;
 	}
 
-	virtual bool hasHealthyFreeSpace() {
-		return getMinFreeSpaceRatio() > SERVER_KNOBS->MIN_FREE_SPACE_RATIO && getMinFreeSpace() > SERVER_KNOBS->MIN_FREE_SPACE;
+	virtual bool hasHealthyAvailableSpace(double minRatio) {
+		return getMinAvailableSpaceRatio() >= minRatio && getMinAvailableSpace() > SERVER_KNOBS->MIN_AVAILABLE_SPACE;
 	}
 
 	virtual Future<Void> updateStorageMetrics() {
@@ -638,6 +643,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	std::vector<DDTeamCollection*> teamCollections;
 	AsyncVar<Optional<Key>> healthyZone;
 	Future<bool> clearHealthyZoneFuture;
+	double medianAvailableSpace;
+	double lastMedianAvailableSpaceUpdate;
 	// clang-format on
 
 	void resetLocalitySet() {
@@ -682,8 +689,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)),
 	    optimalTeamCount(0), recruitingStream(0), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
 	    unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs),
-	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary),
-	    processingUnhealthy(processingUnhealthy) {
+	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary), medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO),
+		lastMedianAvailableSpaceUpdate(0), processingUnhealthy(processingUnhealthy) {
 		if(!primary || configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", distributorId)
 				.detail( "State", "Inactive" )
@@ -757,6 +764,24 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	ACTOR static Future<Void> getTeam( DDTeamCollection* self, GetTeamRequest req ) {
 		try {
 			wait( self->checkBuildTeams( self ) );
+			if(now() - self->lastMedianAvailableSpaceUpdate > SERVER_KNOBS->AVAILABLE_SPACE_UPDATE_DELAY) {
+				self->lastMedianAvailableSpaceUpdate = now();
+				std::vector<double> teamAvailableSpace;
+				teamAvailableSpace.reserve(self->teams.size());
+				for( int i = 0; i < self->teams.size(); i++ ) {
+					if (self->teams[i]->isHealthy()) {
+						teamAvailableSpace.push_back(self->teams[i]->getMinAvailableSpaceRatio());
+					}
+				}
+
+				size_t pivot = teamAvailableSpace.size()/2;
+				if (teamAvailableSpace.size() > 1) {
+					std::nth_element(teamAvailableSpace.begin(), teamAvailableSpace.begin()+pivot, teamAvailableSpace.end());
+					self->medianAvailableSpace = std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO, std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[pivot]));
+				} else {
+					self->medianAvailableSpace = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
+				}
+			}
 
 			// Select the best team
 			// Currently the metric is minimum used disk space (adjusted for data in flight)
@@ -777,6 +802,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			std::vector<Reference<IDataDistributionTeam>> randomTeams;
 			const std::set<UID> completeSources(req.completeSources.begin(), req.completeSources.end());
 
+			// Note: this block does not apply any filters from the request
 			if( !req.wantsNewServers ) {
 				for( int i = 0; i < req.completeSources.size(); i++ ) {
 					if( !self->server_info.count( req.completeSources[i] ) ) {
@@ -803,7 +829,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			if( req.wantsTrueBest ) {
 				ASSERT( !bestOption.present() );
 				for( int i = 0; i < self->teams.size(); i++ ) {
-					if( self->teams[i]->isHealthy() && (!req.preferLowerUtilization || self->teams[i]->hasHealthyFreeSpace()) ) {
+					if (self->teams[i]->isHealthy() &&
+					    (!req.preferLowerUtilization || self->teams[i]->hasHealthyAvailableSpace(self->medianAvailableSpace)) &&
+					    (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(self->teams[i]->getServerIDs(), self->primary)).size() > 0))
+					{
 						int64_t loadBytes = self->teams[i]->getLoadBytes(true, req.inflightPenalty);
 						if( !bestOption.present() || ( req.preferLowerUtilization && loadBytes < bestLoadBytes ) || ( !req.preferLowerUtilization && loadBytes > bestLoadBytes ) ) {
 							bestLoadBytes = loadBytes;
@@ -818,7 +847,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					// If unhealthy team is majority, we may not find an ok dest in this while loop
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
-					bool ok = dest->isHealthy() && (!req.preferLowerUtilization || dest->hasHealthyFreeSpace());
+					bool ok = dest->isHealthy() &&
+					          (!req.preferLowerUtilization || dest->hasHealthyAvailableSpace(self->medianAvailableSpace)) &&
+					          (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)).size() > 0);
+
 					for(int i=0; ok && i<randomTeams.size(); i++) {
 						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
 							ok = false;
@@ -848,6 +880,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 			// Note: req.completeSources can be empty and all servers (and server teams) can be unhealthy.
 			// We will get stuck at this! This only happens when a DC fails. No need to consider it right now.
+			// Note: this block does not apply any filters from the request
 			if(!bestOption.present() && self->zeroHealthyTeams->get()) {
 				//Attempt to find the unhealthy source server team and return it
 				for( int i = 0; i < req.completeSources.size(); i++ ) {
@@ -1317,7 +1350,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TraceEvent("ServerTeamInfo", distributorId)
 			    .detail("TeamIndex", i++)
 			    .detail("Healthy", team->isHealthy())
-			    .detail("HasHealthyFreeSpace", team->hasHealthyFreeSpace())
 			    .detail("TeamSize", team->size())
 			    .detail("MemberIDs", team->getServerIDsStr());
 		}

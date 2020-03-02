@@ -23,7 +23,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.actor.h"
-#include "fdbrpc/Platform.h"
+#include "flow/Platform.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 std::pair< std::string, bool > ClusterConnectionFile::lookupClusterFileName( std::string const& filename ) {
@@ -680,6 +680,7 @@ void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::ve
 				TraceEvent("ConnectedProxy").detail("Proxy", lastProxies[i].id());
 			}
 		}
+		ni.firstProxy = ni.proxies[0];
 		ni.proxies = lastProxies;
 	}
 }

@@ -420,6 +420,14 @@ public:
 		}
 	}
 
+	// Spaceship operator.  Treats not-present as less-than present.
+	int compare(Optional const & rhs) const {
+		if(present() == rhs.present()) {
+			return present() ? get().compare(rhs.get()) : 0;
+		}
+		return present() ? 1 : -1;
+	}
+
 	bool operator == (Optional const& o) const {
 		return present() == o.present() && (!present() || get() == o.get());
 	}
@@ -518,6 +526,10 @@ public:
 		return *this;
 	}
 #endif
+
+	template <class U> Standalone<U> castTo() const {
+		return Standalone<U>(*this, arena());
+	}
 
 	template <class Archive>
 	void serialize(Archive& ar) {

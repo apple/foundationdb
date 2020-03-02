@@ -36,8 +36,7 @@
 #include "fdbclient/BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
-#include "fdbrpc/Platform.h"
-#include "fdbrpc/TLSConnection.h"
+#include "flow/Platform.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -3225,22 +3224,22 @@ int main(int argc, char* argv[]) {
 					blobCredentials.push_back(args->OptionArg());
 					break;
 #ifndef TLS_DISABLED
-				case TLSOptions::OPT_TLS_PLUGIN:
+				case TLSParams::OPT_TLS_PLUGIN:
 					args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_CERTIFICATES:
+				case TLSParams::OPT_TLS_CERTIFICATES:
 					tlsCertPath = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_PASSWORD:
+				case TLSParams::OPT_TLS_PASSWORD:
 					tlsPassword = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_CA_FILE:
+				case TLSParams::OPT_TLS_CA_FILE:
 					tlsCAPath = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_KEY:
+				case TLSParams::OPT_TLS_KEY:
 					tlsKeyPath = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_VERIFY_PEERS:
+				case TLSParams::OPT_TLS_VERIFY_PEERS:
 					tlsVerifyPeers = args->OptionArg();
 					break;
 #endif
@@ -3855,6 +3854,13 @@ int main(int argc, char* argv[]) {
 	} catch (Error& e) {
 		TraceEvent(SevError, "MainError").error(e);
 		status = FDB_EXIT_MAIN_ERROR;
+	} catch (boost::system::system_error& e) {
+		if (g_network) {
+			TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
+		} else {
+			fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code().value());
+		}
+		status = FDB_EXIT_MAIN_EXCEPTION;
 	} catch (std::exception& e) {
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		status = FDB_EXIT_MAIN_EXCEPTION;

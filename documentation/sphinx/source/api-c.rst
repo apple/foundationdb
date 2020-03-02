@@ -528,8 +528,7 @@ Applications must provide error handling and an appropriate retry loop around th
       |snapshot|
 
    ``reverse``
-
-      If non-zero, key-value pairs will be returned in reverse lexicographical order beginning at the end of the range.
+      If non-zero, key-value pairs will be returned in reverse lexicographical order beginning at the end of the range. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
 .. type:: FDBStreamingMode
 
@@ -537,31 +536,31 @@ Applications must provide error handling and an appropriate retry loop around th
 
    ``FDB_STREAMING_MODE_ITERATOR``
 
-      The caller is implementing an iterator (most likely in a binding to a higher level language). The amount of data returned depends on the value of the ``iteration`` parameter to :func:`fdb_transaction_get_range()`.
+   The caller is implementing an iterator (most likely in a binding to a higher level language). The amount of data returned depends on the value of the ``iteration`` parameter to :func:`fdb_transaction_get_range()`.
 
    ``FDB_STREAMING_MODE_SMALL``
 
-      Data is returned in small batches (not much more expensive than reading individual key-value pairs).
+   Data is returned in small batches (not much more expensive than reading individual key-value pairs).
 
    ``FDB_STREAMING_MODE_MEDIUM``
 
-      Data is returned in batches between _SMALL and _LARGE.
+   Data is returned in batches between _SMALL and _LARGE.
 
    ``FDB_STREAMING_MODE_LARGE``
 
-      Data is returned in batches large enough to be, in a high-concurrency environment, nearly as efficient as possible. If the caller does not need the entire range, some disk and network bandwidth may be wasted. The batch size may be still be too small to allow a single client to get high throughput from the database.
+   Data is returned in batches large enough to be, in a high-concurrency environment, nearly as efficient as possible. If the caller does not need the entire range, some disk and network bandwidth may be wasted. The batch size may be still be too small to allow a single client to get high throughput from the database.
 
    ``FDB_STREAMING_MODE_SERIAL``
 
-      Data is returned in batches large enough that an individual client can get reasonable read bandwidth from the database. If the caller does not need the entire range, considerable disk and network bandwidth may be wasted.
+   Data is returned in batches large enough that an individual client can get reasonable read bandwidth from the database. If the caller does not need the entire range, considerable disk and network bandwidth may be wasted.
 
    ``FDB_STREAMING_MODE_WANT_ALL``
 
-      The caller intends to consume the entire range and would like it all transferred as early as possible.
+   The caller intends to consume the entire range and would like it all transferred as early as possible.
 
    ``FDB_STREAMING_MODE_EXACT``
 
-      The caller has passed a specific row limit and wants that many rows delivered in a single batch.
+   The caller has passed a specific row limit and wants that many rows delivered in a single batch.
 
 .. function:: void fdb_transaction_set(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, uint8_t const* value, int value_length)
 

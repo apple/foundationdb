@@ -41,6 +41,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"
+#include "flow/ThreadHelper.actor.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -660,7 +661,7 @@ Standalone<StringRef> roleString(std::set<std::pair<std::string, std::string>> r
 	return StringRef(result);
 }
 
-void startRole(const Role &role, UID roleId, UID workerId, std::map<std::string, std::string> details, std::string origination) {
+void startRole(const Role &role, UID roleId, UID workerId, const std::map<std::string, std::string> &details, const std::string &origination) {
 	if(role.includeInTraceRoles) {
 		addTraceRole(role.abbreviation);
 	}
@@ -746,7 +747,45 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFol
 	return Void();
 }
 
-ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, Reference<ClusterConnectionFile> connFile, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
+ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::set<std::string>>>> issues) {
+	state bool pingTimeout = false;
+	loop {
+		wait(delay(SERVER_KNOBS->TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS));
+		ThreadFuture<Void> f(new ThreadSingleAssignmentVar<Void>);
+		Reference<CompletionCallback<Void>> callback =
+		    Reference<CompletionCallback<Void>>(new CompletionCallback<Void>(f));
+		callback->self = callback;
+		f.callOrSetAsCallback(callback.getPtr(), callback->userParam, 0);
+		pingTraceLogWriterThread(f);
+		try {
+			wait(timeoutError(callback->promise.getFuture(), SERVER_KNOBS->TRACE_LOG_PING_TIMEOUT_SECONDS));
+		} catch (Error& e) {
+			if (e.code() == error_code_timed_out) {
+				pingTimeout = true;
+			} else {
+				throw;
+			}
+		}
+		if (issues.present()) {
+			std::set<std::string> _issues;
+			retriveTraceLogIssues(_issues);
+			if (pingTimeout) {
+				// Ping trace log writer thread timeout.
+				_issues.insert("trace_log_writer_thread_unresponsive");
+				pingTimeout = false;
+			}
+			issues.get()->set(_issues);
+		}
+	}
+}
+
+// TODO: `issues` is right now only updated by `monitorTraceLogIssues` and thus is being `set` on every update.
+// It could be changed to `insert` and `trigger` later if we want to use it as a generic way for the caller of this
+// function to report issues to cluster controller.
+ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                       Reference<ClusterConnectionFile> connFile, LocalityData locality,
+                                       Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                       Optional<Reference<AsyncVar<std::set<std::string>>>> issues) {
 	// Initially most of the serverDBInfo is not known, but we know our locality right away
 	ServerDBInfo localInfo;
 	localInfo.myLocality = locality;
@@ -756,6 +795,12 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 	loop {
 		GetServerDBInfoRequest req;
 		req.knownServerInfoID = dbInfo->get().id;
+
+		if (issues.present()) {
+			for (auto const& i : issues.get()->get()) {
+				req.issues.push_back_deep(req.issues.arena(), i);
+			}
+		}
 
 		ClusterConnectionString fileConnectionString;
 		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
@@ -800,6 +845,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 				if(ccInterface->get().present())
 					TraceEvent("GotCCInterfaceChange").detail("CCID", ccInterface->get().get().id()).detail("CCMachine", ccInterface->get().get().getWorkers.getEndpoint().getPrimaryAddress());
 			}
+			when(wait(issues.present() ? issues.get()->onChange() : Never())) {}
 		}
 	}
 }
@@ -868,6 +914,8 @@ ACTOR Future<Void> workerServer(
 	state WorkerInterface interf( locality );
 	interf.initEndpoints();
 
+	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
+
 	folder = abspath(folder);
 
 	if(metricsPrefix.size() > 0) {
@@ -887,7 +935,8 @@ ACTOR Future<Void> workerServer(
 	errorForwarders.add( resetAfter(degraded, SERVER_KNOBS->DEGRADED_RESET_INTERVAL, false, SERVER_KNOBS->DEGRADED_WARNING_LIMIT, SERVER_KNOBS->DEGRADED_WARNING_RESET_DELAY, "DegradedReset"));
 	errorForwarders.add( loadedPonger( interf.debugPing.getFuture() ) );
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
-	errorForwarders.add( monitorServerDBInfo( ccInterface, connFile, locality, dbInfo ) );
+	errorForwarders.add(monitorTraceLogIssues(issues));
+	errorForwarders.add(monitorServerDBInfo(ccInterface, connFile, locality, dbInfo, issues));
 	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo, locality ) );
 	errorForwarders.add(monitorHighMemory(memoryProfileThreshold));
 
@@ -980,7 +1029,7 @@ ACTOR Future<Void> workerServer(
 				auto& logData = sharedLogs[SharedLogsKey(s.tLogOptions, s.storeType)];
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
-				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !logData.actor.isValid() || logData.actor.isReady() ? logData.requests : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery, folder, degraded, activeSharedTLog );
+				Future<Void> tl = tLogFn( kv, queue, dbInfo, locality, !logData.actor.isValid() || logData.actor.isReady() ? logData.requests : PromiseStream<InitializeTLogRequest>(), s.storeID, interf.id(), true, oldLog, recovery, folder, degraded, activeSharedTLog );
 				recoveries.push_back(recovery.getFuture());
 				activeSharedTLog->set(s.storeID);
 
@@ -1161,7 +1210,7 @@ ACTOR Future<Void> workerServer(
 					filesClosed.add( data->onClosed() );
 					filesClosed.add( queue->onClosed() );
 
-					Future<Void> tLogCore = tLogFn( data, queue, dbInfo, locality, logData.requests, logId, false, Promise<Void>(), Promise<Void>(), folder, degraded, activeSharedTLog );
+					Future<Void> tLogCore = tLogFn( data, queue, dbInfo, locality, logData.requests, logId, interf.id(), false, Promise<Void>(), Promise<Void>(), folder, degraded, activeSharedTLog );
 					tLogCore = handleIOErrors( tLogCore, data, logId );
 					tLogCore = handleIOErrors( tLogCore, queue, logId );
 					errorForwarders.add( forwardError( errors, Role::SHARED_TRANSACTION_LOG, logId, tLogCore ) );
@@ -1458,37 +1507,48 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	state UID processIDUid;
 	platform::createDirectory(folder);
 
-	try {
-		state std::string lockFilePath = joinPath(folder, "processId");
-		state ErrorOr<Reference<IAsyncFile>> lockFile = wait(errorOr(IAsyncFileSystem::filesystem(g_network)->open(lockFilePath, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0600)));
+	loop {
+		try {
+			state std::string lockFilePath = joinPath(folder, "processId");
+			state ErrorOr<Reference<IAsyncFile>> lockFile = wait(errorOr(IAsyncFileSystem::filesystem(g_network)->open(lockFilePath, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0600)));
 
-		if (lockFile.isError() && lockFile.getError().code() == error_code_file_not_found && !fileExists(lockFilePath)) {
-			Reference<IAsyncFile> _lockFile = wait(IAsyncFileSystem::filesystem()->open(lockFilePath, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_LOCK | IAsyncFile::OPEN_READWRITE, 0600));
-			lockFile = _lockFile;
-			processIDUid = deterministicRandom()->randomUniqueID();
-			BinaryWriter wr(IncludeVersion());
-			wr << processIDUid;
-			wait(lockFile.get()->write(wr.getData(), wr.getLength(), 0));
-			wait(lockFile.get()->sync());
-		}
-		else {
-			if (lockFile.isError()) throw lockFile.getError(); // If we've failed to open the file, throw an exception
+			if (lockFile.isError() && lockFile.getError().code() == error_code_file_not_found && !fileExists(lockFilePath)) {
+				Reference<IAsyncFile> _lockFile = wait(IAsyncFileSystem::filesystem()->open(lockFilePath, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_LOCK | IAsyncFile::OPEN_READWRITE, 0600));
+				lockFile = _lockFile;
+				processIDUid = deterministicRandom()->randomUniqueID();
+				BinaryWriter wr(IncludeVersion());
+				wr << processIDUid;
+				wait(lockFile.get()->write(wr.getData(), wr.getLength(), 0));
+				wait(lockFile.get()->sync());
+			}
+			else {
+				if (lockFile.isError()) throw lockFile.getError(); // If we've failed to open the file, throw an exception
 
-			int64_t fileSize = wait(lockFile.get()->size());
-			state Key fileData = makeString(fileSize);
-			wait(success(lockFile.get()->read(mutateString(fileData), fileSize, 0)));
-			processIDUid = BinaryReader::fromStringRef<UID>(fileData, IncludeVersion());
+				int64_t fileSize = wait(lockFile.get()->size());
+				state Key fileData = makeString(fileSize);
+				wait(success(lockFile.get()->read(mutateString(fileData), fileSize, 0)));
+				try {
+					processIDUid = BinaryReader::fromStringRef<UID>(fileData, IncludeVersion());
+					return processIDUid;
+				} catch (Error& e) {
+					if(!g_network->isSimulated()) {
+						throw;
+					}
+					deleteFile(lockFilePath);
+				}
+			}
 		}
-	}
-	catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled) {
-			if (!e.isInjectedFault())
+		catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			if (!e.isInjectedFault()) {
 				fprintf(stderr, "ERROR: error creating or opening process id file `%s'.\n", joinPath(folder, "processId").c_str());
+			}
 			TraceEvent(SevError, "OpenProcessIdError").error(e);
+			throw;
 		}
-		throw;
 	}
-	return processIDUid;
 }
 
 ACTOR Future<Void> fdbd(
