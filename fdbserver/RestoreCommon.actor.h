@@ -249,7 +249,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 } // namespace parallelFileRestore
 
 // Send each request in requests via channel of the request's interface.
-// Save replies to replies if replies != NULL
+// Save replies to replies if replies != nullptr
 // The UID in a request is the UID of the interface to handle the request
 ACTOR template <class Interface, class Request>
 Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
@@ -333,7 +333,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 				}
 			}
 			// Update replies
-			if (replies != NULL) {
+			if (replies != nullptr) {
 				for(int i = 0; i < cmdReplies.size(); ++i) {
 					replies->emplace_back(cmdReplies[i].get());
 				}
@@ -359,7 +359,7 @@ ACTOR template <class Interface, class Request>
 Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::map<UID, Interface> interfaces,
                                std::vector<std::pair<UID, Request>> requests, TaskPriority taskID = TaskPriority::Low,
                                bool trackRequestLatency = true) {
-	wait(getBatchReplies(channel, interfaces, requests, NULL, taskID, trackRequestLatency));
+	wait(getBatchReplies(channel, interfaces, requests, nullptr, taskID, trackRequestLatency));
 
 	return Void();
 }

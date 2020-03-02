@@ -150,7 +150,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		return ss.str();
 	}
 
-	int getVersionBatchState(int batchIndex) {
+	int getVersionBatchState(int batchIndex) final {
 		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
 		if (item != batch.end()) { // Simply caller's effort in when it can call this func.
 			return LoaderVersionBatchState::INVALID;
@@ -158,7 +158,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 			return item->second->vbState.get();
 		}
 	}
-	void setVersionBatchState(int batchIndex, int vbState) {
+	void setVersionBatchState(int batchIndex, int vbState) final {
 		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
 		ASSERT(item != batch.end());
 		item->second->vbState = vbState;

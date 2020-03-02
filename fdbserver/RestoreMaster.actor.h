@@ -157,11 +157,8 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	~RestoreMasterData() = default;
 
-	int getVersionBatchState(int batchIndex) {
-		return RoleVersionBatchState::INVALID;
-	}
-	void setVersionBatchState(int batchIndex, int vbState) {
-	}
+	int getVersionBatchState(int batchIndex) final { return RoleVersionBatchState::INVALID; }
+	void setVersionBatchState(int batchIndex, int vbState) final {}
 
 	void initVersionBatch(int batchIndex) {
 		TraceEvent("FastRestoreMasterInitVersionBatch", id()).detail("VersionBatchIndex", batchIndex);

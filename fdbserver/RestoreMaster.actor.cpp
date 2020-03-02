@@ -914,21 +914,17 @@ ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreMasterData> self)
 	state std::vector<Future<RestoreCommonReply>> fReplies(numRoles, Never()); // TODO: Reserve memory for this vector
 	state std::vector<UID> nodes;
 	state int index = 0;
+	state Future<Void> fTimeout = Void();
 
 	// Initialize nodes only once
 	loader = self->loadersInterf.begin();
 	applier = self->appliersInterf.begin();
-	while (loader != self->loadersInterf.end()) {
-		nodes.push_back(loader->first);
-		loader++;
-	}
-	while (applier != self->appliersInterf.end()) {
-		nodes.push_back(applier->first);
-		applier++;
-	}
+	std::transform(self->loadersInterf.begin(), self->loadersInterf.end(), std::back_inserter(nodes),
+	               [](const std::pair<UID, RestoreLoaderInterface>& in) { return in.first; });
+	std::transform(self->appliersInterf.begin(), self->appliersInterf.end(), std::back_inserter(nodes),
+	               [](const std::pair<UID, RestoreApplierInterface>& in) { return in.first; });
 
 	loop {
-		wait(delay(SERVER_KNOBS->FASTRESTORE_HEARTBEAT_DELAY));
 		loader = self->loadersInterf.begin();
 		applier = self->appliersInterf.begin();
 		index = 0;
@@ -945,7 +941,8 @@ ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreMasterData> self)
 			index++;
 		}
 
-		wait(waitForAll(fReplies) || delay(SERVER_KNOBS->FASTRESTORE_HEARTBEAT_DELAY));
+		fTimeout = delay(SERVER_KNOBS->FASTRESTORE_HEARTBEAT_DELAY);
+		wait(waitForAll(fReplies) || fTimeout);
 		// Update the most recent heart beat time for each role
 		for (int i = 0; i < fReplies.size(); ++i) {
 			if (fReplies[i].isReady()) {
@@ -954,6 +951,7 @@ ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreMasterData> self)
 				item.first->second = currentTime;
 			}
 		}
+		wait(fTimeout); // Ensure not updating heartbeat too quickly
 	}
 }
 
