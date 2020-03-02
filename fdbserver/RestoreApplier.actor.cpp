@@ -197,21 +197,21 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 	return Void();
 }
 
-// Get keys in imcompleteStagingKeys and precompute the stagingKey which is stored in batchData->stagingKeys
+// Get keys in incompleteStagingKeys and precompute the stagingKey which is stored in batchData->stagingKeys
 ACTOR static Future<Void> getAndComputeStagingKeys(
-    std::map<Key, std::map<Key, StagingKey>::iterator> imcompleteStagingKeys, Database cx, UID applierID) {
+    std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys, Database cx, UID applierID) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state std::vector<Future<Optional<Value>>> fValues;
 	state int i = 0;
 	state int retries = 0;
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysStart", applierID)
-	    .detail("GetKeys", imcompleteStagingKeys.size());
+	    .detail("GetKeys", incompleteStagingKeys.size());
 	loop {
 		try {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			for (auto& key : imcompleteStagingKeys) {
+			for (auto& key : incompleteStagingKeys) {
 				fValues.push_back(tr->get(key.first));
 			}
 			wait(waitForAll(fValues));
@@ -219,7 +219,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 		} catch (Error& e) {
 			retries++;
 			TraceEvent(retries > 10 ? SevError : SevWarn, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
-			    .detail("GetKeys", imcompleteStagingKeys.size())
+			    .detail("GetKeys", incompleteStagingKeys.size())
 			    .detail("Error", e.what())
 			    .detail("ErrorCode", e.code());
 			wait(tr->onError(e));
@@ -227,9 +227,9 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 		}
 	}
 
-	ASSERT(fValues.size() == imcompleteStagingKeys.size());
+	ASSERT(fValues.size() == incompleteStagingKeys.size());
 	int i = 0;
-	for (auto& key : imcompleteStagingKeys) {
+	for (auto& key : incompleteStagingKeys) {
 		if (!fValues[i].get().present()) {
 			TraceEvent(SevWarnAlways, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
 			    .detail("Key", key.first)
@@ -257,7 +257,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	}
 
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysDone", applierID)
-	    .detail("GetKeys", imcompleteStagingKeys.size());
+	    .detail("GetKeys", incompleteStagingKeys.size());
 
 	return Void();
 }
@@ -311,23 +311,23 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 
 	// Get keys in stagingKeys which does not have a baseline key by reading database cx, and precompute the key's value
 	std::vector<Future<Void>> fGetAndComputeKeys;
-	std::map<Key, std::map<Key, StagingKey>::iterator> imcompleteStagingKeys;
+	std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys;
 	std::map<Key, StagingKey>::iterator stagingKeyIter = batchData->stagingKeys.begin();
 	int numKeysInBatch = 0;
 	for (; stagingKeyIter != batchData->stagingKeys.end(); stagingKeyIter++) {
 		if (!stagingKeyIter->second.hasBaseValue()) {
-			imcompleteStagingKeys.emplace(stagingKeyIter->first, stagingKeyIter);
+			incompleteStagingKeys.emplace(stagingKeyIter->first, stagingKeyIter);
 			batchData->counters.fetchKeys += 1;
 			numKeysInBatch++;
 		}
 		if (numKeysInBatch == SERVER_KNOBS->FASTRESTORE_APPLIER_FETCH_KEYS_SIZE) {
-			fGetAndComputeKeys.push_back(getAndComputeStagingKeys(imcompleteStagingKeys, cx, applierID));
+			fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, cx, applierID));
 			numKeysInBatch = 0;
-			imcompleteStagingKeys.clear();
+			incompleteStagingKeys.clear();
 		}
 	}
 	if (numKeysInBatch > 0) {
-		fGetAndComputeKeys.push_back(getAndComputeStagingKeys(imcompleteStagingKeys, cx, applierID));
+		fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, cx, applierID));
 	}
 
 	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResult", applierID)
