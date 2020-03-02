@@ -324,7 +324,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 						latestNode = endTime.first;
 					}
 				}
-				if (latest - earliest > SERVER_KNOBS->FASTRESTORE_STRAGGLER_THRESHOLD) {
+				if (latest - earliest > SERVER_KNOBS->FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS) {
 					TraceEvent(SevWarn, "ProfileSendRequestBatchLatencyFoundStraggler", bathcID)
 						.detail("SlowestNode", latestNode)
 						.detail("FatestNode", earliestNode)

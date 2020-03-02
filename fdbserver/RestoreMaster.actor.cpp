@@ -917,8 +917,6 @@ ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreMasterData> self)
 	state Future<Void> fTimeout = Void();
 
 	// Initialize nodes only once
-	loader = self->loadersInterf.begin();
-	applier = self->appliersInterf.begin();
 	std::transform(self->loadersInterf.begin(), self->loadersInterf.end(), std::back_inserter(nodes),
 	               [](const std::pair<UID, RestoreLoaderInterface>& in) { return in.first; });
 	std::transform(self->appliersInterf.begin(), self->appliersInterf.end(), std::back_inserter(nodes),
