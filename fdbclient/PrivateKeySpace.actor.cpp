@@ -78,13 +78,14 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(PrivateKeySpac
 	// KeySelector, GetRangeLimits and reverse are all handled here
 
 	// make sure orEqual == false
-	if (begin.orEqual) begin.removeOrEqual(begin.arena());
-	if (end.orEqual) end.removeOrEqual(end.arena());
+	begin.removeOrEqual(begin.arena());
+	end.removeOrEqual(end.arena());
 
 	// make sure offset == 1
 	state RangeMap<Key, PrivateKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter =
 	    pks->getKeyRangeMap().rangeContaining(begin.getKey());
-	while (begin.offset != 1 && iter != pks->getKeyRangeMap().ranges().begin()) {
+	while (begin.offset != 1 && iter != pks->getKeyRangeMap().ranges().begin() &&
+	       iter != pks->getKeyRangeMap().ranges().end()) {
 		if (iter->value() != nullptr) wait(normalizeKeySelectorActor(iter->value(), ryw, &begin));
 		begin.offset < 1 ? --iter : ++iter;
 	}
@@ -95,7 +96,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(PrivateKeySpac
 		    .detail("TerminateOffset", begin.offset);
 	}
 	iter = pks->getKeyRangeMap().rangeContaining(end.getKey());
-	while (end.offset != 1 && iter != pks->getKeyRangeMap().ranges().end()) {
+	while (end.offset != 1 && iter != pks->getKeyRangeMap().ranges().begin() &&
+	       iter != pks->getKeyRangeMap().ranges().end()) {
 		if (iter->value() != nullptr) wait(normalizeKeySelectorActor(iter->value(), ryw, &end));
 		end.offset < 1 ? --iter : ++iter;
 	}
