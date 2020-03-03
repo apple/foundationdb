@@ -37,13 +37,6 @@ protected:
 	KeyRange range; // underlying key range for this function
 };
 
-// class PrivateKeyRangeSimpleImpl : public PrivateKeyRangeBaseImpl {
-// public:
-// 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
-// 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector
-// end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const;
-// };
-
 class PrivateKeySpace {
 public:
 	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key, bool snapshot = false);
