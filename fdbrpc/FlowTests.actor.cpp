@@ -25,7 +25,6 @@
 #include "flow/IThreadPool.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
-#include "fdbclient/PrivateKeySpace.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 void forceLinkFlowTests() {}
@@ -1354,117 +1353,5 @@ TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 	ASSERT(deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::max() - 1,
 	                                          std::numeric_limits<int64_t>::max()) ==
 	       std::numeric_limits<int64_t>::max() - 1);
-	return Void();
-}
-
-class PrivateKeyRangeTestImpl : public PrivateKeyRangeBaseImpl {
-public:
-	explicit PrivateKeyRangeTestImpl(KeyRef start, KeyRef end, const std::string& prefix, int size) :
-		PrivateKeyRangeBaseImpl(start, end), prefix(prefix), size(size) {
-		ASSERT(size > 0);
-		for (int i = 0; i < size; ++i) {
-			kvs.push_back_deep(kvs.arena(), KeyValueRef(getKeyForIndex(i), deterministicRandom()->randomAlphaNumeric(16)));
-		}
-	}
-
-	KeyValueRef getKeyValueForIndex(int idx) {return kvs[idx];}
-
-	Key getKeyForIndex( int idx ) {
-		return Key( prefix + format("%010d", idx)).withPrefix(range.begin);
-	}
-
-	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr) const override {
-		int startIndex=0, endIndex= size;
-		while (startIndex < size && kvs[startIndex].key < kr.begin)
-			++startIndex;
-		while (endIndex > startIndex && kvs[endIndex-1].key >= kr.end)
-			--endIndex;
-		if (startIndex == endIndex)
-			return Standalone<RangeResultRef>();
-		else
-			return Standalone<RangeResultRef>(RangeResultRef(kvs.slice(startIndex, endIndex), false));
-	}
-private:
-	Standalone<VectorRef<KeyValueRef>> kvs;
-	std::string prefix;
-	int size;
-};
-
-TEST_CASE("/fdbclient/PrivateKeySpace/Aggregation") {
-	PrivateKeySpace pks(LiteralStringRef("\xff\xff"), LiteralStringRef("\xff\xff\xff"));
-	PrivateKeyRangeTestImpl pkr1(LiteralStringRef("\xff\xff/cat/"), LiteralStringRef("\xff\xff/cat/\xff"), "small", 10);
-	PrivateKeyRangeTestImpl pkr2(LiteralStringRef("\xff\xff/dog/"), LiteralStringRef("\xff\xff/dog/\xff"), "medium", 100);
-	PrivateKeyRangeTestImpl pkr3(LiteralStringRef("\xff\xff/pig/"), LiteralStringRef("\xff\xff/pig/\xff"), "large", 1000);
-	pks.registerKeyRange(pkr1.getKeyRange(), &pkr1);
-	pks.registerKeyRange(pkr2.getKeyRange(), &pkr2);
-	pks.registerKeyRange(pkr3.getKeyRange(), &pkr3);
-	auto nullRef = Reference<ReadYourWritesTransaction>();
-	// get
-	{
-		auto resultFuture = pks.get(nullRef, LiteralStringRef("\xff\xff/cat/small0000000009"));
-		ASSERT(resultFuture.isReady());
-		auto result = resultFuture.getValue().get();
-		ASSERT(result == pkr1.getKeyValueForIndex(9).value);
-		auto emptyFuture = pks.get(nullRef, LiteralStringRef("\xff\xff/cat/small0000000010"));
-		ASSERT(emptyFuture.isReady());
-		auto emptyResult = emptyFuture.getValue();
-		ASSERT(!emptyResult.present());
-	}
-	// general getRange
-	{
-		KeySelector start = KeySelectorRef(LiteralStringRef("\xff\xff/elepant"), false, -9);
-		KeySelector end = KeySelectorRef(LiteralStringRef("\xff\xff/frog"), false, +11);
-		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits());
-		ASSERT(resultFuture.isReady());
-		auto result = resultFuture.getValue();
-		ASSERT(result.size() == 20);
-		ASSERT(result[0].key == pkr2.getKeyForIndex(90)) ;
-		ASSERT(result[result.size()-1].key == pkr3.getKeyForIndex(9));
-	}
-	// KeySelector points outside
-	{
-		KeySelector start = KeySelectorRef(pkr3.getKeyForIndex(999), true, -1110);
-		KeySelector end = KeySelectorRef(pkr1.getKeyForIndex(0), false, +1112);
-		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits());
-		ASSERT(resultFuture.isReady());
-		auto result = resultFuture.getValue();
-		ASSERT(result.size() == 1110);
-		ASSERT(result[0].key == pkr1.getKeyForIndex(0)) ;
-		ASSERT(result[result.size()-1].key == pkr3.getKeyForIndex(999));
-	}
-	// GetRangeLimits with row limit
-	{
-		KeySelector start = KeySelectorRef(pkr2.getKeyForIndex(0), true, 0);
-		KeySelector end = KeySelectorRef(pkr3.getKeyForIndex(0), false, 0);
-		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(2));
-		ASSERT(resultFuture.isReady());
-		auto result = resultFuture.getValue();
-		ASSERT(result.size() == 2);
-		ASSERT(result[0].key == pkr2.getKeyForIndex(0));
-		ASSERT(result[1].key == pkr2.getKeyForIndex(1));
-	}
-	// GetRangeLimits with byte limit
-	{
-		KeySelector start = KeySelectorRef(pkr2.getKeyForIndex(0), true, 0);
-		KeySelector end = KeySelectorRef(pkr3.getKeyForIndex(0), false, 0);
-		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(10, 100));
-		ASSERT(resultFuture.isReady());
-		auto result = resultFuture.getValue();
-		int bytes = 0;
-		for (int i = 0; i < result.size()-1; ++i)
-			bytes +=  8 + pkr2.getKeyValueForIndex(i).expectedSize();
-		ASSERT(bytes < 100);
-		ASSERT(bytes + 8 + pkr2.getKeyValueForIndex(result.size()).expectedSize() >= 100);
-	}
-	// reverse test
-	{
-		KeySelector start = KeySelectorRef(pkr2.getKeyForIndex(0), true, 0);
-		KeySelector end = KeySelectorRef(pkr3.getKeyForIndex(0), false, 0);
-		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(100), false, true);
-		ASSERT(resultFuture.isReady());
-		auto result = resultFuture.getValue();
-		for (int i = 0; i < result.size(); ++i)
-			ASSERT(result[i] == pkr2.getKeyValueForIndex(result.size() - 1 - i));
-	}
 	return Void();
 }
