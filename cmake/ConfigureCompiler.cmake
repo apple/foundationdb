@@ -198,7 +198,7 @@ else()
   endif()
 
   if (USE_VALGRIND)
-    add_compile_options(-DVALGRIND -DUSE_VALGRIND)
+    add_compile_options(-DVALGRIND=1 -DUSE_VALGRIND=1)
   endif()
   if (CLANG)
     add_compile_options()
