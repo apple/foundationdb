@@ -45,8 +45,8 @@ public:
 	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false);
 
 	PrivateKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = allKeys.end) {
-		// Default value is NULL, begin of KeyRangeMap is Key() 
-		impls = KeyRangeMap<PrivateKeyRangeBaseImpl*>(NULL, spaceEndKey);
+		// Default value is nullptr, begin of KeyRangeMap is Key() 
+		impls = KeyRangeMap<PrivateKeyRangeBaseImpl*>(nullptr, spaceEndKey);
 		range = KeyRangeRef(spaceStartKey, spaceEndKey);
 	}
 	void registerKeyRange(const KeyRangeRef& kr, PrivateKeyRangeBaseImpl* impl) {

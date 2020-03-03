@@ -101,7 +101,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
     state RangeMap<Key, PrivateKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter =
         pks->getKeyRangeMap().rangeContaining(begin.getKey());
     while (begin.offset != 1 && iter != pks->getKeyRangeMap().ranges().begin()) {
-        if (iter->value() != NULL)
+        if (iter->value() != nullptr)
             wait(normalizeKeySelectorActor(iter->value(), ryw, &begin));
         begin.offset < 1 ? --iter : ++iter;
     }
@@ -113,7 +113,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
     }
     iter = pks->getKeyRangeMap().rangeContaining(end.getKey());
     while (end.offset != 1 && iter != pks->getKeyRangeMap().ranges().end()) {
-        if (iter->value() != NULL)
+        if (iter->value() != nullptr)
             wait(normalizeKeySelectorActor(iter->value(), ryw, &end));
         end.offset < 1 ? --iter : ++iter;
     }
@@ -137,7 +137,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
     if (reverse) {
         while (iter != ranges.begin()) {
             --iter;
-            if (iter->value() == NULL) 
+            if (iter->value() == nullptr) 
                 continue;
             KeyRangeRef kr = iter->range();
             KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
@@ -155,7 +155,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
         }
     } else {
         for (iter = ranges.begin(); iter != ranges.end(); ++iter) {
-            if (iter->value() == NULL)
+            if (iter->value() == nullptr)
                 continue;
             KeyRangeRef kr = iter->range();
             KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
