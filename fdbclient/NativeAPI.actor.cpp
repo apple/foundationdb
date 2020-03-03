@@ -32,7 +32,7 @@
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
-#include "fdbclient/PrivateKeySpace.h"
+#include "fdbclient/PrivateKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/LoadBalance.h"

@@ -25,7 +25,7 @@
 #include "flow/IThreadPool.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
-#include "fdbclient/PrivateKeySpace.h"
+#include "fdbclient/PrivateKeySpace.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 void forceLinkFlowTests() {}

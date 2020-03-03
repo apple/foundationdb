@@ -1,19 +1,7 @@
-#include "fdbclient/PrivateKeySpace.h"
+#include "fdbclient/PrivateKeySpace.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
-ACTOR Future<Optional<Value>> getActor(PrivateKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeyRef key) {
-	// use getRange to workaround this
-	Standalone<RangeResultRef> result = wait(pks->getRange(
-	    ryw, KeySelector(firstGreaterOrEqual(key)), KeySelector(firstGreaterOrEqual(keyAfter(key))), GetRangeLimits()));
-	ASSERT(result.size() <= 1);
-	if (result.size()) {
-		return Optional<Value>(result[0].value);
-	} else {
-		return Optional<Value>();
-	}
-}
-
 // This function will normalize the given KeySelector to a standard KeySelector:
 // orEqual == false && offset == 1 (Standard form)
 // If the corresponding key is not in this private key range, it will move as far as possible to adjust the offset to 1
@@ -70,10 +58,10 @@ ACTOR Future<Void> normalizeKeySelectorActor(const PrivateKeyRangeBaseImpl* pkrI
 	return Void();
 }
 
-ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(PrivateKeySpace* pks,
-                                                                  Reference<ReadYourWritesTransaction> ryw,
-                                                                  KeySelector begin, KeySelector end,
-                                                                  GetRangeLimits limits, bool reverse) {
+} // namespace
+ACTOR Future<Standalone<RangeResultRef>> PrivateKeySpace::getRangeAggregationActor(
+    PrivateKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeySelector begin, KeySelector end,
+    GetRangeLimits limits, bool reverse) {
 	// This function handles ranges which cover more than one keyrange and aggregates all results
 	// KeySelector, GetRangeLimits and reverse are all handled here
 
@@ -83,9 +71,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(PrivateKeySpac
 
 	// make sure offset == 1
 	state RangeMap<Key, PrivateKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter =
-	    pks->getKeyRangeMap().rangeContaining(begin.getKey());
-	while (begin.offset != 1 && iter != pks->getKeyRangeMap().ranges().begin() &&
-	       iter != pks->getKeyRangeMap().ranges().end()) {
+	    pks->impls.rangeContaining(begin.getKey());
+	while (begin.offset != 1 && iter != pks->impls.ranges().begin() && iter != pks->impls.ranges().end()) {
 		if (iter->value() != nullptr) wait(normalizeKeySelectorActor(iter->value(), ryw, &begin));
 		begin.offset < 1 ? --iter : ++iter;
 	}
@@ -95,9 +82,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(PrivateKeySpac
 		    .detail("TerminateKey", begin.getKey())
 		    .detail("TerminateOffset", begin.offset);
 	}
-	iter = pks->getKeyRangeMap().rangeContaining(end.getKey());
-	while (end.offset != 1 && iter != pks->getKeyRangeMap().ranges().begin() &&
-	       iter != pks->getKeyRangeMap().ranges().end()) {
+	iter = pks->impls.rangeContaining(end.getKey());
+	while (end.offset != 1 && iter != pks->impls.ranges().begin() && iter != pks->impls.ranges().end()) {
 		if (iter->value() != nullptr) wait(normalizeKeySelectorActor(iter->value(), ryw, &end));
 		end.offset < 1 ? --iter : ++iter;
 	}
@@ -114,7 +100,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(PrivateKeySpac
 	}
 	state Standalone<RangeResultRef> result;
 	state RangeMap<Key, PrivateKeyRangeBaseImpl*, KeyRangeRef>::Ranges ranges =
-	    pks->getKeyRangeMap().intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
+	    pks->impls.intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
 	// TODO : workaround to write this two together to make the code compact
 	// The issue here is boost::iterator_range<> doest not provide rbegin(), rend()
 	iter = reverse ? ranges.end() : ranges.begin();
@@ -155,7 +141,6 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(PrivateKeySpac
 	return result;
 }
 
-} // namespace
 Future<Standalone<RangeResultRef>> PrivateKeySpace::getRange(Reference<ReadYourWritesTransaction> ryw,
                                                              KeySelector begin, KeySelector end, GetRangeLimits limits,
                                                              bool snapshot, bool reverse) {
@@ -167,6 +152,19 @@ Future<Standalone<RangeResultRef>> PrivateKeySpace::getRange(Reference<ReadYourW
 	}
 	// ignore snapshot, which is not used
 	return getRangeAggregationActor(this, ryw, begin, end, limits, reverse);
+}
+
+ACTOR Future<Optional<Value>> PrivateKeySpace::getActor(PrivateKeySpace* pks, Reference<ReadYourWritesTransaction> ryw,
+                                                        KeyRef key) {
+	// use getRange to workaround this
+	Standalone<RangeResultRef> result = wait(pks->getRange(
+	    ryw, KeySelector(firstGreaterOrEqual(key)), KeySelector(firstGreaterOrEqual(keyAfter(key))), GetRangeLimits()));
+	ASSERT(result.size() <= 1);
+	if (result.size()) {
+		return Optional<Value>(result[0].value);
+	} else {
+		return Optional<Value>();
+	}
 }
 
 Future<Optional<Value>> PrivateKeySpace::get(Reference<ReadYourWritesTransaction> ryw, const Key& key, bool snapshot) {

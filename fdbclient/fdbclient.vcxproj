@@ -77,7 +77,7 @@
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
     </ActorCompiler>
     <ClInclude Include="Notified.h" />
-    <ClInclude Include="PrivateKeySpace.h" />
+    <ClInclude Include="PrivateKeySpace.actor.h" />
     <ClInclude Include="ReadYourWrites.h" />
     <ActorCompiler Include="RunTransaction.actor.h" />
     <ClInclude Include="RYWIterator.h" />

@@ -1,14 +1,17 @@
-#ifndef FDBCLIENT_PRIVATEKEYSPACE_H
-#define FDBCLIENT_PRIVATEKEYSPACE_H
 #pragma once
+
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_PRIVATEKEYSPACE_ACTOR_G_H)
+#define FDBCLIENT_PRIVATEKEYSPACE_ACTOR_G_H
+#include "fdbclient/PrivateKeySpace.actor.g.h"
+#elif !defined(FDBCLIENT_PRIVATEKEYSPACE_ACTOR_H)
+#define FDBCLIENT_PRIVATEKEYSPACE_ACTOR_H
 
 #include "flow/flow.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/ReadYourWrites.h"
-
-// class ReadYourWritesTransaction;
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 class PrivateKeyRangeBaseImpl {
 public:
@@ -58,6 +61,13 @@ public:
 		impls.insert(kr, impl);
 	}
 
+	ACTOR Future<Optional<Value>> getActor(PrivateKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeyRef key);
+
+	ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(PrivateKeySpace* pks,
+	                                                                  Reference<ReadYourWritesTransaction> ryw,
+	                                                                  KeySelector begin, KeySelector end,
+	                                                                  GetRangeLimits limits, bool reverse);
+
 	KeyRangeMap<PrivateKeyRangeBaseImpl*>& getKeyRangeMap() { return impls; }
 
 private:
@@ -65,4 +75,5 @@ private:
 	KeyRange range;
 };
 
+#include "flow/unactorcompiler.h"
 #endif

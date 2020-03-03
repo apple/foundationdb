@@ -21,7 +21,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/PrivateKeySpace.h"
+#include "fdbclient/PrivateKeySpace.actor.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/Util.h"
