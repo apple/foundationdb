@@ -627,6 +627,13 @@ fdb_error_t fdb_transaction_add_conflict_range( FDBTransaction*tr, uint8_t const
 
 }
 
+extern "C" DLLEXPORT 
+FDBFuture* fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, uint8_t const* begin_key_name,
+        int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length ) {
+	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	return (FDBFuture*)(TXN(tr)->getEstimatedRangeSizeBytes(range).extractPtr());
+}
+
 #include "fdb_c_function_pointers.g.h"
 
 #define FDB_API_CHANGED(func, ver) if (header_version < ver) fdb_api_ptr_##func = (void*)&(func##_v##ver##_PREV); else if (fdb_api_ptr_##func == (void*)&fdb_api_ptr_unimpl) fdb_api_ptr_##func = (void*)&(func##_impl);

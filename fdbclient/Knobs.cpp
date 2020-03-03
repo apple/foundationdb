@@ -46,6 +46,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
 	init( MAX_PROXY_CONNECTIONS,                     5 ); if( randomize && BUGGIFY ) MAX_PROXY_CONNECTIONS = 1;
+	init( STATUS_IDLE_TIMEOUT,                   120.0 );
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 
@@ -200,7 +201,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,        50e6 ); // Limit in per sec
 	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
-
-	//fdbcli
-	init( CLI_CONNECT_PARALLELISM,                   10 );
+	
+	//fdbcli		
+	init( CLI_CONNECT_PARALLELISM,                  400 );
+	init( CLI_CONNECT_TIMEOUT,                     10.0 );
 }

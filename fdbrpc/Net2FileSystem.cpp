@@ -108,7 +108,7 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, std::string fileSystemPath)
 					criticalError(FDB_EXIT_ERROR, "FileSystemError", format("`%s' is not a mount point", fileSystemPath.c_str()).c_str());
 				}
 			}
-		} catch (Error& e) {
+		} catch (Error&) {
 			criticalError(FDB_EXIT_ERROR, "FileSystemError", format("Could not get device id from `%s'", fileSystemPath.c_str()).c_str());
 		}
 	}

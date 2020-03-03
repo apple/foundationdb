@@ -27,8 +27,12 @@
 #include <stdint.h>
 #include <variant>
 #include "boost/asio.hpp"
+#ifndef TLS_DISABLED
+#include "boost/asio/ssl.hpp"
+#endif
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
+#include "flow/TLSPolicy.h"
 
 enum class TaskPriority {
 	Max = 1000000,
@@ -40,6 +44,7 @@ enum class TaskPriority {
 	DiskIOComplete = 9150,
 	LoadBalancedEndpoint = 9000,
 	ReadSocket = 9000,
+	Handshake = 8900,
 	CoordinationReply = 8810,
 	Coordination = 8800,
 	FailureMonitor = 8700,
@@ -59,12 +64,11 @@ enum class TaskPriority {
 	TLogCommitReply = 8580,
 	TLogCommit = 8570,
 	ProxyGetRawCommittedVersion = 8565,
-	ProxyCommitYield3 = 8562,
-	ProxyTLogCommitReply = 8560,
+	ProxyMasterVersionReply = 8560,
 	ProxyCommitYield2 = 8557,
-	ProxyResolverReply = 8555,
-	ProxyMasterVersionReply = 8550,
-	ProxyCommitYield1 = 8547,
+	ProxyTLogCommitReply = 8555,
+	ProxyCommitYield1 = 8550,
+	ProxyResolverReply = 8547,
 	ProxyCommit = 8545,
 	ProxyCommitBatcher = 8540,
 	TLogConfirmRunningReply = 8530,
@@ -87,6 +91,10 @@ enum class TaskPriority {
 	CompactCache = 2900,
 	TLogSpilledPeekReply = 2800,
 	FetchKeys = 2500,
+	RestoreApplierWriteDB = 2400,
+	RestoreApplierReceiveMutations = 2310,
+	RestoreLoaderSendMutations = 2300,
+	RestoreLoaderLoadFiles = 2200,
 	Low = 2000,
 
 	Min = 1000,
@@ -225,7 +233,8 @@ struct NetworkAddress {
 	bool isTLS() const { return (flags & FLAG_TLS) != 0; }
 	bool isV6() const { return ip.isV6(); }
 
-	static NetworkAddress parse( std::string const& );
+	static NetworkAddress parse(std::string const&); // May throw connection_string_invalid
+	static Optional<NetworkAddress> parseOptional(std::string const&);
 	static std::vector<NetworkAddress> parseList( std::string const& );
 	std::string toString() const;
 
@@ -283,6 +292,13 @@ struct NetworkAddressList {
 		return secondaryAddress < r.secondaryAddress;
 	}
 
+	NetworkAddress getTLSAddress() const {
+		if(!secondaryAddress.present() || address.isTLS()) {
+			return address;
+		}
+		return secondaryAddress.get();
+	}
+
 	std::string toString() const {
 		if(!secondaryAddress.present()) {
 			return address.toString();
@@ -321,6 +337,8 @@ struct NetworkMetrics {
 	NetworkMetrics() {}
 };
 
+struct BoundedFlowLock;
+
 struct NetworkInfo {
 	NetworkMetrics metrics;
 	double oldestAlternativesFailure = 0;
@@ -328,8 +346,9 @@ struct NetworkInfo {
 	double lastAlternativesFailureSkipDelay = 0;
 
 	std::map<std::pair<IPAddress, uint16_t>, std::pair<int,double>> serverTLSConnectionThrottler;
+	BoundedFlowLock* handshakeLock;
 
-	NetworkInfo() {}
+	NetworkInfo();
 };
 
 class IEventFD : public ReferenceCounted<IEventFD> {
@@ -347,6 +366,10 @@ public:
 
 	// Closes the underlying connection eventually if it is not already closed.
 	virtual void close() = 0;
+
+	virtual Future<Void> acceptHandshake() = 0;
+
+	virtual Future<Void> connectHandshake() = 0;
 
 	// returns when write() can write at least one byte (or may throw an error if the connection dies)
 	virtual Future<Void> onWritable() = 0;
@@ -391,7 +414,7 @@ typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
 class INetwork;
 extern INetwork* g_network;
-extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false);
+extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false, Reference<TLSPolicy> policy = Reference<TLSPolicy>(), const TLSParams& tlsParams = TLSParams());
 
 class INetwork {
 public:
@@ -420,6 +443,10 @@ public:
 	virtual double now() = 0;
 	// Provides a clock that advances at a similar rate on all connected endpoints
 	// FIXME: Return a fixed point Time class
+
+	virtual double timer() = 0;
+	// A wrapper for directly getting the system time. The time returned by now() only updates in the run loop, 
+	// so it cannot be used to measure times of functions that do not have wait statements.
 
 	virtual Future<class Void> delay( double seconds, TaskPriority taskID ) = 0;
 	// The given future will be set after seconds have elapsed
@@ -459,6 +486,9 @@ public:
 
 	virtual void initMetrics() {}
 	// Metrics must be initialized after FlowTransport::createInstance has been called
+
+	virtual void initTLS() {}
+	// TLS must be initialized before using the network
 
 	virtual void getDiskBytes( std::string const& directory, int64_t& free, int64_t& total) = 0;
 	//Gets the number of free and total bytes available on the disk which contains directory

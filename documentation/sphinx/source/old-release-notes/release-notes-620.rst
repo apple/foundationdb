@@ -2,6 +2,37 @@
 Release Notes
 #############
 
+6.2.17
+======
+
+Fixes
+-----
+
+* Restored the ability to set TLS configuration using environment variables. `(PR #2755) <https://github.com/apple/foundationdb/pull/2755>`_.
+
+6.2.16
+======
+
+Performance
+-----------
+
+* Reduced tail commit latencies by improving commit pipelining on the proxies. `(PR #2589) <https://github.com/apple/foundationdb/pull/2589>`_.
+* Data distribution does a better job balancing data when disks are more than 70% full. `(PR #2722) <https://github.com/apple/foundationdb/pull/2722>`_.
+* Reverse range reads could read too much data from disk, resulting in poor performance relative to forward range reads. `(PR #2650) <https://github.com/apple/foundationdb/pull/2650>`_.
+* Switched from LibreSSL to OpenSSL to improve the speed of establishing connections. `(PR #2650) <https://github.com/apple/foundationdb/pull/2650>`_.
+* The cluster controller does a better job avoiding multiple recoveries when first recruited. `(PR #2698) <https://github.com/apple/foundationdb/pull/2698>`_.
+
+Fixes
+-----
+
+* Storage servers could fail to advance their version correctly in response to empty commits. `(PR #2617) <https://github.com/apple/foundationdb/pull/2617>`_.
+* Status could not label more than 5 processes as proxies. `(PR #2653) <https://github.com/apple/foundationdb/pull/2653>`_.
+* The ``TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER``, ``TR_FLAG_REMOVE_MT_WITH_MOST_TEAMS``, ``TR_FLAG_DISABLE_SERVER_TEAM_REMOVER``, and ``BUGGIFY_ALL_COORDINATION`` knobs could not be set at runtime. `(PR #2661) <https://github.com/apple/foundationdb/pull/2661>`_.
+* Backup container filename parsing was unnecessarily consulting the local filesystem which will error when permission is denied. `(PR #2693) <https://github.com/apple/foundationdb/pull/2693>`_.
+* Rebalancing data movement could stop doing work even though the data in the cluster was not well balanced. `(PR #2703) <https://github.com/apple/foundationdb/pull/2703>`_.
+* Data movement uses available space rather than free space when deciding how full a process is. `(PR #2708) <https://github.com/apple/foundationdb/pull/2708>`_.
+* Fetching status attempts to reuse its connection with the cluster controller. `(PR #2583) <https://github.com/apple/foundationdb/pull/2583>`_.
+
 6.2.15
 ======
 

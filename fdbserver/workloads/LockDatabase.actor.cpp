@@ -27,12 +27,14 @@
 struct LockDatabaseWorkload : TestWorkload {
 	double lockAfter, unlockAfter;
 	bool ok;
+	bool onlyCheckLocked;
 
 	LockDatabaseWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx), ok(true)
 	{
 		lockAfter = getOption( options, LiteralStringRef("lockAfter"), 0.0 );
 		unlockAfter = getOption( options, LiteralStringRef("unlockAfter"), 10.0 );
+		onlyCheckLocked = getOption(options, LiteralStringRef("onlyCheckLocked"), false);
 		ASSERT(unlockAfter > lockAfter);
 	}
 
@@ -42,9 +44,8 @@ struct LockDatabaseWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
-		if( clientId == 0 )
-			return lockWorker( cx, this );
+	virtual Future<Void> start(Database const& cx) {
+		if (clientId == 0) return onlyCheckLocked ? timeout(checkLocked(cx, this), 60, Void()) : lockWorker(cx, this);
 		return Void();
 	}
 
@@ -110,6 +111,7 @@ struct LockDatabaseWorkload : TestWorkload {
 				self->ok = false;
 				return Void();
 			} catch( Error &e ) {
+				TEST(e.code() == error_code_database_locked); // Database confirmed locked
 				wait( tr.onError(e) );
 			}
 		}

@@ -256,6 +256,10 @@ extern "C" {
                                        int end_key_name_length,
                                        FDBConflictRangeType type);
 
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+    fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, uint8_t const* begin_key_name,
+        int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length);
+
     #define FDB_KEYSEL_LAST_LESS_THAN(k, l) k, l, 0, 0
     #define FDB_KEYSEL_LAST_LESS_OR_EQUAL(k, l) k, l, 1, 0
     #define FDB_KEYSEL_FIRST_GREATER_THAN(k, l) k, l, 1, 1

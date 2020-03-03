@@ -78,15 +78,18 @@ struct ReadConflictRange {
 struct KeyInfo {
 	StringRef key;
 	int* pIndex;
-	bool nextKey;
 	bool begin;
 	bool write;
 	int transaction;
 
 	KeyInfo(){};
-	KeyInfo(StringRef key, bool nextKey, bool begin, bool write, int transaction, int* pIndex)
-	  : key(key), nextKey(nextKey), begin(begin), write(write), transaction(transaction), pIndex(pIndex) {}
+	KeyInfo(StringRef key, bool begin, bool write, int transaction, int* pIndex)
+	  : key(key), begin(begin), write(write), transaction(transaction), pIndex(pIndex) {}
 };
+
+force_inline int extra_ordering(const KeyInfo& ki) {
+	return ki.begin * 2 + (ki.write ^ ki.begin);
+}
 
 // returns true if done with string
 force_inline bool getCharacter(const KeyInfo& ki, int character, int& outputCharacter) {
@@ -94,15 +97,6 @@ force_inline bool getCharacter(const KeyInfo& ki, int character, int& outputChar
 	if (character < ki.key.size()) {
 		outputCharacter = 5 + ki.key.begin()[character];
 		return false;
-	}
-
-	// nextKey append a zero
-	if (ki.nextKey && character >= ki.key.size()) {
-		if (character == ki.key.size()) {
-			outputCharacter = 5; // extra '0' character
-			return false;
-		}
-		character--;
 	}
 
 	// termination
@@ -113,7 +107,7 @@ force_inline bool getCharacter(const KeyInfo& ki, int character, int& outputChar
 
 	if (character == ki.key.size() + 1) {
 		// end/begin+read/write relative sorting
-		outputCharacter = ki.begin * 2 + (ki.write ^ ki.begin);
+		outputCharacter = extra_ordering(ki);
 		return false;
 	}
 
@@ -126,18 +120,16 @@ bool operator<(const KeyInfo& lhs, const KeyInfo& rhs) {
 	int c = memcmp(lhs.key.begin(), rhs.key.begin(), i);
 	if (c != 0) return c < 0;
 
-	// SOMEDAY: This is probably not very fast.  Slows D.Sort by ~20% relative to previous (incorrect) version.
-
-	bool lDone, rDone;
-	int lc, rc;
-	while (true) {
-		lDone = getCharacter(lhs, i, lc);
-		rDone = getCharacter(rhs, i, rc);
-		if (lDone && rDone) return false; // equality
-		if (lc < rc) return true;
-		if (lc > rc) return false;
-		i++;
+	// Always sort shorter keys before longer keys.
+	if (lhs.key.size() < rhs.key.size()) {
+		return true;
 	}
+	if (lhs.key.size() > rhs.key.size()) {
+		return false;
+	}
+
+	// When the keys are the same length, use the extra ordering constraint.
+	return extra_ordering(lhs) < extra_ordering(rhs);
 }
 
 bool operator==(const KeyInfo& lhs, const KeyInfo& rhs) {
@@ -295,14 +287,10 @@ private:
 		int nPointers, valueLength;
 	};
 
-	static force_inline bool less(const uint8_t* a, int aLen, const uint8_t* b, int bLen) {
-		int len = min(aLen, bLen);
-		for (int i = 0; i < len; i++)
-			if (a[i] < b[i])
-				return true;
-			else if (a[i] > b[i])
-				return false;
-
+	static force_inline bool less( const uint8_t* a, int aLen, const uint8_t* b, int bLen ) {
+		int c = memcmp(a,b,min(aLen,bLen));
+		if (c<0) return true;
+		if (c>0) return false;
 		return aLen < bLen;
 	}
 
@@ -766,14 +754,14 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr) {
 		std::vector<KeyInfo>& points = this->points;
 		for (int r = 0; r < tr.read_conflict_ranges.size(); r++) {
 			const KeyRangeRef& range = tr.read_conflict_ranges[r];
-			points.emplace_back(range.begin, false, true, false, t, &info->readRanges[r].first);
-			points.emplace_back(range.end, false, false, false, t, &info->readRanges[r].second);
+			points.emplace_back(range.begin, true, false, t, &info->readRanges[r].first);
+			points.emplace_back(range.end, false, false, t, &info->readRanges[r].second);
 			combinedReadConflictRanges.emplace_back(range.begin, range.end, tr.read_snapshot, t);
 		}
 		for (int r = 0; r < tr.write_conflict_ranges.size(); r++) {
 			const KeyRangeRef& range = tr.write_conflict_ranges[r];
-			points.emplace_back(range.begin, false, true, true, t, &info->writeRanges[r].first);
-			points.emplace_back(range.end, false, false, true, t, &info->writeRanges[r].second);
+			points.emplace_back(range.begin, true, true, t, &info->writeRanges[r].first);
+			points.emplace_back(range.end, false, true, t, &info->writeRanges[r].second);
 		}
 	}
 
@@ -936,14 +924,46 @@ void miniConflictSetTest() {
 	printf("miniConflictSetTest complete\n");
 }
 
+void operatorLessThanTest() {
+	{ // Longer strings before shorter strings.
+		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
+		KeyInfo b(LiteralStringRef("hello\0"), /*begin=*/false, /*write=*/false, 0, nullptr);
+		ASSERT(a < b);
+		ASSERT(!(b < a));
+		ASSERT(!(a == b));
+	}
+
+	{ // Reads before writes.
+		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/false, 0, nullptr);
+		KeyInfo b(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
+		ASSERT(a < b);
+		ASSERT(!(b < a));
+		ASSERT(!(a == b));
+	}
+
+	{ // Begin reads after writes.
+		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
+		KeyInfo b(LiteralStringRef("hello"), /*begin=*/true, /*write=*/false, 0, nullptr);
+		ASSERT(a < b);
+		ASSERT(!(b < a));
+		ASSERT(!(a == b));
+	}
+
+	{ // Begin writes after writes.
+		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
+		KeyInfo b(LiteralStringRef("hello"), /*begin=*/true, /*write=*/true, 0, nullptr);
+		ASSERT(a < b);
+		ASSERT(!(b < a));
+		ASSERT(!(a == b));
+	}
+}
+
 void skipListTest() {
 	printf("Skip list test\n");
 
-	// A test case that breaks the old operator<
-	// KeyInfo a( LiteralStringRef("hello"), true, false, true, -1 );
-	// KeyInfo b( LiteralStringRef("hello\0"), false, false, false, 0 );
-
 	miniConflictSetTest();
+
+	operatorLessThanTest();
 
 	setAffinity(0);
 

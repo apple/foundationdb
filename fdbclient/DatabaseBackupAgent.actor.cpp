@@ -1840,6 +1840,9 @@ public:
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		
+		//This commit must happen on the first proxy to ensure that the applier has flushed all mutations from previous DRs
+		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 
 		// We will use the global status for now to ensure that multiple backups do not start place with different tags
 		state int status = wait(backupAgent->getStateValue(tr, logUidCurrent));
@@ -1959,8 +1962,8 @@ public:
 		}
 
 		if (!g_network->isSimulated() && !forceAction) {
-			state StatusObject srcStatus = wait(StatusClient::statusFetcher(backupAgent->taskBucket->src->getConnectionFile()));
-			StatusObject destStatus = wait(StatusClient::statusFetcher(dest->getConnectionFile()));
+			state StatusObject srcStatus = wait(StatusClient::statusFetcher(backupAgent->taskBucket->src));
+			StatusObject destStatus = wait(StatusClient::statusFetcher(dest));
 			checkAtomicSwitchOverConfig(srcStatus, destStatus, tagName);
 		}
 		
@@ -2274,6 +2277,7 @@ public:
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state std::string statusText;
+		state int retries = 0;
 
 		loop{
 			try {
@@ -2291,27 +2295,33 @@ public:
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				state Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
+				state Future<Standalone<RangeResultRef>> fErrorValues = errorLimit > 0 ? tr->getRange(backupAgent->errors.get(BinaryWriter::toValue(logUid, Unversioned())).range(), errorLimit, false, true) : Future<Standalone<RangeResultRef>>();
+				state Future<Optional<Value>> fBackupUid = tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned())).pack(DatabaseBackupAgent::keyFolderId));
+				state Future<Optional<Value>> fBackupVerison = tr->get(BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin));
+				state Future<Optional<Key>> fTagName = tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned())).pack(BackupAgentBase::keyConfigBackupTag));
+				state Future<Optional<Value>> fStopVersionKey = tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned())).pack(BackupAgentBase::keyStateStop));
+				state Future<Optional<Key>> fBackupKeysPacked = tr->get(backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned())).pack(BackupAgentBase::keyConfigBackupRanges));
+
 				int backupStateInt = wait(backupAgent->getStateValue(tr, logUid));
 				state BackupAgentBase::enumState backupState = (BackupAgentBase::enumState)backupStateInt;
-
+				
 				if (backupState == DatabaseBackupAgent::STATE_NEVERRAN) {
 					statusText += "No previous backups found.\n";
 				}
 				else {
 					state std::string tagNameDisplay;
-					Optional<Key> tagName = wait(tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned())).pack(BackupAgentBase::keyConfigBackupTag)));
+					Optional<Key> tagName = wait(fTagName);
 
 					// Define the display tag name
 					if (tagName.present()) {
 						tagNameDisplay = tagName.get().toString();
 					}
 
-					state Optional<Value> uid = wait(tr->get(backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned())).pack(BackupAgentBase::keyFolderId)));
-					state Optional<Value> stopVersionKey = wait(tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned())).pack(BackupAgentBase::keyStateStop)));
+					state Optional<Value> stopVersionKey = wait(fStopVersionKey);
+
+					Optional<Key> backupKeysPacked = wait(fBackupKeysPacked);
 
 					state Standalone<VectorRef<KeyRangeRef>> backupRanges;
-					Optional<Key> backupKeysPacked = wait(tr->get(backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned())).pack(BackupAgentBase::keyConfigBackupRanges)));
-
 					if (backupKeysPacked.present()) {
 						BinaryReader br(backupKeysPacked.get(), IncludeVersion());
 						br >> backupRanges;
@@ -2347,7 +2357,7 @@ public:
 
 				// Append the errors, if requested
 				if (errorLimit > 0) {
-					Standalone<RangeResultRef> values = wait(tr->getRange(backupAgent->errors.get(BinaryWriter::toValue(logUid, Unversioned())).range(), errorLimit, false, true));
+					Standalone<RangeResultRef> values = wait( fErrorValues );
 
 					// Display the errors, if any
 					if (values.size() > 0) {
@@ -2364,10 +2374,9 @@ public:
 
 
 				//calculate time differential
-				state Optional<Value> backupUid = wait(tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned())).pack(DatabaseBackupAgent::keyFolderId)));
+				Optional<Value> backupUid = wait(fBackupUid);
 				if(backupUid.present()) {
-					Optional<Value> v = wait(tr->get(BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin)));
-
+					Optional<Value> v = wait(fBackupVerison);
 					if (v.present()) {
 						state Version destApplyBegin = BinaryReader::fromStringRef<Version>(v.get(), Unversioned());
 						Version sourceVersion = wait(srcReadVersion);
@@ -2384,6 +2393,11 @@ public:
 				break;
 			}
 			catch (Error &e) {
+				retries++;
+				if(retries > 5) {
+					statusText += format("\nWARNING: Could not fetch full DR status: %s\n", e.name());
+					return statusText;
+				}
 				wait(tr->onError(e));
 			}
 		}

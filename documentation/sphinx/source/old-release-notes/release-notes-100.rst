@@ -5,7 +5,7 @@ Release Notes
 1.0.1
 =====
 
- * Fix segmentation fault in client when there are a very large number of dependent operations in a transaction and certain errors occur.
+* Fix segmentation fault in client when there are a very large number of dependent operations in a transaction and certain errors occur.
 
 1.0.0
 =====
@@ -21,34 +21,34 @@ There are only minor technical differences between this release and the 0.3.0 re
 Java
 ----
 
- * ``clear(Range)`` replaces the now deprecated ``clearRangeStartsWith()``.
+* ``clear(Range)`` replaces the now deprecated ``clearRangeStartsWith()``.
 
 Python
 ------
 
- * Windows installer supports Python 3.
+* Windows installer supports Python 3.
 
 Node and Ruby
 -------------
 
- * String option parameters are converted to UTF-8.
+* String option parameters are converted to UTF-8.
  
 All
 ---
 
- * API version updated to 100. See the :ref:`API version upgrade guide <api-version-upgrade-guide-100>` for upgrade details.
- * Runs on Mac OS X 10.7.
- * Improvements to installation packages, including package paths and directory modes.
- * Eliminated cases of excessive resource usage in the locality API.
- * Watches are disabled when read-your-writes functionality is disabled.
- * Fatal error paths now call ``_exit()`` instead instead of ``exit()``.
+* API version updated to 100. See the :ref:`API version upgrade guide <api-version-upgrade-guide-100>` for upgrade details.
+* Runs on Mac OS X 10.7.
+* Improvements to installation packages, including package paths and directory modes.
+* Eliminated cases of excessive resource usage in the locality API.
+* Watches are disabled when read-your-writes functionality is disabled.
+* Fatal error paths now call ``_exit()`` instead instead of ``exit()``.
 
 Fixes
 -----
 
- * A few Python API entry points failed to respect the ``as_foundationdb_key()`` convenience interface.
- * ``fdbcli`` could print commit version numbers incorrectly in Windows.
- * Multiple watches set on the same key were not correctly triggered by a subsequent write in the same transaction.
+* A few Python API entry points failed to respect the ``as_foundationdb_key()`` convenience interface.
+* ``fdbcli`` could print commit version numbers incorrectly in Windows.
+* Multiple watches set on the same key were not correctly triggered by a subsequent write in the same transaction.
 
 Earlier release notes
 ---------------------
