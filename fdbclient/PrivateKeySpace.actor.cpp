@@ -12,7 +12,7 @@ ACTOR Future<Void> PrivateKeyRangeBaseImpl::normalizeKeySelectorActor(const Priv
                                                                       Reference<ReadYourWritesTransaction> ryw,
                                                                       KeySelector* ks) {
 	ASSERT(!ks->orEqual); // should be removed before calling
-	ASSERT(ks->offset != 1); // The function is never called when KeySelector is already normalized
+	ASSERT(ks->offset != 1); // never being called if KeySelector is already normalized
 
 	state Key startKey(pkrImpl->range.begin);
 	state Key endKey(pkrImpl->range.end);
