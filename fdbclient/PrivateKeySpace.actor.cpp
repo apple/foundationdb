@@ -4,7 +4,7 @@
 namespace {
 ACTOR Future<Optional<Value>> getActor(
     PrivateKeySpace* pks,
-    ReadYourWritesTransaction* ryw,
+    Reference<ReadYourWritesTransaction> ryw,
     KeyRef key )
 {
     // use getRange to workaround this
@@ -26,7 +26,7 @@ ACTOR Future<Optional<Value>> getActor(
 // Seperate each part to make the code easy to understand and more compact
 ACTOR Future<Void> normalizeKeySelectorActor(
     const PrivateKeyRangeBaseImpl* pkrImpl,
-    ReadYourWritesTransaction* ryw,
+    Reference<ReadYourWritesTransaction> ryw,
     KeySelector* ks )
 {
     ASSERT(!ks->orEqual); // should be removed before calling
@@ -82,7 +82,7 @@ ACTOR Future<Void> normalizeKeySelectorActor(
 
 ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
     PrivateKeySpace* pks,
-    ReadYourWritesTransaction* ryw,
+    Reference<ReadYourWritesTransaction> ryw,
     KeySelector begin,
     KeySelector end,
     GetRangeLimits limits,
@@ -177,7 +177,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(
 
 } // namespace end
 Future<Standalone<RangeResultRef>> PrivateKeySpace::getRange(
-    ReadYourWritesTransaction* ryw,
+    Reference<ReadYourWritesTransaction> ryw,
     KeySelector begin,
     KeySelector end,
     GetRangeLimits limits,
@@ -196,7 +196,7 @@ Future<Standalone<RangeResultRef>> PrivateKeySpace::getRange(
 }
 
 Future<Optional<Value>> PrivateKeySpace::get(
-    ReadYourWritesTransaction* ryw,
+    Reference<ReadYourWritesTransaction> ryw,
     const Key& key,
     bool snapshot)
 {

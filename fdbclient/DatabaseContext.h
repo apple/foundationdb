@@ -25,7 +25,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/MasterProxyInterface.h"
-#include "fdbclient/PrivateKeySpace.h"
+// #include "fdbclient/PrivateKeySpace.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
@@ -46,6 +46,7 @@ private:
 typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
 typedef MultiInterface<MasterProxyInterface> ProxyInfo;
 
+class PrivateKeySpace; //forward declaration
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -203,7 +204,7 @@ public:
 	double detailedHealthMetricsLastUpdated;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
-	PrivateKeySpace privateKeySpace;
+	PrivateKeySpace* privateKeySpace;
 };
 
 #endif

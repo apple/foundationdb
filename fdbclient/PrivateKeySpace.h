@@ -6,8 +6,9 @@
 #include "flow/Arena.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/ReadYourWrites.h"
 
-class ReadYourWritesTransaction;
+// class ReadYourWritesTransaction;
 
 class PrivateKeyRangeBaseImpl {
 public:
@@ -18,7 +19,7 @@ public:
 	// virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const = 0;
 
 	// Each derived class only needs to implement this simple version of getRange
-	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
+	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr) const = 0;
 
 	explicit PrivateKeyRangeBaseImpl(KeyRef start, KeyRef end) {
 		range = KeyRangeRef(range.arena(), KeyRangeRef(start, end));
@@ -39,9 +40,9 @@ protected:
 
 class PrivateKeySpace {
 public:
-	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key, bool snapshot = false);
+	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key, bool snapshot = false);
 
-	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false);
+	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false);
 
 	PrivateKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = allKeys.end) {
 		// Default value is NULL, begin of KeyRangeMap is Key() 

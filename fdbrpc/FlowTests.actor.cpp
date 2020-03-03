@@ -1289,7 +1289,7 @@ public:
 		return Key( prefix + format("%010d", idx)).withPrefix(range.begin);
 	}
 
-	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
+	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr) const override {
 		int startIndex=0, endIndex= size;
 		while (startIndex < size && kvs[startIndex].key < kr.begin)
 			++startIndex;
@@ -1314,13 +1314,14 @@ TEST_CASE("/fdbclient/PrivateKeySpace/Aggregation") {
 	pks.registerKeyRange(pkr1.getKeyRange(), &pkr1);
 	pks.registerKeyRange(pkr2.getKeyRange(), &pkr2);
 	pks.registerKeyRange(pkr3.getKeyRange(), &pkr3);
+	auto nullRef = Reference<ReadYourWritesTransaction>();
 	// get
 	{
-		auto resultFuture = pks.get(NULL, LiteralStringRef("\xff\xff/cat/small0000000009"));
+		auto resultFuture = pks.get(nullRef, LiteralStringRef("\xff\xff/cat/small0000000009"));
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue().get();
 		ASSERT(result == pkr1.getKeyValueForIndex(9).value);
-		auto emptyFuture = pks.get(NULL, LiteralStringRef("\xff\xff/cat/small0000000010"));
+		auto emptyFuture = pks.get(nullRef, LiteralStringRef("\xff\xff/cat/small0000000010"));
 		ASSERT(emptyFuture.isReady());
 		auto emptyResult = emptyFuture.getValue();
 		ASSERT(!emptyResult.present());
@@ -1329,7 +1330,7 @@ TEST_CASE("/fdbclient/PrivateKeySpace/Aggregation") {
 	{
 		KeySelector start = KeySelectorRef(LiteralStringRef("\xff\xff/elepant"), false, -9);
 		KeySelector end = KeySelectorRef(LiteralStringRef("\xff\xff/frog"), false, +11);
-		auto resultFuture = pks.getRange(NULL, start, end, GetRangeLimits());
+		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits());
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		ASSERT(result.size() == 20);
@@ -1340,7 +1341,7 @@ TEST_CASE("/fdbclient/PrivateKeySpace/Aggregation") {
 	{
 		KeySelector start = KeySelectorRef(pkr3.getKeyForIndex(999), true, -1110);
 		KeySelector end = KeySelectorRef(pkr1.getKeyForIndex(0), false, +1112);
-		auto resultFuture = pks.getRange(NULL, start, end, GetRangeLimits());
+		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits());
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		ASSERT(result.size() == 1110);
@@ -1351,7 +1352,7 @@ TEST_CASE("/fdbclient/PrivateKeySpace/Aggregation") {
 	{
 		KeySelector start = KeySelectorRef(pkr2.getKeyForIndex(0), true, 0);
 		KeySelector end = KeySelectorRef(pkr3.getKeyForIndex(0), false, 0);
-		auto resultFuture = pks.getRange(NULL, start, end, GetRangeLimits(2));
+		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(2));
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		ASSERT(result.size() == 2);
@@ -1362,7 +1363,7 @@ TEST_CASE("/fdbclient/PrivateKeySpace/Aggregation") {
 	{
 		KeySelector start = KeySelectorRef(pkr2.getKeyForIndex(0), true, 0);
 		KeySelector end = KeySelectorRef(pkr3.getKeyForIndex(0), false, 0);
-		auto resultFuture = pks.getRange(NULL, start, end, GetRangeLimits(10, 100));
+		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(10, 100));
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		int bytes = 0;
@@ -1375,7 +1376,7 @@ TEST_CASE("/fdbclient/PrivateKeySpace/Aggregation") {
 	{
 		KeySelector start = KeySelectorRef(pkr2.getKeyForIndex(0), true, 0);
 		KeySelector end = KeySelectorRef(pkr3.getKeyForIndex(0), false, 0);
-		auto resultFuture = pks.getRange(NULL, start, end, GetRangeLimits(100), false, true);
+		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(100), false, true);
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		for (int i = 0; i < result.size(); ++i)
