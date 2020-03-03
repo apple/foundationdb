@@ -920,6 +920,7 @@ ACTOR Future<Void> commitBatch(
 					
 					toCommit.addTags(tags);
 					if(self->cacheInfo[m.param1]) {
+						//TraceEvent("CacheTag", self->dbgid).detail("To", describe(tags)).detail("Mutation", m.toString()).detail("Version", commitVersion);
 						toCommit.addTag(cacheTag);
 					}
 					toCommit.addTypedMessage(m);
@@ -950,6 +951,7 @@ ACTOR Future<Void> commitBatch(
 						toCommit.addTags(allSources);
 					}
 					if(self->needsCacheTag(clearRange)) {
+						//TraceEvent("CacheTagClearRange", self->dbgid).detail("To", describe(cacheTag)).detail("Mutation", m.toString()).detail("Version", commitVersion);
 						toCommit.addTag(cacheTag);
 					}
 					toCommit.addTypedMessage(m);

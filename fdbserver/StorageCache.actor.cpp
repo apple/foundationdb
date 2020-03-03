@@ -334,7 +334,10 @@ bool validateCacheRange( StorageCacheData::VersionedData::ViewAtVersion const& v
 	auto i = view.lower_bound(range.begin);
 	if (i != view.begin()) --i;
 	for(; i != view.end() && i.key() < range.end; ++i) {
-		ASSERT( i.insertVersion() > minInsertVersion );
+		// TODO revisit this check. there could be nodes in PTree that were inserted, but never updated. their insertVersion thus maybe lower than the current oldest version of the versioned map
+		//if (i.insertVersion() <= minInsertVersion)
+		//	TraceEvent(SevError,"SCValidateCacheRange",id).detail("IKey", i.key()).detail("Version", version).detail("InsertVersion", i.insertVersion()).detail("MinInsertVersion", minInsertVersion);
+		//ASSERT( i.insertVersion() > minInsertVersion );
 		if (kIsClear && i->isClearTo() ? i.key() <= k : i.key() < k) {
 			TraceEvent(SevError,"SCInvalidRange",id).detail("Key1", k).detail("Key2", i.key()).detail("Version", version);
 			ok = false;
@@ -369,18 +372,6 @@ void validate(StorageCacheData* data, bool force = false) {
 			ASSERT( data->data().getLatestVersion() == data->version.get() || data->data().getLatestVersion() == data->version.get()+1 || (data->debug_inApplyUpdate && data->data().getLatestVersion() > data->version.get()) );
 
 			auto latest = data->data().atLatest();
-
-			// * Old cache ranges are erased: versionedData.atLatest() has entries (sets or clear *begins*) only for keys in readable or adding,transferred cache ranges.
-			for(auto range = data->cachedRangeMap.ranges().begin(); range != data->cachedRangeMap.ranges().end(); ++range) {
-				CacheRangeInfo* cacheRange = range->value().getPtr();
-				if (!cacheRange->isInVersionedData()) {
-					if (latest.lower_bound(range->begin()) != latest.lower_bound(range->end())) {
-						TraceEvent(SevError, "SCValidate", data->thisServerID).detail("LastValidTime", data->debug_lastValidateTime).detail("KeyBegin", range->begin()).detail("KeyEnd", range->end())
-							.detail("FirstKey", latest.lower_bound(range->begin()).key()).detail("FirstInsertV", latest.lower_bound(range->begin()).insertVersion());
-					}
-					ASSERT( latest.lower_bound(range->begin()) == latest.lower_bound(range->end()) );
-				}
-			}
 
 			latest.validate();
 			validateCacheRange(latest, allKeys, data->version.get(), data->thisServerID, data->oldestVersion.get());
@@ -1655,6 +1646,7 @@ ACTOR Future<Void> compactCache(StorageCacheData* data) {
 		//state Version oldestVersion = data->oldestVersion.get();
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		// Call the compaction routine that does the actual work,
+		TraceEvent(SevDebug, "SCCompactCache", data->thisServerID).detail("DesiredVersion", desiredVersion);
 		// TODO It's a synchronous function call as of now. Should it asynch?
 		data->mutableData().compact(desiredVersion);
 		Future<Void> finishedForgetting = data->mutableData().forgetVersionsBeforeAsync( desiredVersion,
@@ -1696,192 +1688,202 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 				}
 			}
 		}
-		data->lastTLogVersion = cursor->getMaxKnownVersion();
-		data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
-		//FIXME: if the popped version is greater than our last version, we need to clear the cache
+		try {
+			data->lastTLogVersion = cursor->getMaxKnownVersion();
+			data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
+			//FIXME: if the popped version is greater than our last version, we need to clear the cache
 
-		// TODO check this part: copare to what we do for storages and what's applicable here
-		state FetchInjectionInfo fii;
-		state Reference<ILogSystem::IPeekCursor> cloneCursor2;
-		loop{
-			state uint64_t changeCounter = data->cacheRangeChangeCounter;
-			bool epochEnd = false;
-			bool firstMutation = true;
-			bool dbgLastMessageWasProtocol = false;
+			// TODO check this part: copare to what we do for storages and what's applicable here
+			state FetchInjectionInfo fii;
+			state Reference<ILogSystem::IPeekCursor> cloneCursor2;
+			loop{
+				state uint64_t changeCounter = data->cacheRangeChangeCounter;
+				bool epochEnd = false;
+				bool firstMutation = true;
+				bool dbgLastMessageWasProtocol = false;
 
-			Reference<ILogSystem::IPeekCursor> cloneCursor1 = cursor->cloneNoMore();
-			cloneCursor2 = cursor->cloneNoMore();
+				Reference<ILogSystem::IPeekCursor> cloneCursor1 = cursor->cloneNoMore();
+				cloneCursor2 = cursor->cloneNoMore();
 
-			// TODO:
-		    cloneCursor1->setProtocolVersion(currentProtocolVersion);
+				// TODO:
+				cloneCursor1->setProtocolVersion(currentProtocolVersion);
 
-			for (; cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
-				ArenaReader& cloneReader = *cloneCursor1->reader();
+				for (; cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
+					ArenaReader& cloneReader = *cloneCursor1->reader();
 
-				if (LogProtocolMessage::isNextIn(cloneReader)) {
+					if (LogProtocolMessage::isNextIn(cloneReader)) {
+						LogProtocolMessage lpm;
+						cloneReader >> lpm;
+						dbgLastMessageWasProtocol = true;
+						cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
+					}
+					else {
+						MutationRef msg;
+						cloneReader >> msg;
+
+						if (msg.param1 == lastEpochEndPrivateKey) {
+							epochEnd = true;
+							ASSERT(firstMutation);
+							ASSERT(dbgLastMessageWasProtocol);
+						}
+
+						firstMutation = false;
+						dbgLastMessageWasProtocol = false;
+					}
+				}
+
+				// Any fetchKeys which are ready to transition their cacheRanges to the adding,transferred state do so now.
+				// If there is an epoch end we skip this step, to increase testability and to prevent inserting a version in the middle of a rolled back version range.
+				while(!epochEnd && !data->readyFetchKeys.empty()) {
+					auto fk = data->readyFetchKeys.back();
+					data->readyFetchKeys.pop_back();
+					fk.send( &fii );
+				}
+				if (data->cacheRangeChangeCounter == changeCounter) break;
+				//TEST(true); // A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.
+			}
+
+			data->debug_inApplyUpdate = true;
+			if (EXPENSIVE_VALIDATION) data->data().atLatest().validate();
+			validate(data);
+
+			state bool injectedChanges = false;
+			state int changeNum = 0;
+			state int mutationBytes = 0;
+			for(; changeNum < fii.changes.size(); changeNum++) {
+				state int mutationNum = 0;
+				state VerUpdateRef* pUpdate = &fii.changes[changeNum];
+				for(; mutationNum < pUpdate->mutations.size(); mutationNum++) {
+					TraceEvent("InjectedChanges", data->thisServerID).detail("Version", pUpdate->version);
+					applyMutation(&updater, data, pUpdate->mutations[mutationNum], pUpdate->version);
+					mutationBytes += pUpdate->mutations[mutationNum].totalSize();
+					injectedChanges = true;
+					if(false && mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
+						mutationBytes = 0;
+						wait(delay(SERVER_KNOBS->UPDATE_DELAY));
+					}
+				}
+			}
+
+			//FIXME: ensure this can only read data from the current version
+			cloneCursor2->setProtocolVersion(currentProtocolVersion);
+			ver = invalidVersion;
+
+			// Now process the mutations
+			for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
+				ArenaReader& reader = *cloneCursor2->reader();
+
+				//TraceEvent("Versions", data->thisServerID).detail("CursorVersion", cloneCursor2->version().version).detail("Ver", ver).detail("DataVersion", data->version.get()).detail("TLogVersion", data->lastTLogVersion);
+				if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
+					++data->counters.updateVersions;
+					ver = cloneCursor2->version().version;
+				}
+				if (LogProtocolMessage::isNextIn(reader)) {
 					LogProtocolMessage lpm;
-					cloneReader >> lpm;
-					dbgLastMessageWasProtocol = true;
-					cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
+					reader >> lpm;
+
+					// TODO should we store the logProtocol?
+					//data->logProtocol = reader.protocolVersion();
+					cloneCursor2->setProtocolVersion(reader.protocolVersion());
 				}
 				else {
 					MutationRef msg;
-					cloneReader >> msg;
+					reader >> msg;
+					//fprintf(stderr, "%lld : %s\n", cursor->version().version, msg.toString().c_str());
 
-					if (msg.param1 == lastEpochEndPrivateKey) {
-						epochEnd = true;
-						ASSERT(firstMutation);
-						ASSERT(dbgLastMessageWasProtocol);
+					if (ver != invalidVersion) // This change belongs to a version < minVersion
+					{
+						applyMutation(&updater, data, msg, ver);
+						data->counters.mutationBytes += msg.totalSize();
+						++data->counters.mutations;
+
+						switch(msg.type) {
+							case MutationRef::SetValue:
+								++data->counters.setMutations;
+								break;
+							case MutationRef::ClearRange:
+								++data->counters.clearRangeMutations;
+								break;
+							case MutationRef::AddValue:
+							case MutationRef::And:
+							case MutationRef::AndV2:
+							case MutationRef::AppendIfFits:
+							case MutationRef::ByteMax:
+							case MutationRef::ByteMin:
+							case MutationRef::Max:
+							case MutationRef::Min:
+							case MutationRef::MinV2:
+							case MutationRef::Or:
+							case MutationRef::Xor:
+							case MutationRef::CompareAndClear:
+								++data->counters.atomicMutations;
+								break;
+						}
 					}
+					else
+						TraceEvent(SevError, "DiscardingPeekedData", data->thisServerID).detail("Mutation", msg.toString()).detail("Version", cursor->version().toString());
 
-					firstMutation = false;
-					dbgLastMessageWasProtocol = false;
+					tagAt = cursor->version().version + 1;
 				}
 			}
 
-			// Any fetchKeys which are ready to transition their cacheRanges to the adding,transferred state do so now.
-			// If there is an epoch end we skip this step, to increase testability and to prevent inserting a version in the middle of a rolled back version range.
-			while(!epochEnd && !data->readyFetchKeys.empty()) {
-				auto fk = data->readyFetchKeys.back();
-				data->readyFetchKeys.pop_back();
-				fk.send( &fii );
+			if(ver != invalidVersion) {
+				data->lastVersionWithData = ver;
+			} else {
+				ver = cloneCursor2->version().version - 1;
 			}
-			if (data->cacheRangeChangeCounter == changeCounter) break;
-			//TEST(true); // A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.
-		}
+			if(injectedChanges) data->lastVersionWithData = ver;
 
-		data->debug_inApplyUpdate = true;
-		if (EXPENSIVE_VALIDATION) data->data().atLatest().validate();
-		validate(data);
+			data->debug_inApplyUpdate = false;
 
-		state bool injectedChanges = false;
-		state int changeNum = 0;
-		state int mutationBytes = 0;
-		for(; changeNum < fii.changes.size(); changeNum++) {
-			state int mutationNum = 0;
-			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
-			for(; mutationNum < pUpdate->mutations.size(); mutationNum++) {
-				TraceEvent("InjectedChanges", data->thisServerID).detail("Version", pUpdate->version);
-				applyMutation(&updater, data, pUpdate->mutations[mutationNum], pUpdate->version);
-				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
-				injectedChanges = true;
-				if(false && mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
-					mutationBytes = 0;
-					wait(delay(SERVER_KNOBS->UPDATE_DELAY));
+			if(ver != invalidVersion && ver > data->version.get()) {
+				// FIXME: enable when debugKeyRange is active
+				//debugKeyRange("SCUpdate", ver, allKeys);
+
+				data->mutableData().createNewVersion(ver);
+
+				// TODO what about otherError
+				if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
+
+				// TODO may enable these later
+				//data->noRecentUpdates.set(false);
+				//data->lastUpdate = now();
+				data->version.set( ver );		// Triggers replies to waiting gets for new version(s)
+				// TODO double check
+				//setDataVersion(data->thisServerID, data->version.get());
+
+				// TODO what about otherError
+				if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
+
+				// we can get rid of versions beyond maxVerionsInMemory at any point. Update the
+				//desiredOldestVersion and that may invoke the compaction actor
+				Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+				Version proposedOldestVersion = data->version.get() - maxVersionsInMemory;
+				proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
+				data->desiredOldestVersion.set(proposedOldestVersion);
+			}
+
+			validate(data);
+
+			//TraceEvent("SCUpdatedVersions", data->thisServerID).detail("DataVersion", data->version.get()).detail("Version", ver);
+			data->lastTLogVersion = cloneCursor2->getMaxKnownVersion();
+			//TraceEvent("CursorVersions", data->thisServerID).detail("CursorVersion", cursor->version().version).detail("CloneCurserVersion", cloneCursor2->version().version).detail("TLogVersion", data->lastTLogVersion);
+			cursor->advanceTo( cloneCursor2->version() );
+			data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
+			if(cursor->version().version >= data->lastTLogVersion) {
+				if(data->behind) {
+					TraceEvent("StorageCacheNoLongerBehind", data->thisServerID).detail("CursorVersion", cursor->version().version).detail("TLogVersion", data->lastTLogVersion);
 				}
+				data->behind = false;
 			}
-		}
-
-		//FIXME: ensure this can only read data from the current version
-		cloneCursor2->setProtocolVersion(currentProtocolVersion);
-		ver = invalidVersion;
-
-		// Now process the mutations
-		for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
-			ArenaReader& reader = *cloneCursor2->reader();
-
-			//TraceEvent("Versions", data->thisServerID).detail("CursorVersion", cloneCursor2->version().version).detail("Ver", ver).detail("DataVersion", data->version.get()).detail("TLogVersion", data->lastTLogVersion);
-			if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
-				++data->counters.updateVersions;
-				ver = cloneCursor2->version().version;
+		} catch (Error& err) {
+			state Error e = err;
+			TraceEvent(SevDebug, "SCUpdateError", data->thisServerID).error(e).backtrace();
+			if (e.code() == error_code_worker_removed) {
+				throw please_reboot();
+			} else {
+				throw e;
 			}
-			if (LogProtocolMessage::isNextIn(reader)) {
-				LogProtocolMessage lpm;
-				reader >> lpm;
-
-				// TODO should we store the logProtocol?
-				//data->logProtocol = reader.protocolVersion();
-				cloneCursor2->setProtocolVersion(reader.protocolVersion());
-			}
-			else {
-				MutationRef msg;
-				reader >> msg;
-				//fprintf(stderr, "%lld : %s\n", cursor->version().version, msg.toString().c_str());
-
-				if (ver != invalidVersion) // This change belongs to a version < minVersion
-				{
-					applyMutation(&updater, data, msg, ver);
-					data->counters.mutationBytes += msg.totalSize();
-					++data->counters.mutations;
-
-					switch(msg.type) {
-						case MutationRef::SetValue:
-							++data->counters.setMutations;
-							break;
-						case MutationRef::ClearRange:
-							++data->counters.clearRangeMutations;
-							break;
-						case MutationRef::AddValue:
-						case MutationRef::And:
-						case MutationRef::AndV2:
-						case MutationRef::AppendIfFits:
-						case MutationRef::ByteMax:
-						case MutationRef::ByteMin:
-						case MutationRef::Max:
-						case MutationRef::Min:
-						case MutationRef::MinV2:
-						case MutationRef::Or:
-						case MutationRef::Xor:
-						case MutationRef::CompareAndClear:
-							++data->counters.atomicMutations;
-							break;
-					}
-				}
-				else
-					TraceEvent(SevError, "DiscardingPeekedData", data->thisServerID).detail("Mutation", msg.toString()).detail("Version", cursor->version().toString());
-
-				tagAt = cursor->version().version + 1;
-			}
-		}
-
-		if(ver != invalidVersion) {
-			data->lastVersionWithData = ver;
-		} else {
-			ver = cloneCursor2->version().version - 1;
-		}
-		if(injectedChanges) data->lastVersionWithData = ver;
-
-		data->debug_inApplyUpdate = false;
-
-		if(ver != invalidVersion && ver > data->version.get()) {
-			// FIXME: enable when debugKeyRange is active
-			//debugKeyRange("SCUpdate", ver, allKeys);
-
-			data->mutableData().createNewVersion(ver);
-
-			// TODO what about otherError
-			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
-
-			// TODO may enable these later
-			//data->noRecentUpdates.set(false);
-			//data->lastUpdate = now();
-			data->version.set( ver );		// Triggers replies to waiting gets for new version(s)
-			// TODO double check
-			//setDataVersion(data->thisServerID, data->version.get());
-
-			// TODO what about otherError
-			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
-
-			// we can get rid of versions beyond maxVerionsInMemory at any point. Update the
-			//desiredOldestVersion and that may invoke the compaction actor
-			Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
-			Version proposedOldestVersion = data->version.get() - maxVersionsInMemory;
-			proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
-			data->desiredOldestVersion.set(proposedOldestVersion);
-		}
-
-		validate(data);
-
-		//TraceEvent("UpdatedVersions", data->thisServerID).detail("DataVersion", data->version.get()).detail("Version", ver);
-		data->lastTLogVersion = cloneCursor2->getMaxKnownVersion();
-		//TraceEvent("CursorVersions", data->thisServerID).detail("CursorVersion", cursor->version().version).detail("CloneCurserVersion", cloneCursor2->version().version).detail("TLogVersion", data->lastTLogVersion);
-		cursor->advanceTo( cloneCursor2->version() );
-		data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
-		if(cursor->version().version >= data->lastTLogVersion) {
-			if(data->behind) {
-				TraceEvent("StorageCacheNoLongerBehind", data->thisServerID).detail("CursorVersion", cursor->version().version).detail("TLogVersion", data->lastTLogVersion);
-			}
-			data->behind = false;
 		}
 
 		tagAt = std::max( tagAt, cursor->version().version);

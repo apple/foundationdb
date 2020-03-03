@@ -612,6 +612,41 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 	}
 }
 
+ACTOR Future<Void> storageCacheRollbackRebooter( Future<Void> prevStorageCache, UID id, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> db) {
+	loop {
+		ErrorOr<Void> e = wait( errorOr( prevStorageCache) );
+		if (!e.isError()) {
+			TraceEvent("StorageCacheRequestedReboot1", id);
+			return Void();
+		}
+		else if (e.getError().code() != error_code_please_reboot && e.getError().code() != error_code_worker_removed) {
+			TraceEvent("StorageCacheRequestedReboot2", id).detail("Code",e.getError().code());
+			throw e.getError();
+		}
+
+		TraceEvent("StorageCacheRequestedReboot", id);
+
+		StorageServerInterface recruited;
+		recruited.uniqueID = deterministicRandom()->randomUniqueID();// id;
+		recruited.locality = locality;
+		recruited.initEndpoints();
+
+		DUMPTOKEN(recruited.getValue);
+		DUMPTOKEN(recruited.getKey);
+		DUMPTOKEN(recruited.getKeyValues);
+		DUMPTOKEN(recruited.getShardState);
+		DUMPTOKEN(recruited.waitMetrics);
+		DUMPTOKEN(recruited.splitMetrics);
+		DUMPTOKEN(recruited.getStorageMetrics);
+		DUMPTOKEN(recruited.waitFailure);
+		DUMPTOKEN(recruited.getQueuingMetrics);
+		DUMPTOKEN(recruited.getKeyValueStoreType);
+		DUMPTOKEN(recruited.watchValue);
+
+		prevStorageCache = storageCacheServer(recruited, 0, db);
+	}
+}
+
 // FIXME:  This will not work correctly in simulation as all workers would share the same roles map
 std::set<std::pair<std::string, std::string>> g_roles;
 
@@ -988,6 +1023,7 @@ ACTOR Future<Void> workerServer(
 			DUMPTOKEN(recruited.watchValue);
 
 			auto f = storageCacheServer(recruited, 0, dbInfo);
+			f = storageCacheRollbackRebooter( f, recruited.id(), recruited.locality, dbInfo);
 			errorForwarders.add(forwardError(errors, Role::STORAGE_CACHE, recruited.id(), f));
 		}
 

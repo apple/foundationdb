@@ -538,7 +538,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		try
 		{
 			//Check the size of the shard on each storage server
-			for(int i = 0; i < storageServers.size() - 1; i++)
+			for(int i = 0; i < storageServers.size(); i++)
 			{
 				resetReply(req);
 				metricFutures.push_back(storageServers[i].waitMetrics.getReplyUnlessFailedFor(req, 2, 0));
@@ -550,7 +550,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			int firstValidStorageServer = -1;
 
 			//Retrieve the size from the storage server responses
-			for(int i = 0; i < storageServers.size() - 1; i++)
+			for(int i = 0; i < storageServers.size(); i++)
 			{
 				ErrorOr<StorageMetrics> reply = metricFutures[i].get();
 
@@ -721,6 +721,7 @@ public:
 			state vector<UID> storageServers = (isRelocating) ? destStorageServers : sourceStorageServers;
 			state vector<StorageServerInterface> storageServerInterfaces;
 
+			//TraceEvent("ConsistencyCheck_GetStorageInfo").detail("StorageServers", storageServers.size());
 			loop {
 				try {
 					vector< Future< Optional<Value> > > serverListEntries;
@@ -809,8 +810,8 @@ public:
 						for(j = 0; j < storageServerInterfaces.size(); j++)
 						{
 							resetReply(req);
-							if (storageServerInterfaces[j].isCacheServer)
-								TraceEvent(SevDebug, "ConsistencyCheck_CacheServerInterface").detail("J", j).detail("UID", storageServerInterfaces[j].uniqueID).detail("IsCacheServer", storageServerInterfaces[j].isCacheServer);
+							//if (storageServerInterfaces[j].isCacheServer)
+							//	TraceEvent(SevDebug, "ConsistencyCheck_CacheServerInterface").detail("J", j).detail("UID", storageServerInterfaces[j].uniqueID).detail("IsCacheServer", storageServerInterfaces[j].isCacheServer);
 							keyValueFutures.push_back(storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 						}
 

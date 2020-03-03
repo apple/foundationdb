@@ -1105,8 +1105,8 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	// Check if the desired key-range is cached
 	auto containingRange = data->cachedRangeMap.rangeContaining(range.begin);
 	if (containingRange.value() && containingRange->range().end >= range.end) {
-		TraceEvent(SevDebug, "SSReadRangeCached").detail("Size",data->cachedRangeMap.size()).detail("ContainingRangeBegin",containingRange->range().begin).detail("ContainingRangeEnd",containingRange->range().end).
-			detail("Begin", range.begin).detail("End",range.end);
+		//TraceEvent(SevDebug, "SSReadRangeCached").detail("Size",data->cachedRangeMap.size()).detail("ContainingRangeBegin",containingRange->range().begin).detail("ContainingRangeEnd",containingRange->range().end).
+		//	detail("Begin", range.begin).detail("End",range.end);
 		result.cached = true;
 	} else
 		result.cached = false;
@@ -2598,12 +2598,12 @@ private:
 			//Figure out the affected shard ranges and maintain the cached key-range information in the in-memory map
 			// TODO revisit- we are not splitting the cached ranges based on shards as of now.
 			if (0) {
-			auto cachedRanges = data->shards.intersectingRanges(keys);
-			for(auto shard = cachedRanges.begin(); shard != cachedRanges.end(); ++shard) {
-				KeyRangeRef intersectingRange = shard.range() & keys;
-				TraceEvent(SevDebug, "SSPrivateCacheMutationInsertUnexpected", data->thisServerID).detail("Begin", intersectingRange.begin).detail("End", intersectingRange.end);
-				data->cachedRangeMap.insert(KeyRangeRef(intersectingRange.begin, intersectingRange.end), true);
-			}
+				auto cachedRanges = data->shards.intersectingRanges(keys);
+				for(auto shard = cachedRanges.begin(); shard != cachedRanges.end(); ++shard) {
+					KeyRangeRef intersectingRange = shard.range() & keys;
+					TraceEvent(SevDebug, "SSPrivateCacheMutationInsertUnexpected", data->thisServerID).detail("Begin", intersectingRange.begin).detail("End", intersectingRange.end);
+					data->cachedRangeMap.insert(KeyRangeRef(intersectingRange.begin, intersectingRange.end), true);
+				}
 			}
 			processedStartKey = false;
 		} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix)) {

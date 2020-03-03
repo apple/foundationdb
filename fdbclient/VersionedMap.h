@@ -143,8 +143,7 @@ namespace PTreeImpl {
 #pragma warning(disable: 4800)
 
 template<class T, class A = FastAlloc<T>>
-//template<class T>
-struct PTree : public /*ReferenceCounted<PTree<T>>, A, */NonCopyable {
+struct PTree : public NonCopyable {
 	uint32_t priority;
 	Reference<PTree> pointer[3];
 	Version lastUpdateVersion;
@@ -153,7 +152,6 @@ struct PTree : public /*ReferenceCounted<PTree<T>>, A, */NonCopyable {
 	T data;
 	using PTreeNodeAllocType = typename std::allocator_traits<A>::template rebind_alloc<PTree<T, A>>;
 	PTreeNodeAllocType allocator;
-	//A allocator;
 
 	Reference<PTree> child(bool which, Version at) const {
 		if (updated && lastUpdateVersion<=at && which == replacedPointer)
@@ -178,7 +176,6 @@ struct PTree : public /*ReferenceCounted<PTree<T>>, A, */NonCopyable {
 		if (delref_no_destroy())
 		{
 			PTreeNodeAllocType alloc = allocator;
-			//A alloc = allocator;
 			auto tmp = const_cast<PTree*>(this);
 			tmp->~PTree();
 			alloc.deallocate(tmp, 1);
@@ -192,7 +189,7 @@ private:
 };
 
 template<class T, class A>
-using rebinded_alloc = typename std::allocator_traits<A>::template rebind_alloc<PTree<T, A>>;// allocator;
+using rebinded_alloc = typename std::allocator_traits<A>::template rebind_alloc<PTree<T, A>>;
 
 template<class T, class A = FastAlloc<T>>
 static Reference<PTree<T, A>> update( Reference<PTree<T, A>> const& node, bool which, Reference<PTree<T, A>> const& ptr, Version at, rebinded_alloc<T, A> allocator=A{} ) {
@@ -207,10 +204,10 @@ static Reference<PTree<T, A>> update( Reference<PTree<T, A>> const& node, bool w
 			Reference<PTree<T, A>> r;
 			if (which)
 			{
-				void *pnode = allocator.allocate(1/*sizeof(PTree<T, A>)*/);
+				void *pnode = allocator.allocate(1);
 				r = Reference<PTree<T,A>>( new (pnode) PTree<T,A>( node->priority, node->data, node->child(0, at), ptr, at, allocator ) );
 			}else {
-				void *pnode = allocator.allocate(1/*sizeof(PTree<T, A>)*/);
+				void *pnode = allocator.allocate(1);
 				r = Reference<PTree<T,A>>( new (pnode) PTree<T,A>( node->priority, node->data, ptr, node->child(1, at), at, allocator ) );
 			}
 			node->pointer[2].clear();
@@ -227,12 +224,12 @@ static Reference<PTree<T, A>> update( Reference<PTree<T, A>> const& node, bool w
 		Reference<PTree<T, A>> r;
 		if (which)
 		{
-			void *pnode = allocator.allocate(1/*sizeof(PTree<T, A>)*/);
+			void *pnode = allocator.allocate(1);
 			r = Reference<PTree<T,A>>( new (pnode) PTree<T, A>( node->priority, node->data, node->child(0, at), ptr, at, allocator  ) );
 		}
 		else
 		{
-			void *pnode = allocator.allocate(1/*sizeof(PTree<T, A>)*/);
+			void *pnode = allocator.allocate(1);
 			r = Reference<PTree<T,A>>( new (pnode) PTree<T, A>( node->priority, node->data, ptr, node->child(1, at), at, allocator ) );
 		}
 		return r;
@@ -349,7 +346,7 @@ T get(std::vector<const PTree<T, A>*>& f){
 template<class T, class A = FastAlloc<T>>
 void insert(Reference<PTree<T, A>>& p, Version at, const T& x, rebinded_alloc<T, A> allocator=A{} ) {
 	if (!p){
-		void * pnode = allocator.allocate(1/*sizeof(PTree<T, A>)*/);
+		void * pnode = allocator.allocate(1);
 		p = Reference<PTree<T, A>>(new (pnode) PTree<T, A>(x, at, allocator));
 	} else {
 		bool direction = !(x < p->data);
@@ -503,7 +500,7 @@ Reference<PTree<T, A>> append(const Reference<PTree<T, A>>& left, const Referenc
 	if (!left) return right;
 	if (!right) return left;
 
-	void *pnode = allocator.allocate(1/*sizeof(PTree<T, A>)*/);
+	void *pnode = allocator.allocate(1);
 	Reference<PTree<T, A>> r = Reference<PTree<T, A>>(new (pnode) PTree<T, A>(lastNode(left, at)->data, at, allocator));
 	ASSERT( r->data < firstNode(right, at)->data);
 	Reference<PTree<T, A>> a = left;
@@ -566,7 +563,6 @@ void printTreeDetails(const Reference<PTree<T,A>>& p, int depth = 0) {
 	printf("Node %p (depth %d): %s\n", p.getPtr(), depth, describe(p->data.key).c_str());
 	printf("  Left: %p\n", p->pointer[0].getPtr());
 	printf("  Right: %p\n", p->pointer[1].getPtr());
-	//if (p->pointer[2])
 	if (p->updated)
 		printf("  Version %lld %s: %p\n", p->lastUpdateVersion, p->replacedPointer ? "Right" : "Left", p->pointer[2].getPtr());
 	for(int i=0; i<3; i++)
@@ -654,15 +650,9 @@ template<class K, class T, class A = FastAlloc<K>>
 class VersionedMap : NonCopyable {
 //private:
 public:
-	//typedef MapPair<K,std::pair<T,Version>> nodeType;
-	//typedef Reference< PTreeT > Tree;
 	using PTreeValue = MapPair<K,std::pair<T,Version>>;
 	using PTreeT = PTreeImpl::PTree<PTreeValue, A>;
-	//using PTreeT = PTreeImpl::PTree<PTreeValue, FastAllocatedPTree<PTreeValue>>;
 	using Tree = Reference<PTreeT>;
-	//using alloc = typename std::allocator_traits<A>::template rebind_alloc<PTreeT>::other;
-	//using PTreeNodeAllocType = typename A::template rebind<PTreeT>::other;
-	//PTreeNodeAllocType allocator;
 	using allocator_type = A;
 	allocator_type allocator;
 
@@ -804,7 +794,6 @@ public:
 
 	void compact(Version newOldestVersion) {
 		ASSERT( newOldestVersion <= latestVersion );
-		//auto newBegin = roots.lower_bound(newOldestVersion);
 		auto newBegin = lower_bound(roots.begin(), roots.end(), newOldestVersion, rootsComparator());
 		for(auto root = roots.begin(); root != newBegin; ++root) {
 			if(root->second)
