@@ -339,45 +339,35 @@ void ArenaBlock::destroy() {
 void ArenaBlock::destroyLeaf() {
 	if (isTiny()) {
 		if (tinySize <= 16) {
-			VALGRIND_MAKE_MEM_UNDEFINED(this, 16);
 			FastAllocator<16>::release(this);
 			INSTRUMENT_RELEASE("Arena16");
 		} else if (tinySize <= 32) {
-			VALGRIND_MAKE_MEM_UNDEFINED(this, 32);
 			FastAllocator<32>::release(this);
 			INSTRUMENT_RELEASE("Arena32");
 		} else {
-			VALGRIND_MAKE_MEM_UNDEFINED(this, 64);
 			FastAllocator<64>::release(this);
 			INSTRUMENT_RELEASE("Arena64");
 		}
 	} else {
 		if (bigSize <= 128) {
-			VALGRIND_MAKE_MEM_UNDEFINED(this, 128);
 			FastAllocator<128>::release(this);
 			INSTRUMENT_RELEASE("Arena128");
 		} else if (bigSize <= 256) {
-			VALGRIND_MAKE_MEM_UNDEFINED(this, 256);
 			FastAllocator<256>::release(this);
 			INSTRUMENT_RELEASE("Arena256");
 		} else if (bigSize <= 512) {
-			VALGRIND_MAKE_MEM_UNDEFINED(this, 512);
 			FastAllocator<512>::release(this);
 			INSTRUMENT_RELEASE("Arena512");
 		} else if (bigSize <= 1024) {
-			VALGRIND_MAKE_MEM_UNDEFINED(this, 1024);
 			FastAllocator<1024>::release(this);
 			INSTRUMENT_RELEASE("Arena1024");
 		} else if (bigSize <= 2048) {
-			VALGRIND_MAKE_MEM_UNDEFINED(this, 2048);
 			FastAllocator<2048>::release(this);
 			INSTRUMENT_RELEASE("Arena2048");
 		} else if (bigSize <= 4096) {
-			VALGRIND_MAKE_MEM_UNDEFINED(this, 4096);
 			FastAllocator<4096>::release(this);
 			INSTRUMENT_RELEASE("Arena4096");
 		} else if (bigSize <= 8192) {
-			VALGRIND_MAKE_MEM_UNDEFINED(this, 8192);
 			FastAllocator<8192>::release(this);
 			INSTRUMENT_RELEASE("Arena8192");
 		} else {
