@@ -20,6 +20,8 @@
 
 #include "Arena.h"
 
+// See https://dox.ipxe.org/memcheck_8h_source.html and https://dox.ipxe.org/valgrind_8h_source.html for an explanation
+// of valgrind client requests
 #ifdef USE_VALGRIND
 #include <memcheck.h>
 #else
@@ -27,6 +29,11 @@
 #define VALGRIND_MAKE_MEM_DEFINED(addr, size) ((void)(addr), (void)(size))
 #define VALGRIND_MAKE_MEM_UNDEFINED(addr, size) ((void)(addr), (void)(size))
 #endif
+
+// For each use of arena-internal memory (e.g. ArenaBlock::getSize()), unpoison the memory before use and
+// poison it when done.
+// When creating a new ArenaBlock, poison the memory that will be later allocated to users.
+// When allocating memory to a user, mark that memory as undefined.
 
 namespace {
 void unpoison(ArenaBlock* b) {
