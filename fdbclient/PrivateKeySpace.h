@@ -16,36 +16,39 @@ public:
 	// Since a keyRange doesn't have any knowledge about other keyRanges, parameters like KeySelector,
 	// GetRangeLimits should be handled together in PrivateKeySpace
 	// Thus, having this general interface looks unnessary.
-	// virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const = 0;
+	// virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin,
+	// KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const = 0;
 
 	// Each derived class only needs to implement this simple version of getRange
-	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr) const = 0;
+	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+	                                                    KeyRangeRef kr) const = 0;
 
 	explicit PrivateKeyRangeBaseImpl(KeyRef start, KeyRef end) {
 		range = KeyRangeRef(range.arena(), KeyRangeRef(start, end));
 	}
-	KeyRangeRef getKeyRange() const {
-		return range;
-	}
+	KeyRangeRef getKeyRange() const { return range; }
+
 protected:
 	KeyRange range; // underlying key range for this function
 };
 
-
 // class PrivateKeyRangeSimpleImpl : public PrivateKeyRangeBaseImpl {
 // public:
 // 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
-// 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const;
+// 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector
+// end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const;
 // };
 
 class PrivateKeySpace {
 public:
 	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key, bool snapshot = false);
 
-	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeySelector begin, KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false);
+	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeySelector begin,
+	                                            KeySelector end, GetRangeLimits limits, bool snapshot = false,
+	                                            bool reverse = false);
 
 	PrivateKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = allKeys.end) {
-		// Default value is nullptr, begin of KeyRangeMap is Key() 
+		// Default value is nullptr, begin of KeyRangeMap is Key()
 		impls = KeyRangeMap<PrivateKeyRangeBaseImpl*>(nullptr, spaceEndKey);
 		range = KeyRangeRef(spaceStartKey, spaceEndKey);
 	}
@@ -55,9 +58,7 @@ public:
 		impls.insert(kr, impl);
 	}
 
-	KeyRangeMap<PrivateKeyRangeBaseImpl*>& getKeyRangeMap(){
-		return impls;
-	}
+	KeyRangeMap<PrivateKeyRangeBaseImpl*>& getKeyRangeMap() { return impls; }
 
 private:
 	KeyRangeMap<PrivateKeyRangeBaseImpl*> impls;
