@@ -31,7 +31,8 @@ public:
 	}
 	KeyRangeRef getKeyRange() const { return range; }
 	ACTOR Future<Void> normalizeKeySelectorActor(const PrivateKeyRangeBaseImpl* pkrImpl,
-                                             Reference<ReadYourWritesTransaction> ryw, KeySelector* ks);
+	                                             Reference<ReadYourWritesTransaction> ryw, KeySelector* ks);
+
 protected:
 	KeyRange range; // underlying key range for this function
 };
