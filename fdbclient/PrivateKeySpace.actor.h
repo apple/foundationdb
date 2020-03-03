@@ -30,7 +30,8 @@ public:
 		range = KeyRangeRef(range.arena(), KeyRangeRef(start, end));
 	}
 	KeyRangeRef getKeyRange() const { return range; }
-
+	ACTOR Future<Void> normalizeKeySelectorActor(const PrivateKeyRangeBaseImpl* pkrImpl,
+                                             Reference<ReadYourWritesTransaction> ryw, KeySelector* ks);
 protected:
 	KeyRange range; // underlying key range for this function
 };
@@ -61,6 +62,7 @@ public:
 		impls.insert(kr, impl);
 	}
 
+private:
 	ACTOR Future<Optional<Value>> getActor(PrivateKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeyRef key);
 
 	ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(PrivateKeySpace* pks,
@@ -68,9 +70,6 @@ public:
 	                                                                  KeySelector begin, KeySelector end,
 	                                                                  GetRangeLimits limits, bool reverse);
 
-	KeyRangeMap<PrivateKeyRangeBaseImpl*>& getKeyRangeMap() { return impls; }
-
-private:
 	KeyRangeMap<PrivateKeyRangeBaseImpl*> impls;
 	KeyRange range;
 };
