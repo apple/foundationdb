@@ -1275,9 +1275,8 @@ TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 
 class PrivateKeyRangeTestImpl : public PrivateKeyRangeBaseImpl {
 public:
-	explicit PrivateKeyRangeTestImpl(KeyRef start, KeyRef end, std::string prefix, int size) : PrivateKeyRangeBaseImpl(start, end) {
-		this->prefix = prefix;
-		this->size = size;
+	explicit PrivateKeyRangeTestImpl(KeyRef start, KeyRef end, const std::string& prefix, int size) :
+		PrivateKeyRangeBaseImpl(start, end), prefix(prefix), size(size) {
 		ASSERT(size > 0);
 		for (int i = 0; i < size; ++i) {
 			kvs.push_back_deep(kvs.arena(), KeyValueRef(getKeyForIndex(i), deterministicRandom()->randomAlphaNumeric(16)));
