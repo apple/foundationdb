@@ -2490,16 +2490,17 @@ struct CLIOptions {
 				if (!flowKnobs->setKnob( k->first, k->second ) &&
 					!clientKnobs->setKnob( k->first, k->second ))
 				{
-					fprintf(stderr, "ERROR: Unrecognized knob option '%s'\n", k->first.c_str());
-					exit_code = FDB_EXIT_ERROR;
+					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
+					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "ERROR: Invalid value '%s' for knob option '%s'\n", k->second.c_str(), k->first.c_str());
-					exit_code = FDB_EXIT_ERROR;
+					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", k->second.c_str(), k->first.c_str());
+					TraceEvent(SevWarnAlways, "InvalidKnobValue").detail("Knob", printable(k->first)).detail("Value", printable(k->second));
 				}
 				else {
 					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
+					TraceEvent(SevError, "FailedToSetKnob").detail("Knob", printable(k->first)).detail("Value", printable(k->second)).error(e);
 					exit_code = FDB_EXIT_ERROR;
 				}
 			}
