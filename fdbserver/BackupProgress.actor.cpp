@@ -37,6 +37,20 @@ void BackupProgress::addBackupStatus(const WorkerBackupStatus& status) {
 	}
 }
 
+void BackupProgress::updateTagVersions(std::map<Tag, Version>* tagVersions, std::set<Tag>* tags,
+                                       const std::map<Tag, Version>& progress, Version endVersion, LogEpoch epoch) {
+	for (const auto& [tag, savedVersion] : progress) {
+		tags->erase(tag);
+		if (savedVersion < endVersion - 1) {
+			tagVersions->insert({ tag, savedVersion + 1 });
+			TraceEvent("BW", dbgid)
+			    .detail("OldEpoch", epoch)
+			    .detail("Tag", tag.toString())
+			    .detail("BeginVersion", savedVersion + 1)
+			    .detail("EndVersion", endVersion);
+		}
+	}
+}
 std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgress::getUnfinishedBackup() {
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit;
 
@@ -45,20 +59,30 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 	for (const auto& [epoch, info] : epochInfos) {
 		std::set<Tag> tags = enumerateLogRouterTags(info.logRouterTags);
 		std::map<Tag, Version> tagVersions;
-		auto progressIt = progress.find(epoch);
-		if (progressIt != progress.end()) {
-			for (const auto& [tag, savedVersion] : progressIt->second) {
-				tags.erase(tag);
-				if (savedVersion < info.epochEnd - 1) {
-					tagVersions.insert({ tag, savedVersion + 1 });
-					TraceEvent("BW", dbgid)
-					    .detail("OldEpoch", epoch)
-					    .detail("Tag", tag.toString())
-					    .detail("BeginVersion", savedVersion + 1)
-					    .detail("EndVersion", info.epochEnd);
+		auto progressIt = progress.lower_bound(epoch);
+		if (progressIt != progress.end() && progressIt->first == epoch) {
+			updateTagVersions(&tagVersions, &tags, progressIt->second, info.epochEnd, epoch);
+		} else {
+			auto rit = findPreviousProgress(epoch);
+			if (rit != progress.rend()) {
+				// A partial recovery can result in empty epoch that copies previous
+				// epoch's version range. In this case, we should check previous
+				// epoch's savedVersion.
+				int savedMore = 0;
+				for (auto [tag, version] : rit->second) {
+					if (version > info.epochBegin) {
+						savedMore++;
+					}
+				}
+				if (savedMore > 1) {
+					ASSERT(savedMore == rit->second.size()); // all tags should saved more
+					ASSERT(savedMore == info.logRouterTags); // Smae number as logRouterTags
+
+					updateTagVersions(&tagVersions, &tags, rit->second, info.epochEnd, epoch);
 				}
 			}
 		}
+
 		for (const Tag tag : tags) { // tags without progress data
 			tagVersions.insert({ tag, info.epochBegin });
 			TraceEvent("BW", dbgid)

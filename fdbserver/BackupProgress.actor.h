@@ -78,6 +78,18 @@ private:
 		return tags;
 	}
 
+	// For each tag in progress, the saved version is smaller than endVersion - 1,
+	// add {tag, savedVersion+1} to tagVersions and remove the tag from "tags".
+	void updateTagVersions(std::map<Tag, Version>* tagVersions, std::set<Tag>* tags,
+	                       const std::map<Tag, Version>& progress, Version endVersion, LogEpoch epoch);
+
+	std::map<LogEpoch, std::map<Tag, Version>>::reverse_iterator findPreviousProgress(LogEpoch epoch) {
+		for (auto it = progress.rbegin(); it != progress.rend(); ++it) {
+			if (it->first < epoch) return it;
+		}
+		return progress.rend();
+	}
+
 	const UID dbgid;
 
 	// Note this MUST be iterated in ascending order.
