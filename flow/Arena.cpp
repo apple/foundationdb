@@ -70,7 +70,9 @@ void Arena::dependsOn(const Arena& p) {
 		unpoison(p.impl.getPtr());
 		ArenaBlock::dependOn(impl, p.impl.getPtr());
 		poison(p.impl.getPtr());
-		poison(impl.getPtr());
+		if (p.impl.getPtr() != impl.getPtr()) {
+			poison(impl.getPtr());
+		}
 	}
 }
 size_t Arena::getSize() const {
