@@ -84,7 +84,7 @@ private:
 	                       const std::map<Tag, Version>& progress, Version endVersion, LogEpoch epoch);
 
 	std::map<LogEpoch, std::map<Tag, Version>>::reverse_iterator findPreviousProgress(LogEpoch epoch) {
-		for (auto it = progress.rbegin(); it != progress.rend(); ++it) {
+		for (auto it = progress.rbegin(); !(it == progress.rend()); ++it) {
 			if (it->first < epoch) return it;
 		}
 		return progress.rend();
