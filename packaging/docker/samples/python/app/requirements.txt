@@ -17,5 +17,5 @@
 # limitations under the License.
 #
 
-Flask==1.0.2
-foundationdb==5.1.5
+Flask==1.1.1
+foundationdb==6.1.11

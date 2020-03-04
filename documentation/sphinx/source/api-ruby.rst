@@ -24,7 +24,6 @@
 .. |max-retry-delay-database-option| replace:: :meth:`Database.options.set_transaction_max_retry_delay`
 .. |transaction-size-limit-database-option| replace:: :func:`Database.options.set_transaction_size_limit`
 .. |causal-read-risky-database-option| replace:: :meth:`Database.options.set_transaction_causal_read_risky`
-.. |include-port-in-address-database-option| replace:: :meth:`Database.options.set_transaction_include_port_in_address`
 .. |snapshot-ryw-enable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_disable`
 .. |transaction-logging-max-field-length-database-option| replace:: :meth:`Database.options.set_transaction_logging_max_field_length`
@@ -37,7 +36,6 @@
 .. |snapshot-ryw-enable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_disable`
 .. |causal-read-risky-transaction-option| replace:: :meth:`Transaction.options.set_causal_read_risky`
-.. |include-port-in-address-transaction-option| replace:: :meth:`Transaction.options.set_include_port_in_address`
 .. |transaction-logging-max-field-length-transaction-option| replace:: :meth:`Transaction.options.set_transaction_logging_max_field_length`
 .. |lazy-iterator-object| replace:: :class:`Enumerator`
 .. |key-meth| replace:: :meth:`Subspace.key`
@@ -87,7 +85,7 @@ When you require the ``FDB`` gem, it exposes only one useful method:
 
 .. warning:: |api-version-multi-version-warning|
 
-For API changes between version 14 and |api-version| (for the purpose of porting older programs), see :doc:`release-notes`.
+For API changes between version 14 and |api-version| (for the purpose of porting older programs), see :doc:`release-notes` and :doc:`api-version-upgrade-guide`.
 
 Opening a database
 ==================
@@ -95,12 +93,14 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 620
+    FDB.api_version 700
     db = FDB.open
 
 .. function:: open( cluster_file=nil ) -> Database
 
-    |fdb-open-blurb|
+    |fdb-open-blurb1|
+
+    |fdb-open-blurb2|
 
 .. global:: FDB.options
 
@@ -125,6 +125,10 @@ After requiring the ``FDB`` gem and selecting an API version, you probably want 
     .. method:: FDB.options.set_trace_format(format) -> nil
 
        |option-trace-format-blurb|
+
+    .. method:: FDB.options.set_trace_clock_source(source) -> nil
+
+       |option-trace-clock-source-blurb|
 
     .. method:: FDB.options.set_disable_multi_version_client_api() -> nil
 
@@ -209,21 +213,21 @@ Key selectors
 
     Creates a key selector with the given reference key, equality flag, and offset. It is usually more convenient to obtain a key selector with one of the following methods:
 
-        .. classmethod:: last_less_than(key) -> KeySelector
+    .. classmethod:: last_less_than(key) -> KeySelector
 
-            Returns a key selector referencing the last (greatest) key in the database less than the specified key.
+        Returns a key selector referencing the last (greatest) key in the database less than the specified key.
 
-        .. classmethod:: KeySelector.last_less_or_equal(key) -> KeySelector
+    .. classmethod:: KeySelector.last_less_or_equal(key) -> KeySelector
 
-            Returns a key selector referencing the last (greatest) key less than, or equal to, the specified key.
+        Returns a key selector referencing the last (greatest) key less than, or equal to, the specified key.
 
-        .. classmethod:: KeySelector.first_greater_than(key) -> KeySelector
+    .. classmethod:: KeySelector.first_greater_than(key) -> KeySelector
 
-            Returns a key selector referencing the first (least) key greater than the specified key.
+        Returns a key selector referencing the first (least) key greater than the specified key.
 
-        .. classmethod:: KeySelector.first_greater_or_equal(key) -> KeySelector
+    .. classmethod:: KeySelector.first_greater_or_equal(key) -> KeySelector
 
-            Returns a key selector referencing the first key greater than, or equal to, the specified key.
+        Returns a key selector referencing the first key greater than, or equal to, the specified key.
 
 .. method:: KeySelector.+(offset) -> KeySelector
 
@@ -279,16 +283,16 @@ A |database-blurb1| |database-blurb2|
 
     The ``options`` hash accepts the following optional parameters:
 
-        ``:limit``
-            Only the first ``limit`` keys (and their values) in the range will be returned.
+    ``:limit``
+        Only the first ``limit`` keys (and their values) in the range will be returned.
 
-        ``:reverse``
-            If ``true``, then the keys in the range will be returned in reverse order.
+    ``:reverse``
+        If ``true``, then the keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
-            If ``:limit`` is also specified, the *last* ``limit`` keys in the range will be returned in reverse order.
+        If ``:limit`` is also specified, the *last* ``limit`` keys in the range will be returned in reverse order.
 
-        ``:streaming_mode``
-            A valid |streaming-mode|, which provides a hint to FoundationDB about how to retrieve the specified range. This option should generally not be specified, allowing FoundationDB to retrieve the full range very efficiently.
+    ``:streaming_mode``
+        A valid |streaming-mode|, which provides a hint to FoundationDB about how to retrieve the specified range. This option should generally not be specified, allowing FoundationDB to retrieve the full range very efficiently.
 
 .. method:: Database.get_range(begin, end, options={}) {|kv| block } -> nil
 
@@ -390,10 +394,6 @@ Database options
 
     |option-db-causal-read-risky-blurb|
 
-.. method:: Database.options.set_transaction_include_port_in_address() -> nil
-
-    |option-db-include-port-in-address-blurb|
-
 .. method:: Database.options.set_transaction_logging_max_field_length(size_limit) -> nil
 
     |option-db-tr-transaction-logging-max-field-length-blurb|
@@ -457,16 +457,16 @@ Reading data
 
     The ``options`` hash accepts the following optional parameters:
 
-        ``:limit``
-            Only the first ``limit`` keys (and their values) in the range will be returned.
+    ``:limit``
+        Only the first ``limit`` keys (and their values) in the range will be returned.
 
-        ``:reverse``
-            If true, then the keys in the range will be returned in reverse order.
+    ``:reverse``
+        If ``true``, then the keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
-            If ``:limit`` is also specified, the *last* ``limit`` keys in the range will be returned in reverse order.
+        If ``:limit`` is also specified, the *last* ``limit`` keys in the range will be returned in reverse order.
 
-        ``:streaming_mode``
-            A valid |streaming-mode|, which provides a hint to FoundationDB about how the returned enumerable is likely to be used.  The default is ``:iterator``.
+    ``:streaming_mode``
+        A valid |streaming-mode|, which provides a hint to FoundationDB about how the returned enumerable is likely to be used.  The default is ``:iterator``.
 
 .. method:: Transaction.get_range(begin, end, options={}) {|kv| block } -> nil
 
@@ -546,11 +546,15 @@ Writing data
 
     Removes all keys ``k`` such that ``begin <= k < end``, and their associated values. |immediate-return|
 
+    |transaction-clear-range-blurb|
+
     .. note:: Unlike in the case of :meth:`Transaction.get_range`, ``begin`` and ``end`` must be keys (:class:`String` or :class:`Key`), not :class:`KeySelector`\ s.  (Resolving arbitrary key selectors would prevent this method from returning immediately, introducing concurrency issues.)
 
 .. method:: Transaction.clear_range_start_with(prefix) -> nil
 
     Removes all the keys ``k`` such that ``k.start_with? prefix``, and their associated values. |immediate-return|
+
+    |transaction-clear-range-blurb|
 
 .. _api-ruby-transaction-atomic-operations:
 
@@ -590,6 +594,10 @@ In each of the methods below, ``param`` should be a string appropriately packed 
 .. method:: Transaction.bit_xor(key, param) -> nil
 
     |atomic-xor|
+
+.. method:: Transaction.compare_and_clear(key, param) -> nil
+
+    |atomic-compare-and-clear|
 
 .. method:: Transaction.max(key, param) -> nil
 
@@ -761,10 +769,6 @@ Transaction options
 
     |option-causal-read-risky-blurb|
 
-.. method:: Transaction.options.set_include_port_in_address() -> nil
-
-    |option-include-port-in-address-blurb|
-
 .. method:: Transaction.options.set_causal_write_risky() -> nil
 
     |option-causal-write-risky-blurb|
@@ -822,6 +826,14 @@ Transaction options
 .. method:: Transaction.options.set_transaction_logging_max_field_length(size_limit) -> nil
 
     |option-set-transaction-logging-max-field-length-blurb|
+
+.. method:: Transaction.options.set_debug_transaction_identifier(id_string) -> nil
+
+    |option-set-debug-transaction-identifier|
+
+.. method:: Transaction.options.set_log_transaction() -> nil
+
+    |option-set-log-transaction|
 
 .. _transact:
 
@@ -911,6 +923,8 @@ All future objects are a subclass of the :class:`Future` type.
         .. method:: Future.on_ready() {|future| block } -> nil
 
             Yields ``self`` to the given block when the future object is ready. If the future object is ready at the time :meth:`on_ready` is called, the block may be called immediately in the current thread (although this behavior is not guaranteed). Otherwise, the call may be delayed and take place on the thread with which the client was initialized. Therefore, the block is responsible for any needed thread synchronization (and/or for posting work to your application's event loop, thread pool, etc., as may be required by your application's architecture).
+
+            .. note:: This function guarantees the callback will be executed **at most once**.
 
             .. warning:: |fdb-careful-with-callbacks-blurb|
 

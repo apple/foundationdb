@@ -42,10 +42,15 @@ enum {
 	tagLocalityRemoteLog = -3,
 	tagLocalityUpgraded = -4,
 	tagLocalitySatellite = -5,
-	tagLocalityLogRouterMapped = -6,
+	tagLocalityLogRouterMapped = -6,  // used by log router to pop from TLogs
 	tagLocalityTxs = -7,
+	tagLocalityBackup = -8,  // used by backup role to pop from TLogs
 	tagLocalityInvalid = -99
 }; //The TLog and LogRouter require these number to be as compact as possible
+
+inline bool isPseudoLocality(int8_t locality) {
+	return locality == tagLocalityLogRouterMapped || locality == tagLocalityBackup;
+}
 
 #pragma pack(push, 1)
 struct Tag {
@@ -68,7 +73,7 @@ struct Tag {
 	}
 
 	template <class Ar>
-	force_inline void serialize_unversioned(Ar& ar) { 
+	force_inline void serialize_unversioned(Ar& ar) {
 		serializer(ar, locality, id);
 	}
 };
@@ -157,11 +162,11 @@ void uniquify( Collection& c ) {
 	c.resize( std::unique(c.begin(), c.end()) - c.begin() );
 }
 
-static std::string describe( const Tag item ) {
+inline std::string describe( const Tag item ) {
 	return format("%d:%d", item.locality, item.id);
 }
 
-static std::string describe( const int item ) {
+inline std::string describe( const int item ) {
 	return format("%d", item);
 }
 
@@ -171,17 +176,17 @@ static std::string describe(const std::string& s) {
 }
 
 template <class T>
-static std::string describe( Reference<T> const& item ) {
+std::string describe( Reference<T> const& item ) {
 	return item->toString();
 }
 
 template <class T>
-static std::string describe( T const& item ) {
+std::string describe( T const& item ) {
 	return item.toString();
 }
 
 template <class K, class V>
-static std::string describe( std::map<K, V> const& items, int max_items = -1 ) {
+std::string describe( std::map<K, V> const& items, int max_items = -1 ) {
 	if(!items.size())
 		return "[no items]";
 
@@ -197,7 +202,7 @@ static std::string describe( std::map<K, V> const& items, int max_items = -1 ) {
 }
 
 template <class T>
-static std::string describeList( T const& items, int max_items ) {
+std::string describeList( T const& items, int max_items ) {
 	if(!items.size())
 		return "[no items]";
 
@@ -213,12 +218,12 @@ static std::string describeList( T const& items, int max_items ) {
 }
 
 template <class T>
-static std::string describe( std::vector<T> const& items, int max_items = -1 ) {
+std::string describe( std::vector<T> const& items, int max_items = -1 ) {
 	return describeList(items, max_items);
 }
 
 template <class T>
-static std::string describe( std::set<T> const& items, int max_items = -1 ) {
+std::string describe( std::set<T> const& items, int max_items = -1 ) {
 	return describeList(items, max_items);
 }
 
@@ -409,7 +414,7 @@ typedef Standalone<KeyRef> Key;
 typedef Standalone<ValueRef> Value;
 typedef Standalone<KeyRangeRef> KeyRange;
 typedef Standalone<KeyValueRef> KeyValue;
-typedef Standalone<struct KeySelectorRef> KeySelector; 
+typedef Standalone<struct KeySelectorRef> KeySelector;
 
 enum { invalidVersion = -1, latestVersion = -2 };
 
@@ -573,7 +578,7 @@ struct KeyRangeWith : KeyRange {
 	}
 };
 template <class Val>
-static inline KeyRangeWith<Val> keyRangeWith( const KeyRangeRef& range, const Val& value ) {
+KeyRangeWith<Val> keyRangeWith( const KeyRangeRef& range, const Val& value ) {
 	return KeyRangeWith<Val>(range, value);
 }
 
@@ -648,6 +653,7 @@ struct KeyValueStoreType {
 		MEMORY,
 		SSD_BTREE_V2,
 		SSD_REDWOOD_V1,
+		MEMORY_RADIXTREE,
 		END
 	};
 
@@ -657,6 +663,7 @@ struct KeyValueStoreType {
 			this->type = END;
 	}
 	operator StoreType() const { return StoreType(type); }
+	StoreType storeType() const { return StoreType(type); }
 
 	template <class Ar>
 	void serialize(Ar& ar) { serializer(ar, type); }
@@ -667,6 +674,7 @@ struct KeyValueStoreType {
 			case SSD_BTREE_V2: return "ssd-2";
 			case SSD_REDWOOD_V1: return "ssd-redwood-experimental";
 			case MEMORY: return "memory";
+			case MEMORY_RADIXTREE: return "memory-radixtree-beta";
 			default: return "unknown";
 		}
 	}
@@ -849,7 +857,7 @@ struct AddressExclusion {
 	}
 };
 
-static bool addressExcluded( std::set<AddressExclusion> const& exclusions, NetworkAddress const& addr ) {
+inline bool addressExcluded( std::set<AddressExclusion> const& exclusions, NetworkAddress const& addr ) {
 	return exclusions.count( AddressExclusion(addr.ip, addr.port) ) || exclusions.count( AddressExclusion(addr.ip) );
 }
 
@@ -881,7 +889,9 @@ struct ClusterControllerPriorityInfo {
 	uint8_t dcFitness;
 
 	bool operator== (ClusterControllerPriorityInfo const& r) const { return processClassFitness == r.processClassFitness && isExcluded == r.isExcluded && dcFitness == r.dcFitness; }
-
+	ClusterControllerPriorityInfo()
+	  : ClusterControllerPriorityInfo(/*ProcessClass::UnsetFit*/ 2, false,
+	                                  ClusterControllerPriorityInfo::FitnessUnknown) {}
 	ClusterControllerPriorityInfo(uint8_t processClassFitness, bool isExcluded, uint8_t dcFitness) : processClassFitness(processClassFitness), isExcluded(isExcluded), dcFitness(dcFitness) {}
 
 	template <class Ar>
@@ -961,6 +971,20 @@ struct HealthMetrics {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, worstStorageQueue, worstStorageDurabilityLag, worstTLogQueue, tpsLimit, batchLimited, storageStats, tLogQueue);
+	}
+};
+
+struct WorkerBackupStatus {
+	LogEpoch epoch;
+	Version version;
+	Tag tag;
+
+	WorkerBackupStatus() : epoch(0), version(invalidVersion) {}
+	WorkerBackupStatus(LogEpoch e, Version v, Tag t) : epoch(e), version(v), tag(t) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, epoch, version, tag);
 	}
 };
 

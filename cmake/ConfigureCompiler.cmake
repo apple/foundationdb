@@ -11,6 +11,7 @@ set(USE_LIBCXX OFF CACHE BOOL "Use libc++")
 set(USE_CCACHE OFF CACHE BOOL "Use ccache for compilation if available")
 set(RELATIVE_DEBUG_PATHS OFF CACHE BOOL "Use relative file paths in debug info")
 set(STATIC_LINK_LIBCXX ON CACHE BOOL "Statically link libstdcpp/libc++")
+set(USE_WERROR OFF CACHE BOOL "Compile with -Werror. Recommended for local development and CI.")
 
 set(rel_debug_paths OFF)
 if(RELATIVE_DEBUG_PATHS)
@@ -41,6 +42,7 @@ endif()
 
 if(FDB_RELEASE)
   add_compile_options(-DFDB_RELEASE)
+  add_compile_options(-DFDB_CLEAN_BUILD)
 endif()
 
 include_directories(${CMAKE_SOURCE_DIR})
@@ -55,26 +57,25 @@ else()
 endif()
 
 if ((NOT USE_CCACHE) AND (NOT "$ENV{USE_CCACHE}" STREQUAL ""))
-	string(TOUPPER "$ENV{USE_CCACHE}" USE_CCACHEENV)
-	if (("${USE_CCACHEENV}" STREQUAL "ON") OR ("${USE_CCACHEENV}" STREQUAL "1") OR ("${USE_CCACHEENV}" STREQUAL "YES"))
-		set(USE_CCACHE ON)
-	endif()
+  if (("$ENV{USE_CCACHE}" STREQUAL "ON") OR ("$ENV{USE_CCACHE}" STREQUAL "1") OR ("$ENV{USE_CCACHE}" STREQUAL "YES"))
+    set(USE_CCACHE ON)
+  endif()
 endif()
 if (USE_CCACHE)
-	FIND_PROGRAM(CCACHE_FOUND "ccache")
-	if(CCACHE_FOUND)
-		set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
-		set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
-	else()
-		message(SEND_ERROR "CCACHE is ON, but ccache was not found")
-	endif()
+  FIND_PROGRAM(CCACHE_FOUND "ccache")
+  if(CCACHE_FOUND)
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
+  else()
+    message(SEND_ERROR "CCACHE is ON, but ccache was not found")
+  endif()
 endif()
 
 if ((NOT USE_LIBCXX) AND (NOT "$ENV{USE_LIBCXX}" STREQUAL ""))
-	string(TOUPPER "$ENV{USE_LIBCXX}" USE_LIBCXXENV)
-	if (("${USE_LIBCXXENV}" STREQUAL "ON") OR ("${USE_LIBCXXENV}" STREQUAL "1") OR ("${USE_LIBCXXENV}" STREQUAL "YES"))
-		set(USE_LIBCXX ON)
-	endif()
+  string(TOUPPER "$ENV{USE_LIBCXX}" USE_LIBCXXENV)
+  if (("${USE_LIBCXXENV}" STREQUAL "ON") OR ("${USE_LIBCXXENV}" STREQUAL "1") OR ("${USE_LIBCXXENV}" STREQUAL "YES"))
+    set(USE_LIBCXX ON)
+  endif()
 endif()
 
 include(CheckFunctionExists)
@@ -84,15 +85,24 @@ set(CMAKE_CXX_STANDARD 17)
 
 if(WIN32)
   # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
-  # this sets the windows target version to Windows 7
-  set(WINDOWS_TARGET 0x0601)
-  add_compile_options(/W3 /EHsc /bigobj $<$<CONFIG:Release>:/Zi> /MP)
-  add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} BOOST_ALL_NO_LIB)
+  # this sets the windows target version to Windows Server 2003
+  set(WINDOWS_TARGET 0x0502)
+  if(CMAKE_CXX_FLAGS MATCHES "/W[0-4]")
+    # TODO: This doesn't seem to be good style, but I couldn't find a better way so far
+    string(REGEX REPLACE "/W[0-4]" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+  endif()
+  add_compile_options(/W0 /EHsc /bigobj $<$<CONFIG:Release>:/Zi> /MP /FC /Gm-)
+  add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} WINVER=${WINDOWS_TARGET} NTDDI_VERSION=0x05020000 BOOST_ALL_NO_LIB)
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
+  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
 else()
   set(GCC NO)
   set(CLANG NO)
+  set(ICC NO)
   if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
     set(CLANG YES)
+  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
+    set(ICC YES)
   else()
     # This is not a very good test. However, as we do not really support many architectures
     # this is good enough for now
@@ -157,6 +167,7 @@ else()
   if(USE_UBSAN)
     add_compile_options(
       -fsanitize=undefined
+      # TODO(atn34) Re-enable -fsanitize=alignment once https://github.com/apple/foundationdb/issues/1434 is resolved
       -fno-sanitize=alignment
       -DUSE_SANITIZER)
     set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fsanitize=undefined")
@@ -175,18 +186,31 @@ else()
       add_link_options(-static-libstdc++ -static-libgcc)
     endif()
   endif()
-  # Instruction sets we require to be supported by the CPU
-  add_compile_options(
-    -maes
-    -mmmx
-    -mavx
-    -msse4.2)
+  # # Instruction sets we require to be supported by the CPU
+  # TODO(atn34) Re-enable once https://github.com/apple/foundationdb/issues/1434 is resolved
+  # Some of the following instructions have alignment requirements, so it seems
+  # prudent to disable them until we properly align memory.
+  # add_compile_options(
+  #   -maes
+  #   -mmmx
+  #   -mavx
+  #   -msse4.2)
+
+  if ((NOT USE_VALGRIND) AND (NOT "$ENV{USE_VALGRIND}" STREQUAL ""))
+    if (("$ENV{USE_VALGRIND}" STREQUAL "ON") OR ("$ENV{USE_VALGRIND}" STREQUAL "1") OR ("$ENV{USE_VALGRIND}" STREQUAL "YES"))
+      set(USE_VALGRIND ON)
+    endif()
+  endif()
 
   if (USE_VALGRIND)
     add_compile_options(-DVALGRIND -DUSE_VALGRIND)
   endif()
   if (CLANG)
     add_compile_options()
+    # Clang has link errors unless `atomic` is specifically requested.
+    if(NOT APPLE)
+      add_link_options(-latomic)
+    endif()
     if (APPLE OR USE_LIBCXX)
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
       add_compile_definitions(WITH_LIBCXX)
@@ -214,8 +238,7 @@ else()
         -Wno-error=unused-command-line-argument)
     endif()
   endif()
-  if (CMAKE_GENERATOR STREQUAL Xcode)
-  else()
+  if (USE_WERROR)
     add_compile_options(-Werror)
   endif()
   if (GCC)
@@ -224,6 +247,9 @@ else()
     # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
     # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
     add_compile_options(-Wno-attributes)
+  elseif(ICC)
+    add_compile_options(-wd1879 -wd1011)
+    add_link_options(-static-intel)
   endif()
   add_compile_options(-Wno-error=format
     -Wunused-variable

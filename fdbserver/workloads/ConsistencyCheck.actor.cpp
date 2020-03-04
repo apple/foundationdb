@@ -121,7 +121,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 
 			try {
-				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0), self->quiescentWaitTimeout));  // FIXME: should be zero?
+				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0),
+				                  self->quiescentWaitTimeout)); // FIXME: should be zero?
 			}
 			catch (Error& e) {
 				TraceEvent("ConsistencyCheck_QuietDatabaseError").error(e);
@@ -272,14 +273,12 @@ struct ConsistencyCheckWorkload : TestWorkload
 					try
 					{
 						int64_t maxStorageServerQueueSize = wait(getMaxStorageServerQueueSize(cx, self->dbInfo));
-						if(maxStorageServerQueueSize > 0)
-						{
-							TraceEvent("ConsistencyCheck_NonZeroStorageServerQueue").detail("MaxQueueSize", maxStorageServerQueueSize);
-							self->testFailure("Non-zero storage server queue size");
+						if (maxStorageServerQueueSize > 0) {
+							TraceEvent("ConsistencyCheck_ExceedStorageServerQueueLimit")
+							    .detail("MaxQueueSize", maxStorageServerQueueSize);
+							self->testFailure("Storage server queue size exceeds limit");
 						}
-					}
-					catch(Error& e)
-					{
+					} catch (Error& e) {
 						if(e.code() == error_code_attribute_not_found)
 						{
 							TraceEvent("ConsistencyCheck_StorageQueueSizeError").error(e).detail("Reason", "Could not read queue size");
@@ -1137,18 +1136,19 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::set<Optional<Key>> missingStorage;
 
 		for( int i = 0; i < workers.size(); i++ ) {
-			if( !configuration.isExcludedServer(workers[i].interf.address()) &&
+			NetworkAddress addr = workers[i].interf.tLog.getEndpoint().addresses.getTLSAddress();
+			if( !configuration.isExcludedServer(addr) &&
 				( workers[i].processClass == ProcessClass::StorageClass || workers[i].processClass == ProcessClass::UnsetClass ) ) {
 				bool found = false;
 				for( int j = 0; j < storageServers.size(); j++ ) {
-					if( storageServers[j].address() == workers[i].interf.address() ) {
+					if( storageServers[j].getValue.getEndpoint().addresses.getTLSAddress() == addr ) {
 						found = true;
 						break;
 					}
 				}
 				if( !found ) {
 					TraceEvent("ConsistencyCheck_NoStorage")
-					    .detail("Address", workers[i].interf.address())
+					    .detail("Address", addr)
 					    .detail("ProcessClassEqualToStorageClass",
 					            (int)(workers[i].processClass == ProcessClass::StorageClass));
 					missingStorage.insert(workers[i].interf.locality.dcId());
@@ -1196,8 +1196,15 @@ struct ConsistencyCheckWorkload : TestWorkload
 				if(!statefulProcesses[itr->interf.address()].count(id)) {
 					TraceEvent("ConsistencyCheck_ExtraDataStore").detail("Address", itr->interf.address()).detail("DataStoreID", id);
 					if(g_network->isSimulated()) {
-						TraceEvent("ConsistencyCheck_RebootProcess").detail("Address", itr->interf.address()).detail("DataStoreID", id);
-						g_simulator.rebootProcess(g_simulator.getProcessByAddress(itr->interf.address()), ISimulator::RebootProcess);
+						//FIXME: this is hiding the fact that we can recruit a new storage server on a location the has files left behind by a previous failure
+						// this means that the process is wasting disk space until the process is rebooting
+						auto p = g_simulator.getProcessByAddress(itr->interf.address());
+						TraceEvent("ConsistencyCheck_RebootProcess").detail("Address", itr->interf.address()).detail("DataStoreID", id).detail("Reliable", p->isReliable());
+						if(p->isReliable()) {
+							g_simulator.rebootProcess(p, ISimulator::RebootProcess);
+						} else {
+							g_simulator.killProcess(p, ISimulator::KillInstantly);
+						}
 					}
 
 					foundExtraDataStore = true;
@@ -1221,12 +1228,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::set<NetworkAddress> workerAddresses;
 
 		for (const auto& it : workers) {
-			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(it.interf.address());
+			NetworkAddress addr = it.interf.tLog.getEndpoint().addresses.getTLSAddress();
+			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(addr);
 			if(!info || info->failed) {
 				TraceEvent("ConsistencyCheck_FailedWorkerInList").detail("Addr", it.interf.address());
 				return false;
 			}
-			workerAddresses.insert( NetworkAddress(it.interf.address().ip, it.interf.address().port, true, false) );
+			workerAddresses.insert( NetworkAddress(addr.ip, addr.port, true, addr.isTLS()) );
 		}
 
 		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
@@ -1424,17 +1432,16 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 
 		// Check DataDistributor
-		ProcessClass::Fitness bestDistributorFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::DataDistributor);
-		if (db.distributor.present() && (!nonExcludedWorkerProcessMap.count(db.distributor.get().address()) || nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(ProcessClass::DataDistributor) != bestDistributorFitness)) {
-			TraceEvent("ConsistencyCheck_DistributorNotBest").detail("BestDataDistributorFitness", bestDistributorFitness)
+		ProcessClass::Fitness fitnessLowerBound = allWorkerProcessMap[db.master.address()].processClass.machineClassFitness(ProcessClass::DataDistributor);
+		if (db.distributor.present() && (!nonExcludedWorkerProcessMap.count(db.distributor.get().address()) || nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(ProcessClass::DataDistributor) > fitnessLowerBound)) {
+			TraceEvent("ConsistencyCheck_DistributorNotBest").detail("DataDistributorFitnessLowerBound", fitnessLowerBound)
 			.detail("ExistingDistributorFitness", nonExcludedWorkerProcessMap.count(db.distributor.get().address()) ? nonExcludedWorkerProcessMap[db.distributor.get().address()].processClass.machineClassFitness(ProcessClass::DataDistributor) : -1);
 			return false;
 		}
 
 		// Check Ratekeeper
-		ProcessClass::Fitness bestRatekeeperFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Ratekeeper);
-		if (db.ratekeeper.present() && (!nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) || nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::Ratekeeper) != bestRatekeeperFitness)) {
-			TraceEvent("ConsistencyCheck_RatekeeperNotBest").detail("BestRatekeeperFitness", bestRatekeeperFitness)
+		if (db.ratekeeper.present() && (!nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) || nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::Ratekeeper) > fitnessLowerBound)) {
+			TraceEvent("ConsistencyCheck_RatekeeperNotBest").detail("BestRatekeeperFitness", fitnessLowerBound)
 			.detail("ExistingRatekeeperFitness", nonExcludedWorkerProcessMap.count(db.ratekeeper.get().address()) ? nonExcludedWorkerProcessMap[db.ratekeeper.get().address()].processClass.machineClassFitness(ProcessClass::Ratekeeper) : -1);
 			return false;
 		}

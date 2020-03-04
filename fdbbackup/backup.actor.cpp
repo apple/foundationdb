@@ -36,8 +36,7 @@
 #include "fdbclient/BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
-#include "fdbrpc/Platform.h"
-#include "fdbrpc/TLSConnection.h"
+#include "flow/Platform.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -1342,7 +1341,7 @@ enumDBType getDBType(std::string dbType)
 	return enBackupType;
 }
 
-ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr, std::string name, std::string id, enumProgramExe exe, Database dest) {
+ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr, std::string name, std::string id, enumProgramExe exe, Database dest, bool snapshot = false) {
 	// This process will write a document that looks like this:
 	// { backup : { $expires : {<subdoc>}, version: <version from approximately 30 seconds from now> }
 	// so that the value under 'backup' will eventually expire to null and thus be ignored by
@@ -1393,28 +1392,28 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			totalBlobStats.create(p.first + ".$sum") = p.second;
 
 		state FileBackupAgent fba;
-		state std::vector<KeyBackedTag> backupTags = wait(getAllBackupTags(tr));
+		state std::vector<KeyBackedTag> backupTags = wait(getAllBackupTags(tr, snapshot));
 		state std::vector<Future<Version>> tagLastRestorableVersions;
 		state std::vector<Future<EBackupState>> tagStates;
 		state std::vector<Future<Reference<IBackupContainer>>> tagContainers;
 		state std::vector<Future<int64_t>> tagRangeBytes;
 		state std::vector<Future<int64_t>> tagLogBytes;
-		state Future<Optional<Value>> fBackupPaused = tr->get(fba.taskBucket->getPauseKey());
+		state Future<Optional<Value>> fBackupPaused = tr->get(fba.taskBucket->getPauseKey(), snapshot);
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state std::vector<KeyBackedTag>::iterator tag;
 		state std::vector<UID> backupTagUids;
 		for (tag = backupTags.begin(); tag != backupTags.end(); tag++) {
-			UidAndAbortedFlagT uidAndAbortedFlag = wait(tag->getOrThrow(tr));
+			UidAndAbortedFlagT uidAndAbortedFlag = wait(tag->getOrThrow(tr, snapshot));
 			BackupConfig config(uidAndAbortedFlag.first);
 			backupTagUids.push_back(config.getUid());
 
-			tagStates.push_back(config.stateEnum().getOrThrow(tr));
-			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, false, 0));
-			tagLogBytes.push_back(config.logBytesWritten().getD(tr, false, 0));
-			tagContainers.push_back(config.backupContainer().getOrThrow(tr));
-			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName)));
+			tagStates.push_back(config.stateEnum().getOrThrow(tr, snapshot));
+			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, snapshot, 0));
+			tagLogBytes.push_back(config.logBytesWritten().getD(tr, snapshot, 0));
+			tagContainers.push_back(config.backupContainer().getOrThrow(tr, snapshot));
+			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName), snapshot));
 		}
 
 		wait( waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainers) && waitForAll(tagRangeBytes) && waitForAll(tagLogBytes) && success(fBackupPaused));
@@ -1451,21 +1450,21 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(dest));
 		tr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr2->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state Standalone<RangeResultRef> tagNames = wait(tr2->getRange(dba.tagNames.range(), 10000));
+		state Standalone<RangeResultRef> tagNames = wait(tr2->getRange(dba.tagNames.range(), 10000, snapshot));
 		state std::vector<Future<Optional<Key>>> backupVersion;
 		state std::vector<Future<int>> backupStatus;
 		state std::vector<Future<int64_t>> tagRangeBytesDR;
 		state std::vector<Future<int64_t>> tagLogBytesDR;
-		state Future<Optional<Value>> fDRPaused = tr->get(dba.taskBucket->getPauseKey());
+		state Future<Optional<Value>> fDRPaused = tr->get(dba.taskBucket->getPauseKey(), snapshot);
 
 		state std::vector<UID> drTagUids;
 		for(int i = 0; i < tagNames.size(); i++) {
-			backupVersion.push_back(tr2->get(tagNames[i].value.withPrefix(applyMutationsBeginRange.begin)));
+			backupVersion.push_back(tr2->get(tagNames[i].value.withPrefix(applyMutationsBeginRange.begin), snapshot));
 			UID tagUID = BinaryReader::fromStringRef<UID>(tagNames[i].value, Unversioned());
 			drTagUids.push_back(tagUID);
-			backupStatus.push_back(dba.getStateValue(tr2, tagUID));
-			tagRangeBytesDR.push_back(dba.getRangeBytesWritten(tr2, tagUID));
-			tagLogBytesDR.push_back(dba.getLogBytesWritten(tr2, tagUID));
+			backupStatus.push_back(dba.getStateValue(tr2, tagUID, snapshot));
+			tagRangeBytesDR.push_back(dba.getRangeBytesWritten(tr2, tagUID, snapshot));
+			tagLogBytesDR.push_back(dba.getLogBytesWritten(tr2, tagUID, snapshot));
 		}
 
 		wait(waitForAll(backupStatus) && waitForAll(backupVersion) && waitForAll(tagRangeBytesDR) && waitForAll(tagLogBytesDR) && success(fDRPaused));
@@ -1618,7 +1617,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					state Future<std::string> futureStatusDoc = getLayerStatus(tr, name, id, exe, taskDest);
+					state Future<std::string> futureStatusDoc = getLayerStatus(tr, name, id, exe, taskDest, true);
 					wait(cleanupStatus(tr, rootKey, name, id));
 					std::string statusdoc = wait(futureStatusDoc);
 					tr->set(instanceKey, statusdoc);
@@ -2204,6 +2203,7 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 
 		if (performRestore) {
 			if (dbVersion == invalidVersion) {
+				TraceEvent("FastRestoreAgent").detail("TargetRestoreVersion", "Largest restorable version");
 				BackupDescription desc = wait(IBackupContainer::openContainer(container)->describeBackup());
 				if (!desc.maxRestorableVersion.present()) {
 					fprintf(stderr, "The specified backup is not restorable to any version.\n");
@@ -2211,6 +2211,7 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 				}
 
 				dbVersion = desc.maxRestorableVersion.get();
+				TraceEvent("FastRestoreAgent").detail("TargetRestoreVersion", dbVersion);
 			}
 			Version _restoreVersion = wait(fastRestore(db, KeyRef(tagName), KeyRef(container), waitForDone, dbVersion,
 			                                           verbose, range, KeyRef(addPrefix), KeyRef(removePrefix)));
@@ -3223,22 +3224,22 @@ int main(int argc, char* argv[]) {
 					blobCredentials.push_back(args->OptionArg());
 					break;
 #ifndef TLS_DISABLED
-				case TLSOptions::OPT_TLS_PLUGIN:
+				case TLSParams::OPT_TLS_PLUGIN:
 					args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_CERTIFICATES:
+				case TLSParams::OPT_TLS_CERTIFICATES:
 					tlsCertPath = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_PASSWORD:
+				case TLSParams::OPT_TLS_PASSWORD:
 					tlsPassword = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_CA_FILE:
+				case TLSParams::OPT_TLS_CA_FILE:
 					tlsCAPath = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_KEY:
+				case TLSParams::OPT_TLS_KEY:
 					tlsKeyPath = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_VERIFY_PEERS:
+				case TLSParams::OPT_TLS_VERIFY_PEERS:
 					tlsVerifyPeers = args->OptionArg();
 					break;
 #endif
@@ -3853,6 +3854,13 @@ int main(int argc, char* argv[]) {
 	} catch (Error& e) {
 		TraceEvent(SevError, "MainError").error(e);
 		status = FDB_EXIT_MAIN_ERROR;
+	} catch (boost::system::system_error& e) {
+		if (g_network) {
+			TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
+		} else {
+			fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code().value());
+		}
+		status = FDB_EXIT_MAIN_EXCEPTION;
 	} catch (std::exception& e) {
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		status = FDB_EXIT_MAIN_EXCEPTION;

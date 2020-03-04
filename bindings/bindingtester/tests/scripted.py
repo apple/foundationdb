@@ -34,7 +34,7 @@ fdb.api_version(FDB_API_VERSION)
 
 
 class ScriptedTest(Test):
-    TEST_API_VERSION = 620
+    TEST_API_VERSION = 700
 
     def __init__(self, subspace):
         super(ScriptedTest, self).__init__(subspace, ScriptedTest.TEST_API_VERSION, ScriptedTest.TEST_API_VERSION)
@@ -358,7 +358,7 @@ class ScriptedTest(Test):
 
     def get_result_specifications(self):
         return [
-            ResultSpecification(self.results_subspace, ordering_index=0, global_error_filter=[1007, 1021])
+            ResultSpecification(self.results_subspace, ordering_index=0, global_error_filter=[1007, 1009, 1021])
         ]
 
     def get_expected_results(self):

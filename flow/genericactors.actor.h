@@ -32,6 +32,7 @@
 #include "flow/flow.h"
 #include "flow/Knobs.h"
 #include "flow/Util.h"
+#include "flow/IndexedSet.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 #pragma warning( disable: 4355 )	// 'this' : used in base member initializer list
 
@@ -400,15 +401,7 @@ Future<Void> map( FutureStream<T> input, F func, PromiseStream<std::invoke_resul
 }
 
 //Returns if the future returns true, otherwise waits forever.
-ACTOR static Future<Void> returnIfTrue( Future<bool> f )
-{
-	bool b = wait( f );
-	if ( b ) {
-		return Void();
-	}
-	wait( Never() );
-	throw internal_error();
-}
+ACTOR Future<Void> returnIfTrue( Future<bool> f );
 
 //Returns if the future, when waited on and then evaluated with the predicate, returns true, otherwise waits forever
 template<class T, class F>
@@ -726,17 +719,15 @@ private:
 	}
 };
 
-ACTOR template <class T> Future<Void> asyncDeserialize( Reference<AsyncVar<Standalone<StringRef>>> input, Reference<AsyncVar<Optional<T>>> output, bool useObjSerializer ) {
+ACTOR template <class T>
+Future<Void> asyncDeserialize(Reference<AsyncVar<Standalone<StringRef>>> input,
+                              Reference<AsyncVar<Optional<T>>> output) {
 	loop {
 		if (input->get().size()) {
-			if (useObjSerializer) {
-				ObjectReader reader(input->get().begin(), IncludeVersion());
-				T res;
-				reader.deserialize(res);
-				output->set(res);
-			} else {
-				output->set( BinaryReader::fromStringRef<T>( input->get(), IncludeVersion() ) );
-			}
+			ObjectReader reader(input->get().begin(), IncludeVersion());
+			T res;
+			reader.deserialize(res);
+			output->set(res);
 		} else
 			output->set( Optional<T>() );
 		wait( input->onChange() );
@@ -751,8 +742,8 @@ void forwardVector( Future<V> values, std::vector<Promise<T>> out ) {
 		out[i].send( in[i] );
 }
 
-ACTOR template <class T> 
-Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time ) {
+ACTOR template <class T>
+Future<Void> delayedAsyncVar(Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time) {
 	try {
 		loop {
 			wait( delay( time ) );
@@ -765,8 +756,8 @@ Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> 
 	}
 }
 
-ACTOR template <class T> 
-Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
+ACTOR template <class T>
+Future<Void> setAfter(Reference<AsyncVar<T>> var, double time, T val) {
 	wait( delay( time ) );
 	var->set( val );
 	return Void();
@@ -823,6 +814,7 @@ Future<Void> anyTrue( std::vector<Reference<AsyncVar<bool>>> const& input, Refer
 Future<Void> cancelOnly( std::vector<Future<Void>> const& futures );
 Future<Void> timeoutWarningCollector( FutureStream<Void> const& input, double const& logDelay, const char* const& context, UID const& id );
 Future<bool> quorumEqualsTrue( std::vector<Future<bool>> const& futures, int const& required );
+Future<Void> lowPriorityDelay( double const& waitTime );
 
 ACTOR template <class T>
 Future<Void> streamHelper( PromiseStream<T> output, PromiseStream<Error> errors, Future<T> input ) {
@@ -897,11 +889,6 @@ struct Quorum : SAV<Void> {
 template <class T>
 class QuorumCallback : public Callback<T> {
 public:
-	QuorumCallback(Future<T> future, Quorum<T>* head)
-		: head(head)
-	{
-		future.addCallbackAndClear(this);
-	}
 	virtual void fire(const T& value) {
 		Callback<T>::remove();
 		Callback<T>::next = 0;
@@ -914,7 +901,11 @@ public:
 	}
 
 private:
+	template <class U>
+	friend Future<Void> quorum(std::vector<Future<U>> const& results, int n);
 	Quorum<T>* head;
+	QuorumCallback() = default;
+	QuorumCallback(Future<T> future, Quorum<T>* head) : head(head) { future.addCallbackAndClear(this); }
 };
 
 template <class T>
@@ -925,15 +916,15 @@ Future<Void> quorum(std::vector<Future<T>> const& results, int n) {
 	Quorum<T>* q = new (allocateFast(size)) Quorum<T>(n, results.size());
 
 	QuorumCallback<T>* nextCallback = q->callbacks();
-	for (auto & r : results) {
+	for (auto& r : results) {
 		if (r.isReady()) {
+			new (nextCallback) QuorumCallback<T>();
 			nextCallback->next = 0;
 			if (r.isError())
 				q->oneError(r.getError());
 			else
 				q->oneSuccess();
-		}
-		else
+		} else
 			new (nextCallback) QuorumCallback<T>(r, q);
 		++nextCallback;
 	}
@@ -962,30 +953,7 @@ Future<Void> waitForAny( std::vector<Future<T>> const& results ) {
 	return quorum( results, 1 );
 }
 
-ACTOR static Future<bool> shortCircuitAny( std::vector<Future<bool>> f )
-{
-	std::vector<Future<Void>> sc;
-	for(Future<bool> fut : f) {
-		sc.push_back(returnIfTrue(fut));
-	}
-
-	choose {
-		when( wait( waitForAll( f ) ) ) {
-			// Handle a possible race condition? If the _last_ term to
-			// be evaluated triggers the waitForAll before bubbling
-			// out of the returnIfTrue quorum
-			for ( auto fut : f ) {
-				if ( fut.get() ) {
-					return true;
-				}
-			}
-			return false;
-		}
-		when( wait( waitForAny( sc ) ) ) {
-			return true;
-		}
-	}
-}
+ACTOR Future<bool> shortCircuitAny( std::vector<Future<bool>> f );
 
 ACTOR template <class T>
 Future<std::vector<T>> getAll( std::vector<Future<T>> input ) {
@@ -1122,16 +1090,7 @@ Future<T> orYield( Future<T> f ) {
 		return f;
 }
 
-static Future<Void> orYield( Future<Void> f ) {
-	if(f.isReady()) {
-		if(f.isError())
-			return tagError<Void>(yield(), f.getError());
-		else
-			return yield();
-	}
-	else
-		return f;
-}
+Future<Void> orYield( Future<Void> f );
 
 ACTOR template <class T> Future<T> chooseActor( Future<T> lhs, Future<T> rhs ) {
 	choose {
@@ -1143,7 +1102,7 @@ ACTOR template <class T> Future<T> chooseActor( Future<T> lhs, Future<T> rhs ) {
 // set && set -> set
 // error && x -> error
 // all others -> unset
-static Future<Void> operator &&( Future<Void> const& lhs, Future<Void> const& rhs ) {
+inline Future<Void> operator &&( Future<Void> const& lhs, Future<Void> const& rhs ) {
 	if(lhs.isReady()) {
 		if(lhs.isError()) return lhs;
 		else return rhs;
@@ -1340,6 +1299,110 @@ private:
 	}
 };
 
+struct NotifiedInt {
+	NotifiedInt( int64_t val = 0 ) : val(val) {}
+
+	Future<Void> whenAtLeast( int64_t limit ) {
+		if (val >= limit) 
+			return Void();
+		Promise<Void> p;
+		waiting.push( std::make_pair(limit,p) );
+		return p.getFuture();
+	}
+
+	int64_t get() const { return val; }
+
+	void set( int64_t v ) {
+		ASSERT( v >= val );
+		if (v != val) {
+			val = v;
+
+			std::vector<Promise<Void>> toSend;
+			while ( waiting.size() && v >= waiting.top().first ) {
+				Promise<Void> p = std::move(waiting.top().second);
+				waiting.pop();
+				toSend.push_back(p);
+			}
+			for(auto& p : toSend) {
+				p.send(Void());
+			}
+		}
+	}
+
+	void operator=( int64_t v ) {
+		set( v );
+	}
+
+	NotifiedInt(NotifiedInt&& r) BOOST_NOEXCEPT : waiting(std::move(r.waiting)), val(r.val) {}
+	void operator=(NotifiedInt&& r) BOOST_NOEXCEPT { waiting = std::move(r.waiting); val = r.val; }
+
+private:
+	typedef std::pair<int64_t,Promise<Void>> Item;
+	struct ItemCompare {
+		bool operator()(const Item& a, const Item& b) { return a.first > b.first; }
+	};
+	std::priority_queue<Item, std::vector<Item>, ItemCompare> waiting;
+	int64_t val;
+};
+
+struct BoundedFlowLock : NonCopyable, public ReferenceCounted<BoundedFlowLock> {
+	// BoundedFlowLock is different from a FlowLock in that it has a bound on how many locks can be taken from the oldest outstanding lock.
+	// For instance, with a FlowLock that has two permits, if one permit is taken but never released, the other permit can be reused an unlimited
+	// amount of times, but with a BoundedFlowLock, it can only be reused a fixed number of times.
+
+	struct Releaser : NonCopyable {
+		BoundedFlowLock* lock;
+		int64_t permitNumber;
+		Releaser() : lock(nullptr), permitNumber(0) {}
+		Releaser( BoundedFlowLock* lock, int64_t permitNumber ) : lock(lock), permitNumber(permitNumber) {}
+		Releaser(Releaser&& r) BOOST_NOEXCEPT : lock(r.lock), permitNumber(r.permitNumber) { r.permitNumber = 0; }
+		void operator=(Releaser&& r) { if (permitNumber) lock->release(permitNumber); lock = r.lock; permitNumber = r.permitNumber; r.permitNumber = 0; }
+
+		void release() {
+			if (permitNumber) {
+				lock->release(permitNumber);
+			}
+			permitNumber = 0;
+		}
+
+		~Releaser() { if (permitNumber) lock->release(permitNumber); }
+	};
+
+	BoundedFlowLock() : unrestrictedPermits(1), boundedPermits(0), nextPermitNumber(0), minOutstanding(0) {}
+	explicit BoundedFlowLock(int64_t unrestrictedPermits, int64_t boundedPermits) : unrestrictedPermits(unrestrictedPermits), boundedPermits(boundedPermits), nextPermitNumber(0), minOutstanding(0) {}
+
+	Future<int64_t> take() {
+		return takeActor(this);
+	}
+	void release( int64_t permitNumber ) {
+		outstanding.erase(permitNumber);
+		updateMinOutstanding();
+	}
+private:
+	IndexedSet<int64_t, int64_t> outstanding;
+	NotifiedInt minOutstanding;
+	int64_t nextPermitNumber;
+	const int64_t unrestrictedPermits;
+	const int64_t boundedPermits;
+
+	void updateMinOutstanding() {
+		auto it = outstanding.index(unrestrictedPermits-1);
+		if(it == outstanding.end()) {
+			minOutstanding.set(nextPermitNumber);
+		} else {
+			minOutstanding.set(*it);
+		}
+	}
+
+	ACTOR static Future<int64_t> takeActor(BoundedFlowLock* lock) {
+		state int64_t permitNumber = ++lock->nextPermitNumber;
+		lock->outstanding.insert(permitNumber, 1);
+		lock->updateMinOutstanding();
+		wait( lock->minOutstanding.whenAtLeast(std::max<int64_t>(0, permitNumber - lock->boundedPermits)) );
+		return permitNumber;
+	}
+};
+
 ACTOR template <class T>
 Future<Void> yieldPromiseStream( FutureStream<T> input, PromiseStream<T> output, TaskPriority taskID = TaskPriority::DefaultYield ) {
 	loop {
@@ -1418,7 +1481,7 @@ struct YieldedFutureActor : SAV<Void>, ActorCallback<YieldedFutureActor, 1, Void
 	}
 };
 
-static Future<Void> yieldedFuture(Future<Void> f) {
+inline Future<Void> yieldedFuture(Future<Void> f) {
 	if (f.isReady())
 		return yield();
 	else
@@ -1687,6 +1750,7 @@ Future<Void> timeReply(Future<T> replyToTime, PromiseStream<double> timeOutput){
 	}
 	return Void();
 }
+
 
 #include "flow/unactorcompiler.h"
 

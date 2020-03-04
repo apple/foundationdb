@@ -602,6 +602,6 @@ class ApiTest(Test):
 
     def get_result_specifications(self):
         return [
-            ResultSpecification(self.workspace, global_error_filter=[1007, 1021]),
-            ResultSpecification(self.stack_subspace, key_start_index=1, ordering_index=1, global_error_filter=[1007, 1021])
+            ResultSpecification(self.workspace, global_error_filter=[1007, 1009, 1021]),
+            ResultSpecification(self.stack_subspace, key_start_index=1, ordering_index=1, global_error_filter=[1007, 1009, 1021])
         ]

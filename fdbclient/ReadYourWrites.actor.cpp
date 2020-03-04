@@ -1133,8 +1133,8 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx)
 }
 
 ACTOR Future<Void> timebomb(double endTime, Promise<Void> resetPromise) {
-	if (now() < endTime) {
-		wait ( delayUntil( endTime ) );
+	while(now() < endTime) {
+		wait( delayUntil( std::min(endTime + 0.0001, now() + CLIENT_KNOBS->TRANSACTION_TIMEOUT_DELAY_INTERVAL) ) );
 	}
 	if( !resetPromise.isSet() )
 		resetPromise.sendError(transaction_timed_out());
@@ -1165,8 +1165,8 @@ Optional<Value> getValueFromJSON(StatusObject statusObj) {
 	}
 }
 
-ACTOR Future<Optional<Value>> getJSON(Reference<ClusterConnectionFile> clusterFile) {
-	StatusObject statusObj = wait(StatusClient::statusFetcher(clusterFile));
+ACTOR Future<Optional<Value>> getJSON(Database db) {
+	StatusObject statusObj = wait(StatusClient::statusFetcher(db));
 	return getValueFromJSON(statusObj);
 }
 
@@ -1194,7 +1194,7 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 	
 	if (key == LiteralStringRef("\xff\xff/status/json")){
 		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-			return getJSON(tr.getDatabase()->getConnectionFile());
+			return getJSON(tr.getDatabase());
 		}
 		else {
 			return Optional<Value>();
@@ -1380,6 +1380,16 @@ Future< Standalone<VectorRef<const char*> >> ReadYourWritesTransaction::getAddre
 	Future< Standalone<VectorRef<const char*> >> result = waitOrError(tr.getAddressesForKey(key), resetPromise.getFuture());
 	reading.add( success( result ) ); 
 	return result;
+}
+
+Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
+	if(checkUsedDuringCommit()) {
+		throw used_during_commit();
+	}
+	if( resetPromise.isSet() )
+		return resetPromise.getFuture().getError();
+
+	return map(waitOrError(tr.getStorageMetrics(keys, -1), resetPromise.getFuture()), [](const StorageMetrics& m) { return m.bytes; });
 }
 
 void ReadYourWritesTransaction::addReadConflictRange( KeyRangeRef const& keys ) {
@@ -1604,11 +1614,16 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	}
 
 	if(operationType == MutationRef::SetVersionstampedKey) {
-		KeyRangeRef range = getVersionstampKeyRange(arena, k, getMaxReadKey()); // this does validation of the key and needs to be performed before the readYourWritesDisabled path
+		// this does validation of the key and needs to be performed before the readYourWritesDisabled path
+		KeyRangeRef range = getVersionstampKeyRange(arena, k, tr.getCachedReadVersion().orDefault(0), getMaxReadKey());
 		if(!options.readYourWritesDisabled) {
 			writeRangeToNativeTransaction(range);
 			writes.addUnmodifiedAndUnreadableRange(range);
 		}
+		// k is the unversionstamped key provided by the user.  If we've filled in a minimum bound
+		// for the versionstamp, we need to make sure that's reflected when we insert it into the
+		// WriteMap below.
+		transformVersionstampKey( k, tr.getCachedReadVersion().orDefault(0), 0 );
 	}
 
 	if(operationType == MutationRef::SetVersionstampedValue) {

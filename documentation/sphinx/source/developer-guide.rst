@@ -53,8 +53,6 @@
 .. |timeout-database-option| replace:: FIXME
 .. |causal-read-risky-database-option| replace:: FIXME
 .. |causal-read-risky-transaction-option| replace:: FIXME
-.. |include-port-in-address-database-option| replace:: FIXME
-.. |include-port-in-address-transaction-option| replace:: FIXME
 .. |transaction-logging-max-field-length-transaction-option| replace:: FIXME
 .. |transaction-logging-max-field-length-database-option| replace:: FIXME
 
@@ -430,7 +428,7 @@ By default, FoundationDB supports read-your-writes, meaning that reads reflect t
 
 Another approach to programming with futures in FoundationDB is to set a callback function to be invoked asynchronously when the future is ready.
 
-.. note:: Be very careful when mixing callbacks with explicit or implicit blocking. Blocking in a callback on a non-ready future will cause a deadlock. Blocking on anything else or performing CPU intensive tasks will block the FoundationDB client thread and therefore all database access from that client.
+.. note:: Be very careful when mixing callbacks with explicit or implicit blocking. Blocking in a callback on a non-ready future will cause a deadlock. Blocking on anything else or performing CPU intensive tasks will block the FoundationDB :ref:`client thread <client-network-thread>` and therefore all database access from that client.
 
 For further details, see the :doc:`API reference <api-reference>` documentation for your language.
 
@@ -538,11 +536,22 @@ Atomic operations
 
 |atomic-ops-blurb1|
 
-Atomic operations are ideal for operating on keys that multiple clients modify frequently. For example, you can use a key as a counter and increment it with atomic :func:`add`::
+Atomic operations are ideal for operating on keys that multiple clients modify frequently. For example, you can use a key as a counter and increment/decrement it with atomic :func:`add`::
 
   @fdb.transactional
   def increment(tr, counter):
       tr.add(counter, struct.pack('<i', 1))
+
+  @fdb.transactional
+  def decrement(tr, counter):
+      tr.add(counter, struct.pack('<i', -1))
+
+When the counter value is decremented down to 0, you may want to clear the key from database. An easy way to do that is to use :func:`compare_and_clear`, which atomically compares the value against given parameter and clears it without issuing a read from client::
+
+  @fdb.transactional
+  def decrement(tr, counter):
+      tr.add(counter, struct.pack('<i', -1))
+      tr.compare_and_clear(counter, struct.pack('<i', 0))
 
 Similarly, you can use a key as a flag and toggle it with atomic :func:`xor`::
 

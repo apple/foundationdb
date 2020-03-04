@@ -251,6 +251,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					state UID lastBackupUID;
 					state int resultWait = wait(backupAgent->waitBackup(cx, backupTag.tagName, false, &lastBackupContainer, &lastBackupUID));
 
+					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName).detail("Result", resultWait);
+
 					state bool restorable = false;
 					if(lastBackupContainer) {
 						state Future<BackupDescription> fdesc = lastBackupContainer->describeBackup();

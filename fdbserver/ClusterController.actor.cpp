@@ -18,9 +18,16 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+#include <iterator>
+#include <map>
+#include <set>
+#include <vector>
+
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/BackupInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/Knobs.h"
@@ -34,7 +41,6 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/LatencyBandConfig.h"
-#include <algorithm>
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -51,7 +57,6 @@ struct WorkerInfo : NonCopyable {
 	ReplyPromise<RegisterWorkerReply> reply;
 	Generation gen;
 	int reboots;
-	double lastAvailableTime;
 	ProcessClass initialClass;
 	ClusterControllerPriorityInfo priorityInfo;
 	WorkerDetails details;
@@ -59,19 +64,18 @@ struct WorkerInfo : NonCopyable {
 	Future<Void> haltDistributor;
 	Optional<uint16_t> storageCacheInfo;
 
-	WorkerInfo() : gen(-1), reboots(0), lastAvailableTime(now()), priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
+	WorkerInfo() : gen(-1), reboots(0), priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
 	WorkerInfo( Future<Void> watcher, ReplyPromise<RegisterWorkerReply> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, bool degraded ) :
-		watcher(watcher), reply(reply), gen(gen), reboots(0), lastAvailableTime(now()), initialClass(initialClass), priorityInfo(priorityInfo), details(interf, processClass, degraded) {}
+		watcher(watcher), reply(reply), gen(gen), reboots(0), initialClass(initialClass), priorityInfo(priorityInfo), details(interf, processClass, degraded) {}
 
 	WorkerInfo( WorkerInfo&& r ) BOOST_NOEXCEPT : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen),
-		reboots(r.reboots), lastAvailableTime(r.lastAvailableTime), initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
+		reboots(r.reboots), initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
 		haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor), storageCacheInfo(r.storageCacheInfo) {}
 	void operator=( WorkerInfo&& r ) BOOST_NOEXCEPT {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
 		gen = r.gen;
 		reboots = r.reboots;
-		lastAvailableTime = r.lastAvailableTime;
 		initialClass = r.initialClass;
 		priorityInfo = r.priorityInfo;
 		details = std::move(r.details);
@@ -95,6 +99,8 @@ public:
 	struct DBInfo {
 		Reference<AsyncVar<ClientDBInfo>> clientInfo;
 		Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> serverInfo;
+		CachedSerialization<ServerDBInfo> serverInfoMasterOnly;
+		std::set<NetworkAddress> requiredAddresses;
 		ProcessIssuesMap workersWithIssues;
 		std::map<NetworkAddress, double> incompatibleConnections;
 		AsyncTrigger forceMasterFailure;
@@ -115,6 +121,12 @@ public:
 			serverInfo( new AsyncVar<CachedSerialization<ServerDBInfo>>( CachedSerialization<ServerDBInfo>() ) ),
 			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskPriority::DefaultEndpoint, true ) )  // SOMEDAY: Locality!
 		{
+		}
+
+		void addRequiredAddresses(const std::vector<WorkerInterface>& interfaces) {
+			for(auto& it : interfaces) {
+				requiredAddresses.insert(it.address());
+			}
 		}
 
 		void setDistributor(const DataDistributorInterface& interf) {
@@ -178,6 +190,7 @@ public:
 			}
 			serverInfo->set( newInfoCache );
 		}
+
 	};
 
 	struct UpdateWorkerList {
@@ -377,7 +390,8 @@ public:
 					std::vector<LocalityData> tLocalities;
 
 					// Try to find the best team of servers to fulfill the policy
-					if (findBestPolicySet(bestSet, logServerSet, policy, desired, SERVER_KNOBS->POLICY_RATING_TESTS, SERVER_KNOBS->POLICY_GENERATIONS)) {
+					if (findBestPolicySet(bestSet, logServerSet, policy, desired, SERVER_KNOBS->POLICY_RATING_TESTS,
+					                      SERVER_KNOBS->POLICY_GENERATIONS)) {
 						results.reserve(results.size() + bestSet.size());
 						for (auto& entry : bestSet) {
 							auto object = logServerMap->getObject(entry);
@@ -419,8 +433,6 @@ public:
 		TraceEvent("GetTLogTeamDone").detail("Completed", bCompleted).detail("Policy", policy->info()).detail("Results", results.size()).detail("Processes", logServerSet->size()).detail("Workers", id_worker.size())
 			.detail("Required", required).detail("Desired", desired).detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS).detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS);
 
-		logServerSet->clear();
-		logServerSet.clear();
 
 		return results;
 	}
@@ -433,7 +445,7 @@ public:
 				if(satelliteFallback || region.satelliteTLogUsableDcsFallback == 0) {
 					throw no_more_servers();
 				} else {
-					if(now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) {
+					if(!goodRecruitmentTime.isReady()) {
 						throw operation_failed();
 					}
 					satelliteFallback = true;
@@ -677,18 +689,8 @@ public:
 			result.logRouters.push_back(logRouters[i].interf);
 		}
 
-		if(!remoteStartTime.present()) {
-			double maxAvailableTime = 0;
-			for(auto& it : result.remoteTLogs) {
-				maxAvailableTime = std::max(maxAvailableTime, id_worker[it.locality.processId()].lastAvailableTime);
-			}
-			for(auto& it : result.logRouters) {
-				maxAvailableTime = std::max(maxAvailableTime, id_worker[it.locality.processId()].lastAvailableTime);
-			}
-			remoteStartTime = maxAvailableTime;
-		}
 
-		if( now() - remoteStartTime.get() < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY &&
+		if( !goodRemoteRecruitmentTime.isReady() &&
 			( ( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredRemoteLogs(), ProcessClass::TLog).betterCount(RoleFitness(remoteLogs, ProcessClass::TLog)) ) ||
 			  ( RoleFitness(SERVER_KNOBS->EXPECTED_LOG_ROUTER_FITNESS, req.logRouterCount, ProcessClass::LogRouter).betterCount(RoleFitness(logRouters, ProcessClass::LogRouter)) ) ) ) {
 			throw operation_failed();
@@ -753,12 +755,29 @@ public:
 		for(int i = 0; i < proxies.size(); i++)
 			result.proxies.push_back(proxies[i].interf);
 
-		auto oldLogRouters = getWorkersForRoleInDatacenter( dcId, ProcessClass::LogRouter, req.maxOldLogRouters, req.configuration, id_used );
-		for(int i = 0; i < oldLogRouters.size(); i++) {
-			result.oldLogRouters.push_back(oldLogRouters[i].interf);
+		if(req.maxOldLogRouters > 0) {
+			if(tlogs.size() == 1) {
+				result.oldLogRouters.push_back(tlogs[0].interf);
+			} else {
+				for(int i = 0; i < tlogs.size(); i++) {
+					if(tlogs[i].interf.locality.processId() != clusterControllerProcessId) {
+						result.oldLogRouters.push_back(tlogs[i].interf);
+					}
+				}
+			}
 		}
 
-		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
+		if (req.configuration.backupWorkerEnabled) {
+			const int nBackup = std::max<int>(
+			    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tlogs.size()),
+			    req.maxOldLogRouters);
+			auto backupWorkers =
+			    getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup, req.configuration, id_used);
+			std::transform(backupWorkers.begin(), backupWorkers.end(), std::back_inserter(result.backupWorkers),
+			               [](const WorkerDetails& w) { return w.interf; });
+		}
+
+		if( !goodRecruitmentTime.isReady() &&
 			( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
 			  ( region.satelliteTLogReplicationFactor > 0 && RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId), ProcessClass::TLog).betterCount(RoleFitness(satelliteLogs, ProcessClass::TLog)) ) ||
 			  RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies(), ProcessClass::Proxy).betterCount(RoleFitness(proxies, ProcessClass::Proxy)) ||
@@ -795,7 +814,7 @@ public:
 				}
 				throw no_more_servers();
 			} catch( Error& e ) {
-				if (now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY && regions[1].dcId != clusterControllerDcId.get()) {
+				if (!goodRemoteRecruitmentTime.isReady() && regions[1].dcId != clusterControllerDcId.get()) {
 					throw operation_failed();
 				}
 
@@ -837,6 +856,18 @@ public:
 				result.tLogs.push_back(tlogs[i].interf);
 			}
 
+			if(req.maxOldLogRouters > 0) {
+				if(tlogs.size() == 1) {
+					result.oldLogRouters.push_back(tlogs[0].interf);
+				} else {
+					for(int i = 0; i < tlogs.size(); i++) {
+						if(tlogs[i].interf.locality.processId() != clusterControllerProcessId) {
+							result.oldLogRouters.push_back(tlogs[i].interf);
+						}
+					}
+				}
+			}
+
 			if(req.recruitSeedServers) {
 				auto primaryStorageServers = getWorkersForSeedServers( req.configuration, req.configuration.storagePolicy );
 				for(int i = 0; i < primaryStorageServers.size(); i++)
@@ -872,10 +903,15 @@ public:
 						for(int i = 0; i < proxies.size(); i++)
 							result.proxies.push_back(proxies[i].interf);
 
-						auto oldLogRouters = getWorkersForRoleInDatacenter( dcId, ProcessClass::LogRouter, req.maxOldLogRouters, req.configuration, used );
-						for(int i = 0; i < oldLogRouters.size(); i++) {
-							result.oldLogRouters.push_back(oldLogRouters[i].interf);
+						if (req.configuration.backupWorkerEnabled) {
+							const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
+							auto backupWorkers = getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup,
+							                                                   req.configuration, id_used);
+							std::transform(backupWorkers.begin(), backupWorkers.end(),
+							               std::back_inserter(result.backupWorkers),
+							               [](const WorkerDetails& w) { return w.interf; });
 						}
+
 						break;
 					} else {
 						if(fitness < bestFitness) {
@@ -906,7 +942,7 @@ public:
 				.detail("DesiredProxies", req.configuration.getDesiredProxies()).detail("ActualProxies", result.proxies.size())
 				.detail("DesiredResolvers", req.configuration.getDesiredResolvers()).detail("ActualResolvers", result.resolvers.size());
 
-			if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
+			if( !goodRecruitmentTime.isReady() &&
 				( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
 				  RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies(), ProcessClass::Proxy).betterCount(bestFitness.proxy) ||
 				  RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers(), ProcessClass::Resolver).betterCount(bestFitness.resolver) ) ) {
@@ -992,6 +1028,8 @@ public:
 		std::vector<WorkerDetails> satellite_tlogs;
 		std::vector<WorkerDetails> log_routers;
 		std::set<NetworkAddress> logRouterAddresses;
+		std::vector<WorkerDetails> backup_workers;
+		std::set<NetworkAddress> backup_addresses;
 
 		for( auto& logSet : dbi.logSystemConfig.tLogs ) {
 			for( auto& it : logSet.tLogs ) {
@@ -1020,6 +1058,16 @@ public:
 				if( !logRouterAddresses.count( tlogWorker->second.details.interf.address() ) ) {
 					logRouterAddresses.insert( tlogWorker->second.details.interf.address() );
 					log_routers.push_back(tlogWorker->second.details);
+				}
+			}
+
+			for (const auto& worker : logSet.backupWorkers) {
+				auto workerIt = id_worker.find(worker.interf().locality.processId());
+				if (workerIt == id_worker.end()) return false;
+				if (workerIt->second.priorityInfo.isExcluded) return true;
+				if (backup_addresses.count(workerIt->second.details.interf.address()) == 0) {
+					backup_addresses.insert(workerIt->second.details.interf.address());
+					backup_workers.push_back(workerIt->second.details);
 				}
 			}
 		}
@@ -1148,7 +1196,7 @@ public:
 		std::transform(newTLogs.begin(), newTLogs.end(), std::back_inserter(exclusionWorkerIds), fn);
 		std::transform(newSatelliteTLogs.begin(), newSatelliteTLogs.end(), std::back_inserter(exclusionWorkerIds), fn);
 		RoleFitness newRemoteTLogFit(
-			(db.config.usableRegions > 1 && dbi.recoveryState == RecoveryState::FULLY_RECOVERED) ?
+			(db.config.usableRegions > 1 && (dbi.recoveryState == RecoveryState::ALL_LOGS_RECRUITED || dbi.recoveryState == RecoveryState::FULLY_RECOVERED)) ?
 			getWorkersForTlogs(db.config, db.config.getRemoteTLogReplicationFactor(), db.config.getDesiredRemoteLogs(), db.config.getRemoteTLogPolicy(), id_used, true, remoteDC, exclusionWorkerIds)
 			: remote_tlogs, ProcessClass::TLog);
 		if(oldRemoteTLogFit < newRemoteTLogFit) return false;
@@ -1179,32 +1227,60 @@ public:
 		if(oldInFit.proxy.betterFitness(newInFit.proxy) || oldInFit.resolver.betterFitness(newInFit.resolver)) {
 			return false;
 		}
-		if(oldTLogFit > newTLogFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLogFit || oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit) {
-			TraceEvent("BetterMasterExists", id).detail("OldMasterFit", oldMasterFit).detail("NewMasterFit", newMasterFit)
-				.detail("OldTLogFit", oldTLogFit.toString()).detail("NewTLogFit", newTLogFit.toString())
-				.detail("OldProxyFit", oldInFit.proxy.toString()).detail("NewProxyFit", newInFit.proxy.toString())
-				.detail("OldResolverFit", oldInFit.resolver.toString()).detail("NewResolverFit", newInFit.resolver.toString())
-				.detail("OldSatelliteFit", oldSatelliteTLogFit.toString()).detail("NewSatelliteFit", newSatelliteTLogFit.toString())
-				.detail("OldRemoteFit", oldRemoteTLogFit.toString()).detail("NewRemoteFit", newRemoteTLogFit.toString())
-				.detail("OldRouterFit", oldLogRoutersFit.toString()).detail("NewRouterFit", newLogRoutersFit.toString())
-				.detail("OldSatelliteFallback", oldSatelliteFallback).detail("NewSatelliteFallback", newSatelliteFallback);
+
+		// Check backup worker fitness
+		RoleFitness oldBackupWorkersFit(backup_workers, ProcessClass::Backup);
+		const int nBackup = backup_addresses.size();
+		RoleFitness newBackupWorkersFit(
+		    getWorkersForRoleInDatacenter(clusterControllerDcId, ProcessClass::Backup, nBackup, db.config, id_used),
+		    ProcessClass::Backup);
+
+		if (oldTLogFit > newTLogFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLogFit ||
+		    oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit ||
+		    oldBackupWorkersFit > newBackupWorkersFit) {
+			TraceEvent("BetterMasterExists", id)
+			    .detail("OldMasterFit", oldMasterFit)
+			    .detail("NewMasterFit", newMasterFit)
+			    .detail("OldTLogFit", oldTLogFit.toString())
+			    .detail("NewTLogFit", newTLogFit.toString())
+			    .detail("OldProxyFit", oldInFit.proxy.toString())
+			    .detail("NewProxyFit", newInFit.proxy.toString())
+			    .detail("OldResolverFit", oldInFit.resolver.toString())
+			    .detail("NewResolverFit", newInFit.resolver.toString())
+			    .detail("OldSatelliteFit", oldSatelliteTLogFit.toString())
+			    .detail("NewSatelliteFit", newSatelliteTLogFit.toString())
+			    .detail("OldRemoteFit", oldRemoteTLogFit.toString())
+			    .detail("NewRemoteFit", newRemoteTLogFit.toString())
+			    .detail("OldRouterFit", oldLogRoutersFit.toString())
+			    .detail("NewRouterFit", newLogRoutersFit.toString())
+			    .detail("OldBackupWorkerFit", oldBackupWorkersFit.toString())
+			    .detail("NewBackupWorkerFit", newBackupWorkersFit.toString())
+			    .detail("OldSatelliteFallback", oldSatelliteFallback)
+			    .detail("NewSatelliteFallback", newSatelliteFallback);
 			return true;
 		}
 
 		return false;
 	}
 
-	bool isProxyOrResolver(Optional<Key> processId) {
+	bool isUsedNotMaster(Optional<Key> processId) {
 		ASSERT(masterProcessId.present());
 		if (processId == masterProcessId) return false;
 
 		auto& dbInfo = db.serverInfo->get().read();
+		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
+			for (const auto& tlog: tlogset.tLogs) {
+				if (tlog.present() && tlog.interf().locality.processId() == processId) return true;
+			}
+		}
 		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
 			if (interf.locality.processId() == processId) return true;
 		}
 		for (const ResolverInterface& interf: dbInfo.resolvers) {
 			if (interf.locality.processId() == processId) return true;
 		}
+		if (processId == clusterControllerProcessId) return true;
+
 		return false;
 	}
 
@@ -1214,7 +1290,7 @@ public:
 		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper) || pid == masterProcessId.get()) {
 			return false;
 		}
-		return isProxyOrResolver(pid);
+		return isUsedNotMaster(pid);
 	}
 
 	std::map< Optional<Standalone<StringRef>>, int> getUsedIds() {
@@ -1258,14 +1334,16 @@ public:
 	ActorCollection ac;
 	UpdateWorkerList updateWorkerList;
 	Future<Void> outstandingRequestChecker;
+	Future<Void> outstandingRemoteRequestChecker;
 
 	DBInfo db;
 	Database cx;
 	double startTime;
-	Optional<double> remoteStartTime;
+	Future<Void> goodRecruitmentTime;
+	Future<Void> goodRemoteRecruitmentTime;
 	Version datacenterVersionDifference;
-	bool versionDifferenceUpdated;
 	PromiseStream<Future<Void>> addActor;
+	bool versionDifferenceUpdated;
 	bool recruitingDistributor;
 	Optional<UID> recruitingRatekeeperID;
 	AsyncVar<bool> recruitRatekeeper;
@@ -1286,8 +1364,9 @@ public:
 
 	ClusterControllerData( ClusterControllerFullInterface const& ccInterface, LocalityData const& locality )
 		: clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()),
-			id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), gotProcessClasses(false),
-			gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0),
+			id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), gotProcessClasses(false),
+			gotFullyRecoveredConfig(false), startTime(now()), goodRecruitmentTime(Never()),
+			goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0),
 			versionDifferenceUpdated(false), recruitingDistributor(false), recruitRatekeeper(false),
 			clusterControllerMetrics("ClusterController", id.toString()),
 			openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
@@ -1301,13 +1380,12 @@ public:
 			serversFailed("ServersFailed", clusterControllerMetrics),
 			serversUnfailed("ServersUnfailed", clusterControllerMetrics)
 	{
-		CachedSerialization<ServerDBInfo> newInfoCache = db.serverInfo->get();
-		auto& serverInfo = newInfoCache.mutate();
+		auto& serverInfo = db.serverInfoMasterOnly.mutate();
 		serverInfo.id = deterministicRandom()->randomUniqueID();
 		serverInfo.masterLifetime.ccID = id;
 		serverInfo.clusterInterface = ccInterface;
 		serverInfo.myLocality = locality;
-		db.serverInfo->set( newInfoCache );
+		db.serverInfo->set( db.serverInfoMasterOnly );
 		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, true, true);
 	}
 
@@ -1336,7 +1414,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 			id_used[cluster->clusterControllerProcessId]++;
 			state WorkerFitnessInfo masterWorker = cluster->getWorkerForRoleInDatacenter(cluster->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db->config, id_used);
 			if( ( masterWorker.worker.processClass.machineClassFitness( ProcessClass::Master ) > SERVER_KNOBS->EXPECTED_MASTER_FITNESS || masterWorker.worker.interf.locality.processId() == cluster->clusterControllerProcessId )
-				&& now() - cluster->startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY ) {
+				&& !cluster->goodRecruitmentTime.isReady() ) {
 				TraceEvent("CCWDB", cluster->id).detail("Fitness", masterWorker.worker.processClass.machineClassFitness( ProcessClass::Master ));
 				wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
 				continue;
@@ -1362,8 +1440,8 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				db->masterRegistrationCount = 0;
 				db->recoveryStalled = false;
 
-				auto cachedInfo = CachedSerialization<ServerDBInfo>();
-				auto& dbInfo = cachedInfo.mutate();
+				db->serverInfoMasterOnly = CachedSerialization<ServerDBInfo>();
+				auto& dbInfo = db->serverInfoMasterOnly.mutate();
 
 				dbInfo.master = iMaster;
 				dbInfo.id = deterministicRandom()->randomUniqueID();
@@ -1373,9 +1451,11 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				dbInfo.distributor = db->serverInfo->get().read().distributor;
 				dbInfo.ratekeeper = db->serverInfo->get().read().ratekeeper;
 				dbInfo.storageCaches = db->serverInfo->get().read().storageCaches;
+				dbInfo.latencyBandConfig = db->serverInfo->get().read().latencyBandConfig;
 
 				TraceEvent("CCWDB", cluster->id).detail("Lifetime", dbInfo.masterLifetime.toString()).detail("ChangeID", dbInfo.id);
-				db->serverInfo->set( cachedInfo );
+				db->requiredAddresses.clear();
+				db->serverInfo->set( db->serverInfoMasterOnly );
 
 				state Future<Void> spinDelay = delay(SERVER_KNOBS->MASTER_SPIN_DELAY);  // Don't retry master recovery more than once per second, but don't delay the "first" recovery after more than a second of normal operation
 
@@ -1414,12 +1494,17 @@ ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db, UID k
                                         std::vector<NetworkAddress> incompatiblePeers,
                                         ReplyPromise<CachedSerialization<ServerDBInfo>> reply) {
 	state Optional<UID> issueID;
+	state bool useMasterOnly = false;
 	setIssues(db->workersWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID);
 	for(auto it : incompatiblePeers) {
 		db->incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	}
 
-	while (db->serverInfo->get().read().id == knownServerInfoID) {
+	loop {
+		useMasterOnly = db->serverInfo->get().read().recoveryState < RecoveryState::ACCEPTING_COMMITS && !db->requiredAddresses.count(reply.getEndpoint().getPrimaryAddress());
+		if((useMasterOnly ? db->serverInfoMasterOnly.read().id : db->serverInfo->get().read().id) != knownServerInfoID) {
+			break;
+		}
 		choose {
 			when (wait( yieldedFuture(db->serverInfo->onChange()) )) {}
 			when (wait( delayJittered( 300 ) )) { break; }  // The server might be long gone!
@@ -1428,7 +1513,7 @@ ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db, UID k
 
 	removeIssues(db->workersWithIssues, reply.getEndpoint().getPrimaryAddress(), issueID);
 
-	reply.send( db->serverInfo->get() );
+	reply.send( useMasterOnly ? db->serverInfoMasterOnly : db->serverInfo->get() );
 	return Void();
 }
 
@@ -1453,7 +1538,14 @@ void checkOutstandingRecruitmentRequests( ClusterControllerData* self ) {
 	for( int i = 0; i < self->outstandingRecruitmentRequests.size(); i++ ) {
 		RecruitFromConfigurationRequest& req = self->outstandingRecruitmentRequests[i];
 		try {
-			req.reply.send( self->findWorkersForConfiguration( req ) );
+			RecruitFromConfigurationReply rep = self->findWorkersForConfiguration( req );
+			self->db.addRequiredAddresses(rep.oldLogRouters);
+			self->db.addRequiredAddresses(rep.proxies);
+			self->db.addRequiredAddresses(rep.resolvers);
+			self->db.addRequiredAddresses(rep.satelliteTLogs);
+			self->db.addRequiredAddresses(rep.tLogs);
+			self->db.serverInfo->trigger();
+			req.reply.send( rep );
 			swapAndPop( &self->outstandingRecruitmentRequests, i-- );
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers || e.code() == error_code_operation_failed) {
@@ -1470,7 +1562,11 @@ void checkOutstandingRemoteRecruitmentRequests( ClusterControllerData* self ) {
 	for( int i = 0; i < self->outstandingRemoteRecruitmentRequests.size(); i++ ) {
 		RecruitRemoteFromConfigurationRequest& req = self->outstandingRemoteRecruitmentRequests[i];
 		try {
-			req.reply.send( self->findRemoteWorkersForConfiguration( req ) );
+			RecruitRemoteFromConfigurationReply rep = self->findRemoteWorkersForConfiguration( req );
+			self->db.addRequiredAddresses(rep.remoteTLogs);
+			self->db.addRequiredAddresses(rep.logRouters);
+			self->db.serverInfo->trigger();
+			req.reply.send( rep );
 			swapAndPop( &self->outstandingRemoteRecruitmentRequests, i-- );
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers || e.code() == error_code_operation_failed) {
@@ -1521,35 +1617,74 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 		return;
 	}
 
-	auto& db = self->db.serverInfo->get().read();
-	auto bestFitnessForRK = self->getBestFitnessForRoleInDatacenter(ProcessClass::Ratekeeper);
-	auto bestFitnessForDD = self->getBestFitnessForRoleInDatacenter(ProcessClass::DataDistributor);
+	std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+	WorkerDetails newRKWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::Ratekeeper, ProcessClass::NeverAssign, self->db.config, id_used, true).worker;
+	if (self->onMasterIsBetter(newRKWorker, ProcessClass::Ratekeeper)) {
+		newRKWorker = self->id_worker[self->masterProcessId.get()].details;
+	}
+	id_used = self->getUsedIds();
+	for(auto& it : id_used) {
+		it.second *= 2;
+	}
+	id_used[newRKWorker.interf.locality.processId()]++;
+	WorkerDetails newDDWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId, ProcessClass::DataDistributor, ProcessClass::NeverAssign, self->db.config, id_used, true).worker;
+	if (self->onMasterIsBetter(newDDWorker, ProcessClass::DataDistributor)) {
+		newDDWorker = self->id_worker[self->masterProcessId.get()].details;
+	}
+	auto bestFitnessForRK = newRKWorker.processClass.machineClassFitness(ProcessClass::Ratekeeper);
+	if(self->db.config.isExcludedServer(newRKWorker.interf.address())) {
+		bestFitnessForRK = std::max(bestFitnessForRK, ProcessClass::ExcludeFit);
+	}
+	auto bestFitnessForDD = newDDWorker.processClass.machineClassFitness(ProcessClass::DataDistributor);
+	if(self->db.config.isExcludedServer(newDDWorker.interf.address())) {
+		bestFitnessForDD = std::max(bestFitnessForDD, ProcessClass::ExcludeFit);
+	}
+	//TraceEvent("CheckBetterDDorRKNewRecruits", self->id).detail("MasterProcessId", self->masterProcessId)
+	//.detail("NewRecruitRKProcessId", newRKWorker.interf.locality.processId()).detail("NewRecruiteDDProcessId", newDDWorker.interf.locality.processId());
 
+	Optional<Standalone<StringRef>> currentRKProcessId;
+	Optional<Standalone<StringRef>> currentDDProcessId;
+	
+	auto& db = self->db.serverInfo->get().read();
+	bool ratekeeperHealthy = false;
 	if (db.ratekeeper.present() && self->id_worker.count(db.ratekeeper.get().locality.processId()) &&
 	   (!self->recruitingRatekeeperID.present() || (self->recruitingRatekeeperID.get() == db.ratekeeper.get().id()))) {
 		auto& rkWorker = self->id_worker[db.ratekeeper.get().locality.processId()];
+		currentRKProcessId = rkWorker.details.interf.locality.processId();
 		auto rkFitness = rkWorker.details.processClass.machineClassFitness(ProcessClass::Ratekeeper);
 		if(rkWorker.priorityInfo.isExcluded) {
 			rkFitness = ProcessClass::ExcludeFit;
 		}
-		if (self->isProxyOrResolver(rkWorker.details.interf.locality.processId()) || rkFitness > bestFitnessForRK) {
+		if (self->isUsedNotMaster(rkWorker.details.interf.locality.processId()) || bestFitnessForRK < rkFitness
+				|| (rkFitness == bestFitnessForRK && rkWorker.details.interf.locality.processId() == self->masterProcessId && newRKWorker.interf.locality.processId() != self->masterProcessId)) {
 			TraceEvent("CCHaltRK", self->id).detail("RKID", db.ratekeeper.get().id())
 			.detail("Excluded", rkWorker.priorityInfo.isExcluded)
 			.detail("Fitness", rkFitness).detail("BestFitness", bestFitnessForRK);
 			self->recruitRatekeeper.set(true);
+		} else {
+			ratekeeperHealthy = true;
 		}
 	}
 
 	if (!self->recruitingDistributor && db.distributor.present() && self->id_worker.count(db.distributor.get().locality.processId())) {
 		auto& ddWorker = self->id_worker[db.distributor.get().locality.processId()];
 		auto ddFitness = ddWorker.details.processClass.machineClassFitness(ProcessClass::DataDistributor);
+		currentDDProcessId = ddWorker.details.interf.locality.processId();
 		if(ddWorker.priorityInfo.isExcluded) {
 			ddFitness = ProcessClass::ExcludeFit;
 		}
-		if (self->isProxyOrResolver(ddWorker.details.interf.locality.processId()) || ddFitness > bestFitnessForDD) {
+		if (self->isUsedNotMaster(ddWorker.details.interf.locality.processId()) || bestFitnessForDD < ddFitness
+				|| (ddFitness == bestFitnessForDD && ddWorker.details.interf.locality.processId() == self->masterProcessId && newDDWorker.interf.locality.processId() != self->masterProcessId)
+				|| (ddFitness == bestFitnessForDD && newRKWorker.interf.locality.processId() != newDDWorker.interf.locality.processId() && ratekeeperHealthy && currentRKProcessId.present() && currentDDProcessId == currentRKProcessId
+							&& (newRKWorker.interf.locality.processId() != self->masterProcessId  && newDDWorker.interf.locality.processId() != self->masterProcessId) )) {
 			TraceEvent("CCHaltDD", self->id).detail("DDID", db.distributor.get().id())
 			.detail("Excluded", ddWorker.priorityInfo.isExcluded)
-			.detail("Fitness", ddFitness).detail("BestFitness", bestFitnessForDD);
+			.detail("Fitness", ddFitness).detail("BestFitness", bestFitnessForDD)
+			.detail("CurrentRateKeeperProcessId", currentRKProcessId.present() ? currentRKProcessId.get() : LiteralStringRef("None"))
+			.detail("CurrentDDProcessId", currentDDProcessId)
+			.detail("MasterProcessID", self->masterProcessId)
+			.detail("NewRKWorkers", newRKWorker.interf.locality.processId())
+			.detail("NewDDWorker", newDDWorker.interf.locality.processId());
 			ddWorker.haltDistributor = brokenPromiseToNever(db.distributor.get().haltDataDistributor.getReply(HaltDataDistributorRequest(self->id)));
 		}
 	}
@@ -1558,9 +1693,11 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 ACTOR Future<Void> doCheckOutstandingRequests( ClusterControllerData* self ) {
 	try {
 		wait( delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL) );
+		while( !self->goodRecruitmentTime.isReady() ) {
+			wait(self->goodRecruitmentTime);
+		}
 
 		checkOutstandingRecruitmentRequests( self );
-		checkOutstandingRemoteRecruitmentRequests( self );
 		checkOutstandingStorageRequests( self );
 		checkBetterDDOrRK(self);
 
@@ -1570,7 +1707,23 @@ ACTOR Future<Void> doCheckOutstandingRequests( ClusterControllerData* self ) {
 			TraceEvent("MasterRegistrationKill", self->id).detail("MasterId", self->db.serverInfo->get().read().master.id());
 		}
 	} catch( Error &e ) {
-		if(e.code() != error_code_operation_failed && e.code() != error_code_no_more_servers) {
+		if(e.code() != error_code_no_more_servers) {
+			TraceEvent(SevError, "CheckOutstandingError").error(e);
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> doCheckOutstandingRemoteRequests( ClusterControllerData* self ) {
+	try {
+		wait( delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL) );
+		while( !self->goodRemoteRecruitmentTime.isReady() ) {
+			wait(self->goodRemoteRecruitmentTime);
+		}
+
+		checkOutstandingRemoteRecruitmentRequests( self );
+	} catch( Error &e ) {
+		if(e.code() != error_code_no_more_servers) {
 			TraceEvent(SevError, "CheckOutstandingError").error(e);
 		}
 	}
@@ -1578,10 +1731,13 @@ ACTOR Future<Void> doCheckOutstandingRequests( ClusterControllerData* self ) {
 }
 
 void checkOutstandingRequests( ClusterControllerData* self ) {
-	if( !self->outstandingRequestChecker.isReady() )
-		return;
+	if( self->outstandingRemoteRequestChecker.isReady() ) {
+		self->outstandingRemoteRequestChecker = doCheckOutstandingRemoteRequests(self);
+	}
 
-	self->outstandingRequestChecker = doCheckOutstandingRequests(self);
+	if( self->outstandingRequestChecker.isReady() ) {
+		self->outstandingRequestChecker = doCheckOutstandingRequests(self);
+	}
 }
 
 ACTOR Future<Void> rebootAndCheck( ClusterControllerData* cluster, Optional<Standalone<StringRef>> processID ) {
@@ -1589,7 +1745,6 @@ ACTOR Future<Void> rebootAndCheck( ClusterControllerData* cluster, Optional<Stan
 		auto watcher = cluster->id_worker.find(processID);
 		ASSERT(watcher != cluster->id_worker.end());
 
-		watcher->second.lastAvailableTime = now();
 		watcher->second.reboots++;
 		wait( delay( g_network->isSimulated() ? SERVER_KNOBS->SIM_SHUTDOWN_TIMEOUT : SERVER_KNOBS->SHUTDOWN_TIMEOUT ) );
 	}
@@ -1685,6 +1840,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData* 
 
 	loop choose {
 		when ( FailureMonitoringRequest req = waitNext( requests ) ) {
+			// TODO: Handling this request should no longer be necessary.
 			++self->failureMonitoringRequests;
 			if ( req.senderStatus.present() ) {
 				// Update the status of requester, if necessary
@@ -1842,10 +1998,17 @@ ACTOR Future<Void> clusterRecruitFromConfiguration( ClusterControllerData* self,
 	TEST(true); //ClusterController RecruitTLogsRequest
 	loop {
 		try {
-			req.reply.send( self->findWorkersForConfiguration( req ) );
+			auto rep = self->findWorkersForConfiguration( req );
+			self->db.addRequiredAddresses(rep.oldLogRouters);
+			self->db.addRequiredAddresses(rep.proxies);
+			self->db.addRequiredAddresses(rep.resolvers);
+			self->db.addRequiredAddresses(rep.satelliteTLogs);
+			self->db.addRequiredAddresses(rep.tLogs);
+			self->db.serverInfo->trigger();
+			req.reply.send( rep );
 			return Void();
 		} catch (Error& e) {
-			if (e.code() == error_code_no_more_servers && now() - self->startTime >= SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) {
+			if (e.code() == error_code_no_more_servers && self->goodRecruitmentTime.isReady()) {
 				self->outstandingRecruitmentRequests.push_back( req );
 				TraceEvent(SevWarn, "RecruitFromConfigurationNotAvailable", self->id).error(e);
 				return Void();
@@ -1857,7 +2020,7 @@ ACTOR Future<Void> clusterRecruitFromConfiguration( ClusterControllerData* self,
 				throw;  // goodbye, cluster controller
 			}
 		}
-		wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
+		wait( lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
 	}
 }
 
@@ -1866,10 +2029,14 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration( ClusterControllerData*
 	TEST(true); //ClusterController RecruitTLogsRequest
 	loop {
 		try {
-			req.reply.send( self->findRemoteWorkersForConfiguration( req ) );
+			RecruitRemoteFromConfigurationReply rep = self->findRemoteWorkersForConfiguration( req );
+			self->db.addRequiredAddresses(rep.remoteTLogs);
+			self->db.addRequiredAddresses(rep.logRouters);
+			self->db.serverInfo->trigger();
+			req.reply.send( rep );
 			return Void();
 		} catch (Error& e) {
-			if (e.code() == error_code_no_more_servers && self->remoteStartTime.present() && now() - self->remoteStartTime.get() >= SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) {
+			if (e.code() == error_code_no_more_servers && self->goodRemoteRecruitmentTime.isReady()) {
 				self->outstandingRemoteRecruitmentRequests.push_back( req );
 				TraceEvent(SevWarn, "RecruitRemoteFromConfigurationNotAvailable", self->id).error(e);
 				return Void();
@@ -1881,7 +2048,7 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration( ClusterControllerData*
 				throw;  // goodbye, cluster controller
 			}
 		}
-		wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
+		wait( lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
 	}
 }
 
@@ -1984,6 +2151,8 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 
 	if(info == self->id_worker.end()) {
 		TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerId",w.id()).detail("ProcessId", w.locality.processId()).detail("ZoneId", w.locality.zoneId()).detail("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
+		self->goodRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY);
+		self->goodRemoteRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY);
 	} else {
 		TraceEvent("ClusterControllerWorkerAlreadyRegistered", self->id).suppressFor(1.0).detail("WorkerId",w.id()).detail("ProcessId", w.locality.processId()).detail("ZoneId", w.locality.zoneId()).detail("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
 	}
@@ -2059,12 +2228,15 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	if (req.ratekeeperInterf.present()) {
 		if((self->recruitingRatekeeperID.present() && self->recruitingRatekeeperID.get() != req.ratekeeperInterf.get().id()) ||
 			self->clusterControllerDcId != w.locality.dcId()) {
-				TraceEvent("CCHaltRegisteringRatekeeper", self->id).detail("RKID", req.ratekeeperInterf.get().id())
-			.detail("DcID", printable(self->clusterControllerDcId))
-			.detail("ReqDcID", printable(w.locality.dcId()))
-			.detail("RecruitingRKID", self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
-			self->id_worker[w.locality.processId()].haltRatekeeper = brokenPromiseToNever(req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
-		} else if(!self->recruitingRatekeeperID.present()) {
+			TraceEvent("CCHaltRegisteringRatekeeper", self->id)
+			    .detail("RKID", req.ratekeeperInterf.get().id())
+			    .detail("DcID", printable(self->clusterControllerDcId))
+			    .detail("ReqDcID", printable(w.locality.dcId()))
+			    .detail("RecruitingRKID",
+			            self->recruitingRatekeeperID.present() ? self->recruitingRatekeeperID.get() : UID());
+			self->id_worker[w.locality.processId()].haltRatekeeper = brokenPromiseToNever(
+			    req.ratekeeperInterf.get().haltRatekeeper.getReply(HaltRatekeeperRequest(self->id)));
+		} else if (!self->recruitingRatekeeperID.present()) {
 			const RatekeeperInterface& rki = req.ratekeeperInterf.get();
 			const auto& ratekeeper = self->db.serverInfo->get().read().ratekeeper;
 			TraceEvent("CCRegisterRatekeeper", self->id).detail("RKID", rki.id());
@@ -2768,7 +2940,7 @@ ACTOR Future<DataDistributorInterface> startDataDistributor( ClusterControllerDa
 				throw;
 			}
 		}
-		wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
+		wait( lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
 	}
 }
 
@@ -2842,7 +3014,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData *self) {
 				throw;
 			}
 		}
-		wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
+		wait( lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
 	}
 }
 

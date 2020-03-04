@@ -449,6 +449,9 @@ struct RolesInfo {
 			obj.setKeyRawNumber("kvstore_free_bytes", storageMetrics.getValue("KvstoreBytesFree"));
 			obj.setKeyRawNumber("kvstore_available_bytes", storageMetrics.getValue("KvstoreBytesAvailable"));
 			obj.setKeyRawNumber("kvstore_total_bytes", storageMetrics.getValue("KvstoreBytesTotal"));
+			obj.setKeyRawNumber("kvstore_total_size", storageMetrics.getValue("KvstoreSizeTotal"));
+			obj.setKeyRawNumber("kvstore_total_nodes", storageMetrics.getValue("KvstoreNodeTotal"));
+			obj.setKeyRawNumber("kvstore_inline_keys", storageMetrics.getValue("KvstoreInlineKey"));
 			obj["input_bytes"] = StatusCounter(storageMetrics.getValue("BytesInput")).getStatus();
 			obj["durable_bytes"] = StatusCounter(storageMetrics.getValue("BytesDurable")).getStatus();
 			obj.setKeyRawNumber("query_queue_max", storageMetrics.getValue("QueryQueueMax"));
@@ -571,7 +574,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     WorkerEvents programStarts, std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
     vector<std::pair<StorageServerInterface, EventMap>> storageServers,
     vector<std::pair<TLogInterface, EventMap>> tLogs, vector<std::pair<MasterProxyInterface, EventMap>> proxies,
-    ServerCoordinators coordinators, Database cx, Optional<DatabaseConfiguration> configuration, 
+    ServerCoordinators coordinators, Database cx, Optional<DatabaseConfiguration> configuration,
     Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
 
 	state JsonBuilderObject processMap;
@@ -1157,10 +1160,10 @@ struct LogRangeAndUID {
 
 	LogRangeAndUID(KeyRange const& range, UID const& destID) : range(range), destID(destID) {}
 
-	bool operator < (LogRangeAndUID const& r) const { 
+	bool operator < (LogRangeAndUID const& r) const {
 		if(range.begin != r.range.begin) return range.begin < r.range.begin;
 		if(range.end != r.range.end) return range.end < r.range.end;
-		return destID < r.destID; 
+		return destID < r.destID;
 	}
 };
 
@@ -1277,7 +1280,7 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<LoadConfi
 				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored) && success(ddModeKey))) {
 					int unreplicated = 0;
 					for(int i = 0; i < result.get().regions.size(); i++) {
-						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) { 
+						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) {
 							unreplicated++;
 						}
 					}
@@ -1544,17 +1547,9 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 	return results;
 }
 
-ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxiesAndMetrics(Database cx, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	Reference<ProxyInfo> proxyInfo = cx->getMasterProxies(false);
-	std::vector<MasterProxyInterface> servers;
-	if(proxyInfo) {
-		for(int i = 0; i < proxyInfo->size(); ++i) {
-			servers.push_back(proxyInfo->getInterface(i));
-		}
-	}
-
+ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxiesAndMetrics(Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	vector<std::pair<MasterProxyInterface, EventMap>> results = wait(getServerMetrics(
-	    servers, address_workers, std::vector<std::string>{ "GRVLatencyMetrics", "CommitLatencyMetrics" }));
+	    db->get().read().client.proxies, address_workers, std::vector<std::string>{ "GRVLatencyMetrics", "CommitLatencyMetrics" }));
 
 	return results;
 }
@@ -2310,7 +2305,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 			state Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture = errorOr(getStorageServersAndMetrics(cx, address_workers));
 			state Future<ErrorOr<vector<std::pair<TLogInterface, EventMap>>>> tLogFuture = errorOr(getTLogsAndMetrics(db, address_workers));
-			state Future<ErrorOr<vector<std::pair<MasterProxyInterface, EventMap>>>> proxyFuture = errorOr(getProxiesAndMetrics(cx, address_workers));
+			state Future<ErrorOr<vector<std::pair<MasterProxyInterface, EventMap>>>> proxyFuture = errorOr(getProxiesAndMetrics(db, address_workers));
 
 			state int minReplicasRemaining = -1;
 			std::vector<Future<JsonBuilderObject>> futures2;
@@ -2405,8 +2400,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, networkMetrics,
 		                                                            latestError, traceFileOpenErrors, programStarts,
-		                                                            processIssues, storageServers, tLogs, proxies, 
-		                                                            coordinators, cx, configuration, 
+		                                                            processIssues, storageServers, tLogs, proxies,
+		                                                            coordinators, cx, configuration,
 		                                                            loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
 		                                                            &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;

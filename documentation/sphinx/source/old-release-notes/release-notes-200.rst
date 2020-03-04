@@ -1,6 +1,6 @@
-###################
-Release Notes (2.0)
-###################
+#############
+Release Notes
+#############
 
 2.0.10
 ======
@@ -49,12 +49,14 @@ Fixes
 
 PHP
 ---
+
 * Package updated to support PHP 5.4+ (instead of 5.3+).
 * Fix: ``get_boundary_keys()`` could fail to complete successfully if certain retryable errors were encountered.
 * Fix: Bindings set error reporting level, which could interfere with clients that used alternate settings.
 
 Java
 ----
+
 * Fix: Calling ``getRange`` on a ``Transaction`` could leak memory.
   
 2.0.7
@@ -110,10 +112,12 @@ Release 2.0.5 is protocol-compatible with 2.0.0, 2.0.1, 2.0.2, 2.0.3, and 2.0.4.
 
 Fixes
 -----
+
 * Clients and servers that specified a cluster file as a filename only (without path) could crash when the coordinators were changed.
 
 PHP
 ---
+
 * Directory layer partitions created with the PHP bindings were incompatible with other language bindings. Contact us if you have data stored in a directory partition created by PHP that can't easily be restored and needs to be migrated.
 
 2.0.4
@@ -123,11 +127,13 @@ Release 2.0.4 is protocol-compatible with 2.0.0, 2.0.1, 2.0.2, and 2.0.3. Users 
 
 Fixes
 -----
+
 * Clearing a key larger than the legal limit of 10 kB caused the database to crash and become unreadable.
 * Explicitly added write conflict ranges were ignored when read-your-writes was disabled.
 
 Java
 ----
+
 * ``ByteArrayUtil.compareUnsigned()`` failed to return in some circumstances.
 
 2.0.3
@@ -137,6 +143,7 @@ Release 2.0.3 is protocol-compatible with 2.0.0, 2.0.1, and 2.0.2. There are no 
 
 Fixes
 -----
+
 * Updated FDBGnuTLS plugin with GnuTLS 3.2.12, incorporating fixes for `GNUTLS-SA-2014-1 <http://gnutls.org/security.html#GNUTLS-SA-2014-1>`_ and `GNUTLS-SA-2014-2 <http://gnutls.org/security.html#GNUTLS-SA-2014-2>`_.
 * When inserting a large number of keys close to the key size limit, server logs were unexpectedly verbose.
 
@@ -147,6 +154,7 @@ Release 2.0.2 is protocol-compatible with 2.0.0 and 2.0.1. There are no updates 
 
 Fixes
 -----
+
 * Windows: Possible database corruption when the FoundationDB service is stopped but unable to kill its child processes.
 
 2.0.1
@@ -156,6 +164,7 @@ Release 2.0.1 is protocol-compatible with 2.0.0. There are no updates to the lan
 
 Fixes
 -----
+
 * In some cases, a server reincluded after previous exclusion would not participate in data distribution.
 * Clients could not reliably connect to multiple clusters.
 * The calculation of usable disk space on Linux and Mac OS X improperly included space reserved for superuser.
@@ -165,24 +174,29 @@ Fixes
 
 New language support
 --------------------
+
 * `Go <../godoc/fdb.html>`_
 * PHP
 
 New layers available in all languages
 -------------------------------------
+
 * The :ref:`Subspace <developer-guide-sub-keyspaces>` layer provides a recommended way to define subspaces of keys by managing key prefixes.
 * The :ref:`Directory <developer-guide-directories>` layer provides a tool to manage related subspaces as virtual directories. Recommended as a convenient and high-performance way to organize and layout different kinds of data within a single FoundationDB database.
 
 Security
 --------
+
 * Added certificate-based :doc:`Transport Layer Security </tls>` to encrypt network traffic.
  
 Monitoring
 ----------
+
 * The ``fdbcli`` command-line interface reports information and warnings about available memory.
 
 Performance
 -----------
+
 * Improved client CPU performance overall.
 * Greatly improved client CPU performance for range-read operations.
 * Greatly improved concurrency when issuing writes between reads.
@@ -192,6 +206,7 @@ Performance
 
 Fixes
 -----
+
 * In rare cases when many keys very close to the maximum key size are inserted, the database could become unavailable. 
 * ``GetReadVersion`` did not properly throw ``transaction_cancelled`` when called on a transaction that had been cancelled.
 * When using the ``access_system_keys`` option, a ``get_range_startswith(\xff)`` would incorrectly return no results.
@@ -204,14 +219,20 @@ Fixes
 
 Other changes
 -------------
+
 * To avoid confusing situations, any use of a transaction that is currently committing will cause both the commit and the use to throw a ``used_during_commit`` error.
 * The ``FDB_CLUSTER_FILE`` environment variable can point to a cluster file that takes precedence over both the current working directory and (e.g., in Linux) ``/etc/foundationdb/fdb.cluster``.
 * Disabled unloading the ``fdb_c`` library to prevent consequent unavoidable race conditions.
 * Discontinued testing and support for Ubuntu 11.04. We continue to support Ubuntu 11.10 and later.
 
+Bindings
+--------
+
+* API version updated to 200. See the :ref:`API version upgrade guide <api-version-upgrade-guide-200>` for upgrade details.
+
 Java
 ----
-* Support for API version 200 and backwards compatibility with previous API versions.
+
 * New APIs for allocating and managing keyspace (:ref:`Directory <developer-guide-directories>`).
 * In most cases, exceptions thrown in synchronous-style Java programs will have the original calling line of code in the backtrace.
 * Native resources are handled in a safer and more efficient manner.
@@ -221,7 +242,7 @@ Java
  
 Node 
 ----
-* Support for API version 200 and backwards compatibility with previous API versions.
+
 * New APIs for allocating and managing keyspace (:ref:`Directory <developer-guide-directories>`).
 * Support for the Promise/A+ specification with supporting utilities.
 * Futures can take multiple callbacks. Callbacks can be added if the original function was called with a callback. The Future type is exposed in our binding.
@@ -235,7 +256,7 @@ Node
 
 Ruby
 ----
-* Support for API version 200 and backwards compatibility with previous API versions.
+
 * New APIs for allocating and managing keyspace (:ref:`Directory <developer-guide-directories>`).
 * Tuple and subspace range assume the empty tuple if none is passed.
 * Added ``as_foundationdb_key`` and ``as_foundationdb_value`` support.
@@ -245,7 +266,7 @@ Ruby
 
 Python
 ------
-* Support for API version 200 and backwards compatibility with previous API versions.
+
 * New APIs for allocating and managing keyspace (:ref:`Directory <developer-guide-directories>`).
 * Snapshot transactions can be used in retry loops.
 * Support for gevent 1.0.
@@ -255,14 +276,13 @@ Python
 
 C
 -
+
 * Support for API version 200 and backwards compatibility with previous API versions.
 
 .NET
 ----
-* Support for API version 200 and backwards compatibility with previous API versions.
+
 * New APIs for allocating and managing keyspace (:ref:`Directory <developer-guide-directories>`).
-
-
 
 Earlier release notes
 ---------------------

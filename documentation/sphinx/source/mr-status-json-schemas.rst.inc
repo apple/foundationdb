@@ -126,10 +126,10 @@
             ],
             "command_line":"-r simulation",
             "memory":{
-               "available_bytes":0, //an estimate of the process' fair share of the memory available to fdbservers
+               "available_bytes":0, // an estimate of the process' fair share of the memory available to fdbservers
                "limit_bytes":0, // memory limit per process
                "unused_allocated_memory":0,
-               "used_bytes":0
+               "used_bytes":0 // virtual memory size of the process
             },
             "messages":[
                {
@@ -413,18 +413,18 @@
                "counter":0,
                "roughness":0.0
             },
-            "reads":{
+            "reads":{ // measures number of completed read requests
                "hz":0.0,
                "counter":0,
                "roughness":0.0
             },
-            "read_requests":{
+            "read_requests":{ // measures number of incoming read requests
                "hz":0.0,
                "counter":0,
                "roughness":0.0
             }
          },
-         "bytes":{ // of operations (independent of hz). Perfectly spaced operations will have a roughness of 1.0 . Randomly spaced (Poisson-distributed) operations will have a roughness of 2.0, with increased bunching resulting in increased values. Higher roughness can result in increased latency due to increased queuing.
+         "bytes":{ // measures number of logical bytes read/written (ignoring replication factor and overhead on disk). Perfectly spaced operations will have a roughness of 1.0. Randomly spaced (Poisson-distributed) operations will have a roughness of 2.0, with increased bunching resulting in increased values. Higher roughness can result in increased latency due to increased queuing.
             "written":{
                "hz":0.0,
                "counter":0,
@@ -557,6 +557,7 @@
          "auto_proxies":3,
          "auto_resolvers":1,
          "auto_logs":3,
+         "backup_worker_enabled":1,
          "proxies":5 // this field will be absent if a value has not been explicitly set
       },
       "data":{
@@ -586,9 +587,9 @@
          "system_kv_size_bytes":0, // estimated
          "partitions_count":2,
          "moving_data":{
-            "total_written_bytes":0,
-            "in_flight_bytes":0,
-            "in_queue_bytes":0,
+            "total_written_bytes":0, // reset whenever data distributor is re-recruited
+            "in_flight_bytes":0, // number of bytes currently being moved between storage servers
+            "in_queue_bytes":0, // number of bytes in the data distributor queue that should be moved (but are not yet being transferred between storage servers)
             "highest_priority":0
          },
          "team_trackers":[
@@ -633,7 +634,7 @@
             },
             "memory":{
                "free_bytes":0, // an estimate of how many bytes are free to allocate to fdbservers without swapping
-               "committed_bytes":0,
+               "committed_bytes":0, // an estimate of the number of bytes of memory on the machine that are not free for allocation
                "total_bytes":0 // an estimate of total physical RAM
             },
             "contributing_workers":4,

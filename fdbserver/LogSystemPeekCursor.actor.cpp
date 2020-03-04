@@ -151,11 +151,8 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 					self->futureResults.push_back( brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked, self->onlySpilled, std::make_pair(self->randomID, self->sequence++)), taskID) ) );
 				}
 				if (self->sequence == std::numeric_limits<decltype(self->sequence)>::max()) {
-					throw timed_out();
+					throw operation_obsolete();
 				}
-			} else if (self->futureResults.size() == 1) {
-				self->randomID = deterministicRandom()->randomUniqueID();
-				self->sequence = 0;
 			} else if (self->futureResults.size() == 0) {
 				return Void();
 			}
@@ -166,7 +163,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 			choose {
 				when( TLogPeekReply res = wait( self->interf->get().present() ? self->futureResults.front() : Never() ) ) {
 					if(res.begin.get() != expectedBegin) {
-						throw timed_out();
+						throw operation_obsolete();
 					}
 					expectedBegin = res.end;
 					self->futureResults.pop_front();
@@ -194,8 +191,11 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 			if(e.code() == error_code_end_of_stream) {
 				self->end.reset( self->messageVersion.version );
 				return Void();
-			} else if(e.code() == error_code_timed_out) {
-				TraceEvent("PeekCursorTimedOut", self->randomID);
+			} else if(e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
+				TraceEvent("PeekCursorTimedOut", self->randomID).error(e);
+				// We *should* never get timed_out(), as it means the TLog got stuck while handling a parallel peek,
+				// and thus we've likely just wasted 10min.
+				ASSERT_WE_THINK(e.code() == error_code_operation_obsolete || SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
 				self->interfaceChanged = self->interf->onChange();
 				self->randomID = deterministicRandom()->randomUniqueID();
 				self->sequence = 0;
@@ -1055,7 +1055,12 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, TaskPriori
 	loop {
 		wait( allLoaders || delay(SERVER_KNOBS->DESIRED_GET_MORE_DELAY, taskID) );
 		minVersion = self->end;
-		for(auto cursor : self->cursors) {
+		for(int i = 0; i < self->cursors.size(); i++) {
+			auto cursor = self->cursors[i];
+			while(cursor->hasMessage()) {
+				self->cursorMessages[i].push_back(ILogSystem::BufferedCursor::BufferedMessage(cursor->arena(), (!self->withTags || self->collectTags) ? cursor->getMessage() : cursor->getMessageWithTags(), !self->withTags ? VectorRef<Tag>() : cursor->getTags(), cursor->version()));
+				cursor->nextMessage();
+			}
 			minVersion = std::min(minVersion, cursor->version().version);
 		}
 		if(minVersion > self->messageVersion.version) {

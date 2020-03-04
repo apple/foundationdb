@@ -29,6 +29,7 @@
 	#define FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_H
 
 #include <sstream>
+#include <string>
 #include "flow/Stats.h"
 #include "flow/flow.h"
 #include "fdbrpc/fdbrpc.h"
@@ -48,9 +49,10 @@ struct RestoreSysInfoRequest;
 struct RestoreLoadFileRequest;
 struct RestoreVersionBatchRequest;
 struct RestoreSendMutationsToAppliersRequest;
-struct RestoreSendMutationVectorVersionedRequest;
+struct RestoreSendVersionedMutationsRequest;
 struct RestoreSysInfo;
 struct RestoreApplierInterface;
+struct RestoreFinishRequest;
 
 // RestoreSysInfo includes information each (type of) restore roles should know.
 // At this moment, it only include appliers. We keep the name for future extension.
@@ -128,8 +130,9 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 	RequestStream<RestoreLoadFileRequest> loadFile;
 	RequestStream<RestoreSendMutationsToAppliersRequest> sendMutations;
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
+	RequestStream<RestoreVersionBatchRequest> finishVersionBatch;
 	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
-	RequestStream<RestoreVersionBatchRequest> finishRestore;
+	RequestStream<RestoreFinishRequest> finishRestore;
 
 	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator!=(RestoreWorkerInterface const& r) const { return id() != r.id(); }
@@ -147,6 +150,7 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 		loadFile.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		sendMutations.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		initVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		finishVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		collectRestoreRoleInterfaces.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		finishRestore.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 	}
@@ -154,7 +158,7 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, updateRestoreSysInfo, loadFile, sendMutations,
-		           initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
+		           initVersionBatch, finishVersionBatch, collectRestoreRoleInterfaces, finishRestore);
 	}
 };
 
@@ -162,11 +166,11 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 	constexpr static FileIdentifier file_identifier = 54253048;
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
-	RequestStream<RestoreSendMutationVectorVersionedRequest> sendMutationVector;
+	RequestStream<RestoreSendVersionedMutationsRequest> sendMutationVector;
 	RequestStream<RestoreVersionBatchRequest> applyToDB;
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
 	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
-	RequestStream<RestoreVersionBatchRequest> finishRestore;
+	RequestStream<RestoreFinishRequest> finishRestore;
 
 	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator!=(RestoreWorkerInterface const& r) const { return id() != r.id(); }
@@ -196,45 +200,85 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 	std::string toString() { return nodeID.toString(); }
 };
 
-// TODO: It is probably better to specify the (beginVersion, endVersion] for each loadingParam.
-// beginVersion (endVersion) is the version the applier is before (after) it receives the request.
+// RestoreAsset uniquely identifies the work unit done by restore roles;
+// It is used to ensure exact-once processing on restore loader and applier;
+// By combining all RestoreAssets across all verstion batches, restore should process all mutations in
+// backup range and log files up to the target restore version.
+struct RestoreAsset {
+	Version beginVersion, endVersion; // Only use mutation in [begin, end) versions;
+	KeyRange range; // Only use mutations in range
+
+	int fileIndex;
+	std::string filename;
+	int64_t offset;
+	int64_t len;
+
+	UID uid;
+
+	RestoreAsset() = default;
+
+	bool operator==(const RestoreAsset& r) const {
+		return fileIndex == r.fileIndex && filename == r.filename && offset == r.offset && len == r.len &&
+		       beginVersion == r.beginVersion && endVersion == r.endVersion && range == r.range;
+	}
+	bool operator!=(const RestoreAsset& r) const {
+		return fileIndex != r.fileIndex || filename != r.filename || offset != r.offset || len != r.len ||
+		       beginVersion != r.beginVersion || endVersion != r.endVersion || range != r.range;
+	}
+	bool operator<(const RestoreAsset& r) const {
+		return std::make_tuple(fileIndex, filename, offset, len, beginVersion, endVersion, range.begin, range.end) <
+		       std::make_tuple(r.fileIndex, r.filename, r.offset, r.len, r.beginVersion, r.endVersion, r.range.begin,
+		                       r.range.end);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, beginVersion, endVersion, range, filename, fileIndex, offset, len, uid);
+	}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "UID:" << uid.toString() << " begin:" << beginVersion << " end:" << endVersion
+		   << " range:" << range.toString() << " filename:" << filename << " fileIndex:" << fileIndex
+		   << " offset:" << offset << " len:" << len;
+		return ss.str();
+	}
+
+	// RestoreAsset and VersionBatch both use endVersion as exclusive in version range
+	bool isInVersionRange(Version commitVersion) const {
+		return commitVersion >= beginVersion && commitVersion < endVersion;
+	}
+};
+
 struct LoadingParam {
 	constexpr static FileIdentifier file_identifier = 17023837;
 
 	bool isRangeFile;
 	Key url;
-	Version prevVersion;
-	Version endVersion;
-	int fileIndex;
-	Version version;
-	std::string filename;
-	int64_t offset;
-	int64_t length;
+	Optional<Version> rangeVersion; // range file's version
+
 	int64_t blockSize;
-	KeyRange restoreRange;
-	Key addPrefix;
-	Key removePrefix;
-	Key mutationLogPrefix;
+	RestoreAsset asset;
+
+	LoadingParam() = default;
 
 	// TODO: Compare all fields for loadingParam
-	bool operator==(const LoadingParam& r) const { return isRangeFile == r.isRangeFile && filename == r.filename; }
-	bool operator!=(const LoadingParam& r) const { return isRangeFile != r.isRangeFile || filename != r.filename; }
+	bool operator==(const LoadingParam& r) const { return isRangeFile == r.isRangeFile && asset == r.asset; }
+	bool operator!=(const LoadingParam& r) const { return isRangeFile != r.isRangeFile || asset != r.asset; }
 	bool operator<(const LoadingParam& r) const {
-		return (isRangeFile < r.isRangeFile) || (isRangeFile == r.isRangeFile && filename < r.filename);
+		return (isRangeFile < r.isRangeFile) || (isRangeFile == r.isRangeFile && asset < r.asset);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, isRangeFile, url, prevVersion, endVersion, fileIndex, version, filename, offset, length,
-		           blockSize, restoreRange, addPrefix, removePrefix, mutationLogPrefix);
+		serializer(ar, isRangeFile, url, rangeVersion, blockSize, asset);
 	}
 
 	std::string toString() {
 		std::stringstream str;
-		str << "isRangeFile:" << isRangeFile << " url:" << url.toString() << " prevVersion:" << prevVersion
-		    << " fileIndex:" << fileIndex << " endVersion:" << endVersion << " version:" << version
-		    << " filename:" << filename << " offset:" << offset << " length:" << length << " blockSize:" << blockSize
-		    << " restoreRange:" << restoreRange.toString() << " addPrefix:" << addPrefix.toString();
+		str << "isRangeFile:" << isRangeFile << " url:" << url.toString()
+		    << " rangeVersion:" << (rangeVersion.present() ? rangeVersion.get() : -1) << " blockSize:" << blockSize
+		    << " RestoreAsset:" << asset.toString();
 		return str.str();
 	}
 };
@@ -297,6 +341,7 @@ struct RestoreRecruitRoleRequest : TimedRequest {
 	std::string toString() { return printable(); }
 };
 
+// Static info. across version batches
 struct RestoreSysInfoRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 75960741;
 
@@ -319,25 +364,50 @@ struct RestoreSysInfoRequest : TimedRequest {
 	}
 };
 
-// Sample_Range_File and Assign_Loader_Range_File, Assign_Loader_Log_File
-struct RestoreLoadFileRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 26557364;
+struct RestoreLoadFileReply : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 34077902;
 
 	LoadingParam param;
+	MutationsVec samples; // sampled mutations
+	bool isDuplicated; // true if loader thinks the request is a duplicated one
 
-	ReplyPromise<RestoreCommonReply> reply;
-
-	RestoreLoadFileRequest() = default;
-	explicit RestoreLoadFileRequest(LoadingParam param) : param(param) {}
+	RestoreLoadFileReply() = default;
+	explicit RestoreLoadFileReply(LoadingParam param, MutationsVec samples, bool isDuplicated)
+	  : param(param), samples(samples), isDuplicated(isDuplicated) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, param, reply);
+		serializer(ar, param, samples, isDuplicated);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreLoadFileRequest param:" << param.toString();
+		ss << "LoadingParam:" << param.toString() << " samples.size:" << samples.size()
+		   << " isDuplicated:" << isDuplicated;
+		return ss.str();
+	}
+};
+
+// Sample_Range_File and Assign_Loader_Range_File, Assign_Loader_Log_File
+struct RestoreLoadFileRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 26557364;
+
+	int batchIndex;
+	LoadingParam param;
+
+	ReplyPromise<RestoreLoadFileReply> reply;
+
+	RestoreLoadFileRequest() = default;
+	explicit RestoreLoadFileRequest(int batchIndex, LoadingParam& param) : batchIndex(batchIndex), param(param){};
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, batchIndex, param, reply);
+	}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "RestoreLoadFileRequest batchIndex:" << batchIndex << " param:" << param.toString();
 		return ss.str();
 	}
 };
@@ -345,75 +415,101 @@ struct RestoreLoadFileRequest : TimedRequest {
 struct RestoreSendMutationsToAppliersRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 68827305;
 
+	int batchIndex; // version batch index
 	std::map<Key, UID> rangeToApplier;
 	bool useRangeFile; // Send mutations parsed from range file?
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendMutationsToAppliersRequest() = default;
-	explicit RestoreSendMutationsToAppliersRequest(std::map<Key, UID> rangeToApplier, bool useRangeFile)
-	  : rangeToApplier(rangeToApplier), useRangeFile(useRangeFile) {}
+	explicit RestoreSendMutationsToAppliersRequest(int batchIndex, std::map<Key, UID> rangeToApplier, bool useRangeFile)
+	  : batchIndex(batchIndex), rangeToApplier(rangeToApplier), useRangeFile(useRangeFile) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeToApplier, useRangeFile, reply);
+		serializer(ar, batchIndex, rangeToApplier, useRangeFile, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreSendMutationsToAppliersRequest keyToAppliers.size:" << rangeToApplier.size()
-		   << " useRangeFile:" << useRangeFile;
+		ss << "RestoreSendMutationsToAppliersRequest batchIndex:" << batchIndex
+		   << " keyToAppliers.size:" << rangeToApplier.size() << " useRangeFile:" << useRangeFile;
 		return ss.str();
 	}
 };
 
-struct RestoreSendMutationVectorVersionedRequest : TimedRequest {
+struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 69764565;
 
+	int batchIndex; // version batch index
+	RestoreAsset asset; // Unique identifier for the current restore asset
+
 	Version prevVersion, version; // version is the commitVersion of the mutation vector.
-	int fileIndex; // Unique index for a backup file
 	bool isRangeFile;
-	Standalone<VectorRef<MutationRef>> mutations; // All mutations are at version
+	MutationsVec mutations; // All mutations at the same version parsed by one loader
 
 	ReplyPromise<RestoreCommonReply> reply;
 
-	RestoreSendMutationVectorVersionedRequest() = default;
-	explicit RestoreSendMutationVectorVersionedRequest(int fileIndex, Version prevVersion, Version version,
-	                                                   bool isRangeFile, VectorRef<MutationRef> mutations)
-	  : fileIndex(fileIndex), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile),
+	RestoreSendVersionedMutationsRequest() = default;
+	explicit RestoreSendVersionedMutationsRequest(int batchIndex, const RestoreAsset& asset, Version prevVersion,
+	                                              Version version, bool isRangeFile, MutationsVec mutations)
+	  : batchIndex(batchIndex), asset(asset), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile),
 	    mutations(mutations) {}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "fileIndex:" << fileIndex << " prevVersion:" << prevVersion << " version:" << version
-		   << " isRangeFile:" << isRangeFile << " mutations.size:" << mutations.size();
+		ss << "VersionBatchIndex:" << batchIndex << "RestoreAsset:" << asset.toString()
+		   << " prevVersion:" << prevVersion << " version:" << version << " isRangeFile:" << isRangeFile
+		   << " mutations.size:" << mutations.size();
 		return ss.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, fileIndex, prevVersion, version, isRangeFile, mutations, reply);
+		serializer(ar, batchIndex, asset, prevVersion, version, isRangeFile, mutations, reply);
 	}
 };
 
 struct RestoreVersionBatchRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 13018413;
+	constexpr static FileIdentifier file_identifier = 97223537;
 
-	int batchID;
+	int batchIndex;
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreVersionBatchRequest() = default;
-	explicit RestoreVersionBatchRequest(int batchID) : batchID(batchID) {}
+	explicit RestoreVersionBatchRequest(int batchIndex) : batchIndex(batchIndex) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, batchID, reply);
+		serializer(ar, batchIndex, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreVersionBatchRequest BatchID:" << batchID;
+		ss << "RestoreVersionBatchRequest batchIndex:" << batchIndex;
+		return ss.str();
+	}
+};
+
+struct RestoreFinishRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 13018413;
+
+	bool terminate; // role exits if terminate = true
+
+	ReplyPromise<RestoreCommonReply> reply;
+
+	RestoreFinishRequest() = default;
+	explicit RestoreFinishRequest(bool terminate) : terminate(terminate) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, terminate, reply);
+	}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "RestoreFinishRequest terminate:" << terminate;
 		return ss.str();
 	}
 };
@@ -434,17 +530,12 @@ struct RestoreRequest {
 	bool lockDB;
 	UID randomUid;
 
-	int testData;
 	std::vector<int> restoreRequests;
 	// Key restoreTag;
 
 	ReplyPromise<struct RestoreCommonReply> reply;
 
-	RestoreRequest() : testData(0) {}
-	explicit RestoreRequest(int testData) : testData(testData) {}
-	explicit RestoreRequest(int testData, std::vector<int>& restoreRequests)
-	  : testData(testData), restoreRequests(restoreRequests) {}
-
+	RestoreRequest() = default;
 	explicit RestoreRequest(const int index, const Key& tagName, const Key& url, bool waitForComplete,
 	                        Version targetVersion, bool verbose, const KeyRange& range, const Key& addPrefix,
 	                        const Key& removePrefix, bool lockDB, const UID& randomUid)
@@ -455,7 +546,7 @@ struct RestoreRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, index, tagName, url, waitForComplete, targetVersion, verbose, range, addPrefix, removePrefix,
-		           lockDB, randomUid, testData, restoreRequests, reply);
+		           lockDB, randomUid, restoreRequests, reply);
 	}
 
 	std::string toString() const {
@@ -474,7 +565,7 @@ std::string getRoleStr(RestoreRole role);
 
 ////--- Interface functions
 ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality);
-ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality);
+ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality, std::string coordFolder);
 
 #include "flow/unactorcompiler.h"
 #endif

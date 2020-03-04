@@ -22,7 +22,7 @@
 
 package fdb
 
-// #define FDB_API_VERSION 620
+// #define FDB_API_VERSION 700
 // #include <foundationdb/fdb_c.h>
 import "C"
 
@@ -39,6 +39,7 @@ type ReadTransaction interface {
 	GetReadVersion() FutureInt64
 	GetDatabase() Database
 	Snapshot() Snapshot
+	GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64
 
 	ReadTransactor
 }
@@ -305,6 +306,28 @@ func (t Transaction) GetRange(r Range, options RangeOptions) RangeResult {
 	return t.getRange(r, options, false)
 }
 
+func (t *transaction) getEstimatedRangeSizeBytes(beginKey Key, endKey Key) FutureInt64 {
+	return &futureInt64{
+		future: newFuture(C.fdb_transaction_get_estimated_range_size_bytes(
+			t.ptr,
+			byteSliceToPtr(beginKey),
+			C.int(len(beginKey)),
+			byteSliceToPtr(endKey),
+			C.int(len(endKey)),
+		)),
+	}
+}
+
+// GetEstimatedRangeSizeBytes will get the byte size of the key range based on the
+// byte sample collected by FDB
+func (t Transaction) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
+	beginKey, endKey := r.FDBRangeKeys()
+	return t.getEstimatedRangeSizeBytes(
+		beginKey.FDBKey(),
+		endKey.FDBKey(),
+	)
+}
+
 func (t *transaction) getReadVersion() FutureInt64 {
 	return &futureInt64{
 		future: newFuture(C.fdb_transaction_get_read_version(t.ptr)),
@@ -337,6 +360,11 @@ func (t Transaction) Clear(key KeyConvertible) {
 // ClearRange removes all keys k such that begin <= k < end, and their
 // associated values. ClearRange returns immediately, having modified the
 // snapshot of the database represented by the transaction.
+// Range clears are efficient with FoundationDB -- clearing large amounts of data
+// will be fast. However, this will not immediately free up disk -
+// data for the deleted range is cleaned up in the background.
+// For purposes of computing the transaction size, only the begin and end keys of a clear range are counted.
+// The size of the data stored in the range does not count against the transaction size limit.
 func (t Transaction) ClearRange(er ExactRange) {
 	begin, end := er.FDBRangeKeys()
 	bkb := begin.FDBKey()

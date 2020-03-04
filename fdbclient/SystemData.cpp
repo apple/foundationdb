@@ -494,6 +494,51 @@ ProcessData decodeWorkerListValue( ValueRef const& value ) {
 	return s;
 }
 
+const KeyRangeRef backupProgressKeys(LiteralStringRef("\xff\x02/backupProgress/"),
+                                     LiteralStringRef("\xff\x02/backupProgress0"));
+const KeyRef backupProgressPrefix = backupProgressKeys.begin;
+const KeyRef backupStartedKey = LiteralStringRef("\xff\x02/backupStarted");
+
+const Key backupProgressKeyFor(UID workerID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(backupProgressPrefix);
+	wr << workerID;
+	return wr.toValue();
+}
+
+const Value backupProgressValue(const WorkerBackupStatus& status) {
+	BinaryWriter wr(IncludeVersion());
+	wr << status;
+	return wr.toValue();
+}
+
+UID decodeBackupProgressKey(const KeyRef& key) {
+	UID serverID;
+	BinaryReader rd(key.removePrefix(backupProgressPrefix), Unversioned());
+	rd >> serverID;
+	return serverID;
+}
+
+WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
+	WorkerBackupStatus status;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> status;
+	return status;
+}
+
+Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids) {
+	BinaryWriter wr(IncludeVersion());
+	wr << ids;
+	return wr.toValue();
+}
+
+std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& value) {
+	std::vector<std::pair<UID, Version>> ids;
+	BinaryReader reader(value, IncludeVersion());
+	if (value.size() > 0) reader >> ids;
+	return ids;
+}
+
 const KeyRef coordinatorsKey = LiteralStringRef("\xff/coordinators");
 const KeyRef logsKey = LiteralStringRef("\xff/logs");
 const KeyRef minRequiredCommitVersionKey = LiteralStringRef("\xff/minRequiredCommitVersion");
@@ -708,20 +753,22 @@ const KeyRangeRef restoreApplierKeys(LiteralStringRef("\xff\x02/restoreApplier/"
 const KeyRef restoreApplierTxnValue = LiteralStringRef("1");
 
 // restoreApplierKeys: track atomic transaction progress to ensure applying atomicOp exactly once
-// Version is passed in as LittleEndian, it must be converted to BigEndian to maintain ordering in lexical order
-const Key restoreApplierKeyFor(UID const& applierID, Version version) {
+// Version and batchIndex are passed in as LittleEndian,
+// they must be converted to BigEndian to maintain ordering in lexical order
+const Key restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(restoreApplierKeys.begin);
-	wr << applierID << bigEndian64(version);
+	wr << applierID << bigEndian64(batchIndex) << bigEndian64(version);
 	return wr.toValue();
 }
 
-std::pair<UID, Version> decodeRestoreApplierKey(ValueRef const& key) {
+std::tuple<UID, int64_t, Version> decodeRestoreApplierKey(ValueRef const& key) {
 	BinaryReader rd(key, Unversioned());
 	UID applierID;
+	int64_t batchIndex;
 	Version version;
-	rd >> applierID >> version;
-	return std::make_pair(applierID, bigEndian64(version));
+	rd >> applierID >> batchIndex >> version;
+	return std::make_tuple(applierID, bigEndian64(batchIndex), bigEndian64(version));
 }
 
 // Encode restore worker key for workerID

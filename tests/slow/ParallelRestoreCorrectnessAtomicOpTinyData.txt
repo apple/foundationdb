@@ -5,7 +5,7 @@ testTitle=BackupAndParallelRestoreWithAtomicOp
 ;    nodeCount=100
     transactionsPerSecond=2500.0
 ;    transactionsPerSecond=500.0
-;    transactionsPerSecond=100.0
+;    transactionsPerSecond=500.0
 ;    nodeCount=4
 ;    transactionsPerSecond=250.0
     testDuration=30.0
@@ -13,20 +13,6 @@ testTitle=BackupAndParallelRestoreWithAtomicOp
 ; Specify a type of atomicOp
 ;	opType=0
 ;	actorsPerClient=1
-
-; AtomicBackupCorrectness.txt does not mix Cycle and AtomicOps workloads
-;    testName=Cycle
-;;    nodeCount=30000
-;;    nodeCount=1000
-;    nodeCount=4
-;;    transactionsPerSecond=2.0
-;;    transactionsPerSecond=10.0
-;;    transactionsPerSecond=20.0
-;    transactionsPerSecond=2500.0
-;    testDuration=30.0
-;    expectedRate=0
-;    clearAfterTest=false
-;	keyPrefix=a
 
 ; Each testName=RunRestoreWorkerWorkload creates a restore worker
 ; We need at least 3 restore workers: master, loader, and applier
@@ -42,7 +28,7 @@ testTitle=BackupAndParallelRestoreWithAtomicOp
 
     testName=RandomClogging
     testDuration=90.0
-	
+
 ;    testName=Rollback
 ;    meanDelay=90.0
 ;    testDuration=90.0
@@ -61,7 +47,7 @@ testTitle=BackupAndParallelRestoreWithAtomicOp
 ;    testDuration=90.0
 
 ; Disable buggify for parallel restore
-buggify=off
+;buggify=on
 ;testDuration=360000 ;not work
 ;timeout is in seconds
 timeout=360000

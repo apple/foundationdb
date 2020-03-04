@@ -2,8 +2,8 @@ testTitle=BackupAndRestore
      testName=Cycle
  ;    nodeCount=30000
      nodeCount=1000
-     transactionsPerSecond=500.0
- ;    transactionsPerSecond=2500.0
+ ;    transactionsPerSecond=500.0
+     transactionsPerSecond=2500.0
      testDuration=30.0
      expectedRate=0
      clearAfterTest=false
@@ -69,7 +69,7 @@ testTitle=BackupAndRestore
  ;    testDuration=90.0
 
  ; Disable buggify for parallel restore
- buggify=off
+ ;buggify=off
  ;testDuration=360000 ;not work
  ;timeout is in seconds
  timeout=360000

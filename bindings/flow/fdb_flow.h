@@ -23,7 +23,7 @@
 
 #include <flow/flow.h>
 
-#define FDB_API_VERSION 620
+#define FDB_API_VERSION 700
 #include <bindings/c/foundationdb/fdb_c.h>
 #undef DLLEXPORT
 
@@ -88,6 +88,8 @@ namespace FDB {
 							KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limits, snapshot, reverse,
 							streamingMode);
 		}
+
+		virtual Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys) = 0;
 
 		virtual void addReadConflictRange(KeyRangeRef const& keys) = 0;
 		virtual void addReadConflictKey(KeyRef const& key) = 0;

@@ -215,20 +215,28 @@ if(NOT OPEN_FOR_IDE)
   else()
     set(lib_destination "linux/amd64")
   endif()
-  set(lib_destination "${unpack_dir}/lib/${lib_destination}")
+	set(lib_destination "${unpack_dir}/lib/${lib_destination}")
+	set(jni_package "${CMAKE_BINARY_DIR}/packages/lib")
   file(MAKE_DIRECTORY ${lib_destination})
+	file(MAKE_DIRECTORY ${jni_package})
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_java> ${lib_destination} &&
+    ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_java> ${jni_package} &&
     ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
     COMMENT "Copy jni library for fat jar")
   add_custom_target(copy_lib DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied)
   add_dependencies(copy_lib unpack_jar)
-  set(target_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}.jar)
+  if(NOT FDB_RELEASE)
+    set(prerelease_string "-PRERELEASE")
+  else()
+    set(prerelease_string "")
+  endif()
+  set(target_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}${prerelease_string}.jar)
   add_custom_command(OUTPUT ${target_jar}
     COMMAND ${Java_JAR_EXECUTABLE} cfm ${target_jar} ${unpack_dir}/META-INF/MANIFEST.MF .
     WORKING_DIRECTORY ${unpack_dir}
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
-    COMMENT "Build ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}.jar")
+    COMMENT "Build ${target_jar}")
   add_custom_target(fat-jar ALL DEPENDS ${target_jar})
   add_dependencies(fat-jar fdb-java)
   add_dependencies(fat-jar copy_lib)

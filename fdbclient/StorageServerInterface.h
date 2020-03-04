@@ -267,7 +267,7 @@ struct GetShardStateRequest {
 		FETCHING = 1,
 		READABLE = 2
 	};
-	
+
 	KeyRange keys;
 	int32_t mode;
 	ReplyPromise<GetShardStateReply> reply;
@@ -282,14 +282,12 @@ struct GetShardStateRequest {
 
 struct StorageMetrics {
 	constexpr static FileIdentifier file_identifier = 13622226;
-	int64_t bytes;				// total storage
-	int64_t bytesPerKSecond;	// network bandwidth (average over 10s)
-	int64_t iosPerKSecond;
-	int64_t bytesReadPerKSecond;
+	int64_t bytes = 0;				// total storage
+	int64_t bytesPerKSecond = 0;	// network bandwidth (average over 10s)
+	int64_t iosPerKSecond = 0;
+	int64_t bytesReadPerKSecond = 0;
 
 	static const int64_t infinity = 1LL<<60;
-
-	StorageMetrics() : bytes(0), bytesPerKSecond(0), iosPerKSecond(0), bytesReadPerKSecond(0) {}
 
 	bool allLessOrEqual( const StorageMetrics& rhs ) const {
 		return bytes <= rhs.bytes && bytesPerKSecond <= rhs.bytesPerKSecond && iosPerKSecond <= rhs.iosPerKSecond &&
@@ -392,7 +390,7 @@ struct SplitMetricsRequest {
 struct GetStorageMetricsReply {
 	constexpr static FileIdentifier file_identifier = 15491478;
 	StorageMetrics load;
-	StorageMetrics free;
+	StorageMetrics available;
 	StorageMetrics capacity;
 	double bytesInputRate;
 
@@ -400,7 +398,7 @@ struct GetStorageMetricsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, load, free, capacity, bytesInputRate);
+		serializer(ar, load, available, capacity, bytesInputRate);
 	}
 };
 

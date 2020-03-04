@@ -172,6 +172,7 @@ public:
 	Counter transactionsMaybeCommitted;
 	Counter transactionsResourceConstrained;
 	Counter transactionsProcessBehind;
+	Counter transactionsThrottled;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
@@ -190,6 +191,10 @@ public:
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
 	Future<Void> clientInfoMonitor;
 	Future<Void> connected;
+
+	Reference<AsyncVar<Optional<ClusterInterface>>> statusClusterInterface;
+	Future<Void> statusLeaderMon;
+	double lastStatusFetch;
 
 	int apiVersion;
 

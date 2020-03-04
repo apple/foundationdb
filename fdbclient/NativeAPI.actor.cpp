@@ -26,7 +26,6 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -39,12 +38,12 @@
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/TLSConnection.h"
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
+#include "flow/TLSPolicy.h"
 #include "flow/UnitTest.h"
 
 #if defined(CMAKE_BUILD) || !defined(WIN32)
@@ -68,12 +67,15 @@ using std::min;
 using std::pair;
 
 NetworkOptions networkOptions;
-Reference<TLSOptions> tlsOptions;
+TLSParams tlsParams;
+static Reference<TLSPolicy> tlsPolicy;
 
-static void initTLSOptions() {
-	if (!tlsOptions) {
-		tlsOptions = Reference<TLSOptions>(new TLSOptions());
+static void initTLSPolicy() {
+#ifndef TLS_DISABLED
+	if (!tlsPolicy) {
+		tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(TLSPolicy::Is::CLIENT));
 	}
+#endif
 }
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
@@ -254,24 +256,6 @@ ACTOR Future<Void> databaseLogger( DatabaseContext *cx ) {
 		cx->bytesPerCommit.clear();
 
 		lastLogged = now();
-	}
-}
-
-ACTOR static Future<Standalone<StringRef> > getSampleVersionStamp(Transaction *tr) {
-	loop{
-		try {
-			tr->reset();
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			wait(success(tr->get(LiteralStringRef("\xff/StatusJsonTestKey62793"))));
-			state Future<Standalone<StringRef> > vstamp = tr->getVersionstamp();
-			tr->makeSelfConflicting();
-			wait(tr->commit());
-			Standalone<StringRef> val = wait(vstamp);
-			return val;
-		}
-		catch (Error& e) {
-			wait(tr->onError(e));
-		}
 	}
 }
 
@@ -511,26 +495,31 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bo
 Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed);
 }
-DatabaseContext::DatabaseContext(
-	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
-	TaskPriority taskID, LocalityData const& clientLocality, bool enableLocalityLoadBalance, bool lockAware, bool internal, int apiVersion, bool switchable ) 
-	: connectionFile(connectionFile),clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), taskID(taskID), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance),
-	lockAware(lockAware), apiVersion(apiVersion), switchable(switchable), provisional(false), cc("TransactionMetrics"),
-	transactionReadVersions("ReadVersions", cc), transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc), 
-	transactionCommittedMutations("CommittedMutations", cc), transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionsCommitStarted("CommitStarted", cc), 
-	transactionsCommitCompleted("CommitCompleted", cc), transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc), 
-	transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc), 
-	transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0),
-	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
-	healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal)
-{
+DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
+                                 Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
+                                 TaskPriority taskID, LocalityData const& clientLocality,
+                                 bool enableLocalityLoadBalance, bool lockAware, bool internal, int apiVersion,
+                                 bool switchable)
+  : connectionFile(connectionFile), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), taskID(taskID),
+    clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
+    apiVersion(apiVersion), switchable(switchable), provisional(false), cc("TransactionMetrics"),
+    transactionReadVersions("ReadVersions", cc), transactionLogicalReads("LogicalUncachedReads", cc),
+    transactionPhysicalReads("PhysicalReadRequests", cc), transactionCommittedMutations("CommittedMutations", cc),
+    transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionsCommitStarted("CommitStarted", cc),
+    transactionsCommitCompleted("CommitCompleted", cc), transactionsTooOld("TooOld", cc),
+    transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
+    transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
+    transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0),
+    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
+    bytesPerCommit(1000), mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    internal(internal) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
 
 	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
 
-	snapshotRywEnabled = apiVersionAtLeast(300) ? 1 : 0; 
+	snapshotRywEnabled = apiVersionAtLeast(300) ? 1 : 0;
 
 	logger = databaseLogger( this );
 	locationCacheSize = g_network->isSimulated() ?
@@ -544,15 +533,17 @@ DatabaseContext::DatabaseContext(
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 }
 
-DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"),
-	transactionReadVersions("ReadVersions", cc), transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc), 
-	transactionCommittedMutations("CommittedMutations", cc), transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionsCommitStarted("CommitStarted", cc), 
-	transactionsCommitCompleted("CommitCompleted", cc), transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc), 
-	transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc), 
-	transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
-	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), 
-	internal(false) {}
-
+DatabaseContext::DatabaseContext(const Error& err)
+  : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc),
+    transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc),
+    transactionCommittedMutations("CommittedMutations", cc),
+    transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionsCommitStarted("CommitStarted", cc),
+    transactionsCommitCompleted("CommitCompleted", cc), transactionsTooOld("TooOld", cc),
+    transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
+    transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
+    transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), latencies(1000),
+    readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
+    internal(false) {}
 
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion, bool switchable) {
 	return Database( new DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>>(), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion, switchable ) );
@@ -738,7 +729,7 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 	clearedClientInfo.id = deterministicRandom()->randomUniqueID();
 	self->clientInfo->set(clearedClientInfo);
 	self->connectionFile->set(connFile);
-	
+
 	state Database db(Reference<DatabaseContext>::addRef(self));
 	state Transaction tr(db);
 	loop {
@@ -789,6 +780,7 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 
 			auto publicIP = determinePublicIPAutomatically( connFile->getConnectionString() );
 			selectTraceFormatter(networkOptions.traceFormat);
+			selectTraceClockSource(networkOptions.traceClockSource);
 			openTraceFile(NetworkAddress(publicIP, ::getpid()), networkOptions.traceRollSize, networkOptions.traceMaxLogsSize, networkOptions.traceDirectory.get(), "trace", networkOptions.traceLogGroup);
 
 			TraceEvent("ClientStart")
@@ -808,6 +800,8 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 			uncancellable( recurring( &systemMonitor, CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace ) );
 		}
 	}
+
+	g_network->initTLS();
 
 	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile(new AsyncVar<Reference<ClusterConnectionFile>>());
@@ -861,6 +855,14 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 				throw invalid_option_value();
 			}
 			break;
+		case FDBNetworkOptions::TRACE_CLOCK_SOURCE:
+			validateOptionValue(value, true);
+			networkOptions.traceClockSource = value.get().toString();
+			if (!validateTraceClockSource(networkOptions.traceClockSource)) {
+				fprintf(stderr, "Unrecognized trace clock source: `%s'\n", networkOptions.traceClockSource.c_str());
+				throw invalid_option_value();
+			}
+			break;
 		case FDBNetworkOptions::KNOB: {
 			validateOptionValue(value, true);
 
@@ -888,49 +890,48 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			break;
 		case FDBNetworkOptions::TLS_CERT_PATH:
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_cert_file( value.get().toString() );
+			tlsParams.tlsCertBytes = "";
+			tlsParams.tlsCertPath = value.get().toString();
 			break;
-		case FDBNetworkOptions::TLS_CERT_BYTES:
-			initTLSOptions();
-			tlsOptions->set_cert_data( value.get().toString() );
-			break;
-		case FDBNetworkOptions::TLS_CA_PATH:
+		case FDBNetworkOptions::TLS_CERT_BYTES: {
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_ca_file( value.get().toString() );
+			tlsParams.tlsCertPath = "";
+			tlsParams.tlsCertBytes = value.get().toString();
 			break;
-		case FDBNetworkOptions::TLS_CA_BYTES:
+		}
+		case FDBNetworkOptions::TLS_CA_PATH: {
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_ca_data(value.get().toString());
+			tlsParams.tlsCABytes = "";
+			tlsParams.tlsCAPath = value.get().toString();
 			break;
+		}
+		case FDBNetworkOptions::TLS_CA_BYTES: {
+			validateOptionValue(value, true);
+			tlsParams.tlsCAPath = "";
+			tlsParams.tlsCABytes = value.get().toString();
+			break;
+		}
 		case FDBNetworkOptions::TLS_PASSWORD:
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_key_password(value.get().toString());
+			tlsParams.tlsPassword = value.get().toString();
 			break;
 		case FDBNetworkOptions::TLS_KEY_PATH:
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_key_file( value.get().toString() );
+			tlsParams.tlsKeyBytes = "";
+			tlsParams.tlsKeyPath = value.get().toString();
 			break;
-		case FDBNetworkOptions::TLS_KEY_BYTES:
+		case FDBNetworkOptions::TLS_KEY_BYTES: {
 			validateOptionValue(value, true);
-			initTLSOptions();
-			tlsOptions->set_key_data( value.get().toString() );
+			tlsParams.tlsKeyPath = "";
+			tlsParams.tlsKeyBytes = value.get().toString();
 			break;
+		}
 		case FDBNetworkOptions::TLS_VERIFY_PEERS:
 			validateOptionValue(value, true);
-			initTLSOptions();
-			try {
-				tlsOptions->set_verify_peers({ value.get().toString() });
-			} catch( Error& e ) {
-				TraceEvent(SevWarnAlways, "TLSValidationSetError")
-					.error( e )
-					.detail("Input", value.get().toString() );
-				throw invalid_option_value();
-			}
+			initTLSPolicy();
+#ifndef TLS_DISABLED
+			tlsPolicy->set_verify_peers({ value.get().toString() });
+#endif
 			break;
 		case FDBNetworkOptions::CLIENT_BUGGIFY_ENABLE:
 			enableBuggify(true, BuggifyType::Client);
@@ -988,15 +989,11 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
-	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present());
+	initTLSPolicy();
+
+	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present(), tlsPolicy, tlsParams);
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
-
-	initTLSOptions();
-
-#ifndef TLS_DISABLED
-	tlsOptions->register_network();
-#endif
 }
 
 void runNetwork() {
@@ -1440,7 +1437,7 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE ), cx->taskID ) ) ) {
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
-					
+
 					if (v.version >= version)
 						return v.version;
 					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version (causal consistency is not needed for this purpose)
@@ -1451,6 +1448,17 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 	} catch (Error& e) {
 		TraceEvent(SevError, "WaitForCommittedVersionError").error(e);
 		throw;
+	}
+}
+
+ACTOR Future<Version> getRawVersion( Database cx ) {
+	loop {
+		choose {
+			when ( wait( cx->onMasterProxiesChanged() ) ) {}
+			when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE ), cx->taskID ) ) ) {
+				return v.version;
+			}
+		}
 	}
 }
 
@@ -2134,6 +2142,10 @@ ACTOR Future<Void> watch( Reference<Watch> watch, Database cx, Transaction *self
 	return Void();
 }
 
+Future<Version> Transaction::getRawReadVersion() {
+	return ::getRawVersion(cx);
+}
+
 Future< Void > Transaction::watch( Reference<Watch> watch ) {
 	return ::watch(watch, cx, this);
 }
@@ -2395,8 +2407,10 @@ void Transaction::addWriteConflictRange( const KeyRangeRef& keys ) {
 
 double Transaction::getBackoff(int errCode) {
 	double b = backoff * deterministicRandom()->random01();
-	backoff = errCode == error_code_proxy_memory_limit_exceeded ? std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF) :
-				std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, options.maxBackoff);
+	backoff =
+	    errCode == error_code_proxy_memory_limit_exceeded
+	        ? std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF)
+	        : std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, options.maxBackoff);
 	return b;
 }
 
@@ -2418,6 +2432,9 @@ void TransactionOptions::reset(Database const& cx) {
 	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
 	sizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 	lockAware = cx->lockAware;
+	if (cx->apiVersionAtLeast(700)) {
+		includePort = true;
+	}
 }
 
 void Transaction::reset() {
@@ -2534,8 +2551,8 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 				} else {
 					Optional<Value> val = wait( tr.get( it->range().begin ) );
 					if( !val.present() || val.get() != m.setValue ) {
-						TraceEvent evt = TraceEvent(SevError, "CheckWritesFailed")
-							.detail("Class", "Set")
+						TraceEvent evt(SevError, "CheckWritesFailed");
+						evt.detail("Class", "Set")
 							.detail("Key", it->range().begin)
 							.detail("Expected", m.setValue);
 						if( !val.present() )
@@ -2603,19 +2620,18 @@ void Transaction::setupWatches() {
 
 ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> trLogInfo, CommitTransactionRequest req, Future<Version> readVersion, TransactionInfo info, Version* pCommittedVersion, Transaction* tr, TransactionOptions options) {
 	state TraceInterval interval( "TransactionCommit" );
-	state double startTime;
+	state double startTime = now();
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
-
-	if(CLIENT_BUGGIFY) {
-		throw deterministicRandom()->randomChoice(std::vector<Error>{
-				not_committed(),
-				transaction_too_old(),
-				proxy_memory_limit_exceeded(),
-				commit_unknown_result()});
-	}
-
 	try {
+		if(CLIENT_BUGGIFY) {
+			throw deterministicRandom()->randomChoice(std::vector<Error>{
+					not_committed(),
+					transaction_too_old(),
+					proxy_memory_limit_exceeded(),
+					commit_unknown_result()});
+		}
+
 		Version v = wait( readVersion );
 		req.transaction.read_snapshot = v;
 
@@ -2630,8 +2646,12 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		req.debugID = commitID;
 		state Future<CommitID> reply;
 		if (options.commitOnFirstProxy) {
-			const std::vector<MasterProxyInterface>& proxies = cx->clientInfo->get().proxies;
-			reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
+			if(cx->clientInfo->get().firstProxy.present()) {
+				reply = throwErrorOr ( brokenPromiseToMaybeDelivered ( cx->clientInfo->get().firstProxy.get().commit.tryGetReply(req) ) );
+			} else {
+				const std::vector<MasterProxyInterface>& proxies = cx->clientInfo->get().proxies;
+				reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
+			}
 		} else {
 			reply = loadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::commit, req, TaskPriority::DefaultPromiseEndpoint, true );
 		}
@@ -2644,6 +2664,9 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			when (CommitID ci = wait( reply )) {
 				Version v = ci.version;
 				if (v != invalidVersion) {
+					if (CLIENT_BUGGIFY) {
+						throw commit_unknown_result();
+					}
 					if (info.debugID.present())
 						TraceEvent(interval.end()).detail("CommittedVersion", v);
 					*pCommittedVersion = v;
@@ -2669,9 +2692,6 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->latencies.addSample(now() - tr->startTime);
 					if (trLogInfo)
 						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), req));
-					if (CLIENT_BUGGIFY) {
-						throw commit_unknown_result();
-					}
 					return Void();
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
@@ -2736,7 +2756,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			if (e.code() != error_code_transaction_too_old
 				&& e.code() != error_code_not_committed
 				&& e.code() != error_code_database_locked
-				&& e.code() != error_code_proxy_memory_limit_exceeded)
+				&& e.code() != error_code_proxy_memory_limit_exceeded
+				&& e.code() != error_code_batch_transaction_throttled)
 				TraceEvent(SevError, "TryCommitError").error(e);
 			if (trLogInfo)
 				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
@@ -3034,7 +3055,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 			}
 		}
 	} catch (Error& e) {
-		if( e.code() != error_code_broken_promise )
+		if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled)
 			TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
 		throw;
 	}
@@ -3052,14 +3073,14 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 	state PromiseStream<double> replyTimes;
 	state PromiseStream<Error> _errorStream;
 	state double batchTime = 0;
-
 	loop {
 		send_batch = false;
 		choose {
-			when(std::pair< Promise<GetReadVersionReply>, Optional<UID> > req = waitNext(versionStream)) {
+			when(std::pair<Promise<GetReadVersionReply>, Optional<UID>> req = waitNext(versionStream)) {
 				if (req.second.present()) {
-					if (!debugID.present())
+					if (!debugID.present()) {
 						debugID = nondeterministicRandom()->randomUniqueID();
+					}
 					g_traceBatch.addAttach("TransactionAttachID", req.second.get().first(), debugID.get().first());
 				}
 				requests.push_back(req.first);
@@ -3068,29 +3089,25 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 				else if (!timeout.isValid())
 					timeout = delay(batchTime, TaskPriority::ProxyGetConsistentReadVersion);
 			}
-			when(wait(timeout.isValid() ? timeout : Never())) {
-				send_batch = true;
-			}
+			when(wait(timeout.isValid() ? timeout : Never())) { send_batch = true; }
 			// dynamic batching monitors reply latencies
-			when(double reply_latency = waitNext(replyTimes.getFuture())){
+			when(double reply_latency = waitNext(replyTimes.getFuture())) {
 				double target_latency = reply_latency * 0.5;
 				batchTime = min(0.1 * target_latency + 0.9 * batchTime, CLIENT_KNOBS->GRV_BATCH_TIMEOUT);
 			}
-			when(wait(collection)){} // for errors
+			when(wait(collection)) {} // for errors
 		}
 		if (send_batch) {
 			int count = requests.size();
 			ASSERT(count);
-
 			// dynamic batching
 			Promise<GetReadVersionReply> GRVReply;
 			requests.push_back(GRVReply);
-			addActor.send(timeReply(GRVReply.getFuture(), replyTimes));
+			addActor.send(ready(timeReply(GRVReply.getFuture(), replyTimes)));
 
-			Future<Void> batch =
-				incrementalBroadcast(
-					getConsistentReadVersion(cx, count, flags, std::move(debugID)),
-					std::vector< Promise<GetReadVersionReply> >(std::move(requests)), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
+			Future<Void> batch = incrementalBroadcastWithError(
+			    getConsistentReadVersion(cx, count, flags, std::move(debugID)),
+			    std::vector<Promise<GetReadVersionReply>>(std::move(requests)), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 			debugID = Optional<UID>();
 			requests = std::vector< Promise<GetReadVersionReply> >();
 			addActor.send(batch);
@@ -3108,8 +3125,8 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Re
 	if(rep.locked && !lockAware)
 		throw database_locked();
 
-	if(rep.version > cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
-		cx->mvCacheInsertLocation = (cx->mvCacheInsertLocation + 1)%cx->metadataVersionCache.size();
+	if (rep.version > cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
+		cx->mvCacheInsertLocation = (cx->mvCacheInsertLocation + 1) % cx->metadataVersionCache.size();
 		cx->metadataVersionCache[cx->mvCacheInsertLocation] = std::make_pair(rep.version, rep.metadataVersion);
 	}
 
@@ -3135,6 +3152,14 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	return readVersion;
 }
 
+Optional<Version> Transaction::getCachedReadVersion() {
+	if (readVersion.isValid() && readVersion.isReady() && !readVersion.isError()) {
+		return readVersion.get();
+	} else {
+		return Optional<Version>();
+	}
+}
+
 Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 	if(committing.isValid()) {
 		return transaction_invalid_version();
@@ -3156,16 +3181,19 @@ Future<Void> Transaction::onError( Error const& e ) {
 		e.code() == error_code_commit_unknown_result ||
 		e.code() == error_code_database_locked ||
 		e.code() == error_code_proxy_memory_limit_exceeded ||
-		e.code() == error_code_process_behind)
+		e.code() == error_code_process_behind ||
+		e.code() == error_code_batch_transaction_throttled)
 	{
 		if(e.code() == error_code_not_committed)
 			++cx->transactionsNotCommitted;
-		if(e.code() == error_code_commit_unknown_result)
+		else if (e.code() == error_code_commit_unknown_result)
 			++cx->transactionsMaybeCommitted;
-		if (e.code() == error_code_proxy_memory_limit_exceeded)
+		else if (e.code() == error_code_proxy_memory_limit_exceeded)
 			++cx->transactionsResourceConstrained;
-		if (e.code() == error_code_process_behind)
+		else if (e.code() == error_code_process_behind)
 			++cx->transactionsProcessBehind;
+		else if (e.code() == error_code_batch_transaction_throttled)
+			++cx->transactionsThrottled;
 
 		double backoff = getBackoff(e.code());
 		reset();
@@ -3189,6 +3217,46 @@ Future<Void> Transaction::onError( Error const& e ) {
 
 	return e;
 }
+ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRangeRef keys);
+
+ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRangeRef keys, Reference<LocationInfo> locationInfo) {
+	loop {
+		try {
+			WaitMetricsRequest req(keys, StorageMetrics(), StorageMetrics());
+			req.min.bytes = 0;
+			req.max.bytes = -1;
+			StorageMetrics m = wait(
+			    loadBalance(locationInfo, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
+			return m;
+		} catch (Error& e) {
+			if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+				TraceEvent(SevError, "WaitStorageMetricsError").error(e);
+				throw;
+			}
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+			cx->invalidateCache(keys);
+			StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys));
+			return m;
+		}
+	}
+}
+
+ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRangeRef keys) {
+
+	vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
+	    cx, keys, std::numeric_limits<int>::max(), false, &StorageServerInterface::waitMetrics, TransactionInfo(TaskPriority::DataDistribution)));
+	state int nLocs = locations.size();
+	state vector<Future<StorageMetrics>> fx(nLocs);
+	state StorageMetrics total;
+	for (int i = 0; i < nLocs; i++) {
+		fx[i] = doGetStorageMetrics(cx, locations[i].first, locations[i].second);
+	}
+	wait(waitForAll(fx));
+	for (int i = 0; i < nLocs; i++) {
+		total += fx[i].get();
+	}
+	return total;
+}
 
 ACTOR Future<Void> trackBoundedStorageMetrics(
 	KeyRange keys,
@@ -3210,14 +3278,11 @@ ACTOR Future<Void> trackBoundedStorageMetrics(
 	}
 }
 
-ACTOR Future< StorageMetrics > waitStorageMetricsMultipleLocations(
-	vector< pair<KeyRange,Reference<LocationInfo>> > locations,
-	StorageMetrics min,
-	StorageMetrics max,
-	StorageMetrics permittedError)
-{
+ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(
+    vector<pair<KeyRange, Reference<LocationInfo>>> locations, StorageMetrics min, StorageMetrics max,
+    StorageMetrics permittedError) {
 	state int nLocs = locations.size();
-	state vector<Future<StorageMetrics>> fx( nLocs );
+	state vector<Future<StorageMetrics>> fx(nLocs);
 	state StorageMetrics total;
 	state PromiseStream<StorageMetrics> deltas;
 	state vector<Future<Void>> wx( fx.size() );
@@ -3225,17 +3290,17 @@ ACTOR Future< StorageMetrics > waitStorageMetricsMultipleLocations(
 	state StorageMetrics maxPlus = max + halfErrorPerMachine * (nLocs-1);
 	state StorageMetrics minMinus = min - halfErrorPerMachine * (nLocs-1);
 
-	for(int i=0; i<nLocs; i++) {
+	for (int i = 0; i < nLocs; i++) {
 		WaitMetricsRequest req(locations[i].first, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
 		req.max.bytes = -1;
-		fx[i] = loadBalance( locations[i].second, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution );
+		fx[i] =
+		    loadBalance(locations[i].second, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution);
 	}
-	wait( waitForAll(fx) );
+	wait(waitForAll(fx));
 
 	// invariant: true total is between (total-permittedError/2, total+permittedError/2)
-	for(int i=0; i<nLocs; i++)
-		total += fx[i].get();
+	for (int i = 0; i < nLocs; i++) total += fx[i].get();
 
 	if (!total.allLessOrEqual( maxPlus )) return total;
 	if (!minMinus.allLessOrEqual( total )) return total;
@@ -3251,29 +3316,38 @@ ACTOR Future< StorageMetrics > waitStorageMetricsMultipleLocations(
 	}
 }
 
-ACTOR Future< StorageMetrics > waitStorageMetrics(
+ACTOR Future< StorageMetrics > extractMetrics( Future<std::pair<Optional<StorageMetrics>, int>> fMetrics ) {
+	std::pair<Optional<StorageMetrics>, int> x = wait(fMetrics);
+	return x.first.get();
+}
+	
+ACTOR Future< std::pair<Optional<StorageMetrics>, int> > waitStorageMetrics(
 	Database cx,
 	KeyRange keys,
 	StorageMetrics min,
 	StorageMetrics max,
 	StorageMetrics permittedError,
-	int shardLimit )
+	int shardLimit,
+	int expectedShardCount )
 {
 	loop {
 		vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, shardLimit, false, &StorageServerInterface::waitMetrics, TransactionInfo(TaskPriority::DataDistribution) ) );
+		if(expectedShardCount >= 0 && locations.size() != expectedShardCount) {
+			return std::make_pair(Optional<StorageMetrics>(), locations.size());
+		}
 
 		//SOMEDAY: Right now, if there are too many shards we delay and check again later. There may be a better solution to this.
 		if(locations.size() < shardLimit) {
 			try {
 				Future<StorageMetrics> fx;
 				if (locations.size() > 1) {
-					fx = waitStorageMetricsMultipleLocations( locations, min, max, permittedError );
+					fx = waitStorageMetricsMultipleLocations(locations, min, max, permittedError);
 				} else {
 					WaitMetricsRequest req( keys, min, max );
 					fx = loadBalance( locations[0].second, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution );
 				}
 				StorageMetrics x = wait(fx);
-				return x;
+				return std::make_pair(x,-1);
 			} catch (Error& e) {
 				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
 					TraceEvent(SevError, "WaitStorageMetricsError").error(e);
@@ -3294,20 +3368,25 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 	}
 }
 
-Future< StorageMetrics > Transaction::waitStorageMetrics(
+Future< std::pair<Optional<StorageMetrics>, int> > Transaction::waitStorageMetrics(
 	KeyRange const& keys,
 	StorageMetrics const& min,
 	StorageMetrics const& max,
 	StorageMetrics const& permittedError,
-	int shardLimit )
+	int shardLimit,
+	int expectedShardCount )
 {
-	return ::waitStorageMetrics( cx, keys, min, max, permittedError, shardLimit );
+	return ::waitStorageMetrics( cx, keys, min, max, permittedError, shardLimit, expectedShardCount );
 }
 
 Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, int shardLimit ) {
-	StorageMetrics m;
-	m.bytes = -1;
-	return ::waitStorageMetrics( cx, keys, StorageMetrics(), m, StorageMetrics(), shardLimit );
+	if (shardLimit > 0) {
+		StorageMetrics m;
+		m.bytes = -1;
+		return extractMetrics(::waitStorageMetrics(cx, keys, StorageMetrics(), m, StorageMetrics(), shardLimit, -1));
+	} else {
+		return ::getStorageMetricsLargeKeyRange(cx, keys);
+	}
 }
 
 ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, KeyRange keys, StorageMetrics limit, StorageMetrics estimated )

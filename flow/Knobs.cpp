@@ -36,8 +36,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( DELAY_JITTER_OFFSET,                                 0.9 );
 	init( DELAY_JITTER_RANGE,                                  0.2 );
 	init( BUSY_WAIT_THRESHOLD,                                   0 ); // 1e100 == never sleep
-	init( CLIENT_REQUEST_INTERVAL,                             0.1 ); if( randomize && BUGGIFY ) CLIENT_REQUEST_INTERVAL = 1.0;
-	init( SERVER_REQUEST_INTERVAL,                             0.1 ); if( randomize && BUGGIFY ) SERVER_REQUEST_INTERVAL = 1.0;
+	init( CLIENT_REQUEST_INTERVAL,                             1.0 ); if( randomize && BUGGIFY ) CLIENT_REQUEST_INTERVAL = 2.0;
+	init( SERVER_REQUEST_INTERVAL,                             1.0 ); if( randomize && BUGGIFY ) SERVER_REQUEST_INTERVAL = 2.0;
 
 	init( REACTOR_FLAGS,                                         0 );
 
@@ -69,13 +69,21 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( RECONNECTION_TIME_GROWTH_RATE,                       1.2 );
 	init( RECONNECTION_RESET_TIME,                             5.0 );
 	init( CONNECTION_ACCEPT_DELAY,                             0.5 );
-	init( USE_OBJECT_SERIALIZER,                                 1 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
+	init( PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT,           3600.0 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
+	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );
+	init( TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT,             11.0 );
+	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
+	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               0 );
 
+	init( NETWORK_TEST_CLIENT_COUNT,                            30 );
 	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
+	init( NETWORK_TEST_REQUEST_COUNT,                            0 ); // 0 -> run forever
+	init( NETWORK_TEST_REQUEST_SIZE,                             1 );
+	init( NETWORK_TEST_SCRIPT_MODE,                          false );
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );
@@ -104,6 +112,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 
 	//GenericActors
 	init( BUGGIFY_FLOW_LOCK_RELEASE_DELAY,                     1.0 );
+	init( LOW_PRIORITY_DELAY_COUNT,                              5 );
 
 	//IAsyncFile
 	init( INCREMENTAL_DELETE_TRUNCATE_AMOUNT,                  5e8 ); //500MB
@@ -115,6 +124,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( SLOW_LOOP_CUTOFF,                          15.0 / 1000.0 );
 	init( SLOW_LOOP_SAMPLING_RATE,                             0.1 );
 	init( TSC_YIELD_TIME,                                  1000000 );
+	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
@@ -125,6 +135,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MIN_PACKET_BUFFER_FREE_BYTES,                        256 );
 	init( FLOW_TCP_NODELAY,                                      1 );
 	init( FLOW_TCP_QUICKACK,                                     0 );
+	init( UNRESTRICTED_HANDSHAKE_LIMIT,                         15 );
+	init( BOUNDED_HANDSHAKE_LIMIT,                             400 );
 
 	//Sim2
 	init( MIN_OPEN_TIME,                                    0.0002 );
@@ -136,6 +148,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( SLOW_NETWORK_LATENCY,                             100e-3 );
 	init( MAX_CLOGGING_LATENCY,                                  0 ); if( randomize && BUGGIFY ) MAX_CLOGGING_LATENCY =  0.1 * deterministicRandom()->random01();
 	init( MAX_BUGGIFIED_DELAY,                                   0 ); if( randomize && BUGGIFY ) MAX_BUGGIFIED_DELAY =  0.2 * deterministicRandom()->random01();
+	init( SIM_CONNECT_ERROR_MODE, deterministicRandom()->randomInt(0,3) );
 
 	//Tracefiles
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );

@@ -25,7 +25,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 
-#include "fdbrpc/crc32c.h"
+#include "flow/crc32c.h"
 
 #define NOMINMAX
 
@@ -34,8 +34,8 @@
 #include <stdlib.h>
 #include <random>
 #include <algorithm>
-#include "fdbrpc/Platform.h"
-#include "generated-constants.cpp"
+#include "flow/Platform.h"
+#include "crc32c-generated-constants.cpp"
 
 static uint32_t append_trivial(uint32_t crc, const uint8_t * input, size_t length)
 {

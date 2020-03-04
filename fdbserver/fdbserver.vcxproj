@@ -34,6 +34,8 @@
     <ActorCompiler Include="worker.actor.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ActorCompiler Include="BackupProgress.actor.cpp" />
+    <ActorCompiler Include="BackupWorker.actor.cpp" />
     <ActorCompiler Include="VersionedBTree.actor.cpp" />
     <ActorCompiler Include="Coordination.actor.cpp" />
     <ActorCompiler Include="CoordinatedState.actor.cpp" />
@@ -173,6 +175,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ApplyMetadataMutation.h" />
+    <ClInclude Include="BackupInterface.h" />
+    <ActorCompiler Include="BackupProgress.actor.h">
+          <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="ClusterRecruitmentInterface.h" />
     <ClInclude Include="ConflictSet.h" />
     <ClInclude Include="CoordinatedState.h" />

@@ -99,6 +99,7 @@ public:
 				case ProcessClass::DataDistributorClass: return false;
 				case ProcessClass::RatekeeperClass: return false;
 				case ProcessClass::StorageCacheClass: return false;
+				case ProcessClass::BackupClass: return false;
 				default: return false;
 			}
 		}
@@ -141,7 +142,7 @@ public:
 	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, TaskPriority taskID = TaskPriority::Zero ) = 0;
 	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, TaskPriority taskID = TaskPriority::Zero ) = 0;
 
-	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
+	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
 	                                const char* coordinationFolder) = 0;
 	virtual void killProcess( ProcessInfo* machine, KillType ) = 0;

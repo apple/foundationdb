@@ -420,6 +420,14 @@ public:
 		}
 	}
 
+	// Spaceship operator.  Treats not-present as less-than present.
+	int compare(Optional const & rhs) const {
+		if(present() == rhs.present()) {
+			return present() ? get().compare(rhs.get()) : 0;
+		}
+		return present() ? 1 : -1;
+	}
+
 	bool operator == (Optional const& o) const {
 		return present() == o.present() && (!present() || get() == o.get());
 	}
@@ -519,6 +527,10 @@ public:
 	}
 #endif
 
+	template <class U> Standalone<U> castTo() const {
+		return Standalone<U>(*this, arena());
+	}
+
 	template <class Archive>
 	void serialize(Archive& ar) {
 		// FIXME: something like BinaryReader(ar) >> arena >> *(T*)this; to guarantee standalone arena???
@@ -546,7 +558,9 @@ public:
 	constexpr static FileIdentifier file_identifier = 13300811;
 	StringRef() : data(0), length(0) {}
 	StringRef( Arena& p, const StringRef& toCopy ) : data( new (p) uint8_t[toCopy.size()] ), length( toCopy.size() ) {
-		memcpy( (void*)data, toCopy.data, length );
+		if (length > 0) {
+			memcpy((void*)data, toCopy.data, length);
+		}
 	}
 	StringRef( Arena& p, const std::string& toCopy ) : length( (int)toCopy.size() ) {
 		UNSTOPPABLE_ASSERT( toCopy.size() <= std::numeric_limits<int>::max());
@@ -554,7 +568,9 @@ public:
 		if (length) memcpy( (void*)data, &toCopy[0], length );
 	}
 	StringRef( Arena& p, const uint8_t* toCopy, int length ) : data( new (p) uint8_t[length] ), length(length) {
-		memcpy( (void*)data, toCopy, length );
+		if (length > 0) {
+			memcpy((void*)data, toCopy, length);
+		}
 	}
 	StringRef( const uint8_t* data, int length ) : data(data), length(length) {}
 	StringRef( const std::string& s ) : data((const uint8_t*)s.c_str()), length((int)s.size()) {
@@ -573,17 +589,25 @@ public:
 	bool startsWith( const StringRef& s ) const { return size() >= s.size() && !memcmp(begin(), s.begin(), s.size()); }
 	bool endsWith( const StringRef& s ) const { return size() >= s.size() && !memcmp(end()-s.size(), s.begin(), s.size()); }
 
-	StringRef withPrefix( const StringRef& prefix, Arena& arena ) const {
-		uint8_t* s = new (arena) uint8_t[ prefix.size() + size() ];
-		memcpy(s, prefix.begin(), prefix.size());
-		memcpy(s+prefix.size(), begin(), size());
-		return StringRef(s,prefix.size() + size());
+	StringRef withPrefix(const StringRef& prefix, Arena& arena) const {
+		uint8_t* s = new (arena) uint8_t[prefix.size() + size()];
+		if (prefix.size() > 0) {
+			memcpy(s, prefix.begin(), prefix.size());
+		}
+		if (size() > 0) {
+			memcpy(s + prefix.size(), begin(), size());
+		}
+		return StringRef(s, prefix.size() + size());
 	}
 
 	StringRef withSuffix( const StringRef& suffix, Arena& arena ) const {
 		uint8_t* s = new (arena) uint8_t[ suffix.size() + size() ];
-		memcpy(s, begin(), size());
-		memcpy(s+size(), suffix.begin(), suffix.size());
+		if (size() > 0) {
+			memcpy(s, begin(), size());
+		}
+		if (suffix.size() > 0) {
+			memcpy(s + size(), suffix.begin(), suffix.size());
+		}
 		return StringRef(s,suffix.size() + size());
 	}
 
@@ -644,9 +668,11 @@ public:
 
 	int expectedSize() const { return size(); }
 
-	int compare( StringRef const& other ) const {
-		int c = memcmp( begin(), other.begin(), std::min( size(), other.size() ) );
-		if (c!=0) return c;
+	int compare(StringRef const& other) const {
+		if (std::min(size(), other.size()) > 0) {
+			int c = memcmp(begin(), other.begin(), std::min(size(), other.size()));
+			if (c != 0) return c;
+		}
 		return size() - other.size();
 	}
 
@@ -782,17 +808,24 @@ struct dynamic_size_traits<StringRef> : std::true_type {
 	}
 };
 
-inline bool operator == (const StringRef& lhs, const StringRef& rhs ) {
+inline bool operator==(const StringRef& lhs, const StringRef& rhs) {
+	if (lhs.size() == 0 && rhs.size() == 0) {
+		return true;
+	}
 	return lhs.size() == rhs.size() && !memcmp(lhs.begin(), rhs.begin(), lhs.size());
 }
-inline bool operator < ( const StringRef& lhs, const StringRef& rhs ) {
-	int c = memcmp( lhs.begin(), rhs.begin(), std::min(lhs.size(), rhs.size()) );
-	if (c!=0) return c<0;
+inline bool operator<(const StringRef& lhs, const StringRef& rhs) {
+	if (std::min(lhs.size(), rhs.size()) > 0) {
+		int c = memcmp(lhs.begin(), rhs.begin(), std::min(lhs.size(), rhs.size()));
+		if (c != 0) return c < 0;
+	}
 	return lhs.size() < rhs.size();
 }
-inline bool operator > ( const StringRef& lhs, const StringRef& rhs ) {
-	int c = memcmp( lhs.begin(), rhs.begin(), std::min(lhs.size(), rhs.size()) );
-	if (c!=0) return c>0;
+inline bool operator>(const StringRef& lhs, const StringRef& rhs) {
+	if (std::min(lhs.size(), rhs.size()) > 0) {
+		int c = memcmp(lhs.begin(), rhs.begin(), std::min(lhs.size(), rhs.size()));
+		if (c != 0) return c > 0;
+	}
 	return lhs.size() > rhs.size();
 }
 inline bool operator != (const StringRef& lhs, const StringRef& rhs ) { return !(lhs==rhs); }
@@ -903,7 +936,9 @@ public:
 	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<memcpy_able<T2>::value, int>::type = 0)
 	  : VPS(toCopy), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()),
 	    m_capacity(toCopy.size()) {
-		memcpy(data, toCopy.data, m_size * sizeof(T));
+		if (m_size > 0) {
+			memcpy(data, toCopy.data, m_size * sizeof(T));
+		}
 	}
 
 	// Arena constructor for Ref types, which must have an Arena constructor
@@ -997,7 +1032,9 @@ public:
 	void append(Arena& p, const T* begin, int count) {
 		if (m_size + count > m_capacity) reallocate(p, m_size + count);
 		VPS::invalidate();
-		memcpy(data + m_size, begin, sizeof(T) * count);
+		if (count > 0) {
+			memcpy(data + m_size, begin, sizeof(T) * count);
+		}
 		m_size += count;
 	}
 	template <class It>
@@ -1062,7 +1099,9 @@ private:
 		requiredCapacity = std::max(m_capacity * 2, requiredCapacity);
 		// SOMEDAY: Maybe we are right at the end of the arena and can expand cheaply
 		T* newData = (T*)new (p) uint8_t[requiredCapacity * sizeof(T)];
-		memcpy(newData, data, m_size * sizeof(T));
+		if (m_size > 0) {
+			memcpy(newData, data, m_size * sizeof(T));
+		}
 		data = newData;
 		m_capacity = requiredCapacity;
 	}

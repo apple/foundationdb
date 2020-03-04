@@ -3,7 +3,7 @@
 #pragma once
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 620
+#define FDB_API_VERSION 700
 #endif
 
 #include <foundationdb/fdb_c.h>
@@ -32,23 +32,22 @@
 #define FDB_ERROR_ABORT -2
 #define FDB_ERROR_CONFLICT -3
 
-
 /* transaction specification */
 enum Operations {
-  OP_GETREADVERSION,
-  OP_GET,
-  OP_GETRANGE,
-  OP_SGET,
-  OP_SGETRANGE,
-  OP_UPDATE,
-  OP_INSERT,
-  OP_INSERTRANGE,
-  OP_CLEAR,
-  OP_SETCLEAR,
-  OP_CLEARRANGE,
-  OP_SETCLEARRANGE,
-  OP_COMMIT,
-  MAX_OP /* must be the last item */
+	OP_GETREADVERSION,
+	OP_GET,
+	OP_GETRANGE,
+	OP_SGET,
+	OP_SGETRANGE,
+	OP_UPDATE,
+	OP_INSERT,
+	OP_INSERTRANGE,
+	OP_CLEAR,
+	OP_SETCLEAR,
+	OP_CLEARRANGE,
+	OP_SETCLEARRANGE,
+	OP_COMMIT,
+	MAX_OP /* must be the last item */
 };
 
 #define OP_COUNT 0
@@ -57,27 +56,25 @@ enum Operations {
 
 /* for long arguments */
 enum Arguments {
-  ARG_KEYLEN,
-  ARG_VALLEN,
-  ARG_TPS,
-  ARG_COMMITGET,
-  ARG_SAMPLING,
-  ARG_VERSION,
-  ARG_KNOBS,
-  ARG_FLATBUFFERS,
-  ARG_TRACE,
-  ARG_TRACEPATH,
-  ARG_TPSMAX,
-  ARG_TPSMIN,
-  ARG_TPSINTERVAL,
-  ARG_TPSCHANGE
+	ARG_KEYLEN,
+	ARG_VALLEN,
+	ARG_TPS,
+	ARG_COMMITGET,
+	ARG_SAMPLING,
+	ARG_VERSION,
+	ARG_KNOBS,
+	ARG_FLATBUFFERS,
+	ARG_TRACE,
+	ARG_TRACEPATH,
+	ARG_TRACEFORMAT,
+	ARG_TPSMAX,
+	ARG_TPSMIN,
+	ARG_TPSINTERVAL,
+	ARG_TPSCHANGE,
+	ARG_TXNTRACE
 };
 
-enum TPSChangeTypes {
-  TPS_SIN,
-  TPS_SQUARE,
-  TPS_PULSE
-};
+enum TPSChangeTypes { TPS_SIN, TPS_SQUARE, TPS_PULSE };
 
 #define KEYPREFIX "mako"
 #define KEYPREFIXLEN 4
@@ -87,38 +84,40 @@ enum TPSChangeTypes {
  */
 
 typedef struct {
-  /* for each operation, it stores "count", "range" and "reverse" */
-  int ops[MAX_OP][3];
+	/* for each operation, it stores "count", "range" and "reverse" */
+	int ops[MAX_OP][3];
 } mako_txnspec_t;
 
 #define KNOB_MAX 256
 
 /* benchmark parameters */
 typedef struct {
-  int api_version;
-  int json;
-  int num_processes;
-  int num_threads;
-  int mode;
-  int rows; /* is 2 billion enough? */
-  int seconds;
-  int iteration;
-  int tpsmax;
-  int tpsmin;
-  int tpsinterval;
-  int tpschange;
-  int sampling;
-  int key_length;
-  int value_length;
-  int zipf;
-  int commit_get;
-  int verbose;
-  mako_txnspec_t txnspec;
-  char cluster_file[PATH_MAX];
-  int trace;
-  char tracepath[PATH_MAX];
-  char knobs[KNOB_MAX];
-  uint8_t flatbuffers;
+	int api_version;
+	int json;
+	int num_processes;
+	int num_threads;
+	int mode;
+	int rows; /* is 2 billion enough? */
+	int seconds;
+	int iteration;
+	int tpsmax;
+	int tpsmin;
+	int tpsinterval;
+	int tpschange;
+	int sampling;
+	int key_length;
+	int value_length;
+	int zipf;
+	int commit_get;
+	int verbose;
+	mako_txnspec_t txnspec;
+	char cluster_file[PATH_MAX];
+	int trace;
+	char tracepath[PATH_MAX];
+	int traceformat; /* 0 - XML, 1 - JSON */
+	char knobs[KNOB_MAX];
+	uint8_t flatbuffers;
+	int txntrace;
 } mako_args_t;
 
 /* shared memory */
@@ -127,34 +126,34 @@ typedef struct {
 #define SIGNAL_OFF 2
 
 typedef struct {
-  int signal;
-  int readycount;
-  double throttle_factor;
+	int signal;
+	int readycount;
+	double throttle_factor;
 } mako_shmhdr_t;
 
 typedef struct {
-  uint64_t xacts;
-  uint64_t conflicts;
-  uint64_t ops[MAX_OP];
-  uint64_t errors[MAX_OP];
-  uint64_t latency_samples[MAX_OP];
-  uint64_t latency_us_total[MAX_OP];
-  uint64_t latency_us_min[MAX_OP];
-  uint64_t latency_us_max[MAX_OP];
+	uint64_t xacts;
+	uint64_t conflicts;
+	uint64_t ops[MAX_OP];
+	uint64_t errors[MAX_OP];
+	uint64_t latency_samples[MAX_OP];
+	uint64_t latency_us_total[MAX_OP];
+	uint64_t latency_us_min[MAX_OP];
+	uint64_t latency_us_max[MAX_OP];
 } mako_stats_t;
 
 /* per-process information */
 typedef struct {
-  int worker_id;
-  FDBDatabase *database;
-  mako_args_t *args;
-  mako_shmhdr_t *shm;
+	int worker_id;
+	FDBDatabase* database;
+	mako_args_t* args;
+	mako_shmhdr_t* shm;
 } process_info_t;
 
 /* args for threads */
 typedef struct {
-  int thread_id;
-  process_info_t *process;
+	int thread_id;
+	process_info_t* process;
 } thread_args_t;
 
 /* process type */

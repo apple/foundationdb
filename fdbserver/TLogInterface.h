@@ -155,7 +155,7 @@ struct TLogPeekReply {
 	Version maxKnownVersion;
 	Version minKnownCommittedVersion;
 	Optional<Version> begin;
-	bool onlySpilled;
+	bool onlySpilled = false;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

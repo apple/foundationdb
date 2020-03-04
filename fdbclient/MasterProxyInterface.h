@@ -82,6 +82,7 @@ struct ClientDBInfo {
 	constexpr static FileIdentifier file_identifier = 5355080;
 	UID id;  // Changes each time anything else changes
 	vector< MasterProxyInterface > proxies;
+	Optional<MasterProxyInterface> firstProxy; //not serialized, used for commitOnFirstProxy when the proxies vector has been shrunk
 	double clientTxnInfoSampleRate;
 	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;
@@ -175,6 +176,7 @@ struct GetReadVersionRequest : TimedRequest {
 		PRIORITY_BATCH = 1 << 24
 	};
 	enum {
+		FLAG_USE_MIN_KNOWN_COMMITTED_VERSION = 4,
 		FLAG_USE_PROVISIONAL_PROXIES = 2,
 		FLAG_CAUSAL_READ_RISKY = 1,
 		FLAG_PRIORITY_MASK = PRIORITY_SYSTEM_IMMEDIATE,

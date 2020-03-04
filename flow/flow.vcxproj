@@ -13,6 +13,9 @@
   <ItemGroup>
     <ActorCompiler Include="ActorCollection.actor.cpp" />
     <ActorCompiler Include="CompressedInt.actor.cpp" />
+    <ClCompile Include="crc32c.cpp" />
+    <ClCompile Include="crc32c-generated-constants.cpp" />
+    <ClCompile Include="DeterministicRandom.cpp" />
     <ClCompile Include="Deque.cpp" />
     <ClCompile Include="Error.cpp" />
     <ClCompile Include="FastAlloc.cpp" />
@@ -48,6 +51,7 @@
     <ClCompile Include="version.cpp" />
     <ClCompile Include="SignalSafeUnwind.cpp" />
     <ClCompile Include="serialize.cpp" />
+    <ClCompile Include="TLSPolicy.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CompressedInt.h" />
@@ -55,6 +59,7 @@
     <ClInclude Include="actorcompiler.h" />
     <ClInclude Include="Arena.h" />
     <ClInclude Include="AsioReactor.h" />
+    <ClInclude Include="crc32c.h" />
     <ClInclude Include="Deque.h" />
     <ClInclude Include="DeterministicRandom.h" />
     <ClInclude Include="Error.h" />
@@ -91,6 +96,7 @@
     <ClInclude Include="Platform.h" />
     <ClInclude Include="ThreadSafeQueue.h" />
     <ClInclude Include="Trace.h" />
+    <ClInclude Include="TLSPolicy.h" />
     <ClInclude Include="SignalSafeUnwind.h" />
     <ClInclude Include="UnitTest.h" />
     <ActorCompiler Include="ThreadHelper.actor.h">

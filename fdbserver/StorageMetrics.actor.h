@@ -209,9 +209,11 @@ struct StorageServerMetrics {
 	// Notifies waiting WaitMetricsRequests through waitMetricsMap, and updates metricsAverageQueue and metricsSampleMap
 	void notify( KeyRef key, StorageMetrics& metrics ) {
 		ASSERT (metrics.bytes == 0); // ShardNotifyMetrics
-		TEST (metrics.bytesPerKSecond != 0); // ShardNotifyMetrics
-		TEST (metrics.iosPerKSecond != 0); // ShardNotifyMetrics
-		TEST(metrics.bytesReadPerKSecond != 0); // ShardNotifyMetrics
+		if (g_network->isSimulated()) {
+			TEST(metrics.bytesPerKSecond != 0); // ShardNotifyMetrics
+			TEST(metrics.iosPerKSecond != 0); // ShardNotifyMetrics
+			TEST(metrics.bytesReadPerKSecond != 0); // ShardNotifyMetrics
+		}
 
 		double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 
@@ -227,8 +229,28 @@ struct StorageServerMetrics {
 		if (!notifyMetrics.allZero()) {
 			auto& v = waitMetricsMap[key];
 			for(int i=0; i<v.size(); i++) {
-				TEST( true ); // ShardNotifyMetrics
+				if (g_network->isSimulated()) {
+					TEST(true);
+				}
+				// ShardNotifyMetrics
 				v[i].send( notifyMetrics );
+			}
+		}
+	}
+
+	// Due to the fact that read sampling will be called on all reads, use this specialized function to avoid overhead
+	// around branch misses and unnecessary stack allocation which eventually addes up under heavy load.
+	void notifyBytesReadPerKSecond(KeyRef key, int64_t in) {
+		double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
+		int64_t bytesReadPerKSecond =
+		    bytesReadSample.addAndExpire(key, in, expire) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+		if (bytesReadPerKSecond > 0) {
+			StorageMetrics notifyMetrics;
+			notifyMetrics.bytesReadPerKSecond = bytesReadPerKSecond;
+			auto& v = waitMetricsMap[key];
+			for (int i = 0; i < v.size(); i++) {
+				TEST(true); // ShardNotifyMetrics
+				v[i].send(notifyMetrics);
 			}
 		}
 	}
@@ -371,10 +393,10 @@ struct StorageServerMetrics {
 			    .detail("Load", rep.load.bytes);
 		}
 
-		rep.free.bytes = sb.free;
-		rep.free.iosPerKSecond = 10e6;
-		rep.free.bytesPerKSecond = 100e9;
-		rep.free.bytesReadPerKSecond = 100e9;
+		rep.available.bytes = sb.available;
+		rep.available.iosPerKSecond = 10e6;
+		rep.available.bytesPerKSecond = 100e9;
+		rep.available.bytesReadPerKSecond = 100e9;
 
 		rep.capacity.bytes = sb.total;
 		rep.capacity.iosPerKSecond = 10e6;

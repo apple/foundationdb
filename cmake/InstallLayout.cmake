@@ -79,6 +79,20 @@ function(install_symlink)
   endif()
 endfunction()
 
+function(symlink_files)
+  if (NOT WIN32)
+    set(options "")
+    set(one_value_options LOCATION SOURCE)
+    set(multi_value_options TARGETS)
+    cmake_parse_arguments(SYM "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
+
+    file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
+    foreach(component IN LISTS SYM_TARGETS)
+      execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${SYM_SOURCE} ${CMAKE_BINARY_DIR}/${SYM_LOCATION}/${component} WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/${SYM_LOCATION})
+    endforeach()
+  endif()
+endfunction()
+
 # 'map' from (destination, package) to path
 # format vars like install_destination_for_${destination}_${package}
 set(install_destination_for_bin_tgz "bin")
@@ -252,10 +266,24 @@ configure_file(${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_BINARY_DIR}/License.txt COPYO
 ################################################################################
 
 if(NOT FDB_RELEASE)
-  set(prerelease_string ".PRERELEASE")
+  if(CURRENT_GIT_VERSION)
+    set(git_string ".${CURRENT_GIT_VERSION}")
+  endif()
+  set(CPACK_RPM_PACKAGE_RELEASE 0)
+  set(prerelease_string "-0${git_string}.PRERELEASE")
+else()
+  set(CPACK_RPM_PACKAGE_RELEASE 1)
+  set(prerelease_string "-1")
 endif()
-set(clients-filename "foundationdb-clients-${PROJECT_VERSION}.${CURRENT_GIT_VERSION}${prerelease_string}")
-set(server-filename "foundationdb-server-${PROJECT_VERSION}.${CURRENT_GIT_VERSION}${prerelease_string}")
+
+
+# RPM filenames
+set(rpm-clients-filename "foundationdb-clients-${PROJECT_VERSION}${prerelease_string}")
+set(rpm-server-filename "foundationdb-server-${PROJECT_VERSION}${prerelease_string}")
+
+# Deb filenames
+set(deb-clients-filename "foundationdb-clients_${PROJECT_VERSION}${prerelease_string}")
+set(deb-server-filename "foundationdb-server_${PROJECT_VERSION}${prerelease_string}")
 
 ################################################################################
 # Configuration for RPM
@@ -269,15 +297,15 @@ set(CPACK_RPM_CLIENTS-EL7_PACKAGE_NAME "foundationdb-clients")
 set(CPACK_RPM_SERVER-EL6_PACKAGE_NAME "foundationdb-server")
 set(CPACK_RPM_SERVER-EL7_PACKAGE_NAME "foundationdb-server")
 
-set(CPACK_RPM_CLIENTS-EL6_FILE_NAME "${clients-filename}.el6.x86_64.rpm")
-set(CPACK_RPM_CLIENTS-EL7_FILE_NAME "${clients-filename}.el7.x86_64.rpm")
-set(CPACK_RPM_SERVER-EL6_FILE_NAME "${server-filename}.el6.x86_64.rpm")
-set(CPACK_RPM_SERVER-EL7_FILE_NAME "${server-filename}.el7.x86_64.rpm")
+set(CPACK_RPM_CLIENTS-EL6_FILE_NAME "${rpm-clients-filename}.el6.x86_64.rpm")
+set(CPACK_RPM_CLIENTS-EL7_FILE_NAME "${rpm-clients-filename}.el7.x86_64.rpm")
+set(CPACK_RPM_SERVER-EL6_FILE_NAME "${rpm-server-filename}.el6.x86_64.rpm")
+set(CPACK_RPM_SERVER-EL7_FILE_NAME "${rpm-server-filename}.el7.x86_64.rpm")
 
-set(CPACK_RPM_CLIENTS-EL6_DEBUGINFO_FILE_NAME "${clients-filename}.el6-debuginfo.x86_64.rpm")
-set(CPACK_RPM_CLIENTS-EL7_DEBUGINFO_FILE_NAME "${clients-filename}.el7-debuginfo.x86_64.rpm")
-set(CPACK_RPM_SERVER-EL6_DEBUGINFO_FILE_NAME "${server-filename}.el6-debuginfo.x86_64.rpm")
-set(CPACK_RPM_SERVER-EL7_DEBUGINFO_FILE_NAME "${server-filename}.el7-debuginfo.x86_64.rpm")
+set(CPACK_RPM_CLIENTS-EL6_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.el6-debuginfo.x86_64.rpm")
+set(CPACK_RPM_CLIENTS-EL7_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.el7-debuginfo.x86_64.rpm")
+set(CPACK_RPM_SERVER-EL6_DEBUGINFO_FILE_NAME "${rpm-server-filename}.el6-debuginfo.x86_64.rpm")
+set(CPACK_RPM_SERVER-EL7_DEBUGINFO_FILE_NAME "${rpm-server-filename}.el7-debuginfo.x86_64.rpm")
 
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir")
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION data COMPONENT server)
@@ -346,8 +374,8 @@ set(CPACK_RPM_SERVER-EL7_PACKAGE_REQUIRES
 # Configuration for DEB
 ################################################################################
 
-set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME "${clients-filename}_amd64.deb")
-set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME "${server-filename}_amd64.deb")
+set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME "${deb-clients-filename}_amd64.deb")
+set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME "${deb-server-filename}_amd64.deb")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
 set(CPACK_DEBIAN_PACKAGE_SECTION "database")
@@ -387,8 +415,8 @@ endif()
 ################################################################################
 
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
-set(CPACK_ARCHIVE_CLIENTS-TGZ_FILE_NAME "${clients-filename}.x86_64")
-set(CPACK_ARCHIVE_SERVER-TGZ_FILE_NAME "${server-filename}.x86_64")
+set(CPACK_ARCHIVE_CLIENTS-TGZ_FILE_NAME "${deb-clients-filename}.x86_64")
+set(CPACK_ARCHIVE_SERVER-TGZ_FILE_NAME "${deb-server-filename}.x86_64")
 
 ################################################################################
 # Server configuration

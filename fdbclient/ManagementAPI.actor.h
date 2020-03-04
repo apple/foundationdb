@@ -61,7 +61,8 @@ public:
 		NOT_ENOUGH_WORKERS,
 		REGION_REPLICATION_MISMATCH,
 		DCID_MISSING,
-		SUCCESS
+		LOCKED_NOT_NEW,
+		SUCCESS,
 	};
 };
 
@@ -146,7 +147,7 @@ ACTOR Future<Void> excludeServers( Database  cx, vector<AddressExclusion>  serve
 
 // Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given IP.  A NetworkAddress() means
 // all servers (don't exclude anything)
-ACTOR Future<Void> includeServers( Database  cx, vector<AddressExclusion>  servers );
+ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed = false);
 
 // Set the process class of processes with the given address.  A NetworkAddress with a port of 0 means all servers on the given IP.
 ACTOR Future<Void> setClass( Database  cx, AddressExclusion  server, ProcessClass  processClass );

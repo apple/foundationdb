@@ -68,6 +68,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "kvstore_available_bytes":12341234,
                   "kvstore_free_bytes":12341234,
                   "kvstore_total_bytes":12341234,
+                  "kvstore_total_size":12341234,
+                  "kvstore_total_nodes":12341234,
+                  "kvstore_inline_keys":12341234,
                   "durable_bytes":{
                      "hz":0.0,
                      "counter":0,
@@ -159,6 +162,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "$enum":[
                         "file_open_error",
                         "incorrect_cluster_file_contents",
+                        "trace_log_file_write_error",
+                        "trace_log_could_not_create_file",
+                        "trace_log_writer_thread_unresponsive",
                         "process_error",
                         "io_error",
                         "io_timeout",
@@ -396,7 +402,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                {
                   "name":{
                      "$enum":[
-                        "incorrect_cluster_file_contents"
+                        "incorrect_cluster_file_contents",
+                        "trace_log_file_write_error",
+                        "trace_log_could_not_create_file",
+                        "trace_log_writer_thread_unresponsive"
                      ]
                   },
                   "description":"Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally."
@@ -405,7 +414,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "description":"abc"
          }
       ],
-)statusSchema" R"statusSchema(
+)statusSchema"
+                                                          R"statusSchema(
       "recovery_state":{
          "required_resolvers":1,
          "required_proxies":1,
@@ -574,7 +584,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd-redwood-experimental",
              "memory",
              "memory-1",
-             "memory-2"
+             "memory-2",
+             "memory-radixtree-beta"
          ]},
          "coordinators_count":1,
          "excluded_servers":[
@@ -585,7 +596,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "auto_proxies":3,
          "auto_resolvers":1,
          "auto_logs":3,
-         "proxies":5
+         "proxies":5,
+         "backup_worker_enabled":1
       },
       "data":{
          "least_operating_space_bytes_log_server":0,

@@ -286,6 +286,11 @@ private:
 		} else {
 			return struct_offset_impl<RightAlign(o, fb_scalar_size<T>) + fb_scalar_size<T>, index - 1, Ts...>::offset;
 		}
+#ifdef __INTEL_COMPILER
+		// ICC somehow thinks that this method does not return
+		// see: https://software.intel.com/en-us/forums/intel-c-compiler/topic/799473
+		return 1;
+#endif
 	}
 
 public:
@@ -699,6 +704,8 @@ private:
 			} else {
 				load_<Alternative + 1>(type_tag, member);
 			}
+		} else {
+			member = std::decay_t<decltype(member)>{};
 		}
 	}
 };
@@ -809,6 +816,7 @@ struct LoadMember {
 		if constexpr (is_vector_of_union_like<Member>) {
 			if (!field_present()) {
 				i += 2;
+				member = std::decay_t<decltype(member)>{};
 				return;
 			}
 			const uint8_t* types_current = &message[vtable[i++]];
@@ -829,6 +837,8 @@ struct LoadMember {
 				if (types_current[i] > 0) {
 					uint8_t type_tag = types_current[i] - 1; // Flatbuffers indexes from 1.
 					(LoadAlternative<Context, union_like_traits<T>>{ context, current }).load(type_tag, value);
+				} else {
+					value = std::decay_t<decltype(value)>{};
 				}
 				*inserter = std::move(value);
 				++inserter;
@@ -837,6 +847,7 @@ struct LoadMember {
 		} else if constexpr (is_union_like<Member>) {
 			if (!field_present()) {
 				i += 2;
+				member = std::decay_t<decltype(member)>{};
 				return;
 			}
 			uint8_t fb_type_tag;
@@ -846,6 +857,8 @@ struct LoadMember {
 			if (field_present() && fb_type_tag > 0) {
 				(LoadAlternative<Context, union_like_traits<Member>>{ context, &message[vtable[i]] })
 				    .load(type_tag, member);
+			} else {
+				member = std::decay_t<decltype(member)>{};
 			}
 			++i;
 		} else if constexpr (_SizeOf<Member>::size == 0) {
@@ -853,6 +866,8 @@ struct LoadMember {
 		} else {
 			if (field_present()) {
 				load_helper(member, &message[vtable[i]], context);
+			} else {
+				member = std::decay_t<decltype(member)>{};
 			}
 			++i;
 		}
@@ -1040,10 +1055,10 @@ struct LoadSaveHelper<std::vector<bool, Alloc>, Context> : Context {
 		current += sizeof(uint32_t);
 		member.clear();
 		member.resize(length);
-		bool m;
+		uint8_t m;
 		for (uint32_t i = 0; i < length; ++i) {
 			load_helper(m, current, *this);
-			member[i] = m;
+			member[i] = m != 0;
 			current += fb_size<bool>;
 		}
 	}
@@ -1158,7 +1173,7 @@ struct NoFileIdentifier {};
 template <class T>
 struct EnsureTable
   : std::conditional_t<HasFileIdentifier<T>::value, detail::YesFileIdentifier<T>, detail::NoFileIdentifier> {
-	EnsureTable() = default;
+	EnsureTable() : t() {}
 	EnsureTable(const T& t) : t(t) {}
 	template <class Archive>
 	void serialize(Archive& ar) {
