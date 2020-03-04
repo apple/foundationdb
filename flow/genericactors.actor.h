@@ -669,7 +669,7 @@ class ReferencedObject : NonCopyable, public ReferenceCounted<ReferencedObject<V
 			value = v;
 		}
 
-		static Reference<ReferencedObject<V>> from(V v) {
+		static Reference<ReferencedObject<V>> from(V const& v) {
 			return Reference<ReferencedObject<V>>(new ReferencedObject<V>(v));
 		}
 	
