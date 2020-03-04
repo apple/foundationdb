@@ -553,8 +553,6 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			// Even though messages is empty, we still want to advance popVersion.
 			if (!self->endVersion.present()) {
 				popVersion = std::max(popVersion, self->minKnownCommittedVersion);
-			} else if (self->pullFinished()) {
-				popVersion = self->endVersion.get();
 			}
 		} else {
 			for (const auto& message : self->messages) {
@@ -564,7 +562,13 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 				numMsg++;
 			}
 		}
-		if (numMsg > 0 || (popVersion > lastPopVersion && self->pulling)) {
+		if (self->messages.empty() && self->pullFinished()) {
+			popVersion = self->endVersion.get();
+		}
+		if (numMsg > 0 || (popVersion > lastPopVersion && self->pulling) || self->pullFinished()) {
+			TraceEvent("BackupWorkerSave", self->myId)
+			    .detail("Version", popVersion)
+			    .detail("MsgQ", self->messages.size());
 			// save an empty file for old epochs so that log file versions are continuous
 			wait(saveMutationsToFile(self, popVersion, numMsg));
 			self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
