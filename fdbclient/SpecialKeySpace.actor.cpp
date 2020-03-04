@@ -114,8 +114,8 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			// limits handler
 			for (int i = pairs.size() - 1; i >= 0; --i) {
 				result.push_back_deep(result.arena(), pairs[i]);
-				// TODO : the behavior here is even the last kv makes bytes larger than specified,
-				// it is still returned and set limits.bytes to zero
+				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it is still returned
+				// In other words, the total size of the returned value (less the last entry) will be less than byteLimit
 				limits.decrement(pairs[i]);
 				if (limits.isReached()) return result;
 			}
@@ -130,8 +130,8 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			// limits handler
 			for (const KeyValueRef& kv : pairs) {
 				result.push_back_deep(result.arena(), kv);
-				// TODO : behavior here is even the last kv makes bytes larger than specified,
-				// it is still returned and set limits.bytes to zero
+				// Note : behavior here is even the last k-v pari makes total bytes larger than specified, it is still returned
+				// In other words, the total size of the returned value (less the last entry) will be less than byteLimit
 				limits.decrement(kv);
 				if (limits.isReached()) return result;
 			}
