@@ -1194,23 +1194,27 @@ std::cout << "    determine " << file.toString() << " , end " << end << "\n\n";
 	// Returns the end version such that [begin, end] is continuous.
 	// "logs" should be already sorted.
 	static Version getPartitionedLogsContinuousEndVersion(const std::vector<LogFile>& logs, Version begin) {
-		auto files = filterDuplicates(logs);
 std::cout << "getPartitionedLogsContinuousEndVersion begin:" << begin << "\n";
-for (auto file : files) std::cout << "    " << file.toString() << "\n";
+for (auto file : logs) std::cout << "    " << file.toString() << "\n";
 		Version end = 0;
 
 		std::map<int, std::vector<int>> tagIndices; // tagId -> indices in files
-		for (int i = 0; i < files.size(); i++) {
-			ASSERT(files[i].tagId >= 0 && files[i].tagId < files[i].totalTags);
-			auto& indices = tagIndices[files[i].tagId];
-			indices.push_back(i);
-			end = std::max(end, files[i].endVersion - 1);
+		for (int i = 0; i < logs.size(); i++) {
+			ASSERT(logs[i].tagId >= 0 && logs[i].tagId < logs[i].totalTags);
+			auto& indices = tagIndices[logs[i].tagId];
+			// filter out if indices.back() is subset of files[i]
+			if (!indices.empty() && logs[indices.back()].isSubset(logs[i])) {
+				indices.back() = i;
+			} else {
+				indices.push_back(i);
+			}
+			end = std::max(end, logs[i].endVersion - 1);
 		}
 std::cout << "Init end: " << end << ", begin " << begin << "\n";
 
 		// check tag 0 is continuous in [begin, end] and create a map of ranges to tags
 		std::map<std::pair<Version, Version>, int> tags; // range [start, end] -> tags
-		isContinuous(files, tagIndices[0], begin, end, &tags);
+		isContinuous(logs, tagIndices[0], begin, end, &tags);
 		if (tags.empty() || end <= begin) return 0;
 		end = std::min(end, tags.rbegin()->first.second);
 std::cout << "  Tag 0 end: " << end << "\n";
@@ -1222,7 +1226,7 @@ for (auto [p, v] : tags) std::cout<<"[" << p.first << ", " << p.second << "] " <
 			Version tagEnd = end; // This range's minimum continous tag version
 			for (int i = 1; i < count; i++) {
 				std::map<std::pair<Version, Version>, int> rangeTags;
-				isContinuous(files, tagIndices[i], beginEnd.first, beginEnd.second, &rangeTags);
+				isContinuous(logs, tagIndices[i], beginEnd.first, beginEnd.second, &rangeTags);
 				tagEnd = rangeTags.empty() ? 0 : std::min(tagEnd, rangeTags.rbegin()->first.second);
 std::cout << "  Tag " << i << " end: " << tagEnd << ", return end = "<< lastEnd << "\n";
 				if (tagEnd == 0) return lastEnd;
@@ -1264,10 +1268,12 @@ std::cout << "Return end = " << end << "\n\n";
 			// FIXME: check if there are tagged logs. for each tag, there is no version gap.
 			state std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion, partitioned));
 
-			// List logs in version order so log continuity can be analyzed
-			std::sort(logs.begin(), logs.end());
-
 			if (partitioned) {
+				// sort by tag ID so that filterDuplicates works.
+				std::sort(logs.begin(), logs.end(), [](const LogFile& a, const LogFile& b) {
+					return a.tagId < b.tagId || a.beginVersion < b.beginVersion || a.endVersion < b.endVersion;
+				});
+
 				// Remove duplicated log files that can happen for old epochs.
 				std::vector<LogFile> filtered = filterDuplicates(logs);
 
@@ -1277,6 +1283,9 @@ std::cout << "Return end = " << end << "\n\n";
 				}
 				return Optional<RestorableFileSet>();
 			}
+
+			// List logs in version order so log continuity can be analyzed
+			std::sort(logs.begin(), logs.end());
 
 			// If there are logs and the first one starts at or before the snapshot begin version then proceed
 			if(!logs.empty() && logs.front().beginVersion <= snapshot.get().beginVersion) {
