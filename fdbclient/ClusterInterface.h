@@ -93,6 +93,7 @@ struct ClientVersionRef {
 	}
 
 	ClientVersionRef(Arena &arena, ClientVersionRef const& cv) : clientVersion(arena, cv.clientVersion), sourceVersion(arena, cv.sourceVersion), protocolVersion(arena, cv.protocolVersion) {}
+	ClientVersionRef(StringRef clientVersion, StringRef sourceVersion, StringRef protocolVersion) : clientVersion(clientVersion), sourceVersion(sourceVersion), protocolVersion(protocolVersion) {}
 	ClientVersionRef(std::string versionString) {
 		size_t index = versionString.find(",");
 		if(index == versionString.npos) {
