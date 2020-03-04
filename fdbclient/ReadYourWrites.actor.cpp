@@ -21,7 +21,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/PrivateKeySpace.actor.h"
+#include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/Util.h"
@@ -1280,10 +1280,10 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		}
 	}
 
-	// start with simplest point, private key space are only allowed to query if both begin and end start with \xff\xff
-	const KeyRef privateKeyPrefix = systemKeys.end;
-	if (begin.getKey().startsWith(privateKeyPrefix) && end.getKey().startsWith(privateKeyPrefix))
-		return getDatabase()->privateKeySpace->getRange(Reference<ReadYourWritesTransaction>(this), begin, end, limits, snapshot, reverse);
+	// start with simplest point, special key space are only allowed to query if both begin and end start with \xff\xff
+	const KeyRef specialKeyPrefix = systemKeys.end;
+	if (begin.getKey().startsWith(specialKeyPrefix) && end.getKey().startsWith(specialKeyPrefix))
+		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>(this), begin, end, limits, snapshot, reverse);
 	
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();

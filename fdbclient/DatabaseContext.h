@@ -45,7 +45,7 @@ private:
 typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
 typedef MultiInterface<MasterProxyInterface> ProxyInfo;
 
-class PrivateKeySpace; //forward declaration
+class SpecialKeySpace; //forward declaration
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -207,7 +207,7 @@ public:
 	double detailedHealthMetricsLastUpdated;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
-	std::unique_ptr<PrivateKeySpace> privateKeySpace;
+	std::unique_ptr<SpecialKeySpace> specialKeySpace;
 };
 
 #endif

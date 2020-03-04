@@ -77,13 +77,13 @@
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
     </ActorCompiler>
     <ClInclude Include="Notified.h" />
-    <ActorCompiler Include="PrivateKeySpace.actor.h" />
     <ClInclude Include="ReadYourWrites.h" />
     <ActorCompiler Include="RunTransaction.actor.h" />
     <ClInclude Include="RYWIterator.h" />
     <ClInclude Include="Schemas.h" />
     <ClInclude Include="sha1\SHA1.h" />
     <ClInclude Include="SnapshotCache.h" />
+    <ActorCompiler Include="SpecialKeySpace.actor.h" />
     <ClInclude Include="Status.h" />
     <ClInclude Include="StatusClient.h" />
     <ClInclude Include="StorageServerInterface.h" />
@@ -124,13 +124,13 @@
     <ActorCompiler Include="ManagementAPI.actor.cpp" />
     <ActorCompiler Include="MultiVersionTransaction.actor.cpp" />
     <ActorCompiler Include="NativeAPI.actor.cpp" />
-    <ActorCompiler Include="PrivateKeySpace.actor.cpp" />
     <ActorCompiler Include="ReadYourWrites.actor.cpp" />
     <ClCompile Include="RYWIterator.cpp" />
     <ActorCompiler Include="StatusClient.actor.cpp" />
     <ClCompile Include="Schemas.cpp" />
     <ClCompile Include="SystemData.cpp" />
     <ClCompile Include="sha1\SHA1.cpp" />
+    <ActorCompiler Include="SpecialKeySpace.actor.cpp" />
     <ActorCompiler Include="ThreadSafeTransaction.actor.cpp" />
     <ActorCompiler Include="TaskBucket.actor.cpp" />
     <ClCompile Include="Subspace.cpp" />
