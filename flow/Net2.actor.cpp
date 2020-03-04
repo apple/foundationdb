@@ -954,8 +954,7 @@ void Net2::initTLS() {
 					sslContext.add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
 				}
 				catch (Error& e) {
-					fprintf(stderr, "Error reading CA file %s: %s\n", tlsParams.tlsCAPath.c_str(), e.what());
-					TraceEvent("Net2TLSReadCAError").error(e);
+					TraceEvent("Net2TLSReadCAError").error(e).detail("CAPath", tlsParams.tlsCAPath);
 					throw tls_error();
 				}
 			}
@@ -978,7 +977,6 @@ void Net2::initTLS() {
 			}
 		}
 	} catch(boost::system::system_error e) {
-		fprintf(stderr, "Error initializing TLS: %s\n", e.what());
 		TraceEvent("Net2TLSInitError").detail("Message", e.what());
 		throw tls_error();
 	}
