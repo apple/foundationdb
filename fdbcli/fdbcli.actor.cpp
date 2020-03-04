@@ -3658,30 +3658,33 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 			fdbcli_comp_cmd(line, completions);
 		},
 		[enabled=opt.cliHints](std::string const& line)->LineNoise::Hint {
-			if (enabled) {
-				bool error = false;
-				bool partial = false;
-				std::string linecopy = line;
-				std::vector<std::vector<StringRef>> parsed = parseLine(linecopy, error, partial);
-				if (parsed.size() == 0 || parsed.back().size() == 0) return LineNoise::Hint();
-				StringRef command = parsed.back().front();
-				int finishedParameters = parsed.back().size() + error;
-
-				// We don't want the hint to flip to parse error and back, e.g. while \" is being typed.
-				if (error && line.back() != '\\') return LineNoise::Hint(std::string(" {malformed escape sequence}"), 90, false);
-
-				auto iter = helpMap.find(command.toString());
-				if (iter != helpMap.end()) {
-					std::string helpLine = iter->second.usage;
-					std::vector<std::vector<StringRef>> parsedHelp = parseLine(helpLine, error, partial);
-					std::string hintLine = (*(line.end() - 1) == ' ' ? "" : " ");
-					for (int i = finishedParameters; i < parsedHelp.back().size(); i++) {
-						hintLine = hintLine + parsedHelp.back()[i].toString() + " ";
-					}
-					return LineNoise::Hint(hintLine, 90, false);
-				}
+			if (!enabled) {
+				return LineNoise::Hint();
 			}
-			return LineNoise::Hint();
+
+			bool error = false;
+			bool partial = false;
+			std::string linecopy = line;
+			std::vector<std::vector<StringRef>> parsed = parseLine(linecopy, error, partial);
+			if (parsed.size() == 0 || parsed.back().size() == 0) return LineNoise::Hint();
+			StringRef command = parsed.back().front();
+			int finishedParameters = parsed.back().size() + error;
+
+			// We don't want the hint to flip to parse error and back, e.g. while \" is being typed.
+			if (error && line.back() != '\\') return LineNoise::Hint(std::string(" {malformed escape sequence}"), 90, false);
+
+			auto iter = helpMap.find(command.toString());
+			if (iter != helpMap.end()) {
+				std::string helpLine = iter->second.usage;
+				std::vector<std::vector<StringRef>> parsedHelp = parseLine(helpLine, error, partial);
+				std::string hintLine = (*(line.end() - 1) == ' ' ? "" : " ");
+				for (int i = finishedParameters; i < parsedHelp.back().size(); i++) {
+					hintLine = hintLine + parsedHelp.back()[i].toString() + " ";
+				}
+				return LineNoise::Hint(hintLine, 90, false);
+			} else {
+				return LineNoise::Hint();
+			}
 		},
 		1000,
 		false);
