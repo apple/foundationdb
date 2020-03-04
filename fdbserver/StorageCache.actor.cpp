@@ -377,7 +377,7 @@ void validate(StorageCacheData* data, bool force = false) {
 			validateCacheRange(latest, allKeys, data->version.get(), data->thisServerID, data->oldestVersion.get());
 
 			data->debug_lastValidateTime = now();
-			TraceEvent(SevDebug, "SCValidationDone", data->thisServerID).detail("LastValidTime", data->debug_lastValidateTime);
+			//TraceEvent(SevDebug, "SCValidationDone", data->thisServerID).detail("LastValidTime", data->debug_lastValidateTime);
 		}
 	} catch (...) {
 		TraceEvent(SevError, "SCValidationFailure", data->thisServerID).detail("LastValidTime", data->debug_lastValidateTime);
@@ -468,10 +468,11 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 		state uint64_t changeCounter = data->cacheRangeChangeCounter;
 
 		if (data->cachedRangeMap[req.key]->notAssigned()) {
-			//TraceEvent("WrongCacheServer", data->thisServerID).detail("Key", req.key).detail("Version", version).detail("In", "getValueQ");
+			//TraceEvent(SevWarn, "WrongCacheServer", data->thisServerID).detail("Key", req.key).detail("ReqVersion", req.version).detail("DataVersion", data->version.get()).detail("In", "getValueQ");
 			throw wrong_shard_server();
 		} else if (!data->cachedRangeMap[req.key]->isReadable()) {
-			//TraceEvent("ColdCacheServer", data->thisServerID).detail("Key", req.key).detail("Version", version).detail("In", "getValueQ");
+			//TraceEvent(SevWarn, "ColdCacheServer", data->thisServerID).detail("Key", req.key).detail("IsAdding", data->cachedRangeMap[req.key]->isAdding())
+			//	.detail("ReqVersion", req.version).detail("DataVersion", data->version.get()).detail("In", "getValueQ");
 			throw future_version();
 		}
 
@@ -501,7 +502,8 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 		GetValueReply reply(v, true);
 		req.reply.send(reply);
 	} catch (Error& e) {
-		TraceEvent(SevError, "SCGetValueQError", data->thisServerID).detail("Code",e.code()).detail("ReqKey",req.key);
+		//TraceEvent(SevWarn, "SCGetValueQError", data->thisServerID).detail("Code",e.code()).detail("ReqKey",req.key)
+		//	.detail("ReqVersion", req.version).detail("DataVersion", data->version.get());
 		if(!canReplyWith(e))
 			throw;
 		req.reply.sendError(e);
@@ -746,7 +748,8 @@ ACTOR Future<Void> getKeyValues( StorageCacheData* data, GetKeyValuesRequest req
 			data->counters.rowsQueried += r.data.size();
 		}
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "SCGetKeyValuesError", data->thisServerID).detail("Code",e.code()).detail("ReqBegin", req.begin.getKey()).detail("ReqEnd", req.end.getKey());
+		TraceEvent(SevWarn, "SCGetKeyValuesError", data->thisServerID).detail("Code",e.code()).detail("ReqBegin", req.begin.getKey()).detail("ReqEnd", req.end.getKey())
+			.detail("ReqVersion", req.version).detail("DataVersion", data->version.get());
 		if(!canReplyWith(e))
 			throw;
 		req.reply.sendError(e);
@@ -1646,7 +1649,7 @@ ACTOR Future<Void> compactCache(StorageCacheData* data) {
 		//state Version oldestVersion = data->oldestVersion.get();
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		// Call the compaction routine that does the actual work,
-		TraceEvent(SevDebug, "SCCompactCache", data->thisServerID).detail("DesiredVersion", desiredVersion);
+		//TraceEvent(SevDebug, "SCCompactCache", data->thisServerID).detail("DesiredVersion", desiredVersion);
 		// TODO It's a synchronous function call as of now. Should it asynch?
 		data->mutableData().compact(desiredVersion);
 		Future<Void> finishedForgetting = data->mutableData().forgetVersionsBeforeAsync( desiredVersion,
@@ -1660,7 +1663,8 @@ ACTOR Future<Void> compactCache(StorageCacheData* data) {
 
 		// TODO what flowlock to acquire during compaction?
 		compactionInProgress.send(Void());
-		wait( delay(0, TaskPriority::CompactCache) ); //Setting compactionInProgess could cause the cache server to shut down, so delay to check for cancellation
+		wait(delay(2.0)); // we want to wait at least some small amount of time before
+		//wait( delay(0, TaskPriority::CompactCache) ); //Setting compactionInProgess could cause the cache server to shut down, so delay to check for cancellation
 	}
 }
 
