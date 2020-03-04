@@ -64,19 +64,18 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 			updateTagVersions(&tagVersions, &tags, progressIt->second, info.epochEnd, epoch);
 		} else {
 			auto rit = findPreviousProgress(epoch);
-			if (rit != progress.rend()) {
+			if (!(rit == progress.rend())) {
 				// A partial recovery can result in empty epoch that copies previous
 				// epoch's version range. In this case, we should check previous
 				// epoch's savedVersion.
 				int savedMore = 0;
 				for (auto [tag, version] : rit->second) {
-					if (version > info.epochBegin) {
+					if (version >= info.epochBegin) {
 						savedMore++;
 					}
 				}
-				if (savedMore > 1) {
-					ASSERT(savedMore == rit->second.size()); // all tags should saved more
-					ASSERT(savedMore == info.logRouterTags); // Smae number as logRouterTags
+				if (savedMore > 0) {
+					ASSERT(info.logRouterTags == rit->second.size()); // Same number as logRouterTags
 
 					updateTagVersions(&tagVersions, &tags, rit->second, info.epochEnd, epoch);
 				}
