@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.2.18
+======
+
+Features
+--------
+
+* Add support for setting knobs in fdbcli. `(PR #2773) <https://github.com/apple/foundationdb/pull/2773>`_.
+
 6.2.17
 ======
 
