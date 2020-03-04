@@ -79,6 +79,7 @@ struct BackupData {
 	std::vector<VersionedMessage> messages;
 	NotifiedVersion pulledVersion;
 	bool pulling = false;
+	bool stopped = false;
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
@@ -132,7 +133,7 @@ struct BackupData {
 	}
 
 	bool allMessageSaved() const {
-		return endVersion.present() && savedVersion >= endVersion.get();
+		return (endVersion.present() && savedVersion >= endVersion.get()) || stopped;
 	}
 
 	Version maxPopVersion() const {
@@ -559,7 +560,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 				numMsg++;
 			}
 		}
-		if (self->messages.empty() && self->pullFinished()) {
+		if (self->pullFinished()) {
 			popVersion = self->endVersion.get();
 		}
 		if (numMsg > 0 || (popVersion > lastPopVersion && self->pulling) || self->pullFinished()) {
@@ -717,6 +718,8 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection(addActor.getFuture());
 	state Future<Void> dbInfoChange = Void();
+	state Future<Void> pull;
+	state Future<Void> done;
 
 	TraceEvent("BackupWorkerStart", self.myId)
 	    .detail("Tag", req.routerTag.toString())
@@ -738,8 +741,8 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 		bool present = wait(monitorBackupStartedKeyChanges(&self, true, false));
 		TraceEvent("BackupWorkerWaitKey", self.myId).detail("Present", present);
 
-		addActor.send(monitorBackupKeyOrPullData(&self));
-		state Future<Void> done = uploadData(&self);
+		pull = monitorBackupKeyOrPullData(&self);
+		done = uploadData(&self);
 
 		loop choose {
 			when(wait(dbInfoChange)) {
@@ -768,9 +771,15 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 			when(wait(error)) {}
 		}
 	} catch (Error& e) {
-		TraceEvent("BackupWorkerTerminated", self.myId).error(e, true);
-		if (e.code() != error_code_actor_cancelled && e.code() != error_code_worker_removed) {
-			throw;
+		state Error err = e;
+		if (e.code() == error_code_worker_removed) {
+			pull = Void(); // cancels pulling
+			self.stopped = true;
+			wait(done);
+		}
+		TraceEvent("BackupWorkerTerminated", self.myId).error(err, true);
+		if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
+			throw err;
 		}
 	}
 	return Void();
