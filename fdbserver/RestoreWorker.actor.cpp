@@ -253,10 +253,10 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 	wait(delay(SERVER_KNOBS->FASTRESTORE_MONITOR_LEADER_DELAY));
 	TraceEvent("FastRestoreWorker", myWorkerInterf.id()).detail("MonitorLeader", "StartLeaderElection");
 	state int count = 0;
+	state RestoreWorkerInterface leaderInterf;
+	state ReadYourWritesTransaction tr(cx); // MX: Somewhere here program gets stuck
 	loop {
 		try {
-			state RestoreWorkerInterface leaderInterf;
-			state ReadYourWritesTransaction tr(cx); // MX: Somewhere here program gets stuck
 			count++;
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);

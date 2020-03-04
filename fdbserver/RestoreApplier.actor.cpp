@@ -228,7 +228,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	}
 
 	ASSERT(fValues.size() == incompleteStagingKeys.size());
-	int i = 0;
+	i = 0;
 	for (auto& key : incompleteStagingKeys) {
 		if (!fValues[i].get().present()) {
 			TraceEvent(SevWarnAlways, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
