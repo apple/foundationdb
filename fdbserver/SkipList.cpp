@@ -608,8 +608,8 @@ private:
 		bool* result;
 		int state;
 		int indexInTx;
-		VectorRef<int>* conflictingKeyRange; // null if report_conflicting_keys is not enabled.
-		Arena* cKRArena; // null if report_conflicting_keys is not enabled.
+		VectorRef<int>* conflictingKeyRange; // nullptr if report_conflicting_keys is not enabled.
+		Arena* cKRArena; // nullptr if report_conflicting_keys is not enabled.
 
 		void init( const ReadConflictRange& r, Node* header, bool* tCS, int indexInTx, VectorRef<int>* cKR, Arena* cKRArena) {
 			this->start.init( r.begin, header );

@@ -47,7 +47,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		    getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("ReportConflictingKeysWorkload"))
 		        .toString());
 		keyBytes = getOption(options, LiteralStringRef("keyBytes"), 16);
-		
+
 		readConflictRangeCount = getOption(options, LiteralStringRef("readConflictRangeCountPerTx"), 1);
 		writeConflictRangeCount = getOption(options, LiteralStringRef("writeConflictRangeCountPerTx"), 1);
 		// modeled by geometric distribution: (1 - prob) / prob = mean
@@ -59,10 +59,9 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		// used for generating keyPrefix
 		keyPrefixBytes = getOption(options, LiteralStringRef("keyPrefixBytes"), 0);
 		if (keyPrefixBytes) {
-			prefixCount = 255 * std::round(std::exp2(8*(keyPrefixBytes-1)));
+			prefixCount = 255 * std::round(std::exp2(8 * (keyPrefixBytes - 1)));
 			ASSERT(keyPrefixBytes + 16 <= keyBytes);
-		}
-		else {
+		} else {
 			ASSERT(keyPrefix.size() + 16 <= keyBytes); // make sure the string format is valid
 		}
 		nodeCountPerPrefix = getOption(options, LiteralStringRef("nodeCountPerPrefix"), 100);
@@ -106,12 +105,13 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		double p = (double)n / nodeCountPerPrefix;
 		int paddingLen = keyBytes - 16 - keyPrefixBytes;
 		// left padding by zero
-		return StringRef(format("%0*llx", paddingLen, *(uint64_t*)&p)).withPrefix( prefixIdx >= 0 ? keyPrefixForIndex( prefixIdx) : keyPrefix);
+		return StringRef(format("%0*llx", paddingLen, *(uint64_t*)&p))
+		    .withPrefix(prefixIdx >= 0 ? keyPrefixForIndex(prefixIdx) : keyPrefix);
 	}
 
 	Key keyPrefixForIndex(uint64_t n) {
 		Key prefix = makeString(keyPrefixBytes);
-		uint8_t * head = mutateString(prefix);
+		uint8_t* head = mutateString(prefix);
 		memset(head, 0, keyPrefixBytes);
 		int offset = keyPrefixBytes - 1;
 		while (n) {
@@ -182,29 +182,30 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 				if (!self->skipCorrectnessCheck && self->reportConflictingKeys && isConflict) {
 					const KeyRef conflictingKeysPreifx = LiteralStringRef("\xff\xff/transaction/conflicting_keys/");
 					state KeyRange ckr = KeyRangeRef(LiteralStringRef("").withPrefix(conflictingKeysPreifx),
-						LiteralStringRef("\xff").withPrefix(conflictingKeysPreifx));
-					// The getRange here using the special key prefix "\xff\xff/transaction/conflicting_keys/" happens locally
-					// Thus, the error handling is not needed here
-					Future<Standalone<RangeResultRef>> conflictingKeyRangesFuture = tr.getRange(ckr, readConflictRanges.size() * 2);
+					                                 LiteralStringRef("\xff").withPrefix(conflictingKeysPreifx));
+					// The getRange here using the special key prefix "\xff\xff/transaction/conflicting_keys/" happens
+					// locally Thus, the error handling is not needed here
+					Future<Standalone<RangeResultRef>> conflictingKeyRangesFuture =
+					    tr.getRange(ckr, readConflictRanges.size() * 2);
 					ASSERT(conflictingKeyRangesFuture.isReady());
 					const Standalone<RangeResultRef> conflictingKeyRanges = conflictingKeyRangesFuture.get();
-					ASSERT( conflictingKeyRanges.size() && ( conflictingKeyRanges.size() % 2 == 0 ) );
+					ASSERT(conflictingKeyRanges.size() && (conflictingKeyRanges.size() % 2 == 0));
 					for (int i = 0; i < conflictingKeyRanges.size(); i += 2) {
 						KeyValueRef startKeyWithPreifx = conflictingKeyRanges[i];
 						ASSERT(startKeyWithPreifx.value == conflictingKeysTrue);
-						KeyValueRef endKeyWithPrefix = conflictingKeyRanges[i+1];
-						ASSERT(endKeyWithPrefix.value ==  conflictingKeysFalse);
+						KeyValueRef endKeyWithPrefix = conflictingKeyRanges[i + 1];
+						ASSERT(endKeyWithPrefix.value == conflictingKeysFalse);
 						// Remove the prefix of returning keys
 						Key startKey = startKeyWithPreifx.key.removePrefix(conflictingKeysPreifx);
 						Key endKey = endKeyWithPrefix.key.removePrefix(conflictingKeysPreifx);
 						KeyRangeRef kr = KeyRangeRef(startKey, endKey);
 						if (!std::any_of(readConflictRanges.begin(), readConflictRanges.end(), [&kr](KeyRange rCR) {
-								// Read_conflict_range remains same in the resolver.
-								// Thus, the returned keyrange is either the original read_conflict_range or merged
-								// by several overlapped ones In either case, it contains at least one original
-								// read_conflict_range
-								return kr.contains(rCR);
-							})) {
+							    // Read_conflict_range remains same in the resolver.
+							    // Thus, the returned keyrange is either the original read_conflict_range or merged
+							    // by several overlapped ones In either case, it contains at least one original
+							    // read_conflict_range
+							    return kr.contains(rCR);
+						    })) {
 							++self->invalidReports;
 							TraceEvent(SevError, "TestFailure").detail("Reason", "InvalidKeyRangeReturned");
 						}
