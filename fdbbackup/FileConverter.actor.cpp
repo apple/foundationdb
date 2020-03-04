@@ -81,10 +81,10 @@ std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, Vers
 	std::vector<LogFile> sorted;
 	int i = 0;
 	for (int j = 1; j < filtered.size(); j++) {
-		if (!filtered[i].sameContent(filtered[j])) {
+		if (!filtered[i].isSubset(filtered[j])) {
 			sorted.push_back(filtered[i]);
-			i = j;
 		}
+		i = j;
 	}
 	if (i < filtered.size()) {
 		sorted.push_back(filtered[i]);

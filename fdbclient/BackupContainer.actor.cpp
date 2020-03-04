@@ -1155,16 +1155,19 @@ std::cout << "lastBegin " << lastBegin << ", lastEnd " << lastEnd << ", end " <<
 		return true;
 	}
 
-	// Returns log files that are not duplicated.
+	// Returns log files that are not duplicated, or subset of another log.
+	// If a log file's progress is not saved, a new log file will be generated
+	// with the same begin version. So we can have a file that contains a subset
+	// of contents in another log file.
 	// PRE-CONDITION: logs are already sorted.
 	static std::vector<LogFile> filterDuplicates(const std::vector<LogFile>& logs) {
 		std::vector<LogFile> filtered;
 		int i = 0;
 		for (int j = 1; j < logs.size(); j++) {
-			if (!logs[i].sameContent(logs[j])) {
+			if (!logs[i].isSubset(logs[j])) {
 				filtered.push_back(logs[i]);
-				i = j;
 			}
+			i = j;
 		}
 		if (i < logs.size()) filtered.push_back(logs[i]);
 		return filtered;
@@ -1180,7 +1183,7 @@ std::cout << "lastBegin " << lastBegin << ", lastEnd " << lastEnd << ", end " <<
 			Version end = getPartitionedLogsContinuousEndVersion(logs, file.beginVersion);
 std::cout << "    determine " << file.toString() << " , end " << end << "\n\n";
 			if (end > file.beginVersion) {
-				desc->minLogBegin = file.beginVersion;
+				// desc->minLogBegin = file.beginVersion;
 				// contiguousLogEnd is not inclusive, so +1 here.
 				desc->contiguousLogEnd.get() = end + 1;
 				return;

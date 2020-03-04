@@ -82,9 +82,10 @@ struct LogFile {
 		return beginVersion == rhs.beginVersion ? endVersion < rhs.endVersion : beginVersion < rhs.beginVersion;
 	}
 
-	// Returns if two log files have the same content by comparing version range and tag ID.
-	bool sameContent(const LogFile& rhs) const {
-		return beginVersion == rhs.beginVersion && endVersion == rhs.endVersion && tagId == rhs.tagId;
+	// Returns if this log file contains a subset of content of the given file
+	// by comparing version range and tag ID.
+	bool isSubset(const LogFile& rhs) const {
+		return beginVersion == rhs.beginVersion && endVersion <= rhs.endVersion && tagId == rhs.tagId;
 	}
 
 	std::string toString() const {
