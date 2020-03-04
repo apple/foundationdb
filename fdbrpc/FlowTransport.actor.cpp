@@ -988,6 +988,7 @@ ACTOR static Future<Void> connectionIncoming( TransportData* self, Reference<ICo
 ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr ) {
 	state ActorCollectionNoErrors incoming;  // Actors monitoring incoming connections that haven't yet been associated with a peer
 	state Reference<IListener> listener = INetworkConnections::net()->listen( listenAddr );
+	state int64_t connectionCount = 0;
 	try {
 		loop {
 			Reference<IConnection> conn = wait( listener->accept() );
@@ -997,7 +998,10 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 					.detail("ListenAddress", listenAddr.toString());
 				incoming.add( connectionIncoming(self, conn) );
 			}
-			wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskPriority::WriteSocket));
+			connectionCount++;
+			if( connectionCount%(FLOW_KNOBS->ACCEPT_BATCH_SIZE) == 0 ) {
+				wait(delay(0, TaskPriority::AcceptSocket));
+			}
 		}
 	} catch (Error& e) {
 		TraceEvent(SevError, "ListenError").error(e);
