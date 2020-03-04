@@ -204,6 +204,7 @@ Future<Void> dataDistributionQueue(
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes,
 	UID const& distributorId,
 	int const& teamSize,
+	int const& singleRegionTeamSize,
 	double* const& lastLimited);
 
 //Holds the permitted size and IO Bounds for a shard
