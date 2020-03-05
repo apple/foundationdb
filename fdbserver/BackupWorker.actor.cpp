@@ -451,7 +451,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	}
 
 	for (auto it = self->backups.begin(); it != self->backups.end();) {
-		if (!it->second.container.get().present()) {
+		if (it->second.stopped || !it->second.container.get().present()) {
 			TraceEvent("BackupWorkerNoContainer", self->myId).detail("BackupId", it->first);
 			it = self->backups.erase(it);
 			continue;
@@ -563,7 +563,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		if (self->pullFinished()) {
 			popVersion = self->endVersion.get();
 		}
-		if (numMsg > 0 || (popVersion > lastPopVersion && self->pulling) || self->pullFinished()) {
+		if (((numMsg > 0 || popVersion > lastPopVersion) && self->pulling) || self->pullFinished()) {
 			TraceEvent("BackupWorkerSave", self->myId)
 			    .detail("Version", popVersion)
 			    .detail("MsgQ", self->messages.size());
@@ -571,6 +571,8 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			wait(saveMutationsToFile(self, popVersion, numMsg));
 			self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
 		}
+
+		// If transition into NOOP mode, should clear messages
 
 		if (popVersion > self->savedVersion) {
 			wait(saveProgress(self, popVersion));
