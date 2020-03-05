@@ -306,6 +306,9 @@ bool canLaunch( RelocateData & relocation, int teamSize, int singleRegionTeamSiz
 	// find the "workFactor" for this, were it launched now
 	int workFactor = getWorkFactor( relocation, singleRegionTeamSize );
 	int neededServers = std::min<int>( relocation.src.size(), teamSize - singleRegionTeamSize + 1 );
+	if(SERVER_KNOBS->USE_OLD_NEEDED_SERVERS) {
+		neededServers = std::max( 1, (int)relocation.src.size() - teamSize + 1 );
+	}
 	// see if each of the SS can launch this task
 	for( int i = 0; i < relocation.src.size(); i++ ) {
 		// For each source server for this relocation, copy and modify its busyness to reflect work that WOULD be cancelled
