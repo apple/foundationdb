@@ -373,6 +373,8 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 
 	loop {
 		try {
+			// It's critical to save progress immediately so that after a master
+			// recovery, the new master can know the progress so far.
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -466,7 +468,6 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		    it->second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id, self->totalTags));
 		it++;
 	}
-	ASSERT(!activeUids.empty());
 
 	keyRangeMap.coalesce(allKeys);
 	wait(waitForAll(logFileFutures));

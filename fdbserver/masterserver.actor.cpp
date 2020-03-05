@@ -1241,6 +1241,9 @@ ACTOR Future<Void> configurationMonitor(Reference<MasterData> self, Database cx)
 ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Database cx) {
 	ASSERT(self->backupWorkers.size() > 0);
 
+	// Avoid race between a backup worker's save progress and the reads below.
+	wait(delay(SERVER_KNOBS->SECONDS_BEFORE_RECRUIT_BACKUP_WORKER));
+
 	state LogEpoch epoch = self->cstate.myDBState.recoveryCount;
 	state Reference<BackupProgress> backupProgress(
 	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochTagsVersionsInfo()));
