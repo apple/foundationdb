@@ -1181,10 +1181,12 @@ void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::
 	
 	for (int i = 0; i < transactionCount; i++)
 	{
-		if (!transactionConflictStatus[i])
-			nonConflicting.push_back( i );
-		if (tooOldTransactions && transactionInfo[i]->tooOld)
+		if (tooOldTransactions && transactionInfo[i]->tooOld) {
 			tooOldTransactions->push_back(i);
+		}
+		else if (!transactionConflictStatus[i]) {
+			nonConflicting.push_back( i );
+		}
 	}
 
 	delete[] transactionConflictStatus;

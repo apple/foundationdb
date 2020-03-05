@@ -174,8 +174,6 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	SO_END_OF_OPTIONS
 };
 
-GlobalCounters g_counters;
-
 extern void dsltest();
 extern void pingtest();
 extern void copyTest();
