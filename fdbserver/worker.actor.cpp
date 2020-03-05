@@ -41,7 +41,6 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"
-#include "flow/ThreadHelper.actor.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -747,45 +746,9 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFol
 	return Void();
 }
 
-ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::set<std::string>>>> issues) {
-	state bool pingTimeout = false;
-	loop {
-		wait(delay(SERVER_KNOBS->TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS));
-		ThreadFuture<Void> f(new ThreadSingleAssignmentVar<Void>);
-		Reference<CompletionCallback<Void>> callback =
-		    Reference<CompletionCallback<Void>>(new CompletionCallback<Void>(f));
-		callback->self = callback;
-		f.callOrSetAsCallback(callback.getPtr(), callback->userParam, 0);
-		pingTraceLogWriterThread(f);
-		try {
-			wait(timeoutError(callback->promise.getFuture(), SERVER_KNOBS->TRACE_LOG_PING_TIMEOUT_SECONDS));
-		} catch (Error& e) {
-			if (e.code() == error_code_timed_out) {
-				pingTimeout = true;
-			} else {
-				throw;
-			}
-		}
-		if (issues.present()) {
-			std::set<std::string> _issues;
-			retriveTraceLogIssues(_issues);
-			if (pingTimeout) {
-				// Ping trace log writer thread timeout.
-				_issues.insert("trace_log_writer_thread_unresponsive");
-				pingTimeout = false;
-			}
-			issues.get()->set(_issues);
-		}
-	}
-}
-
-// TODO: `issues` is right now only updated by `monitorTraceLogIssues` and thus is being `set` on every update.
-// It could be changed to `insert` and `trigger` later if we want to use it as a generic way for the caller of this
-// function to report issues to cluster controller.
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                        Reference<ClusterConnectionFile> connFile, LocalityData locality,
-                                       Reference<AsyncVar<ServerDBInfo>> dbInfo,
-                                       Optional<Reference<AsyncVar<std::set<std::string>>>> issues) {
+                                       Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	// Initially most of the serverDBInfo is not known, but we know our locality right away
 	ServerDBInfo localInfo;
 	localInfo.myLocality = locality;
@@ -795,12 +758,6 @@ ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterContro
 	loop {
 		GetServerDBInfoRequest req;
 		req.knownServerInfoID = dbInfo->get().id;
-
-		if (issues.present()) {
-			for (auto const& i : issues.get()->get()) {
-				req.issues.push_back_deep(req.issues.arena(), i);
-			}
-		}
 
 		ClusterConnectionString fileConnectionString;
 		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
@@ -845,7 +802,6 @@ ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterContro
 				if(ccInterface->get().present())
 					TraceEvent("GotCCInterfaceChange").detail("CCID", ccInterface->get().get().id()).detail("CCMachine", ccInterface->get().get().getWorkers.getEndpoint().getPrimaryAddress());
 			}
-			when(wait(issues.present() ? issues.get()->onChange() : Never())) {}
 		}
 	}
 }
@@ -914,8 +870,6 @@ ACTOR Future<Void> workerServer(
 	state WorkerInterface interf( locality );
 	interf.initEndpoints();
 
-	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
-
 	folder = abspath(folder);
 
 	if(metricsPrefix.size() > 0) {
@@ -935,8 +889,7 @@ ACTOR Future<Void> workerServer(
 	errorForwarders.add( resetAfter(degraded, SERVER_KNOBS->DEGRADED_RESET_INTERVAL, false, SERVER_KNOBS->DEGRADED_WARNING_LIMIT, SERVER_KNOBS->DEGRADED_WARNING_RESET_DELAY, "DegradedReset"));
 	errorForwarders.add( loadedPonger( interf.debugPing.getFuture() ) );
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
-	errorForwarders.add(monitorTraceLogIssues(issues));
-	errorForwarders.add(monitorServerDBInfo(ccInterface, connFile, locality, dbInfo, issues));
+	errorForwarders.add(monitorServerDBInfo(ccInterface, connFile, locality, dbInfo));
 	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo, locality ) );
 	errorForwarders.add(monitorHighMemory(memoryProfileThreshold));
 
