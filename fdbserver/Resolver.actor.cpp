@@ -172,7 +172,6 @@ ACTOR Future<Void> resolveBatch(
 
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
-		double tstart = timer();
 		ConflictBatch conflictBatch( self->conflictSet );
 		int keys = 0;
 		for(int t=0; t<req.transactions.size(); t++) {
