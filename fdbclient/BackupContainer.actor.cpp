@@ -25,7 +25,7 @@
 #include "flow/UnitTest.h"
 #include "flow/Hash3.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
-#include "fdbrpc/Platform.h"
+#include "flow/Platform.h"
 #include "fdbclient/AsyncFileBlobStore.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"

@@ -34,7 +34,7 @@
 #include <stdlib.h>
 #include <random>
 #include <algorithm>
-#include "fdbrpc/Platform.h"
+#include "flow/Platform.h"
 #include "crc32c-generated-constants.cpp"
 
 static uint32_t append_trivial(uint32_t crc, const uint8_t * input, size_t length)

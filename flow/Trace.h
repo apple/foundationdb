@@ -27,7 +27,6 @@
 #include <stdint.h>
 #include <string>
 #include <map>
-#include <set>
 #include <type_traits>
 #include "flow/IRandom.h"
 #include "flow/Error.h"
@@ -529,16 +528,6 @@ struct ITraceLogFormatter {
 	virtual void delref() = 0;
 };
 
-struct ITraceLogIssuesReporter {
-	virtual void addIssue(std::string issue) = 0;
-	virtual void resolveIssue(std::string issue) = 0;
-
-	virtual void retrieveIssues(std::set<std::string>& out) = 0;
-
-	virtual void addref() = 0;
-	virtual void delref() = 0;
-};
-
 struct TraceInterval {
 	TraceInterval( const char* type ) : count(-1), type(type), severity(SevInfo) {}
 
@@ -597,10 +586,6 @@ bool validateTraceClockSource(std::string source);
 
 void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
-void retriveTraceLogIssues(std::set<std::string>& out);
-template <class T>
-struct ThreadFuture;
-void pingTraceLogWriterThread(ThreadFuture<struct Void>& p);
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
 extern std::atomic<trace_clock_t> g_trace_clock;

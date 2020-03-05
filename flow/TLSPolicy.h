@@ -89,7 +89,7 @@ public:
 #ifndef TLS_DISABLED
 	static std::string ErrorString(boost::system::error_code e);
 
-	bool set_verify_peers(std::vector<std::string> verify_peers);
+	void set_verify_peers(std::vector<std::string> verify_peers);
 	bool verify_peer(bool preverified, X509_STORE_CTX* store_ctx);
 
 	std::string toString() const;

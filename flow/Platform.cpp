@@ -77,6 +77,7 @@
 #include <ftw.h>
 #include <pwd.h>
 #include <sched.h>
+#include <cpuid.h>
 
 /* Needed for disk capacity */
 #include <sys/statvfs.h>
@@ -2369,25 +2370,27 @@ std::string getWorkingDirectory() {
 
 extern std::string format( const char *form, ... );
 
-
 namespace platform {
-
-std::string getDefaultPluginPath( const char* plugin_name ) {
+std::string getDefaultConfigPath() {
 #ifdef _WIN32
-	std::string installPath;
-	if(!platform::getEnvironmentVar("FOUNDATIONDB_INSTALL_PATH", installPath)) {
-		// This is relying of the DLL search order to load the plugin,
-		//  starting in the same directory as the executable.
-		return plugin_name;
+	TCHAR szPath[MAX_PATH];
+	if( SHGetFolderPath(NULL, CSIDL_COMMON_APPDATA, NULL, 0, szPath)  != S_OK ) {
+		TraceEvent(SevError, "WindowsAppDataError").GetLastError();
+		throw platform_error();
 	}
-	return format( "%splugins\\%s.dll", installPath.c_str(), plugin_name );
+	std::string _filepath(szPath);
+	return _filepath + "\\foundationdb";
 #elif defined(__linux__)
-	return format( "/usr/lib/foundationdb/plugins/%s.so", plugin_name );
+	return "/etc/foundationdb";
 #elif defined(__APPLE__)
-	return format( "/usr/local/foundationdb/plugins/%s.dylib", plugin_name );
+	return "/usr/local/etc/foundationdb";
 #else
 	#error Port me!
 #endif
+}
+
+std::string getDefaultClusterFilePath() {
+	return joinPath(getDefaultConfigPath(), "fdb.cluster");
 }
 } // namespace platform
 
@@ -2500,6 +2503,54 @@ void outOfMemory() {
 
 	criticalError(FDB_EXIT_NO_MEM, "OutOfMemory", "Out of memory");
 }
+
+// Because the lambda used with nftw below cannot capture
+int __eraseDirectoryRecurseiveCount;
+
+int eraseDirectoryRecursive(std::string const& dir) {
+	__eraseDirectoryRecurseiveCount = 0;
+#ifdef _WIN32
+	system( ("rd /s /q \"" + dir + "\"").c_str() );
+#elif defined(__linux__) || defined(__APPLE__)
+	int error =
+		nftw(dir.c_str(),
+			[](const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf) -> int {
+				int r = remove(fpath);
+				if(r == 0)
+					++__eraseDirectoryRecurseiveCount;
+				return r;
+			},
+			64, FTW_DEPTH | FTW_PHYS);
+	/* Looks like calling code expects this to continue silently if
+	   the directory we're deleting doesn't exist in the first
+	   place */
+	if (error && errno != ENOENT) {
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "EraseDirectoryRecursiveError").detail("Directory", dir).GetLastError().error(e);
+		throw e;
+	}
+#else
+#error Port me!
+#endif
+	//INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
+	return __eraseDirectoryRecurseiveCount;
+}
+
+bool isSse42Supported()
+{
+#if defined(_WIN32)
+	int info[4];
+	__cpuid(info, 1);
+	return (info[2] & (1 << 20)) != 0;
+#elif defined(__unixish__)
+	uint32_t eax, ebx, ecx, edx, level = 1, count = 0;
+	__cpuid_count(level, count, eax, ebx, ecx, edx);
+	return ((ecx >> 20) & 1) != 0;
+#else
+	#error Port me!
+#endif
+}
+
 } // namespace platform
 
 extern "C" void criticalError(int exitCode, const char *type, const char *message) {
