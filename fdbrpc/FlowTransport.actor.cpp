@@ -988,7 +988,7 @@ ACTOR static Future<Void> connectionIncoming( TransportData* self, Reference<ICo
 ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr ) {
 	state ActorCollectionNoErrors incoming;  // Actors monitoring incoming connections that haven't yet been associated with a peer
 	state Reference<IListener> listener = INetworkConnections::net()->listen( listenAddr );
-	state int64_t connectionCount = 0;
+	state uint64_t connectionCount = 0;
 	try {
 		loop {
 			Reference<IConnection> conn = wait( listener->accept() );
