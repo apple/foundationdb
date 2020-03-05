@@ -21,7 +21,7 @@ Performance
 Features
 --------
 
-* Add support for setting knobs in fdbcli. `(PR #2773) <https://github.com/apple/foundationdb/pull/2773>`_.
+* Add support for setting knobs to modify the behavior of fdbcli. `(PR #2773) <https://github.com/apple/foundationdb/pull/2773>`_.
 
 Other Changes
 -------------
