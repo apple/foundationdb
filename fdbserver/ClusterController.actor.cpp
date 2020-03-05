@@ -1807,7 +1807,8 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData* 
 			//TraceEvent("FailureDetectionPoll", uniqueID).detail("PivotDelay", pivotDelay).detail("Clients", currentStatus.size());
 			//TraceEvent("FailureDetectionAcceptableDelay").detail("Delay", acceptableDelay1000);
 
-			bool tooManyLogGenerations = std::max(self->db.unfinishedRecoveries, self->db.logGenerations) > CLIENT_KNOBS->FAILURE_MAX_GENERATIONS;
+			bool tooManyLogGenerations = (std::max(self->db.unfinishedRecoveries, self->db.logGenerations) > CLIENT_KNOBS->FAILURE_MAX_GENERATIONS) ||
+										 (now() - self->startTime < CLIENT_KNOBS->FAILURE_EMERGENCY_DELAY);
 
 			for(auto it = currentStatus.begin(); it != currentStatus.end(); ) {
 				double delay = t - it->second.lastRequestTime;
