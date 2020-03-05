@@ -5,6 +5,18 @@ Release Notes
 6.2.18
 ======
 
+Fixes
+-----
+
+* When configuring a cluster to usable_regions=2, data distribution would not react to machine failures while copying data to the remote region. `(PR #2774) <https://github.com/apple/foundationdb/pull/2774>`_.
+* When a cluster is configured with usable_regions=2, data distribution could push a cluster into saturation by relocating too many shards simulatenously. `(PR #2776) <https://github.com/apple/foundationdb/pull/2776>`_.
+* Backup could not establish TLS connections (broken in 6.2.16). `(PR #2775) <https://github.com/apple/foundationdb/pull/2775>`_.
+
+Performance
+-----------
+
+* Improved the efficiency of establishing large numbers of network connections. `(PR #2777) <https://github.com/apple/foundationdb/pull/2777>`_.
+
 Features
 --------
 
@@ -21,7 +33,7 @@ Other Changes
 Fixes
 -----
 
-* Restored the ability to set TLS configuration using environment variables. `(PR #2755) <https://github.com/apple/foundationdb/pull/2755>`_.
+* Restored the ability to set TLS configuration using environment variables (broken in 6.2.16). `(PR #2755) <https://github.com/apple/foundationdb/pull/2755>`_.
 
 6.2.16
 ======
