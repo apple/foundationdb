@@ -69,6 +69,21 @@ using std::pair;
 NetworkOptions networkOptions;
 TLSConfig tlsConfig(TLSEndpointType::CLIENT);
 
+// The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
+NetworkOptions::NetworkOptions()
+	: localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
+	  traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
+	  traceFormat("xml"), slowTaskProfilingEnabled(false) {
+
+	Standalone<VectorRef<ClientVersionRef>> defaultSupportedVersions;
+
+	StringRef sourceVersion = StringRef((const uint8_t*)getHGVersion(), strlen(getHGVersion()));
+	std::string protocolVersionString = format("%llx", currentProtocolVersion.version());
+	defaultSupportedVersions.push_back_deep(defaultSupportedVersions.arena(), ClientVersionRef(LiteralStringRef(FDB_VT_VERSION), sourceVersion, protocolVersionString));
+
+	supportedVersions = ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>::from(defaultSupportedVersions);
+}
+
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
 
@@ -943,18 +958,19 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			ASSERT(g_network);
 			ASSERT(value.present());
 
-			networkOptions.supportedVersions.resize(networkOptions.supportedVersions.arena(), 0);
+			Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 			std::string versionString = value.get().toString();
 
 			size_t index = 0;
 			size_t nextIndex = 0;
 			while(nextIndex != versionString.npos) {
 				nextIndex = versionString.find(';', index);
-				networkOptions.supportedVersions.push_back_deep(networkOptions.supportedVersions.arena(), ClientVersionRef(versionString.substr(index, nextIndex-index)));
+				supportedVersions.push_back_deep(supportedVersions.arena(), ClientVersionRef(versionString.substr(index, nextIndex-index)));
 				index = nextIndex + 1;
 			}
 
-			ASSERT(networkOptions.supportedVersions.size() > 0);
+			ASSERT(supportedVersions.size() > 0);
+			networkOptions.supportedVersions->set(supportedVersions);
 
 			break;
 		}

@@ -653,6 +653,7 @@ class ReferencedObject : NonCopyable, public ReferenceCounted<ReferencedObject<V
 		ReferencedObject() : value() {}
 		ReferencedObject(V const& v) : value(v) {}
 		ReferencedObject(ReferencedObject&& r) : value(std::move(r.value)) {}
+
 		void operator=(ReferencedObject&& r) {
 			value = std::move(r.value);
 		}
