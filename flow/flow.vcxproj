@@ -50,7 +50,7 @@
     <ClCompile Include="version.cpp" />
     <ClCompile Include="SignalSafeUnwind.cpp" />
     <ClCompile Include="serialize.cpp" />
-    <ClCompile Include="TLSPolicy.cpp" />
+    <ActorCompiler Include="TLSConfig.actor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CompressedInt.h" />
@@ -94,7 +94,9 @@
     <ClInclude Include="Platform.h" />
     <ClInclude Include="ThreadSafeQueue.h" />
     <ClInclude Include="Trace.h" />
-    <ClInclude Include="TLSPolicy.h" />
+    <ActorCompiler Include="TLSConfig.actor.h" >
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="SignalSafeUnwind.h" />
     <ClInclude Include="UnitTest.h" />
     <ActorCompiler Include="ThreadHelper.actor.h">

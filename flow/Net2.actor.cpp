@@ -37,7 +37,7 @@
 #include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/TLSPolicy.h"
+#include "flow/TLSConfig.actor.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
@@ -111,7 +111,7 @@ thread_local INetwork* thread_network = 0;
 class Net2 sealed : public INetwork, public INetworkConnections {
 
 public:
-	Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> tlsPolicy, const TLSParams& tlsParams);
+	Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics);
 	void initTLS();
 	void run();
 	void initMetrics();
@@ -159,12 +159,12 @@ public:
 #ifndef TLS_DISABLED
 	boost::asio::ssl::context sslContext;
 #endif
-	Reference<TLSPolicy> tlsPolicy;
-	TLSParams tlsParams;
+	TLSConfig tlsConfig;
+	std::string tlsPassword;
 	bool tlsInitialized;
 
 	std::string get_password() const {
-		return tlsParams.tlsPassword;
+		return tlsPassword;
 	}
 
 	INetworkConnections *network;  // initially this, but can be changed
@@ -847,7 +847,7 @@ bool insecurely_always_accept(bool _1, boost::asio::ssl::verify_context& _2) {
 }
 #endif
 
-Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> tlsPolicy, const TLSParams& tlsParams)
+Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	: useThreadPool(useThreadPool),
 	  network(this),
 	  reactor(this),
@@ -858,8 +858,7 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> tlsPolicy, 
 	  lastMinTaskID(TaskPriority::Zero),
 	  numYields(0),
 	  tlsInitialized(false),
-	  tlsPolicy(tlsPolicy),
-	  tlsParams(tlsParams)
+	  tlsConfig(tlsConfig)
 #ifndef TLS_DISABLED
 	  ,sslContext(boost::asio::ssl::context(boost::asio::ssl::context::tlsv12))
 #endif
@@ -888,92 +887,142 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> tlsPolicy, 
 
 }
 
+/*
+ACTOR static Future<Void> watchFileForChanges( std::string filename, AsyncVar<Standalone<StringRef>> *contents_var ) {
+	state std::time_t lastModTime = wait(IAsyncFileSystem::filesystem()->lastWriteTime(filename));
+	loop {
+		wait(delay(FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS));
+		std::time_t modtime = wait(IAsyncFileSystem::filesystem()->lastWriteTime(filename));
+		if (lastModTime != modtime) {
+			lastModTime = modtime;
+			ErrorOr<Standalone<StringRef>> contents = wait(readEntireFile(filename));
+			if (contents.present()) {
+				contents_var->set(contents.get());
+			}
+		}
+	}
+}
+
+ACTOR static Future<Void> reloadConfigurationOnChange( TLSOptions::PolicyInfo *pci, Reference<ITLSPlugin> plugin, AsyncVar<Reference<ITLSPolicy>> *realVerifyPeersPolicy, AsyncVar<Reference<ITLSPolicy>> *realNoVerifyPeersPolicy ) {
+       if (FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS <= 0) {
+               return Void();
+               return Void();
+       }
+       loop {
+               // Early in bootup, the filesystem might not be initialized yet.  Wait until it is.
+               if (IAsyncFileSystem::filesystem() != nullptr) {
+                       break;
+               }
+               wait(delay(1.0));
+       }
+       state int mismatches = 0;
+       state AsyncVar<Standalone<StringRef>> ca_var;
+       state AsyncVar<Standalone<StringRef>> key_var;
+       state AsyncVar<Standalone<StringRef>> cert_var;
+       state std::vector<Future<Void>> lifetimes;
+       if (!pci->ca_path.empty()) lifetimes.push_back(watchFileForChanges(pci->ca_path, &ca_var));
+       if (!pci->key_path.empty()) lifetimes.push_back(watchFileForChanges(pci->key_path, &key_var));
+       if (!pci->cert_path.empty()) lifetimes.push_back(watchFileForChanges(pci->cert_path, &cert_var));
+       loop {
+               state Future<Void> ca_changed = ca_var.onChange();
+               state Future<Void> key_changed = key_var.onChange();
+               state Future<Void> cert_changed = cert_var.onChange();
+               wait( ca_changed || key_changed || cert_changed );
+               if (ca_changed.isReady()) {
+                       TraceEvent(SevInfo, "TLSRefreshCAChanged").detail("path", pci->ca_path).detail("length", ca_var.get().size());
+                       pci->ca_contents = ca_var.get();
+               }
+               if (key_changed.isReady()) {
+                       TraceEvent(SevInfo, "TLSRefreshKeyChanged").detail("path", pci->key_path).detail("length", key_var.get().size());
+                       pci->key_contents = key_var.get();
+               }
+               if (cert_changed.isReady()) {
+                       TraceEvent(SevInfo, "TLSRefreshCertChanged").detail("path", pci->cert_path).detail("length", cert_var.get().size());
+                       pci->cert_contents = cert_var.get();
+               }
+               bool rc = true;
+               Reference<ITLSPolicy> verifypeers = Reference<ITLSPolicy>(plugin->create_policy());
+               Reference<ITLSPolicy> noverifypeers = Reference<ITLSPolicy>(plugin->create_policy());
+               loop {
+                       // Don't actually loop.  We're just using loop/break as a `goto err`.
+                       // This loop always ends with an unconditional break.
+                       rc = verifypeers->set_ca_data(pci->ca_contents.begin(), pci->ca_contents.size());
+                       if (!rc) break;
+                       rc = verifypeers->set_key_data(pci->key_contents.begin(), pci->key_contents.size(), pci->keyPassword.c_str());
+                       if (!rc) break;
+                       rc = verifypeers->set_cert_data(pci->cert_contents.begin(), pci->cert_contents.size());
+                       if (!rc) break;
+                       {
+                               std::unique_ptr<const uint8_t *[]> verify_peers_arr(new const uint8_t*[pci->verify_peers.size()]);
+                               std::unique_ptr<int[]> verify_peers_len(new int[pci->verify_peers.size()]);
+                               for (int i = 0; i < pci->verify_peers.size(); i++) {
+                                       verify_peers_arr[i] = (const uint8_t *)&pci->verify_peers[i][0];
+                                       verify_peers_len[i] = pci->verify_peers[i].size();
+                               }
+                               rc = verifypeers->set_verify_peers(pci->verify_peers.size(), verify_peers_arr.get(), verify_peers_len.get());
+                               if (!rc) break;
+                       }
+                       rc = noverifypeers->set_ca_data(pci->ca_contents.begin(), pci->ca_contents.size());
+                       if (!rc) break;
+                       rc = noverifypeers->set_key_data(pci->key_contents.begin(), pci->key_contents.size(), pci->keyPassword.c_str());
+                       if (!rc) break;
+                       rc = noverifypeers->set_cert_data(pci->cert_contents.begin(), pci->cert_contents.size());
+                       if (!rc) break;
+                       break;
+               }
+
+               if (rc) {
+                       TraceEvent(SevInfo, "TLSCertificateRefreshSucceeded");
+                       realVerifyPeersPolicy->set(verifypeers);
+                       realNoVerifyPeersPolicy->set(noverifypeers);
+                       mismatches = 0;
+               } else {
+                       // Some files didn't match up, they should in the future, and we'll retry then.
+                       mismatches++;
+                       TraceEvent(SevWarn, "TLSCertificateRefreshMismatch").detail("mismatches", mismatches);
+               }
+       }
+}
+*/
+
 void Net2::initTLS() {
 	if(tlsInitialized) {
 		return;
 	}
 #ifndef TLS_DISABLED
 	try {
-		const char *defaultCertFileName = "fdb.pem";
-
-		if( tlsPolicy && !tlsPolicy->rules.size() ) {
-			std::string verify_peers;
-			if (platform::getEnvironmentVar("FDB_TLS_VERIFY_PEERS", verify_peers)) {
-				tlsPolicy->set_verify_peers({ verify_peers });
-			} else {
-				tlsPolicy->set_verify_peers({ std::string("Check.Valid=1")});
-			}
-		}
+		LoadedTLSConfig loaded = tlsConfig.loadSync();
 
 		sslContext.set_options(boost::asio::ssl::context::default_workarounds);
 		sslContext.set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
-		if (tlsPolicy) {
-			Reference<TLSPolicy> policy = tlsPolicy;
-			sslContext.set_verify_callback([policy](bool preverified, boost::asio::ssl::verify_context& ctx) {
-				return policy->verify_peer(preverified, ctx.native_handle());
-			});
+
+		if (loaded.isTLSEnabled()) {
+			Reference<TLSPolicy> tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(loaded.getEndpointType()));
+			tlsPolicy->set_verify_peers({ loaded.getVerifyPeers() });
+
+			sslContext.set_verify_callback([policy=tlsPolicy](bool preverified, boost::asio::ssl::verify_context& ctx) {
+					return policy->verify_peer(preverified, ctx.native_handle());
+					});
 		} else {
 			sslContext.set_verify_callback(boost::bind(&insecurely_always_accept, _1, _2));
 		}
 
-		if ( !tlsParams.tlsPassword.size() ) {
-			platform::getEnvironmentVar( "FDB_TLS_PASSWORD", tlsParams.tlsPassword );
-		}
+		tlsPassword = loaded.getPassword();
 		sslContext.set_password_callback(std::bind(&Net2::get_password, this));
 
-		if ( tlsParams.tlsCertBytes.size() ) {
-			sslContext.use_certificate_chain(boost::asio::buffer(tlsParams.tlsCertBytes.data(), tlsParams.tlsCertBytes.size()));
-		}
-		else {
-			if ( !tlsParams.tlsCertPath.size() ) {
-				if ( !platform::getEnvironmentVar( "FDB_TLS_CERTIFICATE_FILE", tlsParams.tlsCertPath ) ) {
-					if( fileExists(defaultCertFileName) ) {
-						tlsParams.tlsCertPath = defaultCertFileName;
-					} else if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
-						tlsParams.tlsCertPath = joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
-					}
-				}
-			}
-			if ( tlsParams.tlsCertPath.size() ) {
-				sslContext.use_certificate_chain_file(tlsParams.tlsCertPath);
-			}
+		const std::string& certBytes = loaded.getCertificateBytes(); 
+		if ( certBytes.size() ) {
+			sslContext.use_certificate_chain(boost::asio::buffer(certBytes.data(), certBytes.size()));
 		}
 
-		if ( tlsParams.tlsCABytes.size() ) {
-			sslContext.add_certificate_authority(boost::asio::buffer(tlsParams.tlsCABytes.data(), tlsParams.tlsCABytes.size()));
-		}
-		else {
-			if ( !tlsParams.tlsCAPath.size() ) {
-				platform::getEnvironmentVar("FDB_TLS_CA_FILE", tlsParams.tlsCAPath);
-			}
-			if ( tlsParams.tlsCAPath.size() ) {
-				try {
-					std::string cert = readFileBytes(tlsParams.tlsCAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
-					sslContext.add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
-				}
-				catch (Error& e) {
-					fprintf(stderr, "Error reading CA file %s: %s\n", tlsParams.tlsCAPath.c_str(), e.what());
-					TraceEvent("Net2TLSReadCAError").error(e);
-					throw tls_error();
-				}
-			}
+		const std::string& CABytes = loaded.getCABytes();
+		if ( CABytes.size() ) {
+			sslContext.add_certificate_authority(boost::asio::buffer(CABytes.data(), CABytes.size()));
 		}
 
-		if (tlsParams.tlsKeyBytes.size()) {
-			sslContext.use_private_key(boost::asio::buffer(tlsParams.tlsKeyBytes.data(), tlsParams.tlsKeyBytes.size()), boost::asio::ssl::context::pem);
-		} else {
-			if (!tlsParams.tlsKeyPath.size()) {
-				if(!platform::getEnvironmentVar( "FDB_TLS_KEY_FILE", tlsParams.tlsKeyPath)) {
-					if( fileExists(defaultCertFileName) ) {
-						tlsParams.tlsKeyPath = defaultCertFileName;
-					} else if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
-						tlsParams.tlsKeyPath = joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
-					}
-				}
-			}
-			if (tlsParams.tlsKeyPath.size()) {
-				sslContext.use_private_key_file(tlsParams.tlsKeyPath, boost::asio::ssl::context::pem);
-			}
+		const std::string& keyBytes = loaded.getKeyBytes();
+		if (keyBytes.size()) {
+			sslContext.use_private_key(boost::asio::buffer(keyBytes.data(), keyBytes.size()), boost::asio::ssl::context::pem);
 		}
 	} catch(boost::system::system_error e) {
 		fprintf(stderr, "Error initializing TLS: %s\n", e.what());
@@ -1522,9 +1571,9 @@ void ASIOReactor::wake() {
 
 } // namespace net2
 
-INetwork* newNet2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> policy, const TLSParams& tlsParams) {
+INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics) {
 	try {
-		N2::g_net2 = new N2::Net2(useThreadPool, useMetrics, policy, tlsParams);
+		N2::g_net2 = new N2::Net2(tlsConfig, useThreadPool, useMetrics);
 	}
 	catch(boost::system::system_error e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());

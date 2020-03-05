@@ -57,7 +57,7 @@
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/SignalSafeUnwind.h"
-#include "flow/TLSPolicy.h"
+#include "flow/TLSConfig.actor.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
@@ -961,8 +961,7 @@ int main(int argc, char* argv[]) {
 		int minTesterCount = 1;
 		bool testOnServers = false;
 
-		Reference<TLSPolicy> tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(TLSPolicy::Is::SERVER));
-		TLSParams tlsParams;
+		TLSConfig tlsConfig(TLSEndpointType::SERVER);
 		std::vector<std::string> tlsVerifyPeers;
 		double fileIoTimeout = 0.0;
 		bool fileIoWarnOnly = false;
@@ -1331,23 +1330,23 @@ int main(int argc, char* argv[]) {
 					whitelistBinPaths = args.OptionArg();
 					break;
 #ifndef TLS_DISABLED
-				case TLSParams::OPT_TLS_PLUGIN:
+				case TLSConfig::OPT_TLS_PLUGIN:
 					args.OptionArg();
 					break;
-				case TLSParams::OPT_TLS_CERTIFICATES:
-					tlsParams.tlsCertPath = args.OptionArg();
+				case TLSConfig::OPT_TLS_CERTIFICATES:
+					tlsConfig.setCertificatePath(args.OptionArg());
 					break;
-				case TLSParams::OPT_TLS_PASSWORD:
-					tlsParams.tlsPassword = args.OptionArg();
+				case TLSConfig::OPT_TLS_PASSWORD:
+					tlsConfig.setPassword(args.OptionArg());
 					break;
-				case TLSParams::OPT_TLS_CA_FILE:
-					tlsParams.tlsCAPath = args.OptionArg();
+				case TLSConfig::OPT_TLS_CA_FILE:
+					tlsConfig.setCAPath(args.OptionArg());
 					break;
-				case TLSParams::OPT_TLS_KEY:
-					tlsParams.tlsKeyPath = args.OptionArg();
+				case TLSConfig::OPT_TLS_KEY:
+					tlsConfig.setKeyPath(args.OptionArg());
 					break;
-				case TLSParams::OPT_TLS_VERIFY_PEERS:
-					tlsVerifyPeers.push_back(args.OptionArg());
+				case TLSConfig::OPT_TLS_VERIFY_PEERS:
+					tlsConfig.addVerifyPeers(args.OptionArg());
 					break;
 #endif
 			}
@@ -1551,18 +1550,7 @@ int main(int argc, char* argv[]) {
 			startNewSimulator();
 			openTraceFile(NetworkAddress(), rollsize, maxLogsSize, logFolder, "trace", logGroup);
 		} else {
-#ifndef TLS_DISABLED
-			if ( tlsVerifyPeers.size() ) {
-				try {
-					tlsPolicy->set_verify_peers( tlsVerifyPeers );
-				} catch( Error &e ) {
-					fprintf(stderr, "ERROR: The format of the --tls_verify_peers option is incorrect.\n");
-					printHelpTeaser(argv[0]);
-					flushAndExit(FDB_EXIT_ERROR);
-				}
-			}
-#endif
-			g_network = newNet2(useThreadPool, true, tlsPolicy, tlsParams);
+			g_network = newNet2(tlsConfig, useThreadPool, true);
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);

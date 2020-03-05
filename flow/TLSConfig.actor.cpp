@@ -1,5 +1,5 @@
 /*
- * TLSPolicy.cpp
+ * TLSConfig.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/TLSPolicy.h"
+#define PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP public
+#include "flow/TLSConfig.actor.h"
+#undef PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP
 
+// To force typeinfo to only be emitted once.
 TLSPolicy::~TLSPolicy() {}
 
 #ifndef TLS_DISABLED
@@ -39,17 +42,190 @@ TLSPolicy::~TLSPolicy() {}
 #include <string>
 #include <sstream>
 #include <utility>
+#include <boost/asio/ssl/context.hpp>
+
+// This include breaks module dependencies, but we need to do async file reads.
+// So either we include fdbrpc here, or this file is moved to fdbrpc/, and then
+// Net2, which depends on us, includes fdbrpc/.
+//
+// Either way, the only way to break this dependency cycle is to move all of
+// AsyncFile to flow/
+#include "fdbrpc/IAsyncFile.h"
+#include "flow/Platform.h"
 
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
+#include "flow/genericactors.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
+
+
+std::vector<std::string> LoadedTLSConfig::getVerifyPeers() const {
+	if (tlsVerifyPeers.size()) {
+		return tlsVerifyPeers;
+	}
+	
+	std::string envVerifyPeers;
+	if (platform::getEnvironmentVar("FDB_TLS_VERIFY_PEERS", envVerifyPeers)) {
+		return {envVerifyPeers};
+	}
+
+	return {"Check.Valid=1"};
+}
+
+std::string LoadedTLSConfig::getPassword() const {
+	if (tlsPassword.size()) {
+		return tlsPassword;
+	}
+	
+	std::string envPassword;
+	platform::getEnvironmentVar("FDB_TLS_PASSWORD", envPassword);
+	return envPassword;
+}
+
+std::string TLSConfig::getCertificatePathSync() const {
+	if (tlsCertPath.size()) {
+		return tlsCertPath;
+	}
+
+	std::string envCertPath;
+	if (platform::getEnvironmentVar("FDB_TLS_CERTIFICATE_FILE", envCertPath)) {
+		return envCertPath;
+	}
+
+	const char *defaultCertFileName = "fdb.pem";
+	if( fileExists(defaultCertFileName) ) {
+		return defaultCertFileName;
+	}
+	
+	if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
+		return joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+	}
+
+	return std::string();
+}
+
+std::string TLSConfig::getKeyPathSync() const {
+	if (tlsKeyPath.size()) {
+		return tlsKeyPath;
+	}
+
+	std::string envKeyPath;
+	if (platform::getEnvironmentVar("FDB_TLS_KEY_FILE", envKeyPath)) {
+		return envKeyPath;
+	}
+
+	const char *defaultCertFileName = "fdb.pem";
+	if( fileExists(defaultCertFileName) ) {
+		return defaultCertFileName;
+	}
+	
+	if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
+		return joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+	}
+
+	return std::string();
+}
+
+std::string TLSConfig::getCAPathSync() const {
+	if (tlsCAPath.size()) {
+		return tlsCAPath;
+	}
+
+	std::string envCAPath;
+	platform::getEnvironmentVar("FDB_TLS_CA_FILE", envCAPath);
+	return envCAPath;
+}
+
+LoadedTLSConfig TLSConfig::loadSync() const {
+	LoadedTLSConfig loaded;
+
+	const std::string certPath = getCertificatePathSync();
+	if (certPath.size()) {
+		loaded.tlsCertBytes = readFileBytes( certPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE );
+	} else {
+		loaded.tlsCertBytes = tlsCertBytes;
+	}
+
+	const std::string keyPath = getKeyPathSync();
+	if (keyPath.size()) {
+		loaded.tlsKeyBytes = readFileBytes( keyPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE );
+	} else {
+		loaded.tlsKeyBytes = tlsKeyBytes;
+	}
+
+	const std::string CAPath = getCAPathSync();
+	if (CAPath.size()) {
+		loaded.tlsCABytes = readFileBytes( CAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE );
+	} else {
+		loaded.tlsCABytes = tlsCABytes;
+	}
+
+	loaded.tlsPassword = tlsPassword;
+	loaded.tlsVerifyPeers = tlsVerifyPeers;
+	loaded.endpointType = endpointType;
+
+	return loaded;
+}
+
+// And now do the same thing, but async...
+
+ACTOR static Future<Void> readEntireFile( std::string filename, std::string* destination ) {
+	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
+	state int64_t filesize = wait(file->size());
+	if (filesize > FLOW_KNOBS->CERT_FILE_MAX_SIZE) {
+		throw tls_error();
+	}
+	destination->resize(filesize);
+	int rc = wait(file->read(const_cast<char*>(destination->c_str()), filesize, 0));
+	if (rc != filesize) {
+		// File modified during read, probably.  The mtime should change, and thus we'll be called again.
+		throw tls_error();
+	}
+	return Void();
+}
+
+ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
+	state LoadedTLSConfig loaded;
+	state std::vector<Future<Void>> reads;
+
+	const std::string& certPath = self->getCertificatePathSync();
+	if (certPath.size()) {
+		reads.push_back( readEntireFile( certPath, &loaded.tlsCertBytes ) );
+	} else {
+		loaded.tlsCertBytes = self->tlsCertBytes;
+	}
+
+	const std::string& keyPath = self->getKeyPathSync();
+	if (keyPath.size()) {
+		reads.push_back( readEntireFile( keyPath, &loaded.tlsKeyBytes ) );
+	} else {
+		loaded.tlsKeyBytes = self->tlsKeyBytes;
+	}
+
+	const std::string& CAPath = self->getCAPathSync();
+	if (CAPath.size()) {
+		reads.push_back( readEntireFile( CAPath, &loaded.tlsCABytes ) );
+	} else {
+		loaded.tlsCABytes = self->tlsKeyBytes;
+	}
+
+	wait(waitForAll(reads));
+
+	loaded.tlsPassword = self->tlsPassword;
+	loaded.tlsVerifyPeers = self->tlsVerifyPeers;
+	loaded.endpointType = self->endpointType;
+
+	return loaded;
+}
+
+void ConfigureSSLContext( boost::asio::ssl::context *context, const LoadedTLSConfig& config ) {
+
+}
 
 std::string TLSPolicy::ErrorString(boost::system::error_code e) {
 	char* str = ERR_error_string(e.value(), NULL);
 	return std::string(str);
 }
-
-// To force typeinfo to only be emitted once.
-
 
 std::string TLSPolicy::toString() const {
 	std::stringstream ss;

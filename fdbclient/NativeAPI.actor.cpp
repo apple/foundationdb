@@ -43,7 +43,7 @@
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
-#include "flow/TLSPolicy.h"
+#include "flow/TLSConfig.actor.h"
 #include "flow/UnitTest.h"
 
 #if defined(CMAKE_BUILD) || !defined(WIN32)
@@ -67,16 +67,7 @@ using std::min;
 using std::pair;
 
 NetworkOptions networkOptions;
-TLSParams tlsParams;
-static Reference<TLSPolicy> tlsPolicy;
-
-static void initTLSPolicy() {
-#ifndef TLS_DISABLED
-	if (!tlsPolicy) {
-		tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(TLSPolicy::Is::CLIENT));
-	}
-#endif
-}
+TLSConfig tlsConfig(TLSEndpointType::CLIENT);
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
@@ -892,48 +883,40 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			break;
 		case FDBNetworkOptions::TLS_CERT_PATH:
 			validateOptionValue(value, true);
-			tlsParams.tlsCertBytes = "";
-			tlsParams.tlsCertPath = value.get().toString();
+			tlsConfig.setCertificatePath(value.get().toString());
 			break;
 		case FDBNetworkOptions::TLS_CERT_BYTES: {
 			validateOptionValue(value, true);
-			tlsParams.tlsCertPath = "";
-			tlsParams.tlsCertBytes = value.get().toString();
+			tlsConfig.setCertificateBytes(value.get().toString());
 			break;
 		}
 		case FDBNetworkOptions::TLS_CA_PATH: {
 			validateOptionValue(value, true);
-			tlsParams.tlsCABytes = "";
-			tlsParams.tlsCAPath = value.get().toString();
+			tlsConfig.setCAPath(value.get().toString());
 			break;
 		}
 		case FDBNetworkOptions::TLS_CA_BYTES: {
 			validateOptionValue(value, true);
-			tlsParams.tlsCAPath = "";
-			tlsParams.tlsCABytes = value.get().toString();
+			tlsConfig.setCABytes(value.get().toString());
 			break;
 		}
 		case FDBNetworkOptions::TLS_PASSWORD:
 			validateOptionValue(value, true);
-			tlsParams.tlsPassword = value.get().toString();
+			tlsConfig.setPassword(value.get().toString());
 			break;
 		case FDBNetworkOptions::TLS_KEY_PATH:
 			validateOptionValue(value, true);
-			tlsParams.tlsKeyBytes = "";
-			tlsParams.tlsKeyPath = value.get().toString();
+			tlsConfig.setKeyPath(value.get().toString());
 			break;
 		case FDBNetworkOptions::TLS_KEY_BYTES: {
 			validateOptionValue(value, true);
-			tlsParams.tlsKeyPath = "";
-			tlsParams.tlsKeyBytes = value.get().toString();
+			tlsConfig.setKeyBytes(value.get().toString());
 			break;
 		}
 		case FDBNetworkOptions::TLS_VERIFY_PEERS:
 			validateOptionValue(value, true);
-			initTLSPolicy();
-#ifndef TLS_DISABLED
-			tlsPolicy->set_verify_peers({ value.get().toString() });
-#endif
+			tlsConfig.clearVerifyPeers();
+			tlsConfig.addVerifyPeers( value.get().toString() );
 			break;
 		case FDBNetworkOptions::CLIENT_BUGGIFY_ENABLE:
 			enableBuggify(true, BuggifyType::Client);
@@ -991,9 +974,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
-	initTLSPolicy();
-
-	g_network = newNet2(false, useMetrics || networkOptions.traceDirectory.present(), tlsPolicy, tlsParams);
+	g_network = newNet2(tlsConfig, false, useMetrics || networkOptions.traceDirectory.present());
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
 }
