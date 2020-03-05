@@ -451,12 +451,13 @@ private:
 };
 
 class Listener : public IListener, ReferenceCounted<Listener> {
+	boost::asio::io_context& io_service;
 	NetworkAddress listenAddress;
 	tcp::acceptor acceptor;
 
 public:
-	Listener( boost::asio::io_service& io_service, NetworkAddress listenAddress )
-		: listenAddress(listenAddress), acceptor( io_service, tcpEndpoint( listenAddress ) )
+	Listener( boost::asio::io_context& io_service, NetworkAddress listenAddress )
+		: io_service(io_service), listenAddress(listenAddress), acceptor( io_service, tcpEndpoint( listenAddress ) )
 	{
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
@@ -473,7 +474,7 @@ public:
 
 private:
 	ACTOR static Future<Reference<IConnection>> doAccept( Listener* self ) {
-		state Reference<Connection> conn( new Connection( self->acceptor.get_io_service() ) );
+		state Reference<Connection> conn( new Connection( self->io_service ) );
 		state tcp::acceptor::endpoint_type peer_endpoint;
 		try {
 			BindPromise p("N2_AcceptError", UID());
@@ -785,13 +786,14 @@ private:
 };
 
 class SSLListener : public IListener, ReferenceCounted<SSLListener> {
+	boost::asio::io_context& io_service;
 	NetworkAddress listenAddress;
 	tcp::acceptor acceptor;
 	boost::asio::ssl::context* context;
 
 public:
-	SSLListener( boost::asio::io_service& io_service, boost::asio::ssl::context* context, NetworkAddress listenAddress )
-		: listenAddress(listenAddress), acceptor( io_service, tcpEndpoint( listenAddress ) ), context(context)
+	SSLListener( boost::asio::io_context& io_service, boost::asio::ssl::context* context, NetworkAddress listenAddress )
+		: io_service(io_service), listenAddress(listenAddress), acceptor( io_service, tcpEndpoint( listenAddress ) ), context(context)
 	{
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
@@ -808,7 +810,7 @@ public:
 
 private:
 	ACTOR static Future<Reference<IConnection>> doAccept( SSLListener* self ) {
-		state Reference<SSLConnection> conn( new SSLConnection( self->acceptor.get_io_service(), *self->context) );
+		state Reference<SSLConnection> conn( new SSLConnection( self->io_service, *self->context) );
 		state tcp::acceptor::endpoint_type peer_endpoint;
 		try {
 			BindPromise p("N2_AcceptError", UID());
@@ -861,7 +863,7 @@ Net2::Net2(bool useThreadPool, bool useMetrics, Reference<TLSPolicy> tlsPolicy, 
 	  tlsPolicy(tlsPolicy),
 	  tlsParams(tlsParams)
 #ifndef TLS_DISABLED
-	  ,sslContext(boost::asio::ssl::context(boost::asio::ssl::context::tlsv12))
+	  ,sslContext(boost::asio::ssl::context(boost::asio::ssl::context::tls))
 #endif
 
 {
@@ -952,8 +954,7 @@ void Net2::initTLS() {
 					sslContext.add_certificate_authority(boost::asio::buffer(cert.data(), cert.size()));
 				}
 				catch (Error& e) {
-					fprintf(stderr, "Error reading CA file %s: %s\n", tlsParams.tlsCAPath.c_str(), e.what());
-					TraceEvent("Net2TLSReadCAError").error(e);
+					TraceEvent("Net2TLSReadCAError").error(e).detail("CAPath", tlsParams.tlsCAPath);
 					throw tls_error();
 				}
 			}
@@ -976,7 +977,6 @@ void Net2::initTLS() {
 			}
 		}
 	} catch(boost::system::system_error e) {
-		fprintf(stderr, "Error initializing TLS: %s\n", e.what());
 		TraceEvent("Net2TLSInitError").detail("Message", e.what());
 		throw tls_error();
 	}
