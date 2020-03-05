@@ -1271,13 +1271,17 @@ std::cout << "Return end = " << end << "\n\n";
 			if (partitioned) {
 				// sort by tag ID so that filterDuplicates works.
 				std::sort(logs.begin(), logs.end(), [](const LogFile& a, const LogFile& b) {
-					return a.tagId < b.tagId || a.beginVersion < b.beginVersion || a.endVersion < b.endVersion;
+					return a.tagId == b.tagId ? (a.beginVersion == b.beginVersion ? a.endVersion < b.endVersion
+					                                                              : a.beginVersion < b.beginVersion)
+					                          : (a.tagId < b.tagId);
 				});
 
 				// Remove duplicated log files that can happen for old epochs.
 				std::vector<LogFile> filtered = filterDuplicates(logs);
 
 				restorable.logs.swap(filtered);
+				// sort by version order again for continuous analysis
+				std::sort(restorable.logs.begin(), restorable.logs.end());
 				if (isPartitionedLogsContinuous(restorable.logs, snapshot.get().beginVersion, targetVersion)) {
 					return Optional<RestorableFileSet>(restorable);
 				}
