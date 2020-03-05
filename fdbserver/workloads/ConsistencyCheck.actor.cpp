@@ -666,8 +666,8 @@ public:
 		}
 
 		// for cacheServer reads
-		state ServerDBInfo system = self->dbInfo->get();
-		state MasterProxyInterface proxy = deterministicRandom()->randomChoice( system.client.proxies );
+		//state ServerDBInfo system = self->dbInfo->get();
+		//state MasterProxyInterface proxy = deterministicRandom()->randomChoice( system.client.proxies );
 		//auto storageCaches = system.storageCaches;
 		//int id = 0;
 		//state std::vector<std::pair<uint16_t,StorageServerInterface>>::iterator scit = find_if(system.storageCaches.begin(), system.storageCaches.end(), storageCachesComparator(id));
