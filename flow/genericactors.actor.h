@@ -648,6 +648,36 @@ protected:
 };
 
 template <class V>
+class ReferencedObject : NonCopyable, public ReferenceCounted<ReferencedObject<V>> {
+	public:
+		ReferencedObject() : value() {}
+		ReferencedObject(V const& v) : value(v) {}
+		ReferencedObject(ReferencedObject&& r) : value(std::move(r.value)) {}
+		void operator=(ReferencedObject&& r) { 
+			value = std::move(r.value);
+		}
+
+		V const& get() const {
+			return value;
+		}
+
+		V& mutate() const {
+			return value;
+		}
+
+		void set(V const& v) {
+			value = v;
+		}
+
+		static Reference<ReferencedObject<V>> from(V const& v) {
+			return Reference<ReferencedObject<V>>(new ReferencedObject<V>(v));
+		}
+	
+	private:
+		V value;
+};
+
+template <class V>
 class AsyncVar : NonCopyable, public ReferenceCounted<AsyncVar<V>> {
 public:
 	AsyncVar() : value() {}

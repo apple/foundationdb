@@ -13,6 +13,7 @@
   <ItemGroup>
     <ActorCompiler Include="ActorCollection.actor.cpp" />
     <ActorCompiler Include="CompressedInt.actor.cpp" />
+    <ClCompile Include="Arena.cpp" />
     <ClCompile Include="DeterministicRandom.cpp" />
     <ClCompile Include="Deque.cpp" />
     <ClCompile Include="Error.cpp" />

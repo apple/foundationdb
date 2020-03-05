@@ -2,6 +2,19 @@
 Release Notes
 #############
 
+6.2.18
+======
+
+Features
+--------
+
+* Add support for setting knobs in fdbcli. `(PR #2773) <https://github.com/apple/foundationdb/pull/2773>`_.
+
+Other Changes
+-------------
+ 
+* Setting invalid knobs in backup and DR binaries is now a warning instead of an error and will not result in the application being terminated. `(PR #2773) <https://github.com/apple/foundationdb/pull/2773>`_.
+
 6.2.17
 ======
 

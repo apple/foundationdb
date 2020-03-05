@@ -2870,7 +2870,9 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				lastWrongConfiguration = anyWrongConfiguration;
 
 				state int lastPriority = team->getPriority();
-				if( serversLeft < self->configuration.storageTeamSize ) {
+				if(team->size() == 0) {
+					team->setPriority( SERVER_KNOBS->PRIORITY_POPULATE_REGION );
+				} else if( serversLeft < self->configuration.storageTeamSize ) {
 					if( serversLeft == 0 )
 						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_0_LEFT );
 					else if( serversLeft == 1 )
@@ -2887,10 +2889,11 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY );
 					}
 				}
-				else if( anyUndesired )
+				else if( anyUndesired ) {
 					team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER );
-				else
+				} else {
 					team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_HEALTHY );
+				}
 
 				if(lastPriority != team->getPriority()) {
 					self->priority_teams[lastPriority]--;

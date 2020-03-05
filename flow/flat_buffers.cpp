@@ -485,4 +485,16 @@ TEST_CASE("/flow/FlatBuffers/Standalone") {
 	return Void();
 }
 
+// Meant to be run with valgrind or asan, to catch heap buffer overflows
+TEST_CASE("/flow/FlatBuffers/Void") {
+	Standalone<StringRef> msg = ObjectWriter::toValue(Void(), Unversioned());
+	auto buffer = std::make_unique<uint8_t[]>(msg.size()); // Make a heap allocation of precisely the right size, so
+	                                                       // that asan or valgrind will catch any overflows
+	memcpy(buffer.get(), msg.begin(), msg.size());
+	ObjectReader rd(buffer.get(), Unversioned());
+	Void x;
+	rd.deserialize(x);
+	return Void();
+}
+
 } // namespace unit_tests
