@@ -30,6 +30,7 @@
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
 #include "flow/network.h"
+#include "flow/TLSConfig.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
@@ -1599,7 +1600,7 @@ public:
 	Sim2() : time(0.0), timerTime(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
 		// Not letting currentProcess be NULL eliminates some annoying special cases
 		currentProcess = new ProcessInfo("NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), {NetworkAddress()}, this, "", "");
-		g_network = net2 = newNet2(false, true);
+		g_network = net2 = newNet2(TLSConfig(), false, true);
 		Net2FileSystem::newFileSystem();
 		check_yield(TaskPriority::Zero);
 	}
