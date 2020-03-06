@@ -43,14 +43,6 @@ struct ProxyRequestsInfo {
 
 namespace{
 struct Resolver : ReferenceCounted<Resolver> {
-	Resolver( UID dbgid, int proxyCount, int resolverCount )
-		: dbgid(dbgid), proxyCount(proxyCount), resolverCount(resolverCount), version(-1), conflictSet( newConflictSet() ), iopsSample( SERVER_KNOBS->KEY_BYTES_PER_SAMPLE ), debugMinRecentStateVersion(0)
-	{
-	}
-	~Resolver() {
-		destroyConflictSet( conflictSet );
-	}
-
 	UID dbgid;
 	int proxyCount, resolverCount;
 	NotifiedVersion version;
@@ -65,6 +57,45 @@ struct Resolver : ReferenceCounted<Resolver> {
 	TransientStorageMetricSample iopsSample;
 
 	Version debugMinRecentStateVersion;
+
+	CounterCollection cc;
+	Counter resolveBatchIn;
+	Counter resolveBatchStart;
+	Counter resolvedTransactions;
+	Counter resolvedBytes;
+	Counter resolvedReadConflictRanges;
+	Counter resolvedWriteConflictRanges;
+	Counter transactionsAccepted;
+	Counter transactionsTooOld;
+	Counter transactionsConflicted;
+	Counter resolvedStateTransactions;
+	Counter resolvedStateMutations;
+	Counter resolvedStateBytes;
+	Counter resolveBatchOut;
+	Counter metricsRequests;
+	Counter splitRequests;
+
+	Future<Void> logger;
+
+	Resolver( UID dbgid, int proxyCount, int resolverCount )
+		: dbgid(dbgid), proxyCount(proxyCount), resolverCount(resolverCount), version(-1), conflictSet( newConflictSet() ), iopsSample( SERVER_KNOBS->KEY_BYTES_PER_SAMPLE ), debugMinRecentStateVersion(0),
+		  cc("Resolver", dbgid.toString()),
+		  resolveBatchIn("ResolveBatchIn", cc), resolveBatchStart("ResolveBatchStart", cc), resolvedTransactions("ResolvedTransactions", cc), resolvedBytes("ResolvedBytes", cc),
+		  resolvedReadConflictRanges("ResolvedReadConflictRanges", cc), resolvedWriteConflictRanges("ResolvedWriteConflictRanges", cc), transactionsAccepted("TransactionsAccepted", cc),
+		  transactionsTooOld("TransactionsTooOld", cc), transactionsConflicted("TransactionsConflicted", cc), resolvedStateTransactions("ResolvedStateTransactions", cc), 
+		  resolvedStateMutations("ResolvedStateMutations", cc), resolvedStateBytes("ResolvedStateBytes", cc), resolveBatchOut("ResolveBatchOut", cc), metricsRequests("MetricsRequests", cc),
+		  splitRequests("SplitRequests", cc)
+	{
+		specialCounter(cc, "Version", [this](){ return this->version.get(); });
+		specialCounter(cc, "NeededVersion", [this](){ return this->neededVersion.get(); });
+		specialCounter(cc, "TotalStateBytes", [this](){ return this->totalStateBytes.get(); });
+
+		logger = traceCounters("ResolverMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ResolverMetrics");
+	}
+	~Resolver() {
+		destroyConflictSet( conflictSet );
+	}
+
 };
 }
 
@@ -77,6 +108,8 @@ ACTOR Future<Void> resolveBatch(
 	// The first request (prevVersion < 0) comes from the master
 	state NetworkAddress proxyAddress = req.prevVersion >= 0 ? req.reply.getEndpoint().getPrimaryAddress() : NetworkAddress();
 	state ProxyRequestsInfo &proxyInfo = self->proxyInfoMap[proxyAddress];
+
+	++self->resolveBatchIn;
 
 	if(req.debugID.present()) {
 		debugID = nondeterministicRandom()->randomUniqueID();
@@ -120,6 +153,10 @@ ACTOR Future<Void> resolveBatch(
 	}
 
 	if (self->version.get() == req.prevVersion) {  // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
+		++self->resolveBatchStart;
+		self->resolvedTransactions += req.transactions.size();
+		self->resolvedBytes += req.transactions.expectedSize();
+
 		if(proxyInfo.lastVersion > 0) {
 			proxyInfo.outstandingBatches.erase(proxyInfo.outstandingBatches.begin(), proxyInfo.outstandingBatches.upper_bound(req.lastReceivedVersion));
 		}
@@ -135,11 +172,12 @@ ACTOR Future<Void> resolveBatch(
 
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
-		double tstart = timer();
 		ConflictBatch conflictBatch( self->conflictSet );
 		int keys = 0;
 		for(int t=0; t<req.transactions.size(); t++) {
 			conflictBatch.addTransaction( req.transactions[t] );
+			self->resolvedReadConflictRanges += req.transactions[t].read_conflict_ranges.size();
+			self->resolvedWriteConflictRanges += req.transactions[t].write_conflict_ranges.size();
 			keys += req.transactions[t].write_conflict_ranges.size()*2 + req.transactions[t].read_conflict_ranges.size()*2;
 			
 			if(self->resolverCount > 1) {
@@ -150,10 +188,6 @@ ACTOR Future<Void> resolveBatch(
 			}
 		}
 		conflictBatch.detectConflicts( req.version, req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS, commitList, &tooOldList);
-		g_counters.conflictTime += timer() - tstart;
-		++g_counters.conflictBatches;
-		g_counters.conflictTransactions += req.transactions.size();
-		g_counters.conflictKeys += keys;
 
 		ResolveTransactionBatchReply &reply = proxyInfo.outstandingBatches[req.version];
 		reply.debugID = req.debugID;
@@ -161,17 +195,29 @@ ACTOR Future<Void> resolveBatch(
 		for(int c=0; c<commitList.size(); c++)
 			reply.committed[commitList[c]] = ConflictBatch::TransactionCommitted;
 
-		for (int c = 0; c<tooOldList.size(); c++)
+		for (int c = 0; c<tooOldList.size(); c++) {
+			ASSERT(reply.committed[tooOldList[c]] == ConflictBatch::TransactionConflict);
 			reply.committed[tooOldList[c]] = ConflictBatch::TransactionTooOld;
+		}
+
+		self->transactionsAccepted += commitList.size();
+		self->transactionsTooOld += tooOldList.size();
+		self->transactionsConflicted += req.transactions.size() - commitList.size() - tooOldList.size();
 
 		ASSERT(req.prevVersion >= 0 || req.txnStateTransactions.size() == 0); // The master's request should not have any state transactions
 
 		auto& stateTransactions = self->recentStateTransactions[ req.version ];
+		int64_t stateMutations = 0;
 		int64_t stateBytes = 0;
 		for(int t : req.txnStateTransactions) {
+			stateMutations += req.transactions[t].mutations.size();
 			stateBytes += req.transactions[t].mutations.expectedSize();
 			stateTransactions.push_back_deep(stateTransactions.arena(), StateTransactionRef(reply.committed[t] == ConflictBatch::TransactionCommitted, req.transactions[t].mutations));
 		}
+
+		self->resolvedStateTransactions += req.txnStateTransactions.size();
+		self->resolvedStateMutations += stateMutations;
+		self->resolvedStateBytes += stateBytes;
 
 		if(stateBytes > 0)
 			self->recentStateTransactionSizes.push_back(std::make_pair(req.version, stateBytes));
@@ -255,6 +301,8 @@ ACTOR Future<Void> resolveBatch(
 		req.reply.send(Never());
 	}
 
+	++self->resolveBatchOut;
+
 	return Void();
 }
 
@@ -273,9 +321,11 @@ ACTOR Future<Void> resolverCore(
 			actors.add( resolveBatch(self, batch) );
 		}
 		when ( ResolutionMetricsRequest req = waitNext( resolver.metrics.getFuture() ) ) {
+			++self->metricsRequests;
 			req.reply.send(self->iopsSample.getEstimate(allKeys));
 		}
 		when ( ResolutionSplitRequest req = waitNext( resolver.split.getFuture() ) ) {
+			++self->splitRequests;
 			ResolutionSplitReply rep;
 			rep.key = self->iopsSample.splitEstimate(req.range, req.offset, req.front);
 			rep.used = self->iopsSample.getEstimate(req.front ? KeyRangeRef(req.range.begin, rep.key) : KeyRangeRef(rep.key, req.range.end));
