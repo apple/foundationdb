@@ -192,7 +192,7 @@ ACTOR Future<Void> resolveBatch(
 		ResolveTransactionBatchReply &reply = proxyInfo.outstandingBatches[req.version];
 		reply.debugID = req.debugID;
 		reply.committed.resize( reply.arena, req.transactions.size() );
-		for(int c=0; c<commitList.size(); c++) 
+		for(int c=0; c<commitList.size(); c++)
 			reply.committed[commitList[c]] = ConflictBatch::TransactionCommitted;
 
 		for (int c = 0; c<tooOldList.size(); c++) {
