@@ -285,7 +285,12 @@ const LogMessageVersion& ILogSystem::ServerPeekCursor::version() { return messag
 
 Version ILogSystem::ServerPeekCursor::getMinKnownCommittedVersion() { return results.minKnownCommittedVersion; }
 
-Optional<UID> ILogSystem::ServerPeekCursor::getPrimaryPeekLocation() { return interf->get().id(); }
+Optional<UID> ILogSystem::ServerPeekCursor::getPrimaryPeekLocation() { 
+	if(interf) {
+		return interf->get().id();
+	}
+	return Optional<UID>();
+}
 
 Version ILogSystem::ServerPeekCursor::popped() { return poppedVersion; }
 
