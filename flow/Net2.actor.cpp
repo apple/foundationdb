@@ -988,6 +988,9 @@ ACTOR static Future<Void> reloadCertificatesOnChange( TLSConfig config, AsyncVar
 			mismatches = 0;
 			contextVar->set(ReferencedObject<boost::asio::ssl::context>::from(std::move(context)));
 		} catch (Error &e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			// Some files didn't match up, they should in the future, and we'll retry then.
 			mismatches++;
 			TraceEvent(SevWarn, "TLSCertificateRefreshMismatch").error(e).detail("mismatches", mismatches);
