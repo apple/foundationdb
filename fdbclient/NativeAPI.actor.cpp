@@ -501,7 +501,7 @@ void updateLocationCacheWithCaches(DatabaseContext* self, const std::map<UID, St
 	// TODO: this needs to be more clever in the future
 	auto ranges = self->locationCache.ranges();
 	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
-		if (iter->value()->hasCaches) {
+		if (iter->value() && iter->value()->hasCaches) {
 			auto& val = iter->value();
 			std::vector<Reference<ReferencedInterface<StorageServerInterface>>> interfaces;
 			interfaces.reserve(val->size() - removed.size() + added.size());
@@ -576,7 +576,7 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 							//	    Reference<LocationInfo>{ new LocationInfo{ cacheInterfaces, true } });
 							//}
 							containedRangesEnd = iter->range().end;
-							if (!iter->value()->hasCaches) {
+							if (iter->value() && !iter->value()->hasCaches) {
 								iter->value() = addCaches(iter->value(), cacheInterfaces);
 							}
 						}
@@ -617,7 +617,7 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 	state Transaction tr(db);
 	state std::map<UID, StorageServerInterface> cacheServerMap;
 	state Future<Void> updateRanges = updateCachedRanges(self, &cacheServerMap);
-	// if no caches are configures, we don't want to run this actor at all
+	// if no caches are configured, we don't want to run this actor at all
 	// so we just wait for the first trigger from a storage server
 	wait(self->updateCache.onTrigger());
 	try {
@@ -636,14 +636,17 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 				std::map<UID, StorageServerInterface> newCacheServers;
 				std::map<UID, StorageServerInterface> deletedCacheServers;
 				std::set_difference(allCacheServers.begin(), allCacheServers.end(), cacheServerMap.begin(),
-				                    cacheServerMap.end(),
-				                    std::insert_iterator<std::map<UID, StorageServerInterface>>(
-				                        newCacheServers, newCacheServers.begin()));
+									cacheServerMap.end(),
+									std::insert_iterator<std::map<UID, StorageServerInterface>>(
+										newCacheServers, newCacheServers.begin()));
 				std::set_difference(cacheServerMap.begin(), cacheServerMap.end(), allCacheServers.begin(),
-				                    allCacheServers.end(),
-				                    std::insert_iterator<std::map<UID, StorageServerInterface>>(
-				                        deletedCacheServers, deletedCacheServers.begin()));
+									allCacheServers.end(),
+									std::insert_iterator<std::map<UID, StorageServerInterface>>(
+										deletedCacheServers, deletedCacheServers.begin()));
 				hasChanges = !(newCacheServers.empty() && deletedCacheServers.empty());
+				TraceEvent(SevDebug, "MonitorCacheList").detail("AllCacheServers",allCacheServers.size())
+				.detail("NewCacheServers",newCacheServers.size())
+				.detail("OldCacheServers",cacheServerMap.size());
 				if (hasChanges) {
 					updateLocationCacheWithCaches(self, deletedCacheServers, newCacheServers);
 				}
