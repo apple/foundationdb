@@ -194,7 +194,6 @@ public:
 		return loadAsync(this);
 	}
 
-PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP:
 	// Return the explicitly set path.
 	// If one was not set, return the path from the environment.
 	// (Cert and Key only) If neither exist, check for fdb.pem in cwd
@@ -206,6 +205,7 @@ PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP:
 	std::string getKeyPathSync() const;
 	std::string getCAPathSync() const;
 
+PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP:
 	ACTOR static Future<LoadedTLSConfig> loadAsync(const TLSConfig* self);
 	template <typename T>
 	friend class LoadAsyncActorState;
@@ -216,15 +216,6 @@ PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP:
 	std::vector<std::string> tlsVerifyPeers;
 	TLSEndpointType endpointType = TLSEndpointType::UNSET;
 };
-
-namespace boost {
-	namespace asio {
-		namespace ssl {
-			struct context;
-		}
-	}
-}
-void ConfigureSSLContext( boost::asio::ssl::context *context, const LoadedTLSConfig& config );
 
 class TLSPolicy : ReferenceCounted<TLSPolicy> {
 public:

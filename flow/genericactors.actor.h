@@ -652,6 +652,7 @@ class ReferencedObject : NonCopyable, public ReferenceCounted<ReferencedObject<V
 	public:
 		ReferencedObject() : value() {}
 		ReferencedObject(V const& v) : value(v) {}
+		ReferencedObject(V&& v) : value(std::move(v)) {}
 		ReferencedObject(ReferencedObject&& r) : value(std::move(r.value)) {}
 
 		void operator=(ReferencedObject&& r) {
@@ -662,7 +663,7 @@ class ReferencedObject : NonCopyable, public ReferenceCounted<ReferencedObject<V
 			return value;
 		}
 
-		V& mutate() const {
+		V& mutate() {
 			return value;
 		}
 
@@ -670,8 +671,16 @@ class ReferencedObject : NonCopyable, public ReferenceCounted<ReferencedObject<V
 			value = v;
 		}
 
+		void set(V&& v) {
+			value = std::move(v);
+		}
+
 		static Reference<ReferencedObject<V>> from(V const& v) {
 			return Reference<ReferencedObject<V>>(new ReferencedObject<V>(v));
+		}
+
+		static Reference<ReferencedObject<V>> from(V&& v) {
+			return Reference<ReferencedObject<V>>(new ReferencedObject<V>(std::move(v)));
 		}
 
 	private:
