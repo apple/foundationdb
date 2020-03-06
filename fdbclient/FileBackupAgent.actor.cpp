@@ -3599,7 +3599,10 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone) {
+	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr,
+	                                       Key outContainer, int snapshotIntervalSeconds, std::string tagName,
+	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone,
+	                                       bool partitionedLog) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
@@ -3700,6 +3703,7 @@ public:
 		config.stopWhenDone().set(tr, stopWhenDone);
 		config.backupRanges().set(tr, normalizedRanges);
 		config.snapshotIntervalSeconds().set(tr, snapshotIntervalSeconds);
+		config.partitionedLogEnabled().set(tr, partitionedLog);
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
 
@@ -4444,8 +4448,12 @@ Future<ERestoreState> FileBackupAgent::waitRestore(Database cx, Key tagName, boo
 	return FileBackupAgentImpl::waitRestore(cx, tagName, verbose);
 };
 
-Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone) {
-	return FileBackupAgentImpl::submitBackup(this, tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone);
+Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer,
+                                           int snapshotIntervalSeconds, std::string tagName,
+                                           Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone,
+                                           bool partitionedLog) {
+	return FileBackupAgentImpl::submitBackup(this, tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges,
+	                                         stopWhenDone, partitionedLog);
 }
 
 Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName){
