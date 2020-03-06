@@ -631,7 +631,7 @@ void startRole(const Role &role, UID roleId, UID workerId, const std::map<std::s
 	for(auto it = details.begin(); it != details.end(); it++)
 		ev.detail(it->first.c_str(), it->second);
 
-	ev.trackLatest( (roleId.shortString() + ".Role" ).c_str() );
+	ev.trackLatest( roleId.shortString() + ".Role"  );
 
 	// Update roles map, log Roles metrics
 	g_roles.insert({role.roleName, roleId.shortString()});
@@ -649,7 +649,7 @@ void endRole(const Role &role, UID id, std::string reason, bool ok, Error e) {
 			.detail("As", role.roleName)
 			.detail("Reason", reason);
 
-		ev.trackLatest( (id.shortString() + ".Role").c_str() );
+		ev.trackLatest( id.shortString() + ".Role" );
 	}
 
 	if(!ok) {

@@ -880,7 +880,7 @@ TraceEvent& TraceEvent::detailfNoMetric( std::string&& key, const char* valueFor
 	return *this;
 }
 
-TraceEvent& TraceEvent::trackLatest( const char *trackingKey ){
+TraceEvent& TraceEvent::trackLatest(const std::string& trackingKey ){
 	ASSERT(!logged);
 	this->trackingKey = trackingKey;
 	ASSERT( this->trackingKey.size() != 0 && this->trackingKey[0] != '/' && this->trackingKey[0] != '\\');

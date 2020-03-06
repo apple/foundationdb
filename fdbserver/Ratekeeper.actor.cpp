@@ -684,7 +684,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			.detail("LimitingStorageServerVersionLag", limitingVersionLag)
 			.detail("WorstStorageServerDurabilityLag", worstDurabilityLag)
 			.detail("LimitingStorageServerDurabilityLag", limitingDurabilityLag)
-			.trackLatest(name.c_str());
+			.trackLatest(name);
 	}
 }
 
