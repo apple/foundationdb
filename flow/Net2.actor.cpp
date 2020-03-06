@@ -892,38 +892,43 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 
 #ifndef TLS_DISABLED
 void ConfigureSSLContext( const LoadedTLSConfig& loaded, boost::asio::ssl::context* context ) {
-	context->set_options(boost::asio::ssl::context::default_workarounds);
-	context->set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
+	try {
+		context->set_options(boost::asio::ssl::context::default_workarounds);
+		context->set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
 
-	if (loaded.isTLSEnabled()) {
-		Reference<TLSPolicy> tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(loaded.getEndpointType()));
-		tlsPolicy->set_verify_peers({ loaded.getVerifyPeers() });
+		if (loaded.isTLSEnabled()) {
+			Reference<TLSPolicy> tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(loaded.getEndpointType()));
+			tlsPolicy->set_verify_peers({ loaded.getVerifyPeers() });
 
-		context->set_verify_callback([policy=tlsPolicy](bool preverified, boost::asio::ssl::verify_context& ctx) {
-				return policy->verify_peer(preverified, ctx.native_handle());
+			context->set_verify_callback([policy=tlsPolicy](bool preverified, boost::asio::ssl::verify_context& ctx) {
+						return policy->verify_peer(preverified, ctx.native_handle());
+					});
+		} else {
+			context->set_verify_callback(boost::bind(&insecurely_always_accept, _1, _2));
+		}
+
+		context->set_password_callback(
+				[password=loaded.getPassword()](size_t, boost::asio::ssl::context::password_purpose) {
+					return password;
 				});
-	} else {
-		context->set_verify_callback(boost::bind(&insecurely_always_accept, _1, _2));
-	}
 
-	context->set_password_callback(
-			[password=loaded.getPassword()](size_t, boost::asio::ssl::context::password_purpose) {
-				return password;
-			});
+		const std::string& certBytes = loaded.getCertificateBytes();
+		if ( certBytes.size() ) {
+			context->use_certificate_chain(boost::asio::buffer(certBytes.data(), certBytes.size()));
+		}
 
-	const std::string& certBytes = loaded.getCertificateBytes(); 
-	if ( certBytes.size() ) {
-		context->use_certificate_chain(boost::asio::buffer(certBytes.data(), certBytes.size()));
-	}
+		const std::string& CABytes = loaded.getCABytes();
+		if ( CABytes.size() ) {
+			context->add_certificate_authority(boost::asio::buffer(CABytes.data(), CABytes.size()));
+		}
 
-	const std::string& CABytes = loaded.getCABytes();
-	if ( CABytes.size() ) {
-		context->add_certificate_authority(boost::asio::buffer(CABytes.data(), CABytes.size()));
-	}
-
-	const std::string& keyBytes = loaded.getKeyBytes();
-	if (keyBytes.size()) {
-		context->use_private_key(boost::asio::buffer(keyBytes.data(), keyBytes.size()), boost::asio::ssl::context::pem);
+		const std::string& keyBytes = loaded.getKeyBytes();
+		if (keyBytes.size()) {
+			context->use_private_key(boost::asio::buffer(keyBytes.data(), keyBytes.size()), boost::asio::ssl::context::pem);
+		}
+	} catch (boost::system::system_error& e) {
+		TraceEvent("TLSConfigureError").detail("What", e.what()).detail("Value", e.code().value()).detail("WhichMeans", TLSPolicy::ErrorString(e.code()));
+		throw tls_error();
 	}
 }
 
@@ -934,10 +939,22 @@ ACTOR static Future<Void> watchFileForChanges( std::string filename, AsyncTrigge
 	state std::time_t lastModTime = wait(IAsyncFileSystem::filesystem()->lastWriteTime(filename));
 	loop {
 		wait(delay(FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS));
-		std::time_t modtime = wait(IAsyncFileSystem::filesystem()->lastWriteTime(filename));
-		if (lastModTime != modtime) {
-			lastModTime = modtime;
-			fileChanged->trigger();
+		try {
+			std::time_t modtime = wait(IAsyncFileSystem::filesystem()->lastWriteTime(filename));
+			if (lastModTime != modtime) {
+				lastModTime = modtime;
+				fileChanged->trigger();
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_io_error) {
+				// EACCES, ELOOP, ENOENT all come out as io_error(), but are more of a system
+				// configuration issue than an FDB problem.  If we managed to load valid
+				// certificates, then there's no point in crashing, but we should complain
+				// loudly.  IAsyncFile will log the error, but not necessarily as a warning.
+				TraceEvent(SevWarnAlways, "TLSCertificateRefreshStatError").detail("File", filename);
+			} else {
+				throw;
+			}
 		}
 	}
 }
@@ -973,7 +990,7 @@ ACTOR static Future<Void> reloadCertificatesOnChange( TLSConfig config, AsyncVar
 		} catch (Error &e) {
 			// Some files didn't match up, they should in the future, and we'll retry then.
 			mismatches++;
-			TraceEvent(SevWarn, "TLSCertificateRefreshMismatch").detail("mismatches", mismatches);
+			TraceEvent(SevWarn, "TLSCertificateRefreshMismatch").error(e).detail("mismatches", mismatches);
 		}
 	}
 }
@@ -984,15 +1001,10 @@ void Net2::initTLS() {
 		return;
 	}
 #ifndef TLS_DISABLED
-	try {
-		boost::asio::ssl::context newContext(boost::asio::ssl::context::tls);
-		ConfigureSSLContext( tlsConfig.loadSync(), &newContext );
-		sslContextVar.set(ReferencedObject<boost::asio::ssl::context>::from(std::move(newContext)));
-		backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, &sslContextVar );
-	} catch(boost::system::system_error e) {
-		TraceEvent("Net2TLSInitError").detail("Message", e.what());
-		throw tls_error();
-	}
+	boost::asio::ssl::context newContext(boost::asio::ssl::context::tls);
+	ConfigureSSLContext( tlsConfig.loadSync(), &newContext );
+	sslContextVar.set(ReferencedObject<boost::asio::ssl::context>::from(std::move(newContext)));
+	backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, &sslContextVar );
 #endif
 	tlsInitialized = true;
 }

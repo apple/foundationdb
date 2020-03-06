@@ -173,14 +173,10 @@ ACTOR static Future<Void> readEntireFile( std::string filename, std::string* des
 	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
 	state int64_t filesize = wait(file->size());
 	if (filesize > FLOW_KNOBS->CERT_FILE_MAX_SIZE) {
-		throw tls_error();
+		throw file_too_large();
 	}
 	destination->resize(filesize);
-	int rc = wait(file->read(const_cast<char*>(destination->c_str()), filesize, 0));
-	if (rc != filesize) {
-		// File modified during read, probably.  The mtime should change, and thus we'll be called again.
-		throw tls_error();
-	}
+	wait(file->read(const_cast<char*>(destination->c_str()), filesize, 0));
 	return Void();
 }
 
@@ -216,10 +212,6 @@ ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 	loaded.endpointType = self->endpointType;
 
 	return loaded;
-}
-
-void ConfigureSSLContext( boost::asio::ssl::context *context, const LoadedTLSConfig& config ) {
-
 }
 
 std::string TLSPolicy::ErrorString(boost::system::error_code e) {
