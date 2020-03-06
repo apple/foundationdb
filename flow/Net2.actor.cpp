@@ -1001,10 +1001,15 @@ void Net2::initTLS() {
 		return;
 	}
 #ifndef TLS_DISABLED
-	boost::asio::ssl::context newContext(boost::asio::ssl::context::tls);
-	ConfigureSSLContext( tlsConfig.loadSync(), &newContext );
-	sslContextVar.set(ReferencedObject<boost::asio::ssl::context>::from(std::move(newContext)));
-	backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, &sslContextVar );
+	try {
+		boost::asio::ssl::context newContext(boost::asio::ssl::context::tls);
+		ConfigureSSLContext( tlsConfig.loadSync(), &newContext );
+		sslContextVar.set(ReferencedObject<boost::asio::ssl::context>::from(std::move(newContext)));
+		backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, &sslContextVar );
+	} catch (Error& e) {
+		TraceEvent("Net2TLSInitError").error(e);
+		throw tls_error();
+	}
 #endif
 	tlsInitialized = true;
 }
