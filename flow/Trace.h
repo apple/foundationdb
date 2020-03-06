@@ -452,7 +452,7 @@ private:
 	TraceEvent& detailImpl( std::string&& key, std::string&& value, bool writeEventMetricField=true );
 public:
 	TraceEvent& backtrace(const std::string& prefix = "");
-	TraceEvent& trackLatest( const char* trackingKey );
+	TraceEvent& trackLatest(const std::string& trackingKey );
 	TraceEvent& sample( double sampleRate, bool logSampleRate=true );
 
 	// Sets the maximum length a field can be before it gets truncated. A value of 0 uses the default, a negative value
@@ -558,6 +558,16 @@ private:
 };
 
 extern LatestEventCache latestEventCache;
+
+struct EventCacheHolder : public ReferenceCounted<EventCacheHolder> {
+	std::string trackingKey;
+
+	EventCacheHolder(const std::string& trackingKey) : trackingKey(trackingKey) {}
+
+	~EventCacheHolder() {
+		latestEventCache.clear(trackingKey);
+	}
+};
 
 // Evil but potentially useful for verbose messages:
 #if CENABLED(0, NOT_IN_CLEAN)
