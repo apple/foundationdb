@@ -180,7 +180,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		try {
 			wait(backupAgent->submitBackup(cx, StringRef(backupContainer), deterministicRandom()->randomInt(0, 100),
-			                               tag.toString(), backupRanges, stopDifferentialDelay ? false : true));
+			                               tag.toString(), backupRanges, stopDifferentialDelay ? false : true,
+			                               /*partitionedLog=*/true));
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) throw;
@@ -395,9 +396,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
 				try {
-					extraBackup = backupAgent.submitBackup(cx, LiteralStringRef("file://simfdb/backups/"),
-					                                       deterministicRandom()->randomInt(0, 100),
-					                                       self->backupTag.toString(), self->backupRanges, true);
+					extraBackup = backupAgent.submitBackup(
+					    cx, LiteralStringRef("file://simfdb/backups/"), deterministicRandom()->randomInt(0, 100),
+					    self->backupTag.toString(), self->backupRanges, true, /*partitionedLog=*/true);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)

@@ -308,9 +308,16 @@ public:
 
 	/** BACKUP METHODS **/
 
-	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true);
-	Future<Void> submitBackup(Database cx, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true) {
-		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr){ return submitBackup(tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone); });
+	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds,
+	                          std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                          bool stopWhenDone = true, bool partitionedLog = false);
+	Future<Void> submitBackup(Database cx, Key outContainer, int snapshotIntervalSeconds, std::string tagName,
+	                          Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true,
+	                          bool partitionedLog = false) {
+		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			return submitBackup(tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone,
+			                    partitionedLog);
+		});
 	}
 
 	Future<Void> discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
@@ -792,6 +799,11 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	// Set to true if partitioned log is enabled (only useful if backup worker is also enabled).
+	KeyBackedProperty<bool> partitionedLogEnabled() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	// Latest version for which all prior versions have saved by backup workers.
 	KeyBackedProperty<Version> latestBackupWorkerSavedVersion() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
@@ -826,12 +838,15 @@ public:
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		auto lastLog = latestLogEndVersion().get(tr);
 		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
-		auto enabled = backupWorkerEnabled().get(tr);
+		auto workerEnabled = backupWorkerEnabled().get(tr);
+		auto plogEnabled = partitionedLogEnabled().get(tr);
 		auto workerVersion = latestBackupWorkerSavedVersion().get(tr);
-		return map(success(lastLog) && success(firstSnapshot) && success(enabled) && success(workerVersion), [=](Void) -> Optional<Version> {
+		return map(success(lastLog) && success(firstSnapshot) && success(workerEnabled) && success(plogEnabled) && success(workerVersion), [=](Void) -> Optional<Version> {
 			// The latest log greater than the oldest snapshot is the restorable version
-			Optional<Version> logVersion =
-			    enabled.get().present() && enabled.get().get() ? workerVersion.get() : lastLog.get();
+			Optional<Version> logVersion = workerEnabled.get().present() && workerEnabled.get().get() &&
+			                                       plogEnabled.get().present() && plogEnabled.get().get()
+			                                   ? workerVersion.get()
+			                                   : lastLog.get();
 			if (logVersion.present() && firstSnapshot.get().present() && logVersion.get() > firstSnapshot.get().get()) {
 				return std::max(logVersion.get() - 1, firstSnapshot.get().get());
 			}
