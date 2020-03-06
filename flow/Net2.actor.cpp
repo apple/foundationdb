@@ -890,6 +890,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 
 }
 
+#ifndef TLS_DISABLED
 void ConfigureSSLContext( const LoadedTLSConfig& loaded, boost::asio::ssl::context* context ) {
 	context->set_options(boost::asio::ssl::context::default_workarounds);
 	context->set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
@@ -976,6 +977,7 @@ ACTOR static Future<Void> reloadCertificatesOnChange( TLSConfig config, AsyncVar
 		}
 	}
 }
+#endif
 
 void Net2::initTLS() {
 	if(tlsInitialized) {
