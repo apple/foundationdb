@@ -2388,7 +2388,8 @@ namespace fileBackup {
 
 			// Check if backup worker is enabled
 			DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
-			if (!dbConfig.backupWorkerEnabled) {
+			state bool backupWorkerEnabled = dbConfig.backupWorkerEnabled;
+			if (!backupWorkerEnabled) {
 				wait(success(changeConfig(cx, "backup_worker_enabled:=1", true)));
 			}
 
@@ -2420,6 +2421,9 @@ namespace fileBackup {
 					}
 
 					tr->set(backupStartedKey, encodeBackupStartedValue(ids));
+					if (backupWorkerEnabled) {
+						config.backupWorkerEnabled().set(tr, true);
+					}
 
 					// The task may be restarted. Set the watch if started key has NOT been set.
 					if (!taskStarted.get().present()) {

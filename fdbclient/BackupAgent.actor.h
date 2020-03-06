@@ -787,6 +787,16 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	// Set to true if backup worker is enabled.
+	KeyBackedProperty<bool> backupWorkerEnabled() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Latest version for which all prior versions have saved by backup workers.
+	KeyBackedProperty<Version> latestBackupWorkerSavedVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	// Stop differntial logging if already started or don't start after completing KV ranges
 	KeyBackedProperty<bool> stopWhenDone() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
@@ -816,10 +826,14 @@ public:
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		auto lastLog = latestLogEndVersion().get(tr);
 		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
-		return map(success(lastLog) && success(firstSnapshot), [=](Void) -> Optional<Version> {
+		auto enabled = backupWorkerEnabled().get(tr);
+		auto workerVersion = latestBackupWorkerSavedVersion().get(tr);
+		return map(success(lastLog) && success(firstSnapshot) && success(enabled) && success(workerVersion), [=](Void) -> Optional<Version> {
 			// The latest log greater than the oldest snapshot is the restorable version
-			if(lastLog.get().present() && firstSnapshot.get().present() && lastLog.get().get() > firstSnapshot.get().get()) {
-				return std::max(lastLog.get().get() - 1, firstSnapshot.get().get());
+			Optional<Version> logVersion =
+			    enabled.get().present() && enabled.get().get() ? workerVersion.get() : lastLog.get();
+			if (logVersion.present() && firstSnapshot.get().present() && logVersion.get() > firstSnapshot.get().get()) {
+				return std::max(logVersion.get() - 1, firstSnapshot.get().get());
 			}
 			return {};
 		});
