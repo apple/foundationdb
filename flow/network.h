@@ -32,7 +32,6 @@
 #endif
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
-#include "flow/TLSPolicy.h"
 
 enum class TaskPriority {
 	Max = 1000000,
@@ -44,6 +43,7 @@ enum class TaskPriority {
 	DiskIOComplete = 9150,
 	LoadBalancedEndpoint = 9000,
 	ReadSocket = 9000,
+	AcceptSocket = 8950,
 	Handshake = 8900,
 	CoordinationReply = 8810,
 	Coordination = 8800,
@@ -412,9 +412,10 @@ typedef void*	flowGlobalType;
 typedef NetworkAddress (*NetworkAddressFuncPtr)();
 typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
+class TLSConfig;
 class INetwork;
 extern INetwork* g_network;
-extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false, Reference<TLSPolicy> policy = Reference<TLSPolicy>(), const TLSParams& tlsParams = TLSParams());
+extern INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool = false, bool useMetrics = false);
 
 class INetwork {
 public:
