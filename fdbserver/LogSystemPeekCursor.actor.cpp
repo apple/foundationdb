@@ -286,6 +286,13 @@ const LogMessageVersion& ILogSystem::ServerPeekCursor::version() { return messag
 
 Version ILogSystem::ServerPeekCursor::getMinKnownCommittedVersion() { return results.minKnownCommittedVersion; }
 
+Optional<UID> ILogSystem::ServerPeekCursor::getPrimaryPeekLocation() { 
+	if(interf) {
+		return interf->get().id();
+	}
+	return Optional<UID>();
+}
+
 Version ILogSystem::ServerPeekCursor::popped() { return poppedVersion; }
 
 ILogSystem::MergedPeekCursor::MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, Version begin )
@@ -514,6 +521,13 @@ const LogMessageVersion& ILogSystem::MergedPeekCursor::version() { return messag
 
 Version ILogSystem::MergedPeekCursor::getMinKnownCommittedVersion() {
 	return serverCursors[currentCursor]->getMinKnownCommittedVersion();
+}
+
+Optional<UID> ILogSystem::MergedPeekCursor::getPrimaryPeekLocation() {
+	if(bestServer >= 0) {
+		return serverCursors[bestServer]->getPrimaryPeekLocation();
+	}
+	return Optional<UID>();
 }
 
 Version ILogSystem::MergedPeekCursor::popped() {
@@ -819,6 +833,13 @@ Version ILogSystem::SetPeekCursor::getMinKnownCommittedVersion() {
 	return serverCursors[currentSet][currentCursor]->getMinKnownCommittedVersion();
 }
 
+Optional<UID> ILogSystem::SetPeekCursor::getPrimaryPeekLocation() {
+	if(bestServer >= 0 && bestSet >= 0) {
+		return serverCursors[bestSet][bestServer]->getPrimaryPeekLocation();
+	}
+	return Optional<UID>();
+}
+
 Version ILogSystem::SetPeekCursor::popped() {
 	Version poppedVersion = 0;
 	for (auto& cursors : serverCursors) {
@@ -911,6 +932,10 @@ const LogMessageVersion& ILogSystem::MultiCursor::version() {
 
 Version ILogSystem::MultiCursor::getMinKnownCommittedVersion() {
 	return cursors.back()->getMinKnownCommittedVersion();
+}
+
+Optional<UID> ILogSystem::MultiCursor::getPrimaryPeekLocation() {
+	return cursors.back()->getPrimaryPeekLocation();
 }
 
 Version ILogSystem::MultiCursor::popped() {
@@ -1152,6 +1177,10 @@ const LogMessageVersion& ILogSystem::BufferedCursor::version() {
 
 Version ILogSystem::BufferedCursor::getMinKnownCommittedVersion() {
 	return minKnownCommittedVersion;
+}
+
+Optional<UID> ILogSystem::BufferedCursor::getPrimaryPeekLocation() {
+	return Optional<UID>();
 }
 
 Version ILogSystem::BufferedCursor::popped() {

@@ -2987,7 +2987,9 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				lastWrongConfiguration = anyWrongConfiguration;
 
 				state int lastPriority = team->getPriority();
-				if( serversLeft < self->configuration.storageTeamSize ) {
+				if(team->size() == 0) {
+					team->setPriority( SERVER_KNOBS->PRIORITY_POPULATE_REGION );
+				} else if( serversLeft < self->configuration.storageTeamSize ) {
 					if( serversLeft == 0 )
 						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_0_LEFT );
 					else if( serversLeft == 1 )
@@ -3004,10 +3006,11 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY );
 					}
 				}
-				else if( anyUndesired )
+				else if( anyUndesired ) {
 					team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER );
-				else
+				} else {
 					team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_HEALTHY );
+				}
 
 				if(lastPriority != team->getPriority()) {
 					self->priority_teams[lastPriority]--;
@@ -3747,7 +3750,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 	state bool recruiting = false;
 	TraceEvent("StorageServerRecruitment", self->distributorId)
 	    .detail("State", "Idle")
-	    .trackLatest(("StorageServerRecruitment_" + self->distributorId.toString()).c_str());
+	    .trackLatest("StorageServerRecruitment_" + self->distributorId.toString());
 	loop {
 		if( !recruiting ) {
 			while(self->recruitingStream.get() == 0) {
@@ -3755,7 +3758,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 			}
 			TraceEvent("StorageServerRecruitment", self->distributorId)
 				.detail("State", "Recruiting")
-				.trackLatest(("StorageServerRecruitment_" + self->distributorId.toString()).c_str());
+				.trackLatest("StorageServerRecruitment_" + self->distributorId.toString());
 			recruiting = true;
 		} else {
 			loop {
@@ -3766,7 +3769,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 			}
 			TraceEvent("StorageServerRecruitment", self->distributorId)
 				.detail("State", "Idle")
-				.trackLatest(("StorageServerRecruitment_" + self->distributorId.toString()).c_str());
+				.trackLatest("StorageServerRecruitment_" + self->distributorId.toString());
 			recruiting = false;
 		}
 	}
@@ -4500,7 +4503,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 
 			actors.push_back( pollMoveKeysLock(cx, lock) );
 			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, self->ddId ), "DDTracker", self->ddId, &normalDDQueueErrors() ) );
-			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, &lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, configuration.storageTeamSize, &lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
 			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );

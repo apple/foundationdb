@@ -1433,29 +1433,30 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 				stateSectionObj["description"] = "No replicas remain of some data";
 				stateSectionObj["min_replicas_remaining"] = 0;
 				replicas = 0;
-			}
-			else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_1_LEFT) {
+			} else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_1_LEFT) {
 				stateSectionObj["healthy"] = false;
 				stateSectionObj["name"] = "healing";
 				stateSectionObj["description"] = "Only one replica remains of some data";
 				stateSectionObj["min_replicas_remaining"] = 1;
 				replicas = 1;
-			}
-			else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_2_LEFT) {
+			} else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_2_LEFT) {
 				stateSectionObj["healthy"] = false;
 				stateSectionObj["name"] = "healing";
 				stateSectionObj["description"] = "Only two replicas remain of some data";
 				stateSectionObj["min_replicas_remaining"] = 2;
 				replicas = 2;
-			}
-			else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
+			} else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
 				stateSectionObj["healthy"] = false;
 				stateSectionObj["name"] = "healing";
 				stateSectionObj["description"] = "Restoring replication factor";
+			} else if (highestPriority >= SERVER_KNOBS->PRIORITY_POPULATE_REGION) {
+				stateSectionObj["healthy"] = true;
+				stateSectionObj["name"] = "healthy_populating_region";
+				stateSectionObj["description"] = "Populating remote region";
 			} else if (highestPriority >= SERVER_KNOBS->PRIORITY_MERGE_SHARD) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_repartitioning";
-				stateSectionObj["description"] = "Repartitioning.";
+				stateSectionObj["description"] = "Repartitioning";
 			} else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "optimizing_team_collections";
