@@ -149,6 +149,7 @@ Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourW
 		TEST(true); // read limit 0
 		return Standalone<RangeResultRef>();
 	}
+	// TODO : transform limits like in NativeAPI.actor.cpp there
 	// ignore snapshot, which is not used
 	return getRangeAggregationActor(this, ryw, begin, end, limits, reverse);
 }
