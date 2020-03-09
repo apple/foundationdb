@@ -721,7 +721,8 @@ struct ILogSystem {
 		// Call only on an ILogSystem obtained from recoverAndEndEpoch()
 		// Returns the first unreadable version number of the recovered epoch (i.e. message version numbers < (get_end(), 0) will be readable)
 
-	virtual Version getStartVersion() const = 0; // Returns the start version of current epoch.
+	// Returns the start version of current epoch for backup workers.
+	virtual Version getBackupStartVersion() const = 0;
 
 	struct EpochTagsVersionsInfo {
 		int32_t logRouterTags; // Number of log router tags.
