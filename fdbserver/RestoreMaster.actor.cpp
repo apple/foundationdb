@@ -314,8 +314,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 		TraceEvent("FastRestoreMasterDispatchVersionBatches")
 		    .detail("BatchIndex", batchIndex)
 		    .detail("BatchSize", versionBatch->size)
-		    .detail("RunningVersionBatches", self->runningVersionBatches.get())
-		    .detail("Start", now());
+		    .detail("RunningVersionBatches", self->runningVersionBatches.get());
 		self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
 		self->batchStatus[batchIndex] = Reference<MasterBatchStatus>(new MasterBatchStatus());
 		fBatches.push_back(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, *versionBatch));
@@ -374,7 +373,8 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		param.asset.len = file.fileSize;
 		param.asset.range = request.range;
 		param.asset.beginVersion = versionBatch.beginVersion;
-		param.asset.endVersion = versionBatch.endVersion;
+		param.asset.endVersion =
+		    isRangeFile ? versionBatch.endVersion : std::min(versionBatch.endVersion, request.targetVersion + 1);
 
 		TraceEvent("FastRestoreMasterPhaseLoadFiles")
 		    .detail("BatchIndex", batchIndex)
