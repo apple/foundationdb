@@ -1256,7 +1256,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 		idsTags.emplace_back(deterministicRandom()->randomUniqueID(), Tag(tagLocalityLogRouter, i));
 	}
 
-	const Version startVersion = self->logSystem->getStartVersion();
+	const Version startVersion = self->logSystem->getBackupStartVersion();
 	state int i = 0;
 	for (; i < logRouterTags; i++) {
 		const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];

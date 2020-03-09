@@ -191,6 +191,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	Optional<Version> recoverAt;
 	Optional<Version> recoveredAt;
 	Version knownCommittedVersion;
+	Version backupStartVersion = invalidVersion; // max(tLogs[0].startVersion, previous epochEnd).
 	LocalityData locality;
 	std::map< std::pair<UID, Tag>, std::pair<Version, Version> > outstandingPops;  // For each currently running popFromLog actor, (log server #, tag)->popped version
 	Optional<PromiseStream<Future<Void>>> addActor;
@@ -1350,9 +1351,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	int getLogRouterTags() const override { return logRouterTags; }
 
-	Version getStartVersion() const override {
+	Version getBackupStartVersion() const final {
 		ASSERT(tLogs.size() > 0);
-		return tLogs[0]->startVersion;
+		return backupStartVersion;
 	}
 
 	std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const override {
@@ -2214,6 +2215,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->oldLogData.insert(logSystem->oldLogData.end(), oldLogSystem->oldLogData.begin(), oldLogSystem->oldLogData.end());
 
 		logSystem->tLogs[0]->startVersion = oldLogSystem->knownCommittedVersion + 1;
+		logSystem->backupStartVersion = oldLogSystem->knownCommittedVersion + 1;
 		state int lockNum = 0;
 		while(lockNum < oldLogSystem->lockResults.size()) {
 			if(oldLogSystem->lockResults[lockNum].logSet->locality == primaryLocality) {
