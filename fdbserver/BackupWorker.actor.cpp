@@ -414,7 +414,7 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			WorkerBackupStatus status(self->backupEpoch, backupVersion, self->tag);
+			WorkerBackupStatus status(self->backupEpoch, backupVersion, self->tag, self->totalTags);
 			tr.set(key, backupProgressValue(status));
 			tr.addReadConflictRange(singleKeyRange(key));
 			wait(tr.commit());

@@ -35,6 +35,13 @@ void BackupProgress::addBackupStatus(const WorkerBackupStatus& status) {
 	} else {
 		it.insert(lb, { status.tag, status.version });
 	}
+
+	auto tagIt = epochTags.find(status.epoch);
+	if (tagIt == epochTags.end()) {
+		epochTags.insert({ status.epoch, status.totalTags });
+	} else {
+		ASSERT(status.totalTags == tagIt->second);
+	}
 }
 
 void BackupProgress::updateTagVersions(std::map<Tag, Version>* tagVersions, std::set<Tag>* tags,
@@ -78,8 +85,8 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 					}
 				}
 				if (savedMore > 0) {
-					// TODO: check the logRouterTags are the same
-					// ASSERT(info.logRouterTags == rit->second.size());
+					// The logRouterTags are the same
+					ASSERT(info.logRouterTags == epochTags[rit->first]);
 
 					updateTagVersions(&tagVersions, &tags, rit->second, info.epochEnd, epoch);
 				}
@@ -124,7 +131,8 @@ ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupPro
 				    .detail("W", workerID)
 				    .detail("Epoch", status.epoch)
 				    .detail("Version", status.version)
-				    .detail("Tag", status.tag.toString());
+				    .detail("Tag", status.tag.toString())
+				    .detail("TotalTags", status.totalTags);
 			}
 			return Void();
 		} catch (Error& e) {
@@ -151,8 +159,8 @@ TEST_CASE("/BackupProgress/Unfinished") {
 		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == begin1);
 	}
 
-	const int saved1 = 50;
-	WorkerBackupStatus status1(epoch1, saved1, tag1);
+	const int saved1 = 50, totalTags = 1;
+	WorkerBackupStatus status1(epoch1, saved1, tag1, totalTags);
 	progress.addBackupStatus(status1);
 	unfinished = progress.getUnfinishedBackup();
 	ASSERT(unfinished.size() == 1);
