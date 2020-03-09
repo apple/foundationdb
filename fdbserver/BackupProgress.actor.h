@@ -93,6 +93,10 @@ private:
 	// the gap. "progress" MUST be iterated in ascending order.
 	std::map<LogEpoch, std::map<Tag, Version>> progress;
 
+	// LogRouterTags for each epoch obtained by decoding backup progress from
+	// the system keyspace.
+	std::map<LogEpoch, int32_t> epochTags;
+
 	// Value of the "backupStartedKey".
 	Optional<Value> backupStartedValue;
 };

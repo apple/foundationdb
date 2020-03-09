@@ -978,13 +978,14 @@ struct WorkerBackupStatus {
 	LogEpoch epoch;
 	Version version;
 	Tag tag;
+	int32_t totalTags;
 
 	WorkerBackupStatus() : epoch(0), version(invalidVersion) {}
-	WorkerBackupStatus(LogEpoch e, Version v, Tag t) : epoch(e), version(v), tag(t) {}
+	WorkerBackupStatus(LogEpoch e, Version v, Tag t, int32_t total) : epoch(e), version(v), tag(t), totalTags(total) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, epoch, version, tag);
+		serializer(ar, epoch, version, tag, totalTags);
 	}
 };
 
