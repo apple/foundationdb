@@ -26,6 +26,9 @@
     <ActorCompiler Include="workloads\BulkLoad.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\Cache.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\MachineAttrition.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>

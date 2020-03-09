@@ -81,6 +81,7 @@
     <ActorCompiler Include="workloads\RandomClogging.actor.cpp" />
     <ActorCompiler Include="workloads\Inventory.actor.cpp" />
     <ActorCompiler Include="workloads\BulkLoad.actor.cpp" />
+    <ActorCompiler Include="workloads\Cache.actor.cpp" />
     <ActorCompiler Include="workloads\MachineAttrition.actor.cpp" />
     <ActorCompiler Include="workloads\LocalRatekeeper.actor.cpp" />
     <ActorCompiler Include="workloads\KillRegion.actor.cpp" />
