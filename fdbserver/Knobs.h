@@ -105,6 +105,7 @@ public:
 	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
+	bool USE_OLD_NEEDED_SERVERS;
 
 	// Higher priorities are executed first
 	// Priority/100 is the "priority group"/"superpriority".  Priority inversion
@@ -118,6 +119,7 @@ public:
 	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
 	int PRIORITY_TEAM_REDUNDANT;
 	int PRIORITY_MERGE_SHARD;
+	int PRIORITY_POPULATE_REGION;
 	int PRIORITY_TEAM_UNHEALTHY;
 	int PRIORITY_TEAM_2_LEFT;
 	int PRIORITY_TEAM_1_LEFT;
@@ -169,6 +171,7 @@ public:
 	int DD_EXCLUDE_MIN_REPLICAS;
 	bool DD_VALIDATE_LOCALITY;
 	int DD_CHECK_INVALID_LOCALITY_DELAY;
+	bool DD_ENABLE_VERBOSE_TRACING;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -453,8 +456,6 @@ public:
 	double DEGRADED_RESET_INTERVAL;
 	double DEGRADED_WARNING_LIMIT;
 	double DEGRADED_WARNING_RESET_DELAY;
-	int64_t TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS;
-	double TRACE_LOG_PING_TIMEOUT_SECONDS;
 
 	// Test harness
 	double WORKER_POLL_DELAY;

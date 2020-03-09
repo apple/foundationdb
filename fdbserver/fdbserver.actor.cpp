@@ -54,7 +54,7 @@
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
-#include "flow/TLSPolicy.h"
+#include "flow/TLSConfig.actor.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
@@ -174,8 +174,6 @@ CSimpleOpt::SOption g_rgOptions[] = {
 };
 
 // clang-format on
-
-GlobalCounters g_counters;
 
 extern void dsltest();
 extern void pingtest();
@@ -941,9 +939,7 @@ struct CLIOptions {
 	int minTesterCount = 1;
 	bool testOnServers = false;
 
-	Reference<TLSPolicy> tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(TLSPolicy::Is::SERVER));
-	TLSParams tlsParams;
-	std::vector<std::string> tlsVerifyPeers;
+	TLSConfig tlsConfig = TLSConfig(TLSEndpointType::SERVER);
 	double fileIoTimeout = 0.0;
 	bool fileIoWarnOnly = false;
 	uint64_t rsssize = -1;
@@ -1370,23 +1366,23 @@ private:
 				break;
 
 #ifndef TLS_DISABLED
-			case TLSParams::OPT_TLS_PLUGIN:
+			case TLSConfig::OPT_TLS_PLUGIN:
 				args.OptionArg();
 				break;
-			case TLSParams::OPT_TLS_CERTIFICATES:
-				tlsParams.tlsCertPath = args.OptionArg();
+			case TLSConfig::OPT_TLS_CERTIFICATES:
+				tlsConfig.setCertificatePath(args.OptionArg());
 				break;
-			case TLSParams::OPT_TLS_PASSWORD:
-				tlsParams.tlsPassword = args.OptionArg();
+			case TLSConfig::OPT_TLS_PASSWORD:
+				tlsConfig.setPassword(args.OptionArg());
 				break;
-			case TLSParams::OPT_TLS_CA_FILE:
-				tlsParams.tlsCAPath = args.OptionArg();
+			case TLSConfig::OPT_TLS_CA_FILE:
+				tlsConfig.setCAPath(args.OptionArg());
 				break;
-			case TLSParams::OPT_TLS_KEY:
-				tlsParams.tlsKeyPath = args.OptionArg();
+			case TLSConfig::OPT_TLS_KEY:
+				tlsConfig.setKeyPath(args.OptionArg());
 				break;
-			case TLSParams::OPT_TLS_VERIFY_PEERS:
-				tlsVerifyPeers.push_back(args.OptionArg());
+			case TLSConfig::OPT_TLS_VERIFY_PEERS:
+				tlsConfig.addVerifyPeers(args.OptionArg());
 				break;
 #endif
 			}
@@ -1581,9 +1577,11 @@ int main(int argc, char* argv[]) {
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "WARNING: Invalid value '%s' for option '%s'\n", k->second.c_str(), k->first.c_str());
+					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", k->second.c_str(), k->first.c_str());
 					TraceEvent(SevWarnAlways, "InvalidKnobValue").detail("Knob", printable(k->first)).detail("Value", printable(k->second));
 				} else {
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
+					TraceEvent(SevError, "FailedToSetKnob").detail("Knob", printable(k->first)).detail("Value", printable(k->second)).error(e);
 					throw;
 				}
 			}
@@ -1625,18 +1623,7 @@ int main(int argc, char* argv[]) {
 			startNewSimulator();
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 		} else {
-#ifndef TLS_DISABLED
-			if ( opts.tlsVerifyPeers.size() ) {
-				try {
-					opts.tlsPolicy->set_verify_peers( opts.tlsVerifyPeers );
-				} catch( Error &e ) {
-					fprintf(stderr, "ERROR: The format of the --tls_verify_peers option is incorrect.\n");
-					printHelpTeaser(argv[0]);
-					flushAndExit(FDB_EXIT_ERROR);
-				}
-			}
-#endif
-			g_network = newNet2(opts.useThreadPool, true, opts.tlsPolicy, opts.tlsParams);
+			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);

@@ -866,10 +866,14 @@ void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::
 	t = timer();
 	mergeWriteConflictRanges(now);
 	g_merge += timer() - t;
-
+	
 	for (int i = 0; i < transactionCount; i++) {
-		if (!transactionConflictStatus[i]) nonConflicting.push_back(i);
-		if (tooOldTransactions && transactionInfo[i]->tooOld) tooOldTransactions->push_back(i);
+		if (tooOldTransactions && transactionInfo[i]->tooOld) {
+			tooOldTransactions->push_back(i);
+		}
+		else if (!transactionConflictStatus[i]) {
+			nonConflicting.push_back( i );
+		}
 	}
 
 	delete[] transactionConflictStatus;

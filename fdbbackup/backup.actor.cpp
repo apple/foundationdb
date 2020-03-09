@@ -26,6 +26,7 @@
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
+#include "flow/TLSConfig.actor.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BackupAgent.actor.h"
@@ -3224,22 +3225,22 @@ int main(int argc, char* argv[]) {
 					blobCredentials.push_back(args->OptionArg());
 					break;
 #ifndef TLS_DISABLED
-				case TLSParams::OPT_TLS_PLUGIN:
+				case TLSConfig::OPT_TLS_PLUGIN:
 					args->OptionArg();
 					break;
-				case TLSParams::OPT_TLS_CERTIFICATES:
+				case TLSConfig::OPT_TLS_CERTIFICATES:
 					tlsCertPath = args->OptionArg();
 					break;
-				case TLSParams::OPT_TLS_PASSWORD:
+				case TLSConfig::OPT_TLS_PASSWORD:
 					tlsPassword = args->OptionArg();
 					break;
-				case TLSParams::OPT_TLS_CA_FILE:
+				case TLSConfig::OPT_TLS_CA_FILE:
 					tlsCAPath = args->OptionArg();
 					break;
-				case TLSParams::OPT_TLS_KEY:
+				case TLSConfig::OPT_TLS_KEY:
 					tlsKeyPath = args->OptionArg();
 					break;
-				case TLSParams::OPT_TLS_VERIFY_PEERS:
+				case TLSConfig::OPT_TLS_VERIFY_PEERS:
 					tlsVerifyPeers = args->OptionArg();
 					break;
 #endif
@@ -3356,15 +3357,19 @@ int main(int argc, char* argv[]) {
 				if (!flowKnobs->setKnob( k->first, k->second ) &&
 					!clientKnobs->setKnob( k->first, k->second ))
 				{
-					fprintf(stderr, "Unrecognized knob option '%s'\n", k->first.c_str());
-					return FDB_EXIT_ERROR;
+					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
+					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "Invalid value '%s' for option '%s'\n", k->second.c_str(), k->first.c_str());
-					return FDB_EXIT_ERROR;
+					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", k->second.c_str(), k->first.c_str());
+					TraceEvent(SevWarnAlways, "InvalidKnobValue").detail("Knob", printable(k->first)).detail("Value", printable(k->second));
 				}
-				throw;
+				else {
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
+					TraceEvent(SevError, "FailedToSetKnob").detail("Knob", printable(k->first)).detail("Value", printable(k->second)).error(e);
+					throw;
+				}
 			}
 		}
 

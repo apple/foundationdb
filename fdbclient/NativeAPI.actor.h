@@ -25,7 +25,6 @@
 #elif !defined(FDBCLIENT_NATIVEAPI_ACTOR_H)
 	#define FDBCLIENT_NATIVEAPI_ACTOR_H
 
-
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/FDBTypes.h"
@@ -60,14 +59,10 @@ struct NetworkOptions {
 	std::string traceFormat;
 	std::string traceClockSource;
 	Optional<bool> logClientInfo;
-	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
+	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool slowTaskProfilingEnabled;
 
-	// The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
-	NetworkOptions()
-	  : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
-	    traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	    traceFormat("xml"), traceClockSource("now"), slowTaskProfilingEnabled(false) {}
+	NetworkOptions();
 };
 
 class Database {

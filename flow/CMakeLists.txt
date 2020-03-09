@@ -3,6 +3,7 @@ find_package(Threads REQUIRED)
 set(FLOW_SRCS
   ActorCollection.actor.cpp
   ActorCollection.h
+  Arena.cpp
   Arena.h
   AsioReactor.h
   CompressedInt.actor.cpp
@@ -51,6 +52,8 @@ set(FLOW_SRCS
   SystemMonitor.h
   TDMetric.actor.h
   TDMetric.cpp
+  TLSConfig.actor.cpp
+  TLSConfig.actor.h
   ThreadHelper.actor.h
   ThreadHelper.cpp
   ThreadPrimitives.cpp
@@ -58,27 +61,25 @@ set(FLOW_SRCS
   ThreadSafeQueue.h
   Trace.cpp
   Trace.h
-  TLSPolicy.h
-  TLSPolicy.cpp
   UnitTest.cpp
   UnitTest.h
-  XmlTraceLogFormatter.h
   XmlTraceLogFormatter.cpp
+  XmlTraceLogFormatter.h
   actorcompiler.h
 	crc32c.h
   crc32c.cpp
   error_definitions.h
   ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h
-  flat_buffers.h
   flat_buffers.cpp
+  flat_buffers.h
   flow.cpp
   flow.h
   genericactors.actor.cpp
   genericactors.actor.h
   network.cpp
   network.h
-  serialize.h
   serialize.cpp
+  serialize.h
   stacktrace.amalgamation.cpp
   stacktrace.h
   version.cpp)

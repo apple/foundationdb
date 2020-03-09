@@ -686,7 +686,7 @@ void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::ve
 }
 
 // Leader is the process that will be elected by coordinators as the cluster controller
-ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, MonitorLeaderInfo info, Standalone<VectorRef<ClientVersionRef>> supportedVersions, Key traceLogGroup) {
+ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, MonitorLeaderInfo info, Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions, Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnFile->getConnectionString();
 	state vector<NetworkAddress> addrs = cs.coordinators();
 	state int idx = 0;
@@ -702,7 +702,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 		req.clusterKey = cs.clusterKey();
 		req.coordinators = cs.coordinators();
 		req.knownClientInfoID = clientInfo->get().id;
-		req.supportedVersions = supportedVersions;
+		req.supportedVersions = supportedVersions->get();
 		req.traceLogGroup = traceLogGroup;
 
 		ClusterConnectionString fileConnectionString;
@@ -755,7 +755,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 	}
 }
 
-ACTOR Future<Void> monitorProxies( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, Standalone<VectorRef<ClientVersionRef>> supportedVersions, Key traceLogGroup ) {
+ACTOR Future<Void> monitorProxies( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions, Key traceLogGroup ) {
 	state MonitorLeaderInfo info(connFile->get());
 	loop {
 		choose {
