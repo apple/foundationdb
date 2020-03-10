@@ -68,7 +68,7 @@ void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
 std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, Version begin, Version end) {
 	std::vector<LogFile> filtered;
 	for (const auto& file : files) {
-		if (file.beginVersion <= end && file.endVersion >= begin && file.tagId >= 0) {
+		if (file.beginVersion <= end && file.endVersion >= begin && file.tagId >= 0 && file.fileSize > 0) {
 			filtered.push_back(file);
 		}
 	}
@@ -76,7 +76,7 @@ std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, Vers
 
 	// Remove duplicates. This is because backup workers may store the log for
 	// old epochs successfully, but do not update the progress before another
-	// recovery happened.	As a result, next epoch will retry and creates
+	// recovery happened. As a result, next epoch will retry and creates
 	// duplicated log files.
 	std::vector<LogFile> sorted;
 	int i = 0;
