@@ -113,14 +113,14 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			toKill2.insert(processSet.begin(), processSet.end());
 		}
 
-		std::vector<NetworkAddress> disableAddrs1;
+		// std::vector<NetworkAddress> disableAddrs1;
 		for( AddressExclusion ex : toKill1 ) {
 			AddressExclusion machineIp(ex.ip);
 			ASSERT(machine_ids.count(machineIp));
 			g_simulator.disableSwapToMachine(machine_ids[machineIp]);
 		}
 
-		std::vector<NetworkAddress> disableAddrs2;
+		// std::vector<NetworkAddress> disableAddrs2;
 		for( AddressExclusion ex : toKill2 ) {
 			AddressExclusion machineIp(ex.ip);
 			ASSERT(machine_ids.count(machineIp));
@@ -224,6 +224,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return procArray;
 	}
 
+	// Return processes that are intersection of killAddrs and allServers and that are safe to kill together;
+	// killAddrs does not guarantee the addresses are safe to kill simultaneously.
 	virtual std::vector<ISimulator::ProcessInfo*> protectServers(std::set<AddressExclusion> const& killAddrs)
 	{
 		std::vector<ISimulator::ProcessInfo*>	processes;
@@ -309,7 +311,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			TraceEvent("RemoveAndKill").detail("Step", "include all first").detail("KillTotal", toKill1.size()).detail("ToKill", describe(toKill1)).detail("ClusterAvailable", g_simulator.isAvailable());
 			wait( includeServers( cx, vector<AddressExclusion>(1) ) );
 			self->includeAddresses(toKill1);
-			TraceEvent("RemoveAndKill").detail("Step", "included all first").detail("KillTotal", toKill1.size()).detail("ToKill", describe(toKill1)).detail("ClusterAvailable", g_simulator.isAvailable());
+			//TraceEvent("RemoveAndKill").detail("Step", "included all first").detail("KillTotal", toKill1.size()).detail("ToKill", describe(toKill1)).detail("ClusterAvailable", g_simulator.isAvailable());
 		}
 
 		// Get the list of protected servers
@@ -335,7 +337,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			TraceEvent("RemoveAndKill").detail("Step", "include all second").detail("KillTotal", toKill2.size()).detail("ToKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
 			wait( includeServers( cx, vector<AddressExclusion>(1) ) );
 			self->includeAddresses(toKill2);
-			TraceEvent("RemoveAndKill").detail("Step", "included all second").detail("KillTotal", toKill2.size()).detail("ToKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
+			//TraceEvent("RemoveAndKill").detail("Step", "included all second").detail("KillTotal", toKill2.size()).detail("ToKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
 		}
 
 		return Void();

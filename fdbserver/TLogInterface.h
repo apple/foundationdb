@@ -49,7 +49,6 @@ struct TLogInterface {
 	RequestStream< struct TLogEnablePopRequest> enablePopRequest;
 	RequestStream< struct TLogSnapRequest> snapRequest;
 
-	
 	TLogInterface() {}
 	explicit TLogInterface(const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
 	TLogInterface(UID sharedTLogID, const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
@@ -59,6 +58,7 @@ struct TLogInterface {
 	std::string toString() const { return id().shortString(); }
 	bool operator == ( TLogInterface const& r ) const { return id() == r.id(); }
 	NetworkAddress address() const { return peekMessages.getEndpoint().getPrimaryAddress(); }
+	Optional<NetworkAddress> secondaryAddress() const {return peekMessages.getEndpoint().addresses.secondaryAddress;}
 	void initEndpoints() {
 		getQueuingMetrics.getEndpoint( TaskPriority::TLogQueuingMetrics );
 		popMessages.getEndpoint( TaskPriority::TLogPop );

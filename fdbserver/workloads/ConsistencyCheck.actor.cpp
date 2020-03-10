@@ -1175,14 +1175,24 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 		state std::vector<WorkerDetails>::iterator itr;
 		state bool foundExtraDataStore = false;
+		state std::vector<struct ProcessInfo*> protectedProcessesToKill;
 
 		state std::map<NetworkAddress, std::set<UID>> statefulProcesses;
 		for (const auto& ss : storageServers) {
 			statefulProcesses[ss.address()].insert(ss.id());
+			// Add both addresses so that we will not mistakenly trigger ConsistencyCheck_ExtraDataStore
+			if (ss.secondaryAddress().present()) {
+				statefulProcesses[ss.secondaryAddress().get()].insert(ss.id());
+			}
 		}
 		for (const auto& log : logs) {
 			statefulProcesses[log.address()].insert(log.id());
+			if (log.secondaryAddress().present()) {
+				statefulProcesses[log.secondaryAddress().get()].insert(log.id());
+			}
 		}
+		// TODO: Add coordinators into stateful processes
+		// Why don't we add coordinator address into statefulProcesses?
 
 		for(itr = workers.begin(); itr != workers.end(); ++itr) {
 			ErrorOr<Standalone<VectorRef<UID>>> stores = wait(itr->interf.diskStoreRequest.getReplyUnlessFailedFor(DiskStoreRequest(false), 2, 0));
@@ -1193,13 +1203,28 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 
 			for (const auto& id : stores.get()) {
+				// if (statefulProcesses[itr->interf.address()].count(id)) {
+				// 	continue;
+				// }
 				if(!statefulProcesses[itr->interf.address()].count(id)) {
 					TraceEvent("ConsistencyCheck_ExtraDataStore").detail("Address", itr->interf.address()).detail("DataStoreID", id);
 					if(g_network->isSimulated()) {
 						//FIXME: this is hiding the fact that we can recruit a new storage server on a location the has files left behind by a previous failure
 						// this means that the process is wasting disk space until the process is rebooting
 						auto p = g_simulator.getProcessByAddress(itr->interf.address());
-						TraceEvent("ConsistencyCheck_RebootProcess").detail("Address", itr->interf.address()).detail("DataStoreID", id).detail("Reliable", p->isReliable());
+						// Note: itr->interf.address() may not equal to p->address() because role's endpoint's primary addr can be swapped by choosePrimaryAddress() based on its peer's tls config.
+						TraceEvent("ConsistencyCheck_RebootProcess")
+						    .detail("Address", itr->interf.address()) // worker's primary address (i.e., the first address)
+							.detail("ProcessAddress", p->address)
+						    .detail("DataStoreID", id)
+						    .detail("Protected", g_simulator.protectedAddresses.count(itr->interf.address()))
+						    .detail("Reliable", p->isReliable())
+						    .detail("ReliableInfo", p->getReliableInfo())
+						    .detail("KillOrRebootProcess", p->address);
+						// if (g_simulator.protectedAddresses.count(machine->address)) {
+						// 	protectedProcessesToKill.push_back(p);
+						// 	continue;
+						// }
 						if(p->isReliable()) {
 							g_simulator.rebootProcess(p, ISimulator::RebootProcess);
 						} else {
@@ -1211,6 +1236,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 				}
 			}
 		}
+
+		// kill or reboot protected process
+		// for () {
+
+		// }
 
 		if(foundExtraDataStore) {
 			self->testFailure("Extra data stores present on workers");

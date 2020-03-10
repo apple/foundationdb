@@ -1029,7 +1029,7 @@ public:
 
 		NetworkAddressList addresses;
 		addresses.address = NetworkAddress(ip, port, true, sslEnabled);
-		if(listenPerProcess == 2) {
+		if(listenPerProcess == 2) { // listenPerProcess is only 1 or 2
 			addresses.secondaryAddress = NetworkAddress(ip, port+1, true, false);
 		}
 
@@ -1250,12 +1250,26 @@ public:
 		TEST( kt == InjectFaults ); // Simulated machine was killed with faults
 
 		if (kt == KillInstantly) {
-			TraceEvent(SevWarn, "FailMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
+			TraceEvent(SevWarn, "FailMachine")
+			    .detail("Name", machine->name)
+			    .detail("Address", machine->address)
+			    .detail("ZoneId", machine->locality.zoneId())
+			    .detail("Process", machine->toString())
+			    .detail("Rebooting", machine->rebooting)
+			    .detail("Protected", protectedAddresses.count(machine->address))
+			    .backtrace();
 			// This will remove all the "tracked" messages that came from the machine being killed
 			latestEventCache.clear();
 			machine->failed = true;
 		} else if (kt == InjectFaults) {
-			TraceEvent(SevWarn, "FaultMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
+			TraceEvent(SevWarn, "FaultMachine")
+			    .detail("Name", machine->name)
+			    .detail("Address", machine->address)
+			    .detail("ZoneId", machine->locality.zoneId())
+			    .detail("Process", machine->toString())
+			    .detail("Rebooting", machine->rebooting)
+			    .detail("Protected", protectedAddresses.count(machine->address))
+			    .backtrace();
 			should_inject_fault = simulator_should_inject_fault;
 			machine->fault_injection_r = deterministicRandom()->randomUniqueID().first();
 			machine->fault_injection_p1 = 0.1;
@@ -1290,7 +1304,7 @@ public:
 		}
 	}
 	virtual void killProcess( ProcessInfo* machine, KillType kt ) {
-		TraceEvent("AttemptingKillProcess");
+		TraceEvent("AttemptingKillProcess").detail("ProcessInfo", machine->toString());
 		if (kt < RebootAndDelete ) {
 			killProcess_internal( machine, kt );
 		}

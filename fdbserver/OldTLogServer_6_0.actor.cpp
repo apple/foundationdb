@@ -381,6 +381,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Version queueCommittingVersion;
 	Version knownCommittedVersion, durableKnownCommittedVersion, minKnownCommittedVersion;
 
+	// Track lastUpdate time for parallel peek and detect stall on tLogs
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>> sequence_version;
 		double lastUpdate;
@@ -500,7 +501,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		for ( auto it = peekTracker.begin(); it != peekTracker.end(); ++it ) {
 			for(auto seq : it->second.sequence_version) {
 				if(!seq.second.isSet()) {
-					seq.second.sendError(timed_out());
+					seq.second.sendError(operation_obsolete());
 				}
 			}
 		}
