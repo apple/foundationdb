@@ -163,6 +163,10 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 				// used for throttling
 				wait(poisson(&lastTime, delay));
 				if (self->reportConflictingKeys) tr.setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
+				// If READ_YOUR_WRITES_DISABLE set, it behaves like native transaction object
+				// where overlapped conflict ranges are not merged.
+				if (deterministicRandom()->random01() < 0.5)
+					tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 				self->addRandomReadConflictRange(&tr, readConflictRanges);
 				self->addRandomWriteConflictRange(&tr);
 				++self->commits;
