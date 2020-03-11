@@ -1285,12 +1285,11 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	// Currently, the conflicting keyranges returned are original read_conflict_ranges.
-	const KeyRef conflictingKeysPrefix = LiteralStringRef("\xff\xff/transaction/conflicting_keys/");
-	// TODO : This condition needs to be changed in the future when we have more special keys under "\xff\xff/transaction/"
-	if (begin.getKey().startsWith(conflictingKeysPrefix) && end.getKey().startsWith(conflictingKeysPrefix)) {
-		// Remove the special key prefix "\xff\xff/transaction/conflicting_keys/"
-		KeyRef beginConflictingKey = begin.getKey().removePrefix(conflictingKeysPrefix);
-		KeyRef endConflictingKey = end.getKey().removePrefix(conflictingKeysPrefix);
+	// TODO : This interface needs to be integrated into the framework that handles special keys' calls in the future
+	if (begin.getKey().startsWith(conflictingKeysAbsolutePrefix) && end.getKey().startsWith(conflictingKeysAbsolutePrefix)) {
+		// Remove the special key prefix "\xff\xff"
+		KeyRef beginConflictingKey = begin.getKey().removePrefix(specialKeys.begin);
+		KeyRef endConflictingKey = end.getKey().removePrefix(specialKeys.begin);
 
 		// Check if the conflicting key range to be read is valid
 		KeyRef maxKey = getMaxReadKey();
@@ -1309,7 +1308,7 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 			Standalone<RangeResultRef> resultWithPrefix;
 			resultWithPrefix.reserve(resultWithPrefix.arena(), resultWithoutPrefix.size());
 			for (auto const & kv : resultWithoutPrefix) {
-				KeyValueRef kvWithPrefix(kv.key.withPrefix(conflictingKeysPrefix, resultWithPrefix.arena()), kv.value);
+				KeyValueRef kvWithPrefix(kv.key.withPrefix(specialKeys.begin, resultWithPrefix.arena()), kv.value);
 				resultWithPrefix.push_back(resultWithPrefix.arena(), kvWithPrefix);
 			}
 			return resultWithPrefix;
