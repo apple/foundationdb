@@ -373,8 +373,9 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		param.asset.len = file.fileSize;
 		param.asset.range = request.range;
 		param.asset.beginVersion = versionBatch.beginVersion;
-		param.asset.endVersion =
-		    isRangeFile ? versionBatch.endVersion : std::min(versionBatch.endVersion, request.targetVersion + 1);
+		param.asset.endVersion = (isRangeFile || request.targetVersion == -1)
+		                             ? versionBatch.endVersion
+		                             : std::min(versionBatch.endVersion, request.targetVersion + 1);
 
 		TraceEvent("FastRestoreMasterPhaseLoadFiles")
 		    .detail("BatchIndex", batchIndex)
