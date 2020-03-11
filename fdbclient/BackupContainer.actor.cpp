@@ -799,7 +799,6 @@ public:
 		}
 
 		state std::vector<LogFile> logs;
-std::cout << "describe list: scanBegin:" << scanBegin << ", scanEnd:" << scanEnd << ", partitioned:" << partitioned << "\n";
 		wait(store(logs, bc->listLogFiles(scanBegin, scanEnd, partitioned)) &&
 		     store(desc.snapshots, bc->listKeyspaceSnapshots()));
 
@@ -1097,7 +1096,6 @@ std::cout << "describe list: scanBegin:" << scanBegin << ", scanEnd:" << scanEnd
 		ASSERT(tags == nullptr || tags->empty());
 		for (int idx : indices) {
 			const LogFile& file = files[idx];
-std::cout << "  " << file.toString() << " " << "lastBegin " << lastBegin << ", lastEnd " << lastEnd << ", end " << end << ", lastTags " << lastTags << "\n";
 			if (lastEnd == invalidVersion) {
 				if (file.beginVersion > begin) return false;
 				if (file.endVersion > begin) {
@@ -1123,7 +1121,6 @@ std::cout << "  " << file.toString() << " " << "lastBegin " << lastBegin << ", l
 			lastEnd = file.endVersion;
 			if (lastEnd > end) break;
 		}
-std::cout << "lastBegin " << lastBegin << ", lastEnd " << lastEnd << ", end " << end << ", lastTags " << lastTags << "\n";
 		if (tags != nullptr && lastBegin != invalidVersion) {
 			tags->emplace(std::make_pair(lastBegin, std::min(end, lastEnd - 1)), lastTags);
 		}
@@ -1181,7 +1178,6 @@ std::cout << "lastBegin " << lastBegin << ", lastEnd " << lastEnd << ", end " <<
 
 		for (const LogFile& file : logs) {
 			Version end = getPartitionedLogsContinuousEndVersion(logs, file.beginVersion);
-std::cout << "    determine " << file.toString() << " , end " << end << "\n\n";
 			if (end > file.beginVersion) {
 				// desc->minLogBegin = file.beginVersion;
 				// contiguousLogEnd is not inclusive, so +1 here.
@@ -1194,8 +1190,6 @@ std::cout << "    determine " << file.toString() << " , end " << end << "\n\n";
 	// Returns the end version such that [begin, end] is continuous.
 	// "logs" should be already sorted.
 	static Version getPartitionedLogsContinuousEndVersion(const std::vector<LogFile>& logs, Version begin) {
-std::cout << "getPartitionedLogsContinuousEndVersion begin:" << begin << "\n";
-for (auto file : logs) std::cout << "    " << file.toString() << "\n";
 		Version end = 0;
 
 		std::map<int, std::vector<int>> tagIndices; // tagId -> indices in files
@@ -1210,15 +1204,12 @@ for (auto file : logs) std::cout << "    " << file.toString() << "\n";
 			}
 			end = std::max(end, logs[i].endVersion - 1);
 		}
-std::cout << "Init end: " << end << ", begin " << begin << "\n";
 
 		// check tag 0 is continuous in [begin, end] and create a map of ranges to tags
 		std::map<std::pair<Version, Version>, int> tags; // range [start, end] -> tags
 		isContinuous(logs, tagIndices[0], begin, end, &tags);
 		if (tags.empty() || end <= begin) return 0;
 		end = std::min(end, tags.rbegin()->first.second);
-std::cout << "  Tag 0 end: " << end << "\n";
-for (auto [p, v] : tags) std::cout<<"[" << p.first << ", " << p.second << "] " << v << "\n";
 
 		// for each range in tags, check all tags from 1 are continouous
 		Version lastEnd = begin;
@@ -1228,7 +1219,6 @@ for (auto [p, v] : tags) std::cout<<"[" << p.first << ", " << p.second << "] " <
 				std::map<std::pair<Version, Version>, int> rangeTags;
 				isContinuous(logs, tagIndices[i], beginEnd.first, beginEnd.second, &rangeTags);
 				tagEnd = rangeTags.empty() ? 0 : std::min(tagEnd, rangeTags.rbegin()->first.second);
-std::cout << "  Tag " << i << " end: " << tagEnd << ", return end = "<< lastEnd << "\n";
 				if (tagEnd == 0) return lastEnd;
 			}
 			if (tagEnd < beginEnd.second) {
@@ -1238,7 +1228,6 @@ std::cout << "  Tag " << i << " end: " << tagEnd << ", return end = "<< lastEnd 
 			lastEnd = beginEnd.second;
 		}
 
-std::cout << "Return end = " << end << "\n\n";
 		return end;
 	}
 
