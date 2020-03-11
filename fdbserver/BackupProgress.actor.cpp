@@ -71,9 +71,9 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 		if (progressIt != progress.end() && progressIt->first == epoch) {
 			updateTagVersions(&tagVersions, &tags, progressIt->second, info.epochEnd, epoch);
 		} else {
-			auto rit =
-			    std::find_if(progress.rbegin(), progress.rend(),
-			                 [=](const std::pair<LogEpoch, std::map<Tag, Version>>& p) { return p.first < epoch; });
+			auto rit = std::find_if(
+			    progress.rbegin(), progress.rend(),
+			    [epoch = epoch](const std::pair<LogEpoch, std::map<Tag, Version>>& p) { return p.first < epoch; });
 			if (!(rit == progress.rend())) {
 				// A partial recovery can result in empty epoch that copies previous
 				// epoch's version range. In this case, we should check previous
