@@ -172,9 +172,9 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 
 			// Deserialize messages written in saveMutationsToFile().
 			LogMessageVersion msgVersion;
-			msgVersion.version = bigEndian64(reader.consume<Version>());
-			msgVersion.sub = bigEndian32(reader.consume<uint32_t>());
-			int msgSize = bigEndian32(reader.consume<int>());
+			msgVersion.version = reader.consumeNetworkUInt64();
+			msgVersion.sub = reader.consumeNetworkUInt32();
+			int msgSize = reader.consumeNetworkInt32();
 			const uint8_t* message = reader.consume(msgSize);
 
 			// Skip mutations out of the version range
@@ -769,12 +769,14 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 		cc->loadedRangeBytes += m.totalSize();
 
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
-		auto it = kvOps.insert(std::make_pair(LogMessageVersion(version), MutationsVec()));
+		// Note we give INT_MAX as the sub sequence number to override any log mutations.
+		const LogMessageVersion msgVersion(version, std::numeric_limits<int32_t>::max());
+		auto it = kvOps.insert(std::make_pair(msgVersion, MutationsVec()));
 		TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
 		    .detail("CommitVersion", version)
 		    .detail("ParsedMutationKV", m.toString());
 
-		ASSERT_WE_THINK(kvOps.find(LogMessageVersion(version)) != kvOps.end());
+		ASSERT_WE_THINK(kvOps.find(msgVersion) != kvOps.end());
 		it.first->second.push_back_deep(it.first->second.arena(), m);
 		// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
 		if (deterministicRandom()->random01() * 100 < SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
