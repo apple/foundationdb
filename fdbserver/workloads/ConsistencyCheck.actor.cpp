@@ -1170,9 +1170,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 	ACTOR Future<bool> checkForExtraDataStores(Database cx, ConsistencyCheckWorkload *self) {
 		state vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
 		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
+		state std::vector<WorkerInterface> coordWorkers = wait(getCoordWorkers(cx, self->dbInfo));
 		auto& db = self->dbInfo->get();
 		state std::vector<TLogInterface> logs = db.logSystemConfig.allPresentLogs();
-		state std::vector<WorkerInterface> coordWorkers = wait(getCoordWorkers(cx, self->dbInfo));
 
 		state std::vector<WorkerDetails>::iterator itr;
 		state bool foundExtraDataStore = false;
