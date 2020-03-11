@@ -2752,22 +2752,26 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 						// We create an empty RYWTransaction and write all conflicting key/values to it.
 						// Since it is RYWTr, we can call getRange on it with same parameters given to the original getRange.
 						tr->info.conflictingKeysRYW = std::make_shared<ReadYourWritesTransaction>(tr->getDatabase());
+						state Reference<ReadYourWritesTransaction> hackTr =
+							Reference<ReadYourWritesTransaction>(tr->info.conflictingKeysRYW.get());
+						state Standalone<VectorRef<int>> conflictingKRIndices = ci.conflictingKRIndices.get();
 						// To make the getRange call local, we need to explicitly set the read version here.
 						// This version number 100 set here does nothing but prevent getting read version from the proxy
 						tr->info.conflictingKeysRYW->setVersion(100);
 						// Clear the whole key space, thus, RYWTr knows to only read keys locally
 						tr->info.conflictingKeysRYW->clear(normalKeys);
-						// in case system keys are conflicting
-						tr->info.conflictingKeysRYW->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr->info.conflictingKeysRYW->clear(systemKeys);
-						// merge duplicate indices
-						const auto cKRs = ci.conflictingKRIndices.get();
-						std::set<int> mergedIds(cKRs.begin(), cKRs.end());
+						// initialize value
+						wait(krmSetRange(hackTr, conflictingKeysPrefix, normalKeys, conflictingKeysFalse));
+						// drop duplicate indices and merge overlapped ranges
+						// Note: addReadConflictRange in native transaction object does not merge overlapped ranges
+						state std::set<int> mergedIds(conflictingKRIndices.begin(), conflictingKRIndices.end());
 						for (auto const & rCRIndex : mergedIds) {
-							const KeyRangeRef & kr = req.transaction.read_conflict_ranges[rCRIndex];
-							tr->info.conflictingKeysRYW->set(kr.begin, conflictingKeysTrue);
-							tr->info.conflictingKeysRYW->set(kr.end, conflictingKeysFalse);
+							const KeyRange kr = req.transaction.read_conflict_ranges[rCRIndex];
+							// tr->info.conflictingKeysRYW->set(kr.begin, conflictingKeysTrue);
+							// tr->info.conflictingKeysRYW->set(kr.end, conflictingKeysFalse);
+							wait(krmSetRange(hackTr, conflictingKeysPrefix, kr, conflictingKeysTrue));
 						}
+						hackTr.extractPtr(); // Avoid the Reference to destroy the RYW object
 					}
 
 					if (info.debugID.present())
