@@ -1172,6 +1172,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
 		auto& db = self->dbInfo->get();
 		state std::vector<TLogInterface> logs = db.logSystemConfig.allPresentLogs();
+		state std::vector<WorkerInterface> coordWorkers = wait(getCoordWorkers(cx, self->dbInfo));
 
 		state std::vector<WorkerDetails>::iterator itr;
 		state bool foundExtraDataStore = false;
@@ -1191,8 +1192,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 				statefulProcesses[log.secondaryAddress().get()].insert(log.id());
 			}
 		}
-		// TODO: Add coordinators into stateful processes
-		// Why don't we add coordinator address into statefulProcesses?
+		// Coordinators are also stateful processes
+		for (const auto& cWorker: coordWorkers) {
+			statefulProcesses[cWorker.address()].insert(cWorker.id());
+			if (cWorker.secondaryAddress().present()) {
+				statefulProcesses[cWorker.secondaryAddress().get()].insert(cWorker.id());
+			}
+		}
 
 		for(itr = workers.begin(); itr != workers.end(); ++itr) {
 			ErrorOr<Standalone<VectorRef<UID>>> stores = wait(itr->interf.diskStoreRequest.getReplyUnlessFailedFor(DiskStoreRequest(false), 2, 0));
