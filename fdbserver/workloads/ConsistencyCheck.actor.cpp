@@ -1350,7 +1350,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 						TraceEvent("ConsistencyCheck_RebootProcess")
 						    .detail("Address",
 						            itr->interf.address()) // worker's primary address (i.e., the first address)
-						    .detail("ProcessAddress", p->address)
+						    .detail("ProcessPrimaryAddress", p->address)
+							.detail("ProcessAddresses", p->addresses.toString())
 						    .detail("DataStoreID", id)
 						    .detail("Protected", g_simulator.protectedAddresses.count(itr->interf.address()))
 						    .detail("Reliable", p->isReliable())

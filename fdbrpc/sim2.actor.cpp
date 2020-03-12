@@ -1584,7 +1584,9 @@ public:
 	virtual ProcessInfo* getProcessByAddress( NetworkAddress const& address ) {
 		NetworkAddress normalizedAddress(address.ip, address.port, true, address.isTLS());
 		ASSERT( addressMap.count( normalizedAddress ) );
-		return addressMap[ normalizedAddress ];
+		// NOTE: addressMap[normalizedAddress]->address may not equal to normalizedAddress
+		// ASSERT_WE_THINK( addressMap[normalizedAddress]->address == normalizedAddress );
+		return addressMap[normalizedAddress];
 	}
 
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) {
