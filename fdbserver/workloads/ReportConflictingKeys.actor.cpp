@@ -184,24 +184,24 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 				wait(tr.onError(e));
 				// check API correctness
 				if (!self->skipCorrectnessCheck && self->reportConflictingKeys && isConflict) {
-					const KeyRef conflictingKeysPreifx = LiteralStringRef("\xff\xff/transaction/conflicting_keys/");
-					state KeyRange ckr = KeyRangeRef(LiteralStringRef("").withPrefix(conflictingKeysPreifx),
-					                                 LiteralStringRef("\xff").withPrefix(conflictingKeysPreifx));
+					// const KeyRef conflictingKeysPreifx = LiteralStringRef("\xff\xff/transaction/conflicting_keys/");
+					state KeyRange ckr = KeyRangeRef(LiteralStringRef("").withPrefix(conflictingKeysAbsolutePrefix),
+					                                 LiteralStringRef("\xff\xff").withPrefix(conflictingKeysAbsolutePrefix));
 					// The getRange here using the special key prefix "\xff\xff/transaction/conflicting_keys/" happens
 					// locally Thus, the error handling is not needed here
 					Future<Standalone<RangeResultRef>> conflictingKeyRangesFuture =
-					    tr.getRange(ckr, readConflictRanges.size() * 2);
+					    tr.getRange(ckr, readConflictRanges.size() * 2 + 1);
 					ASSERT(conflictingKeyRangesFuture.isReady());
 					const Standalone<RangeResultRef> conflictingKeyRanges = conflictingKeyRangesFuture.get();
-					ASSERT(conflictingKeyRanges.size() && (conflictingKeyRanges.size() % 2 == 0));
-					for (int i = 0; i < conflictingKeyRanges.size(); i += 2) {
-						KeyValueRef startKeyWithPreifx = conflictingKeyRanges[i];
-						ASSERT(startKeyWithPreifx.value == conflictingKeysTrue);
+					ASSERT(conflictingKeyRanges.size() && (conflictingKeyRanges.size() % 2 == 1));
+					for (int i = 1; i < conflictingKeyRanges.size(); i += 2) {
+						KeyValueRef startKeyWithPrefix = conflictingKeyRanges[i];
+						ASSERT(startKeyWithPrefix.value == conflictingKeysTrue);
 						KeyValueRef endKeyWithPrefix = conflictingKeyRanges[i + 1];
 						ASSERT(endKeyWithPrefix.value == conflictingKeysFalse);
 						// Remove the prefix of returning keys
-						Key startKey = startKeyWithPreifx.key.removePrefix(conflictingKeysPreifx);
-						Key endKey = endKeyWithPrefix.key.removePrefix(conflictingKeysPreifx);
+						Key startKey = startKeyWithPrefix.key.removePrefix(conflictingKeysAbsolutePrefix);
+						Key endKey = endKeyWithPrefix.key.removePrefix(conflictingKeysAbsolutePrefix);
 						KeyRangeRef kr = KeyRangeRef(startKey, endKey);
 						if (!std::any_of(readConflictRanges.begin(), readConflictRanges.end(), [&kr](KeyRange rCR) {
 							    // Read_conflict_range remains same in the resolver.

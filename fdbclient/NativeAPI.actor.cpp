@@ -2761,7 +2761,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 						// Clear the whole key space, thus, RYWTr knows to only read keys locally
 						tr->info.conflictingKeysRYW->clear(normalKeys);
 						// initialize value
-						wait(krmSetRange(hackTr, conflictingKeysPrefix, normalKeys, conflictingKeysFalse));
+						// wait(krmSetRange(hackTr, conflictingKeysPrefix, normalKeys, conflictingKeysFalse));
+						tr->info.conflictingKeysRYW->set(conflictingKeysPrefix, conflictingKeysFalse);
 						// drop duplicate indices and merge overlapped ranges
 						// Note: addReadConflictRange in native transaction object does not merge overlapped ranges
 						state std::set<int> mergedIds(conflictingKRIndices.begin(), conflictingKRIndices.end());
