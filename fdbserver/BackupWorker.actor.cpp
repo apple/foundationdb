@@ -110,6 +110,7 @@ struct BackupData {
 
 	std::map<UID, PerBackupInfo> backups; // Backup UID to infos
 	AsyncTrigger changedTrigger;
+	AsyncTrigger doneTrigger;
 
 	CounterCollection cc;
 	Future<Void> logger;
@@ -385,7 +386,9 @@ ACTOR Future<Void> monitorAllWorkerProgress(BackupData* self) {
 						const Version current = savedLogVersions[versionConfigs[i].getUid()];
 						if (prevVersions[i].get().present()) {
 							const Version prev = prevVersions[i].get().get();
-							ASSERT(prev <= current);
+							TraceEvent(SevWarn, "BackupWorkerVersionInverse", self->myId)
+							    .detail("Prev", prev)
+							    .detail("Current", current);
 						}
 						if (!prevVersions[i].get().present() || prevVersions[i].get().get() < current) {
 							TraceEvent("BackupWorkerSetVersion", self->myId)
@@ -612,6 +615,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		}
 
 		// If transition into NOOP mode, should clear messages
+		if (!self->pulling) self->messages.clear();
 
 		if (popVersion > self->savedVersion) {
 			wait(saveProgress(self, popVersion));
@@ -624,7 +628,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		}
 
 		if (!self->pullFinished()) {
-			wait(uploadDelay);
+			wait(uploadDelay || self->doneTrigger.onTrigger());
 		}
 	}
 }
@@ -664,6 +668,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		TraceEvent("BackupWorkerGot", self->myId).suppressFor(1.0).detail("V", tagAt);
 		if (self->pullFinished()) {
 			self->eraseMessagesAfterEndVersion();
+			self->doneTrigger.trigger();
 			TraceEvent("BackupWorkerFinishPull", self->myId)
 			    .detail("Tag", self->tag.toString())
 			    .detail("VersionGot", tagAt)
