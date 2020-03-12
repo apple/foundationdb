@@ -2770,7 +2770,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 							const KeyRange kr = req.transaction.read_conflict_ranges[rCRIndex];
 							// tr->info.conflictingKeysRYW->set(kr.begin, conflictingKeysTrue);
 							// tr->info.conflictingKeysRYW->set(kr.end, conflictingKeysFalse);
-							wait(krmSetRange(hackTr, conflictingKeysPrefix, kr, conflictingKeysTrue));
+							// wait(krmSetRange(hackTr, conflictingKeysPrefix, kr, conflictingKeysTrue));
+							wait(krmSetRangeCoalescing(hackTr, conflictingKeysPrefix, kr, allKeys, conflictingKeysTrue));
 						}
 						hackTr.extractPtr(); // Avoid the Reference to destroy the RYW object
 					}
