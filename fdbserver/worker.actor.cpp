@@ -400,6 +400,8 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	return result;
 }
 
+// Register the worker interf to cluster controller (cc) and
+// re-register the worker when key roles interface, e.g., cc, dd, ratekeeper, change.
 ACTOR Future<Void> registrationClient(
 		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
 		WorkerInterface interf,
@@ -424,7 +426,7 @@ ACTOR Future<Void> registrationClient(
 		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply(request) ) : Never();
 		choose {
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
-				processClass = reply.processClass;	
+				processClass = reply.processClass;
 				asyncPriorityInfo->set( reply.priorityInfo );
 
 				if(!reply.storageCache.present()) {
@@ -434,7 +436,7 @@ ACTOR Future<Void> registrationClient(
 					StorageServerInterface recruited;
 					recruited.locality = locality;
 					recruited.initEndpoints();
-					
+
 					std::map<std::string, std::string> details;
 					startRole( Role::STORAGE_CACHE, recruited.id(), interf.id(), details );
 
@@ -1127,7 +1129,7 @@ ACTOR Future<Void> workerServer(
 
 				Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
 				errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
-				TraceEvent("Backup_InitRequest", req.reqId).detail("BackupId", recruited.id());
+				TraceEvent("BackupInitRequest", req.reqId).detail("BackupId", recruited.id());
 				InitializeBackupReply reply(recruited, req.backupEpoch);
 				req.reply.send(reply);
 			}
