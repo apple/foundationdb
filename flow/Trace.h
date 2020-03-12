@@ -43,7 +43,7 @@ inline int fastrand() {
 //inline static bool TRACE_SAMPLE() { return fastrand()<16; }
 inline static bool TRACE_SAMPLE() { return false; }
 
-extern thread_local int g_trace_depth;
+extern thread_local bool g_tracing_allocation;
 
 enum Severity {
 	SevSample=1,

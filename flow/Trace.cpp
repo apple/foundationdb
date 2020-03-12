@@ -43,7 +43,7 @@
 #undef min
 #endif
 
-thread_local int g_trace_depth = 0;
+thread_local bool g_tracing_allocation = false;
 
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
@@ -698,14 +698,12 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 }
 
 TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true), logged(false) {
-	g_trace_depth++;
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
 TraceEvent::TraceEvent( Severity severity, const char* type, UID id )
 	: id(id), type(type), severity(severity), initialized(false), logged(false),
 	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
-	g_trace_depth++;
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
@@ -715,7 +713,6 @@ TraceEvent::TraceEvent( TraceInterval& interval, UID id )
 	  initialized(false), logged(false),
 	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= interval.severity) {
 
-	g_trace_depth++;
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 
@@ -727,7 +724,6 @@ TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id )
 	  initialized(false), logged(false),
 	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
 
-	g_trace_depth++;
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 
@@ -1014,7 +1010,6 @@ void TraceEvent::log() {
 			TraceEvent(SevError, "TraceEventLoggingError").error(e,true);
 		}
 		delete tmpEventMetric;
-		g_trace_depth--;
 		logged = true;
 	}
 }
