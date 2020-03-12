@@ -1143,7 +1143,7 @@ ACTOR Future<Void> commitBatch(
 			trs[t].reply.sendError(transaction_too_old());
 		}
 		else {
-			// If enable the option to report conflicting keys from resolvers, we union all conflicting key ranges here and send back through CommitID
+			// If enable the option to report conflicting keys from resolvers, we send back all keyranges' indices through CommitID
 			if (trs[t].transaction.report_conflicting_keys) {
 				Standalone<VectorRef<int>> conflictingKRIndices;
 				for (int resolverInd : transactionResolverMap[t]) {
