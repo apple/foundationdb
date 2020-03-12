@@ -216,3 +216,70 @@ ACTOR Future<Void> krmSetRangeCoalescing( Transaction *tr, Key mapPrefix, KeyRan
 
 	return Void();
 }
+
+ACTOR Future<Void> krmSetRangeCoalescing( Reference<ReadYourWritesTransaction> tr, Key mapPrefix, KeyRange range, KeyRange maxRange, Value value ) {
+	ASSERT(maxRange.contains(range));
+
+	state KeyRange withPrefix = KeyRangeRef( mapPrefix.toString() + range.begin.toString(), mapPrefix.toString() + range.end.toString() );
+	state KeyRange maxWithPrefix = KeyRangeRef( mapPrefix.toString() + maxRange.begin.toString(), mapPrefix.toString() + maxRange.end.toString() );
+
+	state vector<Future<Standalone<RangeResultRef>>> keys;
+	keys.push_back(tr->getRange(lastLessThan(withPrefix.begin), firstGreaterOrEqual(withPrefix.begin), 1, true));
+	keys.push_back(tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end) + 1, 2, true));
+	wait(waitForAll(keys));
+
+	//Determine how far to extend this range at the beginning
+	auto beginRange = keys[0].get();
+	bool hasBegin = beginRange.size() > 0 && beginRange[0].key.startsWith(mapPrefix);
+	Value beginValue = hasBegin ? beginRange[0].value : LiteralStringRef("");
+
+	state Key beginKey = withPrefix.begin;
+	if(beginValue == value) {
+		bool outsideRange = !hasBegin || beginRange[0].key < maxWithPrefix.begin;
+		beginKey = outsideRange ? maxWithPrefix.begin : beginRange[0].key;
+	}
+
+	//Determine how far to extend this range at the end
+	auto endRange = keys[1].get();
+	bool hasEnd = endRange.size() >= 1 && endRange[0].key.startsWith(mapPrefix) && endRange[0].key <= withPrefix.end;
+	bool hasNext = (endRange.size() == 2 && endRange[1].key.startsWith(mapPrefix)) || (endRange.size() == 1 && withPrefix.end < endRange[0].key && endRange[0].key.startsWith(mapPrefix));
+	Value existingValue = hasEnd ? endRange[0].value : LiteralStringRef("");
+	bool valueMatches = value == existingValue;
+
+	KeyRange conflictRange = KeyRangeRef( hasBegin ? beginRange[0].key : mapPrefix, withPrefix.begin );
+	if( !conflictRange.empty() )
+		tr->addReadConflictRange( conflictRange );
+
+	conflictRange = KeyRangeRef( hasEnd ? endRange[0].key : mapPrefix, hasNext ? keyAfter(endRange.end()[-1].key) : strinc( mapPrefix ) );
+	if( !conflictRange.empty() )
+		tr->addReadConflictRange( conflictRange );
+
+	state Key endKey;
+	state Value endValue;
+
+	//Case 1: Coalesce completely with the following range
+	if(hasNext && endRange.end()[-1].key <= maxWithPrefix.end && valueMatches) {
+		endKey = endRange.end()[-1].key;
+		endValue = endRange.end()[-1].value;
+	}
+
+	//Case 2: Coalesce with the following range only up to the end of maxRange
+	else if(valueMatches) {
+		endKey = maxWithPrefix.end;
+		endValue = existingValue;
+	}
+
+	//Case 3: Don't coalesce
+	else {
+		endKey = withPrefix.end;
+		endValue = existingValue;
+	}
+
+	tr->clear(KeyRangeRef(beginKey, endKey));
+
+	ASSERT(value != endValue || endKey == maxWithPrefix.end);
+	tr->set(beginKey, value);
+	tr->set(endKey, endValue);
+
+	return Void();
+}
