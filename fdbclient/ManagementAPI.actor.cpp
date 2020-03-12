@@ -1152,15 +1152,33 @@ struct AutoQuorumChange : IQuorumChange {
 			}
 			chosen.resize((chosen.size() - 1) | 1);
 		}
+		// Sanity check if chosen coordinators will be injected fault
+		if (g_network->isSimulated()) {
+			for (auto& addr : chosen) {
+				ISimulator::ProcessInfo* p = g_simulator.getProcessByAddress(addr);
+				TraceEvent("MXGetDesiredCoordinator").detail("Address", addr.toString()).detail("Reliable", p->isReliable()).detail("Protected", g_simulator.protectedAddresses.count(addr)).detail("ReliableInfo", p->getReliableInfo());
+			}
+		}
 
 		return chosen;
 	}
 
+	// Select a desired set of workers such that (1) the number of workers at each locality type (e.g., dcid) <= desiredCount; and
+	// (2) prefer workers at a locality where less workers has been chosen than other localities: evenly distribute workers.
 	void addDesiredWorkers(vector<NetworkAddress>& chosen, const vector<ProcessData>& workers, int desiredCount, const std::set<AddressExclusion>& excluded) {
 		vector<ProcessData> remainingWorkers(workers);
 		deterministicRandom()->randomShuffle(remainingWorkers);
 
 		std::partition(remainingWorkers.begin(), remainingWorkers.end(), [](const ProcessData& data) { return (data.processClass == ProcessClass::CoordinatorClass); });
+
+		TraceEvent("AutoSelectCoordinators").detail("CandidateWorkers", remainingWorkers.size());
+		for (auto worker = remainingWorkers.begin(); worker != remainingWorkers.end(); worker++) {
+			TraceEvent("SelectCoordinators").detail("Worker", worker->processClass.toString()).detail("Address", worker->address.toString()).detail("Locality", worker->locality.toString());
+		}
+		TraceEvent("AutoSelectCoordinators").detail("ExcludedAddress", excluded.size());
+		for(auto& excludedAddr : excluded) {
+			TraceEvent("AutoSelectCoordinators").detail("ExcludedAddress", excludedAddr.toString());
+		}
 
 		std::map<StringRef, int> maxCounts;
 		std::map<StringRef, std::map<StringRef, int>> currentCounts;
@@ -1414,6 +1432,7 @@ ACTOR Future<Void> printHealthyZone( Database cx ) {
 
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning, bool clearSSFailureZoneString) {
 	state Transaction tr(cx);
+	TraceEvent("ClearHealthyZone").detail("ClearSSFailureZoneString", clearSSFailureZoneString);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1439,6 +1458,7 @@ ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning, bool clearSS
 
 ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning) {
 	state Transaction tr(cx);
+	TraceEvent("SetHealthyZone").detail("Zone", zoneId).detail("DurationSeconds", seconds);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);

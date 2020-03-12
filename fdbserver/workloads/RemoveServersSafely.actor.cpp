@@ -495,9 +495,13 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			// Wait for removal to be safe
 			TraceEvent("RemoveAndKill", functionId).detail("Step", "Wait For Server Exclusion").detail("Addresses", describe(toKill)).detail("ClusterAvailable", g_simulator.isAvailable());
 			wait(success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)));
+			// TODO: We have to wait for faulty machine to die or reborn; otherwise,
+			// machine that is in failing due to injected fault may be chosen as coordinator.
 
 			TraceEvent("RemoveAndKill", functionId).detail("Step", "coordinators auto").detail("DesiredCoordinators", g_simulator.desiredCoordinators).detail("ClusterAvailable", g_simulator.isAvailable());
 
+			// Ensure coordinators do not use faulty node
+			
 			// Setup the coordinators BEFORE the exclusion
 			// Otherwise, we may end up with NotEnoughMachinesForCoordinators
 			state int cycle=0;

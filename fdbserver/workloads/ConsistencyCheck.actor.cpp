@@ -295,7 +295,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					}
 
 					wait(::success(self->checkForStorage(cx, configuration, self)));
-					wait(::success(self->waitForUnreliableExtraStoreReboot(cx, self)));
+					// wait(::success(self->waitForUnreliableExtraStoreReboot(cx, self)));
 					wait(::success(self->checkForExtraDataStores(cx, self)));
 
 					//Check that each machine is operating as its desired class
@@ -1344,7 +1344,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 					if(g_network->isSimulated()) {
 						//FIXME: this is hiding the fact that we can recruit a new storage server on a location the has files left behind by a previous failure
 						// this means that the process is wasting disk space until the process is rebooting
-						auto p = g_simulator.getProcessByAddress(itr->interf.address());
+						ISimulator::ProcessInfo* p = g_simulator.getProcessByAddress(itr->interf.address());
+						ISimulator::ProcessInfo* p2 = nullptr;
+						if (itr->interf.secondaryAddress().present()) {
+							p2 = g_simulator.getProcessByAddress(itr->interf.secondaryAddress().get());
+						}
 						// Note: itr->interf.address() may not equal to p->address() because role's endpoint's primary
 						// addr can be swapped by choosePrimaryAddress() based on its peer's tls config.
 						TraceEvent("ConsistencyCheck_RebootProcess")
@@ -1352,6 +1356,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 						            itr->interf.address()) // worker's primary address (i.e., the first address)
 						    .detail("ProcessPrimaryAddress", p->address)
 							.detail("ProcessAddresses", p->addresses.toString())
+							.detail("ProcessAtPrimaryAddressIsReliable", p->isReliable())
+							.detail("ProcessAtSecondaryAddressIsReliable", p2 != nullptr ? (p2->isReliable() ? "True" : "False") : "unset")
 						    .detail("DataStoreID", id)
 						    .detail("Protected", g_simulator.protectedAddresses.count(itr->interf.address()))
 						    .detail("Reliable", p->isReliable())
