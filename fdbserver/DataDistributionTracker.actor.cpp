@@ -784,6 +784,11 @@ vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor( Team team ) {
 	return r;
 }
 
+bool ShardsAffectedByTeamFailure::hasShards(Team team) {
+	auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));
+	return it != team_shards.end() && it->first == team;
+}
+
 int ShardsAffectedByTeamFailure::getNumberOfShards( UID ssID ) {
 	return storageServerShards[ssID];
 }
