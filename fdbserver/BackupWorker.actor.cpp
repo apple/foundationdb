@@ -256,6 +256,23 @@ struct BackupData {
 		}
 		return true;
 	}
+
+	ACTOR static Future<Version> _getMinKnownCommittedVersion(BackupData* self) {
+		loop {
+			GetReadVersionRequest request(1, GetReadVersionRequest::PRIORITY_DEFAULT |
+			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
+			choose {
+				when(wait(self->cx->onMasterProxiesChanged())) {}
+				when(GetReadVersionReply reply = wait(loadBalance(self->cx->getMasterProxies(false),
+				                                                  &MasterProxyInterface::getConsistentReadVersion,
+				                                                  request, self->cx->taskID))) {
+					return reply.version;
+				}
+			}
+		}
+	}
+
+	Future<Version> getMinKnownCommittedVersion() { return _getMinKnownCommittedVersion(this); }
 };
 
 // Monitors "backupStartedKey". If "started" is true, wait until the key is set;
@@ -677,63 +694,48 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	}
 }
 
-ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self) {
+ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent) {
 	state Future<Void> pullFinished = Void();
-	state Future<bool> started;
-	state Future<GetReadVersionReply> replyFuture = Never();
 
 	loop {
-		started = monitorBackupStartedKeyChanges(self, true, true);
-		loop choose {
-			when(bool present = wait(started)) {
-				replyFuture = Never();
-				break;
+		state Future<bool> present = monitorBackupStartedKeyChanges(self, !keyPresent, /*watch=*/true);
+		if (keyPresent) {
+			pullFinished = pullAsyncData(self);
+			self->pulling = true;
+			wait(success(present) || pullFinished);
+			if (pullFinished.isReady()) {
+				self->pulling = false;
+				return Void(); // backup is done for some old epoch.
 			}
-			when(wait(self->cx->onMasterProxiesChanged() ||
-			          delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID))) {
-				GetReadVersionRequest request(1, GetReadVersionRequest::PRIORITY_DEFAULT |
-				                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
-				replyFuture = loadBalance(self->cx->getMasterProxies(false),
-				                          &MasterProxyInterface::getConsistentReadVersion, request, self->cx->taskID);
-			}
-			when(GetReadVersionReply reply = wait(replyFuture)) {
-				replyFuture = Never();
-				self->savedVersion = std::max(reply.version, self->savedVersion);
-				self->minKnownCommittedVersion = std::max(reply.version, self->minKnownCommittedVersion);
-				TraceEvent("BackupWorkerNoopPop", self->myId).detail("SavedVersion", self->savedVersion);
-				self->pop(); // Pop while the worker is in this NOOP state.
-			}
-		}
 
-		Future<bool> stopped = monitorBackupStartedKeyChanges(self, false, true);
-		pullFinished = pullAsyncData(self);
-		self->pulling = true;
-		wait(success(stopped) || pullFinished);
-		if (pullFinished.isReady()) {
+			// Even though the snapshot is done, mutation logs may not be written
+			// out yet. We need to make sure mutations up to this point is written.
+			Version currentVersion = wait(self->getMinKnownCommittedVersion());
+			wait(self->pulledVersion.whenAtLeast(currentVersion));
+			pullFinished = Future<Void>(); // cancels pullAsyncData()
 			self->pulling = false;
-			return Void(); // backup is done for some old epoch.
-		}
+			TraceEvent("BackupWorkerPaused", self->myId);
+		} else {
+			// Backup key is not present, enter this NOOP POP mode.
+			state Future<Version> committedVersion = self->getMinKnownCommittedVersion();
 
-		// Even though the snapshot is done, mutation logs may not be written
-		// out yet. We need to make usre mutations up to this point is written.
-		state Version currentVersion;
-		loop {
-			GetReadVersionRequest request(1, GetReadVersionRequest::PRIORITY_DEFAULT |
-			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
-			choose {
-				when(wait(self->cx->onMasterProxiesChanged())) {}
-				when(GetReadVersionReply reply = wait(loadBalance(self->cx->getMasterProxies(false),
-				                                                  &MasterProxyInterface::getConsistentReadVersion,
-				                                                  request, self->cx->taskID))) {
-					currentVersion = reply.version;
-					break;
+			loop choose {
+				when(wait(success(present))) { break; }
+				when(wait(success(committedVersion) || delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID))) {
+					if (committedVersion.isReady()) {
+						self->savedVersion = std::max(committedVersion.get(), self->savedVersion);
+						self->minKnownCommittedVersion =
+						    std::max(committedVersion.get(), self->minKnownCommittedVersion);
+						TraceEvent("BackupWorkerNoopPop", self->myId).detail("SavedVersion", self->savedVersion);
+						self->pop(); // Pop while the worker is in this NOOP state.
+						committedVersion = Never();
+					} else {
+						committedVersion = self->getMinKnownCommittedVersion();
+					}
 				}
 			}
 		}
-		wait(self->pulledVersion.whenAtLeast(currentVersion));
-		pullFinished = Future<Void>(); // cancels pullAsyncData()
-		self->pulling = false;
-		TraceEvent("BackupWorkerPaused", self->myId);
+		keyPresent = !keyPresent;
 	}
 }
 
@@ -784,7 +786,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 		bool present = wait(monitorBackupStartedKeyChanges(&self, true, false));
 		TraceEvent("BackupWorkerWaitKey", self.myId).detail("Present", present);
 
-		pull = monitorBackupKeyOrPullData(&self);
+		pull = monitorBackupKeyOrPullData(&self, present);
 		done = uploadData(&self);
 
 		loop choose {

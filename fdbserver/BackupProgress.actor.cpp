@@ -86,7 +86,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 				}
 				if (savedMore > 0) {
 					// The logRouterTags are the same
-					ASSERT(info.logRouterTags == epochTags[rit->first]);
+					// ASSERT(info.logRouterTags == epochTags[rit->first]);
 
 					updateTagVersions(&tagVersions, &tags, rit->second, info.epochEnd, epoch);
 				}

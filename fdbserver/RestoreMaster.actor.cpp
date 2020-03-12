@@ -686,7 +686,10 @@ ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std
 	if (request.targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
 		request.targetVersion = desc.maxRestorableVersion.get();
 	}
-	TraceEvent("FastRestore").detail("TargetVersion", request.targetVersion).detail("BackupDesc", desc.toString());
+
+	if (g_network->isSimulated()) {
+		std::cout << "Restore to version: " << request.targetVersion << "\nBackupDesc: \n" << desc.toString() << "\n\n";
+	}
 
 	Optional<RestorableFileSet> restorable =
 	    wait(SERVER_KNOBS->FASTRESTORE_USE_PARTITIONED_LOGS ? bc->getPartitionedRestoreSet(request.targetVersion)
