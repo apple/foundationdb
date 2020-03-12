@@ -1156,11 +1156,13 @@ public:
 	// If a log file's progress is not saved, a new log file will be generated
 	// with the same begin version. So we can have a file that contains a subset
 	// of contents in another log file.
-	// PRE-CONDITION: logs are already sorted.
+	// PRE-CONDITION: logs are already sorted by (tagId, beginVersion, endVersion).
 	static std::vector<LogFile> filterDuplicates(const std::vector<LogFile>& logs) {
 		std::vector<LogFile> filtered;
 		int i = 0;
 		for (int j = 1; j < logs.size(); j++) {
+			if (logs[j].isSubset(logs[i])) continue;
+
 			if (!logs[i].isSubset(logs[j])) {
 				filtered.push_back(logs[i]);
 			}
@@ -1196,9 +1198,13 @@ public:
 		for (int i = 0; i < logs.size(); i++) {
 			ASSERT(logs[i].tagId >= 0 && logs[i].tagId < logs[i].totalTags);
 			auto& indices = tagIndices[logs[i].tagId];
-			// filter out if indices.back() is subset of files[i]
-			if (!indices.empty() && logs[indices.back()].isSubset(logs[i])) {
-				indices.back() = i;
+			// filter out if indices.back() is subset of files[i] or vice versa
+			if (!indices.empty()) {
+				if (logs[indices.back()].isSubset(logs[i])) {
+					indices.back() = i;
+				} else if (!logs[i].isSubset(logs[indices.back()])) {
+					indices.push_back(i);
+				}
 			} else {
 				indices.push_back(i);
 			}

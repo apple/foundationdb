@@ -85,7 +85,7 @@ struct LogFile {
 	// Returns if this log file contains a subset of content of the given file
 	// by comparing version range and tag ID.
 	bool isSubset(const LogFile& rhs) const {
-		return beginVersion == rhs.beginVersion && endVersion <= rhs.endVersion && tagId == rhs.tagId;
+		return beginVersion >= rhs.beginVersion && endVersion <= rhs.endVersion && tagId == rhs.tagId;
 	}
 
 	std::string toString() const {
