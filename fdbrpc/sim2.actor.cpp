@@ -1029,7 +1029,7 @@ public:
 
 		NetworkAddressList addresses;
 		addresses.address = NetworkAddress(ip, port, true, sslEnabled);
-		if(listenPerProcess == 2) { // listenPerProcess is only 1 or 2
+		if (listenPerProcess == 2) { // listenPerProcess is only 1 or 2
 			addresses.secondaryAddress = NetworkAddress(ip, port+1, true, false);
 		}
 

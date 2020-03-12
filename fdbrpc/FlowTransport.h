@@ -46,7 +46,8 @@ public:
 	void choosePrimaryAddress() {
 		if(addresses.secondaryAddress.present() && !g_network->getLocalAddresses().secondaryAddress.present() && (addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS())) {
 			// if (addresses.address.isTLS()) {
-			// 	TraceEvent(SevWarn, "MXDEBUGChoosePrimaryAddressSwap").detail("PrimaryAddressWillBeTLS", addresses.secondaryAddress.get().isTLS()).backtrace();
+			// 	TraceEvent(SevWarn, "MXDEBUGChoosePrimaryAddressSwap").detail("PrimaryAddressWillBeTLS",
+			// addresses.secondaryAddress.get().isTLS()).backtrace();
 			// }
 			std::swap(addresses.address, addresses.secondaryAddress.get());
 		}
