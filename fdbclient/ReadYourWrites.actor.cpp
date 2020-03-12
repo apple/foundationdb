@@ -1156,7 +1156,7 @@ Future<Version> ReadYourWritesTransaction::getReadVersion() {
 
 Optional<Value> getValueFromJSON(StatusObject statusObj) {
 	try {
-		Value output = StringRef(json_spirit::write_string(json_spirit::mValue(statusObj), json_spirit::Output_options::none).c_str());
+		Value output = StringRef(json_spirit::write_string(json_spirit::mValue(statusObj), json_spirit::Output_options::none));
 		return output;
 	}
 	catch (std::exception& e){
