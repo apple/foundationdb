@@ -1085,7 +1085,7 @@ public:
 	// For a list of log files specified by their indices (of the same tag),
 	// returns if they are continous in the range [begin, end]. If "tags" is not
 	// nullptr, then it will be populated with [begin, end] -> tags, where next
-	// pair's begin == previous pair's end + 1. On return, the last pair's end
+	// pair's begin <= previous pair's end + 1. On return, the last pair's end
 	// version (inclusive) gives the continuous range from begin.
 	static bool isContinuous(const std::vector<LogFile>& files, const std::vector<int>& indices, Version begin,
 	                         Version end, std::map<std::pair<Version, Version>, int>* tags) {
@@ -1104,7 +1104,7 @@ public:
 				} else {
 					continue;
 				}
-			} else if (lastEnd != file.beginVersion) {
+			} else if (lastEnd < file.beginVersion) {
 				if (tags != nullptr) {
 					tags->emplace(std::make_pair(lastBegin, lastEnd - 1), lastTags);
 				}
