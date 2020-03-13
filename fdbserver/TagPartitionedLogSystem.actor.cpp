@@ -2019,7 +2019,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			needsOldTxs = needsOldTxs || it.tLogs[0]->tLogVersion < TLogVersion::V4;
 		}
 
-		if(region.satelliteTLogReplicationFactor > 0) {
+		if(region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
 			logSystem->tLogs.emplace_back(new LogSet());
 			if(recr.satelliteFallback) {
 				logSystem->tLogs[1]->tLogWriteAntiQuorum = region.satelliteTLogWriteAntiQuorumFallback;
@@ -2167,7 +2167,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		state std::vector<Future<Void>> recoveryComplete;
 
-		if(region.satelliteTLogReplicationFactor > 0) {
+		if(region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
 			state vector<Future<TLogInterface>> satelliteInitializationReplies;
 			vector< InitializeTLogRequest > sreqs( recr.satelliteTLogs.size() );
 			std::vector<Tag> satelliteTags;

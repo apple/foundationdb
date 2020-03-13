@@ -1573,7 +1573,7 @@ static int getExtraTLogEligibleZones(const vector<WorkerDetails>& workers, const
 	for(auto& region : configuration.regions) {
 		int eligible = dcId_zone[region.dcId].size() - std::max(configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) );
 		//FIXME: does not take into account fallback satellite policies
-		if(region.satelliteTLogReplicationFactor > 0) {
+		if(region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
 			int totalSatelliteEligible = 0;
 			for(auto& sat : region.satellites) {
 				totalSatelliteEligible += dcId_zone[sat.dcId].size();
