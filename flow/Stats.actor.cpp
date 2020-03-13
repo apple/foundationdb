@@ -95,6 +95,6 @@ ACTOR Future<Void> traceCounters(std::string traceEventName, UID traceEventID, d
 		}
 
 		last_interval = now();
-		wait(delay(interval));
+		wait(delay(interval, TaskPriority::FlushTrace));
 	}
 }
