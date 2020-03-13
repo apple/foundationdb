@@ -403,6 +403,7 @@ public:
 
 	bool operator == (const RequestStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }
+	uint32_t size() const { return queue->size(); }
 
 private:
 	NetNotifiedQueue<T>* queue;

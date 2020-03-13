@@ -50,6 +50,7 @@
 
 struct ProxyStats {
 	CounterCollection cc;
+	Counter txnRequestIn, txnRequestOut, txnRequestErrors;
 	Counter txnStartIn, txnStartOut, txnStartBatch;
 	Counter txnSystemPriorityStartIn, txnSystemPriorityStartOut;
 	Counter txnBatchPriorityStartIn, txnBatchPriorityStartOut;
@@ -60,7 +61,7 @@ struct ProxyStats {
 	Counter mutationBytes;
 	Counter mutations;
 	Counter conflictRanges;
-	Counter keyServerLocationRequests;
+	Counter keyServerLocationIn, keyServerLocationOut, keyServerLocationErrors;
 	Version lastCommitVersionAssigned;
 
 	LatencyBands commitLatencyBands;
@@ -69,10 +70,10 @@ struct ProxyStats {
 	Future<Void> logger;
 
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion, int64_t *commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()),
+	  : cc("ProxyStats", id.toString()), txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc), txnRequestErrors("TxnRequestErrors", cc),
 		txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc), txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc), txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc), txnBatchPriorityStartOut("TxnBatchPriorityStartOut", cc),
 		txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc), txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc), txnCommitIn("TxnCommitIn", cc),	txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc), txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
-		txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc), keyServerLocationRequests("KeyServerLocationRequests", cc), 
+		txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc), keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc), keyServerLocationErrors("KeyServerLocationErrors", cc), 
 		lastCommitVersionAssigned(0), commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY), grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY)
 	{
 		specialCounter(cc, "LastAssignedCommitVersion", [this](){return this->lastCommitVersionAssigned;});
@@ -144,22 +145,32 @@ ACTOR Future<Void> queueTransactionStartRequests(
 	state int64_t counter = 0;
 	loop choose{
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
-			if (req.debugID.present())
-				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterProxyServer.queueTransactionStartRequests.Before");
+			if( stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() > SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ) {
+				++stats->txnRequestErrors;
+				//FIXME: send an error instead of giving an unreadable version when the client can support the error: req.reply.sendError(proxy_memory_limit_exceeded());
+				GetReadVersionReply rep;
+				rep.version = 1;
+				rep.locked = true;
+				req.reply.send(rep);
+			} else {
+				if (req.debugID.present())
+					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterProxyServer.queueTransactionStartRequests.Before");
 
-			stats->txnStartIn += req.transactionCount;
-			if (req.priority() >= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE)
-				stats->txnSystemPriorityStartIn += req.transactionCount;
-			else if (req.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT)
-				stats->txnDefaultPriorityStartIn += req.transactionCount;
-			else
-				stats->txnBatchPriorityStartIn += req.transactionCount;
+				++stats->txnRequestIn;
+				stats->txnStartIn += req.transactionCount;
+				if (req.priority() >= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE)
+					stats->txnSystemPriorityStartIn += req.transactionCount;
+				else if (req.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT)
+					stats->txnDefaultPriorityStartIn += req.transactionCount;
+				else
+					stats->txnBatchPriorityStartIn += req.transactionCount;
 
-			if (transactionQueue->empty()) {
-				forwardPromise(GRVTimer, delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)), TaskPriority::ProxyGRVTimer));
+				if (transactionQueue->empty()) {
+					forwardPromise(GRVTimer, delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)), TaskPriority::ProxyGRVTimer));
+				}
+
+				transactionQueue->push(std::make_pair(req, counter--));
 			}
-
-			transactionQueue->push(std::make_pair(req, counter--));
 		}
 		// dynamic batching monitors reply latencies
 		when(double reply_latency = waitNext(replyTimes)) {
@@ -1196,6 +1207,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 		if(request.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
 			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
 		}
+		++stats->txnRequestOut;
 		request.reply.send(reply);
 	}
 
@@ -1325,61 +1337,72 @@ ACTOR static Future<Void> transactionStarter(
 	}
 }
 
-ACTOR static Future<Void> readRequestServer( MasterProxyInterface proxy, ProxyCommitData* commitData ) {
-	// Implement read-only parts of the proxy interface
+ACTOR static Future<Void> doKeyServerLocationRequest( GetKeyServerLocationsRequest req, ProxyCommitData* commitData ) {
 	// We can't respond to these requests until we have valid txnStateStore
 	wait(commitData->validState.getFuture());
+	wait(delay(0, TaskPriority::DefaultEndpoint));
 
-	TraceEvent("ProxyReadyForReads", proxy.id());
-
-	loop {
-		GetKeyServerLocationsRequest req = waitNext(proxy.getKeyServersLocations.getFuture());
-		++commitData->stats.keyServerLocationRequests;
-		GetKeyServerLocationsReply rep;
-		if(!req.end.present()) {
-			auto r = req.reverse ? commitData->keyInfo.rangeContainingKeyBefore(req.begin) : commitData->keyInfo.rangeContaining(req.begin);
+	GetKeyServerLocationsReply rep;
+	if(!req.end.present()) {
+		auto r = req.reverse ? commitData->keyInfo.rangeContainingKeyBefore(req.begin) : commitData->keyInfo.rangeContaining(req.begin);
+		vector<StorageServerInterface> ssis;
+		ssis.reserve(r.value().src_info.size());
+		for(auto& it : r.value().src_info) {
+			ssis.push_back(it->interf);
+		}
+		rep.results.push_back(std::make_pair(r.range(), ssis));
+	} else if(!req.reverse) {
+		int count = 0;
+		for(auto r = commitData->keyInfo.rangeContaining(req.begin); r != commitData->keyInfo.ranges().end() && count < req.limit && r.begin() < req.end.get(); ++r) {
 			vector<StorageServerInterface> ssis;
 			ssis.reserve(r.value().src_info.size());
 			for(auto& it : r.value().src_info) {
 				ssis.push_back(it->interf);
 			}
 			rep.results.push_back(std::make_pair(r.range(), ssis));
-		} else if(!req.reverse) {
-			int count = 0;
-			for(auto r = commitData->keyInfo.rangeContaining(req.begin); r != commitData->keyInfo.ranges().end() && count < req.limit && r.begin() < req.end.get(); ++r) {
-				vector<StorageServerInterface> ssis;
-				ssis.reserve(r.value().src_info.size());
-				for(auto& it : r.value().src_info) {
-					ssis.push_back(it->interf);
-				}
-				rep.results.push_back(std::make_pair(r.range(), ssis));
-				count++;
-			}
-		} else {
-			int count = 0;
-			auto r = commitData->keyInfo.rangeContainingKeyBefore(req.end.get());
-			while( count < req.limit && req.begin < r.end() ) {
-				vector<StorageServerInterface> ssis;
-				ssis.reserve(r.value().src_info.size());
-				for(auto& it : r.value().src_info) {
-					ssis.push_back(it->interf);
-				}
-				rep.results.push_back(std::make_pair(r.range(), ssis));
-				if(r == commitData->keyInfo.ranges().begin()) {
-					break;
-				}
-				count++;
-				--r;
-			}
+			count++;
 		}
-		req.reply.send(rep);
-		wait(yield());
+	} else {
+		int count = 0;
+		auto r = commitData->keyInfo.rangeContainingKeyBefore(req.end.get());
+		while( count < req.limit && req.begin < r.end() ) {
+			vector<StorageServerInterface> ssis;
+			ssis.reserve(r.value().src_info.size());
+			for(auto& it : r.value().src_info) {
+				ssis.push_back(it->interf);
+			}
+			rep.results.push_back(std::make_pair(r.range(), ssis));
+			if(r == commitData->keyInfo.ranges().begin()) {
+				break;
+			}
+			count++;
+			--r;
+		}
+	}
+	req.reply.send(rep);
+	++commitData->stats.keyServerLocationOut;
+	return Void();
+}
+
+ACTOR static Future<Void> readRequestServer( MasterProxyInterface proxy, PromiseStream<Future<Void>> addActor, ProxyCommitData* commitData ) {
+	loop {
+		GetKeyServerLocationsRequest req = waitNext(proxy.getKeyServersLocations.getFuture());
+		if(req.limit != CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT && //Always do data distribution requests
+		   commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() > SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE) {
+			++commitData->stats.keyServerLocationErrors;
+			req.reply.sendError(proxy_memory_limit_exceeded());
+		} else {
+			++commitData->stats.keyServerLocationIn;
+			addActor.send(doKeyServerLocationRequest(req, commitData));
+		}
 	}
 }
 
 ACTOR static Future<Void> rejoinServer( MasterProxyInterface proxy, ProxyCommitData* commitData ) {
 	// We can't respond to these requests until we have valid txnStateStore
 	wait(commitData->validState.getFuture());
+
+	TraceEvent("ProxyReadyForReads", proxy.id());
 
 	loop {
 		GetStorageServerRejoinInfoRequest req = waitNext(proxy.getStorageServerRejoinInfo.getFuture());
@@ -1664,7 +1687,7 @@ ACTOR Future<Void> masterProxyServerCore(
 
 	addActor.send(monitorRemoteCommitted(&commitData));
 	addActor.send(transactionStarter(proxy, commitData.db, addActor, &commitData, &healthMetricsReply, &detailedHealthMetricsReply));
-	addActor.send(readRequestServer(proxy, &commitData));
+	addActor.send(readRequestServer(proxy, addActor, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
 
