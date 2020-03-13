@@ -39,7 +39,7 @@ sudo docker run --rm `# delete (temporary) image after return` \\
                 --privileged=true `# Run in privileged mode ` \\
                 --cap-add=SYS_PTRACE \\
                 --security-opt seccomp=unconfined \\
-                -v '${HOME}:${HOME}' `# Mount home directory` \\
+                -v "${HOME}:${HOME}" `# Mount home directory` \\
                 -e "CCACHE_DIR=$CCACHE_DIR" \\
                 -e "CCACHE_UMASK=$CCACHE_UMASK" \\
                 ${image}
