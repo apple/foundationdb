@@ -35,10 +35,10 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 
 	int nodeCount, actorCount, keyBytes, valueBytes, readConflictRangeCount, writeConflictRangeCount;
 
-	PerfIntCounter invalidReports, commits, conflicts, retries, xacts;
+	PerfIntCounter invalidReports, commits, conflicts, xacts;
 
 	ReportConflictingKeysWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), invalidReports("InvalidReports"), conflicts("Conflicts"), retries("Retries"),
+	  : TestWorkload(wcx), invalidReports("InvalidReports"), conflicts("Conflicts"),
 	    commits("Commits"), xacts("Transactions") {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		// transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0) / clientCount;
@@ -80,8 +80,6 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		m.push_back(PerfMetric("Commits/sec", commits.getValue() / testDuration, true));
 		m.push_back(conflicts.getMetric());
 		m.push_back(PerfMetric("Conflicts/sec", conflicts.getValue() / testDuration, true));
-		m.push_back(retries.getMetric());
-		m.push_back(PerfMetric("Retries/sec", retries.getValue() / testDuration, true));
 	}
 
 	// disable the default timeout setting
@@ -169,10 +167,12 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					// The getRange here using the special key prefix "\xff\xff/transaction/conflicting_keys/" happens
 					// locally Thus, the error handling is not needed here
 					Future<Standalone<RangeResultRef>> conflictingKeyRangesFuture =
-					    tr2.getRange(ckr, readConflictRanges.size() * 2);
+					    tr2.getRange(ckr, CLIENT_KNOBS->TOO_MANY);
 					ASSERT(conflictingKeyRangesFuture.isReady());
 					const Standalone<RangeResultRef> conflictingKeyRanges = conflictingKeyRangesFuture.get();
-					ASSERT(conflictingKeyRanges.size() && (conflictingKeyRanges.size() % 2 == 0));
+					ASSERT(conflictingKeyRanges.size() && (conflictingKeyRanges.size() <= readConflictRanges.size() * 2));
+					ASSERT(conflictingKeyRanges.size() % 2 == 0);
+					ASSERT(!conflictingKeyRanges.more);
 					for (int i = 0; i < conflictingKeyRanges.size(); i += 2) {
 						KeyValueRef startKeyWithPrefix = conflictingKeyRanges[i];
 						ASSERT(startKeyWithPrefix.value == conflictingKeysTrue);
