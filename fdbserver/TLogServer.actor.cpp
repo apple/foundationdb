@@ -2766,7 +2766,17 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 		if(restoreFromDisk) {
 			wait( restorePersistentState( &self, locality, oldLog, recovered, tlogRequests ) );
 		} else {
-			wait( checkEmptyQueue(&self) && checkRecovered(&self) );
+			choose {
+				when( wait( checkEmptyQueue(&self) && checkRecovered(&self) ) ) {}
+				when( wait( lowPriorityDelay(SERVER_KNOBS->TLOG_MAX_CREATE_DURATION) ) ) {
+					Error err = io_timeout();
+					if(g_network->isSimulated()) {
+						err = err.asInjectedFault();
+					}
+					TraceEvent(SevError, "TLogInitializeFilesTimeout", tlogId).error(err);
+					throw err;
+				}
+			}
 		}
 
 		//Disk errors need a chance to kill this actor.
