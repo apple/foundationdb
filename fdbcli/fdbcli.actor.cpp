@@ -430,7 +430,7 @@ static void printProgramUsage(const char* name) {
 #endif
 	       "  --knob_KNOBNAME KNOBVALUE\n"
 	       "                 Changes a knob option. KNOBNAME should be lowercase.\n"
-				 "  --debug-tls    Prints the TLS configuration and certificate chain.\n"
+				 "  --debug-tls    Prints the TLS configuration and certificate chain, then exits.\n"
 				 "                 Useful in reporting and diagnosing TLS issues.\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
