@@ -1284,7 +1284,7 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	// The returned key value pairs are interpretted as :
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
-	// Currently, the conflicting keyranges returned are original read_conflict_ranges.
+	// Currently, the conflicting keyranges returned are original read_conflict_ranges or union of them.
 	// TODO : This interface needs to be integrated into the framework that handles special keys' calls in the future
 	if (begin.getKey().startsWith(conflictingKeysAbsolutePrefix) && end.getKey().startsWith(conflictingKeysAbsolutePrefix)) {
 		// Remove the special key prefix "\xff\xff"
