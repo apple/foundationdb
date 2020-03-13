@@ -38,8 +38,8 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	PerfIntCounter invalidReports, commits, conflicts, xacts;
 
 	ReportConflictingKeysWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), invalidReports("InvalidReports"), conflicts("Conflicts"),
-	    commits("Commits"), xacts("Transactions") {
+	  : TestWorkload(wcx), invalidReports("InvalidReports"), conflicts("Conflicts"), commits("Commits"),
+	    xacts("Transactions") {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		// transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0) / clientCount;
 		actorCount = getOption(options, LiteralStringRef("actorsPerClient"), 1);
@@ -170,7 +170,8 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					    tr2.getRange(ckr, CLIENT_KNOBS->TOO_MANY);
 					ASSERT(conflictingKeyRangesFuture.isReady());
 					const Standalone<RangeResultRef> conflictingKeyRanges = conflictingKeyRangesFuture.get();
-					ASSERT(conflictingKeyRanges.size() && (conflictingKeyRanges.size() <= readConflictRanges.size() * 2));
+					ASSERT(conflictingKeyRanges.size() &&
+					       (conflictingKeyRanges.size() <= readConflictRanges.size() * 2));
 					ASSERT(conflictingKeyRanges.size() % 2 == 0);
 					ASSERT(!conflictingKeyRanges.more);
 					for (int i = 0; i < conflictingKeyRanges.size(); i += 2) {
