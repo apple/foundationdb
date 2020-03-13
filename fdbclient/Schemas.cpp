@@ -209,9 +209,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "megabits_received":{
                   "hz":0.0
                },
-							 "tls_policy_failures":{
-								 "hz":0.0
-							 },
+               "tls_policy_failures":{
+                 "hz":0.0
+               }
             },
             "run_loop_busy":0.2
          }
