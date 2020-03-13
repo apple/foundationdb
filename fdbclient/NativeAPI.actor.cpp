@@ -2746,7 +2746,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					// clear the RYW transaction which contains previous conflicting keys
 					tr->info.conflictingKeysRYW.reset();
 					if (ci.conflictingKRIndices.present()){
-						// In general, if we want to use getRange to expose conflicting keys, we need to support all the parameters getRange provides.
+						// In general, if we want to use getRange to expose conflicting keys,
+						// we need to support all the parameters getRange provides.
 						// It is difficult to take care of all corner cases of what getRange does.
 						// Consequently, we use a hack way here to achieve it.
 						// We create an empty RYWTransaction and write all conflicting key/values to it.
@@ -2761,16 +2762,12 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 						// Clear the whole key space, thus, RYWTr knows to only read keys locally
 						tr->info.conflictingKeysRYW->clear(normalKeys);
 						// initialize value
-						// wait(krmSetRange(hackTr, conflictingKeysPrefix, normalKeys, conflictingKeysFalse));
 						tr->info.conflictingKeysRYW->set(conflictingKeysPrefix, conflictingKeysFalse);
 						// drop duplicate indices and merge overlapped ranges
 						// Note: addReadConflictRange in native transaction object does not merge overlapped ranges
 						state std::set<int> mergedIds(conflictingKRIndices.begin(), conflictingKRIndices.end());
 						for (auto const & rCRIndex : mergedIds) {
 							const KeyRange kr = req.transaction.read_conflict_ranges[rCRIndex];
-							// tr->info.conflictingKeysRYW->set(kr.begin, conflictingKeysTrue);
-							// tr->info.conflictingKeysRYW->set(kr.end, conflictingKeysFalse);
-							// wait(krmSetRange(hackTr, conflictingKeysPrefix, kr, conflictingKeysTrue));
 							wait(krmSetRangeCoalescing(hackTr, conflictingKeysPrefix, kr, allKeys, conflictingKeysTrue));
 						}
 						hackTr.extractPtr(); // Avoid the Reference to destroy the RYW object
