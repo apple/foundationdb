@@ -2917,7 +2917,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 								// t is the team in primary DC or the remote DC
 								auto& t = j < teams.first.size() ? teams.first[j] : teams.second[j-teams.first.size()];
 								if( !t.servers.size() ) {
-									maxPriority = SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
+									maxPriority = std::max( maxPriority, SERVER_KNOBS->PRIORITY_POPULATE_REGION );
 									break;
 								}
 
