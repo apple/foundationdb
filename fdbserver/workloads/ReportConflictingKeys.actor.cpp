@@ -49,7 +49,8 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		readConflictRangeCount = getOption(options, LiteralStringRef("readConflictRangeCountPerTx"), 1);
 		writeConflictRangeCount = getOption(options, LiteralStringRef("writeConflictRangeCountPerTx"), 1);
 		ASSERT(readConflictRangeCount >= 1 && writeConflictRangeCount >= 1);
-		// modeled by geometric distribution: (1 - prob) / prob = mean - 1, since we add at least one conflictRange to each tx
+		// modeled by geometric distribution: (1 - prob) / prob = mean - 1, since we add at least one conflictRange to
+		// each tx
 		addReadConflictRangeProb = (readConflictRangeCount - 1.0) / readConflictRangeCount;
 		addWriteConflictRangeProb = (writeConflictRangeCount - 1.0) / writeConflictRangeCount;
 		ASSERT(keyPrefix.size() + 16 <= keyBytes); // make sure the string format is valid
@@ -63,8 +64,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	Future<Void> start(const Database& cx) override { return _start(cx->clone(), this); }
 
 	ACTOR Future<Void> _start(Database cx, ReportConflictingKeysWorkload* self) {
-		if (self->clientId == 0)
-			wait(timeout(self->conflictingClient(cx, self), self->testDuration, Void()));
+		if (self->clientId == 0) wait(timeout(self->conflictingClient(cx, self), self->testDuration, Void()));
 		return Void();
 	}
 
@@ -90,8 +90,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		double p = (double)n / nodeCount;
 		int paddingLen = keyBytes - 16 - keyPrefix.size();
 		// left padding by zero
-		return StringRef(format("%0*llx", paddingLen, *(uint64_t*)&p))
-		    .withPrefix(keyPrefix);
+		return StringRef(format("%0*llx", paddingLen, *(uint64_t*)&p)).withPrefix(keyPrefix);
 	}
 
 	void addRandomReadConflictRange(ReadYourWritesTransaction* tr, std::vector<KeyRange>* readConflictRanges) {
@@ -99,12 +98,11 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		Key startKey, endKey;
 		do { // add at least one
 			startIdx = deterministicRandom()->randomInt(0, nodeCount);
-			endIdx = deterministicRandom()->randomInt(startIdx, nodeCount+1);
+			endIdx = deterministicRandom()->randomInt(startIdx, nodeCount + 1);
 			startKey = keyForIndex(startIdx);
 			endKey = keyForIndex(endIdx);
 			tr->addReadConflictRange(KeyRangeRef(startKey, endKey));
-			if (readConflictRanges)
-				readConflictRanges->push_back(KeyRangeRef(startKey, endKey));
+			if (readConflictRanges) readConflictRanges->push_back(KeyRangeRef(startKey, endKey));
 		} while (deterministicRandom()->random01() < addReadConflictRangeProb);
 	}
 
@@ -113,12 +111,11 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		Key startKey, endKey;
 		do { // add at least one
 			startIdx = deterministicRandom()->randomInt(0, nodeCount);
-			endIdx = deterministicRandom()->randomInt(startIdx, nodeCount+1);
+			endIdx = deterministicRandom()->randomInt(startIdx, nodeCount + 1);
 			startKey = keyForIndex(startIdx);
 			endKey = keyForIndex(endIdx);
 			tr->addWriteConflictRange(KeyRangeRef(startKey, endKey));
-			if (writeConflictRanges)
-				writeConflictRanges->push_back(KeyRangeRef(startKey, endKey));
+			if (writeConflictRanges) writeConflictRanges->push_back(KeyRangeRef(startKey, endKey));
 		} while (deterministicRandom()->random01() < addWriteConflictRangeProb);
 	}
 
@@ -138,7 +135,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 				if (deterministicRandom()->random01() < 0.5)
 					tr2.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-				Version readVersion = wait( tr.getReadVersion() );
+				Version readVersion = wait(tr.getReadVersion());
 				tr2.setVersion(readVersion);
 				self->addRandomReadConflictRange(&tr, nullptr);
 				self->addRandomWriteConflictRange(&tr, &writeConflictRanges);
@@ -154,16 +151,16 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					wait(tr2.commit());
 					++self->xacts;
 				} catch (Error& e) {
-					if( e.code() != error_code_not_committed )
-						throw e;
+					if (e.code() != error_code_not_committed) throw e;
 					foundConflict = true;
 					++self->conflicts;
 				}
 				// check API correctness
 				if (foundConflict) {
-					// \xff\xff/transaction/conflicting_keys is always false, we skip it here for simplicity
-					state KeyRange ckr = KeyRangeRef(keyAfter(LiteralStringRef("").withPrefix(conflictingKeysAbsolutePrefix)),
-					                                 LiteralStringRef("\xff\xff").withPrefix(conflictingKeysAbsolutePrefix));
+					// \xff\xff/transaction/conflicting_keys is always initialized to false, skip it here
+					state KeyRange ckr =
+					    KeyRangeRef(keyAfter(LiteralStringRef("").withPrefix(conflictingKeysAbsolutePrefix)),
+					                LiteralStringRef("\xff\xff").withPrefix(conflictingKeysAbsolutePrefix));
 					// The getRange here using the special key prefix "\xff\xff/transaction/conflicting_keys/" happens
 					// locally Thus, the error handling is not needed here
 					Future<Standalone<RangeResultRef>> conflictingKeyRangesFuture =
@@ -188,26 +185,34 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 							    return kr.contains(rCR);
 						    })) {
 							++self->invalidReports;
-							TraceEvent(SevError, "TestFailure").detail("Reason", "InvalidKeyRangeReturned");
-						}
-						else if (!std::any_of(writeConflictRanges.begin(), writeConflictRanges.end(), [&kr](KeyRange wCR) {
-							    // Returned key range should be conflicting with at least one writeConflictRange
-							    return kr.intersects(wCR);
-						    })) {
+							TraceEvent(SevError, "TestFailure")
+							    .detail(
+							        "Reason",
+							        "Returned conflicting keys are not original readConflictRanges or union of them");
+						} else if (!std::any_of(writeConflictRanges.begin(), writeConflictRanges.end(),
+						                        [&kr](KeyRange wCR) {
+							                        // Returned key range should be conflicting with at least one
+							                        // writeConflictRange
+							                        return kr.intersects(wCR);
+						                        })) {
 							++self->invalidReports;
-							TraceEvent(SevError, "TestFailure").detail("Reason", "Returned keyranges are not conflicting with any write ranges");
+							TraceEvent(SevError, "TestFailure")
+							    .detail("Reason", "Returned keyranges are not conflicting with any write ranges");
 						}
 					}
 				} else {
 					// make sure no conflicts between readConflictRange and writeConflictRange
 					for (const KeyRange& rCR : readConflictRanges) {
-						if (std::any_of(writeConflictRanges.begin(), writeConflictRanges.end(), [&rCR](KeyRange wCR){
-							bool result = wCR.intersects(rCR);
-							if (result)
-								TraceEvent(SevError, "TestFailure").detail("WriteRange", wCR.toString()).detail("ReadRange", rCR.toString());
-							return result;
-						})) {
-							TraceEvent(SevError, "TestFailure").detail("Reason", "No conflicts but should be");
+						if (std::any_of(writeConflictRanges.begin(), writeConflictRanges.end(), [&rCR](KeyRange wCR) {
+							    bool result = wCR.intersects(rCR);
+							    if (result)
+								    TraceEvent(SevError, "TestFailure")
+								        .detail("WriteConflictRange", wCR.toString())
+								        .detail("ReadConflictRange", rCR.toString());
+							    return result;
+						    })) {
+							++self->invalidReports;
+							TraceEvent(SevError, "TestFailure").detail("Reason", "No conflicts returned but it should");
 							break;
 						}
 					}
