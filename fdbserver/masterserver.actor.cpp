@@ -1245,9 +1245,22 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		.detail("StatusCode", RecoveryStatus::locking_coordinated_state)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::locking_coordinated_state])
 		.detail("TLogs", self->cstate.prevDBState.tLogs.size())
+		.detail("OldGenerations", self->cstate.myDBState.oldTLogData.size())
 		.detail("MyRecoveryCount", self->cstate.prevDBState.recoveryCount+2)
 		.detail("ForceRecovery", self->forceRecovery)
 		.trackLatest("MasterRecoveryState");
+
+	if (self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->MAX_GENERATIONS_OVERRIDE) {
+		if (self->cstate.myDBState.oldTLogData.size() >= CLIENT_KNOBS->MAX_GENERATIONS) {
+			TraceEvent(SevError, "RecoveryStoppedTooManyOldGenerations").detail("OldGenerations", self->cstate.myDBState.oldTLogData.size())
+				.detail("Reason", "Recovery stopped because too many recoveries have happened since the last time the cluster was fully_recovered. Set --knob_max_generations_override to a value larger than OldGenerations on your server processes to resume recovery once the underlying problem has been fixed.");
+			wait(Future<Void>(Never()));
+		} else if (self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION) {
+			TraceEvent(SevError, "RecoveryDelayedTooManyOldGenerations").detail("OldGenerations", self->cstate.myDBState.oldTLogData.size())
+				.detail("Reason", "Recovery is delayed because too many recoveries have happened since the last time the cluster was fully_recovered. Set --knob_max_generations_override to a value larger than OldGenerations on your server processes to resume recovery once the underlying problem has been fixed.");
+			wait(delay(CLIENT_KNOBS->RECOVERY_DELAY_SECONDS_PER_GENERATION*(self->cstate.myDBState.oldTLogData.size() - CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION)));
+		}
+	}
 
 	state Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems( new AsyncVar<Reference<ILogSystem>> );
 	state Future<Void> recoverAndEndEpoch = ILogSystem::recoverAndEndEpoch(oldLogSystems, self->dbgid, self->cstate.prevDBState, self->myInterface.tlogRejoin.getFuture(), self->myInterface.locality, &self->forceRecovery);
