@@ -1,12 +1,8 @@
 testTitle=ReportConflictingKeysTest
     testName=ReportConflictingKeys
     testDuration=10.0
-    transactionsPerSecond=100000
-    nodeCountPerPrefix=10000
-    actorsPerClient=256
+    nodeCount=10000
     keyPrefix=RCK
     keyBytes=64
     readConflictRangeCountPerTx=1
     writeConflictRangeCountPerTx=1
-    reportConflictingKeys=true
-    skipCorrectnessCheck=false
