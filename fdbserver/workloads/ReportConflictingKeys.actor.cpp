@@ -26,7 +26,8 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-//For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in (sim2.actor.cpp)
+// For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in
+// (sim2.actor.cpp)
 struct ReportConflictingKeysWorkload : TestWorkload {
 
 	double testDuration, transactionsPerSecond, addReadConflictRangeProb, addWriteConflictRangeProb;
@@ -184,15 +185,14 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 						if (!std::any_of(readConflictRanges.begin(), readConflictRanges.end(), [&kr](KeyRange rCR) {
 							    // Read_conflict_range remains same in the resolver.
 							    // Thus, the returned keyrange is either the original read_conflict_range or merged
-							    // by several overlapped ones In either case, it contains at least one original
+							    // by several overlapped ones in either cases, it contains at least one original
 							    // read_conflict_range
 							    return kr.contains(rCR);
 						    })) {
 							++self->invalidReports;
 							TraceEvent(SevError, "TestFailure")
-							    .detail(
-							        "Reason",
-							        "Returned conflicting keys are not original readConflictRanges or union of them");
+							    .detail("Reason",
+							            "Returned conflicting keys are not original or merged readConflictRanges");
 						} else if (!std::any_of(writeConflictRanges.begin(), writeConflictRanges.end(),
 						                        [&kr](KeyRange wCR) {
 							                        // Returned key range should be conflicting with at least one
@@ -201,7 +201,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 						                        })) {
 							++self->invalidReports;
 							TraceEvent(SevError, "TestFailure")
-							    .detail("Reason", "Returned keyranges are not conflicting with any write ranges");
+							    .detail("Reason", "Returned keyrange is not conflicting with any writeConflictRange");
 						}
 					}
 				} else {
