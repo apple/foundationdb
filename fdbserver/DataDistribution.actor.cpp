@@ -2746,7 +2746,7 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> team, bool badTeam, bool redundantTeam) {
 	state int lastServersLeft = team->size();
 	state bool lastAnyUndesired = false;
-	state bool logTeamEvents = g_network->isSimulated() || !badTeam;
+	state bool logTeamEvents = g_network->isSimulated() || !badTeam || team->size() <= self->configuration.storageTeamSize;
 	state bool lastReady = false;
 	state bool lastHealthy;
 	state bool lastOptimal;
@@ -2787,6 +2787,10 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				if (status.isWrongConfiguration) {
 					anyWrongConfiguration = true;
 				}
+			}
+
+			if(serversLeft == 0) {
+				logTeamEvents = true;
 			}
 
 			// Failed server should not trigger DD if SS failures are set to be ignored
@@ -3946,7 +3950,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 				    .detail("StorageTeamSize", self->configuration.storageTeamSize)
 				    .detail("HighestPriority", highestPriority)
 				    .trackLatest(self->primary ? "TotalDataInFlight" : "TotalDataInFlightRemote");
-				loggingTrigger = delay( SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL );
+				loggingTrigger = delay( SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace );
 			}
 			when( wait( self->serverTrackerErrorOut.getFuture() ) ) {} // Propagate errors from storageServerTracker
 			when( wait( error ) ) {}
