@@ -96,7 +96,7 @@ void LoadedTLSConfig::print(FILE* fp) {
 		ConfigureSSLContext(*this, &context);
 	} catch (Error& e) {
 		fprintf(fp, "There was an error in loading the certificate chain.\n");
-		return;
+		throw;
 	}
 
 	X509_STORE* store = SSL_CTX_get_cert_store(context.native_handle());
