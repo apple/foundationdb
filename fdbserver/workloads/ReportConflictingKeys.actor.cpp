@@ -26,6 +26,7 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+//For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in (sim2.actor.cpp)
 struct ReportConflictingKeysWorkload : TestWorkload {
 
 	double testDuration, transactionsPerSecond, addReadConflictRangeProb, addWriteConflictRangeProb;
@@ -49,7 +50,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		readConflictRangeCount = getOption(options, LiteralStringRef("readConflictRangeCountPerTx"), 1);
 		writeConflictRangeCount = getOption(options, LiteralStringRef("writeConflictRangeCountPerTx"), 1);
 		ASSERT(readConflictRangeCount >= 1 && writeConflictRangeCount >= 1);
-		// modeled by geometric distribution: (1 - prob) / prob = mean - 1, since we add at least one conflictRange to
+		// modeled by geometric distribution: (1 - prob) / prob = mean - 1, where we add at least one conflictRange to
 		// each tx
 		addReadConflictRangeProb = (readConflictRangeCount - 1.0) / readConflictRangeCount;
 		addWriteConflictRangeProb = (writeConflictRangeCount - 1.0) / writeConflictRangeCount;
@@ -121,7 +122,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 
 	ACTOR Future<Void> conflictingClient(Database cx, ReportConflictingKeysWorkload* self) {
 
-		state ReadYourWritesTransaction tr(cx);
+		state ReadYourWritesTransaction tr1(cx);
 		state ReadYourWritesTransaction tr2(cx);
 		state std::vector<KeyRange> readConflictRanges;
 		state std::vector<KeyRange> writeConflictRanges;
@@ -132,15 +133,18 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 				// If READ_YOUR_WRITES_DISABLE set, it behaves like native transaction object
 				// where overlapped conflict ranges are not merged.
 				if (deterministicRandom()->random01() < 0.5)
-					tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+					tr1.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 				if (deterministicRandom()->random01() < 0.5)
 					tr2.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-				Version readVersion = wait(tr.getReadVersion());
+				// We have the two tx with same grv, then commit the first
+				// If the second one is not able to commit due to conflicts, verify the returned conflicting keys
+				// Otherwise, there is no conflicts between tr1's writeConflictRange and tr2's readConflictRange
+				Version readVersion = wait(tr1.getReadVersion());
 				tr2.setVersion(readVersion);
-				self->addRandomReadConflictRange(&tr, nullptr);
-				self->addRandomWriteConflictRange(&tr, &writeConflictRanges);
+				self->addRandomReadConflictRange(&tr1, nullptr);
+				self->addRandomWriteConflictRange(&tr1, &writeConflictRanges);
 				++self->commits;
-				wait(tr.commit());
+				wait(tr1.commit());
 				++self->xacts;
 
 				state bool foundConflict = false;
@@ -201,7 +205,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 						}
 					}
 				} else {
-					// make sure no conflicts between readConflictRange and writeConflictRange
+					// make sure no conflicts between tr2's readConflictRange and tr1's writeConflictRange
 					for (const KeyRange& rCR : readConflictRanges) {
 						if (std::any_of(writeConflictRanges.begin(), writeConflictRanges.end(), [&rCR](KeyRange wCR) {
 							    bool result = wCR.intersects(rCR);
@@ -219,12 +223,12 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 				}
 			} catch (Error& e) {
 				state Error e2 = e;
-				wait(tr.onError(e2));
+				wait(tr1.onError(e2));
 				wait(tr2.onError(e2));
 			}
 			readConflictRanges.clear();
 			writeConflictRanges.clear();
-			tr.reset();
+			tr1.reset();
 			tr2.reset();
 		}
 	}
