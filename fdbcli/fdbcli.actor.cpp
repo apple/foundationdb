@@ -404,6 +404,23 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 	return ret;
 }
 
+// This function has to be outside of cli(), because the actor compiler doesn't
+// understand preprocessor macros.
+bool loadAndPrintTLSCertificates() {
+#ifndef TLS_DISABLED
+	try {
+		LoadedTLSConfig loaded = g_network->getTLSConfig().loadSync();
+		loaded.print(stdout);
+	} catch (Error& e) {
+		printf("Please use --log and check the log file for more details on the error.");
+	}
+	return false;
+#else
+	printf("This fdbcli was built with TLS disabled.\n");
+	return true;
+#endif
+}
+
 static void printProgramUsage(const char* name) {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n"
 		   "usage: %s [OPTIONS]\n"
@@ -557,6 +574,10 @@ void initHelp() {
 		"consistencycheck [on|off]",
 		"permits or prevents consistency checking",
 		"Calling this command with `on' permits consistency check processes to run and `off' will halt their checking. Calling this command with no arguments will display if consistency checking is currently allowed.\n");
+	helpMap["tlsinfo"] = CommandHelp(
+		"tlsinfo",
+		"prints a textual representation of the configured TLS Certificates",
+		"This prints the TLS certificate and the CA certificate, which is likely to be helpful in debugging verify_peers failures.");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -3131,6 +3152,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "tlsinfo")) {
+					is_error = loadAndPrintTLSCertificates();
 					continue;
 				}
 

@@ -25,6 +25,7 @@
 #include "flow/IThreadPool.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
+#include "flow/TLSConfig.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 void forceLinkFlowTests() {}
@@ -202,6 +203,10 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	virtual void run() { return baseNetwork->run(); }
 	virtual void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total)  { return baseNetwork->getDiskBytes(directory,free,total); }
 	virtual bool isAddressOnThisHost(NetworkAddress const& addr) { return baseNetwork->isAddressOnThisHost(addr); }
+	virtual const TLSConfig& getTLSConfig() {
+		static TLSConfig emptyConfig;
+		return emptyConfig;
+	}
 };
 
 struct NonserializableThing {};

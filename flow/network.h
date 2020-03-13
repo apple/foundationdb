@@ -485,6 +485,9 @@ public:
 	virtual void initTLS() {}
 	// TLS must be initialized before using the network
 
+	virtual const TLSConfig& getTLSConfig() = 0;
+	// Return the TLS Configuration
+
 	virtual void getDiskBytes( std::string const& directory, int64_t& free, int64_t& total) = 0;
 	//Gets the number of free and total bytes available on the disk which contains directory
 
