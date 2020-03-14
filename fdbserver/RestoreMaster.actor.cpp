@@ -616,14 +616,12 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 	}
 
 	std::set<Key>::iterator splitter = keyrangeSplitter.begin();
-	int i = 0;
 	batchData->rangeToApplier.clear();
 	for (auto& applier : appliersInterf) {
 		if (splitter == keyrangeSplitter.end()) {
 			break; // Not all appliers will be used
 		}
 		batchData->rangeToApplier[*splitter] = applier.first;
-		i++;
 		splitter++;
 	}
 	ASSERT(batchData->rangeToApplier.size() > 0);

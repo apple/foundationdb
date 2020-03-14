@@ -1266,9 +1266,8 @@ public:
 			if (partitioned) {
 				// sort by tag ID so that filterDuplicates works.
 				std::sort(logs.begin(), logs.end(), [](const LogFile& a, const LogFile& b) {
-					return a.tagId == b.tagId ? (a.beginVersion == b.beginVersion ? a.endVersion < b.endVersion
-					                                                              : a.beginVersion < b.beginVersion)
-					                          : (a.tagId < b.tagId);
+					return std::tie(a.tagId, a.beginVersion, a.endVersion) <
+					       std::tie(b.tagId, b.beginVersion, b.endVersion);
 				});
 
 				// Remove duplicated log files that can happen for old epochs.

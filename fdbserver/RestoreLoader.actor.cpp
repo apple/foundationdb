@@ -777,20 +777,19 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 
 	// Now data only contains the kv mutation within restoreRange
 	VectorRef<KeyValueRef> data = blockData.slice(rangeStart, rangeEnd);
-	int start = 0;
-	int end = data.size();
 
-	// Convert KV in data into mutations in kvOps
-	for (int i = start; i < end; ++i) {
+	// Note we give INT_MAX as the sub sequence number to override any log mutations.
+	const LogMessageVersion msgVersion(version, std::numeric_limits<int32_t>::max());
+
+	// Convert KV in data into SET mutations of different keys in kvOps
+	for (const KeyValueRef& kv : data) {
 		// NOTE: The KV pairs in range files are the real KV pairs in original DB.
 		// Should NOT add prefix or remove surfix for the backup data!
-		MutationRef m(MutationRef::Type::SetValue, data[i].key,
-		              data[i].value); // ASSUME: all operation in range file is set.
+		MutationRef m(MutationRef::Type::SetValue, kv.key,
+		              kv.value); // ASSUME: all operation in range file is set.
 		cc->loadedRangeBytes += m.totalSize();
 
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
-		// Note we give INT_MAX as the sub sequence number to override any log mutations.
-		const LogMessageVersion msgVersion(version, std::numeric_limits<int32_t>::max());
 		auto it = kvOps.insert(std::make_pair(msgVersion, MutationsVec()));
 		TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
 		    .detail("CommitVersion", version)
@@ -831,13 +830,9 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pPro
 	wait(pProcessedFileOffset->whenAtLeast(asset.offset));
 
 	if (pProcessedFileOffset->get() == asset.offset) {
-		int start = 0;
-		int end = data.size();
-		for (int i = start; i < end; ++i) {
-			// Key k = data[i].key.withPrefix(mutationLogPrefix);
-			// ValueRef v = data[i].value;
+		for (const KeyValueRef& kv : data) {
 			// Concatenate the backuped param1 and param2 (KV) at the same version.
-			concatenateBackupMutationForLogFile(pMutationMap, pMutationPartMap, data[i].key, data[i].value, asset);
+			concatenateBackupMutationForLogFile(pMutationMap, pMutationPartMap, kv.key, kv.value, asset);
 		}
 		pProcessedFileOffset->set(asset.offset + asset.len);
 	}
