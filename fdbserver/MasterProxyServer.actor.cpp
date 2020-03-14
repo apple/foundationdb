@@ -1233,9 +1233,9 @@ ACTOR static Future<Void> transactionStarter(
 	state TransactionRateInfo normalRateInfo(10);
 	state TransactionRateInfo batchRateInfo(0);
 
-	state Deque<GetReadVersionRequest> systemQueue,
-	state Deque<GetReadVersionRequest> defaultQueue,
-	state Deque<GetReadVersionRequest> batchQueue,
+	state Deque<GetReadVersionRequest> systemQueue;
+	state Deque<GetReadVersionRequest> defaultQueue;
+	state Deque<GetReadVersionRequest> batchQueue;
 	state vector<MasterProxyInterface> otherProxies;
 
 	state PromiseStream<double> replyTimes;
