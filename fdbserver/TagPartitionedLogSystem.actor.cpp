@@ -1997,7 +1997,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		oldLogSystem->recruitmentID = logSystem->recruitmentID;
 
 		if(configuration.usableRegions > 1) {
-			logSystem->logRouterTags = recr.tLogs.size() * std::max<int>(1, configuration.desiredLogRouterCount / std::max<int>(1,recr.tLogs.size()));
+			logSystem->logRouterTags = std::max(recr.satelliteTLogs.size(), recr.tLogs.size()) * std::max<int>(1, configuration.desiredLogRouterCount / std::max<int>(1,std::max(recr.satelliteTLogs.size(), recr.tLogs.size())));
 			logSystem->expectedLogSets++;
 			logSystem->addPseudoLocality(tagLocalityLogRouterMapped);
 		}
