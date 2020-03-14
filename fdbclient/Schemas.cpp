@@ -443,6 +443,16 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "hz":0.0,
                "counter":0,
                "roughness":0.0
+            },
+            "location_requests":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "memory_errors":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
             }
          },
          "bytes":{

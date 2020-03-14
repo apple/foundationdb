@@ -417,6 +417,16 @@
                "hz":0.0,
                "counter":0,
                "roughness":0.0
+            },
+            "location_requests":{ // measures number of incoming key server location requests
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "memory_errors":{ // measures number of proxy_memory_limit_exceeded errors
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
             }
          },
          "bytes":{ // measures number of logical bytes read/written (ignoring replication factor and overhead on disk). Perfectly spaced operations will have a roughness of 1.0. Randomly spaced (Poisson-distributed) operations will have a roughness of 2.0, with increased bunching resulting in increased values. Higher roughness can result in increased latency due to increased queuing.
