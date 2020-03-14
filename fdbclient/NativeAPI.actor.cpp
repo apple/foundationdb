@@ -98,7 +98,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 	return runAfter(loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model),
 					[ctx](auto res) {
 						if (res.cached) {
-							TraceEvent(SevDebug, "NativeCientReqCached");
+							//TraceEvent(SevDebug, "NativeCientReqCached");
 							ctx->updateCache.trigger();
 						}
 						return res;
@@ -644,9 +644,8 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 									std::insert_iterator<std::map<UID, StorageServerInterface>>(
 										deletedCacheServers, deletedCacheServers.begin()));
 				hasChanges = !(newCacheServers.empty() && deletedCacheServers.empty());
-				TraceEvent(SevDebug, "MonitorCacheList").detail("AllCacheServers",allCacheServers.size())
-				.detail("NewCacheServers",newCacheServers.size())
-				.detail("OldCacheServers",cacheServerMap.size());
+				//TraceEvent(SevDebug, "MonitorCacheList").detail("AllCacheServers",allCacheServers.size())
+				//.detail("NewCacheServers",newCacheServers.size()).detail("OldCacheServers",cacheServerMap.size());
 				if (hasChanges) {
 					updateLocationCacheWithCaches(self, deletedCacheServers, newCacheServers);
 				}

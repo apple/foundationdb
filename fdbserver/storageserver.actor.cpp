@@ -884,6 +884,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 			++data->counters.rowsQueried;
 			resultSize = v.get().size();
 			data->counters.bytesQueried += resultSize;
+			//TraceEvent(SevDebug, "SSGetValueQPresent", data->thisServerID).detail("ResultSize",resultSize).detail("Version", version).detail("ReqKey",req.key).detail("Value",v);
 		}
 		else {
 			++data->counters.emptyQueries;
@@ -1768,6 +1769,7 @@ void applyMutation( StorageServer *self, MutationRef const& m, Arena& arena, Sto
 	self->metrics.notify(m.param1, metrics);
 
 	if (m.type == MutationRef::SetValue) {
+		//TraceEvent("ApplyMutation", self->thisServerID).detail("Mutation", m.toString()).detail("Version", data.latestVersion);
 		auto prev = data.atLatest().lastLessOrEqual(m.param1);
 		if (prev && prev->isClearTo() && prev->getEndKey() > m.param1) {
 			ASSERT( prev.key() <= m.param1 );

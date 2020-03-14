@@ -493,7 +493,7 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 			++data->counters.rowsQueried;
 			resultSize = v.get().size();
 			data->counters.bytesQueried += resultSize;
-			//TraceEvent(SevDebug, "SCGetValueQPresent", data->thisServerID).detail("ResultSize",resultSize).detail("Version", version).detail("ReqKey",req.key);
+			//TraceEvent(SevDebug, "SCGetValueQPresent", data->thisServerID).detail("ResultSize",resultSize).detail("Version", version).detail("ReqKey",req.key).detail("Value",v);
 		}
 
 		if( req.debugID.present() )
@@ -911,20 +911,36 @@ void StorageCacheData::applyMutation( MutationRef const& m, Arena& arena, Storag
 			// TODO double check if the insert version of the previous clear needs to be preserved for the "left half",
 			// insert() invalidates prev, so prev.key() is not safe to pass to it by reference
 			data.insert( KeyRef(prev.key()), ValueOrClearToRef::clearTo( m.param1 ), prev.insertVersion() );  // overwritten by below insert if empty
+			//TraceEvent(SevDebug, "ApplyMutationClearTo")
+			//.detail("Key1", prev.key())
+			//.detail("Key2",m.param1)
+			//.detail("Version1", prev.insertVersion());
 			KeyRef nextKey = keyAfter(m.param1, arena);
 			if ( end != nextKey ) {
 				ASSERT( end > nextKey );
 				// TODO double check if it's okay to let go of the the insert version of the "right half"
 				// FIXME: This copy is technically an asymptotic problem, definitely a waste of memory (copy of keyAfter is a waste, but not asymptotic)
 				data.insert( nextKey, ValueOrClearToRef::clearTo( KeyRef(arena, end) ) );
+				//TraceEvent(SevDebug, "ApplyMutationClearTo2")
+				//.detail("K1", nextKey)
+				//.detail("K2", end)
+				//.detail("V", data.latestVersion);
 			}
 		}
 		data.insert( m.param1, ValueOrClearToRef::value(m.param2) );
+		//TraceEvent(SevDebug, "ApplyMutation")
+		//	.detail("Key", m.param1)
+		//	.detail("Value",m.param2)
+		//	.detail("Version", data.latestVersion);
 	} else if (m.type == MutationRef::ClearRange) {
 		data.erase( m.param1, m.param2 );
 		ASSERT( m.param2 > m.param1 );
 		ASSERT( !data.isClearContaining( data.atLatest(), m.param1 ) );
 		data.insert( m.param1, ValueOrClearToRef::clearTo(m.param2) );
+		//TraceEvent(SevDebug, "ApplyMutationClearTo3")
+		//	.detail("Key21", m.param1)
+		//	.detail("Key22", m.param2)
+		//	.detail("V2", data.latestVersion);
 	}
 }
 
@@ -1616,8 +1632,8 @@ private:
 				rollback( data, rollbackVersion, currentVersion );
 			}
 		} else {
-			fprintf(stderr, "SCPrivateCacheMutation: Unknown private mutation\n");
-			ASSERT(false);  // Unknown private mutation
+			TraceEvent(SevWarn, "SCPrivateCacheMutation: Unknown private mutation");
+			//ASSERT(false);  // Unknown private mutation
 		}
 	}
 };
@@ -1703,6 +1719,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 			loop{
 				state uint64_t changeCounter = data->cacheRangeChangeCounter;
 				bool epochEnd = false;
+			bool hasPrivateData = false;
 				bool firstMutation = true;
 				bool dbgLastMessageWasProtocol = false;
 
@@ -1725,20 +1742,22 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 						MutationRef msg;
 						cloneReader >> msg;
 
+					if (firstMutation && msg.param1.startsWith(systemKeys.end))
+						hasPrivateData = true;
+						firstMutation = false;
 						if (msg.param1 == lastEpochEndPrivateKey) {
 							epochEnd = true;
-							ASSERT(firstMutation);
+							//ASSERT(firstMutation);
 							ASSERT(dbgLastMessageWasProtocol);
 						}
 
-						firstMutation = false;
 						dbgLastMessageWasProtocol = false;
 					}
 				}
 
 				// Any fetchKeys which are ready to transition their cacheRanges to the adding,transferred state do so now.
 				// If there is an epoch end we skip this step, to increase testability and to prevent inserting a version in the middle of a rolled back version range.
-				while(!epochEnd && !data->readyFetchKeys.empty()) {
+				while(!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
 					auto fk = data->readyFetchKeys.back();
 					data->readyFetchKeys.pop_back();
 					fk.send( &fii );

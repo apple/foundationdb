@@ -273,6 +273,7 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 							allTags.insert(decodeServerTagValue(kv.value));
 						}
 					}
+					allTags.insert(cacheTag);
 
 					if (m.param1 == lastEpochEndKey) {
 						toCommit->addTags(allTags);
@@ -283,6 +284,11 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					toCommit->addTags(allTags);
 					toCommit->addTypedMessage(privatized);
+					//if (m.param1 == lastEpochEndKey) {
+					//TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString());
+					//toCommit->addTag( cacheTag );
+					//toCommit->addTypedMessage(privatized);
+					//}
 				}
 			}
 			else if (m.param1 == minRequiredCommitVersionKey) {

@@ -768,7 +768,7 @@ public:
 	void insert(const K& k, const T& t) {
 		insert( k, t, latestVersion );
 	}
-	void insert(const K& k, const T& t, Version insertAt) {[[]]
+	void insert(const K& k, const T& t, Version insertAt) {
 			if (PTreeImpl::contains(roots.back().second, latestVersion, k )) PTreeImpl::remove( roots.back().second, latestVersion, k, allocator); // FIXME: Make PTreeImpl::insert do this automatically  (see also WriteMap.h FIXME)
 		PTreeImpl::insert( roots.back().second, latestVersion, MapPair<K,std::pair<T,Version>>(k,std::make_pair(t,insertAt)), allocator);
 	}

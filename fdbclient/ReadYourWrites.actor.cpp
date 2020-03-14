@@ -1129,6 +1129,7 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx)
     options(tr), deferredError(cx->deferredError) {
 	std::copy(cx.getTransactionDefaults().begin(), cx.getTransactionDefaults().end(),
 	          std::back_inserter(persistentOptions));
+	//debugTransaction( deterministicRandom()->randomUniqueID() );
 	applyPersistentOptions();
 }
 
