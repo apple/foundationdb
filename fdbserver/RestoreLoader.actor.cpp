@@ -463,11 +463,25 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				              nodeIDs.contents());
 				ASSERT(mvector.size() == nodeIDs.size());
 
+				if (debugMutation("RestoreLoader", commitVersion.version, kvm)) {
+					TraceEvent e("DebugSplit");
+					int i = 0;
+					for (auto& [key, uid] : *pRangeToApplier) {
+						e.detail(format("Range%d", i).c_str(), printable(key))
+						    .detail(format("UID%d", i).c_str(), uid.toString());
+						i++;
+					}
+				}
 				for (splitMutationIndex = 0; splitMutationIndex < mvector.size(); splitMutationIndex++) {
 					MutationRef mutation = mvector[splitMutationIndex];
 					UID applierID = nodeIDs[splitMutationIndex];
 					// printf("SPLITTED MUTATION: %d: mutation:%s applierID:%s\n", splitMutationIndex,
 					// mutation.toString().c_str(), applierID.toString().c_str());
+					if (debugMutation("RestoreLoader", commitVersion.version, mutation)) {
+						TraceEvent("SplittedMutation")
+						    .detail("Version", commitVersion.toString())
+						    .detail("Mutation", mutation.toString());
+					}
 					applierMutationsBuffer[applierID].push_back_deep(applierMutationsBuffer[applierID].arena(), mutation);
 					applierSubsBuffer[applierID].push_back(applierSubsBuffer[applierID].arena(), commitVersion.sub);
 					applierMutationsSize[applierID] += mutation.expectedSize();
@@ -522,8 +536,14 @@ void splitMutation(std::map<Key, UID>* pRangeToApplier, MutationRef m, Arena& mv
 	ASSERT(mvector.empty());
 	ASSERT(nodeIDs.empty());
 	// key range [m->param1, m->param2)
-	std::map<Standalone<KeyRef>, UID>::iterator itlow, itup; // we will return [itlow, itup)
+	std::map<Key, UID>::iterator itlow, itup; // we will return [itlow, itup)
 	itlow = pRangeToApplier->lower_bound(m.param1); // lower_bound returns the iterator that is >= m.param1
+	if (itlow == pRangeToApplier->end()) {
+		--itlow;
+		mvector.push_back_deep(mvector_arena, m);
+		nodeIDs.push_back(nodeIDs_arena, itlow->second);
+		return;
+	}
 	if (itlow->first > m.param1) {
 		if (itlow != pRangeToApplier->begin()) {
 			--itlow;
@@ -533,7 +553,7 @@ void splitMutation(std::map<Key, UID>* pRangeToApplier, MutationRef m, Arena& mv
 	itup = pRangeToApplier->upper_bound(m.param2); // return rmap::end if no key is after m.param2.
 	ASSERT(itup == pRangeToApplier->end() || itup->first > m.param2);
 
-	std::map<Standalone<KeyRef>, UID>::iterator itApplier;
+	std::map<Key, UID>::iterator itApplier;
 	while (itlow != itup) {
 		Standalone<MutationRef> curm; // current mutation
 		curm.type = m.type;
@@ -776,7 +796,6 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 		    .detail("CommitVersion", version)
 		    .detail("ParsedMutationKV", m.toString());
 
-		ASSERT_WE_THINK(kvOps.find(msgVersion) != kvOps.end());
 		it.first->second.push_back_deep(it.first->second.arena(), m);
 		// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
 		if (deterministicRandom()->random01() * 100 < SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
