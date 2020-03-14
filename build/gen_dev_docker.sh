@@ -18,6 +18,7 @@ then
         echo "Adding user to docker group"
         sudo usermod -a -G docker ${user}
         echo "Please log out and back in again to reload group list"
+        echo "Afterwards you need to call this script again"
         exit
 fi
 
