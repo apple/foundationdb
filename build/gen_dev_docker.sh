@@ -2,8 +2,26 @@
 
 set -e
 
-DIR_UUID=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+# we first check whether the user is in the group docker
 user=$(id -un)
+is_in_docker_group=0
+for group in $(id -Gn)
+do
+        if [ $group = "docker" ]
+        then
+                is_in_docker_group=1
+        fi
+done
+
+if [ $is_in_docker_group -eq 0 ]
+then
+        echo "Adding user to docker group"
+        sudo usermod -a -G docker ${user}
+        echo "Please log out and back in again to reload group list"
+        exit
+fi
+
+DIR_UUID=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
 group=$(id -gn)
 uid=$(id -u)
 gid=$(id -g)
@@ -48,7 +66,7 @@ EOF
 
 echo "Created ${tmpdir}"
 echo "Buidling Docker container ${image}"
-sudo docker build -t ${image} .
+docker build -t ${image} .
 
 popd
 
@@ -66,7 +84,7 @@ then
 fi
 
 
-sudo docker run --rm `# delete (temporary) image after return` \\
+docker run --rm `# delete (temporary) image after return` \\
                 -it `# Run in interactive mode and simulate a TTY` \\
                 --privileged=true `# Run in privileged mode ` \\
                 --cap-add=SYS_PTRACE \\
