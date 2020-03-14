@@ -245,19 +245,18 @@ struct DecodeProgress {
 		ASSERT(!self->finished());
 
 		loop {
-			state std::tuple<Arena, Version, int32_t, StringRef> tuple = self->keyValues[0];
+			if (self->keyValues.size() == 1) {
+				// Try to decode another block when only one left
+				wait(readAndDecodeFile(self));
+			}
 
+			auto& tuple = self->keyValues[0];
 			ASSERT(std::get<2>(tuple) == 0); // first part number must be 0.
 
 			// decode next versions, check if they are continuous parts
-			state int idx = 1; // next kv pair in "keyValues"
-			state int bufSize = std::get<3>(tuple).size();
-			state int lastPart = 0;
-			loop {
-				// Try to decode another block if needed
-				if (idx == self->keyValues.size()) {
-					wait(readAndDecodeFile(self));
-				}
+			int idx = 1; // next kv pair in "keyValues"
+			int bufSize = std::get<3>(tuple).size();
+			for (int lastPart = 0; idx < self->keyValues.size(); idx++, lastPart++) {
 				if (idx == self->keyValues.size()) break;
 
 				auto next_tuple = self->keyValues[idx];
@@ -270,8 +269,6 @@ struct DecodeProgress {
 					throw restore_corrupted_data();
 				}
 				bufSize += std::get<3>(next_tuple).size();
-				idx++;
-				lastPart++;
 			}
 
 			VersionedMutations m;
