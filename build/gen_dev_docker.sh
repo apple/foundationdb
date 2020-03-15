@@ -21,21 +21,19 @@ echo
 
 cat <<EOF >> Dockerfile
 FROM foundationdb/foundationdb-build:latest
+RUN yum install -y sudo
+RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+RUN groupadd -g 1100 sudo
 EOF
 
 num_groups=${#gids[@]}
-additional_groups=""
+additional_groups="-G sudo"
 for ((i=0;i<num_groups;i++))
 do
         echo "RUN groupadd -g ${gids[$i]} ${groups[$i]}" >> Dockerfile
         if [ ${gids[i]} -ne ${gid} ]
         then
-                if [ -z "${additional_groups}" ]
-                then
-                        additional_groups="-G ${gids[$i]}"
-                else
-                        additional_groups="${additional_groups},${gids[$i]}"
-                fi
+                additional_groups="${additional_groups},${gids[$i]}"
         fi
 done
 
