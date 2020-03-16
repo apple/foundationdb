@@ -627,6 +627,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	double medianAvailableSpace;
 	double lastMedianAvailableSpaceUpdate;
 
+	int lowestUtilizationTeam;
+	int highestUtilizationTeam;
+
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
 		LocalityMap<UID>* storageServerMap = (LocalityMap<UID>*) storageServerSet.getPtr();
@@ -671,7 +674,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    optimalTeamCount(0), recruitingStream(0), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
 	    unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs),
 	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary), medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO),
-		lastMedianAvailableSpaceUpdate(0), processingUnhealthy(processingUnhealthy) {
+		lastMedianAvailableSpaceUpdate(0), processingUnhealthy(processingUnhealthy), lowestUtilizationTeam(0), highestUtilizationTeam(0) {
 		if(!primary || configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", distributorId)
 				.detail( "State", "Inactive" )
@@ -809,18 +812,29 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 			if( req.wantsTrueBest ) {
 				ASSERT( !bestOption.present() );
+				auto &startIndex = req.preferLowerUtilization ? self->lowestUtilizationTeam : self->highestUtilizationTeam;
+				if(startIndex >= self->teams.size()) {
+					startIndex = 0;
+				}
+
+				int bestIndex = startIndex;
 				for( int i = 0; i < self->teams.size(); i++ ) {
-					if (self->teams[i]->isHealthy() &&
-					    (!req.preferLowerUtilization || self->teams[i]->hasHealthyAvailableSpace(self->medianAvailableSpace)) &&
-					    (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(self->teams[i]->getServerIDs(), self->primary)).size() > 0))
+					int currentIndex = (startIndex + i) % self->teams.size();
+					if (self->teams[currentIndex]->isHealthy() &&
+					    (!req.preferLowerUtilization || self->teams[currentIndex]->hasHealthyAvailableSpace(self->medianAvailableSpace)))
 					{
-						int64_t loadBytes = self->teams[i]->getLoadBytes(true, req.inflightPenalty);
-						if( !bestOption.present() || ( req.preferLowerUtilization && loadBytes < bestLoadBytes ) || ( !req.preferLowerUtilization && loadBytes > bestLoadBytes ) ) {
+						int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
+						if((!bestOption.present() || (req.preferLowerUtilization && loadBytes < bestLoadBytes) || (!req.preferLowerUtilization && loadBytes > bestLoadBytes)) &&
+						    (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->hasShards(ShardsAffectedByTeamFailure::Team(self->teams[currentIndex]->getServerIDs(), self->primary)))) 
+						{
 							bestLoadBytes = loadBytes;
-							bestOption = self->teams[i];
+							bestOption = self->teams[currentIndex];
+							bestIndex = currentIndex;
 						}
 					}
 				}
+
+				startIndex = bestIndex;
 			}
 			else {
 				int nTries = 0;
@@ -828,8 +842,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
 					bool ok = dest->isHealthy() &&
-					          (!req.preferLowerUtilization || dest->hasHealthyAvailableSpace(self->medianAvailableSpace)) &&
-					          (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)).size() > 0);
+					          (!req.preferLowerUtilization || dest->hasHealthyAvailableSpace(self->medianAvailableSpace));					
 
 					for(int i=0; ok && i<randomTeams.size(); i++) {
 						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
@@ -837,6 +850,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							break;
 						}
 					}
+
+					ok = ok && (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->hasShards(ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)));
 
 					if (ok)
 						randomTeams.push_back( dest );
