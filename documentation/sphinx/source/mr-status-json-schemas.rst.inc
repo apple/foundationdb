@@ -418,7 +418,7 @@
                "counter":0,
                "roughness":0.0
             },
-            "location_requests":{ // measures number of outgoing key server location requests
+            "location_requests":{ // measures number of outgoing key server location responses
                "hz":0.0,
                "counter":0,
                "roughness":0.0
