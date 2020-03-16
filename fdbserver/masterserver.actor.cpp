@@ -1163,7 +1163,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 			.trackLatest("MasterRecoveryState");
 
 			TraceEvent("MasterRecoveryGenerations", self->dbgid)
-			.detail("ActiveGenerations", 0)
+			.detail("ActiveGenerations", 1)
 			.trackLatest("MasterRecoveryGenerations");
 		} else if( !newState.oldTLogData.size() && self->recoveryState < RecoveryState::STORAGE_RECOVERED ) {
 			self->recoveryState = RecoveryState::STORAGE_RECOVERED;
@@ -1249,13 +1249,13 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		.detail("StatusCode", RecoveryStatus::locking_coordinated_state)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::locking_coordinated_state])
 		.detail("TLogs", self->cstate.prevDBState.tLogs.size())
-		.detail("ActiveGenerations", self->cstate.myDBState.oldTLogData.size())
+		.detail("ActiveGenerations", self->cstate.myDBState.oldTLogData.size() + 1)
 		.detail("MyRecoveryCount", self->cstate.prevDBState.recoveryCount+2)
 		.detail("ForceRecovery", self->forceRecovery)
 		.trackLatest("MasterRecoveryState");
 
 	TraceEvent("MasterRecoveryGenerations", self->dbgid)
-		.detail("ActiveGenerations", self->cstate.myDBState.oldTLogData.size())
+		.detail("ActiveGenerations", self->cstate.myDBState.oldTLogData.size() + 1)
 		.trackLatest("MasterRecoveryGenerations");
 
 	if (self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->MAX_GENERATIONS_OVERRIDE) {
