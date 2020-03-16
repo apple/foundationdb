@@ -73,7 +73,7 @@ enum class TaskPriority {
 	TLogConfirmRunningReply = 8530,
 	TLogConfirmRunning = 8520,
 	ProxyGRVTimer = 8510,
-	ProxyGetConsistentReadVersion = 8500,
+	GetConsistentReadVersion = 8500,
 	DefaultPromiseEndpoint = 8000,
 	DefaultOnMainThread = 7500,
 	DefaultDelay = 7010,
