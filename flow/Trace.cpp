@@ -1043,12 +1043,14 @@ TraceEvent::~TraceEvent() {
 thread_local bool TraceEvent::networkThread = false;
 
 void TraceEvent::setNetworkThread() {
-	if(FLOW_KNOBS->ALLOCATION_TRACING_ENABLED) {
-		--g_allocation_tracing_disabled;
-	}
+	if(!networkThread) {
+		if(FLOW_KNOBS->ALLOCATION_TRACING_ENABLED) {
+			--g_allocation_tracing_disabled;
+		}
 
-	traceEventThrottlerCache = new TransientThresholdMetricSample<Standalone<StringRef>>(FLOW_KNOBS->TRACE_EVENT_METRIC_UNITS_PER_SAMPLE, FLOW_KNOBS->TRACE_EVENT_THROTTLER_MSG_LIMIT);
-	networkThread = true;
+		traceEventThrottlerCache = new TransientThresholdMetricSample<Standalone<StringRef>>(FLOW_KNOBS->TRACE_EVENT_METRIC_UNITS_PER_SAMPLE, FLOW_KNOBS->TRACE_EVENT_THROTTLER_MSG_LIMIT);
+		networkThread = true;
+	}
 }
 
 bool TraceEvent::isNetworkThread() {
