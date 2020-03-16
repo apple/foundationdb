@@ -773,6 +773,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				megabits_received.setKeyRawNumber("hz", processMetrics.getValue("MbpsReceived"));
 				networkObj["megabits_received"] = megabits_received;
 
+				JsonBuilderObject tls_policy_failures;
+				tls_policy_failures.setKeyRawNumber("hz", processMetrics.getValue("TLSPolicyFailures"));
+				networkObj["tls_policy_failures"] = tls_policy_failures;
+
 				statusObj["network"] = networkObj;
 
 				memoryObj.setKeyRawNumber("used_bytes", processMetrics.getValue("Memory"));
@@ -961,8 +965,9 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 	state JsonBuilderObject message;
 
 	try {
+		state Future<TraceEventFields> activeGens = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryGenerations") ) ), 1.0);
 		TraceEventFields md = wait( timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0) );
-		state int mStatusCode = md.getInt("StatusCode");
+		int mStatusCode = md.getInt("StatusCode");
 		if (mStatusCode < 0 || mStatusCode >= RecoveryStatus::END)
 			throw attribute_not_found();
 
@@ -985,6 +990,12 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 		}
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1
+
+		TraceEventFields md = wait(activeGens);
+		if(md.size()) {
+			int activeGenerations = md.getInt("ActiveGenerations");
+			message["active_generations"] = activeGenerations;
+		}
 
 	} catch (Error &e){
 		if (e.code() == error_code_actor_cancelled)
@@ -1573,7 +1584,7 @@ static int getExtraTLogEligibleZones(const vector<WorkerDetails>& workers, const
 	for(auto& region : configuration.regions) {
 		int eligible = dcId_zone[region.dcId].size() - std::max(configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) );
 		//FIXME: does not take into account fallback satellite policies
-		if(region.satelliteTLogReplicationFactor > 0) {
+		if(region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
 			int totalSatelliteEligible = 0;
 			for(auto& sat : region.satellites) {
 				totalSatelliteEligible += dcId_zone[sat.dcId].size();

@@ -683,7 +683,7 @@ public:
 		}
 
 		std::vector<WorkerDetails> satelliteLogs;
-		if(region.satelliteTLogReplicationFactor > 0) {
+		if(region.satelliteTLogReplicationFactor > 0 && req.configuration.usableRegions > 1) {
 			satelliteLogs = getWorkersForSatelliteLogs( req.configuration, region, remoteRegion, id_used, result.satelliteFallback );
 			for(int i = 0; i < satelliteLogs.size(); i++) {
 				result.satelliteTLogs.push_back(satelliteLogs[i].interf);
@@ -718,7 +718,7 @@ public:
 
 		if( !goodRecruitmentTime.isReady() &&
 			( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
-			  ( region.satelliteTLogReplicationFactor > 0 && RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId), ProcessClass::TLog).betterCount(RoleFitness(satelliteLogs, ProcessClass::TLog)) ) ||
+			  ( region.satelliteTLogReplicationFactor > 0 && req.configuration.usableRegions > 1 && RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId), ProcessClass::TLog).betterCount(RoleFitness(satelliteLogs, ProcessClass::TLog)) ) ||
 			  RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies(), ProcessClass::Proxy).betterCount(RoleFitness(proxies, ProcessClass::Proxy)) ||
 			  RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers(), ProcessClass::Resolver).betterCount(RoleFitness(resolvers, ProcessClass::Resolver)) ) ) {
 			return operation_failed();
@@ -895,7 +895,7 @@ public:
 			std::set<Optional<Key>> primaryDC;
 			primaryDC.insert(regions[0].dcId);
 			getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.getDesiredLogs(), db.config.tLogPolicy, id_used, true, primaryDC);
-			if(regions[0].satelliteTLogReplicationFactor > 0) {
+			if(regions[0].satelliteTLogReplicationFactor > 0 && db.config.usableRegions > 1) {
 				bool satelliteFallback = false;
 				getWorkersForSatelliteLogs(db.config, regions[0], regions[1], id_used, satelliteFallback, true);
 			}
@@ -1068,7 +1068,7 @@ public:
 
 		RoleFitness oldSatelliteTLogFit(satellite_tlogs, ProcessClass::TLog);
 		bool newSatelliteFallback = false;
-		auto newSatelliteTLogs = region.satelliteTLogReplicationFactor > 0 ? getWorkersForSatelliteLogs(db.config, region, remoteRegion, id_used, newSatelliteFallback, true) : satellite_tlogs;
+		auto newSatelliteTLogs = (region.satelliteTLogReplicationFactor > 0 && db.config.usableRegions > 1) ? getWorkersForSatelliteLogs(db.config, region, remoteRegion, id_used, newSatelliteFallback, true) : satellite_tlogs;
 		RoleFitness newSatelliteTLogFit(newSatelliteTLogs, ProcessClass::TLog);
 
 		std::map<Optional<Key>,int32_t> satellite_priority;

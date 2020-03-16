@@ -208,6 +208,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                },
                "megabits_received":{
                   "hz":0.0
+               },
+               "tls_policy_failures":{
+                 "hz":0.0
                }
             },
             "run_loop_busy":0.2
@@ -425,6 +428,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          },
          "required_logs":3,
          "missing_logs":"7f8d623d0cb9966e",
+         "active_generations":1,
          "description":"Recovery complete."
       },
       "workload":{

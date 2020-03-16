@@ -764,7 +764,7 @@ ACTOR Future<Void> dataDistributionTracker(
 					.detail("SystemSizeBytes", self.systemSizeEstimate)
 					.trackLatest( "DDTrackerStats" );
 
-				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL);
+				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 			}
 			when( GetMetricsRequest req = waitNext( getShardMetrics.getFuture() ) ) {
 				self.sizeChanges.add( fetchShardMetrics( &self, req ) );
@@ -782,6 +782,11 @@ vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor( Team team ) {
 	for(auto it = team_shards.lower_bound( std::pair<Team,KeyRange>( team, KeyRangeRef() ) ); it != team_shards.end() && it->first == team; ++it)
 		r.push_back( it->second );
 	return r;
+}
+
+bool ShardsAffectedByTeamFailure::hasShards(Team team) {
+	auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));
+	return it != team_shards.end() && it->first == team;
 }
 
 int ShardsAffectedByTeamFailure::getNumberOfShards( UID ssID ) {

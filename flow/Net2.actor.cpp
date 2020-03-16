@@ -222,6 +222,7 @@ public:
 	Int64MetricHandle countYieldCallsTrue;
 	Int64MetricHandle countASIOEvents;
 	Int64MetricHandle countSlowTaskSignals;
+	Int64MetricHandle countTLSPolicyFailures;
 	Int64MetricHandle priorityMetric;
 	DoubleMetricHandle countLaunchTime;
 	DoubleMetricHandle countReactTime;
@@ -914,7 +915,7 @@ ACTOR static Future<Void> watchFileForChanges( std::string filename, AsyncTrigge
 	}
 }
 
-ACTOR static Future<Void> reloadCertificatesOnChange( TLSConfig config, AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>>* contextVar ) {
+ACTOR static Future<Void> reloadCertificatesOnChange( TLSConfig config, std::function<void()> onPolicyFailure, AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>>* contextVar ) {
 	if (FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS <= 0) {
 		return Void();
 	}
@@ -938,7 +939,7 @@ ACTOR static Future<Void> reloadCertificatesOnChange( TLSConfig config, AsyncVar
 		try {
 			LoadedTLSConfig loaded = wait( config.loadAsync() );
 			boost::asio::ssl::context context(boost::asio::ssl::context::tls);
-			ConfigureSSLContext(loaded, &context);
+			ConfigureSSLContext(loaded, &context, onPolicyFailure);
 			TraceEvent(SevInfo, "TLSCertificateRefreshSucceeded");
 			mismatches = 0;
 			contextVar->set(ReferencedObject<boost::asio::ssl::context>::from(std::move(context)));
@@ -961,9 +962,10 @@ void Net2::initTLS() {
 #ifndef TLS_DISABLED
 	try {
 		boost::asio::ssl::context newContext(boost::asio::ssl::context::tls);
-		ConfigureSSLContext( tlsConfig.loadSync(), &newContext );
+		auto onPolicyFailure = [this]() { this->countTLSPolicyFailures++; };
+		ConfigureSSLContext( tlsConfig.loadSync(), &newContext, onPolicyFailure );
 		sslContextVar.set(ReferencedObject<boost::asio::ssl::context>::from(std::move(newContext)));
-		backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, &sslContextVar );
+		backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, onPolicyFailure, &sslContextVar );
 	} catch (Error& e) {
 		TraceEvent("Net2TLSInitError").error(e);
 		throw tls_error();
@@ -999,6 +1001,7 @@ void Net2::initMetrics() {
 	countASIOEvents.init(LiteralStringRef("Net2.CountASIOEvents"));
 	countYieldCallsTrue.init(LiteralStringRef("Net2.CountYieldCallsTrue"));
 	countSlowTaskSignals.init(LiteralStringRef("Net2.CountSlowTaskSignals"));
+	countTLSPolicyFailures.init(LiteralStringRef("Net2.CountTLSPolicyFailures"));
 	priorityMetric.init(LiteralStringRef("Net2.Priority"));
 	awakeMetric.init(LiteralStringRef("Net2.Awake"));
 	slowTaskMetric.init(LiteralStringRef("Net2.SlowTask"));

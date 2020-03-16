@@ -121,7 +121,7 @@ void LoadedTLSConfig::print(FILE* fp) {
 	X509_STORE_CTX_free(store_ctx);
 }
 
-void ConfigureSSLContext( const LoadedTLSConfig& loaded, boost::asio::ssl::context* context ) {
+void ConfigureSSLContext( const LoadedTLSConfig& loaded, boost::asio::ssl::context* context, std::function<void()> onPolicyFailure ) {
 	try {
 		context->set_options(boost::asio::ssl::context::default_workarounds);
 		context->set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
@@ -130,9 +130,13 @@ void ConfigureSSLContext( const LoadedTLSConfig& loaded, boost::asio::ssl::conte
 			Reference<TLSPolicy> tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(loaded.getEndpointType()));
 			tlsPolicy->set_verify_peers({ loaded.getVerifyPeers() });
 
-			context->set_verify_callback([policy=tlsPolicy](bool preverified, boost::asio::ssl::verify_context& ctx) {
-						return policy->verify_peer(preverified, ctx.native_handle());
-					});
+			context->set_verify_callback([policy=tlsPolicy, onPolicyFailure](bool preverified, boost::asio::ssl::verify_context& ctx) {
+					bool success = policy->verify_peer(preverified, ctx.native_handle());
+					if (!success) {
+						onPolicyFailure();
+					}
+					return success;
+				});
 		} else {
 			// Insecurely always except if TLS is not enabled.
 			context->set_verify_callback([](bool, boost::asio::ssl::verify_context&){ return true; });

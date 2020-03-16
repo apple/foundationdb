@@ -1491,7 +1491,7 @@ ACTOR Future<Void> dataDistributionQueue(
 					Promise<int64_t> req;
 					getAverageShardBytes.send( req );
 
-					recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
+					recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 
 					int highestPriorityRelocation = 0;
 					for( auto it = self.priority_relocations.begin(); it != self.priority_relocations.end(); ++it ) {

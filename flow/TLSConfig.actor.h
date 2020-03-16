@@ -222,7 +222,7 @@ PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP:
 
 #ifndef TLS_DISABLED
 namespace boost { namespace asio { namespace ssl { struct context; }}}
-void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::context* context);
+void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::context* context, std::function<void()> onPolicyFailure);
 #endif
 
 class TLSPolicy : ReferenceCounted<TLSPolicy> {
