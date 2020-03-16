@@ -1807,7 +1807,7 @@ ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logDa
 
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
 	state IKeyValueStore *storage = self->persistentData;
-	wait(storage->init());
+	wait( ioTimeoutError( storage->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION ) );
 	storage->set( persistFormat );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(logData->version.get(), Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistKnownCommittedVersionKeys.begin), BinaryWriter::toValue(logData->knownCommittedVersion, Unversioned()) ) );
@@ -1824,7 +1824,7 @@ ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logDa
 	}
 
 	TraceEvent("TLogInitCommit", logData->logId);
-	wait( self->persistentData->commit() );
+	wait( ioTimeoutError( self->persistentData->commit(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION ) );
 	return Void();
 }
 
@@ -2766,17 +2766,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 		if(restoreFromDisk) {
 			wait( restorePersistentState( &self, locality, oldLog, recovered, tlogRequests ) );
 		} else {
-			choose {
-				when( wait( checkEmptyQueue(&self) && checkRecovered(&self) ) ) {}
-				when( wait( lowPriorityDelay(SERVER_KNOBS->TLOG_MAX_CREATE_DURATION) ) ) {
-					Error err = io_timeout();
-					if(g_network->isSimulated()) {
-						err = err.asInjectedFault();
-					}
-					TraceEvent(SevError, "TLogInitializeFilesTimeout", tlogId).error(err);
-					throw err;
-				}
-			}
+			wait( ioTimeoutError( checkEmptyQueue(&self) && checkRecovered(&self), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION ) );
 		}
 
 		//Disk errors need a chance to kill this actor.
