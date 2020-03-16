@@ -1658,6 +1658,8 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		StatusCounter txnDefaultPriorityStartOut;
 		StatusCounter txnBatchPriorityStartOut;
 		StatusCounter txnCommitOutSuccess;
+		StatusCounter txnKeyLocationOut;
+		StatusCounter txnMemoryErrors;
 
 		for (auto &ps : proxyStats) {
 			mutations.updateValues( StatusCounter(ps.getValue("Mutations")) );
@@ -1668,9 +1670,15 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			txnDefaultPriorityStartOut.updateValues(StatusCounter(ps.getValue("TxnDefaultPriorityStartOut")));
 			txnBatchPriorityStartOut.updateValues(StatusCounter(ps.getValue("TxnBatchPriorityStartOut")));
 			txnCommitOutSuccess.updateValues( StatusCounter(ps.getValue("TxnCommitOutSuccess")) );
+			txnKeyLocationOut.updateValues( StatusCounter(ps.getValue("KeyServerLocationOut")) );
+			txnMemoryErrors.updateValues( StatusCounter(ps.getValue("TxnRequestErrors")) );
+			txnMemoryErrors.updateValues( StatusCounter(ps.getValue("KeyServerLocationErrors")) );
+			txnMemoryErrors.updateValues( StatusCounter(ps.getValue("TxnCommitErrors")) );
 		}
 
 		operationsObj["writes"] = mutations.getStatus();
+		operationsObj["location_requests"] = txnKeyLocationOut.getStatus();
+		operationsObj["memory_errors"] = txnMemoryErrors.getStatus();
 		bytesObj["written"] = mutationBytes.getStatus();
 
 		JsonBuilderObject transactions;

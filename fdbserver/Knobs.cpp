@@ -291,6 +291,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL,        0.001 );
 	init( START_TRANSACTION_MAX_TRANSACTIONS_TO_START,        100000 );
 	init( START_TRANSACTION_MAX_REQUESTS_TO_START,             10000 );
+	init( START_TRANSACTION_MAX_QUEUE_SIZE,                      1e6 );
+	init( KEY_LOCATION_MAX_QUEUE_SIZE,                           1e6 );
 
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE,         0.0005 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE = 0.005;
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_MIN,                0.001 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_INTERVAL_MIN = 0.1;

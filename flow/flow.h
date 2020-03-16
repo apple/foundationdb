@@ -578,6 +578,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 
 	bool isReady() const { return !queue.empty() || error.isValid(); }
 	bool isError() const { return queue.empty() && error.isValid(); }  // the *next* thing queued is an error
+	uint32_t size() const { return queue.size(); }
 
 	T pop() {
 		if (queue.empty()) {
