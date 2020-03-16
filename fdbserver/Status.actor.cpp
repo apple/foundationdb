@@ -773,6 +773,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				megabits_received.setKeyRawNumber("hz", processMetrics.getValue("MbpsReceived"));
 				networkObj["megabits_received"] = megabits_received;
 
+				JsonBuilderObject tls_policy_failures;
+				tls_policy_failures.setKeyRawNumber("hz", processMetrics.getValue("TLSPolicyFailures"));
+				networkObj["tls_policy_failures"] = tls_policy_failures;
+
 				statusObj["network"] = networkObj;
 
 				memoryObj.setKeyRawNumber("used_bytes", processMetrics.getValue("Memory"));
