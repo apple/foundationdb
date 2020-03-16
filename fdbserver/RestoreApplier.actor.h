@@ -64,6 +64,8 @@ struct StagingKey {
 			TraceEvent("FastRestoreApplierStagingKeyMutationAtSameVersion")
 			    .detail("Version", newVersion.toString())
 			    .detail("NewMutation", m.toString())
+			    .detail("Key", printable(key))
+			    .detail("Value", printable(val))
 			    .detail("ExistingKeyType", typeString[type]);
 			if (m.type == MutationRef::SetValue) {
 				if (type == MutationRef::SetValue) {
@@ -91,8 +93,13 @@ struct StagingKey {
 				    .detail("NewMutation", m.toString())
 				    .detail("ExistingKeyType", typeString[type])
 				    .detail("ExitingKeyValue", val);
+			} else {
+				ASSERT(false); // Can't be true same key, same version, different mutation
 			}
+
+			return;
 		}
+
 		// newVersion can be smaller than version as different loaders can send
 		// mutations out of order.
 		if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
@@ -107,9 +114,13 @@ struct StagingKey {
 			if (it == pendingMutations.end()) {
 				bool inserted;
 				std::tie(it, inserted) = pendingMutations.emplace(newVersion, MutationsVec());
+				// TODO: Do we really need deep copy?
+				it->second.push_back_deep(it->second.arena(), m);
+			} else {
+				// Duplicated mutation ignored.
+				MutationRef& m1 = *(it->second.begin());
+				ASSERT(m1.type == m.type && m1.param1 == m.param1 && m1.param2 == m.param2);
 			}
-			// TODO: Do we really need deep copy?
-			it->second.push_back_deep(it->second.arena(), m);
 		}
 	}
 
@@ -126,8 +137,7 @@ struct StagingKey {
 		}
 		if (lb->first == version) {
 			// Sanity check mutations at version are either atomicOps which can be ignored or the same value as buffered
-			for (int i = 0; i < lb->second.size(); i++) {
-				MutationRef m = lb->second[i];
+			for (const MutationRef& m : lb->second) {
 				if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
 					if (std::tie(type, key, val) != std::tie(m.type, m.param1, m.param2)) {
 						TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnhandledSituation")
@@ -138,12 +148,9 @@ struct StagingKey {
 					}
 				}
 			}
+			lb++;
 		}
-		while (lb != pendingMutations.end()) {
-			if (lb->first == version) {
-				lb++;
-				continue;
-			}
+		for (; lb != pendingMutations.end(); lb++) {
 			for (auto& mutation : lb->second) {
 				if (type == MutationRef::CompareAndClear) { // Special atomicOp
 					Arena arena;
@@ -162,16 +169,15 @@ struct StagingKey {
 				} else if (mutation.type == MutationRef::SetValue || mutation.type == MutationRef::ClearRange) {
 					type = MutationRef::SetValue; // Precomputed result should be set to DB.
 					TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnexpectedSet")
-					    .detail("Type", typeString[mutation.type])
+					    .detail("MutationType", typeString[mutation.type])
 					    .detail("Version", lb->first.toString());
 				} else {
 					TraceEvent(SevWarnAlways, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation")
-					    .detail("Type", typeString[mutation.type])
+					    .detail("MutationType", typeString[mutation.type])
 					    .detail("Version", lb->first.toString());
 				}
 			}
 			version = lb->first;
-			lb++;
 		}
 	}
 
