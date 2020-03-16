@@ -754,11 +754,11 @@ bool TraceEvent::init() {
 		return enabled;
 	}
 
+	initialized = true;
+	ASSERT(*type != '\0');
+
 	++g_allocation_tracing_disabled;
 
-	initialized = true;
-
-	ASSERT(*type != '\0');
 	enabled = enabled && ( !g_network || severity >= FLOW_KNOBS->MIN_TRACE_SEVERITY );
 
 	// Backstop to throttle very spammy trace events
