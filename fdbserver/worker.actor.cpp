@@ -749,17 +749,12 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFol
 
 ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::set<std::string>>>> issues) {
 	state bool pingTimeout = false;
-	state ThreadFuture<Void> f;
-	state Reference<CompletionCallback<Void>> callback;
 	loop {
 		wait(delay(SERVER_KNOBS->TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS));
-		f = ThreadFuture<Void>(new ThreadSingleAssignmentVar<Void>);
-		callback = Reference<CompletionCallback<Void>>(new CompletionCallback<Void>(f));
-		callback->self = callback;
-		f.callOrSetAsCallback(callback.getPtr(), callback->userParam, 0);
-		pingTraceLogWriterThread(f);
+		TraceEvent("CrashDebugPingActionSetupInWorker");
+		Future<Void> pingAck = pingTraceLogWriterThread();
 		try {
-			wait(timeoutError(callback->promise.getFuture(), SERVER_KNOBS->TRACE_LOG_PING_TIMEOUT_SECONDS));
+			wait(timeoutError(pingAck, SERVER_KNOBS->TRACE_LOG_PING_TIMEOUT_SECONDS));
 		} catch (Error& e) {
 			if (e.code() == error_code_timed_out) {
 				pingTimeout = true;

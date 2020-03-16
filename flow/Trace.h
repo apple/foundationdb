@@ -609,8 +609,9 @@ void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
 void retriveTraceLogIssues(std::set<std::string>& out);
 template <class T>
-struct ThreadFuture;
-void pingTraceLogWriterThread(ThreadFuture<struct Void>& p);
+struct Future;
+struct Void;
+Future<Void> pingTraceLogWriterThread();
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
 extern std::atomic<trace_clock_t> g_trace_clock;

@@ -312,16 +312,17 @@ public:
 		}
 
 		struct Ping : TypedAction<WriterThread, Ping> {
-			ThreadFuture<Void> p;
+			ThreadReturnPromise<Void> ack;
 
-			explicit Ping(ThreadFuture<Void> p) : p(p){};
+			explicit Ping(){};
 			virtual double getTimeEstimate() { return 0; }
 		};
-		void action(Ping& a) {
+		void action(Ping& ping) {
 			try {
-				((ThreadSingleAssignmentVar<Void>*)a.p.getPtr())->send(Void());
+				ping.ack.send(Void());
 			} catch (Error& e) {
-				TraceEvent(SevError, "PingActionFailed").error(e);
+				TraceEvent(SevError, "CrashDebugPingActionFailed").error(e);
+				throw;
 			}
 		}
 	};
@@ -541,9 +542,11 @@ public:
 		}
 	}
 
-	void pingWriterThread(ThreadFuture<Void>& p) {
-		auto a = new WriterThread::Ping(p);
-		writer->post(a);
+	Future<Void> pingWriterThread() {
+		auto ping = new WriterThread::Ping;
+		writer->post(ping);
+		auto f = ping->ack.getFuture();
+		return f;
 	}
 
 	void retriveTraceLogIssues(std::set<std::string>& out) { return issues->retrieveIssues(out); }
@@ -787,8 +790,8 @@ void retriveTraceLogIssues(std::set<std::string>& out) {
 	return g_traceLog.retriveTraceLogIssues(out);
 }
 
-void pingTraceLogWriterThread(ThreadFuture<Void>& p) {
-	return g_traceLog.pingWriterThread(p);
+Future<Void> pingTraceLogWriterThread() {
+	return g_traceLog.pingWriterThread();
 }
 
 TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true), logged(false) {
