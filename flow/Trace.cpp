@@ -43,7 +43,15 @@
 #undef min
 #endif
 
-thread_local int g_trace_depth = 0;
+// Allocations can only be logged when this value is 0.
+// Anybody that needs to disable tracing should increment this by 1 for the duration
+// that they need the disabling to be in effect.
+//
+// This is done for multiple reasons:
+// 1. To avoid recursion in the allocation tracing when each trace event does an allocation
+// 2. To avoid a historically documented but unknown crash that occurs when logging allocations
+//    during an open trace event
+thread_local int g_allocation_tracing_disabled = 1;
 
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
@@ -698,14 +706,12 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 }
 
 TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true), logged(false) {
-	g_trace_depth++;
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
 TraceEvent::TraceEvent( Severity severity, const char* type, UID id )
 	: id(id), type(type), severity(severity), initialized(false), logged(false),
 	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
-	g_trace_depth++;
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
@@ -715,7 +721,6 @@ TraceEvent::TraceEvent( TraceInterval& interval, UID id )
 	  initialized(false), logged(false),
 	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= interval.severity) {
 
-	g_trace_depth++;
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 
@@ -727,7 +732,6 @@ TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id )
 	  initialized(false), logged(false),
 	  enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) {
 
-	g_trace_depth++;
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 
@@ -749,9 +753,12 @@ bool TraceEvent::init() {
 	if(initialized) {
 		return enabled;
 	}
-	initialized = true;
 
+	initialized = true;
 	ASSERT(*type != '\0');
+
+	++g_allocation_tracing_disabled;
+
 	enabled = enabled && ( !g_network || severity >= FLOW_KNOBS->MIN_TRACE_SEVERITY );
 
 	// Backstop to throttle very spammy trace events
@@ -794,6 +801,7 @@ bool TraceEvent::init() {
 		tmpEventMetric = nullptr;
 	}
 
+	--g_allocation_tracing_disabled;
 	return enabled;
 }
 
@@ -823,6 +831,7 @@ TraceEvent& TraceEvent::errorImpl(class Error const& error, bool includeCancelle
 TraceEvent& TraceEvent::detailImpl( std::string&& key, std::string&& value, bool writeEventMetricField) {
 	init();
 	if (enabled) {
+		++g_allocation_tracing_disabled;
 		if( maxFieldLength >= 0 && value.size() > maxFieldLength ) {
 			value = value.substr(0, maxFieldLength) + "...";
 		}
@@ -837,20 +846,27 @@ TraceEvent& TraceEvent::detailImpl( std::string&& key, std::string&& value, bool
 			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, "TraceEventOverflow").setMaxEventLength(1000).detail("TraceFirstBytes", fields.toString().substr(300));
 			enabled = false;
 		}
+		--g_allocation_tracing_disabled;
 	}
 	return *this;
 }
 
 void TraceEvent::setField(const char* key, int64_t value) {
+	++g_allocation_tracing_disabled;
 	tmpEventMetric->setField(key, value);
+	--g_allocation_tracing_disabled;
 }
 
 void TraceEvent::setField(const char* key, double value) {
+	++g_allocation_tracing_disabled;
 	tmpEventMetric->setField(key, value);
+	--g_allocation_tracing_disabled;
 }
 
 void TraceEvent::setField(const char* key, const std::string& value) {
+	++g_allocation_tracing_disabled;
 	tmpEventMetric->setField(key, Standalone<StringRef>(value));
+	--g_allocation_tracing_disabled;
 }
 
 TraceEvent& TraceEvent::detailf( std::string key, const char* valueFormat, ... ) {
@@ -981,6 +997,7 @@ TraceEvent& TraceEvent::backtrace(const std::string& prefix) {
 void TraceEvent::log() {
 	if(!logged) {
 		init();
+		++g_allocation_tracing_disabled;
 		try {
 			if (enabled) {
 				fields.mutate(timeIndex).second = format("%.6f", TraceEvent::getCurrentTime());
@@ -1014,8 +1031,8 @@ void TraceEvent::log() {
 			TraceEvent(SevError, "TraceEventLoggingError").error(e,true);
 		}
 		delete tmpEventMetric;
-		g_trace_depth--;
 		logged = true;
+		--g_allocation_tracing_disabled;
 	}
 }
 
@@ -1026,8 +1043,14 @@ TraceEvent::~TraceEvent() {
 thread_local bool TraceEvent::networkThread = false;
 
 void TraceEvent::setNetworkThread() {
-	traceEventThrottlerCache = new TransientThresholdMetricSample<Standalone<StringRef>>(FLOW_KNOBS->TRACE_EVENT_METRIC_UNITS_PER_SAMPLE, FLOW_KNOBS->TRACE_EVENT_THROTTLER_MSG_LIMIT);
-	networkThread = true;
+	if(!networkThread) {
+		if(FLOW_KNOBS->ALLOCATION_TRACING_ENABLED) {
+			--g_allocation_tracing_disabled;
+		}
+
+		traceEventThrottlerCache = new TransientThresholdMetricSample<Standalone<StringRef>>(FLOW_KNOBS->TRACE_EVENT_METRIC_UNITS_PER_SAMPLE, FLOW_KNOBS->TRACE_EVENT_THROTTLER_MSG_LIMIT);
+		networkThread = true;
+	}
 }
 
 bool TraceEvent::isNetworkThread() {

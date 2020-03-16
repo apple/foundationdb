@@ -153,6 +153,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TRACE_EVENT_THROTTLER_MSG_LIMIT,                   20000 );
 	init( MAX_TRACE_FIELD_LENGTH,                              495 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
+	init( ALLOCATION_TRACING_ENABLED,                         true );
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
