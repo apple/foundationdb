@@ -1206,6 +1206,11 @@ struct AutoQuorumChange : IQuorumChange {
 				if(addressExcluded(excluded, worker->address)) {
 					continue;
 				}
+				// Exclude faulty node due to machine assassination
+				if (g_network->isSimulated() && g_simulator.protectedAddresses.count(worker->address) && !g_simulator.getProcessByAddress(worker->address)->isReliable()) {
+					TraceEvent("AutoSelectCoordinators").detail("SkipUnreliableWorker", worker->address.toString());
+					continue;
+				}
 				bool valid = true;
 				for(auto field = fields.begin(); field != fields.end(); field++) {
 					if(maxCounts[*field] == 0) {

@@ -500,8 +500,6 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 			TraceEvent("RemoveAndKill", functionId).detail("Step", "coordinators auto").detail("DesiredCoordinators", g_simulator.desiredCoordinators).detail("ClusterAvailable", g_simulator.isAvailable());
 
-			// Ensure coordinators do not use faulty node
-			
 			// Setup the coordinators BEFORE the exclusion
 			// Otherwise, we may end up with NotEnoughMachinesForCoordinators
 			state int cycle=0;
