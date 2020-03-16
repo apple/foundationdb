@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include <cstdio>
 #include <map>
 #include <string>
 #include <vector>
@@ -119,6 +120,8 @@ public:
 	bool isTLSEnabled() const {
 		return endpointType != TLSEndpointType::UNSET;
 	}
+
+	void print(FILE* fp);
 
 PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP:
 	std::string tlsCertBytes, tlsKeyBytes, tlsCABytes;
@@ -216,6 +219,11 @@ PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP:
 	std::vector<std::string> tlsVerifyPeers;
 	TLSEndpointType endpointType = TLSEndpointType::UNSET;
 };
+
+#ifndef TLS_DISABLED
+namespace boost { namespace asio { namespace ssl { struct context; }}}
+void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::context* context, std::function<void()> onPolicyFailure = [](){});
+#endif
 
 class TLSPolicy : ReferenceCounted<TLSPolicy> {
 public:
