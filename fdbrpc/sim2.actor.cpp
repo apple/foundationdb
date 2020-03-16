@@ -1585,7 +1585,6 @@ public:
 		NetworkAddress normalizedAddress(address.ip, address.port, true, address.isTLS());
 		ASSERT( addressMap.count( normalizedAddress ) );
 		// NOTE: addressMap[normalizedAddress]->address may not equal to normalizedAddress
-		// ASSERT_WE_THINK( addressMap[normalizedAddress]->address == normalizedAddress );
 		return addressMap[normalizedAddress];
 	}
 

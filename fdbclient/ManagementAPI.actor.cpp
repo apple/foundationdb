@@ -1152,18 +1152,12 @@ struct AutoQuorumChange : IQuorumChange {
 			}
 			chosen.resize((chosen.size() - 1) | 1);
 		}
-		// Sanity check if chosen coordinators will be injected fault
-		if (g_network->isSimulated()) {
-			for (auto& addr : chosen) {
-				ISimulator::ProcessInfo* p = g_simulator.getProcessByAddress(addr);
-				TraceEvent("MXGetDesiredCoordinator").detail("Address", addr.toString()).detail("Reliable", p->isReliable()).detail("Protected", g_simulator.protectedAddresses.count(addr)).detail("ReliableInfo", p->getReliableInfo());
-			}
-		}
 
 		return chosen;
 	}
 
-	// Select a desired set of workers such that (1) the number of workers at each locality type (e.g., dcid) <= desiredCount; and
+	// Select a desired set of workers such that
+	// (1) the number of workers at each locality type (e.g., dcid) <= desiredCount; and
 	// (2) prefer workers at a locality where less workers has been chosen than other localities: evenly distribute workers.
 	void addDesiredWorkers(vector<NetworkAddress>& chosen, const vector<ProcessData>& workers, int desiredCount, const std::set<AddressExclusion>& excluded) {
 		vector<ProcessData> remainingWorkers(workers);
@@ -1171,13 +1165,16 @@ struct AutoQuorumChange : IQuorumChange {
 
 		std::partition(remainingWorkers.begin(), remainingWorkers.end(), [](const ProcessData& data) { return (data.processClass == ProcessClass::CoordinatorClass); });
 
-		TraceEvent("AutoSelectCoordinators").detail("CandidateWorkers", remainingWorkers.size());
+		TraceEvent(SevDebug, "AutoSelectCoordinators").detail("CandidateWorkers", remainingWorkers.size());
 		for (auto worker = remainingWorkers.begin(); worker != remainingWorkers.end(); worker++) {
-			TraceEvent("SelectCoordinators").detail("Worker", worker->processClass.toString()).detail("Address", worker->address.toString()).detail("Locality", worker->locality.toString());
+			TraceEvent(SevDebug, "AutoSelectCoordinators")
+			    .detail("Worker", worker->processClass.toString())
+			    .detail("Address", worker->address.toString())
+			    .detail("Locality", worker->locality.toString());
 		}
-		TraceEvent("AutoSelectCoordinators").detail("ExcludedAddress", excluded.size());
-		for(auto& excludedAddr : excluded) {
-			TraceEvent("AutoSelectCoordinators").detail("ExcludedAddress", excludedAddr.toString());
+		TraceEvent(SevDebug, "AutoSelectCoordinators").detail("ExcludedAddress", excluded.size());
+		for (auto& excludedAddr : excluded) {
+			TraceEvent(SevDebug, "AutoSelectCoordinators").detail("ExcludedAddress", excludedAddr.toString());
 		}
 
 		std::map<StringRef, int> maxCounts;
@@ -1207,7 +1204,8 @@ struct AutoQuorumChange : IQuorumChange {
 					continue;
 				}
 				// Exclude faulty node due to machine assassination
-				if (g_network->isSimulated() && g_simulator.protectedAddresses.count(worker->address) && !g_simulator.getProcessByAddress(worker->address)->isReliable()) {
+				if (g_network->isSimulated() && g_simulator.protectedAddresses.count(worker->address) &&
+				    !g_simulator.getProcessByAddress(worker->address)->isReliable()) {
 					TraceEvent("AutoSelectCoordinators").detail("SkipUnreliableWorker", worker->address.toString());
 					continue;
 				}
