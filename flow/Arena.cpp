@@ -184,11 +184,11 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 			b->bigSize = reqSize;
 			b->bigUsed = sizeof(ArenaBlock);
 
-			if (FLOW_KNOBS && !g_tracing_allocation &&
+			if (FLOW_KNOBS && g_allocation_tracing_disabled > 0 &&
 			    nondeterministicRandom()->random01() < (reqSize / FLOW_KNOBS->HUGE_ARENA_LOGGING_BYTES)) {
-				g_tracing_allocation = true;
+				++g_allocation_tracing_disabled;
 				hugeArenaSample(reqSize);
-				g_tracing_allocation = false;
+				--g_allocation_tracing_disabled;
 			}
 			g_hugeArenaMemory.fetch_add(reqSize);
 
