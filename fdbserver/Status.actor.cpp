@@ -965,8 +965,9 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 	state JsonBuilderObject message;
 
 	try {
+		state Future<TraceEventFields> activeGens = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryGenerations") ) ), 1.0);
 		TraceEventFields md = wait( timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0) );
-		state int mStatusCode = md.getInt("StatusCode");
+		int mStatusCode = md.getInt("StatusCode");
 		if (mStatusCode < 0 || mStatusCode >= RecoveryStatus::END)
 			throw attribute_not_found();
 
@@ -989,6 +990,12 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 		}
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1
+
+		TraceEventFields md = wait(activeGens);
+		if(md.size()) {
+			int activeGenerations = md.getInt("ActiveGenerations");
+			message["active_generations"] = activeGenerations;
+		}
 
 	} catch (Error &e){
 		if (e.code() == error_code_actor_cancelled)
