@@ -1821,16 +1821,29 @@ bool createDirectory( std::string const& directory ) {
 		if ( mkdir( directory.substr(0, sep).c_str(), 0755 ) != 0 ) {
 			if (errno == EEXIST)
 				continue;
+			auto mkdirErrno = errno;
+
+			// check if directory already exists
+			// necessary due to old kernel bugs
+			struct stat s;
+			const char* dirname = directory.c_str();
+			if (stat(dirname, &s) != -1 && S_ISDIR(s.st_mode)) {
+				TraceEvent("DirectoryAlreadyExists").detail("Directory", dirname).detail("IgnoredError", mkdirErrno);
+				continue;
+			}
 
 			Error e;
-			if(errno == EACCES) {
+			if (mkdirErrno == EACCES) {
 				e = file_not_writable();
-			}
-			else {
+			} else {
 				e = systemErrorCodeToError();
 			}
 
-			TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError().error(e);
+			TraceEvent(SevError, "CreateDirectory")
+			    .detail("Directory", directory)
+			    .detailf("UnixErrorCode", "%x", errno)
+			    .detail("UnixError", strerror(mkdirErrno))
+			    .error(e);
 			throw e;
 		}
 		createdDirectory();
