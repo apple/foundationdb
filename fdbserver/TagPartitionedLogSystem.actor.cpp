@@ -202,7 +202,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	TagPartitionedLogSystem(UID dbgid, LocalityData locality, LogEpoch e,
 	                        Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
 	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
-	    repopulateRegionAntiQuorum(0), epoch(e), oldestBackupEpoch(e), recoveryCompleteWrittenToCoreState(false),
+	    repopulateRegionAntiQuorum(0), epoch(e), oldestBackupEpoch(0), recoveryCompleteWrittenToCoreState(false),
 	    locality(locality), remoteLogsWrittenToCoreState(false), hasRemoteServers(false), stopped(false),
 	    addActor(addActor), popActors(false) {}
 
@@ -308,6 +308,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		logSystem->logSystemType = lsConf.logSystemType;
+		logSystem->oldestBackupEpoch = lsConf.oldestBackupEpoch;
 		return logSystem;
 	}
 
@@ -1393,6 +1394,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 			logset->backupWorkers.push_back(worker);
 		}
+		TraceEvent("SetOldestBackupEpoch", dbgid).detail("Epoch", oldestBackupEpoch);
 		backupWorkerChanged.trigger();
 	}
 

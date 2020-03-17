@@ -72,6 +72,7 @@ struct BackupData {
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch;
 	const LogEpoch backupEpoch;
+	LogEpoch oldestBackupEpoch = 0;
 	Version minKnownCommittedVersion;
 	Version savedVersion;
 	AsyncVar<Reference<ILogSystem>> logSystem;
@@ -169,13 +170,12 @@ struct BackupData {
 	}
 
 	void pop() {
-		const LogEpoch oldest = logSystem.get()->getOldestBackupEpoch();
-		if (backupEpoch > oldest) {
+		if (backupEpoch > oldestBackupEpoch) {
 			// Defer pop if old epoch hasn't finished popping yet.
 			TraceEvent("BackupWorkerPopDeferred", myId)
 			    .suppressFor(1.0)
 			    .detail("BackupEpoch", backupEpoch)
-			    .detail("OldestEpoch", oldest)
+			    .detail("OldestEpoch", oldestBackupEpoch)
 			    .detail("Version", savedVersion);
 			return;
 		}
@@ -549,6 +549,14 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		MutationRef m;
 		if (!message.isBackupMessage(&m)) continue;
 
+		if (debugMutation("addMutation", message.version.version, m)) {
+			TraceEvent("BackupWorkerDebug", self->myId)
+			    .detail("Version", message.version.toString())
+			    .detail("Mutation", m.toString())
+			    .detail("KCV", self->minKnownCommittedVersion)
+			    .detail("SavedVersion", self->savedVersion);
+		}
+
 		std::vector<Future<Void>> adds;
 		if (m.type != MutationRef::Type::ClearRange) {
 			for (int index : keyRangeMap[m.param1]) {
@@ -801,15 +809,14 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 				dbInfoChange = db->onChange();
 				Reference<ILogSystem> ls = ILogSystem::fromServerDBInfo(self.myId, db->get(), true);
 				bool hasPseudoLocality = ls.isValid() && ls->hasPseudoLocality(tagLocalityBackup);
-				LogEpoch oldestBackupEpoch = 0;
 				if (hasPseudoLocality) {
 					self.logSystem.set(ls);
 					self.pop();
-					oldestBackupEpoch = ls->getOldestBackupEpoch();
+					self.oldestBackupEpoch = std::max(self.oldestBackupEpoch, ls->getOldestBackupEpoch());
 				}
 				TraceEvent("BackupWorkerLogSystem", self.myId)
 				    .detail("HasBackupLocality", hasPseudoLocality)
-				    .detail("OldestBackupEpoch", oldestBackupEpoch)
+				    .detail("OldestBackupEpoch", self.oldestBackupEpoch)
 				    .detail("Tag", self.tag.toString());
 			}
 			when(wait(done)) {
