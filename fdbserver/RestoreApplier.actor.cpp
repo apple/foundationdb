@@ -202,8 +202,8 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
     std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys, Database cx, UID applierID) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state std::vector<Future<Optional<Value>>> fValues;
-	state int i = 0;
 	state int retries = 0;
+
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysStart", applierID)
 	    .detail("GetKeys", incompleteStagingKeys.size());
 	loop {
@@ -228,7 +228,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	}
 
 	ASSERT(fValues.size() == incompleteStagingKeys.size());
-	i = 0;
+	int i = 0;
 	for (auto& key : incompleteStagingKeys) {
 		if (!fValues[i].get().present()) {
 			TraceEvent(SevWarnAlways, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
@@ -237,11 +237,9 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			    .detail("PendingMutations", key.second->second.pendingMutations.size())
 			    .detail("StagingKeyType", (int)key.second->second.type);
 			for (auto& vm : key.second->second.pendingMutations) {
-				for (auto& m : vm.second) {
-					TraceEvent(SevWarnAlways, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
-					    .detail("PendingMutationVersion", vm.first.toString())
-					    .detail("PendingMutation", m.toString());
-				}
+				TraceEvent(SevWarnAlways, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
+				    .detail("PendingMutationVersion", vm.first.toString())
+				    .detail("PendingMutation", vm.second.toString());
 			}
 			key.second->second.precomputeResult();
 			i++;
