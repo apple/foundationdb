@@ -71,7 +71,8 @@ enum {
 	OPT_STATUS_FROM_JSON,
 	OPT_VERSION,
 	OPT_TRACE_FORMAT,
-	OPT_KNOB
+	OPT_KNOB,
+	OPT_DEBUG_TLS
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -91,6 +92,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_VERSION, "-v", SO_NONE },
 	                                  { OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
 	                                  { OPT_KNOB, "--knob_", SO_REQ_SEP },
+	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
 
 #ifndef TLS_DISABLED
 	                                  TLS_OPTION_FLAGS
@@ -429,6 +431,8 @@ static void printProgramUsage(const char* name) {
 #endif
 	       "  --knob_KNOBNAME KNOBVALUE\n"
 	       "                 Changes a knob option. KNOBNAME should be lowercase.\n"
+				 "  --debug-tls    Prints the TLS configuration and certificate chain, then exits.\n"
+				 "                 Useful in reporting and diagnosing TLS issues.\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
@@ -2480,6 +2484,7 @@ struct CLIOptions {
 	Optional<std::string> exec;
 	bool initialStatusCheck = true;
 	bool cliHints = true;
+	bool debugTLS = false;
 	std::string tlsCertPath;
 	std::string tlsKeyPath;
 	std::string tlsVerifyPeers;
@@ -2577,36 +2582,36 @@ struct CLIOptions {
 
 #ifndef TLS_DISABLED
 			// TLS Options
-		    case TLSConfig::OPT_TLS_PLUGIN:
-			    args.OptionArg();
-			    break;
-		    case TLSConfig::OPT_TLS_CERTIFICATES:
-			    tlsCertPath = args.OptionArg();
-			    break;
-		    case TLSConfig::OPT_TLS_CA_FILE:
-			    tlsCAPath = args.OptionArg();
-			    break;
-		    case TLSConfig::OPT_TLS_KEY:
-			    tlsKeyPath = args.OptionArg();
-			    break;
-		    case TLSConfig::OPT_TLS_PASSWORD:
-			    tlsPassword = args.OptionArg();
-			    break;
-		    case TLSConfig::OPT_TLS_VERIFY_PEERS:
-			    tlsVerifyPeers = args.OptionArg();
-			    break;
+			case TLSConfig::OPT_TLS_PLUGIN:
+				args.OptionArg();
+				break;
+			case TLSConfig::OPT_TLS_CERTIFICATES:
+				tlsCertPath = args.OptionArg();
+				break;
+			case TLSConfig::OPT_TLS_CA_FILE:
+				tlsCAPath = args.OptionArg();
+				break;
+			case TLSConfig::OPT_TLS_KEY:
+				tlsKeyPath = args.OptionArg();
+				break;
+			case TLSConfig::OPT_TLS_PASSWORD:
+				tlsPassword = args.OptionArg();
+				break;
+			case TLSConfig::OPT_TLS_VERIFY_PEERS:
+				tlsVerifyPeers = args.OptionArg();
+				break;
 #endif
-		    case OPT_HELP:
-			    printProgramUsage(program_name.c_str());
-			    return 0;
-		    case OPT_STATUS_FROM_JSON:
-			    return printStatusFromJSON(args.OptionArg());
-		    case OPT_TRACE_FORMAT:
-			    if (!validateTraceFormat(args.OptionArg())) {
-				    fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
-			    }
-			    traceFormat = args.OptionArg();
-			    break;
+			case OPT_HELP:
+				printProgramUsage(program_name.c_str());
+				return 0;
+			case OPT_STATUS_FROM_JSON:
+				return printStatusFromJSON(args.OptionArg());
+			case OPT_TRACE_FORMAT:
+				if (!validateTraceFormat(args.OptionArg())) {
+					fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+				}
+				traceFormat = args.OptionArg();
+				break;
 			case OPT_KNOB: {
 				std::string syn = args.OptionSyntax();
 				if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
@@ -2617,11 +2622,14 @@ struct CLIOptions {
 				knobs.push_back( std::make_pair( syn, args.OptionArg() ) );
 				break;
 			}
-		    case OPT_VERSION:
-			    printVersion();
-			    return FDB_EXIT_SUCCESS;
-		    }
-		    return -1;
+			case OPT_DEBUG_TLS:
+				debugTLS = true;
+				break;
+			case OPT_VERSION:
+				printVersion();
+				return FDB_EXIT_SUCCESS;
+		}
+		return -1;
 	}
 };
 
@@ -3848,6 +3856,30 @@ int main(int argc, char **argv) {
 	catch (Error& e) {
 		fprintf(stderr, "ERROR: cannot disable logging client related information (%s)\n", e.what());
 		return 1;
+	}
+
+	if (opt.debugTLS) {
+#ifndef TLS_DISABLED
+		// Backdoor into NativeAPI's tlsConfig, which is where the above network option settings ended up.
+		extern TLSConfig tlsConfig;
+		printf("TLS Configuration:\n");
+		printf("\tCertificate Path: %s\n", tlsConfig.getCertificatePathSync().c_str());
+		printf("\tKey Path: %s\n", tlsConfig.getKeyPathSync().c_str());
+		printf("\tCA Path: %s\n", tlsConfig.getCAPathSync().c_str());
+		try {
+			LoadedTLSConfig loaded = tlsConfig.loadSync();
+			printf("\tPassword: %s\n", loaded.getPassword().empty() ? "Not configured" : "Exists, but redacted");
+			printf("\n");
+			loaded.print(stdout);
+		} catch (Error& e) {
+			printf("ERROR: %s (%d)\n", e.what(), e.code());
+			printf("Use --log and look at the trace logs for more detailed information on the failure.\n");
+			return 1;
+		}
+#else
+		printf("This fdbcli was built with TLS disabled.\n");
+#endif
+		return 0;
 	}
 
 	try {

@@ -68,11 +68,11 @@ struct MasterProxyInterface {
 	}
 
 	void initEndpoints() {
-		getConsistentReadVersion.getEndpoint(TaskPriority::ProxyGetConsistentReadVersion);
+		getConsistentReadVersion.getEndpoint(TaskPriority::ReadSocket);
 		getRawCommittedVersion.getEndpoint(TaskPriority::ProxyGetRawCommittedVersion);
-		commit.getEndpoint(TaskPriority::ProxyCommitDispatcher);
+		commit.getEndpoint(TaskPriority::ReadSocket);
 		getStorageServerRejoinInfo.getEndpoint(TaskPriority::ProxyStorageRejoin);
-		//getKeyServersLocations.getEndpoint(TaskProxyGetKeyServersLocations); //do not increase the priority of these requests, because clients cans bring down the cluster with too many of these messages.
+		getKeyServersLocations.getEndpoint(TaskPriority::ReadSocket); //priority lowered to TaskPriority::DefaultEndpoint on the proxy
 	}
 };
 

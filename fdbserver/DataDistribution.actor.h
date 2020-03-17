@@ -149,6 +149,7 @@ public:
 
 	int getNumberOfShards( UID ssID );
 	vector<KeyRange> getShardsFor( Team team );
+	bool hasShards(Team team);
 
 	//The first element of the pair is either the source for non-moving shards or the destination team for in-flight shards
 	//The second element of the pair is all previous sources for in-flight shards

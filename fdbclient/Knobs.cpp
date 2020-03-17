@@ -41,6 +41,10 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
 	init( FAILURE_EMERGENCY_DELAY,                30.0 );
 	init( FAILURE_MAX_GENERATIONS,                  10 );
+	init( RECOVERY_DELAY_START_GENERATION,          70 );
+	init( RECOVERY_DELAY_SECONDS_PER_GENERATION,  60.0 );
+	init( MAX_GENERATIONS,                         100 );
+	init( MAX_GENERATIONS_OVERRIDE,                  0 );
 
 	init( COORDINATOR_RECONNECTION_DELAY,          1.0 );
 	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
