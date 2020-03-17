@@ -201,6 +201,26 @@ struct StagingKeyRange {
 	}
 };
 
+// Applier state in each verion batch
+class ApplierVersionBatchState : RoleVersionBatchState {
+public:
+	static const int NOT_INIT = 0;
+	static const int INIT = 1;
+	static const int RECEIVE_MUTATIONS = 2;
+	static const int WRITE_TO_DB = 3;
+	static const int INVALID = 4;
+
+	explicit ApplierVersionBatchState(int newState) {
+		vbState = newState;
+	}
+
+	virtual ~ApplierVersionBatchState() = default;
+
+	virtual void operator=(int newState) { vbState = newState; }
+
+	virtual int get() { return vbState; }
+};
+
 struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	// processedFileState: key: RestoreAsset; value: largest version of mutation received on the applier
 	std::map<RestoreAsset, NotifiedVersion> processedFileState;
@@ -212,26 +232,30 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 
 	Future<Void> pollMetrics;
 
+	RoleVersionBatchState vbState;
+
 	// Status counters
 	struct Counters {
 		CounterCollection cc;
 		Counter receivedBytes, receivedWeightedBytes, receivedMutations, receivedAtomicOps;
 		Counter appliedWeightedBytes, appliedMutations, appliedAtomicOps;
 		Counter appliedTxns;
+		Counter fetchKeys; // number of keys to fetch from dest. FDB cluster.
 
 		Counters(ApplierBatchData* self, UID applierInterfID, int batchIndex)
 		  : cc("ApplierBatch", applierInterfID.toString() + ":" + std::to_string(batchIndex)),
 		    receivedBytes("ReceivedBytes", cc), receivedMutations("ReceivedMutations", cc),
 		    receivedAtomicOps("ReceivedAtomicOps", cc), receivedWeightedBytes("ReceivedWeightedMutations", cc),
 		    appliedWeightedBytes("AppliedWeightedBytes", cc), appliedMutations("AppliedMutations", cc),
-		    appliedAtomicOps("AppliedAtomicOps", cc), appliedTxns("AppliedTxns", cc) {}
+		    appliedAtomicOps("AppliedAtomicOps", cc), appliedTxns("AppliedTxns", cc), fetchKeys("FetchKeys", cc) {}
 	} counters;
 
 	void addref() { return ReferenceCounted<ApplierBatchData>::addref(); }
 	void delref() { return ReferenceCounted<ApplierBatchData>::delref(); }
 
 	explicit ApplierBatchData(UID nodeID, int batchIndex)
-	  : counters(this, nodeID, batchIndex), applyStagingKeysBatchLock(SERVER_KNOBS->FASTRESTORE_APPLYING_PARALLELISM) {
+	  : counters(this, nodeID, batchIndex), applyStagingKeysBatchLock(SERVER_KNOBS->FASTRESTORE_APPLYING_PARALLELISM),
+	    vbState(ApplierVersionBatchState::NOT_INIT) {
 		pollMetrics =
 		    traceCounters("FastRestoreApplierMetrics", nodeID, SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
 		                  &counters.cc, nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
@@ -328,7 +352,6 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreApplierData> {
 	// Buffer for uncommitted data at ongoing version batches
 	std::map<int, Reference<ApplierBatchData>> batch;
-	NotifiedVersion finishedBatch; // The version batch that has been applied to DB
 
 	void addref() { return ReferenceCounted<RestoreApplierData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreApplierData>::delref(); }
@@ -344,6 +367,22 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	}
 
 	~RestoreApplierData() = default;
+
+	// getVersionBatchState may be called periodically to dump version batch state,
+	// even when no version batch has been started.
+	int getVersionBatchState(int batchIndex) final {
+		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
+		if (item == batch.end()) { // Simply caller's effort in when it can call this func.
+			return ApplierVersionBatchState::INVALID;
+		} else {
+			return item->second->vbState.get();
+		}
+	}
+	void setVersionBatchState(int batchIndex, int vbState) final {
+		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
+		ASSERT(item != batch.end());
+		item->second->vbState = vbState;
+	}
 
 	void initVersionBatch(int batchIndex) {
 		TraceEvent("FastRestoreApplierInitVersionBatch", id()).detail("BatchIndex", batchIndex);

@@ -32,8 +32,9 @@
 #include "fdbclient/FDBOptions.g.h"
 
 #include "flow/DeterministicRandom.h"
-#include "fdbrpc/Platform.h"
+#include "flow/Platform.h"
 
+#include "flow/TLSConfig.actor.h"
 #include "flow/SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"
@@ -68,7 +69,8 @@ enum {
 	OPT_NO_STATUS,
 	OPT_STATUS_FROM_JSON,
 	OPT_VERSION,
-	OPT_TRACE_FORMAT
+	OPT_TRACE_FORMAT,
+	OPT_KNOB
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -86,12 +88,13 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_VERSION, "--version", SO_NONE },
 	                                  { OPT_VERSION, "-v", SO_NONE },
 	                                  { OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	                                  { OPT_KNOB, "--knob_", SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	                                  TLS_OPTION_FLAGS
 #endif
 
-	                                      SO_END_OF_OPTIONS };
+	                                  SO_END_OF_OPTIONS };
 
 void printAtCol(const char* text, int col) {
 	const char* iter = text;
@@ -422,6 +425,8 @@ static void printProgramUsage(const char* name) {
 #ifndef TLS_DISABLED
 	       TLS_HELP
 #endif
+	       "  --knob_KNOBNAME KNOBVALUE\n"
+	       "                 Changes a knob option. KNOBNAME should be lowercase.\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
@@ -2478,6 +2483,8 @@ struct CLIOptions {
 	std::string tlsCAPath;
 	std::string tlsPassword;
 
+	std::vector<std::pair<std::string, std::string>> knobs;
+
 	CLIOptions( int argc, char* argv[] )
 		: trace(false),
 		 exit_timeout(0),
@@ -2501,8 +2508,37 @@ struct CLIOptions {
 		}
 		if (exit_timeout && !exec.present()) {
 			fprintf(stderr, "ERROR: --timeout may only be specified with --exec\n");
-			exit_code = 1;
+			exit_code = FDB_EXIT_ERROR;
 			return;
+		}
+
+		delete FLOW_KNOBS;
+		FlowKnobs* flowKnobs = new FlowKnobs(true);
+		FLOW_KNOBS = flowKnobs;
+
+		delete CLIENT_KNOBS;
+		ClientKnobs* clientKnobs = new ClientKnobs(true);
+		CLIENT_KNOBS = clientKnobs;
+
+		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
+			try {
+				if (!flowKnobs->setKnob( k->first, k->second ) &&
+					!clientKnobs->setKnob( k->first, k->second ))
+				{
+					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
+					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_invalid_option_value) {
+					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", k->second.c_str(), k->first.c_str());
+					TraceEvent(SevWarnAlways, "InvalidKnobValue").detail("Knob", printable(k->first)).detail("Value", printable(k->second));
+				}
+				else {
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
+					TraceEvent(SevError, "FailedToSetKnob").detail("Knob", printable(k->first)).detail("Value", printable(k->second)).error(e);
+					exit_code = FDB_EXIT_ERROR;
+				}
+			}
 		}
 	}
 
@@ -2540,22 +2576,22 @@ struct CLIOptions {
 
 #ifndef TLS_DISABLED
 			// TLS Options
-		    case TLSParams::OPT_TLS_PLUGIN:
+		    case TLSConfig::OPT_TLS_PLUGIN:
 			    args.OptionArg();
 			    break;
-		    case TLSParams::OPT_TLS_CERTIFICATES:
+		    case TLSConfig::OPT_TLS_CERTIFICATES:
 			    tlsCertPath = args.OptionArg();
 			    break;
-		    case TLSParams::OPT_TLS_CA_FILE:
+		    case TLSConfig::OPT_TLS_CA_FILE:
 			    tlsCAPath = args.OptionArg();
 			    break;
-		    case TLSParams::OPT_TLS_KEY:
+		    case TLSConfig::OPT_TLS_KEY:
 			    tlsKeyPath = args.OptionArg();
 			    break;
-		    case TLSParams::OPT_TLS_PASSWORD:
+		    case TLSConfig::OPT_TLS_PASSWORD:
 			    tlsPassword = args.OptionArg();
 			    break;
-		    case TLSParams::OPT_TLS_VERIFY_PEERS:
+		    case TLSConfig::OPT_TLS_VERIFY_PEERS:
 			    tlsVerifyPeers = args.OptionArg();
 			    break;
 #endif
@@ -2570,6 +2606,16 @@ struct CLIOptions {
 			    }
 			    traceFormat = args.OptionArg();
 			    break;
+			case OPT_KNOB: {
+				std::string syn = args.OptionSyntax();
+				if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
+					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
+					return FDB_EXIT_ERROR;
+				}
+				syn = syn.substr(7);
+				knobs.push_back( std::make_pair( syn, args.OptionArg() ) );
+				break;
+			}
 		    case OPT_VERSION:
 			    printVersion();
 			    return FDB_EXIT_SUCCESS;
@@ -3789,9 +3835,6 @@ int main(int argc, char **argv) {
 		}
 	} catch (Error& e) {
 		printf("ERROR: %s (%d)\n", e.what(), e.code());
-		return 1;
-	} catch (boost::system::system_error& e) {
-		printf("ERROR: %s (%d)\n", e.what(), e.code().value());
 		return 1;
 	}
 }

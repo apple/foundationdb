@@ -1936,11 +1936,12 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData* 
 			//TraceEvent("FailureDetectionPoll", uniqueID).detail("PivotDelay", pivotDelay).detail("Clients", currentStatus.size());
 			//TraceEvent("FailureDetectionAcceptableDelay").detail("Delay", acceptableDelay1000);
 
-			bool tooManyLogGenerations = std::max(self->db.unfinishedRecoveries, self->db.logGenerations) > CLIENT_KNOBS->FAILURE_MAX_GENERATIONS;
+			bool useEmergencyDelay = (std::max(self->db.unfinishedRecoveries, self->db.logGenerations) > CLIENT_KNOBS->FAILURE_MAX_GENERATIONS) ||
+										 (now() - self->startTime < CLIENT_KNOBS->FAILURE_EMERGENCY_DELAY);
 
 			for(auto it = currentStatus.begin(); it != currentStatus.end(); ) {
 				double delay = t - it->second.lastRequestTime;
-				if ( it->first != g_network->getLocalAddresses() && ( tooManyLogGenerations ?
+				if ( it->first != g_network->getLocalAddresses() && ( useEmergencyDelay ?
 					( delay > CLIENT_KNOBS->FAILURE_EMERGENCY_DELAY ) :
 					( delay > pivotDelay * 2 + FLOW_KNOBS->SERVER_REQUEST_INTERVAL + CLIENT_KNOBS->FAILURE_MIN_DELAY || delay > CLIENT_KNOBS->FAILURE_MAX_DELAY ) ) ) {
 					//printf("Failure Detection Server: Status of '%s' is now '%s' after %f sec\n", it->first.toString().c_str(), "Failed", now() - it->second.lastRequestTime);

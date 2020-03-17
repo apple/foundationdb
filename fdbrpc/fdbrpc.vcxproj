@@ -20,7 +20,6 @@
     <ActorCompiler Include="genericactors.actor.cpp" />
     <ActorCompiler Include="FlowTransport.actor.cpp" />
     <ActorCompiler Include="IAsyncFile.actor.cpp" />
-    <ClCompile Include="Platform.cpp" />
     <ClCompile Include="AsyncFileWriteChecker.cpp" />
     <ClCompile Include="libcoroutine\Common.c" />
     <ClCompile Include="libcoroutine\Coro.c" />
@@ -84,7 +83,6 @@
     </ActorCompiler>
     <ClInclude Include="IAsyncFile.h" />
     <ClInclude Include="IRateControl.h" />
-    <ClInclude Include="Platform.h" />
     <ClInclude Include="fdbrpc.h" />
     <ClInclude Include="FlowTransport.h" />
     <ClInclude Include="libcoroutine\Base.h" />

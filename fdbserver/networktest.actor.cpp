@@ -113,7 +113,6 @@ static bool moreLoggingNeeded(int count, int iteration) {
 ACTOR Future<Void> testClient(std::vector<NetworkTestInterface> interfs, int* sent, int* completed,
                               LatencyStats* latency) {
 	state std::string request_payload(FLOW_KNOBS->NETWORK_TEST_REQUEST_SIZE, '.');
-	state int count = FLOW_KNOBS->NETWORK_TEST_REQUEST_COUNT;
 	state LatencyStats::sample sample;
 
 	while (moreRequestsPending(*sent)) {

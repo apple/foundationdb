@@ -70,7 +70,6 @@
       <Filter>zlib</Filter>
     </ClCompile>
     <ClCompile Include="Net2FileSystem.cpp" />
-    <ClCompile Include="Platform.cpp" />
     <ClCompile Include="QueueModel.cpp" />
     <ClCompile Include="TraceFileIO.cpp" />
     <ClCompile Include="Replication.cpp" />
@@ -131,7 +130,6 @@
     <ClInclude Include="FlowTransport.h" />
     <ClInclude Include="IAsyncFile.h" />
     <ClInclude Include="Net2FileSystem.h" />
-    <ClInclude Include="Platform.h" />
     <ClInclude Include="ActorFuzz.h" />
     <ClInclude Include="ContinuousSample.h" />
     <ClInclude Include="fdbrpc.h" />
