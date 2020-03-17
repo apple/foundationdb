@@ -67,6 +67,7 @@ enum {
 	OPT_TIMEOUT,
 	OPT_EXEC,
 	OPT_NO_STATUS,
+	OPT_NO_HINTS,
 	OPT_STATUS_FROM_JSON,
 	OPT_VERSION,
 	OPT_TRACE_FORMAT,
@@ -81,6 +82,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_TIMEOUT, "--timeout", SO_REQ_SEP },
 	                                  { OPT_EXEC, "--exec", SO_REQ_SEP },
 	                                  { OPT_NO_STATUS, "--no-status", SO_NONE },
+	                                  { OPT_NO_HINTS, "--no-hints", SO_NONE },
 	                                  { OPT_HELP, "-?", SO_NONE },
 	                                  { OPT_HELP, "-h", SO_NONE },
 	                                  { OPT_HELP, "--help", SO_NONE },
@@ -493,7 +495,7 @@ void initHelp() {
 		"change the class of a process",
 		"If no address and class are specified, lists the classes of all servers.\n\nSetting the class to `default' resets the process class to the class specified on the command line.");
 	helpMap["status"] = CommandHelp(
-		"status [minimal] [details] [json]",
+		"status [minimal|details|json]",
 		"get the status of a FoundationDB cluster",
 		"If the cluster is down, this command will print a diagnostic which may be useful in figuring out what is wrong. If the cluster is running, this command will print cluster statistics.\n\nSpecifying 'minimal' will provide a minimal description of the status of your database.\n\nSpecifying 'details' will provide load information for individual workers.\n\nSpecifying 'json' will provide status information in a machine readable JSON format.");
 	helpMap["exit"] = CommandHelp("exit", "exit the CLI", "");
@@ -544,7 +546,7 @@ void initHelp() {
 		"attempts to kill one or more processes in the cluster",
 		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS>*, attempt to kill the specified process.");
 	helpMap["profile"] = CommandHelp(
-		"<type> <action> <ARGS>",
+		"profile <client|list|flow|heap> <action> <ARGS>",
 		"namespace for all the profiling-related commands.",
 		"Different types support different actions.  Run `profile` to get a list of types, and iteratively explore the help.\n");
 	helpMap["force_recovery_with_data_loss"] = CommandHelp(
@@ -2466,17 +2468,18 @@ void LogCommand(std::string line, UID randomID, std::string errMsg) {
 
 struct CLIOptions {
 	std::string program_name;
-	int exit_code;
+	int exit_code = -1;
 
 	std::string commandLine;
 
 	std::string clusterFile;
-	bool trace;
+	bool trace = false;
 	std::string traceDir;
 	std::string traceFormat;
-	int exit_timeout;
+	int exit_timeout = 0;
 	Optional<std::string> exec;
-	bool initialStatusCheck;
+	bool initialStatusCheck = true;
+	bool cliHints = true;
 	std::string tlsCertPath;
 	std::string tlsKeyPath;
 	std::string tlsVerifyPeers;
@@ -2486,10 +2489,6 @@ struct CLIOptions {
 	std::vector<std::pair<std::string, std::string>> knobs;
 
 	CLIOptions( int argc, char* argv[] )
-		: trace(false),
-		 exit_timeout(0),
-		 initialStatusCheck(true),
-		 exit_code(-1)
 	{
 		program_name = argv[0];
 		for (int a = 0; a<argc; a++) {
@@ -2573,6 +2572,8 @@ struct CLIOptions {
 			case OPT_NO_STATUS:
 				initialStatusCheck = false;
 				break;
+			case OPT_NO_HINTS:
+				cliHints = false;
 
 #ifndef TLS_DISABLED
 			// TLS Options
@@ -3702,8 +3703,37 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 		[](std::string const& line, std::vector<std::string>& completions) {
 			fdbcli_comp_cmd(line, completions);
 		},
-		[](std::string const& line)->LineNoise::Hint {
-			return LineNoise::Hint();
+		[enabled=opt.cliHints](std::string const& line)->LineNoise::Hint {
+			if (!enabled) {
+				return LineNoise::Hint();
+			}
+
+			bool error = false;
+			bool partial = false;
+			std::string linecopy = line;
+			std::vector<std::vector<StringRef>> parsed = parseLine(linecopy, error, partial);
+			if (parsed.size() == 0 || parsed.back().size() == 0) return LineNoise::Hint();
+			StringRef command = parsed.back().front();
+			int finishedParameters = parsed.back().size() + error;
+
+			// As a user is typing an escaped character, e.g. \", after the \ and before the " is typed 
+			// the string will be a parse error.  Ignore this parse error to avoid flipping the hint to
+			// {malformed escape sequence} and back to the original hint for the span of one character                                     
+			// being entered.
+			if (error && line.back() != '\\') return LineNoise::Hint(std::string(" {malformed escape sequence}"), 90, false);
+
+			auto iter = helpMap.find(command.toString());
+			if (iter != helpMap.end()) {
+				std::string helpLine = iter->second.usage;
+				std::vector<std::vector<StringRef>> parsedHelp = parseLine(helpLine, error, partial);
+				std::string hintLine = (*(line.end() - 1) == ' ' ? "" : " ");
+				for (int i = finishedParameters; i < parsedHelp.back().size(); i++) {
+					hintLine = hintLine + parsedHelp.back()[i].toString() + " ";
+				}
+				return LineNoise::Hint(hintLine, 90, false);
+			} else {
+				return LineNoise::Hint();
+			}
 		},
 		1000,
 		false);
