@@ -3670,7 +3670,10 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 			StringRef command = parsed.back().front();
 			int finishedParameters = parsed.back().size() + error;
 
-			// We don't want the hint to flip to parse error and back, e.g. while \" is being typed.
+			// As a user is typing an escaped character, e.g. \", after the \ and before the " is typed 
+			// the string will be a parse error.  Ignore this parse error to avoid flipping the hint to
+			// {malformed escape sequence} and back to the original hint for the span of one character                                     
+			// being entered.
 			if (error && line.back() != '\\') return LineNoise::Hint(std::string(" {malformed escape sequence}"), 90, false);
 
 			auto iter = helpMap.find(command.toString());
