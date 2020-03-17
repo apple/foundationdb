@@ -866,6 +866,10 @@ public:
 			}
 		}
 	}
+	virtual const TLSConfig& getTLSConfig() {
+		static TLSConfig emptyConfig;
+		return emptyConfig;
+	}
 
 	virtual void stop() { isStopped = true; }
 	virtual bool isSimulated() const { return true; }

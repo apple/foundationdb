@@ -223,7 +223,7 @@ template <> void delref( DatabaseContext* ptr ) { ptr->delref(); }
 ACTOR Future<Void> databaseLogger( DatabaseContext *cx ) {
 	state double lastLogged = 0;
 	loop {
-		wait(delay(CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, cx->taskID));
+		wait(delay(CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace));
 		TraceEvent ev("TransactionMetrics", cx->dbId);
 
 		ev.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
@@ -3101,7 +3101,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 				if (requests.size() == CLIENT_KNOBS->MAX_BATCH_SIZE)
 					send_batch = true;
 				else if (!timeout.isValid())
-					timeout = delay(batchTime, TaskPriority::ProxyGetConsistentReadVersion);
+					timeout = delay(batchTime, TaskPriority::GetConsistentReadVersion);
 			}
 			when(wait(timeout.isValid() ? timeout : Never())) { send_batch = true; }
 			// dynamic batching monitors reply latencies
@@ -3136,6 +3136,9 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Re
 	cx->GRVLatencies.addSample(latency);
 	if (trLogInfo)
 		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V2(startTime, latency, flags & GetReadVersionRequest::FLAG_PRIORITY_MASK));
+	if (rep.version == 1 && rep.locked) {
+		throw proxy_memory_limit_exceeded();
+	}
 	if(rep.locked && !lockAware)
 		throw database_locked();
 
