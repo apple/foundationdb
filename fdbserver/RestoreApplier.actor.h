@@ -52,7 +52,7 @@ struct StagingKey {
 	Value val;
 	MutationRef::Type type; // set or clear
 	LogMessageVersion version; // largest version of set or clear for the key
-	std::map<LogMessageVersion, MutationsVec> pendingMutations; // mutations not set or clear type
+	std::map<LogMessageVersion, Standalone<MutationRef>> pendingMutations; // mutations not set or clear type
 
 	explicit StagingKey() : version(0), type(MutationRef::MAX_ATOMIC_OP) {}
 
@@ -60,43 +60,15 @@ struct StagingKey {
 	// Assume: SetVersionstampedKey and SetVersionstampedValue have been converted to set
 	void add(const MutationRef& m, LogMessageVersion newVersion) {
 		ASSERT(m.type != MutationRef::SetVersionstampedKey && m.type != MutationRef::SetVersionstampedValue);
+		if (debugMutation("StagingKeyAdd", newVersion.version, m)) {
+			TraceEvent("StagingKeyAdd")
+			    .detail("Version", version.toString())
+			    .detail("NewVersion", newVersion.toString())
+			    .detail("Mutation", m.toString());
+		}
 		if (version == newVersion) { // Sanity check
-			TraceEvent("FastRestoreApplierStagingKeyMutationAtSameVersion")
-			    .detail("Version", newVersion.toString())
-			    .detail("NewMutation", m.toString())
-			    .detail("Key", printable(key))
-			    .detail("Value", printable(val))
-			    .detail("ExistingKeyType", typeString[type]);
-			if (m.type == MutationRef::SetValue) {
-				if (type == MutationRef::SetValue) {
-					if (m.param2 != val) {
-						TraceEvent(SevError, "FastRestoreApplierStagingKeyMutationAtSameVersionUnhandled")
-						    .detail("Version", newVersion.toString())
-						    .detail("NewMutation", m.toString())
-						    .detail("ExistingKeyType", typeString[type])
-						    .detail("ExitingKeyValue", val)
-						    .detail("Investigate",
-						            "Why would backup have two sets with different value at same version");
-					} // else {} Backup has duplicate set at the same version
-				} else {
-					TraceEvent(SevWarnAlways, "FastRestoreApplierStagingKeyMutationAtSameVersionOverride")
-					    .detail("Version", newVersion.toString())
-					    .detail("NewMutation", m.toString())
-					    .detail("ExistingKeyType", typeString[type])
-					    .detail("ExitingKeyValue", val);
-					type = (MutationRef::Type)m.type;
-					val = m.param2;
-				}
-			} else if (m.type == MutationRef::ClearRange) {
-				TraceEvent(SevWarnAlways, "FastRestoreApplierStagingKeyMutationAtSameVersionSkipped")
-				    .detail("Version", newVersion.toString())
-				    .detail("NewMutation", m.toString())
-				    .detail("ExistingKeyType", typeString[type])
-				    .detail("ExitingKeyValue", val);
-			} else {
-				ASSERT(false); // Can't be true same key, same version, different mutation
-			}
-
+			TraceEvent("SameVersion").detail("Version", version.toString()).detail("Mutation", m.toString());
+			ASSERT(type == m.type && key == m.param1 && val == m.param2);
 			return;
 		}
 
@@ -112,14 +84,14 @@ struct StagingKey {
 		} else {
 			auto it = pendingMutations.find(newVersion);
 			if (it == pendingMutations.end()) {
-				bool inserted;
-				std::tie(it, inserted) = pendingMutations.emplace(newVersion, MutationsVec());
-				// TODO: Do we really need deep copy?
-				it->second.push_back_deep(it->second.arena(), m);
+				pendingMutations.emplace(newVersion, m);
 			} else {
 				// Duplicated mutation ignored.
-				MutationRef& m1 = *(it->second.begin());
-				ASSERT(m1.type == m.type && m1.param1 == m.param1 && m1.param2 == m.param2);
+				TraceEvent("SameVersion")
+				    .detail("Version", version.toString())
+				    .detail("Mutation", m.toString())
+				    .detail("NewVersion", newVersion.toString());
+				ASSERT(it->second.type == m.type && it->second.param1 == m.param1 && it->second.param2 == m.param2);
 			}
 		}
 	}
@@ -130,52 +102,50 @@ struct StagingKey {
 		    .detail("Key", key)
 		    .detail("Version", version.toString())
 		    .detail("LargestPendingVersion",
-		            (pendingMutations.empty() ? "-1" : pendingMutations.rbegin()->first.toString()));
-		std::map<LogMessageVersion, MutationsVec>::iterator lb = pendingMutations.lower_bound(version);
+		            (pendingMutations.empty() ? "[none]" : pendingMutations.rbegin()->first.toString()));
+		std::map<LogMessageVersion, Standalone<MutationRef>>::iterator lb = pendingMutations.lower_bound(version);
 		if (lb == pendingMutations.end()) {
 			return;
 		}
 		if (lb->first == version) {
 			// Sanity check mutations at version are either atomicOps which can be ignored or the same value as buffered
-			for (const MutationRef& m : lb->second) {
-				if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
-					if (std::tie(type, key, val) != std::tie(m.type, m.param1, m.param2)) {
-						TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnhandledSituation")
-						    .detail("BufferedType", typeString[type])
-						    .detail("PendingType", typeString[m.type])
-						    .detail("BufferedVal", val.toString())
-						    .detail("PendingVal", m.param2.toString());
-					}
+			MutationRef m = lb->second;
+			if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
+				if (std::tie(type, key, val) != std::tie(m.type, m.param1, m.param2)) {
+					TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnhandledSituation")
+					    .detail("BufferedType", typeString[type])
+					    .detail("PendingType", typeString[m.type])
+					    .detail("BufferedVal", val.toString())
+					    .detail("PendingVal", m.param2.toString());
 				}
 			}
 			lb++;
 		}
 		for (; lb != pendingMutations.end(); lb++) {
-			for (auto& mutation : lb->second) {
-				if (type == MutationRef::CompareAndClear) { // Special atomicOp
-					Arena arena;
-					Optional<ValueRef> retVal = doCompareAndClear(val, mutation.param2, arena);
-					if (!retVal.present()) {
-						val = key;
-						type = MutationRef::ClearRange;
-					} // else no-op
-				} else if (isAtomicOp((MutationRef::Type)mutation.type)) {
-					Optional<StringRef> inputVal;
-					if (hasBaseValue()) {
-						inputVal = val;
-					}
-					val = applyAtomicOp(inputVal, mutation.param2, (MutationRef::Type)mutation.type);
-					type = MutationRef::SetValue; // Precomputed result should be set to DB.
-				} else if (mutation.type == MutationRef::SetValue || mutation.type == MutationRef::ClearRange) {
-					type = MutationRef::SetValue; // Precomputed result should be set to DB.
-					TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnexpectedSet")
-					    .detail("MutationType", typeString[mutation.type])
-					    .detail("Version", lb->first.toString());
-				} else {
-					TraceEvent(SevWarnAlways, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation")
-					    .detail("MutationType", typeString[mutation.type])
-					    .detail("Version", lb->first.toString());
+			MutationRef mutation = lb->second;
+			if (type == MutationRef::CompareAndClear) { // Special atomicOp
+				Arena arena;
+				Optional<ValueRef> retVal = doCompareAndClear(val, mutation.param2, arena);
+				if (!retVal.present()) {
+					val = key;
+					type = MutationRef::ClearRange;
+				} // else no-op
+			} else if (isAtomicOp((MutationRef::Type)mutation.type)) {
+				Optional<StringRef> inputVal;
+				if (hasBaseValue()) {
+					inputVal = val;
 				}
+				val = applyAtomicOp(inputVal, mutation.param2, (MutationRef::Type)mutation.type);
+				type = MutationRef::SetValue; // Precomputed result should be set to DB.
+			} else if (mutation.type == MutationRef::SetValue || mutation.type == MutationRef::ClearRange) {
+				type = MutationRef::SetValue; // Precomputed result should be set to DB.
+				TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnexpectedSet")
+				    .detail("MutationType", typeString[mutation.type])
+				    .detail("Version", lb->first.toString());
+			} else {
+				TraceEvent(SevWarnAlways, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation")
+				    .detail("MutationType", typeString[mutation.type])
+				    .detail("Version", lb->first.toString());
 			}
 			version = lb->first;
 		}
