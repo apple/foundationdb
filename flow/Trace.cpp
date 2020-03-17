@@ -544,8 +544,8 @@ public:
 
 	Future<Void> pingWriterThread() {
 		auto ping = new WriterThread::Ping;
-		writer->post(ping);
 		auto f = ping->ack.getFuture();
+		writer->post(ping);
 		return f;
 	}
 
