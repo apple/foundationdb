@@ -54,16 +54,15 @@ class CommitDebugHandler(xml.sax.ContentHandler, object):
         self._f.write(json.dumps(d) + ', ')
 
     def startElement(self, name, attrs):
-        if self._starttime is None:
-            self._starttime = float(attrs['Time'])
-
         # I've flipped from using Async spans to Duration spans, because
         # I kept on running into issues with trace viewer believeing there
         # is no start or end of an emitted span even when there actually is.
 
         if name == "Event" and attrs.get('Type') == "CommitDebug":
+            if self._starttime is None:
+                self._starttime = float(attrs['Time'])
+
             attr_id = attrs['ID']
-            trace_id = self._idmap.setdefault(attr_id, attr_id)
             # Trace viewer doesn't seem to care about types, so use host as pid and port as tid
             (pid, tid) = attrs['Machine'].split(':')
             traces = locationToPhase[attrs["Location"]]
