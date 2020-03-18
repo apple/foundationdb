@@ -1823,15 +1823,16 @@ ACTOR Future<Void> waitForPrimaryDC( Database cx, StringRef dcId ) {
 ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 	state ReadYourWritesTransaction tr(cx);
 	state KeyRange sysRange = KeyRangeRef(storageCacheKey(range.begin), storageCacheKey(range.end));
+	state KeyRange sysRangeClear = KeyRangeRef(storageCacheKey(range.begin), keyAfter(storageCacheKey(range.end)));
 	state KeyRange privateRange = KeyRangeRef(cacheKeysKey(0, range.begin), cacheKeysKey(0, range.end));
 	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
 	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
 	loop {
-		TraceEvent(SevDebug, "ChangeCachedRangeInLoop").detail("BeginKey", range.begin.toString()).detail("EndKey", range.end.toString());
+		//TraceEvent(SevDebug, "ChangeCachedRangeInLoop").detail("BeginKey", range.begin.toString()).detail("EndKey", range.end.toString());
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			tr.clear(sysRange);
+			tr.clear(sysRangeClear);
 			tr.clear(privateRange);
 			tr.addReadConflictRange(privateRange);
 			Standalone<RangeResultRef> previous =
@@ -1846,12 +1847,12 @@ ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 				// we need to uncache from here
 				tr.set(sysRange.begin, falseValue);
 				tr.set(privateRange.begin, serverKeysFalse);
-				TraceEvent(SevDebug, "ChangeCachedRangeSetBegin1").detail("BeginKey", sysRange.begin.toString());
+				//TraceEvent(SevDebug, "ChangeCachedRangeSetBegin1").detail("BeginKey", sysRange.begin.toString());
 			} else if (!prevIsCached && add) {
 				// we need to cache, starting from here
 				tr.set(sysRange.begin, trueValue);
 				tr.set(privateRange.begin, serverKeysTrue);
-				TraceEvent(SevDebug, "ChangeCachedRangeSetBegin2").detail("BeginKey", sysRange.begin.toString());
+				//TraceEvent(SevDebug, "ChangeCachedRangeSetBegin2").detail("BeginKey", sysRange.begin.toString());
 			}
 			Standalone<RangeResultRef> after =
 			    wait(tr.getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, false));
@@ -1864,14 +1865,14 @@ ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 			if (afterIsCached && !add) {
 				tr.set(sysRange.end, trueValue);
 				tr.set(privateRange.end, serverKeysTrue);
-				TraceEvent(SevDebug, "ChangeCachedRangeSetEnd1").detail("EndKey", sysRange.end.toString());
+				//TraceEvent(SevDebug, "ChangeCachedRangeSetEnd1").detail("EndKey", sysRange.end.toString());
 			} else if (!afterIsCached && add) {
 				tr.set(sysRange.end, falseValue);
 				tr.set(privateRange.end, serverKeysFalse);
-				TraceEvent(SevDebug, "ChangeCachedRangeSetEnd2").detail("EndKey", sysRange.end.toString());
+				//TraceEvent(SevDebug, "ChangeCachedRangeSetEnd2").detail("EndKey", sysRange.end.toString());
 			}
 			wait(tr.commit());
-			TraceEvent(SevDebug, "ChangeCachedRangeReturn");
+			//TraceEvent(SevDebug, "ChangeCachedRangeReturn");
 			return Void();
 		} catch (Error& e) {
 			state Error err = e;
