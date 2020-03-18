@@ -81,6 +81,7 @@ struct BackupData {
 	NotifiedVersion pulledVersion;
 	bool pulling = false;
 	bool stopped = false;
+	bool exitEarly = false; // If the worker is on an old epoch and all backups starts a version >= the endVersion
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
@@ -135,7 +136,7 @@ struct BackupData {
 	}
 
 	bool allMessageSaved() const {
-		return (endVersion.present() && savedVersion >= endVersion.get()) || stopped;
+		return (endVersion.present() && savedVersion >= endVersion.get()) || stopped || exitEarly;
 	}
 
 	Version maxPopVersion() const {
@@ -290,21 +291,27 @@ ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool started
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> value = wait(tr.get(backupStartedKey));
 				std::vector<std::pair<UID, Version>> uidVersions;
+				bool shouldExit = self->endVersion.present();
 				if (value.present()) {
 					uidVersions = decodeBackupStartedValue(value.get());
 					TraceEvent e("BackupWorkerGotStartKey", self->myId);
 					int i = 1;
-					for (auto uidVersion : uidVersions) {
-						e.detail(format("BackupID%d", i), uidVersion.first)
-						    .detail(format("Version%d", i), uidVersion.second);
+					for (auto [uid, version] : uidVersions) {
+						e.detail(format("BackupID%d", i), uid)
+						    .detail(format("Version%d", i), version);
 						i++;
+						if (shouldExit && version < self->endVersion.get()) {
+							shouldExit = false;
+						}
 					}
+					self->exitEarly = shouldExit;
 					self->onBackupChanges(uidVersions);
 					if (started || !watch) return true;
 				} else {
 					TraceEvent("BackupWorkerEmptyStartKey", self->myId);
 					self->onBackupChanges(uidVersions);
 
+					self->exitEarly = shouldExit;
 					if (!started || !watch) {
 						return false;
 					}
@@ -800,12 +807,12 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 
 		// Check if backup key is present to avoid race between this check and
 		// noop pop as well as upload data: pop or skip upload before knowing
-		// there are backup keys.
+		// there are backup keys. Set the "exitEarly" flag if needed.
 		bool present = wait(monitorBackupStartedKeyChanges(&self, true, false));
-		TraceEvent("BackupWorkerWaitKey", self.myId).detail("Present", present);
+		TraceEvent("BackupWorkerWaitKey", self.myId).detail("Present", present).detail("ExitEarly", self.exitEarly);
 
-		pull = monitorBackupKeyOrPullData(&self, present);
-		done = uploadData(&self);
+		pull = self.exitEarly ? Void() : monitorBackupKeyOrPullData(&self, present);
+		done = self.exitEarly ? Void() : uploadData(&self);
 
 		loop choose {
 			when(wait(dbInfoChange)) {
