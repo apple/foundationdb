@@ -255,7 +255,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	// Note: We do not allow a versionBatch size larger than the FASTRESTORE_VERSIONBATCH_MAX_BYTES because the range
 	// file size at a version depends on the number of backupAgents and its upper bound is hard to get.
 	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles, const std::vector<RestoreFileFR>& logFiles,
-	                         std::map<Version, VersionBatch>* versionBatches) {
+	                         std::map<Version, VersionBatch>* versionBatches, Version targetVersion) {
 		bool rewriteNextVersion = false;
 		int rangeIdx = 0;
 		int logIdx = 0; // Ensure each log file is included in version batch
@@ -340,7 +340,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					vb.logFiles.insert(log);
 				}
 
-				vb.endVersion = nextVersion;
+				vb.endVersion = std::min(nextVersion, targetVersion + 1);
 				prevEndVersion = vb.endVersion;
 			} else {
 				if (vb.size < 1) {
@@ -376,7 +376,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		}
 		// The last wip version batch has some files
 		if (vb.size > 0) {
-			vb.endVersion = nextVersion;
+			vb.endVersion = std::min(nextVersion, targetVersion + 1);
 			versionBatches->emplace(vb.beginVersion, vb);
 		}
 	}
