@@ -36,8 +36,9 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR static Future<Void> clearDB(Database cx);
-ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* rangeFiles,
-                                             std::vector<RestoreFileFR>* logFiles, Database cx, RestoreRequest request);
+ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* rangeFiles,
+                                                std::vector<RestoreFileFR>* logFiles, Database cx,
+                                                RestoreRequest request);
 
 ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> self, Database cx, RestoreRequest request);
 ACTOR static Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self, Database cx);
@@ -276,7 +277,8 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	self->initBackupContainer(request.url);
 
 	// Get all backup files' description and save them to files
-	wait(collectBackupFiles(self->bc, &rangeFiles, &logFiles, cx, request));
+	Version targetVersion = wait(collectBackupFiles(self->bc, &rangeFiles, &logFiles, cx, request));
+	ASSERT(targetVersion > 0);
 
 	std::sort(rangeFiles.begin(), rangeFiles.end());
 	std::sort(logFiles.begin(), logFiles.end(), [](RestoreFileFR const& f1, RestoreFileFR const& f2) -> bool {
@@ -284,7 +286,8 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 		       std::tie(f2.endVersion, f2.beginVersion, f2.fileIndex, f2.fileName);
 	});
 
-	self->buildVersionBatches(rangeFiles, logFiles, &self->versionBatches); // Divide files into version batches
+	self->buildVersionBatches(rangeFiles, logFiles, &self->versionBatches,
+	                          targetVersion); // Divide files into version batches
 	self->dumpVersionBatches(self->versionBatches);
 
 	state std::vector<Future<Void>> fBatches;
@@ -672,9 +675,10 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 }
 
 // Collect the backup files' description into output_files by reading the backupContainer bc.
-ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* rangeFiles,
-                                             std::vector<RestoreFileFR>* logFiles, Database cx,
-                                             RestoreRequest request) {
+// Returns the restore target version.
+ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* rangeFiles,
+                                                std::vector<RestoreFileFR>* logFiles, Database cx,
+                                                RestoreRequest request) {
 	state BackupDescription desc = wait(bc->describePartitionedBackup());
 
 	// Convert version to real time for operators to read the BackupDescription desc.
@@ -730,7 +734,7 @@ ACTOR static Future<Void> collectBackupFiles(Reference<IBackupContainer> bc, std
 	    .detail("BackupDesc", desc.toString())
 	    .detail("RangeFiles", rangeFiles->size())
 	    .detail("LogFiles", logFiles->size());
-	return Void();
+	return request.targetVersion;
 }
 
 ACTOR static Future<Void> clearDB(Database cx) {
