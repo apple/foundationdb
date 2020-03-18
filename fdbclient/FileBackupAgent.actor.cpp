@@ -2405,7 +2405,12 @@ namespace fileBackup {
 
 					state Future<Optional<Value>> started = tr->get(backupStartedKey);
 					state Future<Optional<Value>> taskStarted = tr->get(config.allWorkerStarted().key);
-					wait(success(started) && success(taskStarted));
+					state Future<Optional<bool>> partitionedLog = config.partitionedLogEnabled().get(tr);
+					wait(success(started) && success(taskStarted) && success(partitionedLog));
+
+					if (!partitionedLog.get().present() || !partitionedLog.get().get()) {
+						return Void(); // Skip if not using partitioned logs
+					}
 
 					std::vector<std::pair<UID, Version>> ids;
 					if (started.get().present()) {
