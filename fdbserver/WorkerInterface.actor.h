@@ -498,7 +498,9 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQu
 
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                        Reference<ClusterConnectionFile> ccf, LocalityData locality,
-                                       Reference<AsyncVar<ServerDBInfo>> dbInfo);
+                                       Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                       Optional<Reference<AsyncVar<std::set<std::string>>>> issues =
+                                           Optional<Reference<AsyncVar<std::set<std::string>>>>());
 ACTOR Future<Void> resolver(ResolverInterface proxy, InitializeResolverRequest initReq,
                             Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest req,

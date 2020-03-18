@@ -49,9 +49,10 @@
 #include <cmath>
 
 FileTraceLogWriter::FileTraceLogWriter(std::string directory, std::string processName, std::string basename,
-                                       std::string extension, uint64_t maxLogsSize, std::function<void()> onError)
+                                       std::string extension, uint64_t maxLogsSize, std::function<void()> onError,
+                                       Reference<ITraceLogIssuesReporter> issues)
   : directory(directory), processName(processName), basename(basename), extension(extension), maxLogsSize(maxLogsSize),
-    traceFileFD(-1), index(0), onError(onError) {}
+    traceFileFD(-1), index(0), onError(onError), issues(issues) {}
 
 void FileTraceLogWriter::addref() {
 	ReferenceCounted<FileTraceLogWriter>::addref();
@@ -73,6 +74,7 @@ void FileTraceLogWriter::lastError(int err) {
 void FileTraceLogWriter::write(const std::string& str) {
 	auto ptr = str.c_str();
 	int remaining = str.size();
+	bool needsResolve = false;
 
 	while ( remaining ) {
 		int ret = __write( traceFileFD, ptr, remaining );
@@ -80,7 +82,14 @@ void FileTraceLogWriter::write(const std::string& str) {
 			lastError(0);
 			remaining -= ret;
 			ptr += ret;
+			if (needsResolve) {
+				issues->resolveIssue("trace_log_file_write_error");
+				needsResolve = false;
+			}
 		} else {
+			issues->addIssue("trace_log_file_write_error");
+			needsResolve = true;
+			fprintf(stderr, "Unexpected error [%d] when flushing trace log.\n", errno);
 			lastError(errno);
 			threadSleep(0.1);
 		}
@@ -89,6 +98,7 @@ void FileTraceLogWriter::write(const std::string& str) {
 
 void FileTraceLogWriter::open() {
 	cleanupTraceFiles();
+	bool needsResolve = false;
 
 	++index;
 
@@ -113,6 +123,8 @@ void FileTraceLogWriter::open() {
 		}
 		else {
 			fprintf(stderr, "ERROR: could not create trace log file `%s' (%d: %s)\n", finalname.c_str(), errno, strerror(errno));
+			issues->addIssue("trace_log_could_not_create_file");
+			needsResolve = true;
 
 			int errorNum = errno;
 			onMainThreadVoid([finalname, errorNum]{
@@ -125,6 +137,9 @@ void FileTraceLogWriter::open() {
 		}
 	}
 	onMainThreadVoid([]{ latestEventCache.clear("TraceFileOpenError"); }, NULL);
+	if (needsResolve) {
+		issues->resolveIssue("trace_log_could_not_create_file");
+	}
 	lastError(0);
 }
 
