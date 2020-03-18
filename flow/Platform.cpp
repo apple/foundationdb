@@ -2787,7 +2787,8 @@ void crashHandler(int sig) {
 	fprintf(stderr, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
 	fprintf(stderr, "Trace: %s\n", backtrace.c_str());
 
-	_exit(128 + sig);
+	signal(sig, SIG_DFL);
+	kill(getpid(), sig)
 #else
 	// No crash handler for other platforms!
 #endif
