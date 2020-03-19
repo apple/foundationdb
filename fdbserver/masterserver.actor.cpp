@@ -478,13 +478,20 @@ ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILo
 
 		trigger = self->registrationTrigger.onTrigger();
 
-		TraceEvent("MasterUpdateRegistration", self->dbgid).detail("RecoveryCount", self->cstate.myDBState.recoveryCount).detail("Logs", describe(logSystem->getLogSystemConfig().tLogs));
+		auto logSystemConfig = logSystem->getLogSystemConfig();
+		TraceEvent("MasterUpdateRegistration", self->dbgid)
+		    .detail("RecoveryCount", self->cstate.myDBState.recoveryCount)
+		    .detail("OldestBackupEpoch", logSystemConfig.oldestBackupEpoch)
+		    .detail("Logs", describe(logSystemConfig.tLogs));
 
 		if (!self->cstateUpdated.isSet()) {
-			wait(sendMasterRegistration(self.getPtr(), logSystem->getLogSystemConfig(), self->provisionalProxies, self->resolvers, self->cstate.myDBState.recoveryCount, self->cstate.prevDBState.getPriorCommittedLogServers() ));
+			wait(sendMasterRegistration(self.getPtr(), logSystemConfig, self->provisionalProxies, self->resolvers,
+			                            self->cstate.myDBState.recoveryCount,
+			                            self->cstate.prevDBState.getPriorCommittedLogServers()));
 		} else {
 			updateLogsKey = updateLogsValue(self, cx);
-			wait( sendMasterRegistration( self.getPtr(), logSystem->getLogSystemConfig(), self->proxies, self->resolvers, self->cstate.myDBState.recoveryCount, vector<UID>() ) );
+			wait(sendMasterRegistration(self.getPtr(), logSystemConfig, self->proxies, self->resolvers,
+			                            self->cstate.myDBState.recoveryCount, vector<UID>()));
 		}
 	}
 }
