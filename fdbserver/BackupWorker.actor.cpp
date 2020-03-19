@@ -420,7 +420,8 @@ ACTOR Future<Void> monitorAllWorkerProgress(BackupData* self) {
 						    .detail("Prev", prev)
 						    .detail("Current", current);
 					}
-					if (!prevVersions[i].get().present() || prevVersions[i].get().get() < current) {
+					if (self->backupEpoch == self->oldestBackupEpoch &&
+					    (!prevVersions[i].get().present() || prevVersions[i].get().get() < current)) {
 						TraceEvent("BackupWorkerSetVersion", self->myId)
 						    .detail("BackupID", versionConfigs[i].getUid())
 						    .detail("Version", current);
@@ -615,11 +616,6 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 	state Version popVersion = invalidVersion;
 
 	loop {
-		if (self->allMessageSaved()) {
-			self->messages.clear();
-			return Void();
-		}
-
 		// FIXME: knobify the delay of 10s. This delay is sensitive, as it is the
 		// lag TLog might have. Changing to 20s may fail consistency check.
 		state Future<Void> uploadDelay = delay(10);
@@ -661,6 +657,11 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			    .detail("MsgQ", self->messages.size());
 			self->savedVersion = std::max(popVersion, self->savedVersion);
 			self->pop();
+		}
+
+		if (self->allMessageSaved()) {
+			self->messages.clear();
+			return Void();
 		}
 
 		if (!self->pullFinished()) {
@@ -841,6 +842,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 		if (e.code() == error_code_worker_removed) {
 			pull = Void(); // cancels pulling
 			self.stopped = true;
+			self.doneTrigger.trigger();
 			wait(done);
 		}
 		TraceEvent("BackupWorkerTerminated", self.myId).error(err, true);
