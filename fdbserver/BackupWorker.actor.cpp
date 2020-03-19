@@ -153,6 +153,7 @@ struct BackupData {
 			    .detail("Version", savedVersion);
 			return;
 		}
+		// Q: Can backupEpoch < oldest ? If cannot, add an Assertion here
 		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
 		logSystem.get()->pop(savedVersion, popTag);
 	}
@@ -380,7 +381,7 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile, VersionedMessage 
 }
 
 // Saves messages in the range of [0, numMsg) to a file and then remove these
-// messages. The file format is a sequence of (Version, sub#, msgSize, message).
+// messages. The file (name?) format is a sequence of (Version, sub#, msgSize, message).
 // Note only ready backups are saved.
 ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
 	state int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
@@ -496,9 +497,10 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			return Void();
 		}
 
+		// Q: what lag Tlog has in the below comment? Will shorter delay pass consistency check?
 		// FIXME: knobify the delay of 10s. This delay is sensitive, as it is the
 		// lag TLog might have. Changing to 20s may fail consistency check.
-		state Future<Void> uploadDelay = delay(10);
+		state Future<Void> uploadDelay = delay(SERVER_KNOBS->BACKUP_UPLOAD_DELAY);
 
 		const Version maxPopVersion =
 		    self->endVersion.present() ? self->endVersion.get() : self->minKnownCommittedVersion;
@@ -508,6 +510,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		} else {
 			state int numMsg = 0;
 			for (const auto& message : self->messages) {
+				// Q: Why would message.getVersion() > maxPopVersion?
 				if (message.getVersion() > maxPopVersion) break;
 				popVersion = std::max(popVersion, message.getVersion());
 				numMsg++;

@@ -260,6 +260,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	bool hasPseudoLocality(int8_t locality) override { return pseudoLocalities.count(locality) > 0; }
 
+	// Return the min version of all pseudoLocalities, i.e., logRouter and backupTag
 	Version popPseudoLocalityTag(Tag tag, Version upTo) override {
 		ASSERT(isPseudoLocality(tag.locality) && hasPseudoLocality(tag.locality));
 
