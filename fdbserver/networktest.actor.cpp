@@ -64,7 +64,7 @@ NetworkTestInterface::NetworkTestInterface( INetwork* local )
 
 ACTOR Future<Void> networkTestServer() {
 	state NetworkTestInterface interf( g_network );
-	state Future<Void> logging = delay( 1.0 );
+	state Future<Void> logging = delay( FLOW_KNOBS->NETWORK_TEST_LOG_INTERVAL );
 	state double lastTime = now();
 	state int sent = 0;
 	state LatencyStats latency;
@@ -87,7 +87,7 @@ ACTOR Future<Void> networkTestServer() {
 				latency.reset();
 				lastTime = now();
 				sent = 0;
-				logging = delay( 1.0 );
+				logging = delay( FLOW_KNOBS->NETWORK_TEST_LOG_INTERVAL );
 			}
 		}
 	}
@@ -132,12 +132,14 @@ ACTOR Future<Void> logger(int* sent, int* completed, LatencyStats* latency) {
 	state int logged = 0;
 	state int iteration = 0;
 	while (moreLoggingNeeded(logged, ++iteration)) {
-		wait( delay(1.0) );
+		wait( delay(FLOW_KNOBS->NETWORK_TEST_LOG_INTERVAL) );
 		auto spd = (*completed - logged) / (now() - lastTime);
 		if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
 			if (iteration == 2) {
 				// We don't report the first iteration because of warm-up effects.
-				printf("%f\t%.3f\t%.3f\n", spd, latency->mean() * 1e6, latency->stddev() * 1e6);
+				double mbytes_per_sec = spd * (FLOW_KNOBS->NETWORK_TEST_REQUEST_SIZE + FLOW_KNOBS->NETWORK_TEST_REPLY_SIZE) / 1024 / 1024;
+
+				printf("%f\t%.3f\t%.3f\t%.1f\t%.0f\n", spd, latency->mean() * 1e6, latency->stddev() * 1e6, mbytes_per_sec, mbytes_per_sec * 8);
 			}
 		} else {
 			fprintf(stderr, "messages per second: %f (%6.3f us)\n", spd, latency->mean() * 1e6);
