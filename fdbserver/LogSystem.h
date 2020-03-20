@@ -785,6 +785,7 @@ struct ILogSystem {
 	virtual bool removeBackupWorker(const BackupWorkerDoneRequest& req) = 0;
 
 	virtual LogEpoch getOldestBackupEpoch() const = 0;
+	virtual void setOldestBackupEpoch(LogEpoch epoch) = 0;
 };
 
 struct LengthPrefixedStringRef {

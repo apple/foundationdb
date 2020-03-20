@@ -1561,6 +1561,8 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	self->addActor.send(configurationMonitor(self, cx));
 	if (self->configuration.backupWorkerEnabled) {
 		self->addActor.send(recruitBackupWorkers(self, cx));
+	} else {
+		self->logSystem->setOldestBackupEpoch(self->cstate.myDBState.recoveryCount);
 	}
 
 	wait( Future<Void>(Never()) );

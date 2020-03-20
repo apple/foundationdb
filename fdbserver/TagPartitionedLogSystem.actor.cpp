@@ -360,7 +360,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		newState.oldTLogData.clear();
-		if(!recoveryComplete.isValid() || !recoveryComplete.isReady() || (repopulateRegionAntiQuorum == 0 && (!remoteRecoveryComplete.isValid() || !remoteRecoveryComplete.isReady()))) {
+		if (!recoveryComplete.isValid() || !recoveryComplete.isReady() ||
+		    (repopulateRegionAntiQuorum == 0 &&
+		     (!remoteRecoveryComplete.isValid() || !remoteRecoveryComplete.isReady())) ||
+		    epoch != oldestBackupEpoch) {
 			for (const auto& oldData : oldLogData) {
 				newState.oldTLogData.emplace_back(oldData);
 				TraceEvent("BWToCore")
@@ -1430,7 +1433,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return removed;
 	}
 
-	LogEpoch getOldestBackupEpoch() const override { return oldestBackupEpoch; }
+	LogEpoch getOldestBackupEpoch() const final { return oldestBackupEpoch; }
+
+	void setOldestBackupEpoch(LogEpoch epoch) final { oldestBackupEpoch = epoch; }
 
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer, Reference<AsyncVar<bool>> failed) {
 		state Future<Void> waitFailure;
