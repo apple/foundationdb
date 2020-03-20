@@ -1957,13 +1957,20 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData* 
 	}
 }
 
+struct HealthMonitorServerState {
+	std::map<NetworkAddress, std::map<NetworkAddress, bool>> failureState;
+};
+
 ACTOR Future<Void> healthMonitoringServer(UID uniqueID, ClusterControllerData* self,
                                           FutureStream<HealthMonitoringRequest> requests) {
 	state Version currentVersion = 0;
 
 	loop choose {
 		when(HealthMonitoringRequest req = waitNext(requests)) {
-			TraceEvent("HealthMonitorRequestReceived");
+			NetworkAddress reporteeAddress = req.reply.getEndpoint().getPrimaryAddress();
+			TraceEvent("HealthMonitorRequestReceived")
+			    .detail("Size", req.closedPeers.size())
+			    .detail("EndpointAddress", reporteeAddress);
 		}
 	}
 }

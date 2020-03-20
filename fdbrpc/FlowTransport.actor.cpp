@@ -398,6 +398,39 @@ ACTOR Future<Void> connectionWriter( Reference<Peer> self, Reference<IConnection
 	}
 }
 
+ACTOR Future<Void> delayedHealthUpdate(NetworkAddress address) {
+	try {
+		state double start = now();
+		state int count = 0;
+		loop {
+			if (FlowTransport::transport().healthMonitor()->tooManyConnectionsClosed(address) && address.isPublic()) {
+				if (count == 0)
+					TraceEvent("TooManyConnectionsClosedMarkFailed")
+					    .detail("Dest", address)
+					    .detail("StartTime", start);
+				IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(true));
+				FlowTransport::transport().healthMonitor()->delayed[address] = true;
+				wait (delayJittered(FLOW_KNOBS->HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS/4.0));
+			} else {
+				if (count > 1)
+					TraceEvent("TooManyConnectionsClosedMarkAvailable")
+					    .detail("Dest", address)
+					    .detail("StartTime", start);
+				FlowTransport::transport().healthMonitor()->delayed[address] = false;
+				IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(false));
+				break;
+			}
+			++count;
+		}
+		return Void();
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			FlowTransport::transport().healthMonitor()->delayed[address] = false;
+		}
+		throw e;
+	}
+}
+
 ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 		Reference<IConnection> conn = Reference<IConnection>(),
 		Future<Void> reader = Void()) {
@@ -431,18 +464,20 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 				try {
 					choose {
-						when( Reference<IConnection> _conn = wait( INetworkConnections::net()->connect(self->destination) ) ) { 
+						when(Reference<IConnection> _conn =
+						         wait(INetworkConnections::net()->connect(self->destination))) {
 							conn = _conn;
 							wait(conn->connectHandshake());
-							IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 							if (self->unsent.empty()) {
+								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
+								FlowTransport::transport().healthMonitor()->delayed[self->destination] = false;
 								conn->close();
 								conn = Reference<IConnection>();
 								continue;
 							} else {
 								TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
-										.suppressFor(1.0)
-										.detail("PeerAddr", self->destination);
+								    .suppressFor(1.0)
+								    .detail("PeerAddr", self->destination);
 								self->prependConnectPacket();
 							}
 							reader = connectionReader( self->transport, conn, self, Promise<Reference<Peer>>());
@@ -451,28 +486,29 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 							throw connection_failed();
 						}
 					}
-				} catch( Error &e ) {
-					if(e.code() != error_code_connection_failed) {
+				} catch (Error& e) {
+					if (e.code() != error_code_connection_failed) {
 						throw;
 					}
 					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID())
 					    .suppressFor(1.0)
 					    .detail("PeerAddr", self->destination);
 
-					IFailureMonitor::failureMonitor().setStatus(
-					    self->destination, FailureStatus(e.code() == error_code_connection_failed));
+					IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
 					throw;
 				}
 			} else {
-				IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 				self->outgoingConnectionIdle = false;
 			}
 
 			firstConnFailedTime.reset();
 			try {
 				self->transport->countConnEstablished++;
-				wait( connectionWriter( self, conn ) || reader || connectionMonitor(self) );
+				state Future<Void> delayedHealthUpdateF = delayedHealthUpdate(self->destination);
+				wait(connectionWriter(self, conn) || reader || connectionMonitor(self));
 			} catch (Error& e) {
+				if (e.code() == error_code_connection_failed)
+					IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
 				if (e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled ||
 						e.code() == error_code_connection_unreferenced ||
 						(g_network->isSimulated() && e.code() == error_code_checksum_failed))
@@ -485,6 +521,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 			ASSERT( false );
 		} catch (Error& e) {
+			delayedHealthUpdateF.cancel();
 			if(now() - self->lastConnectTime > FLOW_KNOBS->RECONNECTION_RESET_TIME) {
 				self->reconnectionDelay = FLOW_KNOBS->INITIAL_RECONNECTION_TIME;
 			} else {
@@ -537,11 +574,11 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				it.second = now();
 			}
 
-			if (self->destination.isPublic() && !FlowTransport::transport().isClient()) {
-				FlowTransport::transport().healthMonitor()->reportPeerClosed(self->destination);
-			}
-
 			if (conn) {
+				if (self->destination.isPublic() && e.code() == error_code_connection_failed) {
+					FlowTransport::transport().healthMonitor()->reportPeerClosed(self->destination);
+				}
+
 				conn->close();
 				conn = Reference<IConnection>();
 			}
@@ -1115,7 +1152,9 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
 
 	if(peer->peerReferences == -1) {
-		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
+		if (!FlowTransport::transport().healthMonitor()->delayed[endpoint.getPrimaryAddress()]) {
+			IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
+		}
 		peer->peerReferences = 1;
 	} else {
 		peer->peerReferences++;
@@ -1179,7 +1218,8 @@ static void sendLocal( TransportData* self, ISerializeSource const& what, const 
 	deliver(self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false);
 }
 
-static ReliablePacket* sendPacket( TransportData* self, Reference<Peer> peer, ISerializeSource const& what, const Endpoint& destination, bool reliable ) {
+static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISerializeSource const& what,
+                                  const Endpoint& destination, bool reliable) {
 	const bool checksumEnabled = !destination.getPrimaryAddress().isTLS();
 	++self->countPacketsGenerated;
 

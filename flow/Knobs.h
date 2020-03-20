@@ -219,6 +219,10 @@ public:
 	int LOAD_BALANCE_MAX_BAD_OPTIONS;
 	bool LOAD_BALANCE_PENALTY_IS_BAD;
 
+	// Health Monitor
+	int HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS;
+	int HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
+
 	FlowKnobs(bool randomize = false, bool isSimulated = false);
 };
 

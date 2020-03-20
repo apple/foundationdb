@@ -31,11 +31,16 @@ class HealthMonitor {
 public:
 	void reportPeerClosed(const NetworkAddress& peerAddress);
 	const std::deque<std::pair<double, NetworkAddress>>& getPeerClosedHistory();
+	bool tooManyConnectionsClosed(const NetworkAddress& peerAddress);
 
-	std::map<NetworkAddress, bool> getPeerStatus() const;
+	std::map<NetworkAddress, bool> getPeerStatus();
 
+	std::map<NetworkAddress, bool> delayed;
 private:
+	void purgeOutdatedHistory();
+
 	std::deque<std::pair<double, NetworkAddress>> peerClosedHistory;
+	std::unordered_map<NetworkAddress, int> peerClosedNum;
 };
 
 #endif // FDBRPC_HEALTH_MONITOR_H

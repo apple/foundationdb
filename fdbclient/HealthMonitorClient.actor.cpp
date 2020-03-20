@@ -36,8 +36,7 @@ ACTOR Future<Void> healthMonitorClientLoop(ClusterInterface controller, Referenc
 	state double before = now();
 	state double waitfor = 0;
 
-	state int CLIENT_REQUEST_INTERVAL_SECS = 10;
-	state int CLIENT_REQUEST_FAILED_TIMEOUT_SECS = 2;
+	state int CLIENT_REQUEST_FAILED_TIMEOUT_SECS = 2; /* seconds */
 	try {
 		loop {
 			choose {
@@ -48,7 +47,7 @@ ACTOR Future<Void> healthMonitorClientLoop(ClusterInterface controller, Referenc
 					version = reply.healthInformationVersion;
 
 					before = now();
-					waitfor = CLIENT_REQUEST_INTERVAL_SECS;
+					waitfor = FLOW_KNOBS->HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS;
 					nextRequest = delayJittered(waitfor, TaskPriority::FailureMonitor);
 				}
 				when(wait(requestTimeout)) {

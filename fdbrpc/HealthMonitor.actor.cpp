@@ -22,27 +22,43 @@
 #include "fdbrpc/FlowTransport.h"
 #include "fdbrpc/HealthMonitor.h"
 
-const int CLIENT_REQUEST_INTERVAL_SECS = 10; // TODO (Vishesh) Make a Knob
-
 void HealthMonitor::reportPeerClosed(const NetworkAddress& peerAddress) {
+	purgeOutdatedHistory();
 	peerClosedHistory.push_back(std::make_pair(now(), peerAddress));
+	peerClosedNum[peerAddress] += 1;
 }
 
-const std::deque<std::pair<double, NetworkAddress>>& HealthMonitor::getPeerClosedHistory() {
+void HealthMonitor::purgeOutdatedHistory() {
 	for (auto it : peerClosedHistory) {
-		if (it.first < now() - CLIENT_REQUEST_INTERVAL_SECS) {
+		if (it.first < now() - FLOW_KNOBS->HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS) {
+			peerClosedNum[it.second] -= 1;
+			ASSERT(peerClosedNum[it.second] >= 0);
 			peerClosedHistory.pop_front();
 		} else {
 			break;
 		}
 	}
+}
+
+const std::deque<std::pair<double, NetworkAddress>>& HealthMonitor::getPeerClosedHistory() {
+	purgeOutdatedHistory();
 	return peerClosedHistory;
 }
 
-std::map<NetworkAddress, bool> HealthMonitor::getPeerStatus() const {
+std::map<NetworkAddress, bool> HealthMonitor::getPeerStatus() {
+	purgeOutdatedHistory();
 	std::map<NetworkAddress, bool> result;
 	for (const auto& peer : FlowTransport::transport().getPeers()) {
 		result[peer] = IFailureMonitor::failureMonitor().getState(peer).isAvailable();
 	}
 	return result;
+}
+
+bool HealthMonitor::tooManyConnectionsClosed(const NetworkAddress& peerAddress) {
+	purgeOutdatedHistory();
+	std::string history;
+	for (const auto& peer : peerClosedHistory) {
+		history += peer.second.toString() + " " + std::to_string(peer.first) + ", ";
+	}
+	return peerClosedNum[peerAddress] > FLOW_KNOBS->HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
 }
