@@ -171,8 +171,12 @@ struct BackupData {
 	}
 
 	void pop() {
-		if (backupEpoch > oldestBackupEpoch) {
+		if (backupEpoch > oldestBackupEpoch || stopped) {
 			// Defer pop if old epoch hasn't finished popping yet.
+			// If stopped because of displacement, do NOT pop as the progress may
+			// not be saved in a timely fashion. As a result, next epoch may still
+			// need to read mutations in the version range. Let the next epoch's
+			// worker do the pop instead.
 			TraceEvent("BackupWorkerPopDeferred", myId)
 			    .suppressFor(1.0)
 			    .detail("BackupEpoch", backupEpoch)
@@ -180,8 +184,7 @@ struct BackupData {
 			    .detail("Version", savedVersion);
 			return;
 		}
-		// ASSERT will be fixed in PR#2642
-		// ASSERT_WE_THINK(backupEpoch == oldest);
+		ASSERT_WE_THINK(backupEpoch == oldestBackupEpoch);
 		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
 		logSystem.get()->pop(savedVersion, popTag);
 	}
@@ -822,7 +825,6 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 				bool hasPseudoLocality = ls.isValid() && ls->hasPseudoLocality(tagLocalityBackup);
 				if (hasPseudoLocality) {
 					self.logSystem.set(ls);
-					self.pop();
 					self.oldestBackupEpoch = std::max(self.oldestBackupEpoch, ls->getOldestBackupEpoch());
 				}
 				TraceEvent("BackupWorkerLogSystem", self.myId)
