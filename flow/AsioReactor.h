@@ -48,6 +48,7 @@ public:
 private:
 	Net2* network;
 	boost::asio::deadline_timer firstTimer;
+	double lastIO = 0;
 
 	static void nullWaitHandler( const boost::system::error_code& ) {}
 	static void nullCompletionHandler() {}
