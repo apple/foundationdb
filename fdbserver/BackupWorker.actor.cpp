@@ -331,6 +331,63 @@ ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool started
 	}
 }
 
+// Set "allWorkerStarted" and "latestBackupWorkerSavedVersion" key for backups
+ACTOR Future<Void> setBackupKeys(BackupData* self, std::vector<UID> ready, std::map<UID, Version> savedLogVersions) {
+	loop {
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			state std::vector<Future<Optional<Value>>> readyValues;
+			state std::vector<BackupConfig> configs;
+			for (UID uid : ready) {
+				configs.emplace_back(uid);
+				readyValues.push_back(tr->get(configs.back().allWorkerStarted().key));
+			}
+
+			state std::vector<Future<Optional<Version>>> prevVersions;
+			state std::vector<BackupConfig> versionConfigs;
+			for (const auto [uid, version] : savedLogVersions) {
+				versionConfigs.emplace_back(uid);
+				prevVersions.push_back(versionConfigs.back().latestBackupWorkerSavedVersion().get(tr));
+			}
+
+			wait(waitForAll(readyValues) && waitForAll(prevVersions));
+
+			for (int i = 0; i < readyValues.size(); i++) {
+				if (!readyValues[i].get().present()) {
+					configs[i].allWorkerStarted().set(tr, true);
+					TraceEvent("BackupWorkerSetReady", self->myId).detail("BackupID", ready[i].toString());
+				}
+			}
+
+			for (int i = 0; i < prevVersions.size(); i++) {
+				const Version current = savedLogVersions[versionConfigs[i].getUid()];
+				if (prevVersions[i].get().present()) {
+					const Version prev = prevVersions[i].get().get();
+					if (prev > current) {
+						TraceEvent(SevWarn, "BackupWorkerVersionInverse", self->myId)
+						    .detail("Prev", prev)
+						    .detail("Current", current);
+					}
+				}
+				if (self->backupEpoch == self->oldestBackupEpoch &&
+				    (!prevVersions[i].get().present() || prevVersions[i].get().get() < current)) {
+					TraceEvent("BackupWorkerSetVersion", self->myId)
+					    .detail("BackupID", versionConfigs[i].getUid())
+					    .detail("Version", current);
+					versionConfigs[i].latestBackupWorkerSavedVersion().set(tr, current);
+				}
+			}
+			wait(tr->commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 // Monitor all backup worker in the recruited epoch has been started. If so,
 // set the "allWorkerStarted" key of the BackupConfig to true, which in turn
 // unblocks StartFullBackupTaskFunc::_execute. Note only worker with Tag (-2,0)
@@ -339,26 +396,24 @@ ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool started
 // the system space so that the client can know if a backup is restorable --
 // log saved version > snapshot version.
 ACTOR Future<Void> monitorAllWorkerProgress(BackupData* self) {
+	state Future<Void> interval;
+
 	loop {
+		interval = delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL / 2.0);
 		while (self->backups.empty() || !self->logSystem.get()) {
-			wait(delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL / 2.0) || self->changedTrigger.onTrigger() ||
-			     self->logSystem.onChange());
+			wait(self->changedTrigger.onTrigger() || self->logSystem.onChange());
 		}
 
 		// check all workers have started by checking their progress is larger
 		// than the backup's start version.
-		state Reference<BackupProgress> progress(
-		    new BackupProgress(self->myId, self->logSystem.get()->getOldEpochTagsVersionsInfo()));
+		state Reference<BackupProgress> progress(new BackupProgress(self->myId, {}));
 		wait(getBackupProgress(self->cx, self->myId, progress));
-		std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
-		std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit =
-		    progress->getUnfinishedBackup();
-		bool finishedPreviousEpochs =
-		    toRecruit.empty() || std::get<0>(toRecruit.begin()->first) == self->recruitedEpoch;
-
+		state std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
+		state bool finishedPreviousEpochs = self->recruitedEpoch == self->oldestBackupEpoch;
 		state std::vector<UID> ready;
 		state std::map<UID, Version> savedLogVersions;
 		if (tagVersions.size() != self->logSystem.get()->getLogRouterTags()) {
+			wait(interval);
 			continue;
 		}
 
@@ -374,7 +429,7 @@ ACTOR Future<Void> monitorAllWorkerProgress(BackupData* self) {
 				continue;
 			}
 			bool saved = true;
-			for (const std::pair<Tag, Version> tv : tagVersions) {
+			for (const std::pair<Tag, Version>& tv : tagVersions) {
 				if (tv.second < info.startVersion) {
 					saved = false;
 					break;
@@ -385,60 +440,10 @@ ACTOR Future<Void> monitorAllWorkerProgress(BackupData* self) {
 				info.allWorkerStarted = true;
 			}
 		}
-		if (ready.empty() && savedLogVersions.empty()) continue;
+		Future<Void> setKeys =
+		    ready.empty() && savedLogVersions.empty() ? Void() : setBackupKeys(self, ready, savedLogVersions);
 
-		// Set "allWorkerStarted" and "latestBackupWorkerSavedVersion" key for backups
-		loop {
-			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-				state std::vector<Future<Optional<Value>>> readyValues;
-				state std::vector<BackupConfig> configs;
-				for (UID uid : ready) {
-					configs.emplace_back(uid);
-					readyValues.push_back(tr->get(configs.back().allWorkerStarted().key));
-				}
-
-				state std::vector<Future<Optional<Version>>> prevVersions;
-				state std::vector<BackupConfig> versionConfigs;
-				for (const auto [uid, version] : savedLogVersions) {
-					versionConfigs.emplace_back(uid);
-					prevVersions.push_back(versionConfigs.back().latestBackupWorkerSavedVersion().get(tr));
-				}
-
-				wait(waitForAll(readyValues) && waitForAll(prevVersions));
-
-				for (int i = 0; i < readyValues.size(); i++) {
-					if (!readyValues[i].get().present()) {
-						configs[i].allWorkerStarted().set(tr, true);
-						TraceEvent("BackupWorkerSetReady", self->myId).detail("BackupID", ready[i].toString());
-					}
-				}
-
-				for (int i = 0; i < prevVersions.size(); i++) {
-					const Version current = savedLogVersions[versionConfigs[i].getUid()];
-					if (prevVersions[i].get().present()) {
-						const Version prev = prevVersions[i].get().get();
-						TraceEvent(SevWarn, "BackupWorkerVersionInverse", self->myId)
-						    .detail("Prev", prev)
-						    .detail("Current", current);
-					}
-					if (self->backupEpoch == self->oldestBackupEpoch &&
-					    (!prevVersions[i].get().present() || prevVersions[i].get().get() < current)) {
-						TraceEvent("BackupWorkerSetVersion", self->myId)
-						    .detail("BackupID", versionConfigs[i].getUid())
-						    .detail("Version", current);
-						versionConfigs[i].latestBackupWorkerSavedVersion().set(tr, current);
-					}
-				}
-				wait(tr->commit());
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
+		wait(interval && setKeys);
 	}
 }
 
