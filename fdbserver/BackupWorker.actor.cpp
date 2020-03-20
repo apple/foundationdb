@@ -153,7 +153,8 @@ struct BackupData {
 			    .detail("Version", savedVersion);
 			return;
 		}
-		ASSERT_WE_THINK(backupEpoch == oldest);
+		// ASSERT will be fixed in PR#2642
+		// ASSERT_WE_THINK(backupEpoch == oldest);
 		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
 		logSystem.get()->pop(savedVersion, popTag);
 	}
