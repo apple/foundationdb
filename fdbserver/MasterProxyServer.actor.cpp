@@ -447,10 +447,8 @@ struct ResolutionRequestBuilder {
 
 		vector<int> resolversUsed;
 		for (int r = 0; r<outTr.size(); r++)
-			if (outTr[r]) {
+			if (outTr[r])
 				resolversUsed.push_back(r);
-				outTr[r]->report_conflicting_keys = trIn.report_conflicting_keys;
-			}
 		transactionResolverMap.push_back(std::move(resolversUsed));
 	}
 };
@@ -821,9 +819,7 @@ ACTOR Future<Void> commitBatch(
 	// Determine which transactions actually committed (conservatively) by combining results from the resolvers
 	state vector<uint8_t> committed(trs.size());
 	ASSERT(transactionResolverMap.size() == committed.size());
-	// For each commitTransactionRef, it is only sent to resolvers specified in transactionResolverMap
-	// Thus, we use this nextTr to track the correct transaction index on each resolver.
-	state vector<int> nextTr(resolution.size());
+	vector<int> nextTr(resolution.size());
 	for (int t = 0; t<trs.size(); t++) {
 		uint8_t commit = ConflictBatch::TransactionCommitted;
 		for (int r : transactionResolverMap[t])
@@ -1155,8 +1151,6 @@ ACTOR Future<Void> commitBatch(
 
 	// Send replies to clients
 	double endTime = g_network->timer();
-	// Reset all to zero, used to track the correct index of each commitTransacitonRef on each resolver
-	std::fill(nextTr.begin(), nextTr.end(), 0);
 	for (int t = 0; t < trs.size(); t++) {
 		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			ASSERT_WE_THINK(commitVersion != invalidVersion);
@@ -1166,25 +1160,8 @@ ACTOR Future<Void> commitBatch(
 			trs[t].reply.sendError(transaction_too_old());
 		}
 		else {
-			// If enable the option to report conflicting keys from resolvers, we send back all keyranges' indices through CommitID
-			if (trs[t].transaction.report_conflicting_keys) {
-				Standalone<VectorRef<int>> conflictingKRIndices;
-				for (int resolverInd : transactionResolverMap[t]) {
-					auto const & cKRs = resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]];
-					for (auto const & rCRIndex : cKRs)
-						conflictingKRIndices.push_back(conflictingKRIndices.arena(), rCRIndex);
-				}
-				// At least one keyRange index should be returned
-				ASSERT(conflictingKRIndices.size());
-				trs[t].reply.send(CommitID(invalidVersion, t, Optional<Value>(), Optional<Standalone<VectorRef<int>>>(conflictingKRIndices)));
-			} else {
-				trs[t].reply.sendError(not_committed());
-			}
+			trs[t].reply.sendError(not_committed());
 		}
-
-		// Update corresponding transaction indices on each resolver
-		for (int resolverInd : transactionResolverMap[t])
-			nextTr[resolverInd]++;
 
 		// TODO: filter if pipelined with large commit
 		if(self->latencyBandConfig.present()) {
