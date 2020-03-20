@@ -326,7 +326,7 @@ public:
 		++g_net2->countWriteProbes;
 		BindPromise p("N2_WriteProbeError", id);
 		auto f = p.getFuture();
-		socket.async_write_some( boost::asio::null_buffers(), std::move(p) );
+		socket.async_wait( tcp::socket::wait_write, std::move(p) );
 		return f;
 	}
 
@@ -335,7 +335,7 @@ public:
 		++g_net2->countReadProbes;
 		BindPromise p("N2_ReadProbeError", id);
 		auto f = p.getFuture();
-		socket.async_read_some( boost::asio::null_buffers(), std::move(p) );
+		socket.async_wait( tcp::socket::wait_read, std::move(p) );
 		return f;
 	}
 
@@ -665,7 +665,7 @@ public:
 		++g_net2->countWriteProbes;
 		BindPromise p("N2_WriteProbeError", id);
 		auto f = p.getFuture();
-		socket.async_write_some( boost::asio::null_buffers(), std::move(p) );
+		socket.async_wait( tcp::socket::wait_write, std::move(p) );
 		return f;
 	}
 
@@ -674,7 +674,7 @@ public:
 		++g_net2->countReadProbes;
 		BindPromise p("N2_ReadProbeError", id);
 		auto f = p.getFuture();
-		socket.async_read_some( boost::asio::null_buffers(), std::move(p) );
+		socket.async_wait( tcp::socket::wait_read, std::move(p) );
 		return f;
 	}
 
