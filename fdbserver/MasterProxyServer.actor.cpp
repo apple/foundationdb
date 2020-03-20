@@ -98,7 +98,8 @@ struct ProxyStats {
 };
 
 ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, double* outTransactionRate,
-						   double* outBatchTransactionRate, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply) {
+						   double* outBatchTransactionRate, std::map<Standalone<StringRef>, double> *throttledTags, std::map<Standalone<StringRef>, double> *throttledBatchTags, 
+						   GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -138,6 +139,9 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 				detailedHealthMetricsReply->update(rep.healthMetrics, true, true);
 				lastDetailedReply = now();
 			}
+
+			*throttledTags = std::move(rep.throttledTags);
+			*throttledBatchTags = std::move(rep.throttledBatchTags);
 		}
 		when ( wait( leaseTimeout ) ) {
 			*outTransactionRate = 0;
@@ -151,6 +155,8 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 struct TransactionRateInfo {
 	double rate;
 	double limit;
+
+	std::map<Standalone<StringRef>, double> throttledTags; // TODO: unordered map?
 
 	TransactionRateInfo(double rate) : rate(rate), limit(0) {}
 
@@ -177,6 +183,8 @@ ACTOR Future<Void> queueTransactionStartRequests(
 	FutureStream<GetReadVersionRequest> readVersionRequests,
 	PromiseStream<Void> GRVTimer, double *lastGRVTime,
 	double *GRVBatchTime, FutureStream<double> replyTimes,
+	std::map<Standalone<StringRef>, double> *throttledTags,
+	std::map<Standalone<StringRef>, double> *throttledBatchTags,
 	ProxyStats* stats, TransactionRateInfo* batchRateInfo) 
 {
 	loop choose{
@@ -193,6 +201,21 @@ ACTOR Future<Void> queueTransactionStartRequests(
 			} else {
 				if (req.debugID.present())
 					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterProxyServer.queueTransactionStartRequests.Before");
+
+				if(req.priority() != GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
+					double maxThrottle = 0;
+					std::map<Standalone<StringRef>, double> *tagsToCheck = (req.priority() == GetReadVersionRequest::PRIORITY_DEFAULT) ? throttledTags : throttledBatchTags;
+					for(auto& tag : req.tags) {
+						auto itr = tagsToCheck->find(tag);
+						if(itr != tagsToCheck->end()) { 
+							maxThrottle = std::max(maxThrottle, itr->second);
+						}
+					}
+					if(deterministicRandom()->random01() < maxThrottle) {
+						req.reply.sendError(tag_throttled());
+						continue;
+					}
+				}
 
 				if (systemQueue->empty() && defaultQueue->empty() && batchQueue->empty()) {
 					forwardPromise(GRVTimer, delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)), TaskPriority::ProxyGRVTimer));
@@ -1306,10 +1329,10 @@ ACTOR static Future<Void> transactionStarter(
 	state vector<MasterProxyInterface> otherProxies;
 
 	state PromiseStream<double> replyTimes;
-	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate, &batchRateInfo.rate, healthMetricsReply, detailedHealthMetricsReply));
-	addActor.send(queueTransactionStartRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(),
-	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(),
-	                                            &commitData->stats, &batchRateInfo));
+	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate, &batchRateInfo.rate, &normalRateInfo.throttledTags, &batchRateInfo.throttledTags, healthMetricsReply, detailedHealthMetricsReply));
+	addActor.send(queueTransactionStartRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(), 
+	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &normalRateInfo.throttledTags, 
+	                                            &batchRateInfo.throttledTags, &commitData->stats, &batchRateInfo));
 
 	// Get a list of the other proxies that go together with us
 	while (std::find(db->get().client.proxies.begin(), db->get().client.proxies.end(), proxy) == db->get().client.proxies.end())

@@ -449,6 +449,72 @@ public:
 		return val;
 	}
 
+	struct TagCounters {
+		struct TagInfo {
+			Standalone<StringRef> tag;
+			int64_t count;
+			double fractionalBusyness;
+			double elapsed;
+
+			TagInfo(Standalone<StringRef> const& tag, int64_t count, int64_t totalCount, double elapsed) 
+			  : tag(tag), count(count), fractionalBusyness((double)count/totalCount), elapsed(elapsed) {}
+		};
+
+		std::map<Standalone<StringRef>, int64_t> intervalCounts; // TODO: use a hash for performance
+		int64_t intervalTotalCount = 0;
+		Standalone<StringRef> busiestTag;
+		int64_t busiestTagCount = 0;
+		double intervalStart = 0;
+
+		Optional<TagInfo> previousBusiestTag;
+
+		void increment(Standalone<VectorRef<StringRef>> tags, int64_t delta) {
+			// TODO: sampling could be done on the client, but it would probably need to be controlled
+			// via a message from the cluster
+			if(deterministicRandom()->random01() <= SERVER_KNOBS->READ_TAG_SAMPLE_RATE) {
+				for(auto& tag : tags) {
+					int64_t &count = intervalCounts[Standalone<StringRef>(tag, tags.arena())];
+					count += delta;
+					if(count > busiestTagCount) {
+						busiestTagCount = count;
+						busiestTag = tag;
+					}
+				}
+
+				intervalTotalCount += delta;
+			}
+		}
+
+		void startNewInterval(UID id) {
+			double elapsed = now() - intervalStart;
+			if(intervalStart > 0 && busiestTagCount >= SERVER_KNOBS->MIN_TAG_PAGES_READ_RATE * elapsed) {
+				previousBusiestTag = TagInfo(busiestTag, busiestTagCount, intervalTotalCount, elapsed);
+			}
+			else {
+				previousBusiestTag.reset();
+			}
+
+			// TODO: report in status
+			TraceEvent("BusiestReadTag", id)
+				.detail("Elapsed", elapsed)
+				.detail("Tag", printable(busiestTag))
+				.detail("TagCount", busiestTagCount)
+				.detail("TotalCount", intervalTotalCount)
+				.detail("Reported", previousBusiestTag.present());
+
+			intervalCounts.clear();
+			intervalTotalCount = 0;
+			busiestTagCount = 0;
+			intervalStart = now();
+		}
+
+		Optional<TagInfo> getBusiestTag() const {
+			return previousBusiestTag;
+		}
+	};
+
+	TagCounters tagCounters;
+
 	Optional<LatencyBandConfig> latencyBandConfig;
 
 	struct Counters {
@@ -909,6 +975,8 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
+	data->tagCounters.increment(req.tags, (resultSize / 4096) + 1);
+
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
 	if(data->latencyBandConfig.present()) {
@@ -934,7 +1002,7 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 			try {
 				state Version latest = data->data().latestVersion;
 				state Future<Void> watchFuture = data->watches.onChange(req.key);
-				GetValueRequest getReq( req.key, latest, req.debugID );
+				GetValueRequest getReq( req.key, latest, req.tags, req.debugID );
 				state Future<Void> getValue = getValueQ( data, getReq ); //we are relying on the delay zero at the top of getValueQ, if removed we need one here
 				GetValueReply reply = wait( getReq.reply.getFuture() );
 				//TraceEvent("WatcherCheckValue").detail("Key",  req.key  ).detail("Value",  req.value  ).detail("CurrentValue",  v  ).detail("Ver", latest);
@@ -1453,6 +1521,7 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
+	data->tagCounters.increment(req.tags, (resultSize / 4096) + 1);
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
 
@@ -1512,6 +1581,7 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
+	data->tagCounters.increment(req.tags, (resultSize/4096) + 1);
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
 	if(data->latencyBandConfig.present()) {
@@ -1538,6 +1608,12 @@ void getQueuingMetrics( StorageServer* self, StorageQueuingMetricsRequest const&
 	reply.cpuUsage = self->cpuUsage;
 	reply.diskUsage = self->diskUsage;
 	reply.durableVersion = self->durableVersion.get();
+
+	Optional<StorageServer::TagCounters::TagInfo> busiestTag = self->tagCounters.getBusiestTag();
+	reply.busiestTag = busiestTag.map<Standalone<StringRef>>([](StorageServer::TagCounters::TagInfo tagInfo) { return tagInfo.tag; });
+	reply.busiestTagFractionalBusyness = busiestTag.present() ? busiestTag.get().fractionalBusyness : 0.0;
+	reply.busiestTagRate = busiestTag.present() ? busiestTag.get().count / busiestTag.get().elapsed : 0.0;
+
 	req.reply.send( reply );
 }
 
@@ -3544,6 +3620,9 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	actors.add(metricsCore(self, ssi));
 	actors.add(logLongByteSampleRecovery(self->byteSampleRecovery));
 	actors.add(checkBehind(self));
+
+	self->tagCounters.startNewInterval(self->thisServerID);
+	actors.add(recurring([this](){ self->tagCounters.startNewInterval(self->thisServerID); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send( Void() );
 

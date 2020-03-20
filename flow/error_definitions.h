@@ -89,6 +89,7 @@ ERROR( master_proxy_failed, 1209, "Master terminating because a Proxy failed" )
 ERROR( master_resolver_failed, 1210, "Master terminating because a Resolver failed" )
 ERROR( server_overloaded, 1211, "Server is under too much load and cannot respond" )
 ERROR( master_backup_worker_failed, 1212, "Master terminating because a backup worker failed")
+ERROR( tag_throttled, 1213, "Transaction tag is being throttled" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

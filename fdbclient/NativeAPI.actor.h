@@ -129,6 +129,8 @@ struct TransactionOptions {
 	bool firstInBatch : 1;
 	bool includePort : 1;
 
+	Standalone<VectorRef<StringRef>> tags;
+
 	TransactionOptions(Database const& cx);
 	TransactionOptions();
 

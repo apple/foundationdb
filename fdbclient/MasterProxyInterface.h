@@ -182,18 +182,20 @@ struct GetReadVersionRequest : TimedRequest {
 
 	uint32_t transactionCount;
 	uint32_t flags;
+	Standalone<VectorRef<StringRef>> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
 	GetReadVersionRequest() : transactionCount( 1 ), flags( PRIORITY_DEFAULT ) {}
-	GetReadVersionRequest( uint32_t transactionCount, uint32_t flags, Optional<UID> debugID = Optional<UID>() ) : transactionCount( transactionCount ), flags( flags ), debugID( debugID ) {}
+	GetReadVersionRequest( uint32_t transactionCount, uint32_t flags, Standalone<VectorRef<StringRef>> tags = Standalone<VectorRef<StringRef>>(), Optional<UID> debugID = Optional<UID>() ) 
+	    : transactionCount( transactionCount ), flags( flags ), tags(tags), debugID( debugID ) {}
 	
 	int priority() const { return flags & FLAG_PRIORITY_MASK; }
 	bool operator < (GetReadVersionRequest const& rhs) const { return priority() < rhs.priority(); }
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, transactionCount, flags, debugID, reply);
+		serializer(ar, transactionCount, flags, tags, debugID, reply);
 	}
 };
 
