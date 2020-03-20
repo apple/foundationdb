@@ -1,5 +1,5 @@
 add_subdirectory(fmt)
 add_executable(TestHarness TestHarness.cpp Events.h Events.cpp)
-target_link_libraries(TestHarness PRIVATE fmt)
+target_link_libraries(TestHarness PRIVATE fmt Threads::Threads)
 target_include_directories(TestHarness PRIVATE ${CMAKE_SOURCE_DIR}/fdbclient/rapidxml)
 target_include_directories(TestHarness PRIVATE ${CMAKE_SOURCE_DIR}/fdbclient/rapidjson)

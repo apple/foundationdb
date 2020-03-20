@@ -22,6 +22,7 @@
 #include <limits>
 #include <memory>
 #include <random>
+#include <stack>
 #include <string_view>
 #include <string>
 #include <utility>

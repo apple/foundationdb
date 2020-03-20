@@ -22,6 +22,7 @@
 #include "fmt/core.h"
 #include "fmt/ostream.h"
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cctype>
 #include <chrono>
@@ -65,7 +66,9 @@
 #include <exception>
 #include <thread>
 #include <regex>
+#ifndef __USE_POSIX
 #define __USE_POSIX
+#endif
 #include <limits.h>
 #ifndef HOST_NAME_MAX
 #if defined(_POSIX_HOST_NAME_MAX)
