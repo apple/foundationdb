@@ -153,6 +153,8 @@ struct BackupData {
 			    .detail("Version", savedVersion);
 			return;
 		}
+		// ASSERT will be fixed in PR#2642
+		// ASSERT_WE_THINK(backupEpoch == oldest);
 		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
 		logSystem.get()->pop(savedVersion, popTag);
 	}
@@ -380,7 +382,7 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile, VersionedMessage 
 }
 
 // Saves messages in the range of [0, numMsg) to a file and then remove these
-// messages. The file format is a sequence of (Version, sub#, msgSize, message).
+// messages. The file content format is a sequence of (Version, sub#, msgSize, message).
 // Note only ready backups are saved.
 ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
 	state int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
@@ -496,9 +498,8 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			return Void();
 		}
 
-		// FIXME: knobify the delay of 10s. This delay is sensitive, as it is the
-		// lag TLog might have. Changing to 20s may fail consistency check.
-		state Future<Void> uploadDelay = delay(10);
+		// Too large uploadDelay will delay popping tLog data for too long.
+		state Future<Void> uploadDelay = delay(SERVER_KNOBS->BACKUP_UPLOAD_DELAY);
 
 		const Version maxPopVersion =
 		    self->endVersion.present() ? self->endVersion.get() : self->minKnownCommittedVersion;
@@ -508,6 +509,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		} else {
 			state int numMsg = 0;
 			for (const auto& message : self->messages) {
+				// message may be prefetched in peek; uncommitted message should not be uploaded.
 				if (message.getVersion() > maxPopVersion) break;
 				popVersion = std::max(popVersion, message.getVersion());
 				numMsg++;
