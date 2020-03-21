@@ -41,6 +41,7 @@ ACTOR Future<Version> minVersionWhenReady(Future<Void> f, std::vector<Future<TLo
 	return minVersion;
 }
 
+// TagPartitionedLogSystem info in old epoch
 struct OldLogData {
 	std::vector<Reference<LogSet>> tLogs;
 	int32_t logRouterTags;
@@ -165,7 +166,7 @@ OldTLogCoreData::OldTLogCoreData(const OldLogData& oldData)
 struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
 	const UID dbgid;
 	LogSystemType logSystemType;
-	std::vector<Reference<LogSet>> tLogs;
+	std::vector<Reference<LogSet>> tLogs; // LogSets in different locations: primary, remote or satellite
 	int expectedLogSets;
 	int logRouterTags;
 	int txsTags;
@@ -196,7 +197,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	std::map< std::pair<UID, Tag>, std::pair<Version, Version> > outstandingPops;  // For each currently running popFromLog actor, (log server #, tag)->popped version
 	Optional<PromiseStream<Future<Void>>> addActor;
 	ActorCollection popActors;
-	std::vector<OldLogData> oldLogData;
+	std::vector<OldLogData> oldLogData; // each element has the log info. in one old epoch.
 	AsyncTrigger logSystemConfigChanged;
 
 	TagPartitionedLogSystem(UID dbgid, LocalityData locality, LogEpoch e,
@@ -1059,24 +1060,32 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	void pop(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality) override {
 		if (upTo <= 0) return;
-		if( tag.locality == tagLocalityRemoteLog) {
+		if (tag.locality == tagLocalityRemoteLog) {
 			popLogRouter(upTo, tag, durableKnownCommittedVersion, popLocality);
 			return;
 		}
-		for(auto& t : tLogs) {
-			if(t->locality == tagLocalitySpecial || t->locality == tag.locality || tag.locality == tagLocalityUpgraded || (tag.locality < 0 && ((popLocality == tagLocalityInvalid) == t->isLocal))) {
+		for (auto& t : tLogs) {
+			if (t->locality == tagLocalitySpecial || t->locality == tag.locality ||
+			    tag.locality == tagLocalityUpgraded ||
+			    (tag.locality < 0 && ((popLocality == tagLocalityInvalid) == t->isLocal))) {
 				for(auto& log : t->logServers) {
 					Version prev = outstandingPops[std::make_pair(log->get().id(),tag)].first;
-					if (prev < upTo)
+					if (prev < upTo) {
+						// update pop version for popFromLog actor
 						outstandingPops[std::make_pair(log->get().id(),tag)] = std::make_pair(upTo, durableKnownCommittedVersion);
-					if (prev == 0)
+					}
+					if (prev == 0) {
+						// pop tag from log upto version defined in outstandingPops[].first
 						popActors.add( popFromLog( this, log, tag, 1.0 ) ); //< FIXME: knob
+					}
 				}
 			}
 		}
 	}
 
-	ACTOR static Future<Void> popFromLog( TagPartitionedLogSystem* self, Reference<AsyncVar<OptionalInterface<TLogInterface>>> log, Tag tag, double time ) {
+	ACTOR static Future<Void> popFromLog(TagPartitionedLogSystem* self,
+	                                     Reference<AsyncVar<OptionalInterface<TLogInterface>>> log, Tag tag,
+	                                     double time) {
 		state Version last = 0;
 		loop {
 			wait( delay(time, TaskPriority::TLogPop) );
@@ -2363,7 +2372,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					}
 				}
 			}
-			
+
 			for( int i = 0; i < recr.satelliteTLogs.size(); i++ ) {
 				InitializeTLogRequest &req = sreqs[i];
 				req.recruitmentID = logSystem->recruitmentID;

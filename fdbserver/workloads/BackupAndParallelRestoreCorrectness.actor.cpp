@@ -440,6 +440,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					} else if (deterministicRandom()->random01() < 0.1) {
 						targetVersion = desc.maxRestorableVersion.get();
 					} else if (deterministicRandom()->random01() < 0.5) {
+						ASSERT_WE_THINK(desc.minRestorableVersion.get() <= desc.contiguousLogEnd.get());
+						ASSERT_WE_THINK(desc.contiguousLogEnd.get() <= desc.maxRestorableVersion.get());
 						targetVersion = deterministicRandom()->randomInt64(desc.minRestorableVersion.get(),
 						                                                   desc.contiguousLogEnd.get());
 					}

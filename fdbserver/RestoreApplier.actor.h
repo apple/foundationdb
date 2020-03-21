@@ -97,6 +97,7 @@ struct StagingKey {
 	}
 
 	// Precompute the final value of the key.
+	// TODO: Look at the last LogMessageVersion, if it set or clear, we can ignore the rest of versions.
 	void precomputeResult() {
 		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult")
 		    .detail("Key", key)

@@ -71,8 +71,8 @@ struct BackupData {
 	const Version startVersion;
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch;
-	const LogEpoch backupEpoch;
-	LogEpoch oldestBackupEpoch = 0;
+	const LogEpoch backupEpoch; // most recent active epoch whose tLogs are receiving mutations
+	LogEpoch oldestBackupEpoch = 0; // oldest epoch that still has data on tLogs for backup to pull
 	Version minKnownCommittedVersion;
 	Version savedVersion;
 	AsyncVar<Reference<ILogSystem>> logSystem;
@@ -820,6 +820,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 				if (hasPseudoLocality) {
 					self.logSystem.set(ls);
 					self.pop();
+					// Q: When will self.oldestBackupEpoch > ls->getOldestBackupEpoch()
 					self.oldestBackupEpoch = std::max(self.oldestBackupEpoch, ls->getOldestBackupEpoch());
 				}
 				TraceEvent("BackupWorkerLogSystem", self.myId)
