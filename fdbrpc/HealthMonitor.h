@@ -32,10 +32,8 @@ public:
 	void reportPeerClosed(const NetworkAddress& peerAddress);
 	const std::deque<std::pair<double, NetworkAddress>>& getPeerClosedHistory();
 	bool tooManyConnectionsClosed(const NetworkAddress& peerAddress);
-
+	int closedConnectionsCount(const NetworkAddress& peerAddress);
 	std::map<NetworkAddress, bool> getPeerStatus();
-
-	std::map<NetworkAddress, bool> delayed;
 private:
 	void purgeOutdatedHistory();
 

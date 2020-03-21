@@ -404,19 +404,23 @@ ACTOR Future<Void> delayedHealthUpdate(NetworkAddress address) {
 		state int count = 0;
 		loop {
 			if (FlowTransport::transport().healthMonitor()->tooManyConnectionsClosed(address) && address.isPublic()) {
-				if (count == 0)
+				if (count == 0) {
 					TraceEvent("TooManyConnectionsClosedMarkFailed")
 					    .detail("Dest", address)
-					    .detail("StartTime", start);
-				IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(true));
-				FlowTransport::transport().healthMonitor()->delayed[address] = true;
-				wait (delayJittered(FLOW_KNOBS->HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS/4.0));
+					    .detail("StartTime", start)
+					    .detail("ClosedCount",
+					            FlowTransport::transport().healthMonitor()->closedConnectionsCount(address));
+					IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(true));
+				}
+				wait(delayJittered(FLOW_KNOBS->MAX_RECONNECTION_TIME * 2.0));
 			} else {
 				if (count > 1)
 					TraceEvent("TooManyConnectionsClosedMarkAvailable")
 					    .detail("Dest", address)
-					    .detail("StartTime", start);
-				FlowTransport::transport().healthMonitor()->delayed[address] = false;
+					    .detail("StartTime", start)
+					    .detail("TimeElapsed", now() - start)
+					    .detail("ClosedCount",
+					            FlowTransport::transport().healthMonitor()->closedConnectionsCount(address));
 				IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(false));
 				break;
 			}
@@ -424,9 +428,6 @@ ACTOR Future<Void> delayedHealthUpdate(NetworkAddress address) {
 		}
 		return Void();
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) {
-			FlowTransport::transport().healthMonitor()->delayed[address] = false;
-		}
 		throw e;
 	}
 }
@@ -460,7 +461,10 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 															now()))); // Don't connect() to the same peer more than once per 2 sec
 				self->lastConnectTime = now();
 
-				TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
+				TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID())
+				    .suppressFor(1.0)
+				    .detail("PeerAddr", self->destination)
+				    .detail("PeerReferences", self->peerReferences);
 
 				try {
 					choose {
@@ -470,7 +474,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 							wait(conn->connectHandshake());
 							if (self->unsent.empty()) {
 								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
-								FlowTransport::transport().healthMonitor()->delayed[self->destination] = false;
 								conn->close();
 								conn = Reference<IConnection>();
 								continue;
@@ -1152,9 +1155,7 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
 
 	if(peer->peerReferences == -1) {
-		if (!FlowTransport::transport().healthMonitor()->delayed[endpoint.getPrimaryAddress()]) {
-			IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
-		}
+		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 		peer->peerReferences = 1;
 	} else {
 		peer->peerReferences++;

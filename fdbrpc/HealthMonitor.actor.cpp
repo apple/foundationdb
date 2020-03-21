@@ -56,9 +56,10 @@ std::map<NetworkAddress, bool> HealthMonitor::getPeerStatus() {
 
 bool HealthMonitor::tooManyConnectionsClosed(const NetworkAddress& peerAddress) {
 	purgeOutdatedHistory();
-	std::string history;
-	for (const auto& peer : peerClosedHistory) {
-		history += peer.second.toString() + " " + std::to_string(peer.first) + ", ";
-	}
 	return peerClosedNum[peerAddress] > FLOW_KNOBS->HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
+}
+
+int HealthMonitor::closedConnectionsCount(const NetworkAddress& peerAddress) {
+	purgeOutdatedHistory();
+	return peerClosedNum[peerAddress];
 }
