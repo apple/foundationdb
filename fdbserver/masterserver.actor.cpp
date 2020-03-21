@@ -1245,6 +1245,35 @@ ACTOR Future<Void> configurationMonitor(Reference<MasterData> self, Database cx)
 	}
 }
 
+ACTOR static Future<Optional<Version>> getMinBackupVersion(Reference<MasterData> self, Database cx) {
+	loop {
+		state ReadYourWritesTransaction tr(cx);
+
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> value = wait(tr.get(backupStartedKey));
+			Optional<Version> minVersion;
+			if (value.present()) {
+				auto uidVersions = decodeBackupStartedValue(value.get());
+				TraceEvent e("GotBackupStartKey", self->dbgid);
+				int i = 1;
+				for (auto [uid, version] : uidVersions) {
+					e.detail(format("BackupID%d", i), uid).detail(format("Version%d", i), version);
+					i++;
+					minVersion = minVersion.present() ? std::min(version, minVersion.get()) : version;
+				}
+			} else {
+				TraceEvent("EmptyBackupStartKey", self->dbgid);
+			}
+			return minVersion;
+
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Database cx) {
 	ASSERT(self->backupWorkers.size() > 0);
 
@@ -1274,7 +1303,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 		req.totalTags = logRouterTags;
 		req.startVersion = startVersion;
 		TraceEvent("BackupRecruitment", self->dbgid)
-		    .detail("BKID", req.reqId)
+		    .detail("RequestID", req.reqId)
 		    .detail("Tag", req.routerTag.toString())
 		    .detail("Epoch", epoch)
 		    .detail("BackupEpoch", epoch)
@@ -1285,10 +1314,21 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 		                    master_backup_worker_failed()));
 	}
 
-	wait(gotProgress);
+	state Future<Optional<Version>> fMinVersion = getMinBackupVersion(self, cx);
+	wait(gotProgress && success(fMinVersion));
+
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit =
 	    backupProgress->getUnfinishedBackup();
 	for (const auto& [epochVersionCount, tagVersions] : toRecruit) {
+		const Version oldEpochEnd = std::get<1>(epochVersionCount);
+		if (!fMinVersion.get().present() || fMinVersion.get().get() >= oldEpochEnd) {
+			TraceEvent("SkipBackupRecruitment", self->dbgid)
+			    .detail("MinVersion", fMinVersion.get().get())
+			    .detail("Epoch", epoch)
+			    .detail("OldEpoch", std::get<0>(epochVersionCount))
+			    .detail("OldEpochEnd", oldEpochEnd);
+			continue;
+		}
 		for (const auto& [tag, version] : tagVersions) {
 			const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
 			i++;
@@ -1298,9 +1338,9 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 			req.routerTag = tag;
 			req.totalTags = std::get<2>(epochVersionCount);
 			req.startVersion = version; // savedVersion + 1
-			req.endVersion = std::get<1>(epochVersionCount) - 1;
+			req.endVersion = oldEpochEnd - 1;
 			TraceEvent("BackupRecruitment", self->dbgid)
-			    .detail("BKID", req.reqId)
+			    .detail("RequestID", req.reqId)
 			    .detail("Tag", req.routerTag.toString())
 			    .detail("Epoch", epoch)
 			    .detail("BackupEpoch", req.backupEpoch)

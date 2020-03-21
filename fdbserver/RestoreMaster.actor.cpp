@@ -286,8 +286,8 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 		       std::tie(f2.endVersion, f2.beginVersion, f2.fileIndex, f2.fileName);
 	});
 
-	self->buildVersionBatches(rangeFiles, logFiles, &self->versionBatches,
-	                          targetVersion); // Divide files into version batches
+	// Divide files into version batches.
+	self->buildVersionBatches(rangeFiles, logFiles, &self->versionBatches, targetVersion);
 	self->dumpVersionBatches(self->versionBatches);
 
 	state std::vector<Future<Void>> fBatches;
@@ -683,12 +683,14 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 
 	// Convert version to real time for operators to read the BackupDescription desc.
 	wait(desc.resolveVersionTimes(cx));
-	TraceEvent("FastRestoreMasterPhaseCollectBackupFilesStart").detail("BackupDesc", desc.toString());
 
 	if (request.targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
 		request.targetVersion = desc.maxRestorableVersion.get();
 	}
 
+	TraceEvent("FastRestoreMasterPhaseCollectBackupFilesStart")
+	    .detail("TargetVersion", request.targetVersion)
+	    .detail("BackupDesc", desc.toString());
 	if (g_network->isSimulated()) {
 		std::cout << "Restore to version: " << request.targetVersion << "\nBackupDesc: \n" << desc.toString() << "\n\n";
 	}
