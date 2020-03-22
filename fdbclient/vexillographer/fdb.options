@@ -128,9 +128,12 @@ description is not currently required but encouraged.
             description="This option is set automatically on all clients loaded externally using the multi-version API." 
             hidden="true" />
     <Option name="external_client_transport_id" code="1002"
-            description="This option tells a child on a multiversion client what transport ID to use."
             paramType="Int" paramDescription="Transport ID for the child connection"
+            description="This option tells a child on a multiversion client what transport ID to use."
             hidden="true" />
+    <Option name="client_id" code="1003"
+            paramType="String" paramDesciption="Client ID to be included in trace lines"
+            description="This option inclues a client identifier in trace lines" />
   </Scope>
 
   <Scope name="DatabaseOption">

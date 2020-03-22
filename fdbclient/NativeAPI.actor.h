@@ -61,6 +61,7 @@ struct NetworkOptions {
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool slowTaskProfilingEnabled;
+	std::string clientID;
 
 	NetworkOptions();
 };

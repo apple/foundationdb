@@ -587,7 +587,8 @@ struct EventCacheHolder : public ReferenceCounted<EventCacheHolder> {
 #endif
 
 struct NetworkAddress;
-void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogsSize, std::string directory = ".", std::string baseOfBase = "trace", std::string logGroup = "default");
+void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogsSize, std::string directory = ".",
+                   std::string baseOfBase = "trace", std::string logGroup = "default", std::string clientID = "");
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();

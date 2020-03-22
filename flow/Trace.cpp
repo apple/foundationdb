@@ -144,6 +144,7 @@ private:
 	int64_t preopenOverflowCount;
 	std::string basename;
 	std::string logGroup;
+	std::string clientID;
 
 	std::string directory;
 	std::string processName;
@@ -341,13 +342,16 @@ public:
 
 	bool isOpen() const { return opened; }
 
-	void open( std::string const& directory, std::string const& processName, std::string logGroup, std::string const& timestamp, uint64_t rs, uint64_t maxLogsSize, Optional<NetworkAddress> na ) {
+	void open(std::string const& directory, std::string const& processName, std::string logGroup,
+	          std::string const& timestamp, uint64_t rs, uint64_t maxLogsSize, Optional<NetworkAddress> na,
+	          std::string clientID) {
 		ASSERT( !writer && !opened );
 
 		this->directory = directory;
 		this->processName = processName;
 		this->logGroup = logGroup;
 		this->localAddress = na;
+		this->clientID = clientID;
 
 		basename = format("%s/%s.%s.%s", directory.c_str(), processName.c_str(), timestamp.c_str(), deterministicRandom()->randomAlphaNumeric(6).c_str());
 		logWriter = Reference<ITraceLogWriter>(new FileTraceLogWriter(directory, processName, basename,
@@ -398,6 +402,10 @@ public:
 		RoleInfo const& r = mutateRoleInfo();
 		if(r.rolesString.size() > 0) {
 			fields.addField("Roles", r.rolesString);
+		}
+
+		if (!clientID.empty()) {
+			fields.addField("ClientID", clientID);
 		}
 	}
 
@@ -711,7 +719,8 @@ void flushTraceFileVoid() {
 	}
 }
 
-void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogsSize, std::string directory, std::string baseOfBase, std::string logGroup) {
+void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogsSize, std::string directory,
+                   std::string baseOfBase, std::string logGroup, std::string clientID) {
 	if(g_traceLog.isOpen())
 		return;
 
@@ -724,7 +733,8 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 	std::string ip = na.ip.toString();
 	std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
 	std::string baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.port);
-	g_traceLog.open( directory, baseName, logGroup, format("%lld", time(NULL)), rollsize, maxLogsSize, !g_network->isSimulated() ? na : Optional<NetworkAddress>());
+	g_traceLog.open(directory, baseName, logGroup, format("%lld", time(NULL)), rollsize, maxLogsSize,
+	                !g_network->isSimulated() ? na : Optional<NetworkAddress>(), clientID);
 
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
 	g_traceBatch.dump();
