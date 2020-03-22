@@ -85,7 +85,14 @@ struct BackupData {
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
-		PerBackupInfo(BackupData* data, Version v) : self(data), startVersion(v) {}
+		PerBackupInfo(BackupData* data, UID uid, Version v) : self(data), startVersion(v) {
+			// Open the container and get key ranges
+			BackupConfig config(uid);
+			container = config.backupContainer().get(data->cx);
+			ranges = config.backupRanges().get(data->cx);
+			updateWorker = _updateStartedWorkers(this, data, uid);
+			TraceEvent("BackupWorkerAddJob", data->myId).detail("BackupID", uid).detail("Version", v);
+		}
 
 		bool isReady() const {
 			return stopped || (container.isReady() && ranges.isReady());
@@ -101,12 +108,78 @@ struct BackupData {
 			return Void();
 		}
 
+		// Update the number of backup workers in the BackupConfig. Each worker
+		// writes (epoch, tag.id) into the key. Worker 0 monitors the key and once
+		// all workers have updated the key, this backup is considered as started
+		// (i.e., the "submitBackup" call is successful). Worker 0 then sets
+		// the "allWorkerStarted" flag.
+		ACTOR static Future<Void> _updateStartedWorkers(PerBackupInfo* info, BackupData* self, UID uid) {
+			state BackupConfig config(uid);
+			state Future<Void> watchFuture;
+			state bool updated = false; // worker 0 has updated
+			state bool firstWorker = info->self->tag.id == 0;
+			state bool allUpdated = false;
+			state Optional<std::vector<std::pair<int64_t, int64_t>>> workers;
+
+			loop {
+				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+					Optional<std::vector<std::pair<int64_t, int64_t>>> tmp =
+					    wait(config.startedBackupWorkers().get(tr));
+					workers = tmp;
+					if (!updated) {
+						if (workers.present()) {
+							workers.get().emplace_back(self->recruitedEpoch, (int64_t)self->tag.id);
+						} else {
+							std::vector<std::pair<int64_t, int64_t>> v(1, { self->recruitedEpoch, self->tag.id });
+							workers = Optional<std::vector<std::pair<int64_t, int64_t>>>(v);
+						}
+					}
+					if (firstWorker) {
+						std::vector<std::pair<int64_t, int64_t>>& v = workers.get();
+						v.erase(std::remove_if(v.begin(), v.end(),
+						                       [epoch = self->recruitedEpoch](const std::pair<LogEpoch, int32_t>& p) {
+							                       return p.first != epoch;
+						                       }),
+						        v.end());
+						if (self->totalTags == v.size()) {
+							config.allWorkerStarted().set(tr, true);
+							allUpdated = true;
+						} else {
+							// monitor all workers' updates
+							watchFuture = tr->watch(config.startedBackupWorkers().key);
+						}
+						config.startedBackupWorkers().set(tr, workers.get());
+						wait(tr->commit());
+
+						updated = true; // Only set to true after commit.
+						if (allUpdated) {
+							break;
+						}
+						wait(watchFuture);
+					} else {
+						config.startedBackupWorkers().set(tr, workers.get());
+						wait(tr->commit());
+						break;
+					}
+				} catch (Error& e) {
+					wait(tr->onError(e));
+					allUpdated = false;
+				}
+			}
+			TraceEvent("BackupWorkerSetReady", self->myId).detail("BackupID", uid.toString());
+			return Void();
+		}
+
 		BackupData* self = nullptr;
 		Version startVersion = invalidVersion;
 		Version lastSavedVersion = invalidVersion;
 		Future<Optional<Reference<IBackupContainer>>> container;
 		Future<Optional<std::vector<KeyRange>>> ranges; // Key ranges of this backup
-		bool allWorkerStarted = false; // Only worker with Tag(-2,0) uses & sets this field
+		Future<Void> updateWorker;
 		bool stopped = false; // Is the backup stopped?
 	};
 
@@ -210,18 +283,11 @@ struct BackupData {
 		}
 
 		bool modified = false;
-		for (const auto uidVersion : uidVersions) {
-			const UID uid = uidVersion.first;
-
+		for (const auto [uid, version] : uidVersions) {
 			auto it = backups.find(uid);
 			if (it == backups.end()) {
 				modified = true;
-				auto inserted = backups.emplace(uid, BackupData::PerBackupInfo(this, uidVersion.second));
-
-				// Open the container and get key ranges
-				BackupConfig config(uid);
-				inserted.first->second.container = config.backupContainer().get(cx);
-				inserted.first->second.ranges = config.backupRanges().get(cx);
+				backups.emplace(uid, BackupData::PerBackupInfo(this, uid, version));
 			} else {
 				stopList.erase(uid);
 			}
@@ -331,38 +397,28 @@ ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool started
 	}
 }
 
-// Set "allWorkerStarted" and "latestBackupWorkerSavedVersion" key for backups
-ACTOR Future<Void> setBackupKeys(BackupData* self, std::vector<UID> ready, std::map<UID, Version> savedLogVersions) {
+// Set "latestBackupWorkerSavedVersion" key for backups
+ACTOR Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedLogVersions) {
 	loop {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			state std::vector<Future<Optional<Value>>> readyValues;
-			state std::vector<BackupConfig> configs;
-			for (UID uid : ready) {
-				configs.emplace_back(uid);
-				readyValues.push_back(tr->get(configs.back().allWorkerStarted().key));
-			}
-
 			state std::vector<Future<Optional<Version>>> prevVersions;
 			state std::vector<BackupConfig> versionConfigs;
+			state std::vector<Future<Optional<bool>>> allWorkersReady;
 			for (const auto [uid, version] : savedLogVersions) {
 				versionConfigs.emplace_back(uid);
 				prevVersions.push_back(versionConfigs.back().latestBackupWorkerSavedVersion().get(tr));
+				allWorkersReady.push_back(versionConfigs.back().allWorkerStarted().get(tr));
 			}
 
-			wait(waitForAll(readyValues) && waitForAll(prevVersions));
-
-			for (int i = 0; i < readyValues.size(); i++) {
-				if (!readyValues[i].get().present()) {
-					configs[i].allWorkerStarted().set(tr, true);
-					TraceEvent("BackupWorkerSetReady", self->myId).detail("BackupID", ready[i].toString());
-				}
-			}
+			wait(waitForAll(prevVersions) && waitForAll(allWorkersReady));
 
 			for (int i = 0; i < prevVersions.size(); i++) {
+				if (!allWorkersReady[i].get().present() || !allWorkersReady[i].get().get()) continue;
+
 				const Version current = savedLogVersions[versionConfigs[i].getUid()];
 				if (prevVersions[i].get().present()) {
 					const Version prev = prevVersions[i].get().get();
@@ -410,38 +466,29 @@ ACTOR Future<Void> monitorAllWorkerProgress(BackupData* self) {
 		wait(getBackupProgress(self->cx, self->myId, progress));
 		state std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
 		state bool finishedPreviousEpochs = self->recruitedEpoch == self->oldestBackupEpoch;
-		state std::vector<UID> ready;
 		state std::map<UID, Version> savedLogVersions;
-		if (tagVersions.size() != self->logSystem.get()->getLogRouterTags()) {
+		if (tagVersions.size() != self->totalTags) {
 			wait(interval);
 			continue;
 		}
 
 		// Check every version is larger than backup's startVersion
 		for (auto& [uid, info] : self->backups) {
-			if (info.allWorkerStarted && finishedPreviousEpochs) {
+			TraceEvent("BackupWorkerSavedBackupVersion", self->myId)
+			    .detail("BackupID", uid.toString())
+			    .detail("Done", finishedPreviousEpochs);
+			if (finishedPreviousEpochs) {
 				// update update progress so far
 				Version v = std::numeric_limits<Version>::max();
 				for (const auto [tag, version] : tagVersions) {
 					v = std::min(v, version);
 				}
 				savedLogVersions.emplace(uid, v);
-				continue;
-			}
-			bool saved = true;
-			for (const std::pair<Tag, Version>& tv : tagVersions) {
-				if (tv.second < info.startVersion) {
-					saved = false;
-					break;
-				}
-			}
-			if (saved) {
-				ready.push_back(uid);
-				info.allWorkerStarted = true;
+				TraceEvent("BackupWorkerSavedBackupVersion", self->myId).detail("BackupID", uid).detail("Version", v);
 			}
 		}
-		Future<Void> setKeys =
-		    ready.empty() && savedLogVersions.empty() ? Void() : setBackupKeys(self, ready, savedLogVersions);
+		TraceEvent("BackupWorkerSavedBackupVersion", self->myId).detail("Size", savedLogVersions.size());
+		Future<Void> setKeys = savedLogVersions.empty() ? Void() : setBackupKeys(self, savedLogVersions);
 
 		wait(interval && setKeys);
 	}
@@ -523,7 +570,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	state std::vector<Future<Reference<IBackupFile>>> logFileFutures;
 	state std::vector<Reference<IBackupFile>> logFiles;
 	state std::vector<int64_t> blockEnds;
-	state std::set<UID> activeUids; // active Backups' UIDs
+	state std::vector<UID> activeUids; // active Backups' UIDs
 	state KeyRangeMap<std::set<int>> keyRangeMap; // range to index in logFileFutures, logFiles, & blockEnds
 	state std::vector<Standalone<StringRef>> mutations;
 	state int idx;
@@ -540,7 +587,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 			continue;
 		}
 		const int index = logFileFutures.size();
-		activeUids.insert(it->first);
+		activeUids.push_back(it->first);
 		self->insertRanges(keyRangeMap, it->second.ranges.get(), index);
 		if (it->second.lastSavedVersion == invalidVersion) {
 			it->second.lastSavedVersion = self->savedVersion;
@@ -556,10 +603,12 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	std::transform(logFileFutures.begin(), logFileFutures.end(), std::back_inserter(logFiles),
 	               [](const Future<Reference<IBackupFile>>& f) { return f.get(); });
 
-	for (const auto& file : logFiles) {
+	ASSERT(activeUids.size() == logFiles.size());
+	for (int i = 0; i < logFiles.size(); i++) {
 		TraceEvent("OpenMutationFile", self->myId)
+		    .detail("BackupID", activeUids[i])
 		    .detail("TagId", self->tag.id)
-		    .detail("File", file->getFileName());
+		    .detail("File", logFiles[i]->getFileName());
 	}
 
 	blockEnds = std::vector<int64_t>(logFiles.size(), 0);

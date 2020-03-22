@@ -794,6 +794,11 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	// Each backup worker adds its (epoch, tag.id) to this property.
+	KeyBackedProperty<std::vector<std::pair<int64_t, int64_t>>> startedBackupWorkers() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	// Set to true if backup worker is enabled.
 	KeyBackedProperty<bool> backupWorkerEnabled() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
