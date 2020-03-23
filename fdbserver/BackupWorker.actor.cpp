@@ -155,7 +155,11 @@ struct BackupData {
 							                       return p.first != epoch;
 						                       }),
 						        v.end());
-						if (self->totalTags == v.size()) {
+						std::set<int64_t> tags;
+						for (auto p : v) {
+							tags.insert(p.second);
+						}
+						if (self->totalTags == tags.size()) {
 							config.allWorkerStarted().set(tr, true);
 							allUpdated = true;
 						} else {
