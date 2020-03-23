@@ -70,8 +70,8 @@ struct BackupData {
 	const int totalTags; // Total log router tags
 	const Version startVersion;
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
-	const LogEpoch recruitedEpoch;
-	const LogEpoch backupEpoch; // most recent active epoch whose tLogs are receiving mutations
+	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
+	const LogEpoch backupEpoch; // the epoch workers should pull mutations
 	LogEpoch oldestBackupEpoch = 0; // oldest epoch that still has data on tLogs for backup to pull
 	Version minKnownCommittedVersion;
 	Version savedVersion;
