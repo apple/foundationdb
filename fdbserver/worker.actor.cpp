@@ -906,6 +906,7 @@ ACTOR Future<Void> workerServer(
 	// here is no, so that when running with log_version==3, all files should say V=3.
 	state std::map<SharedLogsKey, SharedLogsValue> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
+	state WorkerCache<InitializeBackupReply> backupWorkerCache;
 
 	state std::string coordFolder = abspath(_coordFolder);
 
@@ -1164,17 +1165,23 @@ ACTOR Future<Void> workerServer(
 				req.reply.send(recruited);
 			}
 			when (InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
-				BackupInterface recruited(locality);
-				recruited.initEndpoints();
+				if (!backupWorkerCache.exists(req.reqId)) {
+					BackupInterface recruited(locality);
+					recruited.initEndpoints();
 
-				startRole(Role::BACKUP, recruited.id(), interf.id());
-				DUMPTOKEN(recruited.waitFailure);
+					startRole(Role::BACKUP, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.waitFailure);
 
-				Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
-				errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
-				TraceEvent("BackupInitRequest", req.reqId).detail("BackupId", recruited.id());
-				InitializeBackupReply reply(recruited, req.backupEpoch);
-				req.reply.send(reply);
+					ReplyPromise<InitializeBackupReply> backupReady = req.reply;
+					backupWorkerCache.set(req.reqId, backupReady.getFuture());
+					Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
+					errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
+					TraceEvent("BackupInitRequest", req.reqId).detail("BackupId", recruited.id());
+					InitializeBackupReply reply(recruited, req.backupEpoch);
+					backupReady.send(reply);
+				} else {
+					forwardPromise(req.reply, backupWorkerCache.get(req.reqId));
+				}
 			}
 			when( InitializeTLogRequest req = waitNext(interf.tLog.getFuture()) ) {
 				// For now, there's a one-to-one mapping of spill type to TLogVersion.
