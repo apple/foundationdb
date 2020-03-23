@@ -44,15 +44,13 @@ testTitle=BackupAndRestore
      simBackupAgents=BackupToFile
  ; backupRangesCount<0 means backup the entire normal keyspace
      backupRangesCount=-1
- ; TODO: Support abortAndRestartAfter test by commenting it out
-     abortAndRestartAfter=0
 
      testName=RandomClogging
      testDuration=90.0
 
- ;    testName=Rollback
- ;    meanDelay=90.0
- ;    testDuration=90.0
+     testName=Rollback
+     meanDelay=90.0
+     testDuration=90.0
 
  ; Do NOT kill restore worker process yet
  ; Kill other process to ensure restore works when FDB cluster has faults
