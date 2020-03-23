@@ -67,8 +67,8 @@ struct StagingKey {
 			    .detail("Mutation", m.toString());
 		}
 		if (version == newVersion) { // Sanity check
-			TraceEvent("SameVersion").detail("Version", version.toString()).detail("Mutation", m.toString());
 			ASSERT(type == m.type && key == m.param1 && val == m.param2);
+			TraceEvent(SevError, "SameVersion").detail("Version", version.toString()).detail("Mutation", m.toString());
 			return;
 		}
 

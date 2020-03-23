@@ -100,9 +100,11 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 }
 
 // The actor may be invovked multiple times and executed async.
-// No race condition as long as we do not wait or yield when operate the shared data.
-// Multiple such actors can run on different fileIDs;
-// Only one actor can process mutations from the same file
+// No race condition as long as we do not wait or yield when operate the shared
+// data. Multiple such actors can run on different fileIDs.
+// Different files may contain mutations of the same commit versions, but with
+// different subsequence number.
+// Only one actor can process mutations from the same file.
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self) {
 	state Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
@@ -130,9 +132,9 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 		uint16_t numVersionStampedKV = 0;
 		// Sanity check: mutations in range file is in [beginVersion, endVersion);
 		// mutations in log file is in [beginVersion, endVersion], both inclusive.
-		ASSERT_WE_THINK(commitVersion >= req.asset.beginVersion);
+		ASSERT(commitVersion >= req.asset.beginVersion);
 		// Loader sends the endVersion to ensure all useful versions are sent
-		ASSERT_WE_THINK(commitVersion <= req.asset.endVersion);
+		ASSERT(commitVersion <= req.asset.endVersion);
 		ASSERT(req.mutations.size() == req.subs.size());
 
 		for (int mIndex = 0; mIndex < req.mutations.size(); mIndex++) {
