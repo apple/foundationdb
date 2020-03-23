@@ -97,6 +97,11 @@ struct BackupData {
 			TraceEvent("BackupWorkerAddJob", data->myId).detail("BackupID", uid).detail("Version", v);
 		}
 
+		void stop() {
+			stopped = true;
+			updateWorker = Void(); // cancel actors
+		}
+
 		bool isReady() const {
 			return stopped || (container.isReady() && ranges.isReady());
 		}
@@ -143,6 +148,7 @@ struct BackupData {
 						}
 					}
 					if (firstWorker) {
+						ASSERT(workers.present() && workers.get().size() > 0);
 						std::vector<std::pair<int64_t, int64_t>>& v = workers.get();
 						v.erase(std::remove_if(v.begin(), v.end(),
 						                       [epoch = self->recruitedEpoch](const std::pair<int64_t, int64_t>& p) {
@@ -159,6 +165,9 @@ struct BackupData {
 						ASSERT(workers.present() && workers.get().size() > 0);
 						if (!updated) {
 							config.startedBackupWorkers().set(tr, workers.get());
+						}
+						for (auto p : workers.get()) {
+							TraceEvent("BackupWorkerDebug", self->myId).detail("Epoch", p.first).detail("TagID", p.second);
 						}
 						wait(tr->commit());
 
@@ -304,7 +313,7 @@ struct BackupData {
 		for (UID uid : stopList) {
 			auto it = backups.find(uid);
 			ASSERT(it != backups.end());
-			it->second.stopped = true;
+			it->second.stop();
 			modified = true;
 		}
 		if (modified) changedTrigger.trigger();
