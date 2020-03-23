@@ -36,7 +36,7 @@ struct DBCoreState;
 struct TLogSet;
 struct CoreTLogSet;
 
-// The set of tLog servers and logRouters for a log tag
+// The set of tLog servers, logRouters and backupWorkers for a log tag
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;

@@ -128,7 +128,7 @@ ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupPro
 				const WorkerBackupStatus status = decodeBackupProgressValue(it.value);
 				bStatus->addBackupStatus(status);
 				TraceEvent("GotBackupProgress", dbgid)
-				    .detail("W", workerID)
+				    .detail("BackupWorker", workerID)
 				    .detail("Epoch", status.epoch)
 				    .detail("Version", status.version)
 				    .detail("Tag", status.tag.toString())

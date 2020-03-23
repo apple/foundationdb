@@ -695,6 +695,9 @@ struct TLogVersion {
 		UNSET = 0,
 		// Everything between BEGIN and END should be densely packed, so that we
 		// can iterate over them easily.
+		// V3 was the introduction of spill by reference;
+		// V4 changed how data gets written to satellite TLogs so that we can peek from them;
+		// V5 merged reference and value spilling
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1

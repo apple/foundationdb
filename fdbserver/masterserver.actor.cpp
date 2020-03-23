@@ -1319,13 +1319,13 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit =
 	    backupProgress->getUnfinishedBackup();
-	for (const auto& [epochVersionCount, tagVersions] : toRecruit) {
-		const Version oldEpochEnd = std::get<1>(epochVersionCount);
+	for (const auto& [epochVersionTags, tagVersions] : toRecruit) {
+		const Version oldEpochEnd = std::get<1>(epochVersionTags);
 		if (!fMinVersion.get().present() || fMinVersion.get().get() >= oldEpochEnd) {
 			TraceEvent("SkipBackupRecruitment", self->dbgid)
 			    .detail("MinVersion", fMinVersion.get().get())
 			    .detail("Epoch", epoch)
-			    .detail("OldEpoch", std::get<0>(epochVersionCount))
+			    .detail("OldEpoch", std::get<0>(epochVersionTags))
 			    .detail("OldEpochEnd", oldEpochEnd);
 			continue;
 		}
@@ -1334,11 +1334,11 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 			i++;
 			InitializeBackupRequest req(deterministicRandom()->randomUniqueID());
 			req.recruitedEpoch = epoch;
-			req.backupEpoch = std::get<0>(epochVersionCount);
+			req.backupEpoch = std::get<0>(epochVersionTags);
 			req.routerTag = tag;
-			req.totalTags = std::get<2>(epochVersionCount);
+			req.totalTags = std::get<2>(epochVersionTags);
 			req.startVersion = version; // savedVersion + 1
-			req.endVersion = oldEpochEnd - 1;
+			req.endVersion = std::get<1>(epochVersionTags) - 1;
 			TraceEvent("BackupRecruitment", self->dbgid)
 			    .detail("RequestID", req.reqId)
 			    .detail("Tag", req.routerTag.toString())
