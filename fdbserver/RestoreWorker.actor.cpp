@@ -312,7 +312,13 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 		if (addresses.secondaryAddress.present()) {
 			g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
 		}
-		TraceEvent("ProtectRestoreWorker").detail("Address", addresses.toString()).backtrace();
+		ISimulator::ProcessInfo* p = g_simulator.getProcessByAddress(myWorkerInterf.address());
+		TraceEvent("ProtectRestoreWorker")
+		    .detail("Address", addresses.toString())
+		    .detail("IsReliable", p->isReliable())
+		    .detail("ReliableInfo", p->getReliableInfo())
+		    .backtrace();
+		ASSERT(p->isReliable());
 	}
 
 	TraceEvent("FastRestoreWorkerKnobs", myWorkerInterf.id())
