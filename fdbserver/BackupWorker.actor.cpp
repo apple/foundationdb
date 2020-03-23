@@ -483,7 +483,6 @@ ACTOR Future<Void> monitorBackupProgress(BackupData* self) {
 		state Reference<BackupProgress> progress(new BackupProgress(self->myId, {}));
 		wait(getBackupProgress(self->cx, self->myId, progress));
 		state std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
-		state bool finishedPreviousEpochs = self->recruitedEpoch == self->oldestBackupEpoch;
 		state std::map<UID, Version> savedLogVersions;
 		if (tagVersions.size() != self->totalTags) {
 			wait(interval);
@@ -492,8 +491,8 @@ ACTOR Future<Void> monitorBackupProgress(BackupData* self) {
 
 		// Check every version is larger than backup's startVersion
 		for (auto& [uid, info] : self->backups) {
-			if (finishedPreviousEpochs) {
-				// update update progress so far
+			if (self->recruitedEpoch == self->oldestBackupEpoch) {
+				// update update progress so far if previous epochs are done
 				Version v = std::numeric_limits<Version>::max();
 				for (const auto [tag, version] : tagVersions) {
 					v = std::min(v, version);
