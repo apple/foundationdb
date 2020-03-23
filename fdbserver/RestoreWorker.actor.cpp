@@ -297,11 +297,24 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 	state Future<Void> myWork = Never();
 	state Reference<AsyncVar<RestoreWorkerInterface>> leader =
 	    Reference<AsyncVar<RestoreWorkerInterface>>(new AsyncVar<RestoreWorkerInterface>());
-
 	state RestoreWorkerInterface myWorkerInterf;
-	myWorkerInterf.initEndpoints();
 	state Reference<RestoreWorkerData> self = Reference<RestoreWorkerData>(new RestoreWorkerData());
+
+	myWorkerInterf.initEndpoints();
 	self->workerID = myWorkerInterf.id();
+
+	// Protect restore worker from being killed in simulation;
+	// Future: Remove the protection once restore can tolerate failure
+	if (g_network->isSimulated()) {
+		auto addresses = g_simulator.getProcessByAddress(myWorkerInterf.address())->addresses;
+
+		g_simulator.protectedAddresses.insert(addresses.address);
+		if (addresses.secondaryAddress.present()) {
+			g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
+		}
+		TraceEvent("ProtectRestoreWorker").detail("Address", addresses.toString()).backtrace();
+	}
+
 	TraceEvent("FastRestoreWorkerKnobs", myWorkerInterf.id())
 	    .detail("FailureTimeout", SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT)
 	    .detail("HeartBeat", SERVER_KNOBS->FASTRESTORE_HEARTBEAT_INTERVAL)
