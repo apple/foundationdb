@@ -73,16 +73,7 @@ TLSConfig tlsConfig(TLSEndpointType::CLIENT);
 NetworkOptions::NetworkOptions()
 	: localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
 	  traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	  traceFormat("xml"), slowTaskProfilingEnabled(false) {
-
-	Standalone<VectorRef<ClientVersionRef>> defaultSupportedVersions;
-
-	StringRef sourceVersion = StringRef((const uint8_t*)getHGVersion(), strlen(getHGVersion()));
-	std::string protocolVersionString = format("%llx", currentProtocolVersion.version());
-	defaultSupportedVersions.push_back_deep(defaultSupportedVersions.arena(), ClientVersionRef(LiteralStringRef(FDB_VT_VERSION), sourceVersion, protocolVersionString));
-
-	supportedVersions = ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>::from(defaultSupportedVersions);
-}
+	  traceFormat("xml"), slowTaskProfilingEnabled(false), supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()) {}
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
