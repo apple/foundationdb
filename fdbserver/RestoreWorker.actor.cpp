@@ -32,6 +32,7 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbrpc/IAsyncFile.h"
+#include "fdbrpc/simulator.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
