@@ -4543,10 +4543,39 @@ Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx) {
 				break;
 			}
 		} catch (Error& e) {
-			wait(tr2.onError(e));
+			wait(tr.onError(e));
 		}
 	}
 	return Void();
+}
+
+Future<Void> FileBackupAgent::submitParallelRestore(Database cx, Key backupTag,
+                                                    Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
+                                                    Version targetVersion, bool locked) {
+	loop {
+		state ReadYourWritesTransaction tr(cx);
+		state int restoreIndex = 0;
+		tr.reset();
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			// Note: we always lock DB here in case DB is modified at the bacupRanges boundary.
+			for (restoreIndex = 0; restoreIndex < backupRanges.size(); restoreIndex++) {
+				auto range = backupRanges[restoreIndex];
+				Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
+				// Register the request request in DB, which will be picked up by restore worker leader
+				struct RestoreRequest restoreRequest(restoreIndex, restoreTag, bcUrl, true, targetVersion, true, range,
+				                                     Key(), Key(), locked, deterministicRandom()->randomUniqueID());
+				tr.set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
+			}
+			tr.set(restoreRequestTriggerKey,
+			       restoreRequestTriggerValue(deterministicRandom()->randomUniqueID(), backupRanges.size()));
+			wait(tr.commit()); // Trigger restore
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 }
 
 Future<Version> FileBackupAgent::restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB) {

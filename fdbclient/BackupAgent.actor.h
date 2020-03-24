@@ -276,7 +276,9 @@ public:
 	static StringRef restoreStateText(ERestoreState id);
 
 	// parallel restore
-	Future<Version> parallelRestoreFinish(Database cx);
+	Future<Void> parallelRestoreFinish(Database cx);
+	Future<Void> submitParallelRestore(Database cx, Key backupTag, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                                   KeyRef bcUrl, Version targetVersion, bool locked);
 
 	// restore() will
 	//   - make sure that url is readable and appears to be a complete backup
