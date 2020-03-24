@@ -79,26 +79,30 @@ struct AtomicRestoreWorkload : TestWorkload {
 		wait( delay(self->restoreAfter * deterministicRandom()->random01()) );
 		TraceEvent("AtomicRestore_RestoreStart");
 
-		loop {
-			std::vector<Future<Version>> restores;
-			if (deterministicRandom()->random01() < 0.5) {
-				for (auto &range : self->backupRanges)
-					restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(), range, StringRef(), StringRef()));
+		if (deterministicRandom()->random01() < 0.5 && BUGGIFY) { // New fast parallel restore
+			TraceEvent(SevWarnAlways, "AtomicParallelRestore");
+			wait(backupAgent.atomicParallelRestore(cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
+		} else { // Old style restore
+			loop {
+				std::vector<Future<Version>> restores;
+				if (deterministicRandom()->random01() < 0.5) {
+					for (auto& range : self->backupRanges)
+						restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(), range,
+						                                             StringRef(), StringRef()));
+				} else {
+					restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(),
+					                                             self->backupRanges, StringRef(), StringRef()));
+				}
+				try {
+					wait(waitForAll(restores));
+					break;
+				} catch (Error& e) {
+					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) throw;
+				}
+				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 			}
-			else {
-				restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
-			}
-			try {
-				wait(waitForAll(restores));
-				break;
-			}
-			catch (Error& e) {
-				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
-					throw;
-			}
-			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
 		}
-		
+
 		// SOMEDAY: Remove after backup agents can exist quiescently
 		if (g_simulator.backupAgents == ISimulator::BackupToFile) {
 			g_simulator.backupAgents = ISimulator::NoBackupAgents;

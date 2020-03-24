@@ -4569,8 +4569,12 @@ public:
 
 		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx));
 
-		TraceEvent("AS_StartRestore");
-		Version ver = wait( restore(backupAgent, cx, cx, tagName, KeyRef(bc->getURL()), ranges, true, -1, true, addPrefix, removePrefix, true, randomUid) );
+		TraceEvent("AtomicParallelRestoreStartRestore");
+		Version targetVersion = -1;
+		bool locked = true;
+		wait(submitParallelRestore(cx, tagName, ranges, KeyRef(bc->getURL()), targetVersion, locked));
+		TraceEvent("AtomicParallelRestoreWaitForRestoreFinish");
+		wait(parallelRestoreFinish(cx));
 		return ver;
 	}
 };
