@@ -300,6 +300,9 @@
     <ActorCompiler Include="workloads\Mako.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\ReportConflictingKeys.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
   </ItemGroup>
   <ItemGroup>

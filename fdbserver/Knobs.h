@@ -85,6 +85,7 @@ public:
 	double TLOG_DEGRADED_DURATION;
 	int64_t MAX_CACHE_VERSIONS;
 	double TXS_POPPED_MAX_DELAY;
+	double TLOG_MAX_CREATE_DURATION;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -105,6 +106,7 @@ public:
 	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
+	bool USE_OLD_NEEDED_SERVERS;
 
 	// Higher priorities are executed first
 	// Priority/100 is the "priority group"/"superpriority".  Priority inversion
@@ -118,6 +120,7 @@ public:
 	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
 	int PRIORITY_TEAM_REDUNDANT;
 	int PRIORITY_MERGE_SHARD;
+	int PRIORITY_POPULATE_REGION;
 	int PRIORITY_TEAM_UNHEALTHY;
 	int PRIORITY_TEAM_2_LEFT;
 	int PRIORITY_TEAM_1_LEFT;
@@ -153,8 +156,7 @@ public:
 	double DD_MERGE_COALESCE_DELAY;
 	double STORAGE_METRICS_POLLING_DELAY;
 	double STORAGE_METRICS_RANDOM_DELAY;
-	double FREE_SPACE_RATIO_CUTOFF;
-	double FREE_SPACE_CUTOFF_PENALTY;
+	double AVAILABLE_SPACE_RATIO_CUTOFF;
 	int DESIRED_TEAMS_PER_SERVER;
 	int MAX_TEAMS_PER_SERVER;
 	int64_t DD_SHARD_SIZE_GRANULARITY;
@@ -170,6 +172,7 @@ public:
 	int DD_EXCLUDE_MIN_REPLICAS;
 	bool DD_VALIDATE_LOCALITY;
 	int DD_CHECK_INVALID_LOCALITY_DELAY;
+	bool DD_ENABLE_VERBOSE_TRACING;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -245,6 +248,8 @@ public:
 	double START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL;
 	double START_TRANSACTION_MAX_TRANSACTIONS_TO_START;
 	int START_TRANSACTION_MAX_REQUESTS_TO_START;
+	int START_TRANSACTION_MAX_QUEUE_SIZE;
+	int KEY_LOCATION_MAX_QUEUE_SIZE;
 
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE;
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_MIN;
@@ -272,6 +277,7 @@ public:
 	bool ALWAYS_CAUSAL_READ_RISKY;
 	int MAX_COMMIT_UPDATES;
 	double MIN_PROXY_COMPUTE;
+	double MAX_PROXY_COMPUTE;
 	int PROXY_COMPUTE_BUCKETS;
 	double PROXY_COMPUTE_GROWTH_RATE;
 
@@ -298,6 +304,7 @@ public:
 	double BACKUP_TIMEOUT;  // master's reaction time for backup failure
 	double BACKUP_NOOP_POP_DELAY;
 	int BACKUP_FILE_BLOCK_BYTES;
+	double BACKUP_UPLOAD_DELAY;
 
 	//Cluster Controller
 	double CLUSTER_CONTROLLER_LOGGING_DELAY;
@@ -453,6 +460,8 @@ public:
 	double DEGRADED_RESET_INTERVAL;
 	double DEGRADED_WARNING_LIMIT;
 	double DEGRADED_WARNING_RESET_DELAY;
+	int64_t TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS;
+	double TRACE_LOG_PING_TIMEOUT_SECONDS;
 
 	// Test harness
 	double WORKER_POLL_DELAY;
@@ -501,6 +510,14 @@ public:
 	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
 	int64_t FASTRESTORE_APPLYING_PARALLELISM; // number of outstanding txns writing to dest. DB
 	int64_t FASTRESTORE_MONITOR_LEADER_DELAY;
+	int64_t FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS;
+	bool FASTRESTORE_TRACK_REQUEST_LATENCY; // true to track reply latency of each request in a request batch
+	bool FASTRESTORE_TRACK_LOADER_SEND_REQUESTS; // track requests of load send mutations to appliers?
+	int64_t FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT; // threshold when pipelined actors should be delayed
+	int64_t FASTRESTORE_WAIT_FOR_MEMORY_LATENCY;
+	int64_t FASTRESTORE_HEARTBEAT_DELAY; // interval for master to ping loaders and appliers
+	int64_t FASTRESTORE_HEARTBEAT_MAX_DELAY; // master claim a node is down if no heart beat from the node for this delay
+	int64_t FASTRESTORE_APPLIER_FETCH_KEYS_SIZE; // number of keys to fetch in a txn on applier
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };

@@ -28,6 +28,7 @@
 #include "bindings/flow/FDBLoanerTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/TLSConfig.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Otherwise we have to type setupNetwork(), FDB::open(), etc.
@@ -1603,6 +1604,7 @@ struct UnitTestsFunc : InstructionFunc {
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_LOCK_AWARE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_INCLUDE_PORT_IN_ADDRESS);
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_REPORT_CONFLICTING_KEYS);
 
 		Optional<FDBStandalone<ValueRef> > _ = wait(tr->get(LiteralStringRef("\xff")));
 		tr->cancel();
@@ -1748,7 +1750,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		populateOpsThatCreateDirectories(); // FIXME
 
 		// This is "our" network
-		g_network = newNet2(false);
+		g_network = newNet2(TLSConfig());
 
 		ASSERT(!API::isAPIVersionSelected());
 		try {
@@ -1791,7 +1793,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 
 ACTOR void _test_versionstamp() {
 	try {
-		g_network = newNet2(false);
+		g_network = newNet2(TLSConfig());
 
 		API *fdb = FDB::API::selectAPIVersion(700);
 

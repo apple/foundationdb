@@ -199,7 +199,6 @@ Future<T> timeoutError( Future<T> what, double time, TaskPriority taskID = TaskP
 	}
 }
 
-
 ACTOR template <class T>
 Future<T> delayed( Future<T> what, double time = 0.0, TaskPriority taskID = TaskPriority::DefaultDelay  ) {
 	try {
@@ -640,6 +639,46 @@ protected:
 };
 
 template <class V>
+class ReferencedObject : NonCopyable, public ReferenceCounted<ReferencedObject<V>> {
+	public:
+		ReferencedObject() : value() {}
+		ReferencedObject(V const& v) : value(v) {}
+		ReferencedObject(V&& v) : value(std::move(v)) {}
+		ReferencedObject(ReferencedObject&& r) : value(std::move(r.value)) {}
+
+		void operator=(ReferencedObject&& r) {
+			value = std::move(r.value);
+		}
+
+		V const& get() const {
+			return value;
+		}
+
+		V& mutate() {
+			return value;
+		}
+
+		void set(V const& v) {
+			value = v;
+		}
+
+		void set(V&& v) {
+			value = std::move(v);
+		}
+
+		static Reference<ReferencedObject<V>> from(V const& v) {
+			return Reference<ReferencedObject<V>>(new ReferencedObject<V>(v));
+		}
+
+		static Reference<ReferencedObject<V>> from(V&& v) {
+			return Reference<ReferencedObject<V>>(new ReferencedObject<V>(std::move(v)));
+		}
+
+	private:
+		V value;
+};
+
+template <class V>
 class AsyncVar : NonCopyable, public ReferenceCounted<AsyncVar<V>> {
 public:
 	AsyncVar() : value() {}
@@ -815,6 +854,22 @@ Future<Void> cancelOnly( std::vector<Future<Void>> const& futures );
 Future<Void> timeoutWarningCollector( FutureStream<Void> const& input, double const& logDelay, const char* const& context, UID const& id );
 Future<bool> quorumEqualsTrue( std::vector<Future<bool>> const& futures, int const& required );
 Future<Void> lowPriorityDelay( double const& waitTime );
+
+ACTOR template <class T>
+Future<T> ioTimeoutError( Future<T> what, double time ) {
+	Future<Void> end = lowPriorityDelay( time );
+	choose {
+		when( T t = wait( what ) ) { return t; }
+		when( wait( end ) ) { 
+			Error err = io_timeout();
+			if(g_network->isSimulated()) {
+				err = err.asInjectedFault();
+			}
+			TraceEvent(SevError, "IoTimeoutError").error(err);
+			throw err;
+		}
+	}
+}
 
 ACTOR template <class T>
 Future<Void> streamHelper( PromiseStream<T> output, PromiseStream<Error> errors, Future<T> input ) {

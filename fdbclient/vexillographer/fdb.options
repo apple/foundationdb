@@ -253,6 +253,8 @@ description is not currently required but encouraged.
             hidden="true" />
     <Option name="use_provisional_proxies" code="711"
             description="This option should only be used by tools which change the database configuration." />
+    <Option name="report_conflicting_keys" code="712"
+            description="The transaction can retrieve keys that are conflicting with other transactions." />
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

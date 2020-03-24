@@ -141,9 +141,10 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	std::map<int, Reference<MasterBatchData>> batch;
 	std::map<int, Reference<MasterBatchStatus>> batchStatus;
-	NotifiedVersion finishedBatch; // The highest batch index all appliers have applied mutations
 
 	AsyncVar<int> runningVersionBatches; // Currently running version batches
+
+	std::map<UID, double> rolesHeartBeatTime; // Key: role id; Value: most recent time master receives heart beat
 
 	void addref() { return ReferenceCounted<RestoreMasterData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreMasterData>::delref(); }
@@ -155,6 +156,9 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	}
 
 	~RestoreMasterData() = default;
+
+	int getVersionBatchState(int batchIndex) final { return RoleVersionBatchState::INVALID; }
+	void setVersionBatchState(int batchIndex, int vbState) final {}
 
 	void initVersionBatch(int batchIndex) {
 		TraceEvent("FastRestoreMasterInitVersionBatch", id()).detail("VersionBatchIndex", batchIndex);

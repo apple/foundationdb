@@ -77,6 +77,8 @@ public:
 		}
 	}
 
+	virtual Reference<IPage> clone() const = 0;
+
 	virtual void addref() const = 0;
 	virtual void delref() const = 0;
 

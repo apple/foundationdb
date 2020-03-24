@@ -32,7 +32,6 @@
 #endif
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
-#include "flow/TLSPolicy.h"
 
 enum class TaskPriority {
 	Max = 1000000,
@@ -57,7 +56,6 @@ enum class TaskPriority {
 	ClusterController = 8650,
 	MasterTLogRejoin = 8646,
 	ProxyStorageRejoin = 8645,
-	ProxyCommitDispatcher = 8640,
 	TLogQueuingMetrics = 8620,
 	TLogPop = 8610,
 	TLogPeekReply = 8600,
@@ -75,7 +73,7 @@ enum class TaskPriority {
 	TLogConfirmRunningReply = 8530,
 	TLogConfirmRunning = 8520,
 	ProxyGRVTimer = 8510,
-	ProxyGetConsistentReadVersion = 8500,
+	GetConsistentReadVersion = 8500,
 	DefaultPromiseEndpoint = 8000,
 	DefaultOnMainThread = 7500,
 	DefaultDelay = 7010,
@@ -413,9 +411,10 @@ typedef void*	flowGlobalType;
 typedef NetworkAddress (*NetworkAddressFuncPtr)();
 typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
+class TLSConfig;
 class INetwork;
 extern INetwork* g_network;
-extern INetwork* newNet2(bool useThreadPool = false, bool useMetrics = false, Reference<TLSPolicy> policy = Reference<TLSPolicy>(), const TLSParams& tlsParams = TLSParams());
+extern INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool = false, bool useMetrics = false);
 
 class INetwork {
 public:
@@ -487,6 +486,12 @@ public:
 
 	virtual void initMetrics() {}
 	// Metrics must be initialized after FlowTransport::createInstance has been called
+
+	virtual void initTLS() {}
+	// TLS must be initialized before using the network
+
+	virtual const TLSConfig& getTLSConfig() = 0;
+	// Return the TLS Configuration
 
 	virtual void getDiskBytes( std::string const& directory, int64_t& free, int64_t& total) = 0;
 	//Gets the number of free and total bytes available on the disk which contains directory

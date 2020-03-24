@@ -68,6 +68,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_RECONNECTION_TIME,                               0.5 );
 	init( RECONNECTION_TIME_GROWTH_RATE,                       1.2 );
 	init( RECONNECTION_RESET_TIME,                             5.0 );
+	init( ACCEPT_BATCH_SIZE,                                    10 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
 	init( PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT,           3600.0 );
@@ -161,6 +162,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TRACE_EVENT_THROTTLER_MSG_LIMIT,                   20000 );
 	init( MAX_TRACE_FIELD_LENGTH,                              495 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
+	init( ALLOCATION_TRACING_ENABLED,                         true );
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
