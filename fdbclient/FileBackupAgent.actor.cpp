@@ -4475,7 +4475,7 @@ public:
 	// Similar to atomicRestore, only used in simulation test.
 	// locks the database before discontinuing the backup and that same lock is then used while doing the restore.
 	//the tagname of the backup must be the same as the restore.
-	ACTOR static Future<Version> atomicParallelRestore(FileBackupAgent* backupAgent, Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {
+	ACTOR static Future<Void> atomicParallelRestore(FileBackupAgent* backupAgent, Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {
 		state Reference<ReadYourWritesTransaction> ryw_tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 		state BackupConfig backupConfig;
 		loop {
@@ -4575,7 +4575,7 @@ public:
 		wait(submitParallelRestore(cx, tagName, ranges, KeyRef(bc->getURL()), targetVersion, locked));
 		TraceEvent("AtomicParallelRestoreWaitForRestoreFinish");
 		wait(parallelRestoreFinish(cx));
-		return ver;
+		return Void();
 	}
 };
 
