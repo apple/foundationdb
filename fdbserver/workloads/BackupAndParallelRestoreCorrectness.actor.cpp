@@ -505,32 +505,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// We should wait on all restore before proceeds
 				TraceEvent("FastRestore").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");
-				restoreDone = false;
-				state Future<Void> watchForRestoreRequestDone;
-				loop {
-					try {
-						if (restoreDone) break;
-						tr2.reset();
-						tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-						Optional<Value> restoreRequestDoneKeyValue = wait(tr2.get(restoreRequestDoneKey));
-						// Restore may finish before restoreAgent waits on the restore finish event.
-						if (restoreRequestDoneKeyValue.present()) {
-							restoreDone = true; // In case commit clears the key but in unknown_state
-							tr2.clear(restoreRequestDoneKey);
-							wait(tr2.commit());
-							break;
-						} else {
-							watchForRestoreRequestDone = tr2.watch(restoreRequestDoneKey);
-							wait(tr2.commit());
-							wait(watchForRestoreRequestDone);
-							break;
-						}
-					} catch (Error& e) {
-						wait(tr2.onError(e));
-					}
-				}
-
+				wait(backupAgent.parallelRestoreFinish(cx));
 				TraceEvent("FastRestore").detail("BackupAndParallelRestore", "RestoreFinished");
 
 				for (auto& restore : restores) {

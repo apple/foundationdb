@@ -4518,6 +4518,37 @@ const std::string BackupAgentBase::defaultTagName = "default";
 const int BackupAgentBase::logHeaderSize = 12;
 const int FileBackupAgent::dataFooterSize = 20;
 
+// Return if parallel restore has finished
+Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx) {
+	state bool restoreDone = false;
+	state Future<Void> watchForRestoreRequestDone;
+	state ReadYourWritesTransaction tr(cx);
+	loop {
+		try {
+			if (restoreDone) break;
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
+			// Restore may finish before restoreAgent waits on the restore finish event.
+			if (restoreRequestDoneKeyValue.present()) {
+				restoreDone = true; // In case commit clears the key but in unknown_state
+				tr.clear(restoreRequestDoneKey);
+				wait(tr.commit());
+				break;
+			} else {
+				watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
+				wait(tr.commit());
+				wait(watchForRestoreRequestDone);
+				break;
+			}
+		} catch (Error& e) {
+			wait(tr2.onError(e));
+		}
+	}
+	return Void();
+}
+
 Future<Version> FileBackupAgent::restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB) {
 	return FileBackupAgentImpl::restore(this, cx, cxOrig, tagName, url, ranges, waitForComplete, targetVersion, verbose, addPrefix, removePrefix, lockDB, deterministicRandom()->randomUniqueID());
 }
