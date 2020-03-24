@@ -3548,6 +3548,67 @@ class FileBackupAgentImpl {
 public:
 	static const int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
 
+	// Parallel restore
+	ACTOR static Future<Void> parallelRestoreFinish(Database cx) {
+		state ReadYourWritesTransaction tr(cx);
+		state Future<Void> watchForRestoreRequestDone;
+		state bool restoreDone = false;
+		loop {
+			try {
+				if (restoreDone) break;
+				tr.reset();
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<Value> restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
+				// Restore may finish before restoreAgent waits on the restore finish event.
+				if (restoreRequestDoneKeyValue.present()) {
+					restoreDone = true; // In case commit clears the key but in unknown_state
+					tr.clear(restoreRequestDoneKey);
+					wait(tr.commit());
+					break;
+				} else {
+					watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
+					wait(tr.commit());
+					wait(watchForRestoreRequestDone);
+					break;
+				}
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> submitParallelRestore(Database cx, Key backupTag,
+														Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
+														Version targetVersion, bool locked) {
+		state ReadYourWritesTransaction tr(cx);
+		state int restoreIndex = 0;
+		loop {
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				// Note: we always lock DB here in case DB is modified at the bacupRanges boundary.
+				for (restoreIndex = 0; restoreIndex < backupRanges.size(); restoreIndex++) {
+					auto range = backupRanges[restoreIndex];
+					Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
+					// Register the request request in DB, which will be picked up by restore worker leader
+					struct RestoreRequest restoreRequest(restoreIndex, restoreTag, bcUrl, true, targetVersion, true, range,
+														Key(), Key(), locked, deterministicRandom()->randomUniqueID());
+					tr.set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
+				}
+				tr.set(restoreRequestTriggerKey,
+					restoreRequestTriggerValue(deterministicRandom()->randomUniqueID(), backupRanges.size()));
+				wait(tr.commit()); // Trigger restore
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		return Void();
+	}
+
 	// This method will return the final status of the backup at tag, and return the URL that was used on the tag
 	// when that status value was read.
 	ACTOR static Future<int> waitBackup(FileBackupAgent* backupAgent, Database cx, std::string tagName, bool stopWhenDone, Reference<IBackupContainer> *pContainer = nullptr, UID *pUID = nullptr) {
@@ -4520,62 +4581,13 @@ const int FileBackupAgent::dataFooterSize = 20;
 
 // Return if parallel restore has finished
 Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx) {
-	state bool restoreDone = false;
-	state Future<Void> watchForRestoreRequestDone;
-	state ReadYourWritesTransaction tr(cx);
-	loop {
-		try {
-			if (restoreDone) break;
-			tr.reset();
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
-			// Restore may finish before restoreAgent waits on the restore finish event.
-			if (restoreRequestDoneKeyValue.present()) {
-				restoreDone = true; // In case commit clears the key but in unknown_state
-				tr.clear(restoreRequestDoneKey);
-				wait(tr.commit());
-				break;
-			} else {
-				watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
-				wait(tr.commit());
-				wait(watchForRestoreRequestDone);
-				break;
-			}
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-	return Void();
+	return FileBackupAgentImpl::parallelRestoreFinish(cx);
 }
 
 Future<Void> FileBackupAgent::submitParallelRestore(Database cx, Key backupTag,
                                                     Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
                                                     Version targetVersion, bool locked) {
-	loop {
-		state ReadYourWritesTransaction tr(cx);
-		state int restoreIndex = 0;
-		tr.reset();
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		try {
-			// Note: we always lock DB here in case DB is modified at the bacupRanges boundary.
-			for (restoreIndex = 0; restoreIndex < backupRanges.size(); restoreIndex++) {
-				auto range = backupRanges[restoreIndex];
-				Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
-				// Register the request request in DB, which will be picked up by restore worker leader
-				struct RestoreRequest restoreRequest(restoreIndex, restoreTag, bcUrl, true, targetVersion, true, range,
-				                                     Key(), Key(), locked, deterministicRandom()->randomUniqueID());
-				tr.set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
-			}
-			tr.set(restoreRequestTriggerKey,
-			       restoreRequestTriggerValue(deterministicRandom()->randomUniqueID(), backupRanges.size()));
-			wait(tr.commit()); // Trigger restore
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
+    return FileBackupAgentImpl::submitParallelRestore(cx, backupTag, backupRanges, bcUrl, targetVersion, locked);
 }
 
 Future<Version> FileBackupAgent::restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB) {
