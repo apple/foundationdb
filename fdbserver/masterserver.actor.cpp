@@ -672,8 +672,8 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	TraceEvent("MasterRecovering", self->dbgid).detail("LastEpochEnd", self->lastEpochEnd).detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
 
-	Standalone<VectorRef<KeyValueRef>> rawConf = wait( self->txnStateStore->readRange( configKeys ) );
-	self->configuration.fromKeyValues( rawConf );
+	Standalone<RangeResultRef> rawConf = wait( self->txnStateStore->readRange( configKeys ) );
+	self->configuration.fromKeyValues( rawConf.castTo<VectorRef<KeyValueRef>>() );
 	self->originalConfiguration = self->configuration;
 	self->hasConfiguration = true;
 
@@ -683,13 +683,13 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 		.detail("Conf", self->configuration.toString())
 		.trackLatest("RecoveredConfig");
 
-	Standalone<VectorRef<KeyValueRef>> rawLocalities = wait( self->txnStateStore->readRange( tagLocalityListKeys ) );
+	Standalone<RangeResultRef> rawLocalities = wait( self->txnStateStore->readRange( tagLocalityListKeys ) );
 	self->dcId_locality.clear();
 	for(auto& kv : rawLocalities) {
 		self->dcId_locality[decodeTagLocalityListKey(kv.key)] = decodeTagLocalityListValue(kv.value);
 	}
 
-	Standalone<VectorRef<KeyValueRef>> rawTags = wait( self->txnStateStore->readRange( serverTagKeys ) );
+	Standalone<RangeResultRef> rawTags = wait( self->txnStateStore->readRange( serverTagKeys ) );
 	self->allTags.clear();
 	if(self->lastEpochEnd > 0) {
 		self->allTags.push_back(cacheTag);
@@ -709,7 +709,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 		}
 	}
 
-	Standalone<VectorRef<KeyValueRef>> rawHistoryTags = wait( self->txnStateStore->readRange( serverTagHistoryKeys ) );
+	Standalone<RangeResultRef> rawHistoryTags = wait( self->txnStateStore->readRange( serverTagHistoryKeys ) );
 	for(auto& kv : rawHistoryTags) {
 		self->allTags.push_back(decodeServerTagValue( kv.value ));
 	}
@@ -732,13 +732,13 @@ ACTOR Future<Void> sendInitialCommitToResolvers( Reference<MasterData> self ) {
 	state Sequence txnSequence = 0;
 	ASSERT(self->recoveryTransactionVersion);
 
-	state Standalone<VectorRef<KeyValueRef>> data = self->txnStateStore->readRange(txnKeys, BUGGIFY ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES).get();
+	state Standalone<RangeResultRef> data = self->txnStateStore->readRange(txnKeys, BUGGIFY ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES).get();
 	state vector<Future<Void>> txnReplies;
 	state int64_t dataOutstanding = 0;
 	loop {
 		if(!data.size()) break;
 		((KeyRangeRef&)txnKeys) = KeyRangeRef( keyAfter(data.back().key, txnKeys.arena()), txnKeys.end );
-		Standalone<VectorRef<KeyValueRef>> nextData = self->txnStateStore->readRange(txnKeys, BUGGIFY ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES).get();
+		Standalone<RangeResultRef> nextData = self->txnStateStore->readRange(txnKeys, BUGGIFY ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES).get();
 
 		for(auto& r : self->proxies) {
 			TxnStateRequest req;
@@ -1172,6 +1172,10 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 			.detail("StatusCode", RecoveryStatus::fully_recovered)
 			.detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
 			.trackLatest("MasterRecoveryState");
+
+			TraceEvent("MasterRecoveryGenerations", self->dbgid)
+			.detail("ActiveGenerations", 1)
+			.trackLatest("MasterRecoveryGenerations");
 		} else if( !newState.oldTLogData.size() && self->recoveryState < RecoveryState::STORAGE_RECOVERED ) {
 			self->recoveryState = RecoveryState::STORAGE_RECOVERED;
 			TraceEvent("MasterRecoveryState", self->dbgid)
@@ -1324,12 +1328,29 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		.detail("StatusCode", RecoveryStatus::locking_coordinated_state)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::locking_coordinated_state])
 		.detail("TLogs", self->cstate.prevDBState.tLogs.size())
+		.detail("ActiveGenerations", self->cstate.myDBState.oldTLogData.size() + 1)
 		.detail("MyRecoveryCount", self->cstate.prevDBState.recoveryCount+2)
 		.detail("ForceRecovery", self->forceRecovery)
 		.trackLatest("MasterRecoveryState");
 	//for (const auto& old : self->cstate.prevDBState.oldTLogData) {
 	//	TraceEvent("BWReadCoreState", self->dbgid).detail("Epoch", old.epoch).detail("Version", old.epochEnd);
 	//}
+
+	TraceEvent("MasterRecoveryGenerations", self->dbgid)
+		.detail("ActiveGenerations", self->cstate.myDBState.oldTLogData.size() + 1)
+		.trackLatest("MasterRecoveryGenerations");
+
+	if (self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->MAX_GENERATIONS_OVERRIDE) {
+		if (self->cstate.myDBState.oldTLogData.size() >= CLIENT_KNOBS->MAX_GENERATIONS) {
+			TraceEvent(SevError, "RecoveryStoppedTooManyOldGenerations").detail("OldGenerations", self->cstate.myDBState.oldTLogData.size())
+				.detail("Reason", "Recovery stopped because too many recoveries have happened since the last time the cluster was fully_recovered. Set --knob_max_generations_override on your server processes to a value larger than OldGenerations to resume recovery once the underlying problem has been fixed.");
+			wait(Future<Void>(Never()));
+		} else if (self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION) {
+			TraceEvent(SevError, "RecoveryDelayedTooManyOldGenerations").detail("OldGenerations", self->cstate.myDBState.oldTLogData.size())
+				.detail("Reason", "Recovery is delayed because too many recoveries have happened since the last time the cluster was fully_recovered. Set --knob_max_generations_override on your server processes to a value larger than OldGenerations to resume recovery once the underlying problem has been fixed.");
+			wait(delay(CLIENT_KNOBS->RECOVERY_DELAY_SECONDS_PER_GENERATION*(self->cstate.myDBState.oldTLogData.size() - CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION)));
+		}
+	}
 
 	state Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems( new AsyncVar<Reference<ILogSystem>> );
 	state Future<Void> recoverAndEndEpoch = ILogSystem::recoverAndEndEpoch(oldLogSystems, self->dbgid, self->cstate.prevDBState, self->myInterface.tlogRejoin.getFuture(), self->myInterface.locality, &self->forceRecovery);
@@ -1525,7 +1546,9 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	self->addActor.send( changeCoordinators(self) );
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
 	self->addActor.send(configurationMonitor(self, cx));
-	self->addActor.send(recruitBackupWorkers(self, cx));
+	if (self->configuration.backupWorkerEnabled) {
+		self->addActor.send(recruitBackupWorkers(self, cx));
+	}
 
 	wait( Future<Void>(Never()) );
 	throw internal_error();

@@ -56,6 +56,13 @@ public:
 		backupStartedValue = value;
 	}
 
+	// Returns progress for an epoch.
+	std::map<Tag, Version> getEpochStatus(LogEpoch epoch) const {
+		const auto it = progress.find(epoch);
+		if (it == progress.end()) return {};
+		return it->second;
+	}
+
 	void addref() { ReferenceCounted<BackupProgress>::addref(); }
 
 	void delref() { ReferenceCounted<BackupProgress>::delref(); }

@@ -30,6 +30,7 @@
 
 #include <sstream>
 #include "flow/Stats.h"
+#include "flow/SystemMonitor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/Notified.h"
@@ -40,8 +41,6 @@
 #include "fdbserver/RestoreUtil.h"
 
 #include "flow/actorcompiler.h" // has to be last include
-
-extern bool debug_verbose;
 
 struct RestoreRoleInterface;
 struct RestoreLoaderInterface;
@@ -54,9 +53,10 @@ struct RestoreSimpleRequest;
 
 using VersionedMutationsMap = std::map<Version, MutationsVec>;
 
+ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex, std::string name);
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
-void handleFinishRestoreRequest(const RestoreVersionBatchRequest& req, Reference<RestoreRoleData> self);
+void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<RestoreRoleData> self);
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
 // This struct is mostly copied from StringRefReader. We add a sanity check in this struct.
@@ -105,29 +105,57 @@ struct BackupStringRefReader {
 	Error failure_error;
 };
 
+class RoleVersionBatchState {
+public:
+	static const int INVALID = -1;
+
+	virtual int get() {
+		return vbState;
+	}
+
+	virtual void operator = (int newState) {
+		vbState = newState;
+	}
+
+	explicit RoleVersionBatchState() : vbState(INVALID) {}
+	explicit RoleVersionBatchState(int newState) : vbState(newState) {}
+
+	virtual ~RoleVersionBatchState() = default;
+
+	int vbState;
+};
+
 struct RestoreRoleData : NonCopyable, public ReferenceCounted<RestoreRoleData> {
 public:
 	RestoreRole role;
 	UID nodeID;
 	int nodeIndex;
 
+	double cpuUsage;
+	double memory;
+	double residentMemory;
+
+	AsyncTrigger checkMemory;
+	int delayedActors; // actors that are delayed to release because of low memory
+
 	std::map<UID, RestoreLoaderInterface> loadersInterf; // UID: loaderInterf's id
 	std::map<UID, RestoreApplierInterface> appliersInterf; // UID: applierInterf's id
-	RestoreApplierInterface masterApplierInterf;
 
-	NotifiedVersion versionBatchId; // Continuously increase for each versionBatch
+	NotifiedVersion versionBatchId; // The index of the version batch that has been initialized and put into pipeline
+	NotifiedVersion finishedBatch; // The highest batch index all appliers have applied mutations
 
 	bool versionBatchStart = false;
 
-	uint32_t inProgressFlag = 0;
+	RestoreRoleData() : role(RestoreRole::Invalid), cpuUsage(0.0), memory(0.0), residentMemory(0.0), delayedActors(0){};
 
-	RestoreRoleData() : role(RestoreRole::Invalid){};
-
-	virtual ~RestoreRoleData() {}
+	virtual ~RestoreRoleData() = default;
 
 	UID id() const { return nodeID; }
 
-	virtual void resetPerVersionBatch() = 0;
+	virtual void initVersionBatch(int batchIndex) = 0;
+	virtual void resetPerRestoreRequest() = 0;
+	virtual int getVersionBatchState(int batchIndex) = 0;
+	virtual void setVersionBatchState(int batchIndex, int vbState) = 0;
 
 	void clearInterfaces() {
 		loadersInterf.clear();
@@ -136,6 +164,10 @@ public:
 
 	virtual std::string describeNode() = 0;
 };
+
+void updateProcessStats(Reference<RestoreRoleData> self);
+ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role);
+ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self, std::string role);
 
 #include "flow/unactorcompiler.h"
 #endif

@@ -69,11 +69,11 @@ struct MasterProxyInterface {
 	}
 
 	void initEndpoints() {
-		getConsistentReadVersion.getEndpoint(TaskPriority::ProxyGetConsistentReadVersion);
+		getConsistentReadVersion.getEndpoint(TaskPriority::ReadSocket);
 		getRawCommittedVersion.getEndpoint(TaskPriority::ProxyGetRawCommittedVersion);
-		commit.getEndpoint(TaskPriority::ProxyCommitDispatcher);
+		commit.getEndpoint(TaskPriority::ReadSocket);
 		getStorageServerRejoinInfo.getEndpoint(TaskPriority::ProxyStorageRejoin);
-		//getKeyServersLocations.getEndpoint(TaskProxyGetKeyServersLocations); //do not increase the priority of these requests, because clients cans bring down the cluster with too many of these messages.
+		getKeyServersLocations.getEndpoint(TaskPriority::ReadSocket); //priority lowered to TaskPriority::DefaultEndpoint on the proxy
 	}
 };
 
@@ -83,6 +83,7 @@ struct ClientDBInfo {
 	constexpr static FileIdentifier file_identifier = 5355080;
 	UID id;  // Changes each time anything else changes
 	vector< MasterProxyInterface > proxies;
+	Optional<MasterProxyInterface> firstProxy; //not serialized, used for commitOnFirstProxy when the proxies vector has been shrunk
 	double clientTxnInfoSampleRate;
 	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;

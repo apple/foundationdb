@@ -182,8 +182,10 @@ const Value backupProgressValue(const WorkerBackupStatus& status);
 UID decodeBackupProgressKey(const KeyRef& key);
 WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value);
 
-//    "\xff/backupStarted"
+//    "\xff/backupStarted" := "[[vector<UID,Version1>]]"
 extern const KeyRef backupStartedKey;
+Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids);
+std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& value);
 
 extern const KeyRef coordinatorsKey;
 extern const KeyRef logsKey;
@@ -328,8 +330,8 @@ extern const KeyRangeRef restoreRequestKeys;
 extern const KeyRangeRef restoreApplierKeys;
 extern const KeyRef restoreApplierTxnValue;
 
-const Key restoreApplierKeyFor(UID const& applierID, Version version);
-std::pair<UID, Version> decodeRestoreApplierKey(ValueRef const& key);
+const Key restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version);
+std::tuple<UID, int64_t, Version> decodeRestoreApplierKey(ValueRef const& key);
 const Key restoreWorkerKeyFor(UID const& workerID);
 const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server);
 RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value);

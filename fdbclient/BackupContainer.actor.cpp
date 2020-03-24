@@ -25,7 +25,7 @@
 #include "flow/UnitTest.h"
 #include "flow/Hash3.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
-#include "fdbrpc/Platform.h"
+#include "flow/Platform.h"
 #include "fdbclient/AsyncFileBlobStore.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
@@ -329,17 +329,19 @@ public:
 	}
 
 	// The innermost folder covers 100,000 seconds (1e11 versions) which is 5,000 mutation log files at current settings.
-	static std::string logVersionFolderString(Version v) {
-		return format("logs/%s/", versionFolderString(v, 11).c_str());
+	static std::string logVersionFolderString(Version v, bool mlogs) {
+		return format("%s/%s/", (mlogs ? "mlogs" : "logs"), versionFolderString(v, 11).c_str());
 	}
 
 	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) override {
-		return writeFile(logVersionFolderString(beginVersion) + format("log,%lld,%lld,%s,%d", beginVersion, endVersion, deterministicRandom()->randomUniqueID().toString().c_str(), blockSize));
+		return writeFile(logVersionFolderString(beginVersion, false) +
+		                 format("log,%lld,%lld,%s,%d", beginVersion, endVersion,
+		                        deterministicRandom()->randomUniqueID().toString().c_str(), blockSize));
 	}
 
 	Future<Reference<IBackupFile>> writeTaggedLogFile(Version beginVersion, Version endVersion, int blockSize,
 	                                                  uint16_t tagId) override {
-		return writeFile(logVersionFolderString(beginVersion) +
+		return writeFile(logVersionFolderString(beginVersion, true) +
 		                 format("log,%lld,%lld,%s,%d,%d", beginVersion, endVersion,
 		                        deterministicRandom()->randomUniqueID().toString().c_str(), blockSize, tagId));
 	}
@@ -355,8 +357,23 @@ public:
 		return writeFile(snapshotFolderString(snapshotBeginVersion) + format("/%d/", snapshotFileCount / (BUGGIFY ? 1 : 5000)) + fileName);
 	}
 
+	// Find what should be the filename of a path by finding whatever is after the last forward or backward slash, or failing to find those, the whole string.
+	static std::string fileNameOnly(std::string path) {
+		// Find the last forward slash position, defaulting to 0 if not found
+		int pos = path.find_last_of('/');
+		if(pos == std::string::npos) {
+			pos = 0;
+		}
+		// Find the last backward slash position after pos, and update pos if found
+		int b = path.find_last_of('\\', pos);
+		if(b != std::string::npos) {
+			pos = b;
+		}
+		return path.substr(pos + 1);
+	}
+
 	static bool pathToRangeFile(RangeFile &out, std::string path, int64_t size) {
-		std::string name = basename(path);
+		std::string name = fileNameOnly(path);
 		RangeFile f;
 		f.fileName = path;
 		f.fileSize = size;
@@ -369,7 +386,7 @@ public:
 	}
 
 	static bool pathToLogFile(LogFile &out, std::string path, int64_t size) {
-		std::string name = basename(path);
+		std::string name = fileNameOnly(path);
 		LogFile f;
 		f.fileName = path;
 		f.fileSize = size;
@@ -387,7 +404,7 @@ public:
 	}
 
 	static bool pathToKeyspaceSnapshotFile(KeyspaceSnapshotFile &out, std::string path) {
-		std::string name = basename(path);
+		std::string name = fileNameOnly(path);
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
 		int len;
@@ -517,10 +534,12 @@ public:
 		// so start at an earlier version adjusted by how many versions a file could contain.
 		//
 		// Get the cleaned (without slashes) first and last folders that could contain relevant results.
-		std::string firstPath = cleanFolderString(logVersionFolderString(
-			std::max<Version>(0, beginVersion - CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE)
-		));
-		std::string lastPath =  cleanFolderString(logVersionFolderString(targetVersion));
+		bool mlogs = false; // tagged mutation logs
+		std::string firstPath = cleanFolderString(
+		    logVersionFolderString(std::max<Version>(0, beginVersion - CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES *
+		                                                                   CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE),
+		                           mlogs));
+		std::string lastPath = cleanFolderString(logVersionFolderString(targetVersion, mlogs));
 
 		std::function<bool(std::string const &)> pathFilter = [=](const std::string &folderPath) {
 			// Remove slashes in the given folder path so that the '/' positions in the version folder string do not matter

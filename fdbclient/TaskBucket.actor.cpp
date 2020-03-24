@@ -230,7 +230,7 @@ public:
 		return task;
 	}
 
-	// Verify that the user configured task verification key still has the user specificied value
+	// Verify that the user configured task verification key still has the user specified value
 	ACTOR static Future<bool> taskVerify(Reference<TaskBucket> tb, Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 
 		if (task->params.find(Task::reservedTaskParamValidKey) == task->params.end()) {

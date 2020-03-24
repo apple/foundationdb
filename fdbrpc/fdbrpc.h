@@ -84,22 +84,6 @@ struct NetSAV : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 	}
 
 	virtual void destroy() { delete this; }
-	virtual void receive(ArenaReader& reader) {
-		if (!SAV<T>::canBeSet()) return;  // load balancing and retries can result in the same request being answered twice
-		this->addPromiseRef();
-		bool ok;
-		reader >> ok;
-		if (ok) {
-			T message;
-			reader >> message;
-			SAV<T>::sendAndDelPromiseRef(message);
-		}
-		else {
-			Error error;
-			reader >> error;
-			SAV<T>::sendErrorAndDelPromiseRef(error);
-		}
-	}
 	virtual void receive(ArenaObjectReader& reader) {
 		if (!SAV<T>::canBeSet()) return;
 		this->addPromiseRef();
@@ -239,13 +223,6 @@ struct NetNotifiedQueue : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotif
 	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {}
 
 	virtual void destroy() { delete this; }
-	virtual void receive(ArenaReader& reader) {
-		this->addPromiseRef();
-		T message;
-		reader >> message;
-		this->send(std::move(message));
-		this->delPromiseRef();
-	}
 	virtual void receive(ArenaObjectReader& reader) {
 		this->addPromiseRef();
 		T message;
@@ -404,6 +381,7 @@ public:
 
 	bool operator == (const RequestStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }
+	uint32_t size() const { return queue->size(); }
 
 private:
 	NetNotifiedQueue<T>* queue;

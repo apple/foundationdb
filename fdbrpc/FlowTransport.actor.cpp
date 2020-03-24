@@ -302,7 +302,7 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 			state double lastRefreshed = now();
 			state int64_t lastBytesReceived = peer->bytesReceived;
 			loop {
-				wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME));
+				wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME, TaskPriority::ReadSocket));
 				if (lastBytesReceived < peer->bytesReceived) {
 					lastRefreshed = now();
 					lastBytesReceived = peer->bytesReceived;
@@ -317,7 +317,7 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 
 		//We cannot let an error be thrown from connectionMonitor while still on the stack from scanPackets in connectionReader
 		//because then it would not call the destructor of connectionReader when connectionReader is cancelled.
-		wait(delay(0));
+		wait(delay(0, TaskPriority::ReadSocket));
 
 		if (peer->reliable.empty() && peer->unsent.empty() && peer->outstandingReplies==0) {
 			if (peer->peerReferences == 0 &&
@@ -332,7 +332,7 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 			}
 		}
 
-		wait (delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME));
+		wait (delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME, TaskPriority::ReadSocket));
 
 		// TODO: Stop monitoring and close the connection with no onDisconnect requests outstanding
 		state ReplyPromise<Void> reply;
@@ -429,14 +429,15 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 				try {
 					choose {
-						when(Reference<IConnection> _conn =
-						         wait(INetworkConnections::net()->connect(self->destination))) {
+						when( Reference<IConnection> _conn = wait( INetworkConnections::net()->connect(self->destination) ) ) { 
+							conn = _conn;
+							wait(conn->connectHandshake());
 							IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 							if (self->unsent.empty()) {
-								_conn->close();
+								conn->close();
+								conn = Reference<IConnection>();
 								continue;
 							} else {
-								conn = _conn;
 								TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
 										.suppressFor(1.0)
 										.detail("PeerAddr", self->destination);
@@ -578,9 +579,7 @@ void Peer::prependConnectPacket() {
 
 	pkt.connectPacketLength = sizeof(pkt) - sizeof(pkt.connectPacketLength);
 	pkt.protocolVersion = currentProtocolVersion;
-	if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
-		pkt.protocolVersion.addObjectSerializerFlag();
-	}
+	pkt.protocolVersion.addObjectSerializerFlag();
 	pkt.connectionId = transport->transportId;
 
 	PacketBuffer* pb_first = PacketBuffer::create();
@@ -655,14 +654,10 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 	if (receiver) {
 		try {
 			g_currentDeliveryPeerAddress = destination.addresses;
-			if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
-				StringRef data = reader.arenaReadAll();
-				ASSERT(data.size() > 8);
-				ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
-				receiver->receive(objReader);
-			} else {
-				receiver->receive(reader);
-			}
+			StringRef data = reader.arenaReadAll();
+			ASSERT(data.size() > 8);
+			ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
+			receiver->receive(objReader);
 			g_currentDeliveryPeerAddress = { NetworkAddress() };
 		} catch (Error& e) {
 			g_currentDeliveryPeerAddress = {NetworkAddress()};
@@ -864,8 +859,8 @@ ACTOR static Future<Void> connectionReader(
 						serializer(pktReader, pkt);
 
 						uint64_t connectionId = pkt.connectionId;
-						if((FLOW_KNOBS->USE_OBJECT_SERIALIZER != 0) != pkt.protocolVersion.hasObjectSerializerFlag() ||
-						   !pkt.protocolVersion.isCompatible(currentProtocolVersion)) {
+						if (!pkt.protocolVersion.hasObjectSerializerFlag() ||
+						    !pkt.protocolVersion.isCompatible(currentProtocolVersion)) {
 							incompatibleProtocolVersionNewer = pkt.protocolVersion > currentProtocolVersion;
 							NetworkAddress addr = pkt.canonicalRemotePort
 							                          ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
@@ -896,8 +891,7 @@ ACTOR static Future<Void> connectionReader(
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but it's safer to keep the old behavior.
 								throw incompatible_protocol_version();
 							}
-						}
-						else {
+						} else {
 							compatible = true;
 							TraceEvent("ConnectionEstablished", conn->getDebugID())
 								.suppressFor(1.0)
@@ -972,6 +966,7 @@ ACTOR static Future<Void> connectionReader(
 
 ACTOR static Future<Void> connectionIncoming( TransportData* self, Reference<IConnection> conn ) {
 	try {
+		wait(conn->acceptHandshake());
 		state Promise<Reference<Peer>> onConnected;
 		state Future<Void> reader = connectionReader( self, conn, Reference<Peer>(), onConnected );
 		choose {
@@ -995,14 +990,20 @@ ACTOR static Future<Void> connectionIncoming( TransportData* self, Reference<ICo
 ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr ) {
 	state ActorCollectionNoErrors incoming;  // Actors monitoring incoming connections that haven't yet been associated with a peer
 	state Reference<IListener> listener = INetworkConnections::net()->listen( listenAddr );
+	state uint64_t connectionCount = 0;
 	try {
 		loop {
 			Reference<IConnection> conn = wait( listener->accept() );
-			TraceEvent("ConnectionFrom", conn->getDebugID()).suppressFor(1.0)
-				.detail("FromAddress", conn->getPeerAddress())
-				.detail("ListenAddress", listenAddr.toString());
-			incoming.add( connectionIncoming(self, conn) );
-			wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskPriority::WriteSocket));
+			if(conn) {
+				TraceEvent("ConnectionFrom", conn->getDebugID()).suppressFor(1.0)
+					.detail("FromAddress", conn->getPeerAddress())
+					.detail("ListenAddress", listenAddr.toString());
+				incoming.add( connectionIncoming(self, conn) );
+			}
+			connectionCount++;
+			if( connectionCount%(FLOW_KNOBS->ACCEPT_BATCH_SIZE) == 0 ) {
+				wait(delay(0, TaskPriority::AcceptSocket));
+			}
 		}
 	} catch (Error& e) {
 		TraceEvent(SevError, "ListenError").error(e);
@@ -1106,7 +1107,7 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 		return;
 
 	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
-	
+
 	if(peer->peerReferences == -1) {
 		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 		peer->peerReferences = 1;
@@ -1126,7 +1127,7 @@ void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream)
 				.detail("Address", endpoint.getPrimaryAddress())
 				.detail("Token", endpoint.token);
 		}
-		if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty() && peer->outstandingReplies==0) {
+		if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty() && peer->outstandingReplies==0 && peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY) {
 			peer->resetPing.trigger();
 		}
 	}
@@ -1161,15 +1162,9 @@ static void sendLocal( TransportData* self, ISerializeSource const& what, const 
 	// SOMEDAY: Would it be better to avoid (de)serialization by doing this check in flow?
 
 	Standalone<StringRef> copy;
-	if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
-		ObjectWriter wr(AssumeVersion(currentProtocolVersion));
-		what.serializeObjectWriter(wr);
-		copy = wr.toStringRef();
-	} else {
-		BinaryWriter wr( AssumeVersion(currentProtocolVersion) );
-		what.serializeBinaryWriter(wr);
-		copy = wr.toValue();
-	}
+	ObjectWriter wr(AssumeVersion(currentProtocolVersion));
+	what.serializeObjectWriter(wr);
+	copy = wr.toStringRef();
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(copy.begin(), copy.size());
 #endif
@@ -1208,7 +1203,7 @@ static ReliablePacket* sendPacket( TransportData* self, Reference<Peer> peer, IS
 
 	wr.writeAhead(packetInfoSize , &packetInfoBuffer);
 	wr << destination.token;
-	what.serializePacketWriter(wr, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
+	what.serializePacketWriter(wr);
 	pb = wr.finish();
 	len = wr.size() - packetInfoSize;
 

@@ -78,15 +78,18 @@ struct ReadConflictRange {
 struct KeyInfo {
 	StringRef key;
 	int* pIndex;
-	bool nextKey;
 	bool begin;
 	bool write;
 	int transaction;
 
 	KeyInfo(){};
-	KeyInfo(StringRef key, bool nextKey, bool begin, bool write, int transaction, int* pIndex)
-	  : key(key), nextKey(nextKey), begin(begin), write(write), transaction(transaction), pIndex(pIndex) {}
+	KeyInfo(StringRef key, bool begin, bool write, int transaction, int* pIndex)
+	  : key(key), begin(begin), write(write), transaction(transaction), pIndex(pIndex) {}
 };
+
+force_inline int extra_ordering(const KeyInfo& ki) {
+	return ki.begin * 2 + (ki.write ^ ki.begin);
+}
 
 // returns true if done with string
 force_inline bool getCharacter(const KeyInfo& ki, int character, int& outputCharacter) {
@@ -94,15 +97,6 @@ force_inline bool getCharacter(const KeyInfo& ki, int character, int& outputChar
 	if (character < ki.key.size()) {
 		outputCharacter = 5 + ki.key.begin()[character];
 		return false;
-	}
-
-	// nextKey append a zero
-	if (ki.nextKey && character >= ki.key.size()) {
-		if (character == ki.key.size()) {
-			outputCharacter = 5; // extra '0' character
-			return false;
-		}
-		character--;
 	}
 
 	// termination
@@ -113,7 +107,7 @@ force_inline bool getCharacter(const KeyInfo& ki, int character, int& outputChar
 
 	if (character == ki.key.size() + 1) {
 		// end/begin+read/write relative sorting
-		outputCharacter = ki.begin * 2 + (ki.write ^ ki.begin);
+		outputCharacter = extra_ordering(ki);
 		return false;
 	}
 
@@ -126,18 +120,16 @@ bool operator<(const KeyInfo& lhs, const KeyInfo& rhs) {
 	int c = memcmp(lhs.key.begin(), rhs.key.begin(), i);
 	if (c != 0) return c < 0;
 
-	// SOMEDAY: This is probably not very fast.  Slows D.Sort by ~20% relative to previous (incorrect) version.
-
-	bool lDone, rDone;
-	int lc, rc;
-	while (true) {
-		lDone = getCharacter(lhs, i, lc);
-		rDone = getCharacter(rhs, i, rc);
-		if (lDone && rDone) return false; // equality
-		if (lc < rc) return true;
-		if (lc > rc) return false;
-		i++;
+	// Always sort shorter keys before longer keys.
+	if (lhs.key.size() < rhs.key.size()) {
+		return true;
 	}
+	if (lhs.key.size() > rhs.key.size()) {
+		return false;
+	}
+
+	// When the keys are the same length, use the extra ordering constraint.
+	return extra_ordering(lhs) < extra_ordering(rhs);
 }
 
 bool operator==(const KeyInfo& lhs, const KeyInfo& rhs) {
@@ -295,14 +287,10 @@ private:
 		int nPointers, valueLength;
 	};
 
-	static force_inline bool less(const uint8_t* a, int aLen, const uint8_t* b, int bLen) {
-		int len = min(aLen, bLen);
-		for (int i = 0; i < len; i++)
-			if (a[i] < b[i])
-				return true;
-			else if (a[i] > b[i])
-				return false;
-
+	static force_inline bool less( const uint8_t* a, int aLen, const uint8_t* b, int bLen ) {
+		int c = memcmp(a,b,min(aLen,bLen));
+		if (c<0) return true;
+		if (c>0) return false;
 		return aLen < bLen;
 	}
 
@@ -766,25 +754,26 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr) {
 		std::vector<KeyInfo>& points = this->points;
 		for (int r = 0; r < tr.read_conflict_ranges.size(); r++) {
 			const KeyRangeRef& range = tr.read_conflict_ranges[r];
-			points.emplace_back(range.begin, false, true, false, t, &info->readRanges[r].first);
-			points.emplace_back(range.end, false, false, false, t, &info->readRanges[r].second);
+			points.emplace_back(range.begin, true, false, t, &info->readRanges[r].first);
+			points.emplace_back(range.end, false, false, t, &info->readRanges[r].second);
 			combinedReadConflictRanges.emplace_back(range.begin, range.end, tr.read_snapshot, t);
 		}
 		for (int r = 0; r < tr.write_conflict_ranges.size(); r++) {
 			const KeyRangeRef& range = tr.write_conflict_ranges[r];
-			points.emplace_back(range.begin, false, true, true, t, &info->writeRanges[r].first);
-			points.emplace_back(range.end, false, false, true, t, &info->writeRanges[r].second);
+			points.emplace_back(range.begin, true, true, t, &info->writeRanges[r].first);
+			points.emplace_back(range.end, false, true, t, &info->writeRanges[r].second);
 		}
 	}
 
 	this->transactionInfo.push_back(arena, info);
 }
 
-class MiniConflictSet2 : NonCopyable {
+// SOMEDAY: This should probably be replaced with a roaring bitmap.
+class MiniConflictSet : NonCopyable {
 	std::vector<bool> values;
 
 public:
-	explicit MiniConflictSet2(int size) { values.assign(size, false); }
+	explicit MiniConflictSet(int size) { values.assign(size, false); }
 	void set(int begin, int end) {
 		for (int i = begin; i < end; i++) values[i] = true;
 	}
@@ -792,99 +781,6 @@ public:
 		for (int i = begin; i < end; i++)
 			if (values[i]) return true;
 		return false;
-	}
-};
-
-class MiniConflictSet : NonCopyable {
-	typedef uint64_t wordType;
-	enum { bucketShift = 6, bucketMask = sizeof(wordType) * 8 - 1 };
-	std::vector<wordType> values; // undefined when andValues is true for a range of values
-	std::vector<wordType> orValues;
-	std::vector<wordType> andValues;
-	MiniConflictSet2 debug; // SOMEDAY: Test on big ranges, eliminate this
-
-	wordType bitMask(unsigned int bit) { // computes results for bit%word
-		return (((wordType)1) << (bit & bucketMask));
-	}
-	void setNthBit(std::vector<wordType>& v, const unsigned int bit) { v[bit >> bucketShift] |= bitMask(bit); }
-	void clearNthBit(std::vector<wordType>& v, const unsigned int bit) { v[bit >> bucketShift] &= ~(bitMask(bit)); }
-	bool getNthBit(const std::vector<wordType>& v, const unsigned int bit) {
-		return (v[bit >> bucketShift] & bitMask(bit)) != 0;
-	}
-	int wordsForNBits(unsigned int bits) { return (bits + ((1 << bucketShift) - 1)) >> bucketShift; }
-	wordType highBits(int b) { // bits (b&bucketMask) and higher are 1
-#pragma warning(disable : 4146)
-		return -bitMask(b);
-#pragma warning(default : 4146)
-	}
-	wordType lowBits(int b) { // bits lower than (b&bucketMask) are 1
-		return bitMask(b) - 1;
-	}
-	wordType lowBits2(int b) { return (b & bucketMask) ? lowBits(b) : -1; }
-
-	void setBits(std::vector<wordType>& v, int bitBegin, int bitEnd, bool fillMiddle) {
-		if (bitBegin >= bitEnd) return;
-		int beginWord = bitBegin >> bucketShift;
-		int lastWord = ((bitEnd + bucketMask) >> bucketShift) - 1;
-		if (beginWord == lastWord) {
-			v[beginWord] |= highBits(bitBegin) & lowBits2(bitEnd);
-		} else {
-			v[beginWord] |= highBits(bitBegin);
-			if (fillMiddle)
-				for (int w = beginWord + 1; w < lastWord; w++) v[w] = wordType(-1);
-			v[lastWord] |= lowBits2(bitEnd);
-		}
-	}
-
-	bool orBits(std::vector<wordType>& v, int bitBegin, int bitEnd, bool getMiddle) {
-		if (bitBegin >= bitEnd) return false;
-		int beginWord = bitBegin >> bucketShift;
-		int lastWord = ((bitEnd + bucketMask) >> bucketShift) - 1;
-		if (beginWord == lastWord)
-			return (v[beginWord] & highBits(bitBegin) & lowBits2(bitEnd)) != 0;
-		else {
-			if (getMiddle)
-				for (int w = beginWord + 1; w < lastWord; w++)
-					if (v[w]) return true;
-			return ((v[beginWord] & highBits(bitBegin)) | (v[lastWord] & lowBits2(bitEnd))) != 0;
-		}
-	}
-
-	bool orImpl(int begin, int end) {
-		if (begin == end) return false;
-		int beginWord = begin >> bucketShift;
-		int lastWord = ((end + bucketMask) >> bucketShift) - 1;
-
-		return orBits(orValues, beginWord + 1, lastWord, true) || getNthBit(andValues, beginWord) ||
-		       getNthBit(andValues, lastWord) || orBits(values, begin, end, false);
-	}
-
-public:
-	explicit MiniConflictSet(int size) : debug(size) {
-		static_assert((1 << bucketShift) == sizeof(wordType) * 8, "BucketShift incorrect");
-
-		values.assign(wordsForNBits(size), false);
-		orValues.assign(wordsForNBits(wordsForNBits(size)), false);
-		andValues.assign(wordsForNBits(wordsForNBits(size)), false);
-	}
-
-	void set(int begin, int end) {
-		debug.set(begin, end);
-		if (begin == end) return;
-
-		int beginWord = begin >> bucketShift;
-		int lastWord = ((end + bucketMask) >> bucketShift) - 1;
-
-		setBits(values, begin, end, false);
-		setBits(andValues, beginWord + 1, lastWord, true);
-		setBits(orValues, beginWord, lastWord + 1, true);
-	}
-
-	bool any(int begin, int end) {
-		bool a = orImpl(begin, end);
-		bool b = debug.any(begin, end);
-		ASSERT(a == b);
-		return b;
 	}
 };
 
@@ -940,10 +836,14 @@ void ConflictBatch::detectConflicts(Version now, Version newOldestVersion, std::
 	t = timer();
 	mergeWriteConflictRanges(now);
 	g_merge += timer() - t;
-
+	
 	for (int i = 0; i < transactionCount; i++) {
-		if (!transactionConflictStatus[i]) nonConflicting.push_back(i);
-		if (tooOldTransactions && transactionInfo[i]->tooOld) tooOldTransactions->push_back(i);
+		if (tooOldTransactions && transactionInfo[i]->tooOld) {
+			tooOldTransactions->push_back(i);
+		}
+		else if (!transactionConflictStatus[i]) {
+			nonConflicting.push_back( i );
+		}
 	}
 
 	delete[] transactionConflictStatus;
@@ -1028,14 +928,46 @@ void miniConflictSetTest() {
 	printf("miniConflictSetTest complete\n");
 }
 
+void operatorLessThanTest() {
+	{ // Longer strings before shorter strings.
+		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
+		KeyInfo b(LiteralStringRef("hello\0"), /*begin=*/false, /*write=*/false, 0, nullptr);
+		ASSERT(a < b);
+		ASSERT(!(b < a));
+		ASSERT(!(a == b));
+	}
+
+	{ // Reads before writes.
+		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/false, 0, nullptr);
+		KeyInfo b(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
+		ASSERT(a < b);
+		ASSERT(!(b < a));
+		ASSERT(!(a == b));
+	}
+
+	{ // Begin reads after writes.
+		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
+		KeyInfo b(LiteralStringRef("hello"), /*begin=*/true, /*write=*/false, 0, nullptr);
+		ASSERT(a < b);
+		ASSERT(!(b < a));
+		ASSERT(!(a == b));
+	}
+
+	{ // Begin writes after writes.
+		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
+		KeyInfo b(LiteralStringRef("hello"), /*begin=*/true, /*write=*/true, 0, nullptr);
+		ASSERT(a < b);
+		ASSERT(!(b < a));
+		ASSERT(!(a == b));
+	}
+}
+
 void skipListTest() {
 	printf("Skip list test\n");
 
-	// A test case that breaks the old operator<
-	// KeyInfo a( LiteralStringRef("hello"), true, false, true, -1 );
-	// KeyInfo b( LiteralStringRef("hello\0"), false, false, false, 0 );
-
 	miniConflictSetTest();
+
+	operatorLessThanTest();
 
 	setAffinity(0);
 

@@ -1156,7 +1156,7 @@ Future<Version> ReadYourWritesTransaction::getReadVersion() {
 
 Optional<Value> getValueFromJSON(StatusObject statusObj) {
 	try {
-		Value output = StringRef(json_spirit::write_string(json_spirit::mValue(statusObj), json_spirit::Output_options::raw_utf8).c_str());
+		Value output = StringRef(json_spirit::write_string(json_spirit::mValue(statusObj), json_spirit::Output_options::none));
 		return output;
 	}
 	catch (std::exception& e){
@@ -1165,8 +1165,8 @@ Optional<Value> getValueFromJSON(StatusObject statusObj) {
 	}
 }
 
-ACTOR Future<Optional<Value>> getJSON(Reference<ClusterConnectionFile> clusterFile) {
-	StatusObject statusObj = wait(StatusClient::statusFetcher(clusterFile));
+ACTOR Future<Optional<Value>> getJSON(Database db) {
+	StatusObject statusObj = wait(StatusClient::statusFetcher(db));
 	return getValueFromJSON(statusObj);
 }
 
@@ -1220,7 +1220,7 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 	
 	if (key == LiteralStringRef("\xff\xff/status/json")){
 		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-			return getJSON(tr.getDatabase()->getConnectionFile());
+			return getJSON(tr.getDatabase());
 		}
 		else {
 			return Optional<Value>();
@@ -1383,6 +1383,16 @@ Future< Standalone<VectorRef<const char*> >> ReadYourWritesTransaction::getAddre
 	Future< Standalone<VectorRef<const char*> >> result = waitOrError(tr.getAddressesForKey(key), resetPromise.getFuture());
 	reading.add( success( result ) ); 
 	return result;
+}
+
+Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
+	if(checkUsedDuringCommit()) {
+		throw used_during_commit();
+	}
+	if( resetPromise.isSet() )
+		return resetPromise.getFuture().getError();
+
+	return map(waitOrError(tr.getStorageMetrics(keys, -1), resetPromise.getFuture()), [](const StorageMetrics& m) { return m.bytes; });
 }
 
 void ReadYourWritesTransaction::addReadConflictRange( KeyRangeRef const& keys ) {

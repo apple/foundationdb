@@ -85,6 +85,8 @@ public class FDB {
 	private volatile boolean netStarted = false;
 	private volatile boolean netStopped = false;
 	volatile boolean warnOnUnclosed = true;
+	private boolean useShutdownHook = true;
+	private Thread shutdownHook;
 	private final Semaphore netRunning = new Semaphore(1);
 	private final NetworkOptions options;
 
@@ -104,15 +106,8 @@ public class FDB {
 	 * Called only once to create the FDB singleton.
 	 */
 	private FDB(int apiVersion) {
-		this(apiVersion, true);
-	}
-
-	private FDB(int apiVersion, boolean controlRuntime) {
 		this.apiVersion = apiVersion;
 		options = new NetworkOptions(this::Network_setOption);
-		if (controlRuntime) {
-			Runtime.getRuntime().addShutdownHook(new Thread(this::stopNetwork));
-		}
 	}
 
 	/**
@@ -167,9 +162,9 @@ public class FDB {
 	 *  object.<br><br>
 	 *
 	 *  Warning: When using the multi-version client API, setting an API version that
-	 *   is not supported by a particular client library will prevent that client from 
+	 *   is not supported by a particular client library will prevent that client from
 	 *   being used to connect to the cluster. In particular, you should not advance
-	 *   the API version of your application after upgrading your client until the 
+	 *   the API version of your application after upgrading your client until the
 	 *   cluster has also been upgraded.
 	 *
 	 * @param version the API version required
@@ -177,13 +172,6 @@ public class FDB {
 	 * @return the FoundationDB API object
 	 */
 	public static FDB selectAPIVersion(final int version) throws FDBException {
-		return selectAPIVersion(version, true);
-	}
-
-	/**
-	   This function is called from C++ if the VM is controlled directly from FDB
-	 */
-	private static synchronized FDB selectAPIVersion(final int version, boolean controlRuntime) throws FDBException {
 		if(singleton != null) {
 			if(version != singleton.getAPIVersion()) {
 				throw new IllegalArgumentException(
@@ -197,9 +185,26 @@ public class FDB {
 			throw new IllegalArgumentException("API version not supported (maximum 700)");
 
 		Select_API_version(version);
-		FDB fdb = new FDB(version, controlRuntime);
+		singleton = new FDB(version);
 
-		return singleton = fdb;
+		return singleton;
+	}
+
+	/**
+	 * Disables shutdown hook that stops network thread upon process shutdown. This is useful if you need to run
+	 * your own shutdown hook that uses the FDB instance and you need to avoid race conditions
+	 * with the default shutdown hook. Replacement shutdown hook should stop the network thread manually
+	 * by calling {@link #stopNetwork}.
+	 */
+	public synchronized void disableShutdownHook() {
+		useShutdownHook = false;
+		if(shutdownHook != null) {
+			// If this method was called after network thread started and shutdown hook was installed,
+			// remove this hook
+			Runtime.getRuntime().removeShutdownHook(shutdownHook);
+			// Release thread reference for GC
+			shutdownHook = null;
+		}
 	}
 
 	/**
@@ -404,6 +409,11 @@ public class FDB {
 			throw new IllegalStateException("Network has been stopped and cannot be restarted");
 		if(netStarted) {
 			return;
+		}
+		if(useShutdownHook) {
+			// Register shutdown hook that stops network thread if user did not opt out
+			shutdownHook = new Thread(this::stopNetwork, "fdb-shutdown-hook");
+			Runtime.getRuntime().addShutdownHook(shutdownHook);
 		}
 		Network_setup();
 		netStarted = true;

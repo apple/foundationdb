@@ -240,13 +240,13 @@ class CachedSerialization {
 public:
 	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
 
-	//FIXME: this code will not work for caching a direct serialization from ObjectWriter, because it adds an ErrorOr, 
+	//FIXME: this code will not work for caching a direct serialization from ObjectWriter, because it adds an ErrorOr,
 	// we should create a separate SerializeType for direct serialization
 	enum class SerializeType { None, Binary, Object };
 
 	CachedSerialization() : cacheType(SerializeType::None) {}
 	explicit CachedSerialization(const T& data) : data(data), cacheType(SerializeType::None) {}
-	
+
 	const T& read() const { return data; }
 
 	T& mutate() {
@@ -579,6 +579,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 
 	bool isReady() const { return !queue.empty() || error.isValid(); }
 	bool isError() const { return queue.empty() && error.isValid(); }  // the *next* thing queued is an error
+	uint32_t size() const { return queue.size(); }
 
 	T pop() {
 		if (queue.empty()) {
