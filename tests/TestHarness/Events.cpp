@@ -19,7 +19,8 @@
  */
 
 #include "Events.h"
-#include "rapidxml.hpp"
+#include <rapidxml.hpp>
+#include <algorithm>
 #include <cctype>
 #include <memory>
 #include <random>
