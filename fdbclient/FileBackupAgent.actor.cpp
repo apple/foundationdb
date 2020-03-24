@@ -4450,6 +4450,7 @@ public:
 
 		ryw_tr->reset();
 		loop {
+
 			try {
 				ryw_tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				ryw_tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -4475,7 +4476,7 @@ public:
 	// Similar to atomicRestore, only used in simulation test.
 	// locks the database before discontinuing the backup and that same lock is then used while doing the restore.
 	//the tagname of the backup must be the same as the restore.
-	ACTOR Future<Void> atomicParallelRestore(FileBackupAgent* backupAgent, Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {
+	ACTOR static Future<Void> atomicParallelRestore(FileBackupAgent* backupAgent, Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {
 		state Reference<ReadYourWritesTransaction> ryw_tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 		state BackupConfig backupConfig;
 		loop {
@@ -4592,6 +4593,10 @@ Future<Void> FileBackupAgent::submitParallelRestore(Database cx, Key backupTag,
                                                     Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
                                                     Version targetVersion, bool locked) {
     return FileBackupAgentImpl::submitParallelRestore(cx, backupTag, backupRanges, bcUrl, targetVersion, locked);
+}
+
+Future<Void> FileBackupAgent::atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {
+	return FileBackupAgentImpl::atomicParallelRestore(this, cx, tagName, ranges, addPrefix, removePrefix);
 }
 
 Future<Version> FileBackupAgent::restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB) {

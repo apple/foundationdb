@@ -279,7 +279,7 @@ public:
 	Future<Void> parallelRestoreFinish(Database cx);
 	Future<Void> submitParallelRestore(Database cx, Key backupTag, Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                   KeyRef bcUrl, Version targetVersion, bool locked);
-	Future<Void> atomicParallelRestore(FileBackupAgent* backupAgent, Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix);
+	Future<Void> atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix);
 
 	// restore() will
 	//   - make sure that url is readable and appears to be a complete backup
