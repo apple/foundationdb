@@ -207,7 +207,7 @@ public:
 	double detailedHealthMetricsLastUpdated;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
-	std::unique_ptr<SpecialKeySpace> specialKeySpace;
+	std::shared_ptr<SpecialKeySpace> specialKeySpace;
 };
 
 #endif

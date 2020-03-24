@@ -13,8 +13,12 @@ public:
 	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
 	                                                    KeyRangeRef kr) const {
 		ASSERT(range.contains(kr));
-		auto result = ryw->getRange(kr, GetRangeLimits());
-		// ASSERT(resultFuture.isReady());
+		auto resultFuture = ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY);
+		ASSERT(resultFuture.isReady());
+		auto result = resultFuture.getValue();
+		if (result.size() == 0) {
+			TraceEvent("DebugLLL");
+		}
 		return result;
 	}
 };
@@ -22,13 +26,13 @@ public:
 struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	int actorCount, minKeysPerRange, maxKeysPerRange, rangeCount, keyBytes, valBytes;
-	double testDuration, absoluteRandomProb;
-	std::vector<Future<Void>> clients;
+	double testDuration, absoluteRandomProb, transactionsPerSecond;
+	// std::vector<Future<Void>> clients;
 
 	PerfIntCounter wrongResults, keysCount;
 
 	Reference<ReadYourWritesTransaction> ryw; // used to store all populated data
-	std::vector<SPSCTestImpl> impls;
+	std::vector<SPSCTestImpl*> impls;
 
 	Standalone<VectorRef<KeyRangeRef>> keys;
 
@@ -40,14 +44,17 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		keyBytes = getOption(options, LiteralStringRef("keyBytes"), 16);
 		valBytes = getOption(options, LiteralStringRef("valueBytes"), 16);
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-        actorCount = getOption( options, LiteralStringRef("actorCount"), 50 );
+		transactionsPerSecond = getOption( options, LiteralStringRef("transactionsPerSecond"), 100.0 );
+        actorCount = getOption( options, LiteralStringRef("actorCount"), 1 );
 		absoluteRandomProb = getOption(options, LiteralStringRef("absoluteRandomProb"), 0.5);
 	}
 
 	virtual std::string description() { return "SpecialKeySpaceCorrectness"; }
 	virtual Future<Void> setup(Database const& cx) { return _setup(cx, this); }
 	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
-	virtual Future<bool> check(Database const& cx) { return wrongResults.getValue() == 0; }
+	virtual Future<bool> check(Database const& cx) {
+		return wrongResults.getValue() == 0;
+	}
 	virtual void getMetrics(std::vector<PerfMetric>& m) {}
 
 	// disable the default timeout setting
@@ -75,14 +82,15 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
         self->ryw = Reference(new ReadYourWritesTransaction(cx));
+		self->ryw->clear(normalKeys);
 		// generate key ranges
 		for (int i = 0; i < self->rangeCount; ++i) {
 			std::string baseKey = deterministicRandom()->randomAlphaNumeric(i + 1);
 			Key startKey(baseKey + "/");
 			Key endKey(baseKey + "/\xff");
 			self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
-			self->impls.emplace_back(startKey, endKey);
-			cx->specialKeySpace->registerKeyRange(self->keys.back(), &self->impls.back());
+			self->impls.push_back(new SPSCTestImpl(startKey, endKey));
+			cx->specialKeySpace->registerKeyRange(self->keys.back(), self->impls.back());
 			// generate keys in each key range
 			int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
 			self->keysCount += keysInRange;
@@ -91,36 +99,45 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				               Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
 			}
 		}
-
+		self->ryw->setVersion(100);
         std::vector<Future<Void>> clients;
         for(int c = 0; c < self->actorCount; c++) {
 			clients.push_back(self->getRangeCallActor(cx, self));
 		}
 		wait(timeout(waitForAll(clients), self->testDuration, Void()));
+		// wait(delay(self->testDuration));
+		// printf("After start delay\n");
+		for (SPSCTestImpl* p : self->impls)
+			delete p;
 		return Void();
 	}
 
 	ACTOR Future<Void> getRangeCallActor(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
+		state double lastTime = now();
 		loop {
+			wait( poisson( &lastTime, 1.0 / self->transactionsPerSecond ) );
 			state bool reverse = deterministicRandom()->random01() < 0.5;
 			state GetRangeLimits limit = self->randomLimits();
 			state KeySelector begin = self->randomKeySelector();
 			state KeySelector end = self->randomKeySelector();
-            KeyRange kr = KeyRangeRef(LiteralStringRef("test"), LiteralStringRef("test2"));
-			// state Standalone<RangeResultRef> correctResult = wait(self->ryw->getRange(begin, end, limit, false, reverse));
-            Standalone<RangeResultRef> tempResult = wait(self->ryw->getRange(kr, 1));
-			// ASSERT(correctResultFuture.isReady());
-			// auto correctResult = correctResultFuture.getValue();
-			// auto testResultFuture = cx->specialKeySpace->getRange(self->ryw, begin, end, limit, false, reverse);
-			// ASSERT(testResultFuture.isReady());
-			// auto testResult = testResultFuture.getValue();
+			auto correctResultFuture = self->ryw->getRange(begin, end, limit, false, reverse);
+			ASSERT(correctResultFuture.isReady());
+			// TraceEvent("RANGECALLCOUNTER").detail("Counter", count);
+			// printf("DEBUG Counter: %d\n", count);
+			// count++;
+			auto correctResult = correctResultFuture.getValue();
+			auto testResultFuture = cx->specialKeySpace->getRange(self->ryw, begin, end, limit, false, reverse);
+			ASSERT(testResultFuture.isReady());
+			auto testResult = testResultFuture.getValue();
 
-			// // check the same
-			// if (!self->compareRangeResult(correctResult, testResult)) {
-			// 	// TODO : log here
-			// 	// TraceEvent("WrongGetRangeResult"). detail("KeySeleco")
-			// 	++self->wrongResults;
-			// }
+			// check the same
+			if (!self->compareRangeResult(correctResult, testResult)) {
+				// TODO : log here
+				// TraceEvent("WrongGetRangeResult"). detail("KeySeleco")
+				auto temp1 = cx->specialKeySpace->getRange(self->ryw, begin, end, limit, false, reverse);
+				auto temp2 = self->ryw->getRange(begin, end, limit, false, reverse);
+				++self->wrongResults;
+			}
 		}
 	}
 
@@ -138,11 +155,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			prefix = Key(
 			    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, rangeCount + 1)) + "/");
 		else
-			prefix = keys[deterministicRandom()->randomInt(1, rangeCount + 1)].begin;
+			prefix = keys[deterministicRandom()->randomInt(0, rangeCount)].begin;
 		Key suffix;
 		// TODO : add randomness to pickup existing keys
-		// if (deterministicRandom()->random01() < absoluteRandomProb)
-		suffix = Key(deterministicRandom()->randomAlphaNumeric(keyBytes));
+		if (deterministicRandom()->random01() < absoluteRandomProb)
+			suffix = Key(deterministicRandom()->randomAlphaNumeric(keyBytes));
 		// return Key(deterministicRandom()->randomAlphaNumeric(keyBytes)).withPrefix(prefix);
 		// TODO : test corner case here if offset points out
 		int offset = deterministicRandom()->randomInt(-keysCount.getValue() - 1, keysCount.getValue() + 1);
@@ -151,7 +168,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 
 	GetRangeLimits randomLimits() {
-		if (deterministicRandom()->random01() < 0.5) return GetRangeLimits();
+		// TODO : fix knobs for row_unlimited
+		// if (deterministicRandom()->random01() < 0.5) return GetRangeLimits();
 		int rowLimits = deterministicRandom()->randomInt(1, keysCount.getValue() + 1);
 		// TODO : add random bytes limit here
         // TODO : setRequestLimits in RYW

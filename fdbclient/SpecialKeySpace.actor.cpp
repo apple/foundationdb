@@ -32,6 +32,10 @@ ACTOR Future<Void> SpecialKeyRangeBaseImpl::normalizeKeySelectorActor(const Spec
 	    .detail("SpecialKeyRangeEnd", pkrImpl->range.end);
 
 	Standalone<RangeResultRef> result = wait(pkrImpl->getRange(ryw, KeyRangeRef(startKey, endKey)));
+	if (result.size() == 0) {
+		TraceEvent("ZeroElementsIntheRange").detail("Start", startKey).detail("End", endKey);
+		return Void();
+	}
 	// TODO : KeySelector::setKey has byte limit according to the knobs, customize it if needed
 	if (ks->offset < 1) {
 		if (result.size() >= 1 - ks->offset) {
@@ -71,26 +75,28 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	// make sure offset == 1
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter =
 	    pks->impls.rangeContaining(begin.getKey());
-	while (begin.offset != 1 && iter != pks->impls.ranges().begin() && iter != pks->impls.ranges().end()) {
+	while ((begin.offset < 1 && iter != pks->impls.ranges().begin()) || ( begin.offset > 1 && iter != pks->impls.ranges().end())) {
 		if (iter->value() != nullptr) wait(iter->value()->normalizeKeySelectorActor(iter->value(), ryw, &begin));
 		begin.offset < 1 ? --iter : ++iter;
 	}
 	if (begin.offset != 1) {
 		// The Key Selector points to key outside the whole special key space
-		TraceEvent(SevError, "IllegalBeginKeySelector")
+		TraceEvent(SevWarn, "IllegalBeginKeySelector")
 		    .detail("TerminateKey", begin.getKey())
 		    .detail("TerminateOffset", begin.offset);
+		begin.offset = 1;
 	}
 	iter = pks->impls.rangeContaining(end.getKey());
-	while (end.offset != 1 && iter != pks->impls.ranges().begin() && iter != pks->impls.ranges().end()) {
+	while ((end.offset < 1 && iter != pks->impls.ranges().begin()) || (end.offset > 1 && iter != pks->impls.ranges().end())) {
 		if (iter->value() != nullptr) wait(iter->value()->normalizeKeySelectorActor(iter->value(), ryw, &end));
 		end.offset < 1 ? --iter : ++iter;
 	}
 	if (end.offset != 1) {
 		// The Key Selector points to key outside the whole special key space
-		TraceEvent(SevError, "IllegalEndKeySelector")
+		TraceEvent(SevWarn, "IllegalEndKeySelector")
 		    .detail("TerminateKey", end.getKey())
 		    .detail("TerminateOffset", end.offset);
+		end.offset = 1;
 	}
 	// return if range inverted
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
