@@ -740,6 +740,13 @@ Most applications should use the read version that FoundationDB determines autom
 
     |infrequent| |transaction-get-versionstamp-blurb|
 
+Transaction misc functions
+--------------------------
+
+.. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
+
+    Get the estimated byte size of the given key range. Returns a :class:`Int64Future`.
+
 Transaction options
 -------------------
 
@@ -836,13 +843,6 @@ Transaction options
     |option-set-log-transaction|
 
 .. _transact:
-
-Transaction misc functions
---------------------------
-
-.. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
-
-    Get the estimated byte size of the given key range. Returns a :class:`Int64Future`.
 
 The transact method
 ===================
@@ -968,6 +968,9 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
     .. method:: FutureNil.wait() -> nil
 
         For a :class:`FutureNil` object returned by :meth:`Transaction.commit` or :meth:`Transaction.on_error`, you must call :meth:`FutureNil.wait`, which will return ``nil`` if the operation succeeds or raise an :exc:`FDB::Error` if an error occurred. Failure to call :meth:`FutureNil.wait` on a returned :class:`FutureNil` object means that any potential errors raised by the asynchronous operation that returned the object *will not be seen*, and represents a significant error in your code.
+
+.. class:: Int64Future
+    This type is a future integer.
 
 .. _ruby streaming mode:
 
