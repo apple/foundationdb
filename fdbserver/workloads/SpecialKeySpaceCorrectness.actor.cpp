@@ -142,7 +142,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// TODO : add random bytes limit here
 		int byteLimits = deterministicRandom()->randomInt(1, (keysCount.getValue() + 1) * (keyBytes + valBytes + 8));
 		// TODO : check setRequestLimits in RYW
-		return GetRangeLimits(rowLimits, byteLimits / 2);
+		return GetRangeLimits(rowLimits, byteLimits);
 	}
 };
 
