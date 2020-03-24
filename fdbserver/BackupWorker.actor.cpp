@@ -148,6 +148,10 @@ struct BackupData {
 						}
 					}
 					if (firstWorker) {
+						if (!workers.present()) {
+							TraceEvent("BackupWorkerDetectAbortedJob", self->myId).detail("BackupID", uid);
+							return Void();
+						}
 						ASSERT(workers.present() && workers.get().size() > 0);
 						std::vector<std::pair<int64_t, int64_t>>& v = workers.get();
 						v.erase(std::remove_if(v.begin(), v.end(),
