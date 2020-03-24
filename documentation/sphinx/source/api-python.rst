@@ -904,7 +904,7 @@ Transaction misc functions
 
 .. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
 
-    Get the estimated byte size of the given key range. Returns a ::class::`FutureInt64`.
+    Get the estimated byte size of the given key range. Returns a :class:`FutureInt64`.
 
 Future objects
 ==============
