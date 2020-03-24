@@ -4410,6 +4410,108 @@ public:
 		Version ver = wait( restore(backupAgent, cx, cx, tagName, KeyRef(bc->getURL()), ranges, true, -1, true, addPrefix, removePrefix, true, randomUid) );
 		return ver;
 	}
+
+	// Similar to atomicRestore, only used in simulation test.
+	// locks the database before discontinuing the backup and that same lock is then used while doing the restore.
+	//the tagname of the backup must be the same as the restore.
+	ACTOR static Future<Version> atomicParallelRestore(FileBackupAgent* backupAgent, Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {
+		state Reference<ReadYourWritesTransaction> ryw_tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+		state BackupConfig backupConfig;
+		loop {
+			try {
+				ryw_tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				ryw_tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				state KeyBackedTag tag = makeBackupTag(tagName.toString());
+				UidAndAbortedFlagT uidFlag = wait(tag.getOrThrow(ryw_tr));
+				backupConfig = BackupConfig(uidFlag.first);
+				state EBackupState status = wait(backupConfig.stateEnum().getOrThrow(ryw_tr));
+
+				if (status != BackupAgentBase::STATE_RUNNING_DIFFERENTIAL ) {
+					throw backup_duplicate();
+				}
+
+				break;
+			} catch( Error &e ) {
+				wait( ryw_tr->onError(e) );
+			}
+		}
+
+		//Lock src, record commit version
+		state Transaction tr(cx);
+		state Version commitVersion;
+		state UID randomUid = deterministicRandom()->randomUniqueID();
+		loop {
+			try {
+				// We must get a commit version so add a conflict range that won't likely cause conflicts
+				// but will ensure that the transaction is actually submitted.
+				tr.addWriteConflictRange(backupConfig.snapshotRangeDispatchMap().space.range());
+				wait( lockDatabase(&tr, randomUid) );
+				wait(tr.commit());
+				commitVersion = tr.getCommittedVersion();
+				TraceEvent("AS_Locked").detail("CommitVer", commitVersion);
+				break;
+			} catch( Error &e ) {
+				wait(tr.onError(e));
+			}
+		}
+
+		ryw_tr->reset();
+		loop {
+			try {
+				Optional<Version> restoreVersion = wait( backupConfig.getLatestRestorableVersion(ryw_tr) );
+				if(restoreVersion.present() && restoreVersion.get() >= commitVersion) {
+					TraceEvent("AS_RestoreVersion").detail("RestoreVer", restoreVersion.get());
+					break;
+				} else {
+					ryw_tr->reset();
+					wait(delay(0.2));
+				}
+			} catch( Error &e ) {
+				wait( ryw_tr->onError(e) );
+			}
+		}
+
+		ryw_tr->reset();
+		loop {
+			try {
+				wait( discontinueBackup(backupAgent, ryw_tr, tagName) );
+				wait( ryw_tr->commit() );
+				TraceEvent("AS_DiscontinuedBackup");
+				break;
+			} catch( Error &e ) {
+				if(e.code() == error_code_backup_unneeded || e.code() == error_code_backup_duplicate){
+					break;
+				}
+				wait( ryw_tr->onError(e) );
+			}
+		}
+
+		wait(success( waitBackup(backupAgent, cx, tagName.toString(), true) ));
+		TraceEvent("AS_BackupStopped");
+
+		ryw_tr->reset();
+		loop {
+			try {
+				ryw_tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				ryw_tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				for (auto &range : ranges) {
+					ryw_tr->addReadConflictRange(range);
+					ryw_tr->clear(range);
+				}
+				wait( ryw_tr->commit() );
+				TraceEvent("AS_ClearedRange");
+				break;
+			} catch( Error &e ) {
+				wait( ryw_tr->onError(e) );
+			}
+		}
+
+		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx));
+
+		TraceEvent("AS_StartRestore");
+		Version ver = wait( restore(backupAgent, cx, cx, tagName, KeyRef(bc->getURL()), ranges, true, -1, true, addPrefix, removePrefix, true, randomUid) );
+		return ver;
+	}
 };
 
 const std::string BackupAgentBase::defaultTagName = "default";
