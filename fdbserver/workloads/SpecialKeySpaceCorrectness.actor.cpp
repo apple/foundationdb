@@ -40,24 +40,22 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		keyBytes = getOption(options, LiteralStringRef("keyBytes"), 16);
 		valBytes = getOption(options, LiteralStringRef("valueBytes"), 16);
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		transactionsPerSecond = getOption( options, LiteralStringRef("transactionsPerSecond"), 100.0 );
-        actorCount = getOption( options, LiteralStringRef("actorCount"), 1 );
+		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 100.0);
+		actorCount = getOption(options, LiteralStringRef("actorCount"), 1);
 		absoluteRandomProb = getOption(options, LiteralStringRef("absoluteRandomProb"), 0.5);
 	}
 
 	virtual std::string description() { return "SpecialKeySpaceCorrectness"; }
 	virtual Future<Void> setup(Database const& cx) { return _setup(cx, this); }
 	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
-	virtual Future<bool> check(Database const& cx) {
-		return wrongResults.getValue() == 0;
-	}
+	virtual Future<bool> check(Database const& cx) { return wrongResults.getValue() == 0; }
 	virtual void getMetrics(std::vector<PerfMetric>& m) {}
 
 	// disable the default timeout setting
 	double getCheckTimeout() override { return std::numeric_limits<double>::max(); }
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
-		if (self->clientId == 0) {	
+		if (self->clientId == 0) {
 			self->ryw = Reference(new ReadYourWritesTransaction(cx));
 			self->ryw->setVersion(100);
 			self->ryw->clear(normalKeys);
@@ -74,22 +72,21 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				self->keysCount += keysInRange;
 				for (int j = 0; j < keysInRange; ++j) {
 					self->ryw->set(Key(deterministicRandom()->randomAlphaNumeric(self->keyBytes)).withPrefix(startKey),
-								Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
+					               Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
 				}
 			}
 		}
 		return Void();
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
-        if (self->clientId == 0)
-			wait(timeout(self->getRangeCallActor(cx, self), self->testDuration, Void()));
+		if (self->clientId == 0) wait(timeout(self->getRangeCallActor(cx, self), self->testDuration, Void()));
 		return Void();
 	}
 
 	ACTOR Future<Void> getRangeCallActor(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		state double lastTime = now();
 		loop {
-			wait( poisson( &lastTime, 1.0 / self->transactionsPerSecond ) );
+			wait(poisson(&lastTime, 1.0 / self->transactionsPerSecond));
 			state bool reverse = deterministicRandom()->random01() < 0.5;
 			state GetRangeLimits limit = self->randomLimits();
 			state KeySelector begin = self->randomKeySelector();
@@ -146,7 +143,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// if (deterministicRandom()->random01() < 0.5) return GetRangeLimits();
 		int rowLimits = deterministicRandom()->randomInt(1, keysCount.getValue() + 1);
 		// TODO : add random bytes limit here
-        // TODO : setRequestLimits in RYW
+		// TODO : setRequestLimits in RYW
 		return GetRangeLimits(rowLimits);
 	}
 };
