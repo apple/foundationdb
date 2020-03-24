@@ -93,9 +93,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			state KeySelector end = self->randomKeySelector();
 			auto correctResultFuture = self->ryw->getRange(begin, end, limit, false, reverse);
 			ASSERT(correctResultFuture.isReady());
-			// TraceEvent("RANGECALLCOUNTER").detail("Counter", count);
-			// printf("DEBUG Counter: %d\n", count);
-			// count++;
 			auto correctResult = correctResultFuture.getValue();
 			auto testResultFuture = cx->specialKeySpace->getRange(self->ryw, begin, end, limit, false, reverse);
 			ASSERT(testResultFuture.isReady());
@@ -105,8 +102,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			if (!self->compareRangeResult(correctResult, testResult)) {
 				// TODO : log here
 				// TraceEvent("WrongGetRangeResult"). detail("KeySeleco")
-				auto temp1 = cx->specialKeySpace->getRange(self->ryw, begin, end, limit, false, reverse);
-				auto temp2 = self->ryw->getRange(begin, end, limit, false, reverse);
+				// auto temp1 = cx->specialKeySpace->getRange(self->ryw, begin, end, limit, false, reverse);
+				// auto temp2 = self->ryw->getRange(begin, end, limit, false, reverse);
 				++self->wrongResults;
 			}
 		}
@@ -143,8 +140,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// if (deterministicRandom()->random01() < 0.5) return GetRangeLimits();
 		int rowLimits = deterministicRandom()->randomInt(1, keysCount.getValue() + 1);
 		// TODO : add random bytes limit here
-		// TODO : setRequestLimits in RYW
-		return GetRangeLimits(rowLimits);
+		int byteLimits = deterministicRandom()->randomInt(1, (keysCount.getValue() + 1) * (keyBytes + valBytes + 8));
+		// TODO : check setRequestLimits in RYW
+		return GetRangeLimits(rowLimits, byteLimits / 2);
 	}
 };
 
