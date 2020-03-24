@@ -90,6 +90,7 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061070000LL, ShardedTxsTags);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063000000LL, UnifiedTLogSpilling);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, BackupWorker);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, ReportConflictingKeys);
 };
 
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys.

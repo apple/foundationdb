@@ -165,8 +165,16 @@ struct CommitTransactionRef {
 	bool report_conflicting_keys;
 
 	template <class Ar>
-	force_inline void serialize( Ar& ar ) {
-		serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot, report_conflicting_keys);
+	force_inline void serialize(Ar& ar) {
+		if constexpr (is_fb_function<Ar>) {
+			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot,
+			           report_conflicting_keys);
+		} else {
+			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
+			if (ar.protocolVersion().hasReportConflictingKeys()) {
+				serializer(ar, report_conflicting_keys);
+			}
+		}
 	}
 
 	// Convenience for internal code required to manipulate these without the Native API
