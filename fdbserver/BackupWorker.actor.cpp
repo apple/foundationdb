@@ -102,6 +102,8 @@ struct BackupData {
 			updateWorker = Void(); // cancel actors
 		}
 
+		void cancelUpdater() { updateWorker = Void(); }
+
 		bool isReady() const {
 			return stopped || (container.isReady() && ranges.isReady());
 		}
@@ -290,7 +292,10 @@ struct BackupData {
 	void stop() {
 		stopped = true;
 		for (auto& [uid, info] : backups) {
-			info.stop();
+			// Cancel the actor. Because container is valid, CANNOT set the
+			// "stop" flag that will block writing mutation files in
+			// saveMutationsToFile().
+			info.cancelUpdater();
 		}
 		doneTrigger.trigger();
 	}
