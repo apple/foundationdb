@@ -16,9 +16,6 @@ public:
 		auto resultFuture = ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY);
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
-		if (result.size() == 0) {
-			TraceEvent("DebugLLL");
-		}
 		return result;
 	}
 };
@@ -27,12 +24,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	int actorCount, minKeysPerRange, maxKeysPerRange, rangeCount, keyBytes, valBytes;
 	double testDuration, absoluteRandomProb, transactionsPerSecond;
-	// std::vector<Future<Void>> clients;
 
 	PerfIntCounter wrongResults, keysCount;
 
 	Reference<ReadYourWritesTransaction> ryw; // used to store all populated data
-	std::vector<SPSCTestImpl*> impls;
+	std::vector<std::shared_ptr<SPSCTestImpl>> impls;
 
 	Standalone<VectorRef<KeyRangeRef>> keys;
 
@@ -89,8 +85,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			Key startKey(baseKey + "/");
 			Key endKey(baseKey + "/\xff");
 			self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
-			self->impls.push_back(new SPSCTestImpl(startKey, endKey));
-			cx->specialKeySpace->registerKeyRange(self->keys.back(), self->impls.back());
+			self->impls.push_back(std::make_shared<SPSCTestImpl>(startKey, endKey));
+			cx->specialKeySpace->registerKeyRange(self->keys.back(), self->impls.back().get());
 			// generate keys in each key range
 			int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
 			self->keysCount += keysInRange;
@@ -105,10 +101,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			clients.push_back(self->getRangeCallActor(cx, self));
 		}
 		wait(timeout(waitForAll(clients), self->testDuration, Void()));
-		// wait(delay(self->testDuration));
-		// printf("After start delay\n");
-		for (SPSCTestImpl* p : self->impls)
-			delete p;
 		return Void();
 	}
 
