@@ -576,6 +576,10 @@ class Tester:
                         raise Exception("Unit tests failed: %s" % e.description)
                 elif inst.op.startswith(six.u('DIRECTORY_')):
                     self.directory_extension.process_instruction(inst)
+                elif inst.op == six.u("GET_ESTIMATED_RANGE_SIZE"):
+                    begin, end = inst.pop(2)
+                    estimatedSize = obj.get_estimated_range_size_bytes(begin, end).wait()
+                    inst.push(b"GOT_ESTIMATED_RANGE_SIZE")
                 else:
                     raise Exception("Unknown op %s" % inst.op)
             except fdb.FDBError as e:

@@ -499,6 +499,11 @@ public class StackTester {
 
 				logStack(inst.context.db, entries, prefix);
 			}
+			else if (op == StackOperation.GET_ESTIMATED_RANGE_SIZE) {
+				List<Object> params = inst.popParams(2).join();
+				Long size = inst.readTr.getEstimatedRangeSizeBytes((byte[])params.get(0), (byte[])params.get(1)).join();
+				inst.push("GOT_ESTIMATED_RANGE_SIZE".getBytes());
+			}
 			else {
 				throw new IllegalArgumentException("Unrecognized (or unimplemented) operation");
 			}

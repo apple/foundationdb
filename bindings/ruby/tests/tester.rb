@@ -510,6 +510,9 @@ class Tester
           end
 
           log_stack(entries, prefix)
+        when "GET_ESTIMATED_RANGE_SIZE"
+          inst.tr.get_estimated_range_size_bytes(inst.wait_and_pop, inst.wait_and_pop).to_i
+          inst.push("GOT_ESTIMATED_RANGE_SIZE")
         else
           if op.start_with?('DIRECTORY_')
             @directory_extension.process_instruction(inst)

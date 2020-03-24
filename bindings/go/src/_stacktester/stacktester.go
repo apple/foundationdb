@@ -865,6 +865,16 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 
 	case strings.HasPrefix(op, "DIRECTORY_"):
 		sm.de.processOp(sm, op[10:], isDB, idx, t, rt)
+	case strings.HasPrefix(op, "GET_ESTIMATED_RANGE_SIZE"):
+		r := sm.popKeyRange()
+		_, e := rt.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
+			_ = rtr.GetEstimatedRangeSizeBytes(r).MustGet()
+			sm.store(idx, []byte("GOT_ESTIMATED_RANGE_SIZE"))
+			return nil, nil
+		})
+		if e != nil {
+			panic(e)
+		}
 	default:
 		log.Fatalf("Unhandled operation %s\n", string(inst[0].([]byte)))
 	}

@@ -527,6 +527,11 @@ public class AsyncStackTester {
 		}
 		else if(op == StackOperation.LOG_STACK) {
 			return inst.popParam().thenComposeAsync(prefix -> doLogStack(inst, (byte[])prefix), FDB.DEFAULT_EXECUTOR);
+		} else if (op == StackOperation.GET_ESTIMATED_RANGE_SIZE) {
+			List<Object> params = inst.popParams(2).join();
+			return inst.readTr.getEstimatedRangeSizeBytes((byte[])params.get(0), (byte[])params.get(1)).thenAcceptAsync(size -> {
+				inst.push("GOT_ESTIMATED_RANGE_SIZE".getBytes());
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 
 		throw new IllegalArgumentException("Unrecognized (or unimplemented) operation");
