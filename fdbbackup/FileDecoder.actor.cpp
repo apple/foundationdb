@@ -30,6 +30,8 @@
 #include "flow/serialize.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+#define SevDecodeInfo SevVerbose
+
 extern bool g_crashOnError;
 
 namespace file_converter {
@@ -169,11 +171,10 @@ std::vector<MutationRef> decode_value(const StringRef& value) {
 	reader.consume<uint64_t>(); // Consume the includeVersion
 	uint32_t val_length = reader.consume<uint32_t>();
 	if (val_length != value.size() - sizeof(uint64_t) - sizeof(uint32_t)) {
-		TraceEvent("ValueError")
+		TraceEvent(SevError, "ValueError")
 		    .detail("ValueLen", val_length)
 		    .detail("ValueSize", value.size())
 		    .detail("Value", printable(value));
-		ASSERT(false);
 	}
 
 	std::vector<MutationRef> mutations;
@@ -334,7 +335,7 @@ struct DecodeProgress {
 				std::pair<Version, int32_t> version_part = decode_key(StringRef(k, kLen));
 				uint32_t vLen = reader.consumeNetworkUInt32();
 				const uint8_t* v = reader.consume(vLen);
-				TraceEvent("Block")
+				TraceEvent(SevDecodeInfo, "Block")
 				    .detail("KeySize", kLen)
 				    .detail("valueSize", vLen)
 				    .detail("Offset", reader.rptr - buf.begin())
