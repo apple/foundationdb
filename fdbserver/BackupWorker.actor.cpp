@@ -283,6 +283,14 @@ struct BackupData {
 		logSystem.get()->pop(savedVersion, popTag);
 	}
 
+	void stop() {
+		stopped = true;
+		for (auto& [uid, info] : backups) {
+			info.stop();
+		}
+		doneTrigger.trigger();
+	}
+
 	void eraseMessagesAfterEndVersion() {
 		ASSERT(endVersion.present());
 		const Version ver = endVersion.get();
@@ -913,8 +921,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 		state Error err = e;
 		if (e.code() == error_code_worker_removed) {
 			pull = Void(); // cancels pulling
-			self.stopped = true;
-			self.doneTrigger.trigger();
+			self.stop();
 			wait(done);
 		}
 		TraceEvent("BackupWorkerTerminated", self.myId).error(err, true);
