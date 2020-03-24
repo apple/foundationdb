@@ -56,51 +56,33 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	// disable the default timeout setting
 	double getCheckTimeout() override { return std::numeric_limits<double>::max(); }
 
-	ACTOR Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
-		// self->ryw = Reference(new ReadYourWritesTransaction(cx));
-		// // generate key ranges
-		// for (int i = 0; i < self->rangeCount; ++i) {
-		// 	std::string baseKey = deterministicRandom()->randomAlphaNumeric(i + 1);
-		// 	Key startKey(baseKey + "/");
-		// 	Key endKey(baseKey + "/\xff");
-		// 	self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
-		// 	self->impls.emplace_back(startKey, endKey);
-		// 	cx->specialKeySpace->registerKeyRange(self->keys.back(), &self->impls.back());
-		// 	// generate keys in each key range
-		// 	int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
-		// 	self->keysCount += keysInRange;
-		// 	for (int j = 0; j < keysInRange; ++j) {
-		// 		self->ryw->set(Key(deterministicRandom()->randomAlphaNumeric(self->keyBytes)).withPrefix(startKey),
-		// 		               Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
-		// 	}
-		// }
+	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
+		if (self->clientId == 0) {	
+			self->ryw = Reference(new ReadYourWritesTransaction(cx));
+			self->ryw->setVersion(100);
+			self->ryw->clear(normalKeys);
+			// generate key ranges
+			for (int i = 0; i < self->rangeCount; ++i) {
+				std::string baseKey = deterministicRandom()->randomAlphaNumeric(i + 1);
+				Key startKey(baseKey + "/");
+				Key endKey(baseKey + "/\xff");
+				self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
+				self->impls.push_back(std::make_shared<SPSCTestImpl>(startKey, endKey));
+				cx->specialKeySpace->registerKeyRange(self->keys.back(), self->impls.back().get());
+				// generate keys in each key range
+				int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
+				self->keysCount += keysInRange;
+				for (int j = 0; j < keysInRange; ++j) {
+					self->ryw->set(Key(deterministicRandom()->randomAlphaNumeric(self->keyBytes)).withPrefix(startKey),
+								Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
+				}
+			}
+		}
 		return Void();
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
-        self->ryw = Reference(new ReadYourWritesTransaction(cx));
-		self->ryw->clear(normalKeys);
-		// generate key ranges
-		for (int i = 0; i < self->rangeCount; ++i) {
-			std::string baseKey = deterministicRandom()->randomAlphaNumeric(i + 1);
-			Key startKey(baseKey + "/");
-			Key endKey(baseKey + "/\xff");
-			self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
-			self->impls.push_back(std::make_shared<SPSCTestImpl>(startKey, endKey));
-			cx->specialKeySpace->registerKeyRange(self->keys.back(), self->impls.back().get());
-			// generate keys in each key range
-			int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
-			self->keysCount += keysInRange;
-			for (int j = 0; j < keysInRange; ++j) {
-				self->ryw->set(Key(deterministicRandom()->randomAlphaNumeric(self->keyBytes)).withPrefix(startKey),
-				               Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
-			}
-		}
-		self->ryw->setVersion(100);
-        std::vector<Future<Void>> clients;
-        for(int c = 0; c < self->actorCount; c++) {
-			clients.push_back(self->getRangeCallActor(cx, self));
-		}
-		wait(timeout(waitForAll(clients), self->testDuration, Void()));
+        if (self->clientId == 0)
+			wait(timeout(self->getRangeCallActor(cx, self), self->testDuration, Void()));
 		return Void();
 	}
 
@@ -167,10 +149,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
         // TODO : setRequestLimits in RYW
 		return GetRangeLimits(rowLimits);
 	}
-
-	// void updateGetGetRangeParas(KeySelector& begin, KeySelector& end, GetRangeLimits& limits, bool& reverse) {
-	//     reverse = deterministicRandom()->random01() < 0.5;
-	// }
 };
 
 WorkloadFactory<SpecialKeySpaceCorrectnessWorkload> SpecialKeySpaceCorrectnessFactory("SpecialKeySpaceCorrectness");
