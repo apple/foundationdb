@@ -96,9 +96,9 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	void addRandomReadConflictRange(ReadYourWritesTransaction* tr, std::vector<KeyRange>* readConflictRanges) {
 		int startIdx, endIdx;
 		Key startKey, endKey;
-		do { // add at least one
+		do { // add at least one non-empty range
 			startIdx = deterministicRandom()->randomInt(0, nodeCount);
-			endIdx = deterministicRandom()->randomInt(startIdx, nodeCount + 1);
+			endIdx = deterministicRandom()->randomInt(startIdx + 1, nodeCount + 1);
 			startKey = keyForIndex(startIdx);
 			endKey = keyForIndex(endIdx);
 			tr->addReadConflictRange(KeyRangeRef(startKey, endKey));
@@ -109,9 +109,9 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	void addRandomWriteConflictRange(ReadYourWritesTransaction* tr, std::vector<KeyRange>* writeConflictRanges) {
 		int startIdx, endIdx;
 		Key startKey, endKey;
-		do { // add at least one
+		do { // add at least one non-empty range
 			startIdx = deterministicRandom()->randomInt(0, nodeCount);
-			endIdx = deterministicRandom()->randomInt(startIdx, nodeCount + 1);
+			endIdx = deterministicRandom()->randomInt(startIdx + 1, nodeCount + 1);
 			startKey = keyForIndex(startIdx);
 			endKey = keyForIndex(endIdx);
 			tr->addWriteConflictRange(KeyRangeRef(startKey, endKey));
@@ -212,8 +212,9 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 							    bool result = wCR.intersects(rCR);
 							    if (result)
 								    TraceEvent(SevError, "TestFailure")
-								        .detail("WriteConflictRange", wCR.toString())
-								        .detail("ReadConflictRange", rCR.toString());
+								        .detail("Reason", "No conflicts returned but it should")
+								        .detail("WriteConflictRangeInTr1", wCR.toString())
+								        .detail("ReadConflictRangeInTr2", rCR.toString());
 							    return result;
 						    })) {
 							++self->invalidReports;
