@@ -131,12 +131,13 @@ struct BackupData {
 			state bool firstWorker = info->self->tag.id == 0;
 			state bool allUpdated = false;
 			state Optional<std::vector<std::pair<int64_t, int64_t>>> workers;
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
 
 			loop {
-				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 					Optional<std::vector<std::pair<int64_t, int64_t>>> tmp =
 					    wait(config.startedBackupWorkers().get(tr));
@@ -437,11 +438,13 @@ ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool started
 
 // Set "latestBackupWorkerSavedVersion" key for backups
 ACTOR Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedLogVersions) {
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+
 	loop {
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			state std::vector<Future<Optional<Version>>> prevVersions;
 			state std::vector<BackupConfig> versionConfigs;
