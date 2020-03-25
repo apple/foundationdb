@@ -180,7 +180,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		try {
 			wait(backupAgent->submitBackup(cx, StringRef(backupContainer), deterministicRandom()->randomInt(0, 100),
-			                               tag.toString(), backupRanges, stopDifferentialDelay ? false : true));
+			                               tag.toString(), backupRanges, stopDifferentialDelay ? false : true,
+			                               /*partitionedLog=*/true));
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) throw;
@@ -209,7 +210,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 					state bool restorable = false;
 					if(lastBackupContainer) {
-						state Future<BackupDescription> fdesc = lastBackupContainer->describeBackup();
+						state Future<BackupDescription> fdesc = lastBackupContainer->describePartitionedBackup();
 						wait(ready(fdesc));
 
 						if(!fdesc.isError()) {
@@ -395,9 +396,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
 				try {
-					extraBackup = backupAgent.submitBackup(cx, LiteralStringRef("file://simfdb/backups/"),
-					                                       deterministicRandom()->randomInt(0, 100),
-					                                       self->backupTag.toString(), self->backupRanges, true);
+					extraBackup = backupAgent.submitBackup(
+					    cx, LiteralStringRef("file://simfdb/backups/"), deterministicRandom()->randomInt(0, 100),
+					    self->backupTag.toString(), self->backupRanges, true, /*partitionedLog=*/true);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)
@@ -430,7 +431,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				    .detail("BackupTag", printable(self->backupTag));
 
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
-				BackupDescription desc = wait(container->describeBackup());
+				BackupDescription desc = wait(container->describePartitionedBackup());
 
 				state Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {
@@ -439,6 +440,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					} else if (deterministicRandom()->random01() < 0.1) {
 						targetVersion = desc.maxRestorableVersion.get();
 					} else if (deterministicRandom()->random01() < 0.5) {
+						ASSERT_WE_THINK(desc.minRestorableVersion.get() <= desc.contiguousLogEnd.get());
+						// This assertion can fail when contiguousLogEnd < maxRestorableVersion and
+						// the snapshot version > contiguousLogEnd. I.e., there is a gap between
+						// contiguousLogEnd and snapshot version.
+						// ASSERT_WE_THINK(desc.contiguousLogEnd.get() > desc.maxRestorableVersion.get());
 						targetVersion = deterministicRandom()->randomInt64(desc.minRestorableVersion.get(),
 						                                                   desc.contiguousLogEnd.get());
 					}

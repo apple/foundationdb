@@ -612,7 +612,8 @@ namespace fileBackup {
 	struct LogFileWriter {
 		static const std::string &FFs;
 
-		LogFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0) : file(file), blockSize(blockSize), blockEnd(0), fileVersion(2001) {}
+		LogFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
+		  : file(file), blockSize(blockSize), blockEnd(0) {}
 
 		// Start a new block if needed, then write the key and value
 		ACTOR static Future<Void> writeKV_impl(LogFileWriter *self, Key k, Value v) {
@@ -629,8 +630,8 @@ namespace fileBackup {
 				// Set new blockEnd
 				self->blockEnd += self->blockSize;
 
-				// write Header
-				wait(self->file->append((uint8_t *)&self->fileVersion, sizeof(self->fileVersion)));
+				// write the block header
+				wait(self->file->append((uint8_t *)&BACKUP_AGENT_MLOG_VERSION, sizeof(BACKUP_AGENT_MLOG_VERSION)));
 			}
 
 			wait(self->file->appendStringRefWithLen(k));
@@ -650,7 +651,6 @@ namespace fileBackup {
 
 	private:
 		int64_t blockEnd;
-		uint32_t fileVersion;
 	};
 
 	ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset, int len) {
@@ -663,8 +663,8 @@ namespace fileBackup {
 		state StringRefReader reader(buf, restore_corrupted_data());
 
 		try {
-			// Read header, currently only decoding version 2001
-			if(reader.consume<int32_t>() != 2001)
+			// Read header, currently only decoding version BACKUP_AGENT_MLOG_VERSION
+			if(reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION)
 				throw restore_unsupported_file_version();
 
 			// Read k/v pairs.  Block ends either at end of last value exactly or with 0xFF as first key len byte.
@@ -2388,7 +2388,8 @@ namespace fileBackup {
 
 			// Check if backup worker is enabled
 			DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
-			if (!dbConfig.backupWorkerEnabled) {
+			state bool backupWorkerEnabled = dbConfig.backupWorkerEnabled;
+			if (!backupWorkerEnabled) {
 				wait(success(changeConfig(cx, "backup_worker_enabled:=1", true)));
 			}
 
@@ -2404,7 +2405,12 @@ namespace fileBackup {
 
 					state Future<Optional<Value>> started = tr->get(backupStartedKey);
 					state Future<Optional<Value>> taskStarted = tr->get(config.allWorkerStarted().key);
-					wait(success(started) && success(taskStarted));
+					state Future<Optional<bool>> partitionedLog = config.partitionedLogEnabled().get(tr);
+					wait(success(started) && success(taskStarted) && success(partitionedLog));
+
+					if (!partitionedLog.get().present() || !partitionedLog.get().get()) {
+						return Void(); // Skip if not using partitioned logs
+					}
 
 					std::vector<std::pair<UID, Version>> ids;
 					if (started.get().present()) {
@@ -2420,6 +2426,9 @@ namespace fileBackup {
 					}
 
 					tr->set(backupStartedKey, encodeBackupStartedValue(ids));
+					if (backupWorkerEnabled) {
+						config.backupWorkerEnabled().set(tr, true);
+					}
 
 					// The task may be restarted. Set the watch if started key has NOT been set.
 					if (!taskStarted.get().present()) {
@@ -3595,7 +3604,10 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone) {
+	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr,
+	                                       Key outContainer, int snapshotIntervalSeconds, std::string tagName,
+	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone,
+	                                       bool partitionedLog) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
@@ -3696,6 +3708,7 @@ public:
 		config.stopWhenDone().set(tr, stopWhenDone);
 		config.backupRanges().set(tr, normalizedRanges);
 		config.snapshotIntervalSeconds().set(tr, snapshotIntervalSeconds);
+		config.partitionedLogEnabled().set(tr, partitionedLog);
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
 
@@ -4440,8 +4453,12 @@ Future<ERestoreState> FileBackupAgent::waitRestore(Database cx, Key tagName, boo
 	return FileBackupAgentImpl::waitRestore(cx, tagName, verbose);
 };
 
-Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone) {
-	return FileBackupAgentImpl::submitBackup(this, tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone);
+Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer,
+                                           int snapshotIntervalSeconds, std::string tagName,
+                                           Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone,
+                                           bool partitionedLog) {
+	return FileBackupAgentImpl::submitBackup(this, tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges,
+	                                         stopWhenDone, partitionedLog);
 }
 
 Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName){

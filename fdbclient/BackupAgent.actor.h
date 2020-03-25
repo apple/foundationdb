@@ -308,9 +308,16 @@ public:
 
 	/** BACKUP METHODS **/
 
-	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true);
-	Future<Void> submitBackup(Database cx, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true) {
-		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr){ return submitBackup(tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone); });
+	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds,
+	                          std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                          bool stopWhenDone = true, bool partitionedLog = false);
+	Future<Void> submitBackup(Database cx, Key outContainer, int snapshotIntervalSeconds, std::string tagName,
+	                          Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true,
+	                          bool partitionedLog = false) {
+		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			return submitBackup(tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone,
+			                    partitionedLog);
+		});
 	}
 
 	Future<Void> discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
@@ -787,6 +794,26 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	// Each backup worker adds its (epoch, tag.id) to this property.
+	KeyBackedProperty<std::vector<std::pair<int64_t, int64_t>>> startedBackupWorkers() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Set to true if backup worker is enabled.
+	KeyBackedProperty<bool> backupWorkerEnabled() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Set to true if partitioned log is enabled (only useful if backup worker is also enabled).
+	KeyBackedProperty<bool> partitionedLogEnabled() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Latest version for which all prior versions have saved by backup workers.
+	KeyBackedProperty<Version> latestBackupWorkerSavedVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	// Stop differntial logging if already started or don't start after completing KV ranges
 	KeyBackedProperty<bool> stopWhenDone() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
@@ -816,10 +843,17 @@ public:
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		auto lastLog = latestLogEndVersion().get(tr);
 		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
-		return map(success(lastLog) && success(firstSnapshot), [=](Void) -> Optional<Version> {
+		auto workerEnabled = backupWorkerEnabled().get(tr);
+		auto plogEnabled = partitionedLogEnabled().get(tr);
+		auto workerVersion = latestBackupWorkerSavedVersion().get(tr);
+		return map(success(lastLog) && success(firstSnapshot) && success(workerEnabled) && success(plogEnabled) && success(workerVersion), [=](Void) -> Optional<Version> {
 			// The latest log greater than the oldest snapshot is the restorable version
-			if(lastLog.get().present() && firstSnapshot.get().present() && lastLog.get().get() > firstSnapshot.get().get()) {
-				return std::max(lastLog.get().get() - 1, firstSnapshot.get().get());
+			Optional<Version> logVersion = workerEnabled.get().present() && workerEnabled.get().get() &&
+			                                       plogEnabled.get().present() && plogEnabled.get().get()
+			                                   ? workerVersion.get()
+			                                   : lastLog.get();
+			if (logVersion.present() && firstSnapshot.get().present() && logVersion.get() > firstSnapshot.get().get()) {
+				return std::max(logVersion.get() - 1, firstSnapshot.get().get());
 			}
 			return {};
 		});
@@ -879,6 +913,10 @@ struct StringRefReader {
 	// Consumes a big endian number, swaps it to little endian, and returns it.
 	const int32_t consumeNetworkInt32() { return (int32_t)bigEndian32((uint32_t)consume<int32_t>()); }
 	const uint32_t consumeNetworkUInt32() { return bigEndian32(consume<uint32_t>()); }
+
+	// Convert big Endian value (e.g., encoded in log file) into a littleEndian uint64_t value.
+	int64_t consumeNetworkInt64() { return (int64_t)bigEndian64((uint32_t)consume<int64_t>()); }
+	uint64_t consumeNetworkUInt64() { return bigEndian64(consume<uint64_t>()); }
 
 	bool eof() { return rptr == end; }
 
