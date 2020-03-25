@@ -27,6 +27,7 @@
 //A workload which test the correctness of backup and restore process
 struct AtomicRestoreWorkload : TestWorkload {
 	double startAfter, restoreAfter;
+	bool fastRestore; // true: use fast restore, false: use old style restore
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 
 	AtomicRestoreWorkload(WorkloadContext const& wcx)
@@ -34,6 +35,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 		startAfter = getOption(options, LiteralStringRef("startAfter"), 10.0);
 		restoreAfter = getOption(options, LiteralStringRef("restoreAfter"), 20.0);
+		fastRestore = getOption(options, LiteralStringRef("fastRestore"), false);
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 	}
 
@@ -79,7 +81,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 		wait( delay(self->restoreAfter * deterministicRandom()->random01()) );
 		TraceEvent("AtomicRestore_RestoreStart");
 
-		if (deterministicRandom()->random01() < 0.5 && BUGGIFY) { // New fast parallel restore
+		if (self->fastRestore) { // New fast parallel restore
 			TraceEvent(SevWarnAlways, "AtomicParallelRestore");
 			wait(backupAgent.atomicParallelRestore(cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
 		} else { // Old style restore
