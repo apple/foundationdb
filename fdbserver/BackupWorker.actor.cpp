@@ -222,8 +222,8 @@ struct BackupData {
 	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo>> db, const InitializeBackupRequest& req)
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
-	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion), cc("BackupWorker", myId.toString()),
-	    pulledVersion(0) {
+	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1),
+	    cc("BackupWorker", myId.toString()), pulledVersion(0) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 
 		specialCounter(cc, "SavedVersion", [this]() { return this->savedVersion; });
@@ -624,7 +624,8 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		activeUids.push_back(it->first);
 		self->insertRanges(keyRangeMap, it->second.ranges.get(), index);
 		if (it->second.lastSavedVersion == invalidVersion) {
-			it->second.lastSavedVersion = self->savedVersion;
+			it->second.lastSavedVersion =
+			    self->savedVersion > self->startVersion ? self->savedVersion : self->startVersion;
 		}
 		logFileFutures.push_back(it->second.container.get().get()->writeTaggedLogFile(
 		    it->second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id, self->totalTags));
