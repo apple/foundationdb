@@ -278,7 +278,7 @@ public:
 	// parallel restore
 	Future<Void> parallelRestoreFinish(Database cx);
 	Future<Void> submitParallelRestore(Database cx, Key backupTag, Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                                   KeyRef bcUrl, Version targetVersion, bool locked);
+	                                   KeyRef bcUrl, Version targetVersion, bool lockDB, UID randomUID);
 	Future<Void> atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix);
 
 	// restore() will

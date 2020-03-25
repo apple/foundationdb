@@ -450,11 +450,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				// Submit parallel restore requests
 				TraceEvent("FastRestore").detail("PrepareRestores", self->backupRanges.size());
 				wait(backupAgent.submitParallelRestore(cx, self->backupTag, self->backupRanges,
-				                           KeyRef(lastBackupContainer->getURL()), targetVersion, self->locked));
+				                           KeyRef(lastBackupContainer->getURL()), targetVersion, self->locked, randomID));
 				TraceEvent("FastRestore").detail("TriggerRestore", "Setting up restoreRequestTriggerKey");
 
 				// Sometimes kill and restart the restore
-				// In real cluster, aborting a restore needs: 
+				// In real cluster, aborting a restore needs:
 				// (1) kill restore cluster; (2) clear dest. DB restore system keyspace.
 				// TODO: Consider gracefully abort a restore and restart.
 				if (BUGGIFY && TEST_ABORT_FASTRESTORE) {

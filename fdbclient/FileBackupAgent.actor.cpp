@@ -3581,9 +3581,34 @@ public:
 
 	ACTOR static Future<Void> submitParallelRestore(Database cx, Key backupTag,
 														Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
-														Version targetVersion, bool locked) {
+														Version targetVersion, bool lockDB, UID randomUID) {
 		state ReadYourWritesTransaction tr(cx);
 		state int restoreIndex = 0;
+		state int numTries = 0;
+		// lock DB for restore
+		loop {
+			try {
+				if (lockDB) {
+					wait(lockDatabase(cx, randomUID));
+				}
+				tr.reset();
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(checkDatabaseLock(Reference<ReadYourWritesTransaction>(&tr), randomUID));
+
+				TraceEvent("FastRestoreMasterProcessRestoreRequests").detail("DBIsLocked", randomUID);
+				break;
+			} catch (Error& e) {
+				TraceEvent("FastRestoreMasterProcessRestoreRequests").detail("CheckLockError", e.what());
+				TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreMayFail")
+					.detail("Reason", "DB is not properly locked")
+					.detail("ExpectedLockID", randomUID);
+				numTries++;
+				wait(delay(5.0));
+			}
+		}
+
+		// set up restore request
 		loop {
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3595,7 +3620,7 @@ public:
 					Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
 					// Register the request request in DB, which will be picked up by restore worker leader
 					struct RestoreRequest restoreRequest(restoreIndex, restoreTag, bcUrl, true, targetVersion, true, range,
-														Key(), Key(), locked, deterministicRandom()->randomUniqueID());
+														Key(), Key(), lockDB, deterministicRandom()->randomUniqueID());
 					tr.set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
 				}
 				tr.set(restoreRequestTriggerKey,
@@ -4473,8 +4498,8 @@ public:
 		if (fastRestore) {
 			TraceEvent("AtomicParallelRestoreStartRestore");
 			Version targetVersion = -1;
-			bool locked = true;
-			wait(submitParallelRestore(cx, tagName, ranges, KeyRef(bc->getURL()), targetVersion, locked));
+			bool lockDB = true;
+			wait(submitParallelRestore(cx, tagName, ranges, KeyRef(bc->getURL()), targetVersion, lockDB, randomUid));
 			TraceEvent("AtomicParallelRestoreWaitForRestoreFinish");
 			wait(parallelRestoreFinish(cx));
 			return -1;
@@ -4506,8 +4531,8 @@ Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx) {
 
 Future<Void> FileBackupAgent::submitParallelRestore(Database cx, Key backupTag,
                                                     Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
-                                                    Version targetVersion, bool locked) {
-    return FileBackupAgentImpl::submitParallelRestore(cx, backupTag, backupRanges, bcUrl, targetVersion, locked);
+                                                    Version targetVersion, bool lockDB, UID randomUID) {
+    return FileBackupAgentImpl::submitParallelRestore(cx, backupTag, backupRanges, bcUrl, targetVersion, lockDB, randomUID);
 }
 
 Future<Void> FileBackupAgent::atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {
