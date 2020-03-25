@@ -608,6 +608,7 @@ bool validateTraceClockSource(std::string source);
 void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
 void retriveTraceLogIssues(std::set<std::string>& out);
+void setTraceLogGroup(const std::string& role);
 template <class T>
 struct Future;
 struct Void;
