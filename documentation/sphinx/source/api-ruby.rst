@@ -953,7 +953,7 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
 
     An implementation quirk of :class:`Value` is that it will never evaluate to ``false``, even if its value is ``nil``. It is important to use ``if value.nil?`` rather than ``if ~value`` when checking to see if a key was not present in the database.
 
-.. class:: Version
+.. class:: Int64Future
 
     This type is a future :class:`Integer` object. Objects of this type respond to the same methods as objects of type :class:`Integer`, and may be passed to any method that expects a :class:`Integer`.
 
@@ -969,8 +969,6 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
 
         For a :class:`FutureNil` object returned by :meth:`Transaction.commit` or :meth:`Transaction.on_error`, you must call :meth:`FutureNil.wait`, which will return ``nil`` if the operation succeeds or raise an :exc:`FDB::Error` if an error occurred. Failure to call :meth:`FutureNil.wait` on a returned :class:`FutureNil` object means that any potential errors raised by the asynchronous operation that returned the object *will not be seen*, and represents a significant error in your code.
 
-.. class:: Int64Future
-    This type is a future integer.
 
 .. _ruby streaming mode:
 
