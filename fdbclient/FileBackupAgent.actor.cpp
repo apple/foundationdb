@@ -3582,7 +3582,7 @@ public:
 	ACTOR static Future<Void> submitParallelRestore(Database cx, Key backupTag,
 														Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
 														Version targetVersion, bool lockDB, UID randomUID) {
-		state ReadYourWritesTransaction tr(cx);
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state int restoreIndex = 0;
 		state int numTries = 0;
 		// lock DB for restore
@@ -3591,15 +3591,15 @@ public:
 				if (lockDB) {
 					wait(lockDatabase(cx, randomUID));
 				}
-				tr.reset();
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(checkDatabaseLock(Reference<ReadYourWritesTransaction>(&tr), randomUID));
+				tr->reset();
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(checkDatabaseLock(tr, randomUID));
 
-				TraceEvent("FastRestoreMasterProcessRestoreRequests").detail("DBIsLocked", randomUID);
+				TraceEvent("FastRestoreMasterSubmitRestoreRequests").detail("DBIsLocked", randomUID);
 				break;
 			} catch (Error& e) {
-				TraceEvent("FastRestoreMasterProcessRestoreRequests").detail("CheckLockError", e.what());
+				TraceEvent("FastRestoreMasterSubmitRestoreRequests").detail("CheckLockError", e.what());
 				TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreMayFail")
 					.detail("Reason", "DB is not properly locked")
 					.detail("ExpectedLockID", randomUID);
@@ -3610,9 +3610,9 @@ public:
 
 		// set up restore request
 		loop {
-			tr.reset();
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				// Note: we always lock DB here in case DB is modified at the bacupRanges boundary.
 				for (restoreIndex = 0; restoreIndex < backupRanges.size(); restoreIndex++) {
@@ -3621,14 +3621,14 @@ public:
 					// Register the request request in DB, which will be picked up by restore worker leader
 					struct RestoreRequest restoreRequest(restoreIndex, restoreTag, bcUrl, true, targetVersion, true, range,
 														Key(), Key(), lockDB, deterministicRandom()->randomUniqueID());
-					tr.set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
+					tr->set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
 				}
-				tr.set(restoreRequestTriggerKey,
+				tr->set(restoreRequestTriggerKey,
 					restoreRequestTriggerValue(deterministicRandom()->randomUniqueID(), backupRanges.size()));
-				wait(tr.commit()); // Trigger restore
+				wait(tr->commit()); // Trigger restore
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				wait(tr->onError(e));
 			}
 		}
 		return Void();
