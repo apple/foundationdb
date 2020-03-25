@@ -1324,7 +1324,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 		const Version oldEpochEnd = std::get<1>(epochVersionTags);
 		if (!fMinVersion.get().present() || fMinVersion.get().get() + 1 >= oldEpochEnd) {
 			TraceEvent("SkipBackupRecruitment", self->dbgid)
-			    .detail("MinVersion", fMinVersion.get().get())
+			    .detail("MinVersion", fMinVersion.get().present() ? fMinVersion.get() : -1)
 			    .detail("Epoch", epoch)
 			    .detail("OldEpoch", std::get<0>(epochVersionTags))
 			    .detail("OldEpochEnd", oldEpochEnd);
