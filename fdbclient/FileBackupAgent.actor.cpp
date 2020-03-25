@@ -3556,10 +3556,10 @@ public:
 		TraceEvent("FastRestoreAgentWaitForRestoreToFinish").detail("DBLock", randomUID);
 		loop {
 			try {
-				if (restoreDone) break;
 				tr.reset();
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				Optional<Value> restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
 				// Restore may finish before restoreAgent waits on the restore finish event.
 				if (restoreRequestDoneKeyValue.present()) {
@@ -3567,10 +3567,11 @@ public:
 					tr.clear(restoreRequestDoneKey);
 					wait(tr.commit());
 					break;
-				} else {
+				} else if (!restoreDone) {
 					watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
 					wait(tr.commit());
 					wait(watchForRestoreRequestDone);
+				} else {
 					break;
 				}
 			} catch (Error& e) {
@@ -4419,7 +4420,7 @@ public:
 	//the tagname of the backup must be the same as the restore.
 	ACTOR static Future<Version> atomicRestore(FileBackupAgent* backupAgent, Database cx, Key tagName,
 	                                           Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix,
-	                                           Key removePrefix, bool fastRestore = false) {
+	                                           Key removePrefix, bool fastRestore) {
 		state Reference<ReadYourWritesTransaction> ryw_tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 		state BackupConfig backupConfig;
 		loop {
@@ -4567,7 +4568,7 @@ Future<Version> FileBackupAgent::restore(Database cx, Optional<Database> cxOrig,
 }
 
 Future<Version> FileBackupAgent::atomicRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {
-	return FileBackupAgentImpl::atomicRestore(this, cx, tagName, ranges, addPrefix, removePrefix);
+	return FileBackupAgentImpl::atomicRestore(this, cx, tagName, ranges, addPrefix, removePrefix, false);
 }
 
 Future<ERestoreState> FileBackupAgent::abortRestore(Reference<ReadYourWritesTransaction> tr, Key tagName) {
