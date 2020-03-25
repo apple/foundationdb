@@ -519,7 +519,7 @@ Snapshot reads
 
     Like :meth:`Transaction.get_range_start_with`, but as a snapshot read.
 
-.. method:: Transaction.snapshot.get_read_version() -> Version
+.. method:: Transaction.snapshot.get_read_version() -> Int64Future
 
     Identical to :meth:`Transaction.get_read_version` (since snapshot and strictly serializable reads use the same read version).
 
@@ -728,7 +728,7 @@ Most applications should use the read version that FoundationDB determines autom
 
     |infrequent| Sets the database version that the transaction will read from the database.  The database cannot guarantee causal consistency if this method is used (the transaction's reads will be causally consistent only if the provided read version has that property).
 
-.. method:: Transaction.get_read_version() -> Version
+.. method:: Transaction.get_read_version() -> Int64Future
 
     |infrequent| Returns the transaction's read version.
 
