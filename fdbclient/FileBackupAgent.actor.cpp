@@ -3549,10 +3549,11 @@ public:
 	static const int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
 
 	// Parallel restore
-	ACTOR static Future<Void> parallelRestoreFinish(Database cx) {
+	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID) {
 		state ReadYourWritesTransaction tr(cx);
 		state Future<Void> watchForRestoreRequestDone;
 		state bool restoreDone = false;
+		TraceEvent("FastRestoreAgentWaitForRestoreToFinish").detail("DBLock", randomUID);
 		loop {
 			try {
 				if (restoreDone) break;
@@ -3576,6 +3577,23 @@ public:
 				wait(tr.onError(e));
 			}
 		}
+		TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBStart", randomUID);
+		try {
+			wait(unlockDatabase(cx, randomUID));
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) { // Should only happen in simulation
+				TraceEvent(SevWarnAlways, "FastRestoreAgentOnCancelingActor")
+				    .detail("DBLock", randomUID)
+				    .detail("ManualCheck", "Is DB locked");
+			} else {
+				TraceEvent(SevError, "FastRestoreAgentUnlockDBFailed")
+				    .detail("DBLock", randomUID)
+				    .detail("ErrorCode", e.code())
+				    .detail("Error", e.what());
+				ASSERT_WE_THINK(false); // This unlockDatabase should always succeed, we think.
+			}
+		}
+		TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBFinish", randomUID);
 		return Void();
 	}
 
@@ -3596,10 +3614,10 @@ public:
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(checkDatabaseLock(tr, randomUID));
 
-				TraceEvent("FastRestoreMasterSubmitRestoreRequests").detail("DBIsLocked", randomUID);
+				TraceEvent("FastRestoreAgentSubmitRestoreRequests").detail("DBIsLocked", randomUID);
 				break;
 			} catch (Error& e) {
-				TraceEvent("FastRestoreMasterSubmitRestoreRequests").detail("CheckLockError", e.what());
+				TraceEvent("FastRestoreAgentSubmitRestoreRequests").detail("CheckLockError", e.what());
 				TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreMayFail")
 					.detail("Reason", "DB is not properly locked")
 					.detail("ExpectedLockID", randomUID);
@@ -4501,7 +4519,7 @@ public:
 			bool lockDB = true;
 			wait(submitParallelRestore(cx, tagName, ranges, KeyRef(bc->getURL()), targetVersion, lockDB, randomUid));
 			TraceEvent("AtomicParallelRestoreWaitForRestoreFinish");
-			wait(parallelRestoreFinish(cx));
+			wait(parallelRestoreFinish(cx, randomUid));
 			return -1;
 		} else {
 			TraceEvent("AS_StartRestore");
@@ -4525,8 +4543,8 @@ const int BackupAgentBase::logHeaderSize = 12;
 const int FileBackupAgent::dataFooterSize = 20;
 
 // Return if parallel restore has finished
-Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx) {
-	return FileBackupAgentImpl::parallelRestoreFinish(cx);
+Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx, UID randomUID) {
+	return FileBackupAgentImpl::parallelRestoreFinish(cx, randomUID);
 }
 
 Future<Void> FileBackupAgent::submitParallelRestore(Database cx, Key backupTag,

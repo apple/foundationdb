@@ -214,22 +214,6 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	// Step: Notify all restore requests have been handled by cleaning up the restore keys
 	wait(signalRestoreCompleted(self, cx));
 
-	try {
-		wait(unlockDatabase(cx, randomUID));
-	} catch (Error& e) {
-		if (e.code() == error_code_operation_cancelled) { // Should only happen in simulation
-			TraceEvent(SevWarnAlways, "FastRestoreMasterOnCancelingActor", self->id())
-			    .detail("DBLock", randomUID)
-			    .detail("ManualCheck", "Is DB locked");
-		} else {
-			TraceEvent(SevError, "FastRestoreMasterUnlockDBFailed", self->id())
-			    .detail("DBLock", randomUID)
-			    .detail("ErrorCode", e.code())
-			    .detail("Error", e.what());
-			ASSERT_WE_THINK(false); // This unlockDatabase should always succeed, we think.
-		}
-	}
-
 	TraceEvent("FastRestoreMasterRestoreCompleted", self->id());
 
 	return Void();

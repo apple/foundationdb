@@ -480,7 +480,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// Wait for parallel restore to finish before we can proceed
 				TraceEvent("FastRestore").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");
-				wait(backupAgent.parallelRestoreFinish(cx));
+				wait(backupAgent.parallelRestoreFinish(cx, randomID));
 				TraceEvent("FastRestore").detail("BackupAndParallelRestore", "RestoreFinished");
 
 				for (auto& restore : restores) {
