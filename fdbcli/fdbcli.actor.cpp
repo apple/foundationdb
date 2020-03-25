@@ -1004,7 +1004,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					for (StatusObjectReader region : regions) {
 						outputString += "\n    -";
 						if (region.get("satellite_redundancy_mode", strVal)) {
-							outputString += format("\n        Satellite Redundancy Mode - %s", strVal);
+							outputString += format("\n        Satellite Redundancy Mode - %s", strVal.c_str());
 						}
 						if (region.get("satellite_anti_quorum", intVal)) {
 							outputString += format("\n        Satellite Anti Quorum - %d", intVal);
@@ -1013,7 +1013,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							outputString += format("\n        Satellite Logs - %d", intVal);
 						}
 						if (region.get("satellite_log_policy", strVal)) {
-							outputString += format("\n        Satellite Log Policy - %s", strVal);
+							outputString += format("\n        Satellite Log Policy - %s", strVal.c_str());
 						}
 						if (region.get("satellite_log_replicas", intVal)) {
 							outputString += format("\n        Satellite Log Replicas - %d", intVal);
