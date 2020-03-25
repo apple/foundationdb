@@ -187,6 +187,7 @@ struct BackupData {
 							break;
 						}
 						wait(watchFuture);
+						tr->reset();
 					} else {
 						ASSERT(workers.present() && workers.get().size() > 0);
 						config.startedBackupWorkers().set(tr, workers.get());
