@@ -66,9 +66,13 @@ struct StagingKey {
 			    .detail("NewVersion", newVersion.toString())
 			    .detail("Mutation", m.toString());
 		}
-		if (version == newVersion) { // Sanity check
+		if (version == newVersion) {
+			// This could happen because the same mutation can be present in
+			// overlapping mutation logs, because new TLogs can copy mutations
+			// from old generation TLogs (or backup worker is recruited without
+			// knowning previously saved progress).
 			ASSERT(type == m.type && key == m.param1 && val == m.param2);
-			TraceEvent(SevError, "SameVersion").detail("Version", version.toString()).detail("Mutation", m.toString());
+			TraceEvent("SameVersion").detail("Version", version.toString()).detail("Mutation", m.toString());
 			return;
 		}
 
