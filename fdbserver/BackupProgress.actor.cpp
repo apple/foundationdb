@@ -50,7 +50,7 @@ void BackupProgress::updateTagVersions(std::map<Tag, Version>* tagVersions, std:
 		tags->erase(tag);
 		if (savedVersion < endVersion - 1) {
 			tagVersions->insert({ tag, savedVersion + 1 });
-			TraceEvent("BackupRange", dbgid)
+			TraceEvent("BackupVersionRange", dbgid)
 			    .detail("OldEpoch", epoch)
 			    .detail("Tag", tag.toString())
 			    .detail("BeginVersion", savedVersion + 1)
@@ -95,7 +95,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 
 		for (const Tag tag : tags) { // tags without progress data
 			tagVersions.insert({ tag, info.epochBegin });
-			TraceEvent("BackupRange", dbgid)
+			TraceEvent("BackupVersionRange", dbgid)
 			    .detail("OldEpoch", epoch)
 			    .detail("Tag", tag.toString())
 			    .detail("BeginVersion", info.epochBegin)
