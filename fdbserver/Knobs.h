@@ -304,6 +304,7 @@ public:
 	double BACKUP_TIMEOUT;  // master's reaction time for backup failure
 	double BACKUP_NOOP_POP_DELAY;
 	int BACKUP_FILE_BLOCK_BYTES;
+	double BACKUP_UPLOAD_DELAY;
 
 	//Cluster Controller
 	double CLUSTER_CONTROLLER_LOGGING_DELAY;
@@ -466,6 +467,8 @@ public:
 	double DEGRADED_RESET_INTERVAL;
 	double DEGRADED_WARNING_LIMIT;
 	double DEGRADED_WARNING_RESET_DELAY;
+	int64_t TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS;
+	double TRACE_LOG_PING_TIMEOUT_SECONDS;
 
 	// Test harness
 	double WORKER_POLL_DELAY;

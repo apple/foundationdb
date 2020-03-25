@@ -34,6 +34,9 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+//#define SevCCheckInfo SevVerbose
+#define SevCCheckInfo SevInfo
+
 struct ConsistencyCheckWorkload : TestWorkload
 {
 	//Whether or not we should perform checks that will only pass if the database is in a quiescent state
@@ -1170,20 +1173,51 @@ struct ConsistencyCheckWorkload : TestWorkload
 	}
 
 	ACTOR Future<bool> checkForExtraDataStores(Database cx, ConsistencyCheckWorkload *self) {
-		state vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
-		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
+		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+		state std::vector<WorkerInterface> coordWorkers = wait(getCoordWorkers(cx, self->dbInfo));
 		auto& db = self->dbInfo->get();
 		state std::vector<TLogInterface> logs = db.logSystemConfig.allPresentLogs();
 
 		state std::vector<WorkerDetails>::iterator itr;
 		state bool foundExtraDataStore = false;
+		state std::vector<struct ProcessInfo*> protectedProcessesToKill;
 
 		state std::map<NetworkAddress, std::set<UID>> statefulProcesses;
 		for (const auto& ss : storageServers) {
 			statefulProcesses[ss.address()].insert(ss.id());
+			// A process may have two addresses (same ip, different ports)
+			if (ss.secondaryAddress().present()) {
+				statefulProcesses[ss.secondaryAddress().get()].insert(ss.id());
+			}
+			TraceEvent(SevCCheckInfo, "StatefulProcess")
+			    .detail("StorageServer", ss.id())
+			    .detail("PrimaryAddress", ss.address().toString())
+			    .detail("SecondaryAddress",
+			            ss.secondaryAddress().present() ? ss.secondaryAddress().get().toString() : "Unset");
 		}
 		for (const auto& log : logs) {
 			statefulProcesses[log.address()].insert(log.id());
+			if (log.secondaryAddress().present()) {
+				statefulProcesses[log.secondaryAddress().get()].insert(log.id());
+			}
+			TraceEvent(SevCCheckInfo, "StatefulProcess")
+			    .detail("Log", log.id())
+			    .detail("PrimaryAddress", log.address().toString())
+			    .detail("SecondaryAddress",
+			            log.secondaryAddress().present() ? log.secondaryAddress().get().toString() : "Unset");
+		}
+		// Coordinators are also stateful processes
+		for (const auto& cWorker : coordWorkers) {
+			statefulProcesses[cWorker.address()].insert(cWorker.id());
+			if (cWorker.secondaryAddress().present()) {
+				statefulProcesses[cWorker.secondaryAddress().get()].insert(cWorker.id());
+			}
+			TraceEvent(SevCCheckInfo, "StatefulProcess")
+			    .detail("Coordinator", cWorker.id())
+			    .detail("PrimaryAddress", cWorker.address().toString())
+			    .detail("SecondaryAddress",
+			            cWorker.secondaryAddress().present() ? cWorker.secondaryAddress().get().toString() : "Unset");
 		}
 
 		for(itr = workers.begin(); itr != workers.end(); ++itr) {
@@ -1194,23 +1228,45 @@ struct ConsistencyCheckWorkload : TestWorkload
 				return false;
 			}
 
+			TraceEvent(SevCCheckInfo, "ConsistencyCheck_ExtraDataStore")
+			    .detail("Worker", itr->interf.id().toString())
+			    .detail("PrimaryAddress", itr->interf.address().toString())
+			    .detail("SecondaryAddress", itr->interf.secondaryAddress().present()
+			                                    ? itr->interf.secondaryAddress().get().toString()
+			                                    : "Unset");
 			for (const auto& id : stores.get()) {
-				if(!statefulProcesses[itr->interf.address()].count(id)) {
-					TraceEvent("ConsistencyCheck_ExtraDataStore").detail("Address", itr->interf.address()).detail("DataStoreID", id);
-					if(g_network->isSimulated()) {
-						//FIXME: this is hiding the fact that we can recruit a new storage server on a location the has files left behind by a previous failure
-						// this means that the process is wasting disk space until the process is rebooting
-						auto p = g_simulator.getProcessByAddress(itr->interf.address());
-						TraceEvent("ConsistencyCheck_RebootProcess").detail("Address", itr->interf.address()).detail("DataStoreID", id).detail("Reliable", p->isReliable());
-						if(p->isReliable()) {
-							g_simulator.rebootProcess(p, ISimulator::RebootProcess);
-						} else {
-							g_simulator.killProcess(p, ISimulator::KillInstantly);
-						}
-					}
-
-					foundExtraDataStore = true;
+				if (statefulProcesses[itr->interf.address()].count(id)) {
+					continue;
 				}
+				// For extra data store
+				TraceEvent("ConsistencyCheck_ExtraDataStore")
+				    .detail("Address", itr->interf.address())
+				    .detail("DataStoreID", id);
+				if (g_network->isSimulated()) {
+					// FIXME: this is hiding the fact that we can recruit a new storage server on a location the has
+					// files left behind by a previous failure
+					// this means that the process is wasting disk space until the process is rebooting
+					ISimulator::ProcessInfo* p = g_simulator.getProcessByAddress(itr->interf.address());
+					// Note: itr->interf.address() may not equal to p->address() because role's endpoint's primary
+					// addr can be swapped by choosePrimaryAddress() based on its peer's tls config.
+					TraceEvent("ConsistencyCheck_RebootProcess")
+					    .detail("Address",
+					            itr->interf.address()) // worker's primary address (i.e., the first address)
+					    .detail("ProcessPrimaryAddress", p->address)
+					    .detail("ProcessAddresses", p->addresses.toString())
+					    .detail("DataStoreID", id)
+					    .detail("Protected", g_simulator.protectedAddresses.count(itr->interf.address()))
+					    .detail("Reliable", p->isReliable())
+					    .detail("ReliableInfo", p->getReliableInfo())
+					    .detail("KillOrRebootProcess", p->address);
+					if (p->isReliable()) {
+						g_simulator.rebootProcess(p, ISimulator::RebootProcess);
+					} else {
+						g_simulator.killProcess(p, ISimulator::KillInstantly);
+					}
+				}
+
+				foundExtraDataStore = true;
 			}
 		}
 

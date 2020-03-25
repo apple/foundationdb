@@ -29,6 +29,7 @@
 #include <stdarg.h>
 #include <cctype>
 #include <time.h>
+#include <set>
 
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
@@ -228,6 +229,35 @@ public:
 		}
 	};
 
+	struct IssuesList : ITraceLogIssuesReporter, ThreadSafeReferenceCounted<IssuesList> {
+		IssuesList(){};
+		void addIssue(std::string issue) override {
+			MutexHolder h(mutex);
+			issues.insert(issue);
+		}
+
+		void retrieveIssues(std::set<std::string>& out) override {
+			MutexHolder h(mutex);
+			for (auto const& i : issues) {
+				out.insert(i);
+			}
+		}
+
+		void resolveIssue(std::string issue) override {
+			MutexHolder h(mutex);
+			issues.erase(issue);
+		}
+
+		void addref() { ThreadSafeReferenceCounted<IssuesList>::addref(); }
+		void delref() { ThreadSafeReferenceCounted<IssuesList>::delref(); }
+
+	private:
+		Mutex mutex;
+		std::set<std::string> issues;
+	};
+
+	Reference<IssuesList> issues;
+
 	Reference<BarrierList> barriers;
 
 	struct WriterThread : IThreadPoolReceiver {
@@ -288,11 +318,26 @@ public:
 				logWriter->sync();
 			}
 		}
+
+		struct Ping : TypedAction<WriterThread, Ping> {
+			ThreadReturnPromise<Void> ack;
+
+			explicit Ping(){};
+			virtual double getTimeEstimate() { return 0; }
+		};
+		void action(Ping& ping) {
+			try {
+				ping.ack.send(Void());
+			} catch (Error& e) {
+				TraceEvent(SevError, "CrashDebugPingActionFailed").error(e);
+				throw;
+			}
+		}
 	};
 
 	TraceLog()
 	  : bufferLength(0), loggedLength(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList),
-	    logTraceEventMetrics(false), formatter(new XmlTraceLogFormatter()) {}
+	    logTraceEventMetrics(false), formatter(new XmlTraceLogFormatter()), issues(new IssuesList) {}
 
 	bool isOpen() const { return opened; }
 
@@ -307,7 +352,7 @@ public:
 		basename = format("%s/%s.%s.%s", directory.c_str(), processName.c_str(), timestamp.c_str(), deterministicRandom()->randomAlphaNumeric(6).c_str());
 		logWriter = Reference<ITraceLogWriter>(new FileTraceLogWriter(directory, processName, basename,
 		                                                              formatter->getExtension(), maxLogsSize,
-		                                                              [this]() { barriers->triggerAll(); }));
+		                                                              [this]() { barriers->triggerAll(); }, issues));
 
 		if ( g_network->isSimulated() )
 			writer = Reference<IThreadPool>(new DummyThreadPool());
@@ -504,6 +549,15 @@ public:
 			r.refreshRolesString();
 		}
 	}
+
+	Future<Void> pingWriterThread() {
+		auto ping = new WriterThread::Ping;
+		auto f = ping->ack.getFuture();
+		writer->post(ping);
+		return f;
+	}
+
+	void retriveTraceLogIssues(std::set<std::string>& out) { return issues->retrieveIssues(out); }
 
 	~TraceLog() {
 		close();
@@ -738,6 +792,14 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 	ev.tmpEventMetric = nullptr;
 
 	return *this;
+}
+
+void retriveTraceLogIssues(std::set<std::string>& out) {
+	return g_traceLog.retriveTraceLogIssues(out);
+}
+
+Future<Void> pingTraceLogWriterThread() {
+	return g_traceLog.pingWriterThread();
 }
 
 TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true), logged(false) {
