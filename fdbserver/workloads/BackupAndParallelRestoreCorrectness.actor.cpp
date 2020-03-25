@@ -450,7 +450,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				// Submit parallel restore requests
 				TraceEvent("FastRestore").detail("PrepareRestores", self->backupRanges.size());
 				wait(backupAgent.submitParallelRestore(cx, self->backupTag, self->backupRanges,
-				                           KeyRef(lastBackupContainer->getURL()), targetVersion, self->locked, randomID));
+				                                       KeyRef(lastBackupContainer->getURL()), targetVersion,
+				                                       self->locked, randomID));
 				TraceEvent("FastRestore").detail("TriggerRestore", "Setting up restoreRequestTriggerKey");
 
 				// Sometimes kill and restart the restore

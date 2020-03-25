@@ -83,7 +83,8 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 		if (self->fastRestore) { // New fast parallel restore
 			TraceEvent(SevWarnAlways, "AtomicParallelRestore");
-			wait(backupAgent.atomicParallelRestore(cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
+			wait(backupAgent.atomicParallelRestore(cx, BackupAgentBase::getDefaultTag(), self->backupRanges,
+			                                       StringRef(), StringRef()));
 		} else { // Old style restore
 			loop {
 				std::vector<Future<Version>> restores;

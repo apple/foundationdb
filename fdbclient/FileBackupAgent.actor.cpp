@@ -3598,8 +3598,8 @@ public:
 	}
 
 	ACTOR static Future<Void> submitParallelRestore(Database cx, Key backupTag,
-														Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
-														Version targetVersion, bool lockDB, UID randomUID) {
+	                                                Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
+	                                                Version targetVersion, bool lockDB, UID randomUID) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state int restoreIndex = 0;
 		state int numTries = 0;
@@ -3619,8 +3619,8 @@ public:
 			} catch (Error& e) {
 				TraceEvent("FastRestoreAgentSubmitRestoreRequests").detail("CheckLockError", e.what());
 				TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreMayFail")
-					.detail("Reason", "DB is not properly locked")
-					.detail("ExpectedLockID", randomUID);
+				    .detail("Reason", "DB is not properly locked")
+				    .detail("ExpectedLockID", randomUID);
 				numTries++;
 				wait(delay(5.0));
 			}
@@ -3637,12 +3637,13 @@ public:
 					auto range = backupRanges[restoreIndex];
 					Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
 					// Register the request request in DB, which will be picked up by restore worker leader
-					struct RestoreRequest restoreRequest(restoreIndex, restoreTag, bcUrl, true, targetVersion, true, range,
-														Key(), Key(), lockDB, deterministicRandom()->randomUniqueID());
+					struct RestoreRequest restoreRequest(restoreIndex, restoreTag, bcUrl, true, targetVersion, true,
+					                                     range, Key(), Key(), lockDB,
+					                                     deterministicRandom()->randomUniqueID());
 					tr->set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
 				}
 				tr->set(restoreRequestTriggerKey,
-					restoreRequestTriggerValue(deterministicRandom()->randomUniqueID(), backupRanges.size()));
+				        restoreRequestTriggerValue(deterministicRandom()->randomUniqueID(), backupRanges.size()));
 				wait(tr->commit()); // Trigger restore
 				break;
 			} catch (Error& e) {
@@ -4531,8 +4532,10 @@ public:
 
 	// Similar to atomicRestore, only used in simulation test.
 	// locks the database before discontinuing the backup and that same lock is then used while doing the restore.
-	//the tagname of the backup must be the same as the restore.
-	ACTOR static Future<Void> atomicParallelRestore(FileBackupAgent* backupAgent, Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {
+	// the tagname of the backup must be the same as the restore.
+	ACTOR static Future<Void> atomicParallelRestore(FileBackupAgent* backupAgent, Database cx, Key tagName,
+	                                                Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix,
+	                                                Key removePrefix) {
 		Version ver = wait(atomicRestore(backupAgent, cx, tagName, ranges, addPrefix, removePrefix, true));
 		return Void();
 	}
@@ -4550,10 +4553,12 @@ Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx, UID randomUID) 
 Future<Void> FileBackupAgent::submitParallelRestore(Database cx, Key backupTag,
                                                     Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
                                                     Version targetVersion, bool lockDB, UID randomUID) {
-    return FileBackupAgentImpl::submitParallelRestore(cx, backupTag, backupRanges, bcUrl, targetVersion, lockDB, randomUID);
+	return FileBackupAgentImpl::submitParallelRestore(cx, backupTag, backupRanges, bcUrl, targetVersion, lockDB,
+	                                                  randomUID);
 }
 
-Future<Void> FileBackupAgent::atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {
+Future<Void> FileBackupAgent::atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges,
+                                                    Key addPrefix, Key removePrefix) {
 	return FileBackupAgentImpl::atomicParallelRestore(this, cx, tagName, ranges, addPrefix, removePrefix);
 }
 
