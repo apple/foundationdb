@@ -2125,7 +2125,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 								transaction_too_old(), future_version()
 									});
 					}
-					GetKeyValuesReply rep =
+					GetKeyValuesReply _rep =
 						wait(loadBalance(cx.getPtr(), beginServer.second, &StorageServerInterface::getKeyValues, req,
 										 TaskPriority::DefaultPromiseEndpoint, false,
 										 cx->enableLocalityLoadBalance ? &cx->queueModel : NULL));
