@@ -275,6 +275,13 @@ public:
 	enum ERestoreState { UNITIALIZED = 0, QUEUED = 1, STARTING = 2, RUNNING = 3, COMPLETED = 4, ABORTED = 5 };
 	static StringRef restoreStateText(ERestoreState id);
 
+	// parallel restore
+	Future<Void> parallelRestoreFinish(Database cx, UID randomUID);
+	Future<Void> submitParallelRestore(Database cx, Key backupTag, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                                   KeyRef bcUrl, Version targetVersion, bool lockDB, UID randomUID);
+	Future<Void> atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                   Key addPrefix, Key removePrefix);
+
 	// restore() will
 	//   - make sure that url is readable and appears to be a complete backup
 	//   - make sure the requested TargetVersion is valid
