@@ -67,7 +67,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 		state FileBackupAgent backupAgent;
 
 		wait( delay(self->startAfter * deterministicRandom()->random01()) );
-		TraceEvent("AtomicRestore_Start");
+		TraceEvent("AtomicRestore_Start").detail("UsePartitionedLog", self->usePartitionedLogs);
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		try {
