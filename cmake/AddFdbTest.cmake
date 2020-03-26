@@ -195,6 +195,6 @@ function(create_test_package)
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/packages
     COMMENT "Package correctness archive"
     )
-  add_custom_target(package_tests DEPENDS ${tar_file})
+  add_custom_target(package_tests ALL DEPENDS ${tar_file})
   add_dependencies(package_tests strip_fdbserver TestHarness)
 endfunction()
