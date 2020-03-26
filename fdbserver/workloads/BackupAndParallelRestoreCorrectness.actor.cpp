@@ -21,7 +21,6 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
@@ -185,7 +184,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		try {
 			wait(backupAgent->submitBackup(cx, StringRef(backupContainer), deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(), backupRanges, stopDifferentialDelay ? false : true,
-			                               /*partitionedLog=*/self->usePartitionedLogs));
+			                               self->usePartitionedLogs));
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) throw;
