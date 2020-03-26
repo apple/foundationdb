@@ -18,7 +18,6 @@ set(FDBRPC_SRCS
   Locality.cpp
   Net2FileSystem.cpp
   networksender.actor.h
-  Platform.cpp
   QueueModel.cpp
   ReplicationPolicy.cpp
   ReplicationTypes.cpp

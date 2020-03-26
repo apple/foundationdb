@@ -499,8 +499,12 @@ public:
 	vector<WorkerDetails> getWorkersForRoleInDatacenter(Optional<Standalone<StringRef>> const& dcId, ProcessClass::ClusterRole role, int amount, DatabaseConfiguration const& conf, std::map< Optional<Standalone<StringRef>>, int>& id_used, Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(), bool checkStable = false ) {
 		std::map<std::pair<ProcessClass::Fitness,int>, std::pair<vector<WorkerDetails>,vector<WorkerDetails>>> fitness_workers;
 		vector<WorkerDetails> results;
-		if (amount <= 0)
+		if(minWorker.present()) {
+			results.push_back(minWorker.get().worker);
+		}
+		if (amount <= results.size()) {
 			return results;
+		}
 
 		for( auto& it : id_worker ) {
 			auto fitness = it.second.details.processClass.machineClassFitness( role );
@@ -697,7 +701,7 @@ public:
 		}
 
 		std::vector<WorkerDetails> satelliteLogs;
-		if(region.satelliteTLogReplicationFactor > 0) {
+		if(region.satelliteTLogReplicationFactor > 0 && req.configuration.usableRegions > 1) {
 			satelliteLogs = getWorkersForSatelliteLogs( req.configuration, region, remoteRegion, id_used, result.satelliteFallback );
 			for(int i = 0; i < satelliteLogs.size(); i++) {
 				result.satelliteTLogs.push_back(satelliteLogs[i].interf);
@@ -707,11 +711,8 @@ public:
 		auto first_resolver = getWorkerForRoleInDatacenter( dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, id_used );
 		auto first_proxy = getWorkerForRoleInDatacenter( dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, req.configuration, id_used );
 
-		auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies()-1, req.configuration, id_used, first_proxy );
-		auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers()-1, req.configuration, id_used, first_resolver );
-
-		proxies.push_back(first_proxy.worker);
-		resolvers.push_back(first_resolver.worker);
+		auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies(), req.configuration, id_used, first_proxy );
+		auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, id_used, first_resolver );
 
 		for(int i = 0; i < resolvers.size(); i++)
 			result.resolvers.push_back(resolvers[i].interf);
@@ -742,7 +743,7 @@ public:
 
 		if( !goodRecruitmentTime.isReady() &&
 			( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
-			  ( region.satelliteTLogReplicationFactor > 0 && RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId), ProcessClass::TLog).betterCount(RoleFitness(satelliteLogs, ProcessClass::TLog)) ) ||
+			  ( region.satelliteTLogReplicationFactor > 0 && req.configuration.usableRegions > 1 && RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId), ProcessClass::TLog).betterCount(RoleFitness(satelliteLogs, ProcessClass::TLog)) ) ||
 			  RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies(), ProcessClass::Proxy).betterCount(RoleFitness(proxies, ProcessClass::Proxy)) ||
 			  RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers(), ProcessClass::Resolver).betterCount(RoleFitness(resolvers, ProcessClass::Resolver)) ) ) {
 			return operation_failed();
@@ -850,11 +851,8 @@ public:
 					auto first_resolver = getWorkerForRoleInDatacenter( dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, used );
 					auto first_proxy = getWorkerForRoleInDatacenter( dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, req.configuration, used );
 
-					auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies()-1, req.configuration, used, first_proxy );
-					auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers()-1, req.configuration, used, first_resolver );
-
-					proxies.push_back(first_proxy.worker);
-					resolvers.push_back(first_resolver.worker);
+					auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies(), req.configuration, used, first_proxy );
+					auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, used, first_resolver );
 
 					RoleFitnessPair fitness( RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver) );
 
@@ -929,7 +927,7 @@ public:
 			std::set<Optional<Key>> primaryDC;
 			primaryDC.insert(regions[0].dcId);
 			getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.getDesiredLogs(), db.config.tLogPolicy, id_used, true, primaryDC);
-			if(regions[0].satelliteTLogReplicationFactor > 0) {
+			if(regions[0].satelliteTLogReplicationFactor > 0 && db.config.usableRegions > 1) {
 				bool satelliteFallback = false;
 				getWorkersForSatelliteLogs(db.config, regions[0], regions[1], id_used, satelliteFallback, true);
 			}
@@ -1114,7 +1112,7 @@ public:
 
 		RoleFitness oldSatelliteTLogFit(satellite_tlogs, ProcessClass::TLog);
 		bool newSatelliteFallback = false;
-		auto newSatelliteTLogs = region.satelliteTLogReplicationFactor > 0 ? getWorkersForSatelliteLogs(db.config, region, remoteRegion, id_used, newSatelliteFallback, true) : satellite_tlogs;
+		auto newSatelliteTLogs = (region.satelliteTLogReplicationFactor > 0 && db.config.usableRegions > 1) ? getWorkersForSatelliteLogs(db.config, region, remoteRegion, id_used, newSatelliteFallback, true) : satellite_tlogs;
 		RoleFitness newSatelliteTLogFit(newSatelliteTLogs, ProcessClass::TLog);
 
 		std::map<Optional<Key>,int32_t> satellite_priority;
@@ -1181,10 +1179,8 @@ public:
 		auto first_resolver = getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true );
 		auto first_proxy = getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true );
 
-		auto proxies = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, db.config.getDesiredProxies()-1, db.config, id_used, first_proxy, true );
-		auto resolvers = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, db.config.getDesiredResolvers()-1, db.config, id_used, first_resolver, true );
-		proxies.push_back(first_proxy.worker);
-		resolvers.push_back(first_resolver.worker);
+		auto proxies = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, db.config.getDesiredProxies(), db.config, id_used, first_proxy, true );
+		auto resolvers = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, db.config.getDesiredResolvers(), db.config, id_used, first_resolver, true );
 
 		RoleFitnessPair newInFit(RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver));
 		if(oldInFit.proxy.betterFitness(newInFit.proxy) || oldInFit.resolver.betterFitness(newInFit.resolver)) {
@@ -1880,11 +1876,12 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData* 
 			//TraceEvent("FailureDetectionPoll", uniqueID).detail("PivotDelay", pivotDelay).detail("Clients", currentStatus.size());
 			//TraceEvent("FailureDetectionAcceptableDelay").detail("Delay", acceptableDelay1000);
 
-			bool tooManyLogGenerations = std::max(self->db.unfinishedRecoveries, self->db.logGenerations) > CLIENT_KNOBS->FAILURE_MAX_GENERATIONS;
+			bool useEmergencyDelay = (std::max(self->db.unfinishedRecoveries, self->db.logGenerations) > CLIENT_KNOBS->FAILURE_MAX_GENERATIONS) ||
+										 (now() - self->startTime < CLIENT_KNOBS->FAILURE_EMERGENCY_DELAY);
 
 			for(auto it = currentStatus.begin(); it != currentStatus.end(); ) {
 				double delay = t - it->second.lastRequestTime;
-				if ( it->first != g_network->getLocalAddresses() && ( tooManyLogGenerations ?
+				if ( it->first != g_network->getLocalAddresses() && ( useEmergencyDelay ?
 					( delay > CLIENT_KNOBS->FAILURE_EMERGENCY_DELAY ) :
 					( delay > pivotDelay * 2 + FLOW_KNOBS->SERVER_REQUEST_INTERVAL + CLIENT_KNOBS->FAILURE_MIN_DELAY || delay > CLIENT_KNOBS->FAILURE_MAX_DELAY ) ) ) {
 					//printf("Failure Detection Server: Status of '%s' is now '%s' after %f sec\n", it->first.toString().c_str(), "Failed", now() - it->second.lastRequestTime);
@@ -1999,8 +1996,17 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration( ClusterControllerData*
 void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest const& req ) {
 	req.reply.send( Void() );
 
-	TraceEvent("MasterRegistrationReceived", self->id).detail("MasterId", req.id).detail("Master", req.mi.toString()).detail("Tlogs", describe(req.logSystemConfig.tLogs)).detail("Resolvers", req.resolvers.size())
-		.detail("RecoveryState", (int)req.recoveryState).detail("RegistrationCount", req.registrationCount).detail("Proxies", req.proxies.size()).detail("RecoveryCount", req.recoveryCount).detail("Stalled", req.recoveryStalled);
+	TraceEvent("MasterRegistrationReceived", self->id)
+	    .detail("MasterId", req.id)
+	    .detail("Master", req.mi.toString())
+	    .detail("Tlogs", describe(req.logSystemConfig.tLogs))
+	    .detail("Resolvers", req.resolvers.size())
+	    .detail("RecoveryState", (int)req.recoveryState)
+	    .detail("RegistrationCount", req.registrationCount)
+	    .detail("Proxies", req.proxies.size())
+	    .detail("RecoveryCount", req.recoveryCount)
+	    .detail("Stalled", req.recoveryStalled)
+	    .detail("OldestBackupEpoch", req.logSystemConfig.oldestBackupEpoch);
 
 	//make sure the request comes from an active database
 	auto db = &self->db;

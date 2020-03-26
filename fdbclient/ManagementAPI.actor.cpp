@@ -991,7 +991,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 			if(g_network->isSimulated()) {
 				for(int i = 0; i < (desiredCoordinators.size()/2)+1; i++) {
 					auto addresses = g_simulator.getProcessByAddress(desiredCoordinators[i])->addresses;
-					
+
 					g_simulator.protectedAddresses.insert(addresses.address);
 					if(addresses.secondaryAddress.present()) {
 						g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
@@ -1161,11 +1161,26 @@ struct AutoQuorumChange : IQuorumChange {
 		return chosen;
 	}
 
+	// Select a desired set of workers such that
+	// (1) the number of workers at each locality type (e.g., dcid) <= desiredCount; and
+	// (2) prefer workers at a locality where less workers has been chosen than other localities: evenly distribute workers.
 	void addDesiredWorkers(vector<NetworkAddress>& chosen, const vector<ProcessData>& workers, int desiredCount, const std::set<AddressExclusion>& excluded) {
 		vector<ProcessData> remainingWorkers(workers);
 		deterministicRandom()->randomShuffle(remainingWorkers);
 
 		std::partition(remainingWorkers.begin(), remainingWorkers.end(), [](const ProcessData& data) { return (data.processClass == ProcessClass::CoordinatorClass); });
+
+		TraceEvent(SevDebug, "AutoSelectCoordinators").detail("CandidateWorkers", remainingWorkers.size());
+		for (auto worker = remainingWorkers.begin(); worker != remainingWorkers.end(); worker++) {
+			TraceEvent(SevDebug, "AutoSelectCoordinators")
+			    .detail("Worker", worker->processClass.toString())
+			    .detail("Address", worker->address.toString())
+			    .detail("Locality", worker->locality.toString());
+		}
+		TraceEvent(SevDebug, "AutoSelectCoordinators").detail("ExcludedAddress", excluded.size());
+		for (auto& excludedAddr : excluded) {
+			TraceEvent(SevDebug, "AutoSelectCoordinators").detail("ExcludedAddress", excludedAddr.toString());
+		}
 
 		std::map<StringRef, int> maxCounts;
 		std::map<StringRef, std::map<StringRef, int>> currentCounts;
@@ -1191,6 +1206,12 @@ struct AutoQuorumChange : IQuorumChange {
 			bool found = false;
 			for (auto worker = remainingWorkers.begin(); worker != remainingWorkers.end(); worker++) {
 				if(addressExcluded(excluded, worker->address)) {
+					continue;
+				}
+				// Exclude faulty node due to machine assassination
+				if (g_network->isSimulated() && g_simulator.protectedAddresses.count(worker->address) &&
+				    !g_simulator.getProcessByAddress(worker->address)->isReliable()) {
+					TraceEvent("AutoSelectCoordinators").detail("SkipUnreliableWorker", worker->address.toString());
 					continue;
 				}
 				bool valid = true;
@@ -1419,6 +1440,7 @@ ACTOR Future<Void> printHealthyZone( Database cx ) {
 
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning, bool clearSSFailureZoneString) {
 	state Transaction tr(cx);
+	TraceEvent("ClearHealthyZone").detail("ClearSSFailureZoneString", clearSSFailureZoneString);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1444,6 +1466,7 @@ ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning, bool clearSS
 
 ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning) {
 	state Transaction tr(cx);
+	TraceEvent("SetHealthyZone").detail("Zone", zoneId).detail("DurationSeconds", seconds);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);

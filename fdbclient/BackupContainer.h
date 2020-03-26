@@ -62,6 +62,12 @@ protected:
 
 // Structures for various backup components
 
+// Mutation log version written by old FileBackupAgent
+static const uint32_t BACKUP_AGENT_MLOG_VERSION = 2001;
+
+// Mutation log version written by BackupWorker
+static const uint32_t PARTITIONED_MLOG_VERSION = 4110;
+
 struct LogFile {
 	Version beginVersion;
 	Version endVersion;
@@ -69,15 +75,17 @@ struct LogFile {
 	std::string fileName;
 	int64_t fileSize;
 	int tagId = -1; // Log router tag. Non-negative for new backup format.
+	int totalTags = -1; // Total number of log router tags.
 
 	// Order by beginVersion, break ties with endVersion
 	bool operator< (const LogFile &rhs) const {
 		return beginVersion == rhs.beginVersion ? endVersion < rhs.endVersion : beginVersion < rhs.beginVersion;
 	}
 
-	// Returns if two log files have the same content by comparing version range and tag ID.
-	bool sameContent(const LogFile& rhs) const {
-		return beginVersion == rhs.beginVersion && endVersion == rhs.endVersion && tagId == rhs.tagId;
+	// Returns if this log file contains a subset of content of the given file
+	// by comparing version range and tag ID.
+	bool isSubset(const LogFile& rhs) const {
+		return beginVersion >= rhs.beginVersion && endVersion <= rhs.endVersion && tagId == rhs.tagId;
 	}
 
 	std::string toString() const {
@@ -214,7 +222,7 @@ public:
 
 	// Open a tagged log file for writing, where tagId is the log router tag's id.
 	virtual Future<Reference<IBackupFile>> writeTaggedLogFile(Version beginVersion, Version endVersion, int blockSize,
-	                                                          uint16_t tagId) = 0;
+	                                                          uint16_t tagId, int totalTags) = 0;
 
 	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
 	// snapshot of the key ranges this backup is targeting.
@@ -248,11 +256,19 @@ public:
 	// be after deleting all data prior to logStartVersionOverride.
 	virtual Future<BackupDescription> describeBackup(bool deepScan = false, Version logStartVersionOverride = invalidVersion) = 0;
 
+	// The same as above, except using partitioned mutation logs.
+	virtual Future<BackupDescription> describePartitionedBackup(bool deepScan = false, Version logStartVersionOverride = invalidVersion) = 0;
+
 	virtual Future<BackupFileList> dumpFileList(Version begin = 0, Version end = std::numeric_limits<Version>::max()) = 0;
 
 	// Get exactly the files necessary to restore to targetVersion.  Returns non-present if
 	// restore to given version is not possible.
 	virtual Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) = 0;
+
+	// Get exactly the files necessary to restore to targetVersion. Returns non-present if
+	// restore to given version is not possible. This is intended for parallel
+	// restore in FDB 7.0, which reads partitioned mutation logs.
+	virtual Future<Optional<RestorableFileSet>> getPartitionedRestoreSet(Version targetVersion) = 0;
 
 	// Get an IBackupContainer based on a container spec string
 	static Reference<IBackupContainer> openContainer(std::string url);

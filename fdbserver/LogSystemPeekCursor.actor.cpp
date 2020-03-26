@@ -195,6 +195,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 				TraceEvent("PeekCursorTimedOut", self->randomID).error(e);
 				// We *should* never get timed_out(), as it means the TLog got stuck while handling a parallel peek,
 				// and thus we've likely just wasted 10min.
+				// timed_out() is sent by cleanupPeekTrackers as value PEEK_TRACKER_EXPIRATION_TIME
 				ASSERT_WE_THINK(e.code() == error_code_operation_obsolete || SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
 				self->interfaceChanged = self->interf->onChange();
 				self->randomID = deterministicRandom()->randomUniqueID();
@@ -285,6 +286,13 @@ bool ILogSystem::ServerPeekCursor::isExhausted() {
 const LogMessageVersion& ILogSystem::ServerPeekCursor::version() { return messageVersion; } // Call only after nextMessage().  The sequence of the current message, or results.end if nextMessage() has returned false.
 
 Version ILogSystem::ServerPeekCursor::getMinKnownCommittedVersion() { return results.minKnownCommittedVersion; }
+
+Optional<UID> ILogSystem::ServerPeekCursor::getPrimaryPeekLocation() { 
+	if(interf) {
+		return interf->get().id();
+	}
+	return Optional<UID>();
+}
 
 Version ILogSystem::ServerPeekCursor::popped() { return poppedVersion; }
 
@@ -514,6 +522,13 @@ const LogMessageVersion& ILogSystem::MergedPeekCursor::version() { return messag
 
 Version ILogSystem::MergedPeekCursor::getMinKnownCommittedVersion() {
 	return serverCursors[currentCursor]->getMinKnownCommittedVersion();
+}
+
+Optional<UID> ILogSystem::MergedPeekCursor::getPrimaryPeekLocation() {
+	if(bestServer >= 0) {
+		return serverCursors[bestServer]->getPrimaryPeekLocation();
+	}
+	return Optional<UID>();
 }
 
 Version ILogSystem::MergedPeekCursor::popped() {
@@ -819,6 +834,13 @@ Version ILogSystem::SetPeekCursor::getMinKnownCommittedVersion() {
 	return serverCursors[currentSet][currentCursor]->getMinKnownCommittedVersion();
 }
 
+Optional<UID> ILogSystem::SetPeekCursor::getPrimaryPeekLocation() {
+	if(bestServer >= 0 && bestSet >= 0) {
+		return serverCursors[bestSet][bestServer]->getPrimaryPeekLocation();
+	}
+	return Optional<UID>();
+}
+
 Version ILogSystem::SetPeekCursor::popped() {
 	Version poppedVersion = 0;
 	for (auto& cursors : serverCursors) {
@@ -911,6 +933,10 @@ const LogMessageVersion& ILogSystem::MultiCursor::version() {
 
 Version ILogSystem::MultiCursor::getMinKnownCommittedVersion() {
 	return cursors.back()->getMinKnownCommittedVersion();
+}
+
+Optional<UID> ILogSystem::MultiCursor::getPrimaryPeekLocation() {
+	return cursors.back()->getPrimaryPeekLocation();
 }
 
 Version ILogSystem::MultiCursor::popped() {
@@ -1152,6 +1178,10 @@ const LogMessageVersion& ILogSystem::BufferedCursor::version() {
 
 Version ILogSystem::BufferedCursor::getMinKnownCommittedVersion() {
 	return minKnownCommittedVersion;
+}
+
+Optional<UID> ILogSystem::BufferedCursor::getPrimaryPeekLocation() {
+	return Optional<UID>();
 }
 
 Version ILogSystem::BufferedCursor::popped() {

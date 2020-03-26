@@ -130,6 +130,7 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 	RequestStream<RestoreLoadFileRequest> loadFile;
 	RequestStream<RestoreSendMutationsToAppliersRequest> sendMutations;
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
+	RequestStream<RestoreVersionBatchRequest> finishVersionBatch;
 	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
 	RequestStream<RestoreFinishRequest> finishRestore;
 
@@ -149,6 +150,7 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 		loadFile.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		sendMutations.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		initVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		finishVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		collectRestoreRoleInterfaces.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		finishRestore.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 	}
@@ -156,7 +158,7 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, updateRestoreSysInfo, loadFile, sendMutations,
-		           initVersionBatch, collectRestoreRoleInterfaces, finishRestore);
+		           initVersionBatch, finishVersionBatch, collectRestoreRoleInterfaces, finishRestore);
 	}
 };
 
@@ -207,6 +209,8 @@ struct RestoreAsset {
 	KeyRange range; // Only use mutations in range
 
 	int fileIndex;
+	// Partition ID for mutation log files, which is also encoded in the filename of mutation logs.
+	int partitionId = -1;
 	std::string filename;
 	int64_t offset;
 	int64_t len;
@@ -216,12 +220,12 @@ struct RestoreAsset {
 	RestoreAsset() = default;
 
 	bool operator==(const RestoreAsset& r) const {
-		return fileIndex == r.fileIndex && filename == r.filename && offset == r.offset && len == r.len &&
-		       beginVersion == r.beginVersion && endVersion == r.endVersion && range == r.range;
+		return beginVersion == r.beginVersion && endVersion == r.endVersion && range == r.range &&
+		       fileIndex == r.fileIndex && partitionId == r.partitionId && filename == r.filename &&
+		       offset == r.offset && len == r.len;
 	}
 	bool operator!=(const RestoreAsset& r) const {
-		return fileIndex != r.fileIndex || filename != r.filename || offset != r.offset || len != r.len ||
-		       beginVersion != r.beginVersion || endVersion != r.endVersion || range != r.range;
+		return !(*this == r);
 	}
 	bool operator<(const RestoreAsset& r) const {
 		return std::make_tuple(fileIndex, filename, offset, len, beginVersion, endVersion, range.begin, range.end) <
@@ -231,14 +235,14 @@ struct RestoreAsset {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, beginVersion, endVersion, range, filename, fileIndex, offset, len, uid);
+		serializer(ar, beginVersion, endVersion, range, filename, fileIndex, partitionId, offset, len, uid);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
 		ss << "UID:" << uid.toString() << " begin:" << beginVersion << " end:" << endVersion
 		   << " range:" << range.toString() << " filename:" << filename << " fileIndex:" << fileIndex
-		   << " offset:" << offset << " len:" << len;
+		   << " partitionId:" << partitionId << " offset:" << offset << " len:" << len;
 		return ss.str();
 	}
 
@@ -265,6 +269,10 @@ struct LoadingParam {
 	bool operator!=(const LoadingParam& r) const { return isRangeFile != r.isRangeFile || asset != r.asset; }
 	bool operator<(const LoadingParam& r) const {
 		return (isRangeFile < r.isRangeFile) || (isRangeFile == r.isRangeFile && asset < r.asset);
+	}
+
+	bool isPartitionedLog() const {
+		return !isRangeFile && asset.partitionId >= 0;
 	}
 
 	template <class Ar>
@@ -445,26 +453,28 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	Version prevVersion, version; // version is the commitVersion of the mutation vector.
 	bool isRangeFile;
 	MutationsVec mutations; // All mutations at the same version parsed by one loader
+	SubSequenceVec subs; // Sub-sequence number for mutations
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendVersionedMutationsRequest() = default;
 	explicit RestoreSendVersionedMutationsRequest(int batchIndex, const RestoreAsset& asset, Version prevVersion,
-	                                              Version version, bool isRangeFile, MutationsVec mutations)
+	                                              Version version, bool isRangeFile, MutationsVec mutations,
+	                                              SubSequenceVec subs)
 	  : batchIndex(batchIndex), asset(asset), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile),
-	    mutations(mutations) {}
+	    mutations(mutations), subs(subs) {}
 
 	std::string toString() {
 		std::stringstream ss;
 		ss << "VersionBatchIndex:" << batchIndex << "RestoreAsset:" << asset.toString()
 		   << " prevVersion:" << prevVersion << " version:" << version << " isRangeFile:" << isRangeFile
-		   << " mutations.size:" << mutations.size();
+		   << " mutations.size:" << mutations.size() << " subs.size:" << subs.size();
 		return ss.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, batchIndex, asset, prevVersion, version, isRangeFile, mutations, reply);
+		serializer(ar, batchIndex, asset, prevVersion, version, isRangeFile, mutations, subs, reply);
 	}
 };
 

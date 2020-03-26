@@ -647,6 +647,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	double lastMedianAvailableSpaceUpdate;
 	// clang-format on
 
+	int lowestUtilizationTeam;
+	int highestUtilizationTeam;
+
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
 		LocalityMap<UID>* storageServerMap = (LocalityMap<UID>*) storageServerSet.getPtr();
@@ -690,7 +693,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    optimalTeamCount(0), recruitingStream(0), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
 	    unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs),
 	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary), medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO),
-		lastMedianAvailableSpaceUpdate(0), processingUnhealthy(processingUnhealthy) {
+		lastMedianAvailableSpaceUpdate(0), processingUnhealthy(processingUnhealthy), lowestUtilizationTeam(0), highestUtilizationTeam(0) {
 		if(!primary || configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", distributorId)
 				.detail( "State", "Inactive" )
@@ -828,18 +831,29 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 			if( req.wantsTrueBest ) {
 				ASSERT( !bestOption.present() );
+				auto &startIndex = req.preferLowerUtilization ? self->lowestUtilizationTeam : self->highestUtilizationTeam;
+				if(startIndex >= self->teams.size()) {
+					startIndex = 0;
+				}
+
+				int bestIndex = startIndex;
 				for( int i = 0; i < self->teams.size(); i++ ) {
-					if (self->teams[i]->isHealthy() &&
-					    (!req.preferLowerUtilization || self->teams[i]->hasHealthyAvailableSpace(self->medianAvailableSpace)) &&
-					    (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(self->teams[i]->getServerIDs(), self->primary)).size() > 0))
+					int currentIndex = (startIndex + i) % self->teams.size();
+					if (self->teams[currentIndex]->isHealthy() &&
+					    (!req.preferLowerUtilization || self->teams[currentIndex]->hasHealthyAvailableSpace(self->medianAvailableSpace)))
 					{
-						int64_t loadBytes = self->teams[i]->getLoadBytes(true, req.inflightPenalty);
-						if( !bestOption.present() || ( req.preferLowerUtilization && loadBytes < bestLoadBytes ) || ( !req.preferLowerUtilization && loadBytes > bestLoadBytes ) ) {
+						int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
+						if((!bestOption.present() || (req.preferLowerUtilization && loadBytes < bestLoadBytes) || (!req.preferLowerUtilization && loadBytes > bestLoadBytes)) &&
+						    (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->hasShards(ShardsAffectedByTeamFailure::Team(self->teams[currentIndex]->getServerIDs(), self->primary)))) 
+						{
 							bestLoadBytes = loadBytes;
-							bestOption = self->teams[i];
+							bestOption = self->teams[currentIndex];
+							bestIndex = currentIndex;
 						}
 					}
 				}
+
+				startIndex = bestIndex;
 			}
 			else {
 				int nTries = 0;
@@ -848,8 +862,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
 					bool ok = dest->isHealthy() &&
-					          (!req.preferLowerUtilization || dest->hasHealthyAvailableSpace(self->medianAvailableSpace)) &&
-					          (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->getShardsFor(ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)).size() > 0);
+					          (!req.preferLowerUtilization || dest->hasHealthyAvailableSpace(self->medianAvailableSpace));					
 
 					for(int i=0; ok && i<randomTeams.size(); i++) {
 						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
@@ -857,6 +870,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							break;
 						}
 					}
+
+					ok = ok && (!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->hasShards(ShardsAffectedByTeamFailure::Team(dest->getServerIDs(), self->primary)));
 
 					if (ok)
 						randomTeams.push_back( dest );
@@ -2850,7 +2865,7 @@ bool teamContainsFailedServer(DDTeamCollection* self, Reference<TCTeamInfo> team
 ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> team, bool badTeam, bool redundantTeam) {
 	state int lastServersLeft = team->size();
 	state bool lastAnyUndesired = false;
-	state bool logTeamEvents = g_network->isSimulated() || !badTeam;
+	state bool logTeamEvents = g_network->isSimulated() || !badTeam || team->size() <= self->configuration.storageTeamSize;
 	state bool lastReady = false;
 	state bool lastHealthy;
 	state bool lastOptimal;
@@ -2891,6 +2906,10 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				if (status.isWrongConfiguration) {
 					anyWrongConfiguration = true;
 				}
+			}
+
+			if(serversLeft == 0) {
+				logTeamEvents = true;
 			}
 
 			// Failed server should not trigger DD if SS failures are set to be ignored
@@ -2987,7 +3006,9 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				lastWrongConfiguration = anyWrongConfiguration;
 
 				state int lastPriority = team->getPriority();
-				if( serversLeft < self->configuration.storageTeamSize ) {
+				if(team->size() == 0) {
+					team->setPriority( SERVER_KNOBS->PRIORITY_POPULATE_REGION );
+				} else if( serversLeft < self->configuration.storageTeamSize ) {
 					if( serversLeft == 0 )
 						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_0_LEFT );
 					else if( serversLeft == 1 )
@@ -3004,10 +3025,11 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY );
 					}
 				}
-				else if( anyUndesired )
+				else if( anyUndesired ) {
 					team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER );
-				else
+				} else {
 					team->setPriority( SERVER_KNOBS->PRIORITY_TEAM_HEALTHY );
+				}
 
 				if(lastPriority != team->getPriority()) {
 					self->priority_teams[lastPriority]--;
@@ -3034,7 +3056,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 								// t is the team in primary DC or the remote DC
 								auto& t = j < teams.first.size() ? teams.first[j] : teams.second[j-teams.first.size()];
 								if( !t.servers.size() ) {
-									maxPriority = SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
+									maxPriority = std::max( maxPriority, SERVER_KNOBS->PRIORITY_POPULATE_REGION );
 									break;
 								}
 
@@ -3747,7 +3769,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 	state bool recruiting = false;
 	TraceEvent("StorageServerRecruitment", self->distributorId)
 	    .detail("State", "Idle")
-	    .trackLatest(("StorageServerRecruitment_" + self->distributorId.toString()).c_str());
+	    .trackLatest("StorageServerRecruitment_" + self->distributorId.toString());
 	loop {
 		if( !recruiting ) {
 			while(self->recruitingStream.get() == 0) {
@@ -3755,7 +3777,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 			}
 			TraceEvent("StorageServerRecruitment", self->distributorId)
 				.detail("State", "Recruiting")
-				.trackLatest(("StorageServerRecruitment_" + self->distributorId.toString()).c_str());
+				.trackLatest("StorageServerRecruitment_" + self->distributorId.toString());
 			recruiting = true;
 		} else {
 			loop {
@@ -3766,7 +3788,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 			}
 			TraceEvent("StorageServerRecruitment", self->distributorId)
 				.detail("State", "Idle")
-				.trackLatest(("StorageServerRecruitment_" + self->distributorId.toString()).c_str());
+				.trackLatest("StorageServerRecruitment_" + self->distributorId.toString());
 			recruiting = false;
 		}
 	}
@@ -4162,7 +4184,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 				    .detail("StorageTeamSize", self->configuration.storageTeamSize)
 				    .detail("HighestPriority", highestPriority)
 				    .trackLatest(self->primary ? "TotalDataInFlight" : "TotalDataInFlightRemote");
-				loggingTrigger = delay( SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL );
+				loggingTrigger = delay( SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace );
 			}
 			when( wait( self->serverTrackerErrorOut.getFuture() ) ) {} // Propagate errors from storageServerTracker
 			when( wait( error ) ) {}
@@ -4500,7 +4522,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 
 			actors.push_back( pollMoveKeysLock(cx, lock) );
 			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, self->ddId ), "DDTracker", self->ddId, &normalDDQueueErrors() ) );
-			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, &lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, configuration.storageTeamSize, &lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
 			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
