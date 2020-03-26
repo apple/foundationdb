@@ -355,6 +355,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( PROVISIONAL_START_DELAY,                               1.0 );
 	init( PROVISIONAL_MAX_DELAY,                                60.0 );
 	init( PROVISIONAL_DELAY_GROWTH,                              1.5 );
+	init( SECONDS_BEFORE_RECRUIT_BACKUP_WORKER,                  4.0 );
 
 	// Resolver
 	init( SAMPLE_OFFSET_PER_KEY,                                 100 );
@@ -367,6 +368,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( BACKUP_TIMEOUT,                                        0.4 );
 	init( BACKUP_NOOP_POP_DELAY,                                 5.0 );
 	init( BACKUP_FILE_BLOCK_BYTES,                       1024 * 1024 );
+	init( BACKUP_UPLOAD_DELAY,                                  10.0 ); if( randomize && BUGGIFY ) BACKUP_UPLOAD_DELAY = deterministicRandom()->random01() * 20; // TODO: Increase delay range
 
 	//Cluster Controller
 	init( CLUSTER_CONTROLLER_LOGGING_DELAY,                      5.0 );
@@ -520,6 +522,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( DEGRADED_RESET_INTERVAL,                          24*60*60 ); if ( randomize && BUGGIFY ) DEGRADED_RESET_INTERVAL = 10;
 	init( DEGRADED_WARNING_LIMIT,                                  1 );
 	init( DEGRADED_WARNING_RESET_DELAY,                   7*24*60*60 );
+	init( TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS,         10 );
+	init( TRACE_LOG_PING_TIMEOUT_SECONDS,                        5.0 );
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );
@@ -566,6 +570,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( FASTRESTORE_APPLYING_PARALLELISM,               	     100 ); if( randomize ) { FASTRESTORE_APPLYING_PARALLELISM = deterministicRandom()->random01() * 10 + 1; }
 	init( FASTRESTORE_MONITOR_LEADER_DELAY,                        5 ); if( randomize ) { FASTRESTORE_MONITOR_LEADER_DELAY = deterministicRandom()->random01() * 100; }
 	init( FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS,                60 ); if( randomize && BUGGIFY ) { FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS = deterministicRandom()->random01() * 240 + 10; }
+	init( FASTRESTORE_USE_PARTITIONED_LOGS,                     true );
 	init( FASTRESTORE_TRACK_REQUEST_LATENCY,              	    true ); if( randomize && BUGGIFY ) { FASTRESTORE_TRACK_REQUEST_LATENCY = false; }
 	init( FASTRESTORE_TRACK_LOADER_SEND_REQUESTS,              false ); if( randomize && BUGGIFY ) { FASTRESTORE_TRACK_LOADER_SEND_REQUESTS = true; }
 	init( FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT,                 6144 ); if( randomize && BUGGIFY ) { FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT = 1; }

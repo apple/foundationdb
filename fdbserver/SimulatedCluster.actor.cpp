@@ -816,12 +816,15 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		set_config(format("log_spill:=%d", logSpill));
 		int logVersion = deterministicRandom()->randomInt( TLogVersion::MIN_RECRUITABLE, TLogVersion::MAX_SUPPORTED+1 );
 		set_config(format("log_version:=%d", logVersion));
-		set_config("backup_worker_enabled:=1");
 	} else {
 		if (deterministicRandom()->random01() < 0.7)
 			set_config(format("log_version:=%d", TLogVersion::MAX_SUPPORTED));
 		if (deterministicRandom()->random01() < 0.5)
 			set_config(format("log_spill:=%d", TLogSpillType::DEFAULT));
+	}
+
+	if (deterministicRandom()->random01() < 0.5) {
+		set_config("backup_worker_enabled:=1");
 	}
 
 	if(generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5)) {
