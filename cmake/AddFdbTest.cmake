@@ -189,10 +189,12 @@ function(create_test_package)
     OUTPUT ${tar_file}
     DEPENDS ${out_files}
     COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+            ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
+            ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
     ${out_files} ${external_files}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/packages
     COMMENT "Package correctness archive"
     )
   add_custom_target(package_tests DEPENDS ${tar_file})
-  add_dependencies(package_tests strip_fdbserver)
+  add_dependencies(package_tests strip_fdbserver TestHarness)
 endfunction()
