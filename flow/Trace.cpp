@@ -726,7 +726,7 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 	std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
 	std::string baseName;
 	if (identifier.size() > 0) {
-		baseName = format("%s.%s.%s.%d", identifier, baseOfBase.c_str(), ip.c_str(), na.port);
+		baseName = format("%s.%s.%s.%d", identifier.c_str(), baseOfBase.c_str(), ip.c_str(), na.port);
 	} else {
 		baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.port);
 	}
