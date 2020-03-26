@@ -453,39 +453,15 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				state std::vector<Future<Version>> restores;
 				state std::vector<Standalone<StringRef>> restoreTags;
 
-				// Restore each range by calling backupAgent.restore()
+				// Submit parallel restore requests
 				TraceEvent("FastRestore").detail("PrepareRestores", self->backupRanges.size());
-				loop {
-					state ReadYourWritesTransaction tr1(cx);
-					tr1.reset();
-					tr1.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr1.setOption(FDBTransactionOptions::LOCK_AWARE);
-					try {
-						// Note: we always lock DB here in case DB is modified at the bacupRanges boundary.
-						for (restoreIndex = 0; restoreIndex < self->backupRanges.size(); restoreIndex++) {
-							auto range = self->backupRanges[restoreIndex];
-							Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" +
-							                                 std::to_string(restoreIndex));
-							restoreTags.push_back(restoreTag);
-							// Register the request request in DB, which will be picked up by restore worker leader
-							struct RestoreRequest restoreRequest(
-							    restoreIndex, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion,
-							    true, range, Key(), Key(), self->locked, deterministicRandom()->randomUniqueID());
-							tr1.set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
-						}
-						tr1.set(restoreRequestTriggerKey,
-						        restoreRequestTriggerValue(deterministicRandom()->randomUniqueID(),
-						                                   self->backupRanges.size()));
-						wait(tr1.commit()); // Trigger restore
-						break;
-					} catch (Error& e) {
-						wait(tr1.onError(e));
-					}
-				};
+				wait(backupAgent.submitParallelRestore(cx, self->backupTag, self->backupRanges,
+				                                       KeyRef(lastBackupContainer->getURL()), targetVersion,
+				                                       self->locked, randomID));
 				TraceEvent("FastRestore").detail("TriggerRestore", "Setting up restoreRequestTriggerKey");
 
 				// Sometimes kill and restart the restore
-				// In real cluster, aborting a restore needs: 
+				// In real cluster, aborting a restore needs:
 				// (1) kill restore cluster; (2) clear dest. DB restore system keyspace.
 				// TODO: Consider gracefully abort a restore and restart.
 				if (BUGGIFY && TEST_ABORT_FASTRESTORE) {
@@ -509,34 +485,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					}
 				}
 
-				// We should wait on all restore before proceeds
+				// Wait for parallel restore to finish before we can proceed
 				TraceEvent("FastRestore").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");
-				restoreDone = false;
-				state Future<Void> watchForRestoreRequestDone;
-				loop {
-					try {
-						if (restoreDone) break;
-						tr2.reset();
-						tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-						Optional<Value> restoreRequestDoneKeyValue = wait(tr2.get(restoreRequestDoneKey));
-						// Restore may finish before restoreAgent waits on the restore finish event.
-						if (restoreRequestDoneKeyValue.present()) {
-							restoreDone = true; // In case commit clears the key but in unknown_state
-							tr2.clear(restoreRequestDoneKey);
-							wait(tr2.commit());
-							break;
-						} else {
-							watchForRestoreRequestDone = tr2.watch(restoreRequestDoneKey);
-							wait(tr2.commit());
-							wait(watchForRestoreRequestDone);
-							break;
-						}
-					} catch (Error& e) {
-						wait(tr2.onError(e));
-					}
-				}
-
+				wait(backupAgent.parallelRestoreFinish(cx, randomID));
 				TraceEvent("FastRestore").detail("BackupAndParallelRestore", "RestoreFinished");
 
 				for (auto& restore : restores) {
