@@ -54,6 +54,9 @@ description is not currently required but encouraged.
     <Option name="trace_clock_source" code="35"
             paramType="String" paramDescription="Trace clock source"
             description="Select clock source for trace files. now (the default) or realtime are supported." />
+    <Option name="trace_file_identifier" code="36"
+            paramType="String" paramDescription="The identifier that will be part of all trace file names"
+            description="Once provided, all trace log file names will use this string as the prefix." />
     <Option name="knob" code="40"
             paramType="String" paramDescription="knob_name=knob_value"
             description="Set internal tuning or debugging knobs"/>

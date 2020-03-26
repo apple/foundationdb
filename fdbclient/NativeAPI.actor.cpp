@@ -792,7 +792,9 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 			auto publicIP = determinePublicIPAutomatically( connFile->getConnectionString() );
 			selectTraceFormatter(networkOptions.traceFormat);
 			selectTraceClockSource(networkOptions.traceClockSource);
-			openTraceFile(NetworkAddress(publicIP, ::getpid()), networkOptions.traceRollSize, networkOptions.traceMaxLogsSize, networkOptions.traceDirectory.get(), "trace", networkOptions.traceLogGroup);
+			openTraceFile(NetworkAddress(publicIP, ::getpid()), networkOptions.traceRollSize,
+			              networkOptions.traceMaxLogsSize, networkOptions.traceDirectory.get(), "trace",
+			              networkOptions.traceLogGroup, networkOptions.traceFileIdentifier);
 
 			TraceEvent("ClientStart")
 				.detail("SourceVersion", getSourceVersion())
@@ -874,7 +876,11 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 				throw invalid_option_value();
 			}
 			break;
-		case FDBNetworkOptions::KNOB: {
+	    case FDBNetworkOptions::TRACE_FILE_IDENTIFIER:
+		    validateOptionValue(value, true);
+		    networkOptions.traceFileIdentifier = value.get().toString();
+		    break;
+	    case FDBNetworkOptions::KNOB: {
 			validateOptionValue(value, true);
 
 			std::string optionValue = value.get().toString();
