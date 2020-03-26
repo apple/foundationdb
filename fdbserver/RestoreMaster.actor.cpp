@@ -512,8 +512,11 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	ASSERT(batchStatus->loadStatus.empty());
 	ASSERT(batchStatus->applyStatus.empty());
 
-	wait(loadFilesOnLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, cx, request, versionBatch, false));
-	wait(loadFilesOnLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, cx, request, versionBatch, true));
+	// New backup has subversion to order mutations at the same version. For mutations at the same version,
+	// range file's mutations have the largest subversion and larger than log file's.
+	// SOMEDAY: Extend subversion to old-style backup.
+	wait(loadFilesOnLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, cx, request, versionBatch, false) &&
+		loadFilesOnLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, cx, request, versionBatch, true));
 
 	ASSERT(batchData->rangeToApplier.empty());
 	splitKeyRangeForAppliers(batchData, self->appliersInterf, batchIndex);
