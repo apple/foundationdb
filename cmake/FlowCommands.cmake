@@ -134,7 +134,6 @@ function(strip_debug_symbols target)
     COMMENT "Stripping symbols from ${target}")
   add_custom_target(strip_only_${target} DEPENDS ${out_file})
   if(is_exec AND NOT APPLE)
-    message(STATUS "Debug Target name is ${out_file}.debug")
     add_custom_command(OUTPUT "${out_file}.debug"
       COMMAND objcopy --verbose --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug"
       COMMAND objcopy --verbose --add-gnu-debuglink="${out_file}.debug" "${out_file}"
@@ -143,6 +142,7 @@ function(strip_debug_symbols target)
     add_dependencies(strip_${target} ${target} strip_only_${target})
   else()
     add_custom_target(strip_${target})
+    add_dependencies(strip_${target} strip_only_${target})
   endif()
   add_dependencies(strip_targets strip_${target})
 endfunction()
