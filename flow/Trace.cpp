@@ -550,7 +550,10 @@ public:
 		}
 	}
 
-	void setLogGroup(const std::string& logGroup) { this->logGroup = logGroup; }
+	void setLogGroup(const std::string& logGroup) {
+		MutexHolder holder(mutex);
+		this->logGroup = logGroup;
+	}
 
 	Future<Void> pingWriterThread() {
 		auto ping = new WriterThread::Ping;
