@@ -874,8 +874,9 @@ struct LogPushData : NonCopyable {
 			BinaryWriter& wr = messagesWriter[loc];
 			int offset = wr.getLength();
 			wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
-			for(auto& tag : prev_tags)
+			for(auto& tag : prev_tags) {
 				wr << tag;
+			}
 			wr << item;
 			*(uint32_t*)((uint8_t*)wr.getData() + offset) = wr.getLength() - offset - sizeof(uint32_t);
 		}

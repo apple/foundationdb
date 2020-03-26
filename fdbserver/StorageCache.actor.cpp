@@ -144,8 +144,8 @@ private:
 public:
 	UID thisServerID; // unique id
 	uint16_t index; // server index
+	ProtocolVersion logProtocol;
 	Reference<ILogSystem> logSystem;
-	//Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
 	Key ck; //cacheKey
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo>> const& db;
@@ -231,7 +231,7 @@ public:
 
 	explicit StorageCacheData(UID thisServerID, uint16_t index, Reference<AsyncVar<ServerDBInfo>> const& db)
 		:   versionedData(FastAllocPTree<KeyRef>{std::make_shared<int>(0)}),
-			thisServerID(thisServerID), index(index), db(db),
+			thisServerID(thisServerID), index(index), logProtocol(0), db(db),
 			cacheRangeChangeCounter(0),
 			lastTLogVersion(0), lastVersionWithData(0),
 			compactionInProgress(Void()),
@@ -1709,24 +1709,30 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 			}
 		}
 		try {
+			//TraceEvent("Versions", data->thisServerID).detail("CursorVersion", cursor->version().version).detail("PoppedVer", cursor->popped()).
+			//	detail("CursorMaxKnownVersion", cursor->getMaxKnownVersion());
+
+			// If the popped version is greater than our last version, we need to clear the cache
+			if (cursor->version().version <= cursor->popped())
+				throw please_reboot();
+
 			data->lastTLogVersion = cursor->getMaxKnownVersion();
 			data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
-			//FIXME: if the popped version is greater than our last version, we need to clear the cache
 
-			// TODO check this part: copare to what we do for storages and what's applicable here
 			state FetchInjectionInfo fii;
 			state Reference<ILogSystem::IPeekCursor> cloneCursor2;
 			loop{
 				state uint64_t changeCounter = data->cacheRangeChangeCounter;
 				bool epochEnd = false;
-			bool hasPrivateData = false;
+				bool hasPrivateData = false;
 				bool firstMutation = true;
 				bool dbgLastMessageWasProtocol = false;
 
 				Reference<ILogSystem::IPeekCursor> cloneCursor1 = cursor->cloneNoMore();
 				cloneCursor2 = cursor->cloneNoMore();
 
-				// TODO:
+				//TODO cache servers should write the LogProtocolMessage when they are created
+				//cloneCursor1->setProtocolVersion(data->logProtocol);
 				cloneCursor1->setProtocolVersion(currentProtocolVersion);
 
 				for (; cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
@@ -1737,14 +1743,17 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 						cloneReader >> lpm;
 						dbgLastMessageWasProtocol = true;
 						cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
+						//TraceEvent(SevDebug, "SCReadingLPM", data->thisServerID).detail("Mutation", lpm.toString());
 					}
 					else {
 						MutationRef msg;
 						cloneReader >> msg;
+						//TraceEvent(SevDebug, "SCReadingLog", data->thisServerID).detail("Mutation", msg.toString());
 
-					if (firstMutation && msg.param1.startsWith(systemKeys.end))
-						hasPrivateData = true;
+						if (firstMutation && msg.param1.startsWith(systemKeys.end))
+							hasPrivateData = true;
 						firstMutation = false;
+
 						if (msg.param1 == lastEpochEndPrivateKey) {
 							epochEnd = true;
 							//ASSERT(firstMutation);
@@ -1789,6 +1798,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 			}
 
 			//FIXME: ensure this can only read data from the current version
+			//cloneCursor2->setProtocolVersion(data->logProtocol);
 			cloneCursor2->setProtocolVersion(currentProtocolVersion);
 			ver = invalidVersion;
 
@@ -1806,8 +1816,9 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 					reader >> lpm;
 
 					// TODO should we store the logProtocol?
-					//data->logProtocol = reader.protocolVersion();
-					cloneCursor2->setProtocolVersion(reader.protocolVersion());
+					data->logProtocol = reader.protocolVersion();
+					cloneCursor2->setProtocolVersion(data->logProtocol);
+					//TraceEvent(SevDebug, "SCReadingLPM", data->thisServerID).detail("Mutation", lpm.toString()).detail("LogProtocolVersion", data->logProtocol.version());
 				}
 				else {
 					MutationRef msg;

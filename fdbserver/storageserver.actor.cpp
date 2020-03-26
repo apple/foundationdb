@@ -2682,6 +2682,8 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			cloneCursor2 = cursor->cloneNoMore();
 
 			cloneCursor1->setProtocolVersion(data->logProtocol);
+			TraceEvent(SevDebug, "SSUpdate", data->thisServerID).detail("CurrentLPV", currentProtocolVersion.version()).
+					detail("DataLPV", data->logProtocol.version());
 
 			for (; cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
 				ArenaReader& cloneReader = *cloneCursor1->reader();
@@ -2689,12 +2691,14 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 				if (LogProtocolMessage::isNextIn(cloneReader)) {
 					LogProtocolMessage lpm;
 					cloneReader >> lpm;
+					//TraceEvent(SevDebug, "SSReadingLPM", data->thisServerID).detail("Mutation", lpm.toString());
 					dbgLastMessageWasProtocol = true;
 					cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
 				}
 				else {
 					MutationRef msg;
 					cloneReader >> msg;
+					//TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg.toString());
 
 					if (firstMutation && msg.param1.startsWith(systemKeys.end))
 						hasPrivateData = true;

@@ -28,6 +28,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -1366,7 +1367,10 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	state BinaryWriter messages2(Unversioned());
 	state int sequence = -1;
 	state UID peekId;
-	
+	//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginVersion", req.begin).
+	//	detail("Tag", req.tag.toString()).detail("LogDataVersion", logData->version.get()).
+	//	detail("LogId", logData->logId);
+
 	if(req.sequence.present()) {
 		try {
 			peekId = req.sequence.get().first;
@@ -1398,6 +1402,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			req.onlySpilled = prevPeekData.second;
 			wait(yield());
 		} catch( Error &e ) {
+			//TraceEvent("TLogPeekMessagesError", self->dbgid).detail("ErrorCode", e.code());
 			if(e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);
 				return Void();
@@ -1456,6 +1461,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			auto& sequenceData = trackerData.sequence_version[sequence+1];
 			trackerData.lastUpdate = now();
 			if(trackerData.sequence_version.size() && sequence+1 < trackerData.sequence_version.begin()->first) {
+				//TraceEvent("TLogPeekMessagesOperationObsolete", self->dbgid).detail("PoppedVer", poppedVer);
 				req.reply.sendError(operation_obsolete());
 				if (!sequenceData.isSet())
 					sequenceData.sendError(operation_obsolete());
@@ -1464,6 +1470,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			if(sequenceData.isSet()) {
 				if(sequenceData.getFuture().get().first != rep.end) {
 					TEST(true); //tlog peek second attempt ended at a different version
+					//TraceEvent("TLogPeekMessagesOperationObsolete", self->dbgid).detail("PoppedVer", poppedVer);
 					req.reply.sendError(operation_obsolete());
 					return Void();
 				}
@@ -1473,6 +1480,8 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			rep.begin = req.begin;
 		}
 
+		//TraceEvent("TLogPeekMessagesPopped", self->dbgid).detail("PoppedVer", poppedVer).
+		//	detail("MaxKnownVersion", rep.maxKnownVersion).detail("MinKnownCommittedVer", rep.minKnownCommittedVersion);;
 		req.reply.send( rep );
 		return Void();
 	}
@@ -1613,7 +1622,10 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
 
-	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("EndVer", reply.end).detail("MsgBytes", reply.messages.expectedSize()).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
+	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("Tag", req.tag.toString()).
+	//	detail("BeginVer", req.begin).detail("EndVer", reply.end).
+	//	detail("MsgBytes", reply.messages.expectedSize()).
+	//	detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
 
 	if(req.sequence.present()) {
 		auto& trackerData = logData->peekTracker[peekId];
