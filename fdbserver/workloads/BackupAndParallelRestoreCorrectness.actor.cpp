@@ -21,6 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
@@ -40,6 +41,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	bool locked;
 	bool allowPauses;
 	bool shareLogRange;
+	bool usePartitionedLogs;
 
 	std::map<Standalone<KeyRef>, Standalone<ValueRef>> dbKVs;
 
@@ -67,6 +69,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		agentRequest = getOption(options, LiteralStringRef("simBackupAgents"), true);
 		allowPauses = getOption(options, LiteralStringRef("allowPauses"), true);
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
+		usePartitionedLogs = getOption(options, LiteralStringRef("usePartitionedLogs"), true);
 
 		KeyRef beginRange;
 		KeyRef endRange;
@@ -181,7 +184,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		try {
 			wait(backupAgent->submitBackup(cx, StringRef(backupContainer), deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(), backupRanges, stopDifferentialDelay ? false : true,
-			                               /*partitionedLog=*/true));
+			                               /*partitionedLog=*/self->usePartitionedLogs));
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) throw;
@@ -209,8 +212,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName).detail("Result", resultWait);
 
 					state bool restorable = false;
-					if(lastBackupContainer) {
-						state Future<BackupDescription> fdesc = lastBackupContainer->describePartitionedBackup();
+					if (lastBackupContainer) {
+						state Future<BackupDescription> fdesc = self->usePartitionedLogs
+						                                            ? lastBackupContainer->describePartitionedBackup()
+						                                            : lastBackupContainer->describeBackup();
 						wait(ready(fdesc));
 
 						if(!fdesc.isError()) {
@@ -398,7 +403,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				try {
 					extraBackup = backupAgent.submitBackup(
 					    cx, LiteralStringRef("file://simfdb/backups/"), deterministicRandom()->randomInt(0, 100),
-					    self->backupTag.toString(), self->backupRanges, true, /*partitionedLog=*/true);
+					    self->backupTag.toString(), self->backupRanges, true, self->usePartitionedLogs);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)
@@ -431,7 +436,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				    .detail("BackupTag", printable(self->backupTag));
 
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
-				BackupDescription desc = wait(container->describePartitionedBackup());
+				BackupDescription desc = wait(self->usePartitionedLogs ? container->describePartitionedBackup()
+				                                                       : container->describeBackup());
 
 				state Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {

@@ -88,6 +88,10 @@ struct LogFile {
 		return beginVersion >= rhs.beginVersion && endVersion <= rhs.endVersion && tagId == rhs.tagId;
 	}
 
+	bool isPartitionedLog() const {
+		return tagId >= 0 && tagId < totalTags;
+	}
+
 	std::string toString() const {
 		std::stringstream ss;
 		ss << "beginVersion:" << std::to_string(beginVersion) << " endVersion:" << std::to_string(endVersion)
@@ -260,6 +264,9 @@ public:
 	virtual Future<BackupDescription> describePartitionedBackup(bool deepScan = false, Version logStartVersionOverride = invalidVersion) = 0;
 
 	virtual Future<BackupFileList> dumpFileList(Version begin = 0, Version end = std::numeric_limits<Version>::max()) = 0;
+
+	// If there are partitioned log files, then returns true; otherwise, returns false.
+	virtual Future<bool> isPartitionedBackup() = 0;
 
 	// Get exactly the files necessary to restore to targetVersion.  Returns non-present if
 	// restore to given version is not possible.
