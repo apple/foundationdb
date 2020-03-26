@@ -69,7 +69,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		agentRequest = getOption(options, LiteralStringRef("simBackupAgents"), true);
 		allowPauses = getOption(options, LiteralStringRef("allowPauses"), true);
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
-		usePartitionedLogs = getOption(options, LiteralStringRef("usePartitionedLogs"), true);
+		usePartitionedLogs = getOption(options, LiteralStringRef("usePartitionedLogs"),
+		                               deterministicRandom()->random01() < 0.5 ? true : false);
 
 		KeyRef beginRange;
 		KeyRef endRange;
