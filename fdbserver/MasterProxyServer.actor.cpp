@@ -1166,25 +1166,26 @@ ACTOR Future<Void> commitBatch(
 			trs[t].reply.sendError(transaction_too_old());
 		}
 		else {
-			// If enable the option to report conflicting keys from resolvers, we send back all keyranges' indices through CommitID
+			// If enable the option to report conflicting keys from resolvers, we send back all keyranges' indices
+			// through CommitID
 			if (trs[t].transaction.report_conflicting_keys) {
 				Standalone<VectorRef<int>> conflictingKRIndices;
 				for (int resolverInd : transactionResolverMap[t]) {
-					auto const & cKRs = resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]];
-					for (auto const & rCRIndex : cKRs)
+					auto const& cKRs = resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]];
+					for (auto const& rCRIndex : cKRs)
 						conflictingKRIndices.push_back(conflictingKRIndices.arena(), rCRIndex);
 				}
 				// At least one keyRange index should be returned
 				ASSERT(conflictingKRIndices.size());
-				trs[t].reply.send(CommitID(invalidVersion, t, Optional<Value>(), Optional<Standalone<VectorRef<int>>>(conflictingKRIndices)));
+				trs[t].reply.send(CommitID(invalidVersion, t, Optional<Value>(),
+				                           Optional<Standalone<VectorRef<int>>>(conflictingKRIndices)));
 			} else {
 				trs[t].reply.sendError(not_committed());
 			}
 		}
 
 		// Update corresponding transaction indices on each resolver
-		for (int resolverInd : transactionResolverMap[t])
-			nextTr[resolverInd]++;
+		for (int resolverInd : transactionResolverMap[t]) nextTr[resolverInd]++;
 
 		// TODO: filter if pipelined with large commit
 		if(self->latencyBandConfig.present()) {

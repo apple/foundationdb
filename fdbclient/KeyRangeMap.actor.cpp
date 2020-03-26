@@ -151,7 +151,8 @@ ACTOR Future<Void> krmSetRange( Reference<ReadYourWritesTransaction> tr, Key map
 //Ranges outside of maxRange will not be coalesced
 //CAUTION: use care when attempting to coalesce multiple ranges in the same prefix in a single transaction
 ACTOR template <class Transaction>
-static Future<Void> krmSetRangeCoalescing_( Transaction *tr, Key mapPrefix, KeyRange range, KeyRange maxRange, Value value ) {
+static Future<Void> krmSetRangeCoalescing_(Transaction* tr, Key mapPrefix, KeyRange range, KeyRange maxRange,
+                                           Value value) {
 	ASSERT(maxRange.contains(range));
 
 	state KeyRange withPrefix = KeyRangeRef( mapPrefix.toString() + range.begin.toString(), mapPrefix.toString() + range.end.toString() );
@@ -219,9 +220,9 @@ static Future<Void> krmSetRangeCoalescing_( Transaction *tr, Key mapPrefix, KeyR
 }
 Future<Void> krmSetRangeCoalescing(Transaction* const& tr, Key const& mapPrefix, KeyRange const& range,
                                    KeyRange const& maxRange, Value const& value) {
-   return krmSetRangeCoalescing_(tr, mapPrefix, range, maxRange, value);
+	return krmSetRangeCoalescing_(tr, mapPrefix, range, maxRange, value);
 }
 Future<Void> krmSetRangeCoalescing(Reference<ReadYourWritesTransaction> const& tr, Key const& mapPrefix,
                                    KeyRange const& range, KeyRange const& maxRange, Value const& value) {
-   return holdWhile(tr, krmSetRangeCoalescing_(tr.getPtr(), mapPrefix, range, maxRange, value));
+	return holdWhile(tr, krmSetRangeCoalescing_(tr.getPtr(), mapPrefix, range, maxRange, value));
 }

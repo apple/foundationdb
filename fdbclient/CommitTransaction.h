@@ -151,13 +151,10 @@ static inline bool isNonAssociativeOp(MutationRef::Type mutationType) {
 
 struct CommitTransactionRef {
 	CommitTransactionRef() : read_snapshot(0), report_conflicting_keys(false) {}
-	CommitTransactionRef(Arena &a, const CommitTransactionRef &from)
-	  : read_conflict_ranges(a, from.read_conflict_ranges),
-		write_conflict_ranges(a, from.write_conflict_ranges),
-		mutations(a, from.mutations),
-		read_snapshot(from.read_snapshot),
-		report_conflicting_keys(from.report_conflicting_keys) {
-	}
+	CommitTransactionRef(Arena& a, const CommitTransactionRef& from)
+	  : read_conflict_ranges(a, from.read_conflict_ranges), write_conflict_ranges(a, from.write_conflict_ranges),
+	    mutations(a, from.mutations), read_snapshot(from.read_snapshot),
+	    report_conflicting_keys(from.report_conflicting_keys) {}
 	VectorRef< KeyRangeRef > read_conflict_ranges;
 	VectorRef< KeyRangeRef > write_conflict_ranges;
 	VectorRef< MutationRef > mutations;

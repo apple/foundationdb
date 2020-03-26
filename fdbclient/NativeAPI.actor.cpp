@@ -2746,20 +2746,22 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
 					tr->info.conflictingKeysRYW.reset();
-					if (ci.conflictingKRIndices.present()){
+					if (ci.conflictingKRIndices.present()) {
 						// In general, if we want to use getRange to expose conflicting keys,
 						// we need to support all the parameters getRange provides.
 						// It is difficult to take care of all corner cases of what getRange does.
 						// Consequently, we use a hack way here to achieve it.
 						// We create an empty RYWTransaction and write all conflicting key/values to it.
-						// Since it is RYWTr, we can call getRange on it with same parameters given to the original getRange.
+						// Since it is RYWTr, we can call getRange on it with same parameters given to the original
+						// getRange.
 						tr->info.conflictingKeysRYW = std::make_shared<ReadYourWritesTransaction>(tr->getDatabase());
 						state Reference<ReadYourWritesTransaction> hackTr =
-							Reference<ReadYourWritesTransaction>(tr->info.conflictingKeysRYW.get());
+						    Reference<ReadYourWritesTransaction>(tr->info.conflictingKeysRYW.get());
 						try {
 							state Standalone<VectorRef<int>> conflictingKRIndices = ci.conflictingKRIndices.get();
 							// To make the getRange call local, we need to explicitly set the read version here.
-							// This version number 100 set here does nothing but prevent getting read version from the proxy
+							// This version number 100 set here does nothing but prevent getting read version from the
+							// proxy
 							tr->info.conflictingKeysRYW->setVersion(100);
 							// Clear the whole key space, thus, RYWTr knows to only read keys locally
 							tr->info.conflictingKeysRYW->clear(normalKeys);
@@ -2767,10 +2769,12 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 							tr->info.conflictingKeysRYW->set(conflictingKeysPrefix, conflictingKeysFalse);
 							// drop duplicate indices and merge overlapped ranges
 							// Note: addReadConflictRange in native transaction object does not merge overlapped ranges
-							state std::unordered_set<int> mergedIds(conflictingKRIndices.begin(), conflictingKRIndices.end());
-							for (auto const & rCRIndex : mergedIds) {
+							state std::unordered_set<int> mergedIds(conflictingKRIndices.begin(),
+							                                        conflictingKRIndices.end());
+							for (auto const& rCRIndex : mergedIds) {
 								const KeyRange kr = req.transaction.read_conflict_ranges[rCRIndex];
-								wait(krmSetRangeCoalescing(hackTr, conflictingKeysPrefix, kr, allKeys, conflictingKeysTrue));
+								wait(krmSetRangeCoalescing(hackTr, conflictingKeysPrefix, kr, allKeys,
+								                           conflictingKeysTrue));
 							}
 						} catch (Error& e) {
 							hackTr.extractPtr(); // Make sure the RYW is not freed twice in case exception thrown
@@ -2891,7 +2895,7 @@ Future<Void> Transaction::commitMutations() {
 		if(options.firstInBatch) {
 			tr.flags = tr.flags | CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
 		}
-		if(options.reportConflictingKeys) {
+		if (options.reportConflictingKeys) {
 			tr.transaction.report_conflicting_keys = true;
 		}
 
@@ -3084,13 +3088,13 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			validateOptionValue(value, false);
 			options.includePort = true;
 			break;
-		
-		case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:
-			validateOptionValue(value, false);
-			options.reportConflictingKeys = true;
-			break;
 
-		default:
+	    case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:
+		    validateOptionValue(value, false);
+		    options.reportConflictingKeys = true;
+		    break;
+
+	    default:
 			break;
 	}
 }

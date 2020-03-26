@@ -166,8 +166,8 @@ ACTOR Future<Void> resolveBatch(
 
 		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterOrderer");
-		
-		ResolveTransactionBatchReply &reply = proxyInfo.outstandingBatches[req.version];
+
+		ResolveTransactionBatchReply& reply = proxyInfo.outstandingBatches[req.version];
 
 		vector<int> commitList;
 		vector<int> tooOldList;

@@ -113,7 +113,10 @@ struct CommitID {
 	}
 
 	CommitID() : version(invalidVersion), txnBatchId(0) {}
-	CommitID( Version version, uint16_t txnBatchId, const Optional<Value>& metadataVersion, const Optional<Standalone<VectorRef<int>>>& conflictingKRIndices = Optional<Standalone<VectorRef<int>>>() ) : version(version), txnBatchId(txnBatchId), metadataVersion(metadataVersion), conflictingKRIndices(conflictingKRIndices) {}
+	CommitID(Version version, uint16_t txnBatchId, const Optional<Value>& metadataVersion,
+	         const Optional<Standalone<VectorRef<int>>>& conflictingKRIndices = Optional<Standalone<VectorRef<int>>>())
+	  : version(version), txnBatchId(txnBatchId), metadataVersion(metadataVersion),
+	    conflictingKRIndices(conflictingKRIndices) {}
 };
 
 struct CommitTransactionRequest : TimedRequest {
@@ -138,7 +141,6 @@ struct CommitTransactionRequest : TimedRequest {
 	void serialize(Ar& ar) { 
 		serializer(ar, transaction, reply, arena, flags, debugID);
 	}
-	
 };
 
 static inline int getBytes( CommitTransactionRequest const& r ) {
