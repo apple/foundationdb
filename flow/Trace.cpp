@@ -550,6 +550,11 @@ public:
 		}
 	}
 
+	void setLogGroup(const std::string& logGroup) {
+		MutexHolder holder(mutex);
+		this->logGroup = logGroup;
+	}
+
 	Future<Void> pingWriterThread() {
 		auto ping = new WriterThread::Ping;
 		auto f = ping->ack.getFuture();
@@ -748,6 +753,10 @@ void addTraceRole(std::string role) {
 
 void removeTraceRole(std::string role) {
 	g_traceLog.removeRole(role);
+}
+
+void setTraceLogGroup(const std::string& logGroup) {
+	g_traceLog.setLogGroup(logGroup);
 }
 
 TraceEvent::TraceEvent() : initialized(true), enabled(false), logged(true) {}
