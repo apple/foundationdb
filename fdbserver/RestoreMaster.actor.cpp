@@ -204,9 +204,13 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	} catch (Error& e) {
 		if (restoreIndex < restoreRequests.size()) {
 			TraceEvent(SevError, "FastRestoreMasterProcessRestoreRequestsFailed", self->id())
+				.detail("Error", e.what())
+				.detail("ErrorCode", e.code())
 			    .detail("RestoreRequest", restoreRequests[restoreIndex].toString());
 		} else {
 			TraceEvent(SevError, "FastRestoreMasterProcessRestoreRequestsFailed", self->id())
+				.detail("Error", e.what())
+				.detail("ErrorCode", e.code())
 			    .detail("RestoreRequests", restoreRequests.size())
 			    .detail("RestoreIndex", restoreIndex);
 		}

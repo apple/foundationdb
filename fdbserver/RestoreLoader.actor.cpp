@@ -723,6 +723,7 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 
 			auto it = kvOps.insert(std::make_pair(LogMessageVersion(commitVersion, sub++), MutationsVec()));
 			ASSERT(it.second); // inserted is true
+			ASSERT(sub < std::numeric_limits<int32_t>::max()); // range file mutation uses int32_max as subversion
 			it.first->second.push_back_deep(it.first->second.arena(), mutation);
 
 			// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
