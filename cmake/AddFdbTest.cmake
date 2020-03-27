@@ -184,6 +184,7 @@ function(create_test_package)
       file(COPY ${file} DESTINATION ${CMAKE_BINARY_DIR}/packages/${dest_dir})
     endforeach()
   endforeach()
+  if (NOT USE_VALGRIND)
   set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness-${CMAKE_PROJECT_VERSION_MAJOR}.${CMAKE_PROJECT_VERSION_MINOR}.tar.gz)
   add_custom_command(
     OUTPUT ${tar_file}
