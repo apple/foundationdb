@@ -20,6 +20,7 @@
 
 #include "fdbserver/QuietDatabase.h"
 
+#include "fdbserver/MutationTracking.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/ApiWorkload.h"
 #include "fdbserver/workloads/MemoryKeyValueStore.h"

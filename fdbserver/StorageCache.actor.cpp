@@ -26,6 +26,7 @@
 #include "fdbclient/Atomic.h"
 #include "fdbclient/Notified.h"
 #include "fdbserver/LogSystem.h"
+#include "fdbserver/MutationTracking.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -710,22 +711,10 @@ void StorageCacheData::addMutation(KeyRangeRef const& cachedKeyRange, Version ve
 		return;
 	}
 	expanded = addMutationToMutationLog(mLog, expanded);
-	if (debugMutation("expandedMutation", version, expanded)) {
-		const char* type =
-			mutation.type == MutationRef::SetValue ? "SetValue" :
-			mutation.type == MutationRef::ClearRange ? "ClearRange" :
-			mutation.type == MutationRef::DebugKeyRange ? "DebugKeyRange" :
-			mutation.type == MutationRef::DebugKey ? "DebugKey" :
-			"UnknownMutation";
-		printf("DEBUGMUTATION:\t%.6f\t%s\t%s\t%s\t%s\t%s\n",
-			   now(), g_network->getLocalAddress().toString().c_str(), "originalMutation",
-			   type, printable(mutation.param1).c_str(), printable(mutation.param2).c_str());
-		printf("  Cached Key-range: %s - %s\n", printable(cachedKeyRange.begin).c_str(), printable(cachedKeyRange.end).c_str());
-	}
+	debugMutation("expandedMutation", version, expanded).detail("Begin", cachedKeyRange.begin).detail("End", cachedKeyRange.end);
 	applyMutation( this, expanded, mLog.arena(), mutableData() );
 	printf("\nSCUpdate: Printing versioned tree after applying mutation\n");
 	mutableData().printTree(version);
-
 }
 
 // Helper class for updating the storage cache (i.e. applying mutations)

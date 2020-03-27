@@ -124,6 +124,13 @@ struct MutationRef {
 	};
 };
 
+template<>
+struct Traceable<MutationRef> : std::true_type {
+	static std::string toString(MutationRef const& value) {
+		return value.toString();
+	}
+};
+
 // A 'single key mutation' is one which affects exactly the value of the key specified by its param1
 static inline bool isSingleKeyMutation(MutationRef::Type type) {
 	return (MutationRef::SINGLE_KEY_MASK & (1<<type)) != 0;
@@ -182,8 +189,5 @@ struct CommitTransactionRef {
 		return read_conflict_ranges.expectedSize() + write_conflict_ranges.expectedSize() + mutations.expectedSize();
 	}
 };
-
-bool debugMutation( const char* context, Version version, MutationRef const& m );
-bool debugKeyRange( const char* context, Version version, KeyRangeRef const& keyRange );
 
 #endif

@@ -38,6 +38,7 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MasterInterface.h"
+#include "fdbserver/MutationTracking.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
@@ -938,8 +939,7 @@ ACTOR Future<Void> commitBatch(
 						self->singleKeyMutationEvent->log();
 					}
 
-					if (debugMutation("ProxyCommit", commitVersion, m))
-						TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("Mutation", m.toString()).detail("Version", commitVersion);
+					debugMutation("ProxyCommit", commitVersion, m).detail("Dbgid", self->dbgid).detail("To", tags).detail("Mutation", m);
 					
 					toCommit.addTags(tags);
 					if(self->cacheInfo[m.param1]) {
@@ -954,8 +954,7 @@ ACTOR Future<Void> commitBatch(
 					++firstRange;
 					if (firstRange == ranges.end()) {
 						// Fast path
-						if (debugMutation("ProxyCommit", commitVersion, m))
-							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(ranges.begin().value().tags)).detail("Mutation", m.toString()).detail("Version", commitVersion);
+						debugMutation("ProxyCommit", commitVersion, m).detail("Dbgid", self->dbgid).detail("To", ranges.begin().value().tags).detail("Mutation", m);
 
 						ranges.begin().value().populateTags();
 						toCommit.addTags(ranges.begin().value().tags);
@@ -967,8 +966,7 @@ ACTOR Future<Void> commitBatch(
 							r.value().populateTags();
 							allSources.insert(r.value().tags.begin(), r.value().tags.end());
 						}
-						if (debugMutation("ProxyCommit", commitVersion, m))
-							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(allSources)).detail("Mutation", m.toString()).detail("Version", commitVersion);
+						debugMutation("ProxyCommit", commitVersion, m).detail("Dbgid", self->dbgid).detail("To", allSources).detail("Mutation", m);
 
 						toCommit.addTags(allSources);
 					}

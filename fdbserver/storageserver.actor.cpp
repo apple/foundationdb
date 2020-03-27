@@ -42,6 +42,7 @@
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/MutationTracking.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/StorageMetrics.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -2288,7 +2289,8 @@ void changeServerKeys( StorageServer* data, const KeyRangeRef& keys, bool nowAss
 	//	.detail("Context", changeServerKeysContextName[(int)context]);
 	validate(data);
 
-	debugKeyRange( nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys );
+	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
+	//debugKeyRange( nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys );
 
 	bool isDifferent = false;
 	auto existingShards = data->shards.intersectingRanges(keys);
@@ -2414,18 +2416,7 @@ void StorageServer::addMutation(Version version, MutationRef const& mutation, Ke
 		return;
 	}
 	expanded = addMutationToMutationLog(mLog, expanded);
-	if (debugMutation("expandedMutation", version, expanded)) {
-		const char* type =
-			mutation.type == MutationRef::SetValue ? "SetValue" :
-			mutation.type == MutationRef::ClearRange ? "ClearRange" :
-			mutation.type == MutationRef::DebugKeyRange ? "DebugKeyRange" :
-			mutation.type == MutationRef::DebugKey ? "DebugKey" :
-			"UnknownMutation";
-		printf("DEBUGMUTATION:\t%.6f\t%s\t%s\t%" PRId64 "\t%s\t%s\t%s\n", now(), g_network->getLocalAddress().toString().c_str(), "originalMutation", version, type, printable(mutation.param1).c_str(), printable(mutation.param2).c_str());
-		printf("  shard: %s - %s\n", printable(shard.begin).c_str(), printable(shard.end).c_str());
-		if (mutation.type == MutationRef::ClearRange && mutation.param2 != shard.end)
-			printf("  eager: %s\n", printable( eagerReads->getKeyEnd( mutation.param2 ) ).c_str() );
-	}
+	debugMutation("applyMutation", version, expanded).detail("UID", thisServerID).detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 	applyMutation( this, expanded, mLog.arena(), mutableData() );
 	//printf("\nSSUpdate: Printing versioned tree after applying mutation\n");
 	//mutableData().printTree(version);
@@ -2766,7 +2757,8 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 				rd >> msg;
 
 				if (ver != invalidVersion) {  // This change belongs to a version < minVersion
-					if (debugMutation("SSPeek", ver, msg) || ver == 1) {
+					debugMutation("SSPeek", ver, msg).detail("ServerID", data->thisServerID);
+					if (ver == 1) {
 						TraceEvent("SSPeekMutation", data->thisServerID);
 						// The following trace event may produce a value with special characters
 						//TraceEvent("SSPeekMutation", data->thisServerID).detail("Mutation", msg.toString()).detail("Version", cloneCursor2->version().toString());
@@ -2819,7 +2811,8 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		}
 
 		if(ver != invalidVersion && ver > data->version.get()) {
-			debugKeyRange("SSUpdate", ver, allKeys);
+			// TODO(alexmiller): Update to version tracking.
+			debugKeyRange("SSUpdate", ver, KeyRangeRef());
 
 			data->mutableData().createNewVersion(ver);
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
@@ -3033,7 +3026,7 @@ void StorageServerDisk::writeMutation( MutationRef mutation ) {
 
 void StorageServerDisk::writeMutations( MutationListRef mutations, Version debugVersion, const char* debugContext ) {
 	for(auto m = mutations.begin(); m; ++m) {
-		debugMutation(debugContext, debugVersion, *m);
+		debugMutation(debugContext, debugVersion, *m).detail("UID", data->thisServerID);
 		if (m->type == MutationRef::SetValue) {
 			storage->set( KeyValueRef(m->param1, m->param2) );
 		} else if (m->type == MutationRef::ClearRange) {
@@ -3050,7 +3043,8 @@ bool StorageServerDisk::makeVersionMutationsDurable( Version& prevStorageVersion
 	if (u != data->getMutationLog().end() && u->first <= newStorageVersion) {
 		VersionUpdateRef const& v = u->second;
 		ASSERT( v.version > prevStorageVersion && v.version <= newStorageVersion );
-		debugKeyRange("makeVersionMutationsDurable", v.version, allKeys);
+		// TODO(alexmiller): Update to version tracking.
+		debugKeyRange("makeVersionMutationsDurable", v.version, KeyRangeRef());
 		writeMutations(v.mutations, v.version, "makeVersionDurable");
 		for(auto m=v.mutations.begin(); m; ++m)
 			bytesLeft -= mvccStorageBytes(*m);
@@ -3236,7 +3230,8 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 		for(auto it = data->newestAvailableVersion.ranges().begin(); it != data->newestAvailableVersion.ranges().end(); ++it) {
 			if (it->value() == invalidVersion) {
 				KeyRangeRef clearRange(it->begin(), it->end());
-				debugKeyRange("clearInvalidVersion", invalidVersion, clearRange);
+				// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
+				//debugKeyRange("clearInvalidVersion", invalidVersion, clearRange);
 				storage->clear( clearRange );
 				data->byteSampleApplyClear( clearRange, invalidVersion );
 			}

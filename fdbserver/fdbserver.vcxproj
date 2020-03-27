@@ -41,6 +41,7 @@
     <ActorCompiler Include="CoordinatedState.actor.cpp" />
     <ActorCompiler Include="CoroFlow.actor.cpp" />
     <ActorCompiler Include="MasterProxyServer.actor.cpp" />
+    <ClCompile Include="MutationTracking.cpp" />
     <ActorCompiler Include="KeyValueStoreSQLite.actor.cpp" />
     <ActorCompiler Include="LeaderElection.actor.cpp" />
     <ActorCompiler Include="Ratekeeper.actor.cpp" />
@@ -202,6 +203,7 @@
     <ClInclude Include="LogSystemConfig.h" />
     <ClInclude Include="LogSystemDiskQueueAdapter.h" />
     <ClInclude Include="MasterInterface.h" />
+    <ClInclude Include="MutationTracking.h" />
     <ActorCompiler Include="MoveKeys.actor.h">
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>

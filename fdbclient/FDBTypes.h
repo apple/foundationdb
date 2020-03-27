@@ -222,10 +222,24 @@ std::string describe( std::vector<T> const& items, int max_items = -1 ) {
 	return describeList(items, max_items);
 }
 
+template<typename T>
+struct Traceable<std::vector<T>> : std::true_type {
+	static std::string toString(const std::vector<T>& value) {
+		return describe(value);
+	}
+};
+
 template <class T>
 std::string describe( std::set<T> const& items, int max_items = -1 ) {
 	return describeList(items, max_items);
 }
+
+template<typename T>
+struct Traceable<std::set<T>> : std::true_type {
+	static std::string toString(const std::set<T>& value) {
+		return describe(value);
+	}
+};
 
 std::string printable( const StringRef& val );
 std::string printable( const std::string& val );
