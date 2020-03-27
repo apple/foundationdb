@@ -14,7 +14,7 @@ source ${SCRIPTDIR}/localClusterStart.sh
 # Display syntax
 if [ "$#" -lt 1 ]
 then
-	echo "runBindingTest.ksh <number of test cycles>"
+	echo "bindingTestScript.ksh <number of test cycles>"
 	echo "   version: ${VERSION}"
 	exit 1
 fi
