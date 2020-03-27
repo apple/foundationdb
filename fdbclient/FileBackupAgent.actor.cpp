@@ -2453,13 +2453,16 @@ namespace fileBackup {
 
 			state Future<std::vector<KeyRange>> backupRangesFuture = config.backupRanges().getOrThrow(tr);
 			state Future<Key> destUidValueFuture = config.destUidValue().getOrThrow(tr);
-			wait(success(backupRangesFuture) && success(destUidValueFuture));
+			state Future<Optional<bool>> partitionedLog = config.partitionedLogEnabled().get(tr);
+			wait(success(backupRangesFuture) && success(destUidValueFuture) && success(partitionedLog));
 			std::vector<KeyRange> backupRanges = backupRangesFuture.get();
 			Key destUidValue = destUidValueFuture.get();
 
-			// Start logging the mutations for the specified ranges of the tag
-			for (auto &backupRange : backupRanges) {
-				config.startMutationLogs(tr, backupRange, destUidValue);
+			// Start logging the mutations for the specified ranges of the tag if needed
+			if (!partitionedLog.get().present() || !partitionedLog.get().get()) {
+				for (auto& backupRange : backupRanges) {
+					config.startMutationLogs(tr, backupRange, destUidValue);
+				}
 			}
 
 			config.stateEnum().set(tr, EBackupState::STATE_RUNNING);
@@ -2472,7 +2475,9 @@ namespace fileBackup {
 
 			// Using priority 1 for both of these to at least start both tasks soon
 			wait(success(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, 1, TaskCompletionKey::joinWith(backupFinished))));
-			wait(success(BackupLogsDispatchTask::addTask(tr, taskBucket, task, 1, 0, beginVersion, TaskCompletionKey::joinWith(backupFinished))));
+			if (!partitionedLog.get().present() || !partitionedLog.get().get()) {
+				wait(success(BackupLogsDispatchTask::addTask(tr, taskBucket, task, 1, 0, beginVersion, TaskCompletionKey::joinWith(backupFinished))));
+			}
 
 			// If a clean stop is requested, the log and snapshot tasks will quit after the backup is restorable, then the following
 			// task will clean up and set the completed state.
