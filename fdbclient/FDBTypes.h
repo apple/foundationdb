@@ -108,6 +108,13 @@ struct struct_like_traits<Tag> : std::true_type {
 	}
 };
 
+template<>
+struct Traceable<Tag> : std::true_type {
+	static std::string toString(const Tag& value) {
+		return value.toString();
+	}
+};
+
 static const Tag invalidTag {tagLocalitySpecial, 0};
 static const Tag txsTag {tagLocalitySpecial, 1};
 static const Tag cacheTag {tagLocalitySpecial, 2};

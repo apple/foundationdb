@@ -29,5 +29,6 @@
 
 TraceEvent debugMutation( const char* context, Version version, MutationRef const& mutation );
 TraceEvent debugKeyRange( const char* context, Version version, KeyRangeRef const& keys );
+TraceEvent debugMessagesAndTags( const char* context, Version version, StringRef commitBlob );
 
 #endif
