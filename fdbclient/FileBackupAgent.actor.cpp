@@ -1970,7 +1970,6 @@ namespace fileBackup {
 
 			if (Params.addBackupLogRangeTasks().get(task)) {
 				wait(startBackupLogRangeInternal(tr, taskBucket, futureBucket, task, taskFuture, beginVersion, endVersion));
-				endVersion = beginVersion;
 			} else {
 				wait(taskFuture->set(tr, taskBucket));
 			}
@@ -2073,12 +2072,14 @@ namespace fileBackup {
 			state EBackupState backupState;
 			state Optional<std::string> tag;
 			state Optional<Version> latestSnapshotEndVersion;
+			state Optional<bool> partitionedLog;
 
 			wait(store(stopWhenDone, config.stopWhenDone().getOrThrow(tr))
 						&& store(restorableVersion, config.getLatestRestorableVersion(tr))
 						&& store(backupState, config.stateEnum().getOrThrow(tr))
 						&& store(tag, config.tag().get(tr))
-						&& store(latestSnapshotEndVersion, config.latestSnapshotEndVersion().get(tr)));
+						&& store(latestSnapshotEndVersion, config.latestSnapshotEndVersion().get(tr))
+						&& store(partitionedLog, config.partitionedLogEnabled().get(tr)));
 
 			// If restorable, update the last restorable version for this tag
 			if(restorableVersion.present() && tag.present()) {
@@ -2114,14 +2115,18 @@ namespace fileBackup {
 			// If a snapshot has ended for this backup then mutations are higher priority to reduce backup lag
 			state int priority = latestSnapshotEndVersion.present() ? 1 : 0;
 
-			// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will run after this batch is done
-			wait(success(BackupLogRangeTaskFunc::addTask(tr, taskBucket, task, priority, beginVersion, endVersion, TaskCompletionKey::joinWith(logDispatchBatchFuture))));
 			wait(success(BackupLogsDispatchTask::addTask(tr, taskBucket, task, priority, beginVersion, endVersion, TaskCompletionKey::signal(onDone), logDispatchBatchFuture)));
 
-			// Do not erase at the first time
-			if (prevBeginVersion > 0) {
-				state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
-				wait( eraseLogData(tr, config.getUidAsKey(), destUidValue, Optional<Version>(beginVersion)) );
+			// Skip mutation copy and erase backup mutations for partitioned logs
+			if (!partitionedLog.present() || !partitionedLog.get()) {
+				// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will run after this batch is done
+				wait(success(BackupLogRangeTaskFunc::addTask(tr, taskBucket, task, priority, beginVersion, endVersion, TaskCompletionKey::joinWith(logDispatchBatchFuture))));
+
+				// Do not erase at the first time
+				if (prevBeginVersion > 0) {
+					state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
+					wait( eraseLogData(tr, config.getUidAsKey(), destUidValue, Optional<Version>(beginVersion)) );
+				}
 			}
 
 			wait(taskBucket->finish(tr, task));
@@ -2475,9 +2480,7 @@ namespace fileBackup {
 
 			// Using priority 1 for both of these to at least start both tasks soon
 			wait(success(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, 1, TaskCompletionKey::joinWith(backupFinished))));
-			if (!partitionedLog.get().present() || !partitionedLog.get().get()) {
-				wait(success(BackupLogsDispatchTask::addTask(tr, taskBucket, task, 1, 0, beginVersion, TaskCompletionKey::joinWith(backupFinished))));
-			}
+			wait(success(BackupLogsDispatchTask::addTask(tr, taskBucket, task, 1, 0, beginVersion, TaskCompletionKey::joinWith(backupFinished))));
 
 			// If a clean stop is requested, the log and snapshot tasks will quit after the backup is restorable, then the following
 			// task will clean up and set the completed state.
