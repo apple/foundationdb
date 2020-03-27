@@ -199,8 +199,9 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( LOAD_BALANCE_PENALTY_IS_BAD,                        true );
 
 	// Health Monitor
+	init( HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS,    true );
 	init( HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS,          30 );
-	init( HEALTH_MONITOR_CONNECTION_MAX_CLOSED,                  6 );
+	init( HEALTH_MONITOR_CONNECTION_MAX_CLOSED,                  5 );
 }
 // clang-format on
 

@@ -403,7 +403,8 @@ ACTOR Future<Void> delayedHealthUpdate(NetworkAddress address) {
 		state double start = now();
 		state int count = 0;
 		loop {
-			if (FlowTransport::transport().healthMonitor()->tooManyConnectionsClosed(address) && address.isPublic()) {
+			if (FLOW_KNOBS->HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS &&
+			    FlowTransport::transport().healthMonitor()->tooManyConnectionsClosed(address) && address.isPublic()) {
 				if (count == 0) {
 					TraceEvent("TooManyConnectionsClosedMarkFailed")
 					    .detail("Dest", address)
