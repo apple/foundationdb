@@ -227,7 +227,7 @@ if(WITH_PYTHON)
 
 
   verify_testing()
-  if (NOT OPEN_FOR_IDE)
+  if (NOT OPEN_FOR_IDE AND NOT WIN32)
     create_test_package()
   endif()
 endif()
