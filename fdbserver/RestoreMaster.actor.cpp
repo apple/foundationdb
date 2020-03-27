@@ -525,11 +525,10 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	ASSERT(batchData->rangeToApplier.empty());
 	splitKeyRangeForAppliers(batchData, self->appliersInterf, batchIndex);
 
-	// Loaders should ensure log files' mutations sent to appliers before range files' mutations
-	// TODO: Let applier buffer mutations from log and range files differently so that loaders can send mutations in
-	// parallel
-	wait(sendMutationsFromLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, false));
-	wait(sendMutationsFromLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, true));
+	// Ask loaders to send parsed mutations to appliers;
+	// log mutations should be applied before range mutations at the same version, which is ensured by LogMessageVersion
+	wait(sendMutationsFromLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, false) &&
+		sendMutationsFromLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, true));
 
 	// Synchronization point for version batch pipelining.
 	// self->finishedBatch will continuously increase by 1 per version batch.
