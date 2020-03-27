@@ -185,7 +185,7 @@ function(create_test_package)
     endforeach()
   endforeach()
   if(NOT USE_VALGRIND)
-    set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness-${CMAKE_PROJECT_VERSION_MAJOR}.${CMAKE_PROJECT_VERSION_MINOR}.tar.gz)
+    set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness-${CMAKE_PROJECT_VERSION}.tar.gz)
     add_custom_command(
       OUTPUT ${tar_file}
       DEPENDS ${out_files}
@@ -206,7 +206,7 @@ function(create_test_package)
   endif()
 
   if(USE_VALGRIND)
-    set(tar_file ${CMAKE_BINARY_DIR}/packages/valgrind-${CMAKE_PROJECT_VERSION_MAJOR}.${CMAKE_PROJECT_VERSION_MINOR}.tar.gz)
+    set(tar_file ${CMAKE_BINARY_DIR}/packages/valgrind-${CMAKE_PROJECT_VERSION}.tar.gz)
     add_custom_command(
       OUTPUT ${tar_file}
       DEPENDS ${out_files}
@@ -259,8 +259,7 @@ function(package_bindingtester)
     COMMENT "Copy test files for bindingtester")
   add_custom_target(copy_bindingtester_binaries DEPENDS ${outfiles}  "${CMAKE_BINARY_DIR}/bindingtester.touch")
   add_dependencies(copy_bindingtester_binaries strip_only_fdbserver strip_only_fdbcli strip_only_fdb_c)
-  set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester-${CMAKE_PROJECT_VERSION_MAJOR}.${CMAKE_PROJECT_VERSION_MINOR}.tar.gz)
-  set(tmp_tar_file ${CMAKE_BINARY_DIR}/bindingtester/bindingtester-${CMAKE_PROJECT_VERSION_MAJOR}.${CMAKE_PROJECT_VERSION_MINOR}.tar.gz)
+  set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester-${CMAKE_PROJECT_VERSION}.tar.gz)
   add_custom_command(
     OUTPUT ${tar_file}
     COMMAND ${CMAKE_COMMAND} -E tar czf ${tar_file} *
