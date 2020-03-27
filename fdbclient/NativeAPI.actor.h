@@ -128,7 +128,6 @@ struct TransactionOptions {
 	bool readOnly : 1;
 	bool firstInBatch : 1;
 	bool includePort : 1;
-	bool reportConflictingKeys : 1;
 
 	TransactionOptions(Database const& cx);
 	TransactionOptions();
@@ -136,14 +135,10 @@ struct TransactionOptions {
 	void reset(Database const& cx);
 };
 
-class ReadYourWritesTransaction; // workaround cyclic dependency
 struct TransactionInfo {
 	Optional<UID> debugID;
 	TaskPriority taskID;
 	bool useProvisionalProxies;
-	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
-	// shared_ptr used here since TransactionInfo is sometimes copied as function parameters.
-	std::shared_ptr<ReadYourWritesTransaction> conflictingKeysRYW;
 
 	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
 };

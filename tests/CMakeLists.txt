@@ -211,6 +211,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/ddbalance.txt)
   add_fdb_test(TEST_FILES slow/ParallelRestoreCorrectnessAtomicOpTinyData.txt)
   add_fdb_test(TEST_FILES slow/ParallelRestoreCorrectnessCycle.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreCorrectnessMultiCycles.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreApiCorrectnessAtomicRestore.txt)
   # Note that status tests are not deterministic.
   add_fdb_test(TEST_FILES status/invalid_proc_addresses.txt)
   add_fdb_test(TEST_FILES status/local_6_machine_no_replicas_remain.txt)
@@ -227,7 +229,7 @@ if(WITH_PYTHON)
 
 
   verify_testing()
-  if (NOT OPEN_FOR_IDE)
+  if (NOT OPEN_FOR_IDE AND NOT WIN32)
     create_test_package()
   endif()
 endif()

@@ -819,9 +819,9 @@ module FDB
       get_range(prefix, FDB.strinc(prefix), options, &block)
     end
 
-    def get_estimated_range_size_bytes(beginKey, endKey)
-      bkey = FDB.key_to_bytes(beginKey)
-      ekey = FDB.key_to_bytes(endKey)
+    def get_estimated_range_size_bytes(begin_key, end_key)
+      bkey = FDB.key_to_bytes(begin_key)
+      ekey = FDB.key_to_bytes(end_key)
       Int64Future.new(FDBC.fdb_transaction_get_estimated_range_size_bytes(@tpointer, bkey, bkey.bytesize, ekey, ekey.bytesize))
     end
 

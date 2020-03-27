@@ -39,6 +39,7 @@
 //#define SevFRMutationInfo SevInfo
 
 using MutationsVec = Standalone<VectorRef<MutationRef>>;
+using SubSequenceVec = Standalone<VectorRef<uint32_t>>;
 
 enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);

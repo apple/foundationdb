@@ -150,23 +150,21 @@ static inline bool isNonAssociativeOp(MutationRef::Type mutationType) {
 }
 
 struct CommitTransactionRef {
-	CommitTransactionRef() : read_snapshot(0), report_conflicting_keys(false) {}
+	CommitTransactionRef() : read_snapshot(0) {}
 	CommitTransactionRef(Arena &a, const CommitTransactionRef &from)
 	  : read_conflict_ranges(a, from.read_conflict_ranges),
 		write_conflict_ranges(a, from.write_conflict_ranges),
 		mutations(a, from.mutations),
-		read_snapshot(from.read_snapshot),
-		report_conflicting_keys(from.report_conflicting_keys) {
+		read_snapshot(from.read_snapshot) {
 	}
 	VectorRef< KeyRangeRef > read_conflict_ranges;
 	VectorRef< KeyRangeRef > write_conflict_ranges;
 	VectorRef< MutationRef > mutations;
 	Version read_snapshot;
-	bool report_conflicting_keys;
 
 	template <class Ar>
 	force_inline void serialize( Ar& ar ) {
-		serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot, report_conflicting_keys);
+		serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
 	}
 
 	// Convenience for internal code required to manipulate these without the Native API
