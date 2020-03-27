@@ -204,13 +204,13 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	} catch (Error& e) {
 		if (restoreIndex < restoreRequests.size()) {
 			TraceEvent(SevError, "FastRestoreMasterProcessRestoreRequestsFailed", self->id())
-				.detail("Error", e.what())
-				.detail("ErrorCode", e.code())
+			    .detail("Error", e.what())
+			    .detail("ErrorCode", e.code())
 			    .detail("RestoreRequest", restoreRequests[restoreIndex].toString());
 		} else {
 			TraceEvent(SevError, "FastRestoreMasterProcessRestoreRequestsFailed", self->id())
-				.detail("Error", e.what())
-				.detail("ErrorCode", e.code())
+			    .detail("Error", e.what())
+			    .detail("ErrorCode", e.code())
 			    .detail("RestoreRequests", restoreRequests.size())
 			    .detail("RestoreIndex", restoreIndex);
 		}
@@ -519,8 +519,9 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	// New backup has subversion to order mutations at the same version. For mutations at the same version,
 	// range file's mutations have the largest subversion and larger than log file's.
 	// SOMEDAY: Extend subversion to old-style backup.
-	wait(loadFilesOnLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, cx, request, versionBatch, false) &&
-		loadFilesOnLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, cx, request, versionBatch, true));
+	wait(
+	    loadFilesOnLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, cx, request, versionBatch, false) &&
+	    loadFilesOnLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, cx, request, versionBatch, true));
 
 	ASSERT(batchData->rangeToApplier.empty());
 	splitKeyRangeForAppliers(batchData, self->appliersInterf, batchIndex);
@@ -528,7 +529,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	// Ask loaders to send parsed mutations to appliers;
 	// log mutations should be applied before range mutations at the same version, which is ensured by LogMessageVersion
 	wait(sendMutationsFromLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, false) &&
-		sendMutationsFromLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, true));
+	     sendMutationsFromLoaders(batchData, batchStatus, self->loadersInterf, batchIndex, true));
 
 	// Synchronization point for version batch pipelining.
 	// self->finishedBatch will continuously increase by 1 per version batch.

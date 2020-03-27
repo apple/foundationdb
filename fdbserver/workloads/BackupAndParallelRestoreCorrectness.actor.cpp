@@ -442,8 +442,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				TraceEvent("BAFRW_Restore", randomID)
 				    .detail("LastBackupContainer", lastBackupContainer->getURL())
 				    .detail("MinRestorableVersion", desc.minRestorableVersion.get())
-					.detail("MaxRestorableVersion", desc.maxRestorableVersion.get())
-					.detail("ContiguousLogEnd", desc.contiguousLogEnd.get());
+				    .detail("MaxRestorableVersion", desc.maxRestorableVersion.get())
+				    .detail("ContiguousLogEnd", desc.contiguousLogEnd.get());
 
 				state Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {
