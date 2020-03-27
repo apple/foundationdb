@@ -39,6 +39,7 @@
 #include <ios>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <locale>
 #include <memory>
 #include <mutex>
@@ -914,8 +915,9 @@ void logTestPlan(std::string const& summaryFileName, std::string const& testFile
 struct ExecArgs {
 	std::vector<char*> args;
 	ExecArgs& operator()(const std::string_view& str) {
-		std::unique_ptr<char[]> ptr{ new char[str.size()] };
+		std::unique_ptr<char[]> ptr{ new char[str.size() + 1] };
 		memcpy(ptr.get(), str.data(), str.size());
+		ptr[str.size()] = '\0';
 		args.push_back(ptr.release());
 		return *this;
 	}
@@ -1043,7 +1045,7 @@ struct ThreadObserver {
 	}
 };
 
-int runTest(std::filesystem::path const& fdbserverName, std::filesystem::path const& tlsPluginFile,
+int runTest(std::filesystem::path fdbserverName, std::filesystem::path const& tlsPluginFile,
             std::string const& summaryFileName, std::optional<std::string> const& errorFileName, int seed, bool buggify,
             std::string const& testFile, std::optional<std::filesystem::path> const& runDir, std::string const& uid,
             int expectedUnseed, int& unseed, bool& retryableError, bool logOnRetryableError, bool useValgrind,
@@ -1054,6 +1056,13 @@ int runTest(std::filesystem::path const& fdbserverName, std::filesystem::path co
 	int ok = 0;
 
 	auto tempPath = runDir.has_value() ? runDir.value() : std::filesystem::temp_directory_path() / uid;
+	if (tempPath.is_relative()) {
+		tempPath = std::filesystem::absolute(tempPath);
+	}
+	if (fdbserverName.is_relative()) {
+		fdbserverName = std::filesystem::absolute(fdbserverName);
+	}
+	fmt::print("Current Path: {} tempPath: {}\n", std::filesystem::current_path(), tempPath);
 	auto oldDir = std::filesystem::current_path();
 
 	std::filesystem::create_directory(tempPath);
@@ -1067,10 +1076,10 @@ int runTest(std::filesystem::path const& fdbserverName, std::filesystem::path co
 	ExecArgs args;
 	std::string binaryName;
 	if (willRestart && stringEndsWith(oldBinaryName, "alpha6")) {
-		args("-Rs")("1000000000")("-r")("simulation")("-q")("-s")(std::to_string(seed))("-f")(testFile)("-b")(
+		args("-Rs")("1000000000")("-r")("simulation")("-s")(std::to_string(seed))("-f")(testFile)("-b")(
 		    buggify ? "on" : "off")(fmt::format("--tls_plugin={}", tlsPluginFile))("--crash");
 	} else {
-		args("-Rs")("1GB")("-r")("simulation")("-q")("-s")(std::to_string(seed))("-f")(testFile)("-b")(
+		args("-Rs")("1GB")("-r")("simulation")("-s")(std::to_string(seed))("-f")(testFile)("-b")(
 		    buggify ? "on" : "off")(fmt::format("--tls_plugin={}", tlsPluginFile))("--crash");
 	}
 	if (restarting) {
@@ -1086,7 +1095,7 @@ int runTest(std::filesystem::path const& fdbserverName, std::filesystem::path co
 				valgrindArgs(fmt::format("--extra-debuginfo-path={}", p));
 			}
 		}
-		valgrindArgs("--xml=yes")(fmt::format("--xml-file={}", valgrindOutputFile.value()))("-q")(
+		valgrindArgs("--xml=yes")(fmt::format("--xml-file={}", valgrindOutputFile.value()))(
 		    fdbserverName.c_str());
 		args = valgrindArgs + args;
 	} else {
@@ -1100,6 +1109,11 @@ int runTest(std::filesystem::path const& fdbserverName, std::filesystem::path co
 	if (pipe(errfd) == -1) {
 		assert(false);
 	}
+	fmt::print("Starting fdbserver: {}", fdbserverName);
+	for (auto arg : args.args) {
+		fmt::print(" {}", arg);
+	}
+	fmt::print("\n");
 	auto pid = ::fork();
 	if (pid == 0) {
 		while ((dup2(outfd[0], STDOUT_FILENO) == -1) && (errno == EINTR)) {
@@ -1174,7 +1188,7 @@ int run(std::filesystem::path const& fdbserverName, std::filesystem::path const&
         std::optional<std::string> const& errorFileName, std::optional<std::filesystem::path> const& runDir,
         std::optional<std::filesystem::path> const& oldBinaryFolder, bool useValgrind, int maxTries,
         bool traceToStdout = false, std::filesystem::path const& tlsPluginFile_5_1 = "") {
-	uint64_t seed = std::uniform_int_distribution<uint64_t>{}(g_rnd);
+	int seed = std::uniform_int_distribution<int>{0, std::numeric_limits<int>::max()}(g_rnd);
 	bool buggify = std::uniform_real_distribution<double>{ 0, 1 }(g_rnd) < buggifyOnRatio;
 	std::optional<std::filesystem::path> testFile;
 	std::filesystem::path testDir;
