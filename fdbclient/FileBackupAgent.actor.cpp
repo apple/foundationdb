@@ -3719,9 +3719,10 @@ public:
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 
 		TraceEvent(SevInfo, "FBA_SubmitBackup")
-				.detail("TagName", tagName.c_str())
-				.detail("StopWhenDone", stopWhenDone)
-				.detail("OutContainer", outContainer.toString());
+		    .detail("TagName", tagName.c_str())
+		    .detail("StopWhenDone", stopWhenDone)
+		    .detail("UsePartitionedLog", partitionedLog)
+		    .detail("OutContainer", outContainer.toString());
 
 		state KeyBackedTag tag = makeBackupTag(tagName);
 		Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
