@@ -640,6 +640,7 @@ ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> rel
 	return Void();
 }
 
+// Commit one batch of transactions trs
 ACTOR Future<Void> commitBatch(
 	ProxyCommitData* self,
 	vector<CommitTransactionRequest> trs,
@@ -1480,7 +1481,7 @@ ACTOR static Future<Void> readRequestServer( MasterProxyInterface proxy, Promise
 		//WARNING: this code is run at a high priority, so it needs to do as little work as possible
 		if(req.limit != CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT && //Always do data distribution requests
 		   commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() > SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE) {
-			++commitData->stats.keyServerLocationErrors;
+			++commitData->stats.keyServerLocationErrors;-
 			req.reply.sendError(proxy_memory_limit_exceeded());
 			TraceEvent(SevWarnAlways, "ProxyLocationRequestThresholdExceeded").suppressFor(60);
 		} else {

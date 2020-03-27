@@ -1196,7 +1196,8 @@ public:
 
 		std::map<int, std::vector<int>> tagIndices; // tagId -> indices in files
 		for (int i = 0; i < logs.size(); i++) {
-			ASSERT(logs[i].tagId >= 0 && logs[i].tagId < logs[i].totalTags);
+			ASSERT(logs[i].tagId >= 0);
+			ASSERT(logs[i].tagId < logs[i].totalTags);
 			auto& indices = tagIndices[logs[i].tagId];
 			// filter out if indices.back() is subset of files[i] or vice versa
 			if (!indices.empty()) {

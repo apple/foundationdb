@@ -177,7 +177,7 @@ const KeyRangeRef serverTagConflictKeys(
 const KeyRef serverTagConflictPrefix = serverTagConflictKeys.begin;
 // serverTagHistoryKeys is the old tag a storage server uses before it is migrated to a different location.
 // For example, we can copy a SS file to a remote DC and start the SS there;
-//   The new SS will need to cnosume the last bits of data from the old tag it is responsible for.
+//   The new SS will need to consume the last bits of data from the old tag it is responsible for.
 const KeyRangeRef serverTagHistoryKeys(
 	LiteralStringRef("\xff/serverTagHistory/"),
 	LiteralStringRef("\xff/serverTagHistory0") );
