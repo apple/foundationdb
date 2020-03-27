@@ -25,7 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 
-#define MUTATION_TRACKING_ENABLED 1
+#define MUTATION_TRACKING_ENABLED 0
 
 TraceEvent debugMutation( const char* context, Version version, MutationRef const& mutation );
 TraceEvent debugKeyRange( const char* context, Version version, KeyRangeRef const& keys );

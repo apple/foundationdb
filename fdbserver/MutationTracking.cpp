@@ -90,7 +90,11 @@ TraceEvent debugMutation( const char* context, Version version, MutationRef cons
 TraceEvent debugKeyRange( const char* context, Version version, KeyRangeRef const& keys ) {
 	return debugKeyRangeEnabled( context, version, keys );
 }
+TraceEvent debugMessagesAndTags( const char* context, Version version, StringRef commitBlob ) {
+	return debugMessagesAndTagsEnabled( context, version, commitBlob );
+}
 #else
 TraceEvent debugMutation( const char* context, Version version, MutationRef const& mutation ) { return std::move(TraceEvent()); }
 TraceEvent debugKeyRange( const char* context, Version version, KeyRangeRef const& keys ) { return std::move(TraceEvent()); }
+TraceEvent debugMessagesAndTags( const char* context, Version version, StringRef commitBlob ) { return std::move(TraceEvent()); }
 #endif
