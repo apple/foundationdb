@@ -203,6 +203,7 @@ function(create_test_package)
   add_custom_target(package_tests ALL DEPENDS ${tar_file})
   add_dependencies(package_tests strip_only_fdbserver TestHarness)
 
+  if (USE_VALGRIND)
   set(tar_file ${CMAKE_BINARY_DIR}/packages/valgrind-${CMAKE_PROJECT_VERSION_MAJOR}.${CMAKE_PROJECT_VERSION_MINOR}.tar.gz)
   add_custom_command(
     OUTPUT ${tar_file}
