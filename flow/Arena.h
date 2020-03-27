@@ -669,29 +669,29 @@ struct dynamic_size_traits<StringRef> : std::true_type {
 	}
 };
 
-inline bool operator==(const StringRef& lhs, const StringRef& rhs) {
+inline bool operator==(StringRef lhs, StringRef rhs) {
 	if (lhs.size() == 0 && rhs.size() == 0) {
 		return true;
 	}
 	return lhs.size() == rhs.size() && !memcmp(lhs.begin(), rhs.begin(), lhs.size());
 }
-inline bool operator<(const StringRef& lhs, const StringRef& rhs) {
+inline bool operator<(StringRef lhs, StringRef rhs) {
 	if (std::min(lhs.size(), rhs.size()) > 0) {
 		int c = memcmp(lhs.begin(), rhs.begin(), std::min(lhs.size(), rhs.size()));
 		if (c != 0) return c < 0;
 	}
 	return lhs.size() < rhs.size();
 }
-inline bool operator>(const StringRef& lhs, const StringRef& rhs) {
+inline bool operator>(StringRef lhs, StringRef rhs) {
 	if (std::min(lhs.size(), rhs.size()) > 0) {
 		int c = memcmp(lhs.begin(), rhs.begin(), std::min(lhs.size(), rhs.size()));
 		if (c != 0) return c > 0;
 	}
 	return lhs.size() > rhs.size();
 }
-inline bool operator != (const StringRef& lhs, const StringRef& rhs ) { return !(lhs==rhs); }
-inline bool operator <= ( const StringRef& lhs, const StringRef& rhs ) { return !(lhs>rhs); }
-inline bool operator >= ( const StringRef& lhs, const StringRef& rhs ) { return !(lhs<rhs); }
+inline bool operator != (StringRef lhs, StringRef rhs ) { return !(lhs==rhs); }
+inline bool operator <= (StringRef lhs, StringRef rhs ) { return !(lhs>rhs); }
+inline bool operator >= (StringRef lhs, StringRef rhs ) { return !(lhs<rhs); }
 
 // This trait is used by VectorRef to determine if it should just memcpy the vector contents.
 // FIXME:  VectorRef really should use std::is_trivially_copyable for this BUT that is not implemented
