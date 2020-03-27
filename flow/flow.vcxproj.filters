@@ -15,6 +15,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="crc32c-generated-constants.cpp" />
+    <ClCompile Include="Arena.cpp" />
     <ClCompile Include="DeterministicRandom.cpp" />
     <ClCompile Include="Error.cpp" />
     <ClCompile Include="FastAlloc.cpp" />

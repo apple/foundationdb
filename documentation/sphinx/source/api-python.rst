@@ -143,6 +143,10 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
 
        |option-trace-format-blurb|
 
+    .. method :: fdb.options.set_trace_clock_source(source)
+
+       |option-trace-clock-source-blurb|
+
     .. method :: fdb.options.set_disable_multi_version_client_api()
 
        |option-disable-multi-version-client-api|
@@ -289,7 +293,7 @@ A |database-blurb1| |database-blurb2|
 
     If ``limit`` is specified, then only the first ``limit`` keys (and their values) in the range will be returned.
 
-    If ``reverse`` is True, then the last ``limit`` keys in the range will be returned in reverse order.
+    If ``reverse`` is True, then the last ``limit`` keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
     If ``streaming_mode`` is specified, it must be a value from the :data:`StreamingMode` enumeration. It provides a hint to FoundationDB about how to retrieve the specified range. This option should generally not be specified, allowing FoundationDB to retrieve the full range very efficiently.
 
@@ -501,7 +505,7 @@ Reading data
 
     If ``limit`` is specified, then only the first ``limit`` keys (and their values) in the range will be returned.
 
-    If ``reverse`` is True, then the last ``limit`` keys in the range will be returned in reverse order.
+    If ``reverse`` is True, then the last ``limit`` keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
     If ``streaming_mode`` is specified, it must be a value from the :data:`StreamingMode` enumeration. It provides a hint to FoundationDB about how the returned container is likely to be used.  The default is :data:`StreamingMode.iterator`.
 
@@ -792,6 +796,13 @@ Most applications should use the read version that FoundationDB determines autom
 
     |infrequent| |transaction-get-versionstamp-blurb|
 
+Transaction misc functions
+--------------------------
+
+.. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
+
+    Get the estimated byte size of the given key range. Returns a :class:`FutureInt64`.
+
 .. _api-python-transaction-options:
 
 Transaction options
@@ -958,9 +969,9 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
 
     Represents a future string object and responds to the same methods as string in Python. They may be passed to FoundationDB methods that expect a string.
 
-.. class:: FutureVersion
+.. class:: FutureInt64
 
-    Represents a future version (integer). You must call the :meth:`Future.wait()` method on this object to retrieve the version as an integer.
+    Represents a future integer. You must call the :meth:`Future.wait()` method on this object to retrieve the integer.
 
 .. class:: FutureStringArray
 

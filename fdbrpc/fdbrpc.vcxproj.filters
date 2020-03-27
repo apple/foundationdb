@@ -10,7 +10,6 @@
     <ActorCompiler Include="AsyncFileCached.actor.cpp" />
     <ActorCompiler Include="AsyncFileNonDurable.actor.h" />
     <ActorCompiler Include="AsyncFileNonDurable.actor.cpp" />
-    <ActorCompiler Include="TLSConnection.actor.cpp" />
     <ActorCompiler Include="dsltest.actor.cpp" />
     <ActorCompiler Include="FlowTests.actor.cpp" />
     <ActorCompiler Include="genericactors.actor.cpp" />
@@ -71,7 +70,6 @@
       <Filter>zlib</Filter>
     </ClCompile>
     <ClCompile Include="Net2FileSystem.cpp" />
-    <ClCompile Include="Platform.cpp" />
     <ClCompile Include="QueueModel.cpp" />
     <ClCompile Include="TraceFileIO.cpp" />
     <ClCompile Include="Replication.cpp" />
@@ -128,12 +126,10 @@
     <ClInclude Include="zlib\inftrees.h">
       <Filter>zlib</Filter>
     </ClInclude>
-    <ClInclude Include="ITLSPlugin.h" />
     <ClInclude Include="FailureMonitor.h" />
     <ClInclude Include="FlowTransport.h" />
     <ClInclude Include="IAsyncFile.h" />
     <ClInclude Include="Net2FileSystem.h" />
-    <ClInclude Include="Platform.h" />
     <ClInclude Include="ActorFuzz.h" />
     <ClInclude Include="ContinuousSample.h" />
     <ClInclude Include="fdbrpc.h" />
@@ -143,7 +139,6 @@
     <ClInclude Include="RangeMap.h" />
     <ClInclude Include="Smoother.h" />
     <ClInclude Include="TraceFileIO.h" />
-    <ClInclude Include="TLSConnection.h" />
     <ClInclude Include="IRateControl.h" />
     <ClInclude Include="Replication.h" />
     <ClInclude Include="ReplicationTypes.h" />

@@ -26,3 +26,4 @@ startAfter=10.0
 restoreAfter=50.0
 clearAfterTest=false
 simBackupAgents=BackupToFile
+usePartitionedLogs=false

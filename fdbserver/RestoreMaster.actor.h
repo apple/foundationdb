@@ -41,16 +41,20 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-extern int restoreStatusIndex;
-
 struct VersionBatch {
 	Version beginVersion; // Inclusive
 	Version endVersion; // exclusive
-	std::vector<RestoreFileFR> logFiles;
-	std::vector<RestoreFileFR> rangeFiles;
+	std::set<RestoreFileFR> logFiles;
+	std::set<RestoreFileFR> rangeFiles;
 	double size; // size of data in range and log files
+	int batchIndex; // Never reset
 
 	VersionBatch() : beginVersion(0), endVersion(0), size(0){};
+
+	bool operator<(const VersionBatch& rhs) const {
+		return std::tie(batchIndex, beginVersion, endVersion, logFiles, rangeFiles, size) <
+		       std::tie(rhs.batchIndex, rhs.beginVersion, rhs.endVersion, rhs.logFiles, rhs.rangeFiles, rhs.size);
+	}
 
 	bool isEmpty() { return logFiles.empty() && rangeFiles.empty(); }
 	void reset() {
@@ -65,19 +69,82 @@ struct VersionBatch {
 	bool isInVersionRange(Version version) const { return version >= beginVersion && version < endVersion; }
 };
 
-struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
+struct MasterBatchData : public ReferenceCounted<MasterBatchData> {
 	// rangeToApplier is in master and loader node. Loader uses this to determine which applier a mutation should be sent.
 	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
 	std::map<Key, UID> rangeToApplier;
-	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
+	IndexedSet<Key, int64_t> samples; // sample of range and log files
+	double samplesSize; // sum of the metric of all samples
+	Optional<Future<Void>> applyToDB;
 
-	int batchIndex;
+	MasterBatchData() = default;
+	~MasterBatchData() = default;
+
+	// Return true if pass the sanity check
+	bool sanityCheckApplierKeyRange() {
+		bool ret = true;
+		// An applier should only appear once in rangeToApplier
+		std::map<UID, Key> applierToRange;
+		for (auto& applier : rangeToApplier) {
+			if (applierToRange.find(applier.second) == applierToRange.end()) {
+				applierToRange[applier.second] = applier.first;
+			} else {
+				TraceEvent(SevError, "FastRestore")
+				    .detail("SanityCheckApplierKeyRange", applierToRange.size())
+				    .detail("ApplierID", applier.second)
+				    .detail("Key1", applierToRange[applier.second])
+				    .detail("Key2", applier.first);
+				ret = false;
+			}
+		}
+		return ret;
+	}
+
+	void logApplierKeyRange(int batchIndex) {
+		TraceEvent("FastRestoreLogApplierKeyRange")
+		    .detail("BatchIndex", batchIndex)
+		    .detail("ApplierKeyRangeNum", rangeToApplier.size());
+		for (auto& applier : rangeToApplier) {
+			TraceEvent("FastRestoreLogApplierKeyRange")
+			    .detail("BatchIndex", batchIndex)
+			    .detail("KeyRangeLowerBound", applier.first)
+			    .detail("Applier", applier.second);
+		}
+	}
+};
+
+enum class RestoreAssetStatus { Loading, Loaded };
+
+enum class RestoreSendStatus { SendingLogs, SendedLogs, SendingRanges, SendedRanges };
+
+enum class RestoreApplyStatus { Applying, Applied };
+
+// Track restore progress of each RestoreAsset (RA) and
+// Use status to sanity check restore property, e.g., each RA should be processed exactly once.
+struct MasterBatchStatus : public ReferenceCounted<MasterBatchStatus> {
+	std::map<RestoreAsset, RestoreAssetStatus> raStatus;
+	std::map<UID, RestoreSendStatus> loadStatus;
+	std::map<UID, RestoreApplyStatus> applyStatus;
+
+	void addref() { return ReferenceCounted<MasterBatchStatus>::addref(); }
+	void delref() { return ReferenceCounted<MasterBatchStatus>::delref(); }
+
+	MasterBatchStatus() = default;
+	~MasterBatchStatus() = default;
+};
+
+struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
+	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
 
-	IndexedSet<Key, int64_t> samples; // sample of range and log files
-	double samplesSize; // sum of the metric of all samples
+	std::map<int, Reference<MasterBatchData>> batch;
+	std::map<int, Reference<MasterBatchStatus>> batchStatus;
+
+	AsyncVar<int> runningVersionBatches; // Currently running version batches
+
+	std::map<UID, double> rolesHeartBeatTime; // Key: role id; Value: most recent time master receives heart beat
 
 	void addref() { return ReferenceCounted<RestoreMasterData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreMasterData>::delref(); }
@@ -85,30 +152,40 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	RestoreMasterData() {
 		role = RestoreRole::Master;
 		nodeID = UID();
-		batchIndex = 1; // starts with 1 because batchId (NotifiedVersion) in loaders and appliers start with 0
+		runningVersionBatches.set(0);
 	}
 
 	~RestoreMasterData() = default;
 
-	void resetPerVersionBatch() {
-		TraceEvent("FastRestore")
-		    .detail("RestoreMaster", "ResetPerVersionBatch")
-		    .detail("VersionBatchIndex", batchIndex);
-		samplesSize = 0;
-		samples.clear();
+	int getVersionBatchState(int batchIndex) final { return RoleVersionBatchState::INVALID; }
+	void setVersionBatchState(int batchIndex, int vbState) final {}
+
+	void initVersionBatch(int batchIndex) {
+		TraceEvent("FastRestoreMasterInitVersionBatch", id()).detail("VersionBatchIndex", batchIndex);
+	}
+
+	// Reset master data at the beginning of each restore request
+	void resetPerRestoreRequest() {
+		TraceEvent("FastRestoreMasterReset").detail("OldVersionBatches", versionBatches.size());
+		versionBatches.clear();
+		batch.clear();
+		batchStatus.clear();
+		finishedBatch = NotifiedVersion();
+		ASSERT(runningVersionBatches.get() == 0);
 	}
 
 	std::string describeNode() {
 		std::stringstream ss;
-		ss << "Master versionBatch:" << batchIndex;
+		ss << "Master";
 		return ss.str();
 	}
 
 	void dumpVersionBatches(const std::map<Version, VersionBatch>& versionBatches) {
-		int i = 0;
+		int i = 1;
 		for (auto& vb : versionBatches) {
 			TraceEvent("FastRestoreVersionBatches")
-			    .detail("BatchIndex", i)
+			    .detail("BatchIndex", vb.second.batchIndex)
+			    .detail("ExpectedBatchIndex", i)
 			    .detail("BeginVersion", vb.second.beginVersion)
 			    .detail("EndVersion", vb.second.endVersion)
 			    .detail("Size", vb.second.size);
@@ -154,33 +231,31 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			}
 			++rangeIdx;
 		}
-		int logIdx = 0;
 		std::vector<RestoreFileFR> retLogs;
 		// Scan all logFiles every time to avoid assumption on log files' version ranges.
 		// For example, we do not assume each version range only exists in one log file
-		while (logIdx < logFiles.size()) {
-			Version begin = std::max(prevVersion, logFiles[logIdx].beginVersion);
-			Version end = std::min(nextVersion, logFiles[logIdx].endVersion);
+		for (const auto& file : logFiles) {
+			Version begin = std::max(prevVersion, file.beginVersion);
+			Version end = std::min(nextVersion, file.endVersion);
 			if (begin < end) { // logIdx file overlap in [prevVersion, nextVersion)
-				double ratio = (end - begin) * 1.0 / (logFiles[logIdx].endVersion - logFiles[logIdx].beginVersion);
-				size += logFiles[logIdx].fileSize * ratio;
-				retLogs.push_back(logFiles[logIdx]);
+				double ratio = (end - begin) * 1.0 / (file.endVersion - file.beginVersion);
+				size += file.fileSize * ratio;
+				retLogs.push_back(file);
 			}
-			++logIdx;
 		}
 		return std::make_tuple(size, rangeIdx, retLogs);
 	}
 
 	// Split backup files into version batches, each of which has similar data size
 	// Input: sorted range files, sorted log files;
-	// Output: a set of version batches whose size is less than opConfig.batchSizeThreshold
-	//    	   and each mutation in backup files is included in the version batches exactly once.
+	// Output: a set of version batches whose size is less than SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES
+	//         and each mutation in backup files is included in the version batches exactly once.
 	// Assumption 1: input files has no empty files;
-	// Assumption 2: range files at one version <= batchSizeThreshold.
-	// Note: We do not allow a versionBatch size larger than the batchSizeThreshold because the range file size at
-	// a version depends on the number of backupAgents and its upper bound is hard to get.
+	// Assumption 2: range files at one version <= FASTRESTORE_VERSIONBATCH_MAX_BYTES.
+	// Note: We do not allow a versionBatch size larger than the FASTRESTORE_VERSIONBATCH_MAX_BYTES because the range
+	// file size at a version depends on the number of backupAgents and its upper bound is hard to get.
 	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles, const std::vector<RestoreFileFR>& logFiles,
-	                         std::map<Version, VersionBatch>* versionBatches) {
+	                         std::map<Version, VersionBatch>* versionBatches, Version targetVersion) {
 		bool rewriteNextVersion = false;
 		int rangeIdx = 0;
 		int logIdx = 0; // Ensure each log file is included in version batch
@@ -188,6 +263,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		Version nextVersion = 0; // Used to calculate the batch's endVersion
 		VersionBatch vb;
 		vb.beginVersion = 0; // Version batch range [beginVersion, endVersion)
+		vb.batchIndex = 1;
 
 		while (rangeIdx < rangeFiles.size() || logIdx < logFiles.size()) {
 			if (!rewriteNextVersion) {
@@ -230,19 +306,30 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			    .detail("RangeFiles", rangeFiles.size())
 			    .detail("LogIndex", logIdx)
 			    .detail("LogFiles", logFiles.size())
-			    .detail("BatchSizeThreshold", opConfig.batchSizeThreshold)
+			    .detail("VersionBatchSizeThreshold", SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES)
 			    .detail("CurrentBatchSize", vb.size)
 			    .detail("NextVersionIntervalSize", nextVersionSize)
 			    .detail("NextRangeIndex", nextRangeIdx)
 			    .detail("UsedLogFiles", curLogFiles.size());
 
 			ASSERT(prevEndVersion < nextVersion); // Ensure progress
-			if (vb.size + nextVersionSize <= opConfig.batchSizeThreshold) {
+			if (vb.size + nextVersionSize <= SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES ||
+			    (vb.size < 1 && prevEndVersion + 1 == nextVersion)) {
+				// In case the batch size at a single version > FASTRESTORE_VERSIONBATCH_MAX_BYTES,
+				// the version batch should include the single version to avoid false positive in simulation.
+				if (vb.size + nextVersionSize > SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES) {
+					TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "FastRestoreBuildVersionBatch")
+					    .detail("NextVersion", nextVersion)
+					    .detail("PreviousEndVersion", prevEndVersion)
+					    .detail("NextVersionIntervalSize", nextVersionSize)
+					    .detail("VersionBatchSizeThreshold", SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES)
+					    .detail("SuggestedMinimumVersionBatchSizeThreshold", nextVersionSize * 2);
+				}
 				// nextVersion should be included in this batch
 				vb.size += nextVersionSize;
 				while (rangeIdx < nextRangeIdx && rangeIdx < rangeFiles.size()) {
 					ASSERT(rangeFiles[rangeIdx].fileSize > 0);
-					vb.rangeFiles.push_back(rangeFiles[rangeIdx]);
+					vb.rangeFiles.insert(rangeFiles[rangeIdx]);
 					++rangeIdx;
 				}
 
@@ -250,23 +337,24 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					ASSERT(log.beginVersion < nextVersion);
 					ASSERT(log.endVersion > prevEndVersion);
 					ASSERT(log.fileSize > 0);
-					vb.logFiles.push_back(log);
+					vb.logFiles.insert(log);
 				}
 
-				vb.endVersion = nextVersion;
+				vb.endVersion = std::min(nextVersion, targetVersion + 1);
 				prevEndVersion = vb.endVersion;
 			} else {
 				if (vb.size < 1) {
-					// [vb.endVersion, nextVersion) > opConfig.batchSizeThreshold. We should split the version range
+					// [vb.endVersion, nextVersion) > SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES. We should split
+					// the version range
 					if (prevEndVersion >= nextVersion) {
-						// If range files at one version > batchSizeThreshold, DBA should increase batchSizeThreshold to
-						// some value larger than nextVersion
+						// If range files at one version > FASTRESTORE_VERSIONBATCH_MAX_BYTES, DBA should increase
+						// FASTRESTORE_VERSIONBATCH_MAX_BYTES to some value larger than nextVersion
 						TraceEvent(SevError, "FastRestoreBuildVersionBatch")
 						    .detail("NextVersion", nextVersion)
 						    .detail("PreviousEndVersion", prevEndVersion)
 						    .detail("NextVersionIntervalSize", nextVersionSize)
-						    .detail("BatchSizeThreshold", opConfig.batchSizeThreshold)
-						    .detail("SuggestedMinimumBatchSizeThreshold", nextVersion);
+						    .detail("VersionBatchSizeThreshold", SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES)
+						    .detail("SuggestedMinimumVersionBatchSizeThreshold", nextVersionSize * 2);
 						// Exit restore early if it won't succeed
 						flushAndExit(FDB_EXIT_ERROR);
 					}
@@ -283,39 +371,13 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				vb.reset();
 				vb.size = 0;
 				vb.beginVersion = prevEndVersion;
+				vb.batchIndex++;
 			}
 		}
 		// The last wip version batch has some files
 		if (vb.size > 0) {
-			vb.endVersion = nextVersion;
+			vb.endVersion = std::min(nextVersion, targetVersion + 1);
 			versionBatches->emplace(vb.beginVersion, vb);
-		}
-	}
-
-	// Return true if pass the sanity check
-	bool sanityCheckApplierKeyRange() {
-		bool ret = true;
-		// An applier should only appear once in rangeToApplier
-		std::map<UID, Key> applierToRange;
-		for (auto& applier : rangeToApplier) {
-			if (applierToRange.find(applier.second) == applierToRange.end()) {
-				applierToRange[applier.second] = applier.first;
-			} else {
-				TraceEvent(SevError, "FastRestore")
-				    .detail("SanityCheckApplierKeyRange", applierToRange.size())
-				    .detail("ApplierID", applier.second)
-				    .detail("Key1", applierToRange[applier.second])
-				    .detail("Key2", applier.first);
-				ret = false;
-			}
-		}
-		return ret;
-	}
-
-	void logApplierKeyRange() {
-		TraceEvent("FastRestore").detail("ApplierKeyRangeNum", rangeToApplier.size());
-		for (auto& applier : rangeToApplier) {
-			TraceEvent("FastRestore").detail("KeyRangeLowerBound", applier.first).detail("Applier", applier.second);
 		}
 	}
 

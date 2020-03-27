@@ -25,6 +25,7 @@
 
 #include "flow/DeterministicRandom.h"
 #include "flow/SystemMonitor.h"
+#include "flow/TLSConfig.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 using namespace FDB;
@@ -82,7 +83,7 @@ void fdb_flow_test() {
 	fdb->setupNetwork();
 	startThread(networkThread, fdb);
 
-	g_network = newNet2( false );
+	g_network = newNet2(TLSConfig());
 
 	openTraceFile(NetworkAddress(), 1000000, 1000000, ".");
 	systemMonitor();

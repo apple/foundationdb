@@ -31,7 +31,7 @@ While a cluster is being used as the destination for a DR operation it will be l
 Limitations
 ===========
 
-Backup data is not encrypted on disk, in a blob store account, or in transit to a destination blob store account or database.
+Backup data is not encrypted at rest on disk or in a blob store account.
 
 Tools
 ===========
@@ -159,15 +159,14 @@ The Blob Credential File format is JSON with the following schema:
     }
   }
 
-SSL Support
+TLS Support
 ===========
 
-By default, backup will communicate over https. To configure https, the following environment variables are used:
+In-flight traffic for blob store or disaster recovery backups can be encrypted with the following environment variables. They are also offered as command-line flags or can be specified in ``foundationdb.conf`` for backup agents.
 
 ============================ ====================================================
 Environment Variable         Purpose
 ============================ ====================================================
-``FDB_TLS_PLUGIN``           Path to the file to be loaded as the TLS plugin
 ``FDB_TLS_CERTIFICATE_FILE`` Path to the file from which the local certificates
                              can be loaded, used by the plugin
 ``FDB_TLS_KEY_FILE``         Path to the file from which to load the private
@@ -177,8 +176,11 @@ Environment Variable         Purpose
 ``FDB_TLS_CA_FILE``          Path to the file containing the CA certificates
                              to trust. Specify to override the default openssl
                              location.
+``FDB_TLS_VERIFY_PEERS``     The byte-string for the verification of peer
+                             certificates and sessions.
 ============================ ====================================================
 
+Blob store backups can be configured to use HTTPS/TLS by setting the ``secure_connection`` or ``sc`` backup URL option to ``1``, which is the default. Disaster recovery backups are secured by using TLS for both the source and target clusters and setting the TLS options for the ``fdbdr`` and ``dr_agent`` commands.
 
 ``fdbbackup`` command line tool
 ===============================

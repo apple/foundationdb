@@ -52,6 +52,13 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		return out;
 	}
 
+	if (mode == "locked") {
+		// Setting this key is interpreted as an instruction to use the normal version-stamp-based mechanism for locking
+		// the database.
+		out[databaseLockedKey.toString()] = deterministicRandom()->randomUniqueID().toString();
+		return out;
+	}
+
 	size_t pos;
 
 	// key:=value is unvalidated and unchecked
@@ -300,6 +307,17 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 	// make sure we have essential configuration options
 	std::string initKey = configKeysPrefix.toString() + "initialized";
 	state bool creating = m.count( initKey ) != 0;
+	state Optional<UID> locked;
+	{
+		auto iter = m.find(databaseLockedKey.toString());
+		if (iter != m.end()) {
+			if (!creating) {
+				return ConfigurationResult::LOCKED_NOT_NEW;
+			}
+			locked = UID::fromString(iter->second);
+			m.erase(iter);
+		}
+	}
 	if (creating) {
 		m[initIdKey.toString()] = deterministicRandom()->randomUniqueID().toString();
 		if (!isCompleteConfiguration(m)) {
@@ -484,6 +502,15 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 				// might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
 				tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
 				tr.addReadConflictRange( singleKeyRange(m.begin()->first) );
+			}
+
+			if (locked.present()) {
+				ASSERT(creating);
+				tr.atomicOp(databaseLockedKey,
+				            BinaryWriter::toValue(locked.get(), Unversioned())
+				                .withPrefix(LiteralStringRef("0123456789"))
+				                .withSuffix(LiteralStringRef("\x00\x00\x00\x00")),
+				            MutationRef::SetVersionstampedValue);
 			}
 
 			for (auto i = m.begin(); i != m.end(); ++i) {
@@ -958,9 +985,13 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 
 			if(g_network->isSimulated()) {
 				for(int i = 0; i < (desiredCoordinators.size()/2)+1; i++) {
-					auto address = NetworkAddress(desiredCoordinators[i].ip,desiredCoordinators[i].port,true,false);
-					g_simulator.protectedAddresses.insert(address);
-					TraceEvent("ProtectCoordinator").detail("Address", address).backtrace();
+					auto addresses = g_simulator.getProcessByAddress(desiredCoordinators[i])->addresses;
+
+					g_simulator.protectedAddresses.insert(addresses.address);
+					if(addresses.secondaryAddress.present()) {
+						g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
+					}
+					TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 				}
 			}
 
@@ -1119,18 +1150,32 @@ struct AutoQuorumChange : IQuorumChange {
 				*err = CoordinatorsResult::NOT_ENOUGH_MACHINES;
 				return vector<NetworkAddress>();
 			}
-			desiredCount = std::max(oldCoordinators.size(), (workers.size() - 1) | 1);
-			chosen.resize(desiredCount);
+			chosen.resize((chosen.size() - 1) | 1);
 		}
 
 		return chosen;
 	}
 
+	// Select a desired set of workers such that
+	// (1) the number of workers at each locality type (e.g., dcid) <= desiredCount; and
+	// (2) prefer workers at a locality where less workers has been chosen than other localities: evenly distribute workers.
 	void addDesiredWorkers(vector<NetworkAddress>& chosen, const vector<ProcessData>& workers, int desiredCount, const std::set<AddressExclusion>& excluded) {
 		vector<ProcessData> remainingWorkers(workers);
 		deterministicRandom()->randomShuffle(remainingWorkers);
 
 		std::partition(remainingWorkers.begin(), remainingWorkers.end(), [](const ProcessData& data) { return (data.processClass == ProcessClass::CoordinatorClass); });
+
+		TraceEvent(SevDebug, "AutoSelectCoordinators").detail("CandidateWorkers", remainingWorkers.size());
+		for (auto worker = remainingWorkers.begin(); worker != remainingWorkers.end(); worker++) {
+			TraceEvent(SevDebug, "AutoSelectCoordinators")
+			    .detail("Worker", worker->processClass.toString())
+			    .detail("Address", worker->address.toString())
+			    .detail("Locality", worker->locality.toString());
+		}
+		TraceEvent(SevDebug, "AutoSelectCoordinators").detail("ExcludedAddress", excluded.size());
+		for (auto& excludedAddr : excluded) {
+			TraceEvent(SevDebug, "AutoSelectCoordinators").detail("ExcludedAddress", excludedAddr.toString());
+		}
 
 		std::map<StringRef, int> maxCounts;
 		std::map<StringRef, std::map<StringRef, int>> currentCounts;
@@ -1156,6 +1201,12 @@ struct AutoQuorumChange : IQuorumChange {
 			bool found = false;
 			for (auto worker = remainingWorkers.begin(); worker != remainingWorkers.end(); worker++) {
 				if(addressExcluded(excluded, worker->address)) {
+					continue;
+				}
+				// Exclude faulty node due to machine assassination
+				if (g_network->isSimulated() && g_simulator.protectedAddresses.count(worker->address) &&
+				    !g_simulator.getProcessByAddress(worker->address)->isReliable()) {
+					TraceEvent("AutoSelectCoordinators").detail("SkipUnreliableWorker", worker->address.toString());
 					continue;
 				}
 				bool valid = true;
@@ -1384,6 +1435,7 @@ ACTOR Future<Void> printHealthyZone( Database cx ) {
 
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning, bool clearSSFailureZoneString) {
 	state Transaction tr(cx);
+	TraceEvent("ClearHealthyZone").detail("ClearSSFailureZoneString", clearSSFailureZoneString);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1409,6 +1461,7 @@ ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning, bool clearSS
 
 ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning) {
 	state Transaction tr(cx);
+	TraceEvent("SetHealthyZone").detail("Zone", zoneId).detail("DurationSeconds", seconds);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1516,10 +1569,14 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 			state bool ok = true;
 			inProgressExclusion.clear();
 			for(auto& s : serverList) {
-				auto addr = decodeServerListValue( s.value ).address();
-				if ( addressExcluded(exclusions, addr) ) {
+				auto addresses = decodeServerListValue( s.value ).getKeyValues.getEndpoint().addresses;
+				if ( addressExcluded(exclusions, addresses.address) ) {
 					ok = false;
-					inProgressExclusion.insert(addr);
+					inProgressExclusion.insert(addresses.address);
+				}
+				if ( addresses.secondaryAddress.present() && addressExcluded(exclusions, addresses.secondaryAddress.get()) ) {
+					ok = false;
+					inProgressExclusion.insert(addresses.secondaryAddress.get());
 				}
 			}
 
