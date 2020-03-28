@@ -21,6 +21,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
@@ -2127,8 +2128,8 @@ namespace fileBackup {
 				}
 			} else {
 				// Skip mutation copy and erase backup mutations. Just check back periodically.
-				Version scheduledVersion = tr->getReadVersion().get() + 10 * SERVER_KNOBS->VERSIONS_PER_SECOND;
-				wait(success(BackupLogsDispatchTask::addTask(tr, taskBucket, task, 1, beginVersion, endVersion, TaskCompletionKey::noSignal(), Reference<TaskFuture>(), scheduledVersion)));
+				Version scheduledVersion = tr->getReadVersion().get() + CLIENT_KNOBS->BACKUP_POLL_PROGRESS_SECONDS * CLIENT_KNOBS->VERSIONS_PER_SECOND;
+				wait(success(BackupLogsDispatchTask::addTask(tr, taskBucket, task, 1, beginVersion, endVersion, TaskCompletionKey::signal(onDone), Reference<TaskFuture>(), scheduledVersion)));
 			}
 
 			wait(taskBucket->finish(tr, task));
