@@ -447,38 +447,38 @@ ACTOR static Future<Void> sendMutationsFromLoaders(Reference<MasterBatchData> ba
 	                     TaskPriority::RestoreLoaderSendMutations));
 
 	// Update status and sanity check
-	for (auto& reply : replies) {
-		RestoreSendStatus status = batchStatus->loadStatus[reply.id];
-		if ((status == RestoreSendStatus::SendingRanges || status == RestoreSendStatus::SendingLogs)) {
-			batchStatus->loadStatus[reply.id] = (status == RestoreSendStatus::SendingRanges)
-			                                        ? RestoreSendStatus::SendedRanges
-			                                        : RestoreSendStatus::SendedLogs;
-			if (reply.isDuplicated) {
-				TraceEvent(SevWarn, "FastRestoreMasterPhaseSendMutationsFromLoaders")
-				    .detail("Loader", reply.id)
-				    .detail("DuplicateRequestAcked", "Request should have been processed");
-			}
-		} else if ((status == RestoreSendStatus::SendedRanges || status == RestoreSendStatus::SendedLogs) &&
-		           reply.isDuplicated) {
-			TraceEvent(SevDebug, "FastRestoreMasterPhaseSendMutationsFromLoaders")
-			    .detail("Loader", reply.id)
-			    .detail("RequestIgnored", "Send request was sent more than once");
-		} else {
-			TraceEvent(SevError, "FastRestoreMasterPhaseSendMutationsFromLoaders")
-			    .detail("Loader", reply.id)
-			    .detail("UnexpectedReply", reply.toString());
-		}
-	}
-	// Sanity check all loaders have sent requests
-	for (auto& loader : loadersInterf) {
-		if ((useRangeFile && batchStatus->loadStatus[loader.first] != RestoreSendStatus::SendedRanges) ||
-		    (!useRangeFile && batchStatus->loadStatus[loader.first] != RestoreSendStatus::SendedLogs)) {
-			TraceEvent(SevError, "FastRestoreMasterPhaseSendMutationsFromLoaders")
-			    .detail("Loader", loader.first)
-			    .detail("UseRangeFile", useRangeFile)
-			    .detail("SendStatus", batchStatus->loadStatus[loader.first]);
-		}
-	}
+	// for (auto& reply : replies) {
+	// 	RestoreSendStatus status = batchStatus->loadStatus[reply.id];
+	// 	if ((status == RestoreSendStatus::SendingRanges || status == RestoreSendStatus::SendingLogs)) {
+	// 		batchStatus->loadStatus[reply.id] = (status == RestoreSendStatus::SendingRanges)
+	// 		                                        ? RestoreSendStatus::SendedRanges
+	// 		                                        : RestoreSendStatus::SendedLogs;
+	// 		if (reply.isDuplicated) {
+	// 			TraceEvent(SevWarn, "FastRestoreMasterPhaseSendMutationsFromLoaders")
+	// 			    .detail("Loader", reply.id)
+	// 			    .detail("DuplicateRequestAcked", "Request should have been processed");
+	// 		}
+	// 	} else if ((status == RestoreSendStatus::SendedRanges || status == RestoreSendStatus::SendedLogs) &&
+	// 	           reply.isDuplicated) {
+	// 		TraceEvent(SevDebug, "FastRestoreMasterPhaseSendMutationsFromLoaders")
+	// 		    .detail("Loader", reply.id)
+	// 		    .detail("RequestIgnored", "Send request was sent more than once");
+	// 	} else {
+	// 		TraceEvent(SevError, "FastRestoreMasterPhaseSendMutationsFromLoaders")
+	// 		    .detail("Loader", reply.id)
+	// 		    .detail("UnexpectedReply", reply.toString());
+	// 	}
+	// }
+	// // Sanity check all loaders have sent requests
+	// for (auto& loader : loadersInterf) {
+	// 	if ((useRangeFile && batchStatus->loadStatus[loader.first] != RestoreSendStatus::SendedRanges) ||
+	// 	    (!useRangeFile && batchStatus->loadStatus[loader.first] != RestoreSendStatus::SendedLogs)) {
+	// 		TraceEvent(SevError, "FastRestoreMasterPhaseSendMutationsFromLoaders")
+	// 		    .detail("Loader", loader.first)
+	// 		    .detail("UseRangeFile", useRangeFile)
+	// 		    .detail("SendStatus", batchStatus->loadStatus[loader.first]);
+	// 	}
+	// }
 
 	TraceEvent("FastRestoreMasterPhaseSendMutationsFromLoadersDone")
 	    .detail("BatchIndex", batchIndex)

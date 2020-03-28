@@ -335,6 +335,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	    .detail("UseRangeFile", req.useRangeFile)
 	    .detail("LoaderSendStatus", batchStatus->toString());
 
+	// Ensure each file is sent exactly once by using batchStatus->sendAllLogs and batchStatus->sendAllRanges
 	if (!req.useRangeFile) {
 		if (!batchStatus->sendAllLogs.present()) { // Has not sent
 			batchStatus->sendAllLogs = Never();
@@ -342,7 +343,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 			TraceEvent(SevInfo, "FastRestoreSendMutationsProcessLogRequest", self->id())
 			    .detail("BatchIndex", req.batchIndex)
 			    .detail("UseRangeFile", req.useRangeFile);
-			ASSERT(!batchStatus->sendAllRanges.present());
+			// ASSERT(!batchStatus->sendAllRanges.present());
 		} else if (!batchStatus->sendAllLogs.get().isReady()) { // In the process of sending
 			TraceEvent(SevDebug, "FastRestoreSendMutationsWaitDuplicateLogRequest", self->id())
 			    .detail("BatchIndex", req.batchIndex)
@@ -360,7 +361,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 			TraceEvent(SevInfo, "FastRestoreSendMutationsProcessRangeRequest", self->id())
 			    .detail("BatchIndex", req.batchIndex)
 			    .detail("UseRangeFile", req.useRangeFile);
-			ASSERT(batchStatus->sendAllLogs.get().isReady());
+			// ASSERT(batchStatus->sendAllLogs.get().isReady());
 		} else if (!batchStatus->sendAllRanges.get().isReady()) {
 			TraceEvent(SevDebug, "FastRestoreSendMutationsWaitDuplicateRangeRequest", self->id())
 			    .detail("BatchIndex", req.batchIndex)
