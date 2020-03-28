@@ -84,10 +84,7 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker,
 		wait(startProcessRestoreRequests(self, cx));
 	} catch (Error& e) {
 		if (e.code() != error_code_operation_cancelled) {
-			TraceEvent(SevError, "FastRestoreMasterStart")
-			    .detail("Reason", "Unexpected unhandled error")
-			    .detail("ErrorCode", e.code())
-			    .detail("Error", e.what());
+			TraceEvent(SevError, "FastRestoreMasterStart").detail("Reason", "Unexpected unhandled error").error(e);
 		}
 	}
 
@@ -204,15 +201,13 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	} catch (Error& e) {
 		if (restoreIndex < restoreRequests.size()) {
 			TraceEvent(SevError, "FastRestoreMasterProcessRestoreRequestsFailed", self->id())
-			    .detail("Error", e.what())
-			    .detail("ErrorCode", e.code())
-			    .detail("RestoreRequest", restoreRequests[restoreIndex].toString());
+			    .detail("RestoreRequest", restoreRequests[restoreIndex].toString())
+			    .error(e);
 		} else {
 			TraceEvent(SevError, "FastRestoreMasterProcessRestoreRequestsFailed", self->id())
-			    .detail("Error", e.what())
-			    .detail("ErrorCode", e.code())
 			    .detail("RestoreRequests", restoreRequests.size())
-			    .detail("RestoreIndex", restoreIndex);
+			    .detail("RestoreIndex", restoreIndex)
+			    .error(e);
 		}
 	}
 

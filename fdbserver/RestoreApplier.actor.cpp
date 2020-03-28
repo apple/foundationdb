@@ -222,8 +222,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			retries++;
 			TraceEvent(retries > 10 ? SevError : SevWarn, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
 			    .detail("GetKeys", incompleteStagingKeys.size())
-			    .detail("Error", e.what())
-			    .detail("ErrorCode", e.code());
+			    .error(e);
 			wait(tr->onError(e));
 			fValues.clear();
 		}
