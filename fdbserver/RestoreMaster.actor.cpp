@@ -437,8 +437,6 @@ ACTOR static Future<Void> sendMutationsFromLoaders(Reference<MasterBatchData> ba
 
 	std::vector<std::pair<UID, RestoreSendMutationsToAppliersRequest>> requests;
 	for (auto& loader : loadersInterf) {
-		ASSERT(batchStatus->loadStatus.find(loader.first) == batchStatus->loadStatus.end() ||
-		       batchStatus->loadStatus[loader.first] == RestoreSendStatus::SendedLogs);
 		requests.emplace_back(
 		    loader.first, RestoreSendMutationsToAppliersRequest(batchIndex, batchData->rangeToApplier, useRangeFile));
 		batchStatus->loadStatus[loader.first] =
