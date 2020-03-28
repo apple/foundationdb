@@ -1152,18 +1152,21 @@ public:
 		// check partition 0 is continuous and create a map of ranges to tags
 		std::map<std::pair<Version, Version>, int> tags; // range [begin, end] -> tags
 		if (!isContinuous(files, tagIndices[0], begin, end, &tags)) {
-			TraceEvent(SevWarn, "BackupFileNotContinuous").detail("Partition", 0).detail("Begin", begin).detail("End", end);
+			TraceEvent(SevWarn, "BackupFileNotContinuous")
+			    .detail("Partition", 0)
+			    .detail("RangeBegin", begin)
+			    .detail("RangeEnd", end);
 			return false;
 		}
 
 		// for each range in tags, check all tags from 1 are continouous
 		for (const auto [beginEnd, count] : tags) {
 			for (int i = 1; i < count; i++) {
-				if (!isContinuous(files, tagIndices[i], beginEnd.first, beginEnd.second, nullptr)) {
+				if (!isContinuous(files, tagIndices[i], beginEnd.first, std::min(beginEnd.second - 1, end), nullptr)) {
 					TraceEvent(SevWarn, "BackupFileNotContinuous")
 					    .detail("Partition", i)
-					    .detail("Begin", begin)
-					    .detail("End", end);
+					    .detail("RangeBegin", beginEnd.first)
+					    .detail("RangeEnd", beginEnd.second);
 					return false;
 				}
 			}
@@ -1197,12 +1200,24 @@ public:
 	                                               const Version scanBegin, const Version scanEnd) {
 		if (logs.empty()) return;
 
-		Version ver = getPartitionedLogsContinuousEndVersion(
-		    logs, scanBegin > desc->minLogBegin.get() ? scanBegin : desc->minLogBegin.get());
-		if (ver >= desc->contiguousLogEnd.get()) {
-			// contiguousLogEnd is not inclusive, so +1 here.
-			desc->contiguousLogEnd.get() = ver + 1;
-			TraceEvent("UpdateContinuousLogEnd").detail("Version", ver + 1);
+		Version begin = std::max(scanBegin, desc->minLogBegin.get());
+		TraceEvent("ContinuousLogEnd").detail("ScanBegin", scanBegin).detail("ScanEnd", scanEnd).detail("Begin", begin);
+		for (const auto& file : logs) {
+			if (file.beginVersion > begin) {
+				if (scanBegin > 0) return;
+
+				// scanBegin is 0
+				desc->minLogBegin = file.beginVersion;
+				begin = file.beginVersion;
+			}
+
+			Version ver = getPartitionedLogsContinuousEndVersion(logs, begin);
+			if (ver >= desc->contiguousLogEnd.get()) {
+				// contiguousLogEnd is not inclusive, so +1 here.
+				desc->contiguousLogEnd.get() = ver + 1;
+				TraceEvent("UpdateContinuousLogEnd").detail("Version", ver + 1);
+				return;
+			}
 		}
 	}
 
@@ -1250,7 +1265,7 @@ public:
 				    .detail("EndVersion", tagEnd)
 				    .detail("RangeBegin", beginEnd.first)
 				    .detail("RangeEnd", beginEnd.second);
-				if (tagEnd == 0) return lastEnd;
+				if (tagEnd == 0) return lastEnd == begin ? 0 : lastEnd;
 			}
 			if (tagEnd < beginEnd.second) {
 				return tagEnd;
