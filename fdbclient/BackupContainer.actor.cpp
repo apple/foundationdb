@@ -1206,6 +1206,7 @@ public:
 	                                               const Version scanBegin, const Version scanEnd) {
 		if (logs.empty()) return;
 
+		Version snapshotBeginVersion = desc->snapshots.size() > 0 ? desc->snapshots[0].beginVersion : invalidVersion;
 		Version begin = std::max(scanBegin, desc->minLogBegin.get());
 		TraceEvent("ContinuousLogEnd")
 		    .detail("ScanBegin", scanBegin)
@@ -1226,7 +1227,7 @@ public:
 				// contiguousLogEnd is not inclusive, so +1 here.
 				desc->contiguousLogEnd.get() = ver + 1;
 				TraceEvent("UpdateContinuousLogEnd").detail("Version", ver + 1);
-				return;
+				if (ver > snapshotBeginVersion) return;
 			}
 		}
 	}
