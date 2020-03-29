@@ -161,6 +161,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			// Note: Log and range mutations may be delivered out of order. Can we handle it?
 			if (mutation.type == MutationRef::SetVersionstampedKey ||
 			    mutation.type == MutationRef::SetVersionstampedValue) {
+				ASSERT(false); // No version stamp mutations in backup logs
 				batchData->addVersionStampedKV(mutation, mutationVersion, numVersionStampedKV);
 				numVersionStampedKV++;
 			} else {
