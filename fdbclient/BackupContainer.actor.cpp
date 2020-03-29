@@ -823,7 +823,13 @@ public:
 			// If we didn't get log versions above then seed them using the first log file
 			if (!desc.contiguousLogEnd.present()) {
 				desc.minLogBegin = logs.begin()->beginVersion;
-				desc.contiguousLogEnd = logs.begin()->endVersion;
+				if (partitioned) {
+					// Cannot use the first file's end version, which may not be contiguous
+					// for other partitions. Set to its beginVersion to be safe.
+					desc.contiguousLogEnd = logs.begin()->beginVersion;
+				} else {
+					desc.contiguousLogEnd = logs.begin()->endVersion;
+				}
 			}
 
 			if (partitioned) {
@@ -1201,7 +1207,11 @@ public:
 		if (logs.empty()) return;
 
 		Version begin = std::max(scanBegin, desc->minLogBegin.get());
-		TraceEvent("ContinuousLogEnd").detail("ScanBegin", scanBegin).detail("ScanEnd", scanEnd).detail("Begin", begin);
+		TraceEvent("ContinuousLogEnd")
+		    .detail("ScanBegin", scanBegin)
+		    .detail("ScanEnd", scanEnd)
+		    .detail("Begin", begin)
+		    .detail("ContiguousLogEnd", desc->contiguousLogEnd.get());
 		for (const auto& file : logs) {
 			if (file.beginVersion > begin) {
 				if (scanBegin > 0) return;
