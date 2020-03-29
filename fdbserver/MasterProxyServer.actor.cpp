@@ -640,6 +640,7 @@ ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> rel
 	return Void();
 }
 
+// Commit one batch of transactions trs
 ACTOR Future<Void> commitBatch(
 	ProxyCommitData* self,
 	vector<CommitTransactionRequest> trs,

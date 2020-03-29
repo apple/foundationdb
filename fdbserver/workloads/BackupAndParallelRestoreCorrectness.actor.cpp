@@ -439,6 +439,12 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				BackupDescription desc = wait(self->usePartitionedLogs ? container->describePartitionedBackup()
 				                                                       : container->describeBackup());
 
+				TraceEvent("BAFRW_Restore", randomID)
+				    .detail("LastBackupContainer", lastBackupContainer->getURL())
+				    .detail("MinRestorableVersion", desc.minRestorableVersion.get())
+				    .detail("MaxRestorableVersion", desc.maxRestorableVersion.get())
+				    .detail("ContiguousLogEnd", desc.contiguousLogEnd.get());
+
 				state Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {
 					if (deterministicRandom()->random01() < 0.1) {
@@ -446,7 +452,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					} else if (deterministicRandom()->random01() < 0.1) {
 						targetVersion = desc.maxRestorableVersion.get();
 					} else if (deterministicRandom()->random01() < 0.5) {
-						ASSERT_WE_THINK(desc.minRestorableVersion.get() <= desc.contiguousLogEnd.get());
+						// The assertion may fail because minRestorableVersion may be decided by snapshot version.
+						// ASSERT_WE_THINK(desc.minRestorableVersion.get() <= desc.contiguousLogEnd.get());
 						// This assertion can fail when contiguousLogEnd < maxRestorableVersion and
 						// the snapshot version > contiguousLogEnd. I.e., there is a gap between
 						// contiguousLogEnd and snapshot version.
