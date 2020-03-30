@@ -39,7 +39,9 @@ from json import JSONEncoder
 import logging
 import struct
 from bisect import bisect_left
+from bisect import bisect_right
 import time
+import datetime
 
 PROTOCOL_VERSION_5_2 = 0x0FDB00A552000001
 PROTOCOL_VERSION_6_0 = 0x0FDB00A570010001
@@ -514,6 +516,7 @@ class RangeCounter(object):
         self.k = k
         from sortedcontainers import SortedDict
         self.ranges = SortedDict()
+        self.ranges[b''] = 0
 
     def process(self, transaction_info):
         for get_range in transaction_info.get_ranges:
@@ -521,52 +524,18 @@ class RangeCounter(object):
 
     def _insert_range(self, start_key, end_key):
         keys = self.ranges.keys()
-        if len(keys) == 0:
-            self.ranges[start_key] = end_key, 1
-            return
+        start_pos = bisect_right(keys, start_key)-1
+        end_pos = bisect_right(keys, end_key)-1
 
-        start_pos = bisect_left(keys, start_key)
+        start_count = self.ranges[keys[start_pos]]
+        end_count = self.ranges[keys[end_pos]]
+
         end_pos = bisect_left(keys, end_key)
-        #print("start_pos=%d, end_pos=%d" % (start_pos, end_pos))
+        for k in self.ranges.islice(start_pos+1, end_pos):
+            self.ranges[k] += 1
 
-        possible_intersection_keys = keys[max(0, start_pos - 1):min(len(keys), end_pos+1)]
-
-        start_range_left = start_key
-
-        for key in possible_intersection_keys:
-            cur_end_key, cur_count = self.ranges[key]
-            #logger.debug("key=%s, cur_end_key=%s, cur_count=%d, start_range_left=%s" % (key, cur_end_key, cur_count, start_range_left))
-            if start_range_left < key:
-                if end_key <= key:
-                    self.ranges[start_range_left] = end_key, 1
-                    return
-                self.ranges[start_range_left] = key, 1
-                start_range_left = key
-            assert start_range_left >= key
-            if start_range_left >= cur_end_key:
-                continue
-
-            # [key, start_range_left) = cur_count
-            # if key == start_range_left this will get overwritten below
-            self.ranges[key] = start_range_left, cur_count
-
-            if end_key <= cur_end_key:
-                # [start_range_left, end_key) = cur_count+1
-                # [end_key, cur_end_key) = cur_count
-                self.ranges[start_range_left] = end_key, cur_count + 1
-                if end_key != cur_end_key:
-                    self.ranges[end_key] = cur_end_key, cur_count
-                start_range_left = end_key
-                break
-            else:
-                # [start_range_left, cur_end_key) = cur_count+1
-                self.ranges[start_range_left] = cur_end_key, cur_count+1
-                start_range_left = cur_end_key
-            assert start_range_left <= end_key
-
-        # there may be some range left
-        if start_range_left < end_key:
-            self.ranges[start_range_left] = end_key, 1
+        self.ranges[start_key] = start_count+1
+        self.ranges[end_key] = end_count
 
     def get_count_for_key(self, key):
         if key in self.ranges:
@@ -574,16 +543,12 @@ class RangeCounter(object):
 
         keys = self.ranges.keys()
         index = bisect_left(keys, key)
-        if index == 0:
-            return 0
 
         index_key = keys[index-1]
-        if index_key <= key < self.ranges[index_key][0]:
-            return self.ranges[index_key][1]
-        return 0
+        return self.ranges[keys[index_key]]
 
     def get_range_boundaries(self, shard_finder=None):
-        total = sum([count for _, (_, count) in self.ranges.items()])
+        total = sum([count for count in self.ranges.values()])
         range_size = total // self.k
         output_range_counts = []
 
@@ -599,42 +564,102 @@ class RangeCounter(object):
                 output_range_counts.append((start, end, count, None, None))
 
         this_range_start_key = None
+        this_range_end_key = None
         count_this_range = 0
-        for (start_key, (end_key, count)) in self.ranges.items():
-            if not this_range_start_key:
-                this_range_start_key = start_key
-            count_this_range += count
+        prev_count = 0
+        for (start_key, count) in self.ranges.items():
+            if prev_count > 0:
+                this_range_end_key = start_key
+
             if count_this_range >= range_size:
-                add_boundary(this_range_start_key, end_key, count_this_range)
+                add_boundary(this_range_start_key, this_range_end_key, count_this_range)
                 count_this_range = 0
                 this_range_start_key = None
+
+            if count != 0 and not this_range_start_key:
+                this_range_start_key = start_key
+
+            prev_count = count
+            count_this_range += count
+
+        if this_range_end_key is None:
+            this_range_end_key = b'\xff'
         if count_this_range > 0:
-            add_boundary(this_range_start_key, end_key, count_this_range)
+            add_boundary(this_range_start_key, this_range_end_key, count_this_range)
+
+        for index in range(len(output_range_counts)):
+            item = output_range_counts[index]
+            if item[4] is not None:
+                while True:
+                    try:
+                        output_range_counts[index] = item[0:4] + ([a.decode('ascii') for a in item[4].wait()],)
+                        break
+                    except fdb.FDBError as e:
+                        output_range_counts[index] = item[0:4] + (shard_finder.get_addresses_for_key(item[0]),)
 
         return output_range_counts
 
 
 class ShardFinder(object):
-    def __init__(self, db):
+    def __init__(self, db, include_ports):
         self.db = db
+        self.include_ports = include_ports
 
-    @staticmethod
-    @fdb.transactional
-    def _get_boundary_keys(tr, begin, end):
-        tr.options.set_read_lock_aware()
-        return fdb.locality.get_boundary_keys(tr, begin, end)
+        self.tr = db.create_transaction()
+        self.refresh_tr()
+
+        self.outstanding = []
+        self.boundary_keys = list(fdb.locality.get_boundary_keys(db, b'', b'\xff\xff'))
+        self.shard_cache = {}
+
+    def _get_boundary_keys(self, begin, end):
+        start_pos = max(0, bisect_right(self.boundary_keys, begin)-1)
+        end_pos = max(0, bisect_right(self.boundary_keys, end)-1)
+
+        return self.boundary_keys[start_pos:end_pos]
+
+    def refresh_tr(self):
+        self.tr.options.set_read_lock_aware()
+        if self.include_ports:
+            self.tr.options.set_include_port_in_address()
 
     @staticmethod
     @fdb.transactional
     def _get_addresses_for_key(tr, key):
-        tr.options.set_read_lock_aware()
         return fdb.locality.get_addresses_for_key(tr, key)
 
     def get_shard_count(self, start_key, end_key):
-        return len(list(self._get_boundary_keys(self.db, start_key, end_key))) + 1
+        return len(self._get_boundary_keys(start_key, end_key)) + 1
 
     def get_addresses_for_key(self, key):
-        return [a.decode('ascii') for a in self._get_addresses_for_key(self.db, key).wait()]
+        shard = self.boundary_keys[max(0, bisect_right(self.boundary_keys, key)-1)]
+        do_load = False
+        if not shard in self.shard_cache:
+            do_load = True
+        elif self.shard_cache[shard].is_ready():
+            try:
+                self.shard_cache[shard].wait()
+            except fdb.FDBError as e:
+                self.tr.on_error(e).wait()
+                self.refresh_tr()
+                do_load = True
+
+        if do_load:
+            if len(self.outstanding) > 1000:
+                for f in self.outstanding:
+                    try:
+                        f.wait()
+                    except fdb.FDBError as e:
+                        pass
+
+                self.outstanding = []
+                self.tr.reset()
+                self.refresh_tr()
+
+            self.outstanding.append(self._get_addresses_for_key(self.tr, shard))
+            self.shard_cache[shard] = self.outstanding[-1]
+
+        return self.shard_cache[shard]
 
 
 class TopKeysCounter(object):
@@ -682,6 +707,16 @@ class TopKeysCounter(object):
                 start_key = None
         if count_this_range > 0:
             add_boundary(start_key, k, count_this_range)
+
+        for index in range(len(output_range_counts)):
+            item = output_range_counts[index]
+            if item[4] is not None:
+                while True:
+                    try:
+                        output_range_counts[index] = item[0:4] + ([a.decode('ascii') for a in item[4].wait()],)
+                        break
+                    except fdb.FDBError as e:
+                        output_range_counts[index] = item[0:4] + (shard_finder.get_addresses_for_key(item[0]),)
 
         return output_range_counts
 
@@ -733,6 +768,7 @@ def main():
     end_time_group.add_argument("--max-timestamp", type=int, help="Don't return events newer than this epoch time")
     end_time_group.add_argument("-e", "--end-time", type=str, help="Don't return events older than this parsed time")
     parser.add_argument("--top-keys", type=int, help="If specified will output this many top keys for reads or writes", default=0)
+    parser.add_argument("--include-ports", type=bool, help="Print addresses with the port number. 6.2 clusters only", default=False)
     args = parser.parse_args()
 
     type_filter = set()
@@ -802,7 +838,8 @@ def main():
                     addresses_string = "addresses=%s" % ','.join(addresses) if addresses else ''
                     print("[%s, %s] %d shards=%d %s" % (start, end, count, shard_count, addresses_string))
 
-        shard_finder = ShardFinder(db)
+        shard_finder = ShardFinder(db, args.include_ports)
+
         top_reads = key_counter.get_top_k_reads()
         if top_reads:
             print("Top %d reads:" % min(top_keys, len(top_reads)))
