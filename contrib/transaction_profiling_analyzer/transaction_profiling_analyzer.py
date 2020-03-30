@@ -524,18 +524,25 @@ class RangeCounter(object):
 
     def _insert_range(self, start_key, end_key):
         keys = self.ranges.keys()
-        start_pos = bisect_right(keys, start_key)-1
-        end_pos = bisect_right(keys, end_key)-1
+        start_pos = self.ranges.bisect_right(start_key)-1
+        end_pos = self.ranges.bisect_right(end_key)-1
 
-        start_count = self.ranges[keys[start_pos]]
-        end_count = self.ranges[keys[end_pos]]
+        exact_end = end_key == keys[end_pos]
+        if not exact_end:
+            end_count = self.ranges[keys[end_pos]]
+            end_pos += 1
 
-        end_pos = bisect_left(keys, end_key)
         for k in self.ranges.islice(start_pos+1, end_pos):
             self.ranges[k] += 1
 
-        self.ranges[start_key] = start_count+1
-        self.ranges[end_key] = end_count
+        if keys[start_pos] == start_key:
+            self.ranges[start_key] += 1
+        else:
+            self.ranges[start_key] = self.ranges[keys[start_pos]] + 1
+
+        if not exact_end:
+            self.ranges[end_key] = end_count
+
 
     def get_count_for_key(self, key):
         if key in self.ranges:
