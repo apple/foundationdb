@@ -536,6 +536,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "data_distribution_disabled_for_rebalance":true,
       "data_distribution_disabled":true,
       "configuration":{
+         "active_primary_db":"pv",
          "log_anti_quorum":0,
          "log_replicas":2,
          "log_replication_policy":"(zoneid^3x1)",

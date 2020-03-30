@@ -997,12 +997,52 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					outputString += "unknown";
 				}
 
+				Optional<std::string> activePrimaryDC;
+
+				if (statusObjConfig.has("active_primary_dc")) {
+					activePrimaryDC = statusObjConfig["active_primary_dc"].get_str();
+				}
+
 				StatusArray regions;
 				if (statusObjConfig.has("regions")) {
 					outputString += "\n  Regions: ";
 					regions = statusObjConfig["regions"].get_array();
+					bool isFirstRegion = true;
+					bool isPrimary = false;
+					std::vector<std::string> regionSatelliteDCs;
+					std::string regionDC;
 					for (StatusObjectReader region : regions) {
-						outputString += "\n    -";
+						// Assumes the `regions` are already sorted by priority in descending order
+						for (StatusObjectReader dc : region["datacenters"].get_array()) {
+							if (!dc.has("satellite")) {
+								regionDC = dc["id"].get_str();
+								if (activePrimaryDC.present() && dc["id"].get_str() == activePrimaryDC.get()) {
+									isPrimary = true;
+								} else if (!activePrimaryDC.present() && isFirstRegion) {
+									isPrimary = true;
+								}
+							} else if (dc["satellite"].get_int() == 1) {
+								regionSatelliteDCs.push_back(dc["id"].get_str());
+							}
+						}
+						if (isPrimary) {
+							outputString += "\n    Primary -";
+						} else {
+							outputString += "\n    Remote -";
+						}
+						outputString += format("\n        Datacenter                    - %s", regionDC.c_str());
+						if (regionSatelliteDCs.size() > 0) {
+							outputString += "\n        Satellite datacenters         - ";
+							for (int i = 0; i < regionSatelliteDCs.size(); i++) {
+								if (i != regionSatelliteDCs.size() - 1) {
+									outputString += format("%s, ", regionSatelliteDCs[i].c_str());
+								} else {
+									outputString += format("%s", regionSatelliteDCs[i].c_str());
+								}
+							}
+						}
+						isPrimary = false;
+						isFirstRegion = false;
 						if (region.get("satellite_redundancy_mode", strVal)) {
 							outputString += format("\n        Satellite Redundancy Mode     - %s", strVal.c_str());
 						}

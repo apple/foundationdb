@@ -2150,6 +2150,20 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<CachedSer
 	return statusObj;
 }
 
+ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx) {
+	state ReadYourWritesTransaction tr(cx);
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> res = wait(tr.get(primaryDatacenterKey));
+			return res;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 // constructs the cluster section of the json status output
 ACTOR Future<StatusReply> clusterGetStatus(
 		Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> db,
@@ -2346,11 +2360,17 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(configuration.get(), coordinators, workers, extraTlogEligibleZones, minReplicasRemaining, loadResult.present() && loadResult.get().healthyZone.present());
 			}
 
-			JsonBuilderObject configObj = configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
+			state JsonBuilderObject configObj =
+			    configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
 
 			// configArr could be empty
-			if (!configObj.empty())
+			if (!configObj.empty()) {
+				Optional<Value> primaryDCO = wait(getActivePrimaryDC(cx));
+				if (primaryDCO.present()) {
+					configObj["active_primary_dc"] = primaryDCO.get();
+				}
 				statusObj["configuration"] = configObj;
+			}
 
 			// workloadStatusFetcher returns the workload section but also optionally writes the qos section and adds to the data_overlay object
 			if (!workerStatuses[1].empty())
