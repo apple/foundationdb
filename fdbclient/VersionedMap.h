@@ -114,30 +114,53 @@ namespace PTreeImpl {
 		return contains(p->child(!less, at), at, x);
 	}
 
+	// TODO: Remove the number of invocations of operator<, and replace with something closer to memcmp.
+	// and same for upper_bound.
 	template<class T, class X>
-	void lower_bound(const Reference<PTree<T>>& p, Version at, const X& x, std::vector<const PTree<T>*>& f){
+	void lower_bound(const Reference<PTree<T>>& p, Version at, const X& x, std::vector<const PTree<T>*>& f, std::vector<bool>& lessThan){
 		if (!p) {
-			while (f.size() && !(x < f.back()->data))
+			while (f.size() && !(lessThan.back())) {
 				f.pop_back();
+				lessThan.pop_back();
+			}
 			return;
 		}
 		f.push_back(p.getPtr());
 		bool less = x < p->data;
+		lessThan.push_back(less);
 		if (!less && !(p->data<x)) return;  // x == p->data
-		lower_bound(p->child(!less, at), at, x, f);
+		lower_bound(p->child(!less, at), at, x, f, lessThan);
+	}
+
+	template<class T, class X>
+	void lower_bound(const Reference<PTree<T>>& p, Version at, const X& x, std::vector<const PTree<T>*>& f) {
+		assert(!f.size());
+		std::vector<bool> lessThan;
+		lower_bound(p, at, x, f, lessThan);
+	}
+
+	template<class T, class X>
+	void upper_bound(const Reference<PTree<T>>& p, Version at, const X& x, std::vector<const PTree<T>*>& f, std::vector<bool>& lessThan){
+		if (!p) {
+			while (f.size() && !(lessThan.back())) {
+				f.pop_back();
+				lessThan.pop_back();
+			}
+			return;
+		}
+		f.push_back(p.getPtr());
+		bool less = x < p->data;
+		lessThan.push_back(less);
+		upper_bound(p->child(!less, at), at, x, f, lessThan);
 	}
 
 	template<class T, class X>
 	void upper_bound(const Reference<PTree<T>>& p, Version at, const X& x, std::vector<const PTree<T>*>& f){
-		if (!p) {
-			while (f.size() && !(x < f.back()->data))
-				f.pop_back();
-			return;
-		}
-		f.push_back(p.getPtr());
-		upper_bound(p->child(!(x < p->data), at), at, x, f);
+		assert(!f.size());
+		std::vector<bool> lessThan;
+		upper_bound(p, at, x, f, lessThan);
 	}
-	
+
 	template<class T, bool forward>
 	void move(Version at, std::vector<const PTree<T>*>& f){
 		ASSERT(f.size());

@@ -700,6 +700,7 @@ int IndexedSet<T,Metric>::insert(const std::vector<std::pair<T,Metric>>& dataVec
 			// traverse to find insert point
 			bool foundNode = false;
 			while (true){
+				// TODO: remove implicit double invocation of memcmp
 				d = t->data < data;
 				if (!d)
 					blockEnd = t;
@@ -995,6 +996,7 @@ template <class Key>
 typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::find(const Key &key) const {
 	Node* t = root;
 	while (t){
+		// TODO: avoid indirect double invocation of memcmp
 		int d = t->data < key;
 		if (!d && !(key < t->data)) // t->data == key
 			return iterator(t);
@@ -1009,13 +1011,15 @@ template <class Key>
 typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::lower_bound(const Key &key) const {
 	Node* t = root;
 	if (!t) return iterator();
+	bool less;
 	while (true) {
-		Node *n = t->child[ t->data < key ];
+		less = t->data < key;
+		Node *n = t->child[less];
 		if (!n) break;
 		t = n;
 	}
 
-	if (t->data < key)
+	if (less)
 		moveIterator<1>(t);
 
 	return iterator(t);
@@ -1027,13 +1031,15 @@ template <class Key>
 typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::upper_bound(const Key &key) const {
 	Node* t = root;
 	if (!t) return iterator();
+	bool not_less;
 	while (true) {
-		Node *n = t->child[ !(key < t->data) ];
+		not_less = !(key < t->data);
+		Node *n = t->child[not_less];
 		if (!n) break;
 		t = n;
 	}
 
-	if (!(key < t->data))
+	if (not_less)
 		moveIterator<1>(t);
 
 	return iterator(t);
