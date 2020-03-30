@@ -1,5 +1,5 @@
 /*
- * art.h
+ * art_impl.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -52,10 +52,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef ART_IMPL_H
 #define ART_IMPL_H
 
-#define art_tree VersionedBTree::art_tree
+
+//#define art_tree VersionedBTree::art_tree
+using art_tree =  VersionedBTree::art_tree;
 #define art_node art_tree::art_node
 
-typedef art_tree::art_leaf art_leaf;
+//typedef art_tree::art_leaf art_leaf;
+using art_leaf = art_tree::art_leaf;
 
 
 int art_tree::fat_leaf_offset[] = {
@@ -149,6 +152,7 @@ art_leaf *art_tree::minimum(art_node *n) {
         case ART_NODE4_KV:
             return ART_FAT_NODE_LEAF(n);
         default:
+            printf("%d\n", n->type);
             UNSTOPPABLE_ASSERT(false);
     }
 }
@@ -1158,7 +1162,7 @@ art_leaf *art_tree::insert_fat_node(art_node *n, art_node **ref, const KeyRef &k
         art_leaf *lm = min_of_n == nullptr ? minimum(n) : min_of_n; //FIXME: reuse from before if already taken
         art_node *nkv = n;
         //change the type before deferencing the leaf
-        nkv->type = n->type + 4;
+        nkv->type = static_cast<ART_NODE_TYPE>(n->type + 4);
         art_leaf *l_new = make_leaf(k, value);
         ART_FAT_NODE_LEAF(nkv) = l_new;
         *ref = (art_node *) nkv;
@@ -1445,15 +1449,17 @@ void art_tree::add_child4(art_node4 *n, art_node **ref, unsigned char c, void *c
 
 
 //Every node is actually a kv node, but the type is <= NODE256
-art_node *art_tree::alloc_node(uint8_t type) {
+art_node *art_tree::alloc_node(ART_NODE_TYPE type) {
     const int offset = type > ART_NODE256 ? 0 : ART_NODE256;
-    art_node *n = (art_node *) new((Arena & ) * this->arena)uint8_t[node_sizes[offset + type]]();
+    art_node *n = (art_node *)
+            new((Arena & ) * this->arena)uint8_t[node_sizes[offset + type]]();
     n->type = type;
     return n;
 }
 
-art_node *art_tree::alloc_kv_node(uint8_t type) {
-    art_node *n = (art_node *) new((Arena & ) * this->arena)uint8_t[node_sizes[type]]();
+art_node *art_tree::alloc_kv_node(ART_NODE_TYPE type) {
+    art_node *n = (art_node *)
+            new((Arena & ) * this->arena)uint8_t[node_sizes[type]]();
     n->type = type;
     return n;
 }
@@ -1461,7 +1467,8 @@ art_node *art_tree::alloc_kv_node(uint8_t type) {
 art_leaf *art_tree::make_leaf(const KeyRef &k, void *value) {
     const int key_len = k.size();
     //Allocate contiguous buffer to hold the leaf and the key pointed by the KeyRef
-    art_leaf *v = (art_leaf *) new((Arena & ) * this->arena)uint8_t[sizeof(art_leaf) + key_len];
+    art_leaf *v = (art_leaf *)
+            new((Arena & ) * this->arena)uint8_t[sizeof(art_leaf) + key_len];
     //copy the key to the proper offset in the buffer
     memcpy(v + 1, k.begin(), key_len);
     KeyRef nkr = KeyRef((const uint8_t *) (v + 1), key_len);

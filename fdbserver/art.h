@@ -74,17 +74,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 struct art_iterator;
 
 struct art_tree {
-
-
-#define ART_LEAF 0
-#define ART_NODE4   1
-#define ART_NODE16  2
-#define ART_NODE48  3
-#define ART_NODE256 4
-#define ART_NODE4_KV   5
-#define ART_NODE16_KV  6
-#define ART_NODE48_KV  7
-#define ART_NODE256_KV 8
+    enum ART_NODE_TYPE : uint8_t{
+        ART_LEAF = 0, ART_NODE4 = 1, ART_NODE16 = 2, ART_NODE48 = 3, ART_NODE256 = 4,
+        ART_NODE4_KV = 5, ART_NODE16_KV = 6, ART_NODE48_KV = 7, ART_NODE256_KV = 8
+    };
 #define ART_MIN_LEAF_UNSET 1UL
 #define ART_LEAF_MATCH_KEY 1
 #define ART_LEAF_SMALLER_KEY 2
@@ -98,7 +91,7 @@ struct art_tree {
 #define ART_NEITHER 0
 
 
-#define ART_IS_LEAF(x) ( (*((uint8_t*)x) == ART_LEAF))
+#define ART_IS_LEAF(x) ( (*((ART_NODE_TYPE*)x) == ART_LEAF))
 
 #define ART_LEAF_RAW(x) ((art_leaf*)(x))
 
@@ -127,7 +120,7 @@ struct art_tree {
  * of all the various node sizes
  */
     struct art_node {
-        uint8_t type;
+        ART_NODE_TYPE type;
         uint8_t num_children;
         uint32_t partial_len;
         unsigned char partial[ART_MAX_PREFIX_LEN];
@@ -139,7 +132,7 @@ struct art_tree {
  * Note that the first two fields must be the same as in art_node
  */
     struct art_leaf {
-        uint8_t type;
+        ART_NODE_TYPE type;
         void *value;
         art_leaf *prev = nullptr;
         art_leaf *next = nullptr;
@@ -229,16 +222,6 @@ struct art_tree {
         art_leaf *leaf;
     };
 
-    struct art_children_pair {
-        art_node *child = nullptr;
-        art_node *next = nullptr;
-        art_node *prev = nullptr;
-    };
-
-/**
- * Main struct, points to root.
- */
-
 
 private:
     art_node *root;
@@ -264,7 +247,6 @@ private:
     static int prefix_mismatch(art_node *n, KeyRef &k, int depth, art_leaf **minout);
 
     static art_leaf *minimum_kv(art_node *n);
-
 
     static art_node **find_child(art_node *n, unsigned char c);
 
@@ -292,9 +274,9 @@ private:
     void remove_child(art_node *n, art_node **ref, unsigned char c, art_node **l, int depth);
 
     //needs this pointer to do allocation
-    art_node *alloc_node(uint8_t type);
+    art_node *alloc_node(ART_NODE_TYPE type);
 
-    art_node *alloc_kv_node(uint8_t type);
+    art_node *alloc_kv_node(ART_NODE_TYPE type);
 
     art_leaf *make_leaf(const KeyRef &k, void *value);
 
