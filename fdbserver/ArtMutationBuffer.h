@@ -1,0 +1,183 @@
+#ifndef ART_MUTATION_BUFFER
+#define ART_MUTATION_BUFFER
+
+#include "art.h"
+#include "flow/Arena.h"
+
+struct MutationBuffer {
+
+private:
+    Arena arena;
+    art_tree *mutations;
+
+public:
+    struct iterator : std::map<KeyRef, RangeMutation>::iterator {
+
+        art_iterator artIterator;
+
+        iterator() = default;
+
+        iterator(art_iterator i) {
+            artIterator = i;
+        }
+
+        iterator(const iterator &i) {
+            artIterator = i.artIterator;
+        }
+
+        const KeyRef &key() {
+            return artIterator.key();
+        }
+
+        RangeMutation &mutation() {
+            return (RangeMutation & )(*((RangeMutation *) artIterator.value()));
+        }
+
+        void **value_ptr() {
+            return artIterator.value_ptr();
+        }
+
+        bool operator==(const iterator &other) const {
+            return (artIterator) == (other.artIterator);
+        }
+
+        iterator &operator++() {
+            ++(artIterator);
+            return *this;
+        }
+
+        iterator &operator--() {
+            --(artIterator);
+            return *this;
+        }
+    };
+
+    struct const_iterator : std::map<KeyRef, RangeMutation>::const_iterator {
+        art_iterator artIterator;
+
+        const_iterator() = default;
+
+        const_iterator(art_iterator i) {
+            artIterator = i;
+        }
+
+        const_iterator(const const_iterator &i) {
+            artIterator = i.artIterator;
+        }
+
+        const KeyRef &key() {
+            return artIterator.key();
+        }
+
+        const RangeMutation &mutation() {
+            return (const RangeMutation &) (*((RangeMutation *) artIterator.value()));
+        }
+
+        bool operator==(const const_iterator &other) const {
+            return (artIterator) == (other.artIterator);
+        }
+
+        const_iterator &operator++() {
+            ++(artIterator);
+            return *this;
+        }
+
+        const_iterator &operator--() {
+            --(artIterator);
+            return *this;
+        }
+    };
+
+    MutationBuffer() {
+        printf("NEW MB\n");
+        mutations = new(arena) art_tree(arena);
+        // Create range representing the entire keyspace.  This reduces edge cases to applying mutations
+        // because now all existing keys are within some range in the mutation map.
+
+        mutations->insert(dbBegin.key, new(arena)RangeMutation());
+
+        // Setting the dbEnd key to be cleared prevents having to treat a range clear to dbEnd as a special
+        // case in order to avoid traversing down the rightmost edge of the tree.
+        RangeMutation *rm = new(arena) RangeMutation();
+        rm->clearBoundary();
+
+        mutations->insert(dbEnd.key, rm);
+    }
+
+    // Return a T constructed in arena
+    template<typename T>
+    T copyToArena(const T &object) {
+        return T(arena, object);
+    }
+
+    const_iterator upper_bound(const KeyRef &k) const {
+        return const_iterator(mutations->upper_bound(k));
+    }
+
+    const_iterator lower_bound(const KeyRef &k) const {
+        return const_iterator(mutations->lower_bound(k));
+    }
+
+    /*
+     * For now, let's not deal with conversions. Just create all combinations.
+     */
+    // erase [begin, end) from the mutation map
+    void erase(const iterator &begin, const iterator &end) {
+        art_iterator it = begin.artIterator;
+        art_iterator next = it;
+        ++next;
+        while (end.artIterator != it) {
+            mutations->erase(it);
+            it = next;
+            ++next;
+        }
+    }
+
+    void erase(const const_iterator &begin, const iterator &end) {
+        art_iterator it = begin.artIterator;
+        art_iterator next = it;
+        ++next;
+        while (end.artIterator != it) {
+            mutations->erase(it);
+            it = next;
+            ++next;
+        }
+    }
+
+    void erase(const iterator &begin, const const_iterator &end) {
+        art_iterator it = begin.artIterator;
+        art_iterator next = it;
+        ++next;
+        while (end.artIterator != it) {
+            mutations->erase(it);
+            it = next;
+            ++next;
+        }
+    }
+
+    // Find or create a mutation buffer boundary for bound and return an iterator to it
+    iterator insert(KeyRef boundary) {
+        int already_present = 0;
+        iterator ib = iterator(mutations->insert_if_absent(boundary, nullptr, &already_present));
+        if (already_present) {
+            return ib;
+        } else {
+            *(ib.value_ptr()) = new(arena) RangeMutation();
+        }
+        iterator iPrevious = ib;
+        --iPrevious;
+        if (iPrevious.mutation().clearAfterBoundary) {
+            ib.mutation().clearAll();
+        }
+        return ib;
+    }
+
+
+};
+
+#endif //ART_MUTATION_BUFFER
+
+
+
+
+
