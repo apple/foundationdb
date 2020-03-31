@@ -796,6 +796,13 @@ Most applications should use the read version that FoundationDB determines autom
 
 .. _api-python-transaction-options:
 
+Transaction misc functions
+--------------------------
+
+.. method:: Transaction.get_approximate_size()
+
+    |transaction-get-approximate-size-blurb|. Returns a :class:`FutureInt64`.
+
 Transaction options
 -------------------
 
