@@ -1,10 +1,10 @@
 testTitle=WriteDuringReadTest
     testName=WriteDuringRead
-	maximumTotalData=1000000
+    maximumTotalData=1000000
     testDuration=240.0
     slowModeStart=60.0
-	minNode=1
-	useSystemKeys=false
+    minNode=1
+    useSystemKeys=false
 
     testName=AtomicRestore
     startAfter=10.0
