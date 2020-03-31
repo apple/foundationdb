@@ -796,6 +796,13 @@ Most applications should use the read version that FoundationDB determines autom
 
     |infrequent| |transaction-get-versionstamp-blurb|
 
+Transaction misc functions
+--------------------------
+
+.. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
+
+    Get the estimated byte size of the given key range. Returns a :class:`FutureInt64`.
+
 .. _api-python-transaction-options:
 
 Transaction options
@@ -962,9 +969,9 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
 
     Represents a future string object and responds to the same methods as string in Python. They may be passed to FoundationDB methods that expect a string.
 
-.. class:: FutureVersion
+.. class:: FutureInt64
 
-    Represents a future version (integer). You must call the :meth:`Future.wait()` method on this object to retrieve the version as an integer.
+    Represents a future integer. You must call the :meth:`Future.wait()` method on this object to retrieve the integer.
 
 .. class:: FutureStringArray
 

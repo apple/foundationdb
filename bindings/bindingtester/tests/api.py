@@ -157,6 +157,7 @@ class ApiTest(Test):
         read_conflicts = ['READ_CONFLICT_RANGE', 'READ_CONFLICT_KEY']
         write_conflicts = ['WRITE_CONFLICT_RANGE', 'WRITE_CONFLICT_KEY', 'DISABLE_WRITE_CONFLICT']
         txn_sizes = ['GET_APPROXIMATE_SIZE']
+        storage_metrics = ['GET_ESTIMATED_RANGE_SIZE']
 
         op_choices += reads
         op_choices += mutations
@@ -170,6 +171,7 @@ class ApiTest(Test):
         op_choices += write_conflicts
         op_choices += resets
         op_choices += txn_sizes
+        op_choices += storage_metrics
 
         idempotent_atomic_ops = ['BIT_AND', 'BIT_OR', 'MAX', 'MIN', 'BYTE_MIN', 'BYTE_MAX']
         atomic_ops = idempotent_atomic_ops + ['ADD', 'BIT_XOR', 'APPEND_IF_FITS']
@@ -534,6 +536,21 @@ class ApiTest(Test):
             elif op == 'DECODE_DOUBLE':
                 d = self.random.random_float(11)
                 instructions.push_args(d)
+                instructions.append(op)
+                self.add_strings(1)
+            elif op == 'GET_ESTIMATED_RANGE_SIZE':
+                # Protect against inverted range and identical keys
+                key1 = self.workspace.pack(self.random.random_tuple(1))
+                key2 = self.workspace.pack(self.random.random_tuple(1))
+
+                while key1 == key2:
+                    key1 = self.workspace.pack(self.random.random_tuple(1))
+                    key2 = self.workspace.pack(self.random.random_tuple(1))
+
+                if key1 > key2:
+                    key1, key2 = key2, key1
+
+                instructions.push_args(key1, key2)
                 instructions.append(op)
                 self.add_strings(1)
 

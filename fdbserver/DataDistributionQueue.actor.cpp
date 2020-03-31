@@ -57,7 +57,8 @@ struct RelocateData {
 			rs.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT), interval("QueuedRelocation") {}
 
 	static bool isHealthPriority(int priority) {
-		return  priority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || 
+		return  priority == SERVER_KNOBS->PRIORITY_POPULATE_REGION ||
+				priority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || 
 				priority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT ||
 				priority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
 				priority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT ||
@@ -286,30 +287,31 @@ struct Busyness {
 };
 
 // find the "workFactor" for this, were it launched now
-int getWorkFactor( RelocateData const& relocation ) {
-	// Avoid the divide by 0!
-	ASSERT( relocation.src.size() );
-
+int getWorkFactor( RelocateData const& relocation, int singleRegionTeamSize ) {
 	if( relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT )
 		return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	else if( relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT )
 		return WORK_FULL_UTILIZATION / 2 / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	else // for now we assume that any message at a lower priority can best be assumed to have a full team left for work
-		return WORK_FULL_UTILIZATION / relocation.src.size() / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+		return WORK_FULL_UTILIZATION / singleRegionTeamSize / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 }
 
 // Data movement's resource control: Do not overload source servers used for the RelocateData
 // return true if servers are not too busy to launch the relocation
 // This ensure source servers will not be overloaded.
-bool canLaunch( RelocateData & relocation, int teamSize, std::map<UID, Busyness> & busymap,
+bool canLaunch( RelocateData & relocation, int teamSize, int singleRegionTeamSize, std::map<UID, Busyness> & busymap,
 		std::vector<RelocateData> cancellableRelocations ) {
 	// assert this has not already been launched
 	ASSERT( relocation.workFactor == 0 );
 	ASSERT( relocation.src.size() != 0 );
+	ASSERT( teamSize >= singleRegionTeamSize );
 
 	// find the "workFactor" for this, were it launched now
-	int workFactor = getWorkFactor( relocation );
-	int neededServers = std::max( 1, (int)relocation.src.size() - teamSize + 1 );
+	int workFactor = getWorkFactor( relocation, singleRegionTeamSize );
+	int neededServers = std::min<int>( relocation.src.size(), teamSize - singleRegionTeamSize + 1 );
+	if(SERVER_KNOBS->USE_OLD_NEEDED_SERVERS) {
+		neededServers = std::max( 1, (int)relocation.src.size() - teamSize + 1 );
+	}
 	// see if each of the SS can launch this task
 	for( int i = 0; i < relocation.src.size(); i++ ) {
 		// For each source server for this relocation, copy and modify its busyness to reflect work that WOULD be cancelled
@@ -330,9 +332,9 @@ bool canLaunch( RelocateData & relocation, int teamSize, std::map<UID, Busyness>
 }
 
 // update busyness for each server
-void launch( RelocateData & relocation, std::map<UID, Busyness> & busymap ) {
+void launch( RelocateData & relocation, std::map<UID, Busyness> & busymap, int singleRegionTeamSize ) {
 	// if we are here this means that we can launch and should adjust all the work the servers can do
-	relocation.workFactor = getWorkFactor( relocation );
+	relocation.workFactor = getWorkFactor( relocation, singleRegionTeamSize );
 	for( int i = 0; i < relocation.src.size(); i++ )
 		busymap[ relocation.src[i] ].addWork( relocation.priority, relocation.workFactor );
 }
@@ -361,6 +363,7 @@ struct DDQueueData {
 	int queuedRelocations;
 	int64_t bytesWritten;
 	int teamSize;
+	int singleRegionTeamSize;
 
 	std::map<UID, Busyness> busymap; // UID is serverID
 
@@ -397,7 +400,7 @@ struct DDQueueData {
 		// ensure a team remover will not start before the previous one finishes removing a team and move away data
 		// NOTE: split and merge shard have higher priority. If they have to wait for unhealthyRelocations = 0,
 		// deadlock may happen: split/merge shard waits for unhealthyRelocations, while blocks team_redundant.
-		if (healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT ||
+		if (healthPriority == SERVER_KNOBS->PRIORITY_POPULATE_REGION || healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT ||
 		 healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT || healthPriority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT) { 
 			unhealthyRelocations++;
 			rawProcessingUnhealthy->set(true);
@@ -405,7 +408,7 @@ struct DDQueueData {
 		priority_relocations[priority]++;
 	}
 	void finishRelocation(int priority, int healthPriority) {
-		if (healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT ||
+		if (healthPriority == SERVER_KNOBS->PRIORITY_POPULATE_REGION || healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT ||
 		 healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT || healthPriority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT) {
 			unhealthyRelocations--;
 			ASSERT(unhealthyRelocations >= 0);
@@ -418,10 +421,10 @@ struct DDQueueData {
 
 	DDQueueData( UID mid, MoveKeysLock lock, Database cx, std::vector<TeamCollectionInterface> teamCollections,
 		Reference<ShardsAffectedByTeamFailure> sABTF, PromiseStream<Promise<int64_t>> getAverageShardBytes,
-		int teamSize, PromiseStream<RelocateShard> output, FutureStream<RelocateShard> input, PromiseStream<GetMetricsRequest> getShardMetrics, double* lastLimited ) :
+		int teamSize, int singleRegionTeamSize, PromiseStream<RelocateShard> output, FutureStream<RelocateShard> input, PromiseStream<GetMetricsRequest> getShardMetrics, double* lastLimited ) :
 			activeRelocations( 0 ), queuedRelocations( 0 ), bytesWritten ( 0 ), teamCollections( teamCollections ),
 			shardsAffectedByTeamFailure( sABTF ), getAverageShardBytes( getAverageShardBytes ), distributorId( mid ), lock( lock ),
-			cx( cx ), teamSize( teamSize ), output( output ), input( input ), getShardMetrics( getShardMetrics ), startMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ),
+			cx( cx ), teamSize( teamSize ), singleRegionTeamSize( singleRegionTeamSize ), output( output ), input( input ), getShardMetrics( getShardMetrics ), startMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ),
 			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), lastLimited(lastLimited),
 			suppressIntervals(0), lastInterval(0), unhealthyRelocations(0), rawProcessingUnhealthy( new AsyncVar<bool>(false) ) {}
 
@@ -823,7 +826,7 @@ struct DDQueueData {
 			// SOMEDAY: the list of source servers may be outdated since they were fetched when the work was put in the
 			// queue
 			// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
-			if( !canLaunch( rd, teamSize, busymap, cancellableRelocations ) ) {
+			if( !canLaunch( rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations ) ) {
 				//logRelocation( rd, "SkippingQueuedRelocation" );
 				continue;
 			}
@@ -861,7 +864,7 @@ struct DDQueueData {
 				RelocateData& rrs = inFlight.rangeContaining(ranges[r].begin)->value();
 				rrs.keys = ranges[r];
 
-				launch( rrs, busymap );
+				launch( rrs, busymap, singleRegionTeamSize );
 				activeRelocations++;
 				startRelocation(rrs.priority, rrs.healthPriority);
 				// Start the actor that relocates data in the rrs.keys
@@ -936,7 +939,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				while( tciIndex < self->teamCollections.size() ) {
 					double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
 					if(rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT) inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_UNHEALTHY;
-					if(rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
+					if(rd.healthPriority == SERVER_KNOBS->PRIORITY_POPULATE_REGION || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
 					auto req = GetTeamRequest(rd.wantsNewServers, rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, true, false, inflightPenalty);
 					req.completeSources = rd.completeSources;
@@ -1028,10 +1031,23 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			//FIXME: do not add data in flight to servers that were already in the src.
 			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
 
-			TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId)
-				.detail("PairId", relocateShardInterval.pairID)
-				.detail("DestinationTeam", describe(destIds))
-				.detail("ExtraIds", describe(extraIds));
+			if (SERVER_KNOBS->DD_ENABLE_VERBOSE_TRACING) {
+				// StorageMetrics is the rd shard's metrics, e.g., bytes and write bandwidth
+				TraceEvent(SevInfo, "RelocateShardDecision", distributorId)
+				    .detail("PairId", relocateShardInterval.pairID)
+				    .detail("Priority", rd.priority)
+				    .detail("KeyBegin", rd.keys.begin)
+				    .detail("KeyEnd", rd.keys.end)
+				    .detail("StorageMetrics", metrics.toString())
+				    .detail("SourceServers", describe(rd.src))
+				    .detail("DestinationTeam", describe(destIds))
+				    .detail("ExtraIds", describe(extraIds));
+			} else {
+				TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId)
+				    .detail("PairId", relocateShardInterval.pairID)
+				    .detail("DestinationTeam", describe(destIds))
+				    .detail("ExtraIds", describe(extraIds));
+			}
 
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
@@ -1405,9 +1421,10 @@ ACTOR Future<Void> dataDistributionQueue(
 	PromiseStream<Promise<int64_t>> getAverageShardBytes,
 	UID distributorId,
 	int teamSize,
+	int singleRegionTeamSize,
 	double* lastLimited)
 {
-	state DDQueueData self( distributorId, lock, cx, teamCollections, shardsAffectedByTeamFailure, getAverageShardBytes, teamSize, output, input, getShardMetrics, lastLimited );
+	state DDQueueData self( distributorId, lock, cx, teamCollections, shardsAffectedByTeamFailure, getAverageShardBytes, teamSize, singleRegionTeamSize, output, input, getShardMetrics, lastLimited );
 	state std::set<UID> serversToLaunchFrom;
 	state KeyRange keysToLaunchFrom;
 	state RelocateData launchData;
@@ -1483,7 +1500,7 @@ ACTOR Future<Void> dataDistributionQueue(
 					Promise<int64_t> req;
 					getAverageShardBytes.send( req );
 
-					recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
+					recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 
 					int highestPriorityRelocation = 0;
 					for( auto it = self.priority_relocations.begin(); it != self.priority_relocations.end(); ++it ) {
@@ -1506,6 +1523,7 @@ ACTOR Future<Void> dataDistributionQueue(
 						.detail( "PriorityTeamContainsUndesiredServer", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER] )
 						.detail( "PriorityTeamRedundant", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT] )
 						.detail( "PriorityMergeShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_MERGE_SHARD] )
+						.detail( "PriorityPopulateRegion", self.priority_relocations[SERVER_KNOBS->PRIORITY_POPULATE_REGION] )
 						.detail( "PriorityTeamUnhealthy", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY] )
 						.detail( "PriorityTeam2Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_2_LEFT] )
 						.detail( "PriorityTeam1Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_1_LEFT] )

@@ -11,8 +11,6 @@
 
 enum {OP_GETREADVERSION, OP_GET, OP_GETRANGE, OP_SGET, OP_SGETRANGE, OP_UPDATE, OP_INSERT, OP_INSERTRANGE, OP_CLEAR, OP_SETCLEAR, OP_CLEARRANGE, OP_SETCLEARRANGE, OP_COMMIT, MAX_OP};
 enum {OP_COUNT, OP_RANGE};
-constexpr int MAXKEYVALUESIZE = 1000;
-constexpr int RANGELIMIT = 10000;
 struct MakoWorkload : TestWorkload {
 	uint64_t rowCount, seqNumLen, sampleSize, actorCountPerClient, keyBytes, maxValueBytes, minValueBytes, csSize, csCount, csPartitionSize, csStepSizeInPartition;
 	double testDuration, loadTime, warmingDelay, maxInsertRate, transactionsPerSecond, allowedLatency, periodicLoggingInterval, zipfConstant;
@@ -79,8 +77,6 @@ struct MakoWorkload : TestWorkload {
 		seqNumLen = digits(rowCount);
 		// check keyBytes, maxValueBytes is valid
 		ASSERT(seqNumLen + KEYPREFIXLEN <= keyBytes);
-		ASSERT(keyBytes <= MAXKEYVALUESIZE);
-		ASSERT(maxValueBytes <= MAXKEYVALUESIZE);
 		// user input: a sequence of operations to be executed; e.g. "g10i5" means to do GET 10 times and Insert 5 times
 		// One operation type is defined as "<Type><Count>" or "<Type><Count>:<Range>".
 		// When Count is omitted, it's equivalent to setting it to 1.  (e.g. "g" is equivalent to "g1")
@@ -382,7 +378,7 @@ struct MakoWorkload : TestWorkload {
 					if (i == OP_COMMIT)
 						continue;
 					for (count = 0; count < self->operations[i][0]; ++count) {
-						range = std::min(RANGELIMIT, self->operations[i][1]);
+						range = self->operations[i][1];
 						rangeLen = digits(range);
 						// generate random key-val pair for operation
 						indBegin = self->getRandomKeyIndex(self->rowCount);
@@ -409,13 +405,13 @@ struct MakoWorkload : TestWorkload {
 						else if (i == OP_GET){
 							wait(logLatency(tr.get(rkey, false), &self->opLatencies[i]));
 						} else if (i == OP_GETRANGE){
-							wait(logLatency(tr.getRange(rkeyRangeRef, RANGELIMIT, false), &self->opLatencies[i]));
+							wait(logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, false), &self->opLatencies[i]));
 						}
 						else if (i == OP_SGET){
 							wait(logLatency(tr.get(rkey, true), &self->opLatencies[i]));
 						} else if (i == OP_SGETRANGE){
 							//do snapshot get range here
-							wait(logLatency(tr.getRange(rkeyRangeRef, RANGELIMIT, true), &self->opLatencies[i]));
+							wait(logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, true), &self->opLatencies[i]));
 						} else if (i == OP_UPDATE){
 							wait(logLatency(tr.get(rkey, false), &self->opLatencies[OP_GET]));
 							tr.set(rkey, rval);
@@ -632,8 +628,6 @@ struct MakoWorkload : TestWorkload {
 						ptr++;
 					}
 					/* set range */
-					if (num > RANGELIMIT)
-						TraceEvent(SevError, "TestFailure").detail("Reason", "RangeExceedLimit").detail("RangeLimit", RANGELIMIT).detail("Range", num);
 					operations[op][OP_RANGE] = num;
 				}
 			}

@@ -9,30 +9,6 @@ testTitle=BackupAndRestore
      clearAfterTest=false
  ;	keyPrefix=!
 
- ;    testName=Cycle
- ;;    nodeCount=1000
- ;    transactionsPerSecond=2500.0
- ;    testDuration=30.0
- ;    expectedRate=0
- ;    clearAfterTest=false
- ;	keyPrefix=z
- ;
- ;    testName=Cycle
- ;;    nodeCount=1000
- ;    transactionsPerSecond=2500.0
- ;    testDuration=30.0
- ;    expectedRate=0
- ;    clearAfterTest=false
- ;	keyPrefix=A
- ;
- ;    testName=Cycle
- ;;    nodeCount=1000
- ;    transactionsPerSecond=2500.0
- ;    testDuration=30.0
- ;    expectedRate=0
- ;    clearAfterTest=false
- ;	keyPrefix=Z
-
  ; Each testName=RunRestoreWorkerWorkload creates a restore worker
  ; We need at least 3 restore workers: master, loader, and applier
      testName=RunRestoreWorkerWorkload
@@ -45,28 +21,28 @@ testTitle=BackupAndRestore
      simBackupAgents=BackupToFile
  ; backupRangesCount<0 means backup the entire normal keyspace
      backupRangesCount=-1
- ; TODO: Support abortAndRestartAfter test by commenting it out
-     abortAndRestartAfter=0
+     usePartitionedLogs=true
 
      testName=RandomClogging
      testDuration=90.0
 
- ;    testName=Rollback
- ;    meanDelay=90.0
- ;    testDuration=90.0
+     testName=Rollback
+     meanDelay=90.0
+     testDuration=90.0
 
- ; Do NOT consider machine crash yet
- ;    testName=Attrition
- ;    machinesToKill=10
- ;    machinesToLeave=3
- ;    reboot=true
- ;    testDuration=90.0
+ ; Do NOT kill restore worker process yet
+ ; Kill other process to ensure restore works when FDB cluster has faults
+     testName=Attrition
+     machinesToKill=10
+     machinesToLeave=3
+     reboot=true
+     testDuration=90.0
 
- ;    testName=Attrition
- ;    machinesToKill=10
- ;    machinesToLeave=3
- ;    reboot=true
- ;    testDuration=90.0
+     testName=Attrition
+     machinesToKill=10
+     machinesToLeave=3
+     reboot=true
+     testDuration=90.0
 
  ; Disable buggify for parallel restore
  ;buggify=off

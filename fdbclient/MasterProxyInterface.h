@@ -68,11 +68,11 @@ struct MasterProxyInterface {
 	}
 
 	void initEndpoints() {
-		getConsistentReadVersion.getEndpoint(TaskPriority::ProxyGetConsistentReadVersion);
+		getConsistentReadVersion.getEndpoint(TaskPriority::ReadSocket);
 		getRawCommittedVersion.getEndpoint(TaskPriority::ProxyGetRawCommittedVersion);
-		commit.getEndpoint(TaskPriority::ProxyCommitDispatcher);
+		commit.getEndpoint(TaskPriority::ReadSocket);
 		getStorageServerRejoinInfo.getEndpoint(TaskPriority::ProxyStorageRejoin);
-		//getKeyServersLocations.getEndpoint(TaskProxyGetKeyServersLocations); //do not increase the priority of these requests, because clients cans bring down the cluster with too many of these messages.
+		getKeyServersLocations.getEndpoint(TaskPriority::ReadSocket); //priority lowered to TaskPriority::DefaultEndpoint on the proxy
 	}
 };
 
@@ -105,14 +105,18 @@ struct CommitID {
 	Version version; 			// returns invalidVersion if transaction conflicts
 	uint16_t txnBatchId;
 	Optional<Value> metadataVersion;
+	Optional<Standalone<VectorRef<int>>> conflictingKRIndices;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, txnBatchId, metadataVersion);
+		serializer(ar, version, txnBatchId, metadataVersion, conflictingKRIndices);
 	}
 
 	CommitID() : version(invalidVersion), txnBatchId(0) {}
-	CommitID( Version version, uint16_t txnBatchId, const Optional<Value>& metadataVersion ) : version(version), txnBatchId(txnBatchId), metadataVersion(metadataVersion) {}
+	CommitID(Version version, uint16_t txnBatchId, const Optional<Value>& metadataVersion,
+	         const Optional<Standalone<VectorRef<int>>>& conflictingKRIndices = Optional<Standalone<VectorRef<int>>>())
+	  : version(version), txnBatchId(txnBatchId), metadataVersion(metadataVersion),
+	    conflictingKRIndices(conflictingKRIndices) {}
 };
 
 struct CommitTransactionRequest : TimedRequest {

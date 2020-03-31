@@ -41,6 +41,10 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
 	init( FAILURE_EMERGENCY_DELAY,                30.0 );
 	init( FAILURE_MAX_GENERATIONS,                  10 );
+	init( RECOVERY_DELAY_START_GENERATION,          70 );
+	init( RECOVERY_DELAY_SECONDS_PER_GENERATION,  60.0 );
+	init( MAX_GENERATIONS,                         100 );
+	init( MAX_GENERATIONS_OVERRIDE,                  0 );
 
 	init( COORDINATOR_RECONNECTION_DELAY,          1.0 );
 	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
@@ -134,6 +138,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_COPY_TASKS,                        90 );
 	init( BACKUP_BLOCK_SIZE,   LOG_RANGE_BLOCK_SIZE/10 );
 	init( BACKUP_TASKS_PER_AGENT,                   10 );
+	init( BACKUP_POLL_PROGRESS_SECONDS,             10 );
+	init( VERSIONS_PER_SECOND,                     1e6 ); // Must be the same as SERVER_KNOBS->VERSIONS_PER_SECOND
 	init( SIM_BACKUP_TASKS_PER_AGENT,               10 );
 	init( BACKUP_RANGEFILE_BLOCK_SIZE,      1024 * 1024);
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);

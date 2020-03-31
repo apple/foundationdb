@@ -83,6 +83,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( MAX_CACHE_VERSIONS,                                   10e6 );
 	init( TLOG_IGNORE_POP_AUTO_ENABLE_DELAY,                   300.0 );
 	init( TXS_POPPED_MAX_DELAY,                                  1.0 ); if ( randomize && BUGGIFY ) TXS_POPPED_MAX_DELAY = deterministicRandom()->random01();
+	init( TLOG_MAX_CREATE_DURATION,                             10.0 );
 
 	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
 	init( SNAP_CREATE_MAX_TIMEOUT,                             300.0 );
@@ -105,6 +106,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( INFLIGHT_PENALTY_HEALTHY,                              1.0 );
 	init( INFLIGHT_PENALTY_UNHEALTHY,                          500.0 );
 	init( INFLIGHT_PENALTY_ONE_LEFT,                          1000.0 );
+	init( USE_OLD_NEEDED_SERVERS,                              false );
 
 	init( PRIORITY_RECOVER_MOVE,                                 110 );
 	init( PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,                 120 );
@@ -113,6 +115,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER,               150 );
 	init( PRIORITY_TEAM_REDUNDANT,                               200 );
 	init( PRIORITY_MERGE_SHARD,                                  340 );
+	init( PRIORITY_POPULATE_REGION,                              600 );
 	init( PRIORITY_TEAM_UNHEALTHY,                               700 );
 	init( PRIORITY_TEAM_2_LEFT,                                  709 );
 	init( PRIORITY_TEAM_1_LEFT,                                  800 );
@@ -211,6 +214,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( DD_EXCLUDE_MIN_REPLICAS,                                 1 );
 	init( DD_VALIDATE_LOCALITY,                                 true ); if( randomize && BUGGIFY ) DD_VALIDATE_LOCALITY = false;
 	init( DD_CHECK_INVALID_LOCALITY_DELAY,                       60  ); if( randomize && BUGGIFY ) DD_CHECK_INVALID_LOCALITY_DELAY = 1 + deterministicRandom()->random01() * 600;
+	init( DD_ENABLE_VERBOSE_TRACING,                           false ); if( randomize && BUGGIFY ) DD_ENABLE_VERBOSE_TRACING = true;
 
 	// TeamRemover
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
@@ -299,6 +303,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL,        0.001 );
 	init( START_TRANSACTION_MAX_TRANSACTIONS_TO_START,        100000 );
 	init( START_TRANSACTION_MAX_REQUESTS_TO_START,             10000 );
+	init( START_TRANSACTION_MAX_QUEUE_SIZE,                      1e6 );
+	init( KEY_LOCATION_MAX_QUEUE_SIZE,                           1e6 );
 
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE,         0.0005 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE = 0.005;
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_MIN,                0.001 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_INTERVAL_MIN = 0.1;
@@ -349,6 +355,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( PROVISIONAL_START_DELAY,                               1.0 );
 	init( PROVISIONAL_MAX_DELAY,                                60.0 );
 	init( PROVISIONAL_DELAY_GROWTH,                              1.5 );
+	init( SECONDS_BEFORE_RECRUIT_BACKUP_WORKER,                  4.0 );
 
 	// Resolver
 	init( SAMPLE_OFFSET_PER_KEY,                                 100 );
@@ -361,6 +368,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( BACKUP_TIMEOUT,                                        0.4 );
 	init( BACKUP_NOOP_POP_DELAY,                                 5.0 );
 	init( BACKUP_FILE_BLOCK_BYTES,                       1024 * 1024 );
+	init( BACKUP_UPLOAD_DELAY,                                  10.0 ); if( randomize && BUGGIFY ) BACKUP_UPLOAD_DELAY = deterministicRandom()->random01() * 20; // TODO: Increase delay range
 
 	//Cluster Controller
 	init( CLUSTER_CONTROLLER_LOGGING_DELAY,                      5.0 );

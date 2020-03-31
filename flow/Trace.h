@@ -44,7 +44,7 @@ inline int fastrand() {
 //inline static bool TRACE_SAMPLE() { return fastrand()<16; }
 inline static bool TRACE_SAMPLE() { return false; }
 
-extern thread_local int g_trace_depth;
+extern thread_local int g_allocation_tracing_disabled;
 
 enum Severity {
 	SevVerbose = 0,
@@ -454,7 +454,7 @@ private:
 	TraceEvent& detailImpl( std::string&& key, std::string&& value, bool writeEventMetricField=true );
 public:
 	TraceEvent& backtrace(const std::string& prefix = "");
-	TraceEvent& trackLatest( const char* trackingKey );
+	TraceEvent& trackLatest(const std::string& trackingKey );
 	TraceEvent& sample( double sampleRate, bool logSampleRate=true );
 
 	// Sets the maximum length a field can be before it gets truncated. A value of 0 uses the default, a negative value
@@ -571,6 +571,16 @@ private:
 
 extern LatestEventCache latestEventCache;
 
+struct EventCacheHolder : public ReferenceCounted<EventCacheHolder> {
+	std::string trackingKey;
+
+	EventCacheHolder(const std::string& trackingKey) : trackingKey(trackingKey) {}
+
+	~EventCacheHolder() {
+		latestEventCache.clear(trackingKey);
+	}
+};
+
 // Evil but potentially useful for verbose messages:
 #if CENABLED(0, NOT_IN_CLEAN)
 #define TRACE( t, m ) if (TraceEvent::isEnabled(t)) TraceEvent(t,m)
@@ -598,9 +608,11 @@ bool validateTraceClockSource(std::string source);
 void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
 void retriveTraceLogIssues(std::set<std::string>& out);
+void setTraceLogGroup(const std::string& role);
 template <class T>
-struct ThreadFuture;
-void pingTraceLogWriterThread(ThreadFuture<struct Void>& p);
+struct Future;
+struct Void;
+Future<Void> pingTraceLogWriterThread();
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
 extern std::atomic<trace_clock_t> g_trace_clock;
