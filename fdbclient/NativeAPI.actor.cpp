@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 
 #include <iterator>
+#include <regex>
 
 #include "fdbclient/Atomic.h"
 #include "fdbclient/ClusterInterface.h"
@@ -843,6 +844,7 @@ const UniqueOrderedOptionList<FDBTransactionOptions>& Database::getTransactionDe
 }
 
 void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
+	std::regex identifierRegex("^[a-zA-Z0-9_]*$");
 	switch(option) {
 		// SOMEDAY: If the network is already started, should these three throw an error?
 		case FDBNetworkOptions::TRACE_ENABLE:
@@ -879,9 +881,16 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 	    case FDBNetworkOptions::TRACE_FILE_IDENTIFIER:
 		    validateOptionValue(value, true);
 		    networkOptions.traceFileIdentifier = value.get().toString();
+		    if (networkOptions.traceFileIdentifier.length() > CLIENT_KNOBS->TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH) {
+			    fprintf(stderr, "Trace file identifier provided is too long.\n");
+			    throw invalid_option_value();
+		    } else if (!std::regex_match(networkOptions.traceFileIdentifier, identifierRegex)) {
+			    fprintf(stderr, "Trace file identifier should only contain alphanumerics and underscores.\n");
+			    throw invalid_option_value();
+		    }
 		    break;
 	    case FDBNetworkOptions::KNOB: {
-			validateOptionValue(value, true);
+		    validateOptionValue(value, true);
 
 			std::string optionValue = value.get().toString();
 			TraceEvent("SetKnob").detail("KnobString", optionValue);
@@ -901,8 +910,8 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 				fprintf(stderr, "FoundationDB client ignoring unrecognized knob option '%s'\n", knobName.c_str());
 			}
 			break;
-		}
-		case FDBNetworkOptions::TLS_PLUGIN:
+	    }
+	    case FDBNetworkOptions::TLS_PLUGIN:
 			validateOptionValue(value, true);
 			break;
 		case FDBNetworkOptions::TLS_CERT_PATH:

@@ -200,6 +200,9 @@ public:
 	int CLI_CONNECT_PARALLELISM;
 	double CLI_CONNECT_TIMEOUT;
 
+	// trace
+	int TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH;
+
 	ClientKnobs(bool randomize = false);
 };
 
