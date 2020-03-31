@@ -71,9 +71,6 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter;
 	state int actualBeginOffset;
 	state int actualEndOffset;
-	// make sure orEqual == false
-	begin.removeOrEqual(begin.arena());
-	end.removeOrEqual(end.arena());
 
 	// make sure offset == 1
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator beginIter =
@@ -87,9 +84,9 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 
 	actualBeginOffset = begin.offset;
 	if (beginIter == pks->impls.ranges().begin())
-		begin.setKey(normalKeys.begin);
+		begin.setKey(pks->range.begin);
 	else if (beginIter == pks->impls.ranges().end())
-		begin.setKey(normalKeys.end);
+		begin.setKey(pks->range.end);
 
 	if (!begin.isFirstGreaterOrEqual()) {
 		// The Key Selector points to key outside the whole special key space
@@ -112,9 +109,9 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 
 	actualEndOffset = end.offset;
 	if (endIter == pks->impls.ranges().begin())
-		end.setKey(normalKeys.begin);
+		end.setKey(pks->range.begin);
 	else if (endIter == pks->impls.ranges().end())
-		end.setKey(normalKeys.end);
+		end.setKey(pks->range.end);
 
 	if (!end.isFirstGreaterOrEqual()) {
 		// The Key Selector points to key outside the whole special key space
@@ -201,6 +198,9 @@ Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourW
 		TEST(true); // read limit 0
 		return Standalone<RangeResultRef>();
 	}
+	// make sure orEqual == false
+	begin.removeOrEqual(begin.arena());
+	end.removeOrEqual(end.arena());
 	// ignore snapshot, which is not used
 	return getRangeAggregationActor(this, ryw, begin, end, limits, reverse);
 }
