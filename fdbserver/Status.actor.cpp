@@ -2155,7 +2155,7 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx) {
 
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			Optional<Value> res = wait(tr.get(primaryDatacenterKey));
 			return res;
 		} catch (Error& e) {
