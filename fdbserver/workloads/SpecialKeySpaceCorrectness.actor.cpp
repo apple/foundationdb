@@ -125,37 +125,57 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			    .detail("ReadThroughEnd2", res2.readThroughEnd);
 			return false;
 		}
-		if (res1.size() != res2.size()) return false;
+		if (res1.size() != res2.size()) {
+			TraceEvent(SevError, "TestFailure")
+			    .detail("Reason", "Results' sizes are inconsistent")
+			    .detail("CorrestResultSize", res1.size())
+			    .detail("TestResultSize", res2.size());
+			return false;
+		}
 		for (int i = 0; i < res1.size(); ++i) {
-			if (res1[i] != res2[i]) return false;
+			if (res1[i] != res2[i]) {
+				TraceEvent(SevError, "TestFailure")
+				    .detail("Reason", "Elements are inconsistent")
+				    .detail("Index", i)
+				    .detail("CorrectKey", printable(res1[i].key))
+				    .detail("TestKey", printable(res2[i].key))
+				    .detail("CorrectValue", printable(res1[i].value))
+				    .detail("TestValue", printable(res2[i].value));
+				return false;
+			}
 		}
 		return true;
 	}
 
 	KeySelector randomKeySelector() {
-		Key prefix;
-		if (deterministicRandom()->random01() < absoluteRandomProb)
-			prefix = Key(
-			    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, rangeCount + 1)) + "/");
-		else
-			prefix = keys[deterministicRandom()->randomInt(0, rangeCount)].begin;
-		Key suffix;
+		Key randomKey;
 		// TODO : add randomness to pickup existing keys
-		if (deterministicRandom()->random01() < absoluteRandomProb)
-			suffix = Key(deterministicRandom()->randomAlphaNumeric(keyBytes));
+		if (deterministicRandom()->random01() < absoluteRandomProb) {
+			Key prefix;
+			if (deterministicRandom()->random01() < absoluteRandomProb)
+				// prefix length is randomly generated
+				prefix = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, rangeCount + 1)) + "/");
+			else
+				// pick up an existing prefix
+				prefix = keys[deterministicRandom()->randomInt(0, rangeCount)].begin;
+			randomKey = Key(deterministicRandom()->randomAlphaNumeric(keyBytes)).withPrefix(prefix);
+		} else {
+			// pick up existing keys from registered key ranges
+			KeyRangeRef randomKeyRangeRef = keys[deterministicRandom()->randomInt(0, keys.size())];
+			randomKey = deterministicRandom()->random01() < 0.5 ? randomKeyRangeRef.begin : randomKeyRangeRef.end;
+		}
 		// return Key(deterministicRandom()->randomAlphaNumeric(keyBytes)).withPrefix(prefix);
-		// TODO : test corner case here if offset points out
-		int offset = deterministicRandom()->randomInt(-keysCount.getValue() - 1, keysCount.getValue() + 1);
+		// covers corner cases where offset points outside the key space
+		int offset = deterministicRandom()->randomInt(-keysCount.getValue() - 1, keysCount.getValue() + 2);
 		bool orEqual = deterministicRandom()->random01() < 0.5;
-		return KeySelectorRef(suffix.withPrefix(prefix), orEqual, offset);
+		return KeySelectorRef(randomKey, orEqual, offset);
 	}
 
 	GetRangeLimits randomLimits() {
 		// TODO : fix knobs for row_unlimited
-		// if (deterministicRandom()->random01() < 0.5) return GetRangeLimits();
 		int rowLimits = deterministicRandom()->randomInt(1, keysCount.getValue() + 1);
-		// TODO : add random bytes limit here
-		int byteLimits = deterministicRandom()->randomInt(1, (keysCount.getValue() + 1) * (keyBytes + valBytes + 8));
+		int byteLimits =
+		    deterministicRandom()->randomInt(1, keysCount.getValue() * (keyBytes + valBytes + (rangeCount + 1) + 8) + 1);
 		// TODO : check setRequestLimits in RYW
 		return GetRangeLimits(rowLimits, byteLimits);
 	}
