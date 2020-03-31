@@ -166,13 +166,15 @@ ACTOR Future<Void> resolveBatch(
 
 		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterOrderer");
-		
+
+		ResolveTransactionBatchReply& reply = proxyInfo.outstandingBatches[req.version];
+
 		vector<int> commitList;
 		vector<int> tooOldList;
 
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
-		ConflictBatch conflictBatch( self->conflictSet );
+		ConflictBatch conflictBatch(self->conflictSet, &reply.conflictingKeyRangeMap, &reply.arena);
 		int keys = 0;
 		for(int t=0; t<req.transactions.size(); t++) {
 			conflictBatch.addTransaction( req.transactions[t] );
@@ -189,7 +191,6 @@ ACTOR Future<Void> resolveBatch(
 		}
 		conflictBatch.detectConflicts( req.version, req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS, commitList, &tooOldList);
 
-		ResolveTransactionBatchReply &reply = proxyInfo.outstandingBatches[req.version];
 		reply.debugID = req.debugID;
 		reply.committed.resize( reply.arena, req.transactions.size() );
 		for(int c=0; c<commitList.size(); c++)
