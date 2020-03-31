@@ -897,15 +897,15 @@ TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 
 	// Prepare RangeToApplier
 	rangeToApplier.emplace(normalKeys.begin, deterministicRandom()->randomUniqueID());
-	int numAppliers = deterministicRandom()->randomInt(0, 10);
+	int numAppliers = deterministicRandom()->randomInt(0, 50);
 	for (int i = 0; i < numAppliers; ++i) {
-		Key k = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10)));
+		Key k = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 1000)));
 		UID node = deterministicRandom()->randomUniqueID();
 		rangeToApplier.emplace(k, node);
 		TraceEvent("RangeToApplier").detail("Key", k).detail("Node", node);
 	}
-	Key k1 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10)));
-	Key k2 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10)));
+	Key k1 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 500)));
+	Key k2 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 1000)));
 	Key beginK = k1 < k2 ? k1 : k2;
 	Key endK = k1 < k2 ? k2 : k1;
 	Standalone<MutationRef> mutation(MutationRef(MutationRef::ClearRange, beginK.contents(), endK.contents()));
