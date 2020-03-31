@@ -36,7 +36,7 @@ ACTOR Future<Void> SpecialKeyRangeBaseImpl::normalizeKeySelectorActor(const Spec
 		TraceEvent("ZeroElementsIntheRange").detail("Start", startKey).detail("End", endKey);
 		return Void();
 	}
-	// TODO : KeySelector::setKey has byte limit according to the knobs, customize it if needed
+	// Note : KeySelector::setKey has byte limit according to the knobs, customize it if needed
 	if (ks->offset < 1) {
 		if (result.size() >= 1 - ks->offset) {
 			ks->setKey(KeyRef(ks->arena(), result[result.size() - (1 - ks->offset)].key));
@@ -156,7 +156,6 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 				// byteLimit
 				limits.decrement(pairs[i]);
 				if (limits.isReached()) {
-					// result.more = (iter != ranges.begin()) || (iter == ranges.begin() && i != 0);
 					result.more = true;
 					result.readToBegin = false;
 					return result;
@@ -178,7 +177,6 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 				// byteLimit
 				limits.decrement(pairs[i]);
 				if (limits.isReached()) {
-					// result.more = (iter != ranges.end()) || (iter == ranges.end() && i != pairs.size() - 1);
 					result.more = true;
 					result.readThroughEnd = false;
 					return result;
@@ -208,8 +206,9 @@ Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourW
 ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw,
                                                         KeyRef key) {
 	// use getRange to workaround this
-	Standalone<RangeResultRef> result = wait(pks->getRange(
-	    ryw, KeySelector(firstGreaterOrEqual(key)), KeySelector(firstGreaterOrEqual(keyAfter(key))), GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+	Standalone<RangeResultRef> result =
+	    wait(pks->getRange(ryw, KeySelector(firstGreaterOrEqual(key)), KeySelector(firstGreaterOrEqual(keyAfter(key))),
+	                       GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 	ASSERT(result.size() <= 1);
 	if (result.size()) {
 		return Optional<Value>(result[0].value);
