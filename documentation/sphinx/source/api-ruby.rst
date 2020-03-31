@@ -736,6 +736,10 @@ Most applications should use the read version that FoundationDB determines autom
 
     |infrequent| |transaction-get-committed-version-blurb|
 
+.. method:: Transaction.get_approximate_size() -> Int64Future
+
+    |infrequent| |transaction-get-approximate-size-blurb|
+
 .. method:: Transaction.get_verionstamp() -> String
 
     |infrequent| |transaction-get-versionstamp-blurb|
