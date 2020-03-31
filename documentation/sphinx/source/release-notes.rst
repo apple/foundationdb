@@ -24,6 +24,7 @@ Bindings
 Other Changes
 -------------
 * Double the number of shard locations that the client will cache locally. `(PR #2198) <https://github.com/apple/foundationdb/pull/2198>`_
+* Add an option for transactions to report conflicting keys by calling getRange with the special key prefix \xff\xff/transaction/conflicting_keys/. `(PR 2257) <https://github.com/apple/foundationdb/pull/2257>`_
 
 Earlier release notes
 ---------------------

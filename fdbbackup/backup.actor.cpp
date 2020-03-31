@@ -3879,7 +3879,7 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 	// We should wait on all restore to finish before proceeds
 	TraceEvent("FastRestore").detail("Progress", "WaitForRestoreToFinish");
 	state ReadYourWritesTransaction tr(cx);
-	state Future<Void> watchForRestoreRequestDone;
+	state Future<Void> fRestoreRequestDone;
 	state bool restoreRequestDone = false;
 
 	loop {
@@ -3887,6 +3887,7 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			// In case restoreRequestDoneKey is already set before we set watch on it
 			Optional<Value> restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
 			if (restoreRequestDoneKeyValue.present()) {
@@ -3894,12 +3895,13 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 				tr.clear(restoreRequestDoneKey);
 				wait(tr.commit());
 				break;
-			} else {
-				watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
+			} else if (!restoreRequestDone) {
+				fRestoreRequestDone = tr.watch(restoreRequestDoneKey);
 				wait(tr.commit());
+				wait(fRestoreRequestDone);
+			} else {
+				break;
 			}
-			// The clear transaction may fail in uncertain state, which may already clear the restoreRequestDoneKey
-			if (restoreRequestDone) break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}

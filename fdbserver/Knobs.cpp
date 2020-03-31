@@ -355,6 +355,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( PROVISIONAL_START_DELAY,                               1.0 );
 	init( PROVISIONAL_MAX_DELAY,                                60.0 );
 	init( PROVISIONAL_DELAY_GROWTH,                              1.5 );
+	init( SECONDS_BEFORE_RECRUIT_BACKUP_WORKER,                  4.0 );
 
 	// Resolver
 	init( SAMPLE_OFFSET_PER_KEY,                                 100 );

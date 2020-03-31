@@ -25,6 +25,8 @@ testTitle=BackupAndParallelRestoreWithAtomicOp
     clearAfterTest=false
     simBackupAgents=BackupToFile
     backupRangesCount=-1
+; use new backup
+    usePartitionedLogs=true
 
     testName=RandomClogging
     testDuration=90.0
