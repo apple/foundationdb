@@ -5,8 +5,6 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"
 
-const KeyRef startSuffix = LiteralStringRef("/");
-const KeyRef endSuffix = LiteralStringRef("/\xff");
 class SPSCTestImpl : public SpecialKeyRangeBaseImpl {
 public:
 	explicit SPSCTestImpl(KeyRef start, KeyRef end) : SpecialKeyRangeBaseImpl(start, end) {}
@@ -14,9 +12,9 @@ public:
 	                                                    KeyRangeRef kr) const {
 		ASSERT(range.contains(kr));
 		auto resultFuture = ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY);
+		// all keys are written to RYW, since GRV is set, the read should happen locally
 		ASSERT(resultFuture.isReady());
-		auto result = resultFuture.getValue();
-		return result;
+		return resultFuture.getValue();
 	}
 };
 
@@ -154,7 +152,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			Key prefix;
 			if (deterministicRandom()->random01() < absoluteRandomProb)
 				// prefix length is randomly generated
-				prefix = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, rangeCount + 1)) + "/");
+				prefix =
+				    Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, rangeCount + 1)) +
+				        "/");
 			else
 				// pick up an existing prefix
 				prefix = keys[deterministicRandom()->randomInt(0, rangeCount)].begin;
@@ -174,8 +174,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	GetRangeLimits randomLimits() {
 		// TODO : fix knobs for row_unlimited
 		int rowLimits = deterministicRandom()->randomInt(1, keysCount.getValue() + 1);
-		int byteLimits =
-		    deterministicRandom()->randomInt(1, keysCount.getValue() * (keyBytes + valBytes + (rangeCount + 1) + 8) + 1);
+		// The largest key's bytes is longest prefix bytes + 1(for '/') + generated key bytes
+		// 8 here refers to bytes of KeyValueRef
+		int byteLimits = deterministicRandom()->randomInt(
+		    1, keysCount.getValue() * (keyBytes + (rangeCount + 1) + valBytes + 8) + 1);
 		// TODO : check setRequestLimits in RYW
 		return GetRangeLimits(rowLimits, byteLimits);
 	}
