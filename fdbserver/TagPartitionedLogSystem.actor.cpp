@@ -369,6 +369,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				newState.oldTLogData.emplace_back(oldData);
 				TraceEvent("BWToCore")
 				    .detail("Epoch", newState.oldTLogData.back().epoch)
+				    .detail("TotalTags", newState.oldTLogData.back().logRouterTags)
 				    .detail("BeginVersion", newState.oldTLogData.back().epochBegin)
 				    .detail("EndVersion", newState.oldTLogData.back().epochEnd);
 			}
