@@ -3288,13 +3288,11 @@ private:
 	};
 
 public:
-#define USE_ART_MUTATION_BUFFER 1
 
-#if USE_ART_MUTATION_BUFFER
+
 #include "ArtMutationBuffer.h"
-#else
-	struct MutationBuffer {
-		MutationBuffer() {
+	struct MutationBufferStdMap {
+		MutationBufferStdMap() {
 			// Create range representing the entire keyspace.  This reduces edge cases to applying mutations
 			// because now all existing keys are within some range in the mutation map.
 			mutations[dbBegin.key];
@@ -3390,7 +3388,13 @@ public:
 		}
 
 	};
-#endif //USE_ART_MUTATION_BUFFER
+#define USE_ART_MUTATION_BUFFER 1
+
+#ifdef USE_ART_MUTATION_BUFFER
+	typedef struct MutationBufferART  MutationBuffer;
+#else
+	typedef struct MutationBufferStdMap  MutationBuffer;
+#endif
 
 private:
 	/* Mutation Buffer Overview
@@ -5002,9 +5006,7 @@ private:
 
 };
 
-#if USE_ART_MUTATION_BUFFER
 #include "art_impl.h"
-#endif //USE_ART_MUTATION_BUFFER
 
 RedwoodRecordRef VersionedBTree::dbBegin(StringRef(), 0);
 RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"));

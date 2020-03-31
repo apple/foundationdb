@@ -23,55 +23,15 @@
 #include "art.h"
 #include "flow/Arena.h"
 
-struct MutationBuffer {
+struct MutationBufferART {
 
 private:
     Arena arena;
     art_tree *mutations;
 
 public:
-    struct iterator : std::map<KeyRef, RangeMutation>::iterator {
 
-        art_iterator artIterator;
-
-        iterator() = default;
-
-        iterator(art_iterator i) {
-            artIterator = i;
-        }
-
-        iterator(const iterator &i) {
-            artIterator = i.artIterator;
-        }
-
-        const KeyRef &key() {
-            return artIterator.key();
-        }
-
-        RangeMutation &mutation() {
-            return (RangeMutation & )(*((RangeMutation *) artIterator.value()));
-        }
-
-        void **value_ptr() {
-            return artIterator.value_ptr();
-        }
-
-        bool operator==(const iterator &other) const {
-            return (artIterator) == (other.artIterator);
-        }
-
-        iterator &operator++() {
-            ++(artIterator);
-            return *this;
-        }
-
-        iterator &operator--() {
-            --(artIterator);
-            return *this;
-        }
-    };
-
-    struct const_iterator : std::map<KeyRef, RangeMutation>::const_iterator {
+    struct const_iterator {
         art_iterator artIterator;
 
         const_iterator() = default;
@@ -107,7 +67,57 @@ public:
         }
     };
 
-    MutationBuffer() {
+    struct iterator {
+
+        art_iterator artIterator;
+
+        iterator() = default;
+
+        iterator(art_iterator i) {
+            artIterator = i;
+        }
+
+        iterator(const iterator &i) {
+            artIterator = i.artIterator;
+        }
+
+        const KeyRef &key() {
+            return artIterator.key();
+        }
+
+        RangeMutation &mutation() {
+            return (RangeMutation & )(*((RangeMutation *) artIterator.value()));
+        }
+
+        void **value_ptr() {
+            return artIterator.value_ptr();
+        }
+
+        bool operator==(const iterator &other) const {
+            return (artIterator) == (other.artIterator);
+        }
+
+        bool operator==(const const_iterator &other) const {
+            return (artIterator) == (other.artIterator);
+        }
+
+        iterator &operator++() {
+            ++(artIterator);
+            return *this;
+        }
+
+        iterator &operator--() {
+            --(artIterator);
+            return *this;
+        }
+
+        //Enable implicit conversion
+        operator const_iterator() {
+            return const_iterator(this->artIterator);
+        }
+    };
+
+    MutationBufferART() {
         mutations = new(arena) art_tree(arena);
         // Create range representing the entire keyspace.  This reduces edge cases to applying mutations
         // because now all existing keys are within some range in the mutation map.
@@ -136,33 +146,8 @@ public:
         return const_iterator(mutations->lower_bound(k));
     }
 
-    /*
-     * For now, let's not deal with conversions. Just create all combinations.
-     */
     // erase [begin, end) from the mutation map
-    void erase(const iterator &begin, const iterator &end) {
-        art_iterator it = begin.artIterator;
-        art_iterator next = it;
-        ++next;
-        while (end.artIterator != it) {
-            mutations->erase(it);
-            it = next;
-            ++next;
-        }
-    }
-
-    void erase(const const_iterator &begin, const iterator &end) {
-        art_iterator it = begin.artIterator;
-        art_iterator next = it;
-        ++next;
-        while (end.artIterator != it) {
-            mutations->erase(it);
-            it = next;
-            ++next;
-        }
-    }
-
-    void erase(const iterator &begin, const const_iterator &end) {
+    void erase(const const_iterator &begin, const const_iterator &end) {
         art_iterator it = begin.artIterator;
         art_iterator next = it;
         ++next;
