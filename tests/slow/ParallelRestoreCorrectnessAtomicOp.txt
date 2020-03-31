@@ -25,29 +25,32 @@ testTitle=BackupAndParallelRestoreWithAtomicOp
     clearAfterTest=false
     simBackupAgents=BackupToFile
     backupRangesCount=-1
+; use new backup
+    usePartitionedLogs=true
 
     testName=RandomClogging
     testDuration=90.0
-	
-;    testName=Rollback
-;    meanDelay=90.0
-;    testDuration=90.0
 
-; Do NOT consider machine crash yet
-;    testName=Attrition
-;    machinesToKill=10
-;    machinesToLeave=3
-;    reboot=true
-;    testDuration=90.0
+    testName=Rollback
+    meanDelay=90.0
+    testDuration=90.0
 
-;    testName=Attrition
-;    machinesToKill=10
-;    machinesToLeave=3
-;    reboot=true
-;    testDuration=90.0
+; Do NOT kill restore worker process yet
+; Kill other process to ensure restore works when FDB cluster has faults
+    testName=Attrition
+    machinesToKill=10
+    machinesToLeave=3
+    reboot=true
+    testDuration=90.0
+
+    testName=Attrition
+    machinesToKill=10
+    machinesToLeave=3
+    reboot=true
+    testDuration=90.0
 
 ; Disable buggify for parallel restore
-buggify=off
+;buggify=on
 ;testDuration=360000 ;not work
 ;timeout is in seconds
 timeout=360000

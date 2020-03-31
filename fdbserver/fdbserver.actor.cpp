@@ -51,11 +51,10 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include <time.h>
 #include "fdbserver/Status.h"
-#include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Net2FileSystem.h"
-#include "fdbrpc/Platform.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
+#include "flow/TLSConfig.actor.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
@@ -175,8 +174,6 @@ CSimpleOpt::SOption g_rgOptions[] = {
 };
 
 // clang-format on
-
-GlobalCounters g_counters;
 
 extern void dsltest();
 extern void pingtest();
@@ -942,9 +939,7 @@ struct CLIOptions {
 	int minTesterCount = 1;
 	bool testOnServers = false;
 
-	Reference<TLSOptions> tlsOptions = Reference<TLSOptions>(new TLSOptions);
-	std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
-	std::vector<std::string> tlsVerifyPeers;
+	TLSConfig tlsConfig = TLSConfig(TLSEndpointType::SERVER);
 	double fileIoTimeout = 0.0;
 	bool fileIoWarnOnly = false;
 	uint64_t rsssize = -1;
@@ -1371,23 +1366,23 @@ private:
 				break;
 
 #ifndef TLS_DISABLED
-			case TLSOptions::OPT_TLS_PLUGIN:
+			case TLSConfig::OPT_TLS_PLUGIN:
 				args.OptionArg();
 				break;
-			case TLSOptions::OPT_TLS_CERTIFICATES:
-				tlsCertPath = args.OptionArg();
+			case TLSConfig::OPT_TLS_CERTIFICATES:
+				tlsConfig.setCertificatePath(args.OptionArg());
 				break;
-			case TLSOptions::OPT_TLS_PASSWORD:
-				tlsPassword = args.OptionArg();
+			case TLSConfig::OPT_TLS_PASSWORD:
+				tlsConfig.setPassword(args.OptionArg());
 				break;
-			case TLSOptions::OPT_TLS_CA_FILE:
-				tlsCAPath = args.OptionArg();
+			case TLSConfig::OPT_TLS_CA_FILE:
+				tlsConfig.setCAPath(args.OptionArg());
 				break;
-			case TLSOptions::OPT_TLS_KEY:
-				tlsKeyPath = args.OptionArg();
+			case TLSConfig::OPT_TLS_KEY:
+				tlsConfig.setKeyPath(args.OptionArg());
 				break;
-			case TLSOptions::OPT_TLS_VERIFY_PEERS:
-				tlsVerifyPeers.push_back(args.OptionArg());
+			case TLSConfig::OPT_TLS_VERIFY_PEERS:
+				tlsConfig.addVerifyPeers(args.OptionArg());
 				break;
 #endif
 			}
@@ -1582,9 +1577,11 @@ int main(int argc, char* argv[]) {
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "WARNING: Invalid value '%s' for option '%s'\n", k->second.c_str(), k->first.c_str());
+					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", k->second.c_str(), k->first.c_str());
 					TraceEvent(SevWarnAlways, "InvalidKnobValue").detail("Knob", printable(k->first)).detail("Value", printable(k->second));
 				} else {
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
+					TraceEvent(SevError, "FailedToSetKnob").detail("Knob", printable(k->first)).detail("Value", printable(k->second)).error(e);
 					throw;
 				}
 			}
@@ -1626,7 +1623,7 @@ int main(int argc, char* argv[]) {
 			startNewSimulator();
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 		} else {
-			g_network = newNet2(opts.useThreadPool, true);
+			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
@@ -1640,19 +1637,8 @@ int main(int argc, char* argv[]) {
 
 			openTraceFile(opts.publicAddresses.address, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace",
 			              opts.logGroup);
+			g_network->initTLS();
 
-#ifndef TLS_DISABLED
-			if (opts.tlsCertPath.size()) opts.tlsOptions->set_cert_file(opts.tlsCertPath);
-			if (opts.tlsCAPath.size()) opts.tlsOptions->set_ca_file(opts.tlsCAPath);
-			if (opts.tlsKeyPath.size()) {
-				if (opts.tlsPassword.size()) opts.tlsOptions->set_key_password(opts.tlsPassword);
-
-				opts.tlsOptions->set_key_file(opts.tlsKeyPath);
-			}
-			if (opts.tlsVerifyPeers.size()) opts.tlsOptions->set_verify_peers(opts.tlsVerifyPeers);
-
-			opts.tlsOptions->register_network();
-#endif
 			if (expectsPublicAddress) {
 				for (int ii = 0; ii < (opts.publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
 					const NetworkAddress& publicAddress =
@@ -1853,8 +1839,7 @@ int main(int argc, char* argv[]) {
 					}
 				}
 			}
-			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths,
-			            opts.tlsOptions);
+			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator.run();
 		} else if (role == FDBD) {
 			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
@@ -2070,6 +2055,12 @@ int main(int argc, char* argv[]) {
 		TraceEvent(SevError, "MainError").error(e);
 		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
+	} catch (boost::system::system_error& e) {
+		ASSERT_WE_THINK(false); // boost errors shouldn't leak
+		fprintf(stderr, "boost::system::system_error: %s (%d)", e.what(), e.code().value());
+		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
+		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
+		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	} catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());

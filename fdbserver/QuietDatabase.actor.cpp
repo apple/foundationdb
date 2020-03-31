@@ -578,7 +578,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 					TraceEvent(("QuietDatabase" + phase + "Done").c_str());
 					break;
 				} else {
-					wait(delay(2.0));
+					wait(delay( g_network->isSimulated() ? 2.0 : 30.0));
 				}
 			}
 		} catch (Error& e) {

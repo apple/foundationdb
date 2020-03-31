@@ -26,6 +26,7 @@
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
+#include "flow/TLSConfig.actor.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BackupAgent.actor.h"
@@ -36,8 +37,7 @@
 #include "fdbclient/BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
-#include "fdbrpc/Platform.h"
-#include "fdbrpc/TLSConnection.h"
+#include "flow/Platform.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -3225,22 +3225,22 @@ int main(int argc, char* argv[]) {
 					blobCredentials.push_back(args->OptionArg());
 					break;
 #ifndef TLS_DISABLED
-				case TLSOptions::OPT_TLS_PLUGIN:
+				case TLSConfig::OPT_TLS_PLUGIN:
 					args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_CERTIFICATES:
+				case TLSConfig::OPT_TLS_CERTIFICATES:
 					tlsCertPath = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_PASSWORD:
+				case TLSConfig::OPT_TLS_PASSWORD:
 					tlsPassword = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_CA_FILE:
+				case TLSConfig::OPT_TLS_CA_FILE:
 					tlsCAPath = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_KEY:
+				case TLSConfig::OPT_TLS_KEY:
 					tlsKeyPath = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_VERIFY_PEERS:
+				case TLSConfig::OPT_TLS_VERIFY_PEERS:
 					tlsVerifyPeers = args->OptionArg();
 					break;
 #endif
@@ -3357,15 +3357,19 @@ int main(int argc, char* argv[]) {
 				if (!flowKnobs->setKnob( k->first, k->second ) &&
 					!clientKnobs->setKnob( k->first, k->second ))
 				{
-					fprintf(stderr, "Unrecognized knob option '%s'\n", k->first.c_str());
-					return FDB_EXIT_ERROR;
+					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
+					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "Invalid value '%s' for option '%s'\n", k->second.c_str(), k->first.c_str());
-					return FDB_EXIT_ERROR;
+					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", k->second.c_str(), k->first.c_str());
+					TraceEvent(SevWarnAlways, "InvalidKnobValue").detail("Knob", printable(k->first)).detail("Value", printable(k->second));
 				}
-				throw;
+				else {
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
+					TraceEvent(SevError, "FailedToSetKnob").detail("Knob", printable(k->first)).detail("Value", printable(k->second)).error(e);
+					throw;
+				}
 			}
 		}
 
@@ -3855,6 +3859,13 @@ int main(int argc, char* argv[]) {
 	} catch (Error& e) {
 		TraceEvent(SevError, "MainError").error(e);
 		status = FDB_EXIT_MAIN_ERROR;
+	} catch (boost::system::system_error& e) {
+		if (g_network) {
+			TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
+		} else {
+			fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code().value());
+		}
+		status = FDB_EXIT_MAIN_EXCEPTION;
 	} catch (std::exception& e) {
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		status = FDB_EXIT_MAIN_EXCEPTION;
@@ -3868,7 +3879,7 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 	// We should wait on all restore to finish before proceeds
 	TraceEvent("FastRestore").detail("Progress", "WaitForRestoreToFinish");
 	state ReadYourWritesTransaction tr(cx);
-	state Future<Void> watchForRestoreRequestDone;
+	state Future<Void> fRestoreRequestDone;
 	state bool restoreRequestDone = false;
 
 	loop {
@@ -3876,6 +3887,7 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			// In case restoreRequestDoneKey is already set before we set watch on it
 			Optional<Value> restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
 			if (restoreRequestDoneKeyValue.present()) {
@@ -3883,12 +3895,13 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 				tr.clear(restoreRequestDoneKey);
 				wait(tr.commit());
 				break;
-			} else {
-				watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
+			} else if (!restoreRequestDone) {
+				fRestoreRequestDone = tr.watch(restoreRequestDoneKey);
 				wait(tr.commit());
+				wait(fRestoreRequestDone);
+			} else {
+				break;
 			}
-			// The clear transaction may fail in uncertain state, which may already clear the restoreRequestDoneKey
-			if (restoreRequestDone) break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}

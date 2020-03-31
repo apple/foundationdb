@@ -30,6 +30,7 @@
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
 #include "flow/network.h"
+#include "flow/TLSConfig.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
@@ -93,10 +94,6 @@ public:
 		return crc32c_append(0, (const uint8_t*)&s, sizeof(s));
 	}
 };
-}
-
-bool onlyBeforeSimulatorInit() {
-	return g_network->isSimulated() && g_simulator.getAllProcesses().empty();
 }
 
 const UID TOKEN_ENDPOINT_NOT_FOUND(-1, -1);
@@ -199,6 +196,9 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 	virtual void addref() { ReferenceCounted<Sim2Conn>::addref(); }
 	virtual void delref() { ReferenceCounted<Sim2Conn>::delref(); }
 	virtual void close() { closedByCaller = true; closeInternal(); }
+
+	virtual Future<Void> acceptHandshake() { return delay(0.01*deterministicRandom()->random01()); }
+	virtual Future<Void> connectHandshake() { return delay(0.01*deterministicRandom()->random01()); }
 
 	virtual Future<Void> onWritable() { return whenWritable(this); }
 	virtual Future<Void> onReadable() { return whenReadable(this); }
@@ -756,6 +756,12 @@ public:
 	// Everything actually network related is delegated to the Sim2Net class; Sim2 is only concerned with simulating machines and time
 	virtual double now() { return time; }
 
+	// timer() can be up to 0.1 seconds ahead of now()
+	virtual double timer() {
+		timerTime += deterministicRandom()->random01()*(time+0.1-timerTime)/2.0;
+		return timerTime; 
+	}
+
 	virtual Future<class Void> delay( double seconds, TaskPriority taskID ) {
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay( seconds, taskID, currentProcess );
@@ -806,7 +812,7 @@ public:
 	}
 	// Sets the taskID/priority of the current task, without yielding
 	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host ) {
-		ASSERT( !toAddr.isTLS() && host.empty());
+		ASSERT( host.empty());
 		if (!addressMap.count( toAddr )) {
 			return waitForProcessAndConnect( toAddr, this );
 		}
@@ -824,7 +830,7 @@ public:
 		} else {
 			localIp = IPAddress(getCurrentProcess()->address.ip.toV4() + deterministicRandom()->randomInt(0, 256));
 		}
-		peerc->connect(myc, NetworkAddress(localIp, deterministicRandom()->randomInt(40000, 60000)));
+		peerc->connect(myc, NetworkAddress(localIp, deterministicRandom()->randomInt(40000, 60000), false, toAddr.isTLS()));
 
 		((Sim2Listener*)peerp->getListener(toAddr).getPtr())->incomingConnection( 0.5*deterministicRandom()->random01(), Reference<IConnection>(peerc) );
 		return onConnect( ::delay(0.5*deterministicRandom()->random01()), myc );
@@ -845,7 +851,6 @@ public:
 		return conn;
 	}
 	virtual Reference<IListener> listen( NetworkAddress localAddr ) {
-		ASSERT( !localAddr.isTLS() );
 		Reference<IListener> listener( getCurrentProcess()->getListener(localAddr) );
 		ASSERT(listener);
 		return listener;
@@ -860,6 +865,10 @@ public:
 				return c;
 			}
 		}
+	}
+	virtual const TLSConfig& getTLSConfig() {
+		static TLSConfig emptyConfig;
+		return emptyConfig;
 	}
 
 	virtual void stop() { isStopped = true; }
@@ -994,7 +1003,7 @@ public:
 		Future<Void> loopFuture = runLoop(this);
 		net2->run();
 	}
-	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, uint16_t listenPerProcess,
+	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
 	                                const char* coordinationFolder) {
 		ASSERT( locality.machineId().present() );
@@ -1023,14 +1032,14 @@ public:
 		}
 
 		NetworkAddressList addresses;
-		addresses.address = NetworkAddress(ip, port, true, false);
-		if(listenPerProcess == 2) {
+		addresses.address = NetworkAddress(ip, port, true, sslEnabled);
+		if (listenPerProcess == 2) { // listenPerProcess is only 1 or 2
 			addresses.secondaryAddress = NetworkAddress(ip, port+1, true, false);
 		}
 
 		ProcessInfo* m = new ProcessInfo(name, locality, startingClass, addresses, this, dataFolder, coordinationFolder);
 		for (int processPort = port; processPort < port + listenPerProcess; ++processPort) {
-			NetworkAddress address(ip, processPort, true, false); // SOMEDAY see above about becoming SSL!
+			NetworkAddress address(ip, processPort, true, sslEnabled && processPort == port);
 			m->listenerMap[address] = Reference<IListener>( new Sim2Listener(m, address) );
 			addressMap[address] = m;
 		}
@@ -1245,12 +1254,26 @@ public:
 		TEST( kt == InjectFaults ); // Simulated machine was killed with faults
 
 		if (kt == KillInstantly) {
-			TraceEvent(SevWarn, "FailMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
+			TraceEvent(SevWarn, "FailMachine")
+			    .detail("Name", machine->name)
+			    .detail("Address", machine->address)
+			    .detail("ZoneId", machine->locality.zoneId())
+			    .detail("Process", machine->toString())
+			    .detail("Rebooting", machine->rebooting)
+			    .detail("Protected", protectedAddresses.count(machine->address))
+			    .backtrace();
 			// This will remove all the "tracked" messages that came from the machine being killed
 			latestEventCache.clear();
 			machine->failed = true;
 		} else if (kt == InjectFaults) {
-			TraceEvent(SevWarn, "FaultMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
+			TraceEvent(SevWarn, "FaultMachine")
+			    .detail("Name", machine->name)
+			    .detail("Address", machine->address)
+			    .detail("ZoneId", machine->locality.zoneId())
+			    .detail("Process", machine->toString())
+			    .detail("Rebooting", machine->rebooting)
+			    .detail("Protected", protectedAddresses.count(machine->address))
+			    .backtrace();
 			should_inject_fault = simulator_should_inject_fault;
 			machine->fault_injection_r = deterministicRandom()->randomUniqueID().first();
 			machine->fault_injection_p1 = 0.1;
@@ -1285,7 +1308,7 @@ public:
 		}
 	}
 	virtual void killProcess( ProcessInfo* machine, KillType kt ) {
-		TraceEvent("AttemptingKillProcess");
+		TraceEvent("AttemptingKillProcess").detail("ProcessInfo", machine->toString());
 		if (kt < RebootAndDelete ) {
 			killProcess_internal( machine, kt );
 		}
@@ -1563,9 +1586,10 @@ public:
 		return processes;
 	}
 	virtual ProcessInfo* getProcessByAddress( NetworkAddress const& address ) {
-		NetworkAddress normalizedAddress(address.ip, address.port, true, false);
+		NetworkAddress normalizedAddress(address.ip, address.port, true, address.isTLS());
 		ASSERT( addressMap.count( normalizedAddress ) );
-		return addressMap[ normalizedAddress ];
+		// NOTE: addressMap[normalizedAddress]->address may not equal to normalizedAddress
+		return addressMap[normalizedAddress];
 	}
 
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) {
@@ -1587,10 +1611,10 @@ public:
 		machines.erase(machineId);
 	}
 
-	Sim2() : time(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
+	Sim2() : time(0.0), timerTime(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
 		// Not letting currentProcess be NULL eliminates some annoying special cases
 		currentProcess = new ProcessInfo("NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), {NetworkAddress()}, this, "", "");
-		g_network = net2 = newNet2(false, true);
+		g_network = net2 = newNet2(TLSConfig(), false, true);
 		Net2FileSystem::newFileSystem();
 		check_yield(TaskPriority::Zero);
 	}
@@ -1623,6 +1647,7 @@ public:
 		else {
 			mutex.enter();
 			this->time = t.time;
+			this->timerTime = std::max(this->timerTime, this->time);
 			mutex.leave();
 
 			this->currentProcess = t.machine;
@@ -1675,6 +1700,7 @@ public:
 	//time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	//time should only be modified from the main thread.
 	double time;
+	double timerTime;
 	TaskPriority currentTaskID;
 
 	//taskCount is guarded by ISimulator::mutex
@@ -1717,7 +1743,7 @@ ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
 		TEST( kt == ISimulator::RebootAndDelete ); // Simulated machine rebooted with data and coordination state deletion
 		TEST( kt == ISimulator::RebootProcessAndDelete ); // Simulated process rebooted with data and coordination state deletion
 
-		if( p->rebooting )
+		if( p->rebooting || !p->isReliable() )
 			return;
 		TraceEvent("RebootingProcess").detail("KillType", kt).detail("Address", p->address).detail("ZoneId", p->locality.zoneId()).detail("DataHall", p->locality.dataHallId()).detail("Locality", p->locality.toString()).detail("Failed", p->failed).detail("Excluded", p->excluded).detail("Cleared", p->cleared).backtrace();
 		p->rebooting = true;

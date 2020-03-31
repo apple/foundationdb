@@ -1157,7 +1157,7 @@ Future<Version> ReadYourWritesTransaction::getReadVersion() {
 
 Optional<Value> getValueFromJSON(StatusObject statusObj) {
 	try {
-		Value output = StringRef(json_spirit::write_string(json_spirit::mValue(statusObj), json_spirit::Output_options::raw_utf8).c_str());
+		Value output = StringRef(json_spirit::write_string(json_spirit::mValue(statusObj), json_spirit::Output_options::none));
 		return output;
 	}
 	catch (std::exception& e){
@@ -1166,8 +1166,8 @@ Optional<Value> getValueFromJSON(StatusObject statusObj) {
 	}
 }
 
-ACTOR Future<Optional<Value>> getJSON(Reference<ClusterConnectionFile> clusterFile) {
-	StatusObject statusObj = wait(StatusClient::statusFetcher(clusterFile));
+ACTOR Future<Optional<Value>> getJSON(Database db) {
+	StatusObject statusObj = wait(StatusClient::statusFetcher(db));
 	return getValueFromJSON(statusObj);
 }
 
@@ -1195,7 +1195,7 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 	
 	if (key == LiteralStringRef("\xff\xff/status/json")){
 		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-			return getJSON(tr.getDatabase()->getConnectionFile());
+			return getJSON(tr.getDatabase());
 		}
 		else {
 			return Optional<Value>();
@@ -1279,7 +1279,43 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 			return Standalone<RangeResultRef>();
 		}
 	}
-	
+
+	// Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
+	// to retrieve keys which caused latest not_committed(conflicting with another transaction) error.
+	// The returned key value pairs are interpretted as :
+	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
+	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
+	// Currently, the conflicting keyranges returned are original read_conflict_ranges or union of them.
+	// TODO : This interface needs to be integrated into the framework that handles special keys' calls in the future
+	if (begin.getKey().startsWith(conflictingKeysAbsolutePrefix) &&
+	    end.getKey().startsWith(conflictingKeysAbsolutePrefix)) {
+		// Remove the special key prefix "\xff\xff"
+		KeyRef beginConflictingKey = begin.getKey().removePrefix(specialKeys.begin);
+		KeyRef endConflictingKey = end.getKey().removePrefix(specialKeys.begin);
+		// Check if the conflicting key range to be read is valid
+		KeyRef maxKey = getMaxReadKey();
+		if (beginConflictingKey > maxKey || endConflictingKey > maxKey) return key_outside_legal_range();
+		begin.setKey(beginConflictingKey);
+		end.setKey(endConflictingKey);
+		if (tr.info.conflictingKeysRYW) {
+			Future<Standalone<RangeResultRef>> resultWithoutPrefixFuture =
+			    tr.info.conflictingKeysRYW->getRange(begin, end, limits, snapshot, reverse);
+			// Make sure it happens locally
+			ASSERT(resultWithoutPrefixFuture.isReady());
+			Standalone<RangeResultRef> resultWithoutPrefix = resultWithoutPrefixFuture.get();
+			// Add prefix to results, making keys consistent with the getRange query
+			Standalone<RangeResultRef> resultWithPrefix;
+			resultWithPrefix.reserve(resultWithPrefix.arena(), resultWithoutPrefix.size());
+			for (auto const& kv : resultWithoutPrefix) {
+				KeyValueRef kvWithPrefix(kv.key.withPrefix(specialKeys.begin, resultWithPrefix.arena()), kv.value);
+				resultWithPrefix.push_back(resultWithPrefix.arena(), kvWithPrefix);
+			}
+			return resultWithPrefix;
+		} else {
+			return Standalone<RangeResultRef>();
+		}
+	}
+
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
 	}

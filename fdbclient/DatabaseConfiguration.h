@@ -107,7 +107,7 @@ struct DatabaseConfiguration {
 
 	int expectedLogSets( Optional<Key> dcId ) const {
 		int result = 1;
-		if(dcId.present() && getRegion(dcId.get()).satelliteTLogReplicationFactor > 0) {
+		if(dcId.present() && getRegion(dcId.get()).satelliteTLogReplicationFactor > 0 && usableRegions > 1) {
 			result++;
 		}
 		

@@ -26,6 +26,8 @@
 #include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+#define TEST_ABORT_FASTRESTORE	0
+
 // A workload which test the correctness of backup and restore process
 struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	double backupAfter, restoreAfter, abortAndRestartAfter;
@@ -38,6 +40,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	bool locked;
 	bool allowPauses;
 	bool shareLogRange;
+	bool usePartitionedLogs;
 
 	std::map<Standalone<KeyRef>, Standalone<ValueRef>> dbKVs;
 
@@ -65,6 +68,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		agentRequest = getOption(options, LiteralStringRef("simBackupAgents"), true);
 		allowPauses = getOption(options, LiteralStringRef("allowPauses"), true);
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
+		usePartitionedLogs = getOption(options, LiteralStringRef("usePartitionedLogs"),
+		                               deterministicRandom()->random01() < 0.5 ? true : false);
 
 		KeyRef beginRange;
 		KeyRef endRange;
@@ -178,7 +183,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		try {
 			wait(backupAgent->submitBackup(cx, StringRef(backupContainer), deterministicRandom()->randomInt(0, 100),
-			                               tag.toString(), backupRanges, stopDifferentialDelay ? false : true));
+			                               tag.toString(), backupRanges, stopDifferentialDelay ? false : true,
+			                               self->usePartitionedLogs));
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) throw;
@@ -198,50 +204,47 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				if (BUGGIFY) {
 					state KeyBackedTag backupTag = makeBackupTag(tag.toString());
 					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName);
-					// Wait until the backup is in a restorable state
-					state int resultWait = wait(backupAgent->waitBackup(cx, backupTag.tagName, false));
-					UidAndAbortedFlagT uidFlag = wait(backupTag.getOrThrow(cx));
-					state UID logUid = uidFlag.first;
-					state Reference<IBackupContainer> lastBackupContainer =
-					    wait(BackupConfig(logUid).backupContainer().getD(cx));
+					// Wait until the backup is in a restorable state and get the status, URL, and UID atomically
+					state Reference<IBackupContainer> lastBackupContainer;
+					state UID lastBackupUID;
+					state int resultWait = wait(backupAgent->waitBackup(cx, backupTag.tagName, false, &lastBackupContainer, &lastBackupUID));
+
+					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName).detail("Result", resultWait);
 
 					state bool restorable = false;
 					if (lastBackupContainer) {
-						state BackupDescription desc = wait(lastBackupContainer->describeBackup());
-						wait(desc.resolveVersionTimes(cx));
-						printf("BackupDescription:\n%s\n", desc.toString().c_str());
-						restorable = desc.maxRestorableVersion.present();
+						state Future<BackupDescription> fdesc = self->usePartitionedLogs
+						                                            ? lastBackupContainer->describePartitionedBackup()
+						                                            : lastBackupContainer->describeBackup();
+						wait(ready(fdesc));
+
+						if(!fdesc.isError()) {
+							state BackupDescription desc = fdesc.get();
+							wait(desc.resolveVersionTimes(cx));
+							printf("BackupDescription:\n%s\n", desc.toString().c_str());
+							restorable = desc.maxRestorableVersion.present();
+						}
 					}
 
 					TraceEvent("BARW_LastBackupContainer", randomID)
-					    .detail("BackupTag", printable(tag))
-					    .detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
-					    .detail("LogUid", logUid)
-					    .detail("WaitStatus", resultWait)
-					    .detail("Restorable", restorable);
+						.detail("BackupTag", printable(tag))
+						.detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
+						.detail("LastBackupUID", lastBackupUID).detail("WaitStatus", resultWait).detail("Restorable", restorable);
 
 					// Do not check the backup, if aborted
 					if (resultWait == BackupAgentBase::STATE_ABORTED) {
 					}
 					// Ensure that a backup container was found
 					else if (!lastBackupContainer) {
-						TraceEvent("BARW_MissingBackupContainer", randomID)
-						    .detail("LogUid", logUid)
-						    .detail("BackupTag", printable(tag))
-						    .detail("WaitStatus", resultWait);
+						TraceEvent(SevError, "BARW_MissingBackupContainer", randomID).detail("LastBackupUID", lastBackupUID).detail("BackupTag", printable(tag)).detail("WaitStatus", resultWait);
 						printf("BackupCorrectnessMissingBackupContainer   tag: %s  status: %d\n",
 						       printable(tag).c_str(), resultWait);
 					}
 					// Check that backup is restorable
-					else {
-						if (!restorable) {
-							TraceEvent("BARW_NotRestorable", randomID)
-							    .detail("LogUid", logUid)
-							    .detail("BackupTag", printable(tag))
-							    .detail("BackupFolder", lastBackupContainer->getURL())
-							    .detail("WaitStatus", resultWait);
-							printf("BackupCorrectnessNotRestorable:  tag: %s\n", printable(tag).c_str());
-						}
+					else if(!restorable) {
+						TraceEvent(SevError, "BARW_NotRestorable", randomID).detail("LastBackupUID", lastBackupUID).detail("BackupTag", printable(tag))
+							.detail("BackupFolder", lastBackupContainer->getURL()).detail("WaitStatus", resultWait);
+						printf("BackupCorrectnessNotRestorable:  tag: %s\n", printable(tag).c_str());
 					}
 
 					// Abort the backup, if not the first backup because the second backup may have aborted the backup
@@ -398,9 +401,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
 				try {
-					extraBackup = backupAgent.submitBackup(cx, LiteralStringRef("file://simfdb/backups/"),
-					                                       deterministicRandom()->randomInt(0, 100),
-					                                       self->backupTag.toString(), self->backupRanges, true);
+					extraBackup = backupAgent.submitBackup(
+					    cx, LiteralStringRef("file://simfdb/backups/"), deterministicRandom()->randomInt(0, 100),
+					    self->backupTag.toString(), self->backupRanges, true, self->usePartitionedLogs);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)
@@ -433,7 +436,14 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				    .detail("BackupTag", printable(self->backupTag));
 
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
-				BackupDescription desc = wait(container->describeBackup());
+				BackupDescription desc = wait(self->usePartitionedLogs ? container->describePartitionedBackup()
+				                                                       : container->describeBackup());
+
+				TraceEvent("BAFRW_Restore", randomID)
+				    .detail("LastBackupContainer", lastBackupContainer->getURL())
+				    .detail("MinRestorableVersion", desc.minRestorableVersion.get())
+				    .detail("MaxRestorableVersion", desc.maxRestorableVersion.get())
+				    .detail("ContiguousLogEnd", desc.contiguousLogEnd.get());
 
 				state Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {
@@ -442,6 +452,12 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					} else if (deterministicRandom()->random01() < 0.1) {
 						targetVersion = desc.maxRestorableVersion.get();
 					} else if (deterministicRandom()->random01() < 0.5) {
+						// The assertion may fail because minRestorableVersion may be decided by snapshot version.
+						// ASSERT_WE_THINK(desc.minRestorableVersion.get() <= desc.contiguousLogEnd.get());
+						// This assertion can fail when contiguousLogEnd < maxRestorableVersion and
+						// the snapshot version > contiguousLogEnd. I.e., there is a gap between
+						// contiguousLogEnd and snapshot version.
+						// ASSERT_WE_THINK(desc.contiguousLogEnd.get() > desc.maxRestorableVersion.get());
 						targetVersion = deterministicRandom()->randomInt64(desc.minRestorableVersion.get(),
 						                                                   desc.contiguousLogEnd.get());
 					}
@@ -450,39 +466,18 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				state std::vector<Future<Version>> restores;
 				state std::vector<Standalone<StringRef>> restoreTags;
 
-				// Restore each range by calling backupAgent.restore()
+				// Submit parallel restore requests
 				TraceEvent("FastRestore").detail("PrepareRestores", self->backupRanges.size());
-				loop {
-					state ReadYourWritesTransaction tr1(cx);
-					tr1.reset();
-					tr1.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr1.setOption(FDBTransactionOptions::LOCK_AWARE);
-					try {
-						// Note: we always lock DB here in case DB is modified at the bacupRanges boundary.
-						for (restoreIndex = 0; restoreIndex < self->backupRanges.size(); restoreIndex++) {
-							auto range = self->backupRanges[restoreIndex];
-							Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" +
-							                                 std::to_string(restoreIndex));
-							restoreTags.push_back(restoreTag);
-							// Register the request request in DB, which will be picked up by restore worker leader
-							struct RestoreRequest restoreRequest(
-							    restoreIndex, restoreTag, KeyRef(lastBackupContainer->getURL()), true, targetVersion,
-							    true, range, Key(), Key(), self->locked, deterministicRandom()->randomUniqueID());
-							tr1.set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
-						}
-						tr1.set(restoreRequestTriggerKey,
-						        restoreRequestTriggerValue(deterministicRandom()->randomUniqueID(),
-						                                   self->backupRanges.size()));
-						wait(tr1.commit()); // Trigger restore
-						break;
-					} catch (Error& e) {
-						wait(tr1.onError(e));
-					}
-				};
+				wait(backupAgent.submitParallelRestore(cx, self->backupTag, self->backupRanges,
+				                                       KeyRef(lastBackupContainer->getURL()), targetVersion,
+				                                       self->locked, randomID));
 				TraceEvent("FastRestore").detail("TriggerRestore", "Setting up restoreRequestTriggerKey");
 
 				// Sometimes kill and restart the restore
-				if (BUGGIFY) {
+				// In real cluster, aborting a restore needs:
+				// (1) kill restore cluster; (2) clear dest. DB restore system keyspace.
+				// TODO: Consider gracefully abort a restore and restart.
+				if (BUGGIFY && TEST_ABORT_FASTRESTORE) {
 					TraceEvent(SevError, "FastRestore").detail("Buggify", "NotImplementedYet");
 					wait(delay(deterministicRandom()->randomInt(0, 10)));
 					for (restoreIndex = 0; restoreIndex < restores.size(); restoreIndex++) {
@@ -503,34 +498,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					}
 				}
 
-				// We should wait on all restore before proceeds
+				// Wait for parallel restore to finish before we can proceed
 				TraceEvent("FastRestore").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");
-				restoreDone = false;
-				state Future<Void> watchForRestoreRequestDone;
-				loop {
-					try {
-						if (restoreDone) break;
-						tr2.reset();
-						tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-						Optional<Value> restoreRequestDoneKeyValue = wait(tr2.get(restoreRequestDoneKey));
-						// Restore may finish before restoreAgent waits on the restore finish event.
-						if (restoreRequestDoneKeyValue.present()) {
-							restoreDone = true; // In case commit clears the key but in unknown_state
-							tr2.clear(restoreRequestDoneKey);
-							wait(tr2.commit());
-							break;
-						} else {
-							watchForRestoreRequestDone = tr2.watch(restoreRequestDoneKey);
-							wait(tr2.commit());
-							wait(watchForRestoreRequestDone);
-							break;
-						}
-					} catch (Error& e) {
-						wait(tr2.onError(e));
-					}
-				}
-
+				wait(backupAgent.parallelRestoreFinish(cx, randomID));
 				TraceEvent("FastRestore").detail("BackupAndParallelRestore", "RestoreFinished");
 
 				for (auto& restore : restores) {

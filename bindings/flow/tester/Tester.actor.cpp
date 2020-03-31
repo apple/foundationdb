@@ -28,6 +28,7 @@
 #include "bindings/flow/FDBLoanerTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/TLSConfig.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Otherwise we have to type setupNetwork(), FDB::open(), etc.
@@ -429,9 +430,8 @@ struct LogStackFunc : InstructionFunc {
 				wait(logStack(data, entries, prefix));
 				entries.clear();
 			}
-
-			wait(logStack(data, entries, prefix));
 		}
+		wait(logStack(data, entries, prefix));
 
 		return Void();
 	}
@@ -637,6 +637,29 @@ struct GetFunc : InstructionFunc {
 };
 const char* GetFunc::name = "GET";
 REGISTER_INSTRUCTION_FUNC(GetFunc);
+
+struct GetEstimatedRangeSize : InstructionFunc {
+	static const char* name;
+
+	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
+		state std::vector<StackItem> items = data->stack.pop(2);
+		if (items.size() != 2)
+			return Void();
+
+		Standalone<StringRef> s1 = wait(items[0].value);
+		state Standalone<StringRef> beginKey = Tuple::unpack(s1).getString(0);
+
+		Standalone<StringRef> s2 = wait(items[1].value);
+		state Standalone<StringRef> endKey = Tuple::unpack(s2).getString(0);
+		Future<int64_t> fsize = instruction->tr->getEstimatedRangeSizeBytes(KeyRangeRef(beginKey, endKey));
+		int64_t size = wait(fsize);
+		data->stack.pushTuple(LiteralStringRef("GOT_ESTIMATED_RANGE_SIZE"));
+
+		return Void();
+	}
+};
+const char* GetEstimatedRangeSize::name = "GET_ESTIMATED_RANGE_SIZE";
+REGISTER_INSTRUCTION_FUNC(GetEstimatedRangeSize);
 
 struct GetKeyFunc : InstructionFunc {
 	static const char* name;
@@ -1603,6 +1626,7 @@ struct UnitTestsFunc : InstructionFunc {
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_LOCK_AWARE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_INCLUDE_PORT_IN_ADDRESS);
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_REPORT_CONFLICTING_KEYS);
 
 		Optional<FDBStandalone<ValueRef> > _ = wait(tr->get(LiteralStringRef("\xff")));
 		tr->cancel();
@@ -1748,7 +1772,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		populateOpsThatCreateDirectories(); // FIXME
 
 		// This is "our" network
-		g_network = newNet2(false);
+		g_network = newNet2(TLSConfig());
 
 		ASSERT(!API::isAPIVersionSelected());
 		try {
@@ -1791,7 +1815,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 
 ACTOR void _test_versionstamp() {
 	try {
-		g_network = newNet2(false);
+		g_network = newNet2(TLSConfig());
 
 		API *fdb = FDB::API::selectAPIVersion(700);
 

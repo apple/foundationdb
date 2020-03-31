@@ -327,10 +327,43 @@ struct ReadWriteWorkload : KVWorkload {
 			elapsed += self->periodicLoggingInterval;
 			wait( delayUntil(start + elapsed) );
 
-			TraceEvent((self->description() + "_RowReadLatency").c_str()).detail("Mean", self->readLatencies.mean()).detail("Median", self->readLatencies.median()).detail("Percentile5", self->readLatencies.percentile(.05)).detail("Percentile95", self->readLatencies.percentile(.95)).detail("Count", self->readLatencyCount).detail("Elapsed", elapsed);
-			TraceEvent((self->description() + "_GRVLatency").c_str()).detail("Mean", self->GRVLatencies.mean()).detail("Median", self->GRVLatencies.median()).detail("Percentile5", self->GRVLatencies.percentile(.05)).detail("Percentile95", self->GRVLatencies.percentile(.95));
-			TraceEvent((self->description() + "_CommitLatency").c_str()).detail("Mean", self->commitLatencies.mean()).detail("Median", self->commitLatencies.median()).detail("Percentile5", self->commitLatencies.percentile(.05)).detail("Percentile95", self->commitLatencies.percentile(.95));
-			TraceEvent((self->description() + "_TotalLatency").c_str()).detail("Mean", self->latencies.mean()).detail("Median", self->latencies.median()).detail("Percentile5", self->latencies.percentile(.05)).detail("Percentile95", self->latencies.percentile(.95));
+			TraceEvent((self->description() + "_RowReadLatency").c_str())
+				.detail("Mean", self->readLatencies.mean())
+				.detail("Median", self->readLatencies.median())
+				.detail("Percentile5", self->readLatencies.percentile(.05))
+				.detail("Percentile95", self->readLatencies.percentile(.95))
+				.detail("Percentile99", self->readLatencies.percentile(.99))
+				.detail("Percentile99_9", self->readLatencies.percentile(.999))
+				.detail("Max", self->readLatencies.max())
+				.detail("Count", self->readLatencyCount)
+				.detail("Elapsed", elapsed);
+
+			TraceEvent((self->description() + "_GRVLatency").c_str())
+				.detail("Mean", self->GRVLatencies.mean())
+				.detail("Median", self->GRVLatencies.median())
+				.detail("Percentile5", self->GRVLatencies.percentile(.05))
+				.detail("Percentile95", self->GRVLatencies.percentile(.95))
+				.detail("Percentile99", self->GRVLatencies.percentile(.99))
+				.detail("Percentile99_9", self->GRVLatencies.percentile(.999))
+				.detail("Max", self->GRVLatencies.max());
+				
+			TraceEvent((self->description() + "_CommitLatency").c_str())
+				.detail("Mean", self->commitLatencies.mean())
+				.detail("Median", self->commitLatencies.median())
+				.detail("Percentile5", self->commitLatencies.percentile(.05))
+				.detail("Percentile95", self->commitLatencies.percentile(.95))
+				.detail("Percentile99", self->commitLatencies.percentile(.99))
+				.detail("Percentile99_9", self->commitLatencies.percentile(.999))
+				.detail("Max", self->commitLatencies.max());
+
+			TraceEvent((self->description() + "_TotalLatency").c_str())
+				.detail("Mean", self->latencies.mean())
+				.detail("Median", self->latencies.median())
+				.detail("Percentile5", self->latencies.percentile(.05))
+				.detail("Percentile95", self->latencies.percentile(.95))
+				.detail("Percentile99", self->latencies.percentile(.99))
+				.detail("Percentile99_9", self->latencies.percentile(.999))
+				.detail("Max", self->latencies.max());
 
 			int64_t ops = (self->aTransactions.getValue() * (self->readsPerTransactionA+self->writesPerTransactionA)) + 
 						  (self->bTransactions.getValue() * (self->readsPerTransactionB+self->writesPerTransactionB));

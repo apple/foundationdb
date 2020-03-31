@@ -184,15 +184,87 @@ function(create_test_package)
       file(COPY ${file} DESTINATION ${CMAKE_BINARY_DIR}/packages/${dest_dir})
     endforeach()
   endforeach()
-  set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness.tar.gz)
+  if(NOT USE_VALGRIND)
+    set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness-${CMAKE_PROJECT_VERSION}.tar.gz)
+    add_custom_command(
+      OUTPUT ${tar_file}
+      DEPENDS ${out_files}
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTest.sh ${CMAKE_BINARY_DIR}/packages/joshua_test
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTimeout.sh ${CMAKE_BINARY_DIR}/packages/joshua_timeout
+      COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+      ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
+      ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
+      ${CMAKE_BINARY_DIR}/packages/joshua_test
+      ${CMAKE_BINARY_DIR}/packages/joshua_timeout
+      ${out_files} ${external_files}
+      COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/packages/joshua_test ${CMAKE_BINARY_DIR}/packages/joshua_timeout
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/packages
+      COMMENT "Package correctness archive"
+      )
+    add_custom_target(package_tests ALL DEPENDS ${tar_file})
+    add_dependencies(package_tests strip_only_fdbserver TestHarness)
+  endif()
+
+  if(USE_VALGRIND)
+    set(tar_file ${CMAKE_BINARY_DIR}/packages/valgrind-${CMAKE_PROJECT_VERSION}.tar.gz)
+    add_custom_command(
+      OUTPUT ${tar_file}
+      DEPENDS ${out_files}
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/valgrindTest.sh ${CMAKE_BINARY_DIR}/packages/joshua_test
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/valgrindTimeout.sh ${CMAKE_BINARY_DIR}/packages/joshua_timeout
+      COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+      ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
+      ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
+      ${CMAKE_BINARY_DIR}/packages/joshua_test
+      ${CMAKE_BINARY_DIR}/packages/joshua_timeout
+      ${out_files} ${external_files}
+      COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/packages/joshua_test ${CMAKE_BINARY_DIR}/packages/joshua_timeout
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/packages
+      COMMENT "Package correctness archive"
+      )
+    add_custom_target(package_valgrind_tests ALL DEPENDS ${tar_file})
+    add_dependencies(package_valgrind_tests strip_only_fdbserver TestHarness)
+  endif()
+endfunction()
+
+function(package_bindingtester)
+  if(WIN32 OR OPEN_FOR_IDE)
+    return()
+  elseif(APPLE)
+    set(fdbcName "libfdb_c.dylib")
+  else()
+    set(fdbcName "libfdb_c.so")
+  endif()
+  set(bdir ${CMAKE_BINARY_DIR}/bindingtester)
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/bindingtester)
+  set(outfiles ${bdir}/fdbcli ${bdir}/fdbserver ${bdir}/${fdbcName} ${bdir}/joshua_test ${bdir}/joshua_timeout)
+  add_custom_command(
+    OUTPUT ${outfiles}
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/packages/bin/fdbcli
+            ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+            ${CMAKE_BINARY_DIR}/packages/lib/${fdbcName}
+            ${bdir}
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/bindingTest.sh ${bdir}/joshua_test
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/bindingTimeout.sh ${bdir}/joshua_timeout
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/localClusterStart.sh ${bdir}/localClusterStart.sh
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/bindingTestScript.sh ${bdir}/bindingTestScript.ksh
+    COMMENT "Copy executes to bindingtester dir")
+  file(GLOB_RECURSE test_files ${CMAKE_SOURCE_DIR}/bindings/*)
+  add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/bindingtester.touch"
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/bindingtester/tests
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bindingtester/tests
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bindings ${CMAKE_BINARY_DIR}/bindingtester/tests
+    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/bindingtester.touch"
+    COMMENT "Copy test files for bindingtester")
+  add_custom_target(copy_bindingtester_binaries DEPENDS ${outfiles}  "${CMAKE_BINARY_DIR}/bindingtester.touch")
+  add_dependencies(copy_bindingtester_binaries strip_only_fdbserver strip_only_fdbcli strip_only_fdb_c)
+  set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester-${CMAKE_PROJECT_VERSION}.tar.gz)
   add_custom_command(
     OUTPUT ${tar_file}
-    DEPENDS ${out_files}
-    COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
-    ${out_files} ${external_files}
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/packages
-    COMMENT "Package correctness archive"
-    )
-  add_custom_target(package_tests DEPENDS ${tar_file})
-  add_dependencies(package_tests strip_fdbserver)
+    COMMAND ${CMAKE_COMMAND} -E tar czf ${tar_file} *
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/bindingtester
+    COMMENT "Pack bindingtester")
+  add_custom_target(bindingtester ALL DEPENDS ${tar_file})
+  add_dependencies(bindingtester copy_bindingtester_binaries)
 endfunction()

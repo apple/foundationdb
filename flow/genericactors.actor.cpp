@@ -129,3 +129,12 @@ ACTOR Future<Void> returnIfTrue( Future<bool> f )
 	wait( Never() );
 	throw internal_error();
 }
+
+ACTOR Future<Void> lowPriorityDelay( double waitTime ) {
+	state int loopCount = 0;
+	while(loopCount < FLOW_KNOBS->LOW_PRIORITY_DELAY_COUNT) {
+		wait(delay(waitTime/FLOW_KNOBS->LOW_PRIORITY_DELAY_COUNT, TaskPriority::Low));
+		loopCount++;
+	}
+	return Void();
+}

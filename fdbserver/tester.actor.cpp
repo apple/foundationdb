@@ -973,6 +973,8 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			TraceEvent("TestParserTest").detail("ParsedSimDrAgents", spec.simDrAgents);
 		} else if( attrib == "extraDB" ) {
 			TraceEvent("TestParserTest").detail("ParsedExtraDB", "");
+		} else if ( attrib == "configureLocked" ) {
+			TraceEvent("TestParserTest").detail("ParsedConfigureLocked", "");
 		} else if( attrib == "minimumReplication" ) {
 			TraceEvent("TestParserTest").detail("ParsedMinimumReplication", "");
 		} else if( attrib == "minimumRegions" ) {
@@ -1018,7 +1020,8 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc, Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector< TesterInterface > testers, vector<TestSpec> tests, StringRef startingConfiguration, LocalityData locality ) {
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo> );
-	state Future<Void> ccMonitor = monitorServerDBInfo( cc, Reference<ClusterConnectionFile>(), LocalityData(), dbInfo );  // FIXME: locality
+	state Future<Void> ccMonitor =
+	    monitorServerDBInfo(cc, Reference<ClusterConnectionFile>(), LocalityData(), dbInfo); // FIXME: locality
 
 	state bool useDB = false;
 	state bool waitForQuiescenceBegin = false;

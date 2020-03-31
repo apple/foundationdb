@@ -29,6 +29,7 @@
 
 #include <sstream>
 #include "flow/Stats.h"
+#include "fdbclient/Atomic.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
@@ -40,13 +41,184 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef::Type type);
+
+// Key whose mutations are buffered on applier.
+// key, value, type and version defines the parsed mutation at version.
+// pendingMutations has all versioned mutations to be applied.
+// Mutations in pendingMutations whose version is below the version in StagingKey can be ignored in applying phase.
+struct StagingKey {
+	Key key; // TODO: Maybe not needed?
+	Value val;
+	MutationRef::Type type; // set or clear
+	LogMessageVersion version; // largest version of set or clear for the key
+	std::map<LogMessageVersion, Standalone<MutationRef>> pendingMutations; // mutations not set or clear type
+
+	explicit StagingKey() : version(0), type(MutationRef::MAX_ATOMIC_OP) {}
+
+	// Add mutation m at newVersion to stagingKey
+	// Assume: SetVersionstampedKey and SetVersionstampedValue have been converted to set
+	void add(const MutationRef& m, LogMessageVersion newVersion) {
+		ASSERT(m.type != MutationRef::SetVersionstampedKey && m.type != MutationRef::SetVersionstampedValue);
+		if (debugMutation("StagingKeyAdd", newVersion.version, m)) {
+			TraceEvent("StagingKeyAdd")
+			    .detail("Version", version.toString())
+			    .detail("NewVersion", newVersion.toString())
+			    .detail("Mutation", m.toString());
+		}
+		if (version == newVersion) {
+			// This could happen because the same mutation can be present in
+			// overlapping mutation logs, because new TLogs can copy mutations
+			// from old generation TLogs (or backup worker is recruited without
+			// knowning previously saved progress).
+			ASSERT(type == m.type && key == m.param1 && val == m.param2);
+			TraceEvent("SameVersion").detail("Version", version.toString()).detail("Mutation", m.toString());
+			return;
+		}
+
+		// newVersion can be smaller than version as different loaders can send
+		// mutations out of order.
+		if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
+			if (version < newVersion) {
+				key = m.param1;
+				val = m.param2;
+				type = (MutationRef::Type)m.type;
+				version = newVersion;
+			}
+		} else {
+			auto it = pendingMutations.find(newVersion);
+			if (it == pendingMutations.end()) {
+				pendingMutations.emplace(newVersion, m);
+			} else {
+				// Duplicated mutation ignored.
+				TraceEvent("SameVersion")
+				    .detail("Version", version.toString())
+				    .detail("Mutation", m.toString())
+				    .detail("NewVersion", newVersion.toString());
+				ASSERT(it->second.type == m.type && it->second.param1 == m.param1 && it->second.param2 == m.param2);
+			}
+		}
+	}
+
+	// Precompute the final value of the key.
+	// TODO: Look at the last LogMessageVersion, if it set or clear, we can ignore the rest of versions.
+	void precomputeResult() {
+		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult")
+		    .detail("Key", key)
+		    .detail("Version", version.toString())
+		    .detail("LargestPendingVersion",
+		            (pendingMutations.empty() ? "[none]" : pendingMutations.rbegin()->first.toString()));
+		std::map<LogMessageVersion, Standalone<MutationRef>>::iterator lb = pendingMutations.lower_bound(version);
+		if (lb == pendingMutations.end()) {
+			return;
+		}
+		if (lb->first == version) {
+			// Sanity check mutations at version are either atomicOps which can be ignored or the same value as buffered
+			MutationRef m = lb->second;
+			if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
+				if (std::tie(type, key, val) != std::tie(m.type, m.param1, m.param2)) {
+					TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnhandledSituation")
+					    .detail("BufferedType", typeString[type])
+					    .detail("PendingType", typeString[m.type])
+					    .detail("BufferedVal", val.toString())
+					    .detail("PendingVal", m.param2.toString());
+				}
+			}
+			lb++;
+		}
+		for (; lb != pendingMutations.end(); lb++) {
+			MutationRef mutation = lb->second;
+			if (type == MutationRef::CompareAndClear) { // Special atomicOp
+				Arena arena;
+				Optional<ValueRef> retVal = doCompareAndClear(val, mutation.param2, arena);
+				if (!retVal.present()) {
+					val = key;
+					type = MutationRef::ClearRange;
+				} // else no-op
+			} else if (isAtomicOp((MutationRef::Type)mutation.type)) {
+				Optional<StringRef> inputVal;
+				if (hasBaseValue()) {
+					inputVal = val;
+				}
+				val = applyAtomicOp(inputVal, mutation.param2, (MutationRef::Type)mutation.type);
+				type = MutationRef::SetValue; // Precomputed result should be set to DB.
+			} else if (mutation.type == MutationRef::SetValue || mutation.type == MutationRef::ClearRange) {
+				type = MutationRef::SetValue; // Precomputed result should be set to DB.
+				TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnexpectedSet")
+				    .detail("MutationType", typeString[mutation.type])
+				    .detail("Version", lb->first.toString());
+			} else {
+				TraceEvent(SevWarnAlways, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation")
+				    .detail("MutationType", typeString[mutation.type])
+				    .detail("Version", lb->first.toString());
+			}
+			version = lb->first;
+		}
+	}
+
+	// Does the key has at least 1 set or clear mutation to get the base value
+	bool hasBaseValue() {
+		if (version.version > 0) {
+			ASSERT(type == MutationRef::SetValue || type == MutationRef::ClearRange);
+		}
+		return version.version > 0;
+	}
+
+	// Has all pendingMutations been pre-applied to the val?
+	bool hasPrecomputed() {
+		ASSERT(pendingMutations.empty() || pendingMutations.rbegin()->first >= pendingMutations.begin()->first);
+		return pendingMutations.empty() || version >= pendingMutations.rbegin()->first;
+	}
+
+	int expectedMutationSize() { return key.size() + val.size(); }
+};
+
+// The range mutation received on applier.
+// Range mutations should be applied both to the destination DB and to the StagingKeys
+struct StagingKeyRange {
+	Standalone<MutationRef> mutation;
+	LogMessageVersion version;
+
+	explicit StagingKeyRange(MutationRef m, LogMessageVersion newVersion) : mutation(m), version(newVersion) {}
+
+	bool operator<(const StagingKeyRange& rhs) const {
+		return std::tie(version, mutation.type, mutation.param1, mutation.param2) <
+		       std::tie(rhs.version, rhs.mutation.type, rhs.mutation.param1, rhs.mutation.param2);
+	}
+};
+
+// Applier state in each verion batch
+class ApplierVersionBatchState : RoleVersionBatchState {
+public:
+	static const int NOT_INIT = 0;
+	static const int INIT = 1;
+	static const int RECEIVE_MUTATIONS = 2;
+	static const int WRITE_TO_DB = 3;
+	static const int INVALID = 4;
+
+	explicit ApplierVersionBatchState(int newState) {
+		vbState = newState;
+	}
+
+	virtual ~ApplierVersionBatchState() = default;
+
+	virtual void operator=(int newState) { vbState = newState; }
+
+	virtual int get() { return vbState; }
+};
+
 struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	// processedFileState: key: RestoreAsset; value: largest version of mutation received on the applier
 	std::map<RestoreAsset, NotifiedVersion> processedFileState;
 	Optional<Future<Void>> dbApplier;
 	VersionedMutationsMap kvOps; // Mutations at each version
+	std::map<Key, StagingKey> stagingKeys;
+	std::set<StagingKeyRange> stagingKeyRanges;
+	FlowLock applyStagingKeysBatchLock;
 
 	Future<Void> pollMetrics;
+
+	RoleVersionBatchState vbState;
 
 	// Status counters
 	struct Counters {
@@ -54,25 +226,72 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 		Counter receivedBytes, receivedWeightedBytes, receivedMutations, receivedAtomicOps;
 		Counter appliedWeightedBytes, appliedMutations, appliedAtomicOps;
 		Counter appliedTxns;
+		Counter fetchKeys; // number of keys to fetch from dest. FDB cluster.
 
 		Counters(ApplierBatchData* self, UID applierInterfID, int batchIndex)
 		  : cc("ApplierBatch", applierInterfID.toString() + ":" + std::to_string(batchIndex)),
 		    receivedBytes("ReceivedBytes", cc), receivedMutations("ReceivedMutations", cc),
 		    receivedAtomicOps("ReceivedAtomicOps", cc), receivedWeightedBytes("ReceivedWeightedMutations", cc),
 		    appliedWeightedBytes("AppliedWeightedBytes", cc), appliedMutations("AppliedMutations", cc),
-		    appliedAtomicOps("AppliedAtomicOps", cc), appliedTxns("AppliedTxns", cc) {}
+		    appliedAtomicOps("AppliedAtomicOps", cc), appliedTxns("AppliedTxns", cc), fetchKeys("FetchKeys", cc) {}
 	} counters;
 
 	void addref() { return ReferenceCounted<ApplierBatchData>::addref(); }
 	void delref() { return ReferenceCounted<ApplierBatchData>::delref(); }
 
-	explicit ApplierBatchData(UID nodeID, int batchIndex) : counters(this, nodeID, batchIndex) {
+	explicit ApplierBatchData(UID nodeID, int batchIndex)
+	  : counters(this, nodeID, batchIndex), applyStagingKeysBatchLock(SERVER_KNOBS->FASTRESTORE_APPLYING_PARALLELISM),
+	    vbState(ApplierVersionBatchState::NOT_INIT) {
 		pollMetrics =
 		    traceCounters("FastRestoreApplierMetrics", nodeID, SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
 		                  &counters.cc, nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreApplierMetricsCreated").detail("Node", nodeID);
 	}
 	~ApplierBatchData() = default;
+
+	void addMutation(MutationRef m, LogMessageVersion ver) {
+		if (!isRangeMutation(m)) {
+			auto item = stagingKeys.emplace(m.param1, StagingKey());
+			item.first->second.add(m, ver);
+		} else {
+			stagingKeyRanges.insert(StagingKeyRange(m, ver));
+		}
+	}
+
+	void addVersionStampedKV(MutationRef m, LogMessageVersion ver, uint16_t numVersionStampedKV) {
+		if (m.type == MutationRef::SetVersionstampedKey) {
+			// Assume transactionNumber = 0 does not affect result
+			TraceEvent(SevDebug, "FastRestoreApplierAddMutation")
+			    .detail("MutationType", typeString[m.type])
+			    .detail("FakedTransactionNumber", numVersionStampedKV);
+			transformVersionstampMutation(m, &MutationRef::param1, ver.version, numVersionStampedKV);
+			addMutation(m, ver);
+		} else if (m.type == MutationRef::SetVersionstampedValue) {
+			// Assume transactionNumber = 0 does not affect result
+			TraceEvent(SevDebug, "FastRestoreApplierAddMutation")
+			    .detail("MutationType", typeString[m.type])
+			    .detail("FakedTransactionNumber", numVersionStampedKV);
+			transformVersionstampMutation(m, &MutationRef::param2, ver.version, numVersionStampedKV);
+			addMutation(m, ver);
+		} else {
+			ASSERT(false);
+		}
+	}
+
+	// Return true if all staging keys have been precomputed
+	bool allKeysPrecomputed() {
+		for (auto& stagingKey : stagingKeys) {
+			if (!stagingKey.second.hasPrecomputed()) {
+				TraceEvent("FastRestoreApplierAllKeysPrecomputedFalse")
+				    .detail("Key", stagingKey.first)
+				    .detail("BufferedVersion", stagingKey.second.version.toString())
+				    .detail("MaxPendingVersion", stagingKey.second.pendingMutations.rbegin()->first.toString());
+				return false;
+			}
+		}
+		TraceEvent("FastRestoreApplierAllKeysPrecomputed");
+		return true;
+	}
 
 	void reset() {
 		kvOps.clear();
@@ -87,20 +306,17 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	}
 
 	bool isKVOpsSorted() {
-		bool ret = true;
 		auto prev = kvOps.begin();
 		for (auto it = kvOps.begin(); it != kvOps.end(); ++it) {
 			if (prev->first > it->first) {
-				ret = false;
-				break;
+				return false;
 			}
 			prev = it;
 		}
-		return ret;
+		return true;
 	}
 
 	bool allOpsAreKnown() {
-		bool ret = true;
 		for (auto it = kvOps.begin(); it != kvOps.end(); ++it) {
 			for (auto m = it->second.begin(); m != it->second.end(); ++m) {
 				if (m->type == MutationRef::SetValue || m->type == MutationRef::ClearRange ||
@@ -108,18 +324,17 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 					continue;
 				else {
 					TraceEvent(SevError, "FastRestore").detail("UnknownMutationType", m->type);
-					ret = false;
+					return false;
 				}
 			}
 		}
-		return ret;
+		return true;
 	}
 };
 
 struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreApplierData> {
 	// Buffer for uncommitted data at ongoing version batches
 	std::map<int, Reference<ApplierBatchData>> batch;
-	NotifiedVersion finishedBatch; // The version batch that has been applied to DB
 
 	void addref() { return ReferenceCounted<RestoreApplierData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreApplierData>::delref(); }
@@ -135,6 +350,22 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	}
 
 	~RestoreApplierData() = default;
+
+	// getVersionBatchState may be called periodically to dump version batch state,
+	// even when no version batch has been started.
+	int getVersionBatchState(int batchIndex) final {
+		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
+		if (item == batch.end()) { // Simply caller's effort in when it can call this func.
+			return ApplierVersionBatchState::INVALID;
+		} else {
+			return item->second->vbState.get();
+		}
+	}
+	void setVersionBatchState(int batchIndex, int vbState) final {
+		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
+		ASSERT(item != batch.end());
+		item->second->vbState = vbState;
+	}
 
 	void initVersionBatch(int batchIndex) {
 		TraceEvent("FastRestoreApplierInitVersionBatch", id()).detail("BatchIndex", batchIndex);
