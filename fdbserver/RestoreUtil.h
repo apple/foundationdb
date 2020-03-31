@@ -35,8 +35,8 @@
 #include <cstdint>
 #include <cstdarg>
 
-#define SevFRMutationInfo SevVerbose
-//#define SevFRMutationInfo SevInfo
+//#define SevFRMutationInfo SevVerbose
+#define SevFRMutationInfo SevInfo
 
 using MutationsVec = Standalone<VectorRef<MutationRef>>;
 using SubSequenceVec = Standalone<VectorRef<uint32_t>>;

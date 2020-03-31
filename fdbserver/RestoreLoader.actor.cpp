@@ -202,7 +202,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
 			}
 
-			TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
+			TraceEvent(SevFRMutationInfo, "FastRestoreDecodePartitionedLogFile")
 			    .detail("CommitVersion", msgVersion.toString())
 			    .detail("ParsedMutation", mutation.toString());
 			it->second.push_back_deep(it->second.arena(), mutation);
@@ -721,7 +721,7 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 
 			cc->sampledLogBytes += mutation.totalSize();
 
-			TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
+			TraceEvent(SevFRMutationInfo, "FastRestoreDecodeLogFile")
 			    .detail("CommitVersion", commitVersion)
 			    .detail("ParsedMutation", mutation.toString());
 
@@ -810,7 +810,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
 		auto it = kvOps.insert(std::make_pair(msgVersion, MutationsVec()));
-		TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
+		TraceEvent(SevFRMutationInfo, "FastRestoreDecodeRangeFile")
 		    .detail("CommitVersion", version)
 		    .detail("ParsedMutationKV", m.toString());
 

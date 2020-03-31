@@ -201,7 +201,7 @@ bool enableFailures = true;
 vector< Standalone<VectorRef<DebugEntryRef>> > debugEntries;
 int64_t totalDebugEntriesSize = 0;
 
-#if CENABLED(0, NOT_IN_CLEAN)
+#if CENABLED(1, NOT_IN_CLEAN)
 StringRef debugKey = LiteralStringRef( "" );
 StringRef debugKey2 = LiteralStringRef( "\xff\xff\xff\xff" );
 

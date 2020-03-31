@@ -105,6 +105,8 @@ struct StagingKey {
 	void precomputeResult() {
 		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult")
 		    .detail("Key", key)
+			.detail("Value", val)
+			.detail("MType", typeString[(int)type])
 		    .detail("Version", version.toString())
 		    .detail("LargestPendingVersion",
 		            (pendingMutations.empty() ? "[none]" : pendingMutations.rbegin()->first.toString()));
