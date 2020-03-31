@@ -531,7 +531,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
-	specialKeySpace = std::make_shared<SpecialKeySpace>(LiteralStringRef(""), LiteralStringRef("\xff\xff\xff\xff"));
+	specialKeySpace = std::make_shared<SpecialKeySpace>(LiteralStringRef(""), LiteralStringRef("\xff"));
 }
 
 DatabaseContext::DatabaseContext(const Error& err)
