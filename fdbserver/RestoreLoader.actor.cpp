@@ -21,6 +21,7 @@
 // This file implements the functions and actors used by the RestoreLoader role.
 // The RestoreLoader role starts with the restoreLoaderCore actor
 
+#include "flow/UnitTest.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
@@ -880,5 +881,88 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 		self->checkMemory.trigger();
 	}
 	req.reply.send(RestoreCommonReply(self->id(), false));
+	return Void();
+}
+
+
+// Test splitMutation
+TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
+	std::map<Key, UID> rangeToApplier;
+	MutationsVec mvector;
+	Standalone<VectorRef<UID>> nodeIDs;
+
+	// Prepare RangeToApplier
+	rangeToApplier.emplace(normalKeys.begin, deterministicRandom()->randomUniqueID());
+	int numAppliers = deterministicRandom()->randomInt(0, 10);
+	for (int i = 0; i < numAppliers; ++i) {
+		Key k = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10)));
+		UID node = deterministicRandom()->randomUniqueID();
+		rangeToApplier.emplace(k, node);
+		TraceEvent("RangeToApplier").detail("Key", k).detail("Node", node);
+	}
+	Key k1 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10)));
+	Key k2 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10)));
+	Key beginK = k1 < k2 ? k1 : k2;
+	Key endK = k1 < k2 ? k2 : k1;
+	Standalone<MutationRef> mutation(MutationRef(MutationRef::ClearRange, beginK.contents(), endK.contents()));
+
+	// Method 1: Use splitMutation
+	splitMutation(&rangeToApplier, mutation, mvector.arena(), mvector.contents(), nodeIDs.arena(),
+					nodeIDs.contents());
+	ASSERT(mvector.size() == nodeIDs.size());
+
+	// Method 2: Use intersection
+	KeyRangeMap<UID> krMap;
+	std::map<Key, UID>::iterator beginKey = rangeToApplier.begin();
+	std::map<Key, UID>::iterator endKey = beginKey;
+	endKey++;
+	while (endKey != rangeToApplier.end()) {
+		TraceEvent("KeyRangeMap").detail("BeginKey", beginKey->first).detail("EndKey", endKey->first).detail("Node", beginKey->second);
+		krMap.insert(KeyRangeRef(beginKey->first, endKey->first), beginKey->second);
+		beginKey = endKey;
+		endKey++;
+	}
+	if (beginKey != rangeToApplier.end()) {
+		TraceEvent("KeyRangeMap").detail("BeginKey", beginKey->first).detail("EndKey", systemKeys.end).detail("Node", beginKey->second);
+		krMap.insert(KeyRangeRef(beginKey->first, systemKeys.end), beginKey->second);
+	}
+
+	int splitMutationIndex = 0;
+	auto r = krMap.intersectingRanges( KeyRangeRef(mutation.param1, mutation.param2) );
+	bool correctResult = true;
+	for(auto i = r.begin(); i != r.end(); ++i) {
+		// intersectionRange result
+		// Calculate the overlap range
+		KeyRef rangeBegin = mutation.param1 > i->range().begin ? mutation.param1 : i->range().begin;
+		KeyRef rangeEnd = mutation.param2 < i->range().end ? mutation.param2 : i->range().end;
+		KeyRange krange(KeyRangeRef(rangeBegin, rangeEnd));
+		UID nodeID = i->value();
+		// splitMuation result
+		if (splitMutationIndex >= mvector.size()) {
+			correctResult = false;
+			break;
+		}
+		MutationRef mutation = mvector[splitMutationIndex];
+		UID applierID = nodeIDs[splitMutationIndex];
+		KeyRange krange2(KeyRangeRef(mutation.param1, mutation.param2));
+		TraceEvent("Result").detail("KeyRange1", krange.toString())
+				.detail("KeyRange2", krange2.toString())
+				.detail("ApplierID1", nodeID).detail("ApplierID2", applierID);
+		if (krange != krange2 || nodeID != applierID) {
+			correctResult = false;
+			TraceEvent(SevError, "IncorrectResult")
+				.detail("Mutation", mutation.toString())
+				.detail("KeyRange1", krange.toString())
+				.detail("KeyRange2", krange2.toString())
+				.detail("ApplierID1", nodeID).detail("ApplierID2", applierID);
+		}
+		splitMutationIndex++;
+	}
+
+	if (splitMutationIndex != mvector.size()) {
+		correctResult = false;
+		TraceEvent(SevError, "SplitMuationTooMany").detail("SplitMutationIndex", splitMutationIndex).detail("Results", mvector.size());
+	}
+
 	return Void();
 }
