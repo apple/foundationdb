@@ -22,6 +22,7 @@
 #include "fmt/core.h"
 #include "fmt/ostream.h"
 #include <algorithm>
+#include <asm-generic/errno-base.h>
 #include <atomic>
 #include <cassert>
 #include <cctype>
@@ -913,21 +914,28 @@ void logTestPlan(std::string const& summaryFileName, std::string const& testFile
 }
 
 struct ExecArgs {
-	std::vector<char*> args;
+	std::vector<std::string> args;
+
 	ExecArgs& operator()(const std::string_view& str) {
-		std::unique_ptr<char[]> ptr{ new char[str.size() + 1] };
-		memcpy(ptr.get(), str.data(), str.size());
-		ptr[str.size()] = '\0';
-		args.push_back(ptr.release());
+		args.push_back(std::string{str});
 		return *this;
 	}
 
-	~ExecArgs() {
-		for (auto ptr : args) {
-			delete[] ptr;
+	// this call leaks memory, either one needs to delete the result afterwards
+	// or if it is passed as argv to execve, we can simply leak it...
+	auto data(std::string& binName) {
+		std::unique_ptr<char*[]> res{new char*[args.size() + 2]};
+		std::unique_ptr<char[]> name{new char[binName.size() + 1]};
+		memcpy(name.get(), binName.c_str(), binName.size() + 1);
+		res[0] = name.release();
+		for (int i = 0; i < args.size(); ++i) {
+			std::unique_ptr<char[]> a{new char[args[i].size() + 1]};
+			memcpy(a.get(), args[i].c_str(), args[i].size() + 1);
+			res[i + 1] = a.release();
 		}
+		res[args.size() + 1] = nullptr;
+		return res.release();
 	}
-	auto data() { return args.data(); }
 };
 
 ExecArgs operator+(ExecArgs const& lhs, ExecArgs const& rhs) {
@@ -958,15 +966,15 @@ struct ThreadObserver {
 	  : pid(pid), outfd(outfd), errfd(errfd), useValgrind(useValgrind), maxErrorLength(maxErrorLength) {}
 
 	template <class Fun>
-	void handleIO(Fun const& fun) {
+	void handleIO(int fd, Fun const& fun) {
 		const size_t bufferSize = 4098;
-		std::unique_ptr<char[]> buffer;
+		std::unique_ptr<char[]> buffer{new char[bufferSize]};
 		std::string currLine;
 		for (;;) {
-			auto cnt = ::read(outfd, buffer.get(), bufferSize);
+			auto cnt = ::read(fd, buffer.get(), bufferSize);
 			if (cnt < 0) {
 				if (errno == EINTR) continue;
-				throw std::runtime_error{ "Could not read buffer" };
+				throw std::runtime_error{ fmt::format("Could not read buffer ({}): {}", errno, strerror(errno)) };
 			} else if (cnt == 0) {
 				break;
 			} else {
@@ -985,10 +993,10 @@ struct ThreadObserver {
 		}
 	}
 	void handleStdOut() {
-		handleIO([](std::string const&) {});
+		handleIO(outfd, [](std::string const& line) {});
 	}
 	void handleStdErr() {
-		handleIO([this](std::string const& line) {
+		handleIO(errfd, [this](std::string const& line) {
 			outputErrors.push_back(line.substr(0, std::min(maxErrorLength, line.size())));
 		});
 	}
@@ -1062,7 +1070,6 @@ int runTest(std::filesystem::path fdbserverName, std::filesystem::path const& tl
 	if (fdbserverName.is_relative()) {
 		fdbserverName = std::filesystem::absolute(fdbserverName);
 	}
-	fmt::print("Current Path: {} tempPath: {}\n", std::filesystem::current_path(), tempPath);
 	auto oldDir = std::filesystem::current_path();
 
 	std::filesystem::create_directory(tempPath);
@@ -1099,7 +1106,7 @@ int runTest(std::filesystem::path fdbserverName, std::filesystem::path const& tl
 		    fdbserverName.c_str());
 		args = valgrindArgs + args;
 	} else {
-		binaryName = fdbserverName;
+		binaryName = fdbserverName.filename();
 	}
 	int errfd[2];
 	int outfd[2];
@@ -1109,28 +1116,33 @@ int runTest(std::filesystem::path fdbserverName, std::filesystem::path const& tl
 	if (pipe(errfd) == -1) {
 		assert(false);
 	}
-	fmt::print("Starting fdbserver: {}", fdbserverName);
-	for (auto arg : args.args) {
-		fmt::print(" {}", arg);
-	}
-	fmt::print("\n");
 	auto pid = ::fork();
 	if (pid == 0) {
-		while ((dup2(outfd[0], STDOUT_FILENO) == -1) && (errno == EINTR)) {
-		}
-		while ((dup2(errfd[0], STDERR_FILENO) == -1) && (errno == EINTR)) {
-		}
+		std::ofstream out("/tmp/forked_testharness.txt", std::ios_base::out | std::ios_base::trunc);
+		fmt::print(out, "Started Forked process\n");
+		out.flush();
+		while ((dup2(outfd[1], STDOUT_FILENO) == -1) && (errno == EINTR)) {}
+		while ((dup2(errfd[1], STDERR_FILENO) == -1) && (errno == EINTR)) {}
 		close(outfd[0]);
 		close(outfd[1]);
 		close(errfd[0]);
 		close(errfd[1]);
-		// child
-		execve(fdbserverName.c_str(), args.data(), environ);
-		assert(false);
+		fmt::print(out, "Run {}", fdbserverName.c_str());
+		for (int i = 0; i < args.args.size(); ++i) {
+			fmt::print(" \"{}\"", args.args[1]);
+			out << " \"" << args.args[i] << "\"";
+		}
+		out << std::endl;
+		out.flush();
+		execve(fdbserverName.c_str(), args.data(binaryName), environ);
+		// if we get here we know execve failed - no need to check return value
+		fmt::print(out, "ERROR: execve failed: {} ({})\n", strerror(errno), errno);
+		out.flush();
+		out.close();
 	}
 	close(outfd[1]);
 	close(errfd[1]);
-	ThreadObserver outHandler{ pid, outfd[0], outfd[1], useValgrind };
+	ThreadObserver outHandler{ pid, outfd[0], errfd[0], useValgrind };
 	outHandler.run();
 
 	int statLoc;
@@ -1257,20 +1269,19 @@ int run(std::filesystem::path const& fdbserverName, std::filesystem::path const&
 			int unseed;
 			std::string uid = newGuid();
 			auto oldServerNameTokens = split(oldServerName, '-');
+			testFile = testFile.value().string() + (result == 0 ? "-2.txt" : "-1.txt" );
+			if (testFile.value().is_relative()) {
+				testFile = std::filesystem::absolute(testFile.value());
+			}
 			bool useNewPlugin = oldServerName == fdbserverName ||
 			                    versionGreaterThanOrEqual(oldServerNameTokens[oldServerNameTokens.size() - 1], "5.2.0");
 			result =
 			    runTest(oldServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName,
-			            seed, buggify, testFile.value().string() + "-1.txt", runDir, uid, expectedUnseed, unseed,
+			            result == 0 ? seed + 1 : seed, buggify, testFile.value(), runDir, uid, expectedUnseed, unseed,
 			            retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout);
-			if (result == 0) {
-				result =
-				    runTest(fdbserverName, tlsPluginFile, summaryFileName, errorFileName, seed + 1, buggify,
-				            testFile.value().string() + "-2.txt", runDir, uid, expectedUnseed, unseed, retryableError,
-				            logOnRetryableError, useValgrind, true, false, oldServerName, traceToStdout);
-			}
 		} else {
 			int expectedUnseed = -1;
+			testFile = std::filesystem::absolute(testFile.value());
 			if (!useValgrind && unseedCheck) {
 				result = runTest(fdbserverName, tlsPluginFile, {}, {}, seed, buggify, testFile.value(), runDir,
 				                 newGuid(), -1, expectedUnseed, retryableError, logOnRetryableError, false, false,
@@ -1543,7 +1554,8 @@ int extractErrors(std::filesystem::path const& summaryFileName, std::filesystem:
 } // namespace
 
 int main(int argc, char* argv[]) {
-	g_rnd.seed(std::random_device{}());
+	//g_rnd.seed(std::random_device{}());
+	g_rnd.seed(100);
 	std::optional<std::string> valgrindFileName;
 	std::string externalError = "";
 	bool traceToStdout = false;
