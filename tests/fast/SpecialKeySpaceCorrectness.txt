@@ -1,5 +1,5 @@
 testTitle=SpecialKeySpaceCorrectnessTest
     testName=SpecialKeySpaceCorrectness
-    testDuration=10.0
+    testDuration=30.0
     valueBytes=16
     keyBytes=16

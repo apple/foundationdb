@@ -67,43 +67,75 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
     GetRangeLimits limits, bool reverse) {
 	// This function handles ranges which cover more than one keyrange and aggregates all results
 	// KeySelector, GetRangeLimits and reverse are all handled here
-
+	state Standalone<RangeResultRef> result;
+	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter;
+	state int actualBeginOffset;
+	state int actualEndOffset;
 	// make sure orEqual == false
 	begin.removeOrEqual(begin.arena());
 	end.removeOrEqual(end.arena());
 
 	// make sure offset == 1
-	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter =
+	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator beginIter =
 	    pks->impls.rangeContaining(begin.getKey());
-	while ((begin.offset < 1 && iter != pks->impls.ranges().begin()) || ( begin.offset > 1 && iter != pks->impls.ranges().end())) {
-		if (iter->value() != nullptr) wait(iter->value()->normalizeKeySelectorActor(iter->value(), ryw, &begin));
-		begin.offset < 1 ? --iter : ++iter;
+	while ((begin.offset < 1 && beginIter != pks->impls.ranges().begin()) ||
+	       (begin.offset > 1 && beginIter != pks->impls.ranges().end())) {
+		if (beginIter->value() != nullptr)
+			wait(beginIter->value()->normalizeKeySelectorActor(beginIter->value(), ryw, &begin));
+		begin.offset < 1 ? --beginIter : ++beginIter;
 	}
+	// TODO : change to is FirstGreaterOrEqual
+	actualBeginOffset = begin.offset;
+	if (beginIter == pks->impls.ranges().begin())
+		begin.setKey(normalKeys.begin);
+	else if (beginIter == pks->impls.ranges().end())
+		begin.setKey(normalKeys.end);
+
 	if (begin.offset != 1) {
 		// The Key Selector points to key outside the whole special key space
-		TraceEvent(SevWarn, "IllegalBeginKeySelector")
-		    .detail("TerminateKey", begin.getKey())
-		    .detail("TerminateOffset", begin.offset);
+		TraceEvent(SevInfo, "IllegalBeginKeySelector")
+			.detail("TerminateKey", begin.getKey())
+			.detail("TerminateOffset", begin.offset);
+		if (begin.offset < 1 && beginIter == pks->impls.ranges().begin())
+			result.readToBegin = true;
+		else
+			result.readThroughEnd = true;
 		begin.offset = 1;
 	}
-	iter = pks->impls.rangeContaining(end.getKey());
-	while ((end.offset < 1 && iter != pks->impls.ranges().begin()) || (end.offset > 1 && iter != pks->impls.ranges().end())) {
-		if (iter->value() != nullptr) wait(iter->value()->normalizeKeySelectorActor(iter->value(), ryw, &end));
-		end.offset < 1 ? --iter : ++iter;
+	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator endIter =
+	    pks->impls.rangeContaining(end.getKey());
+	while ((end.offset < 1 && endIter != pks->impls.ranges().begin()) ||
+	       (end.offset > 1 && endIter != pks->impls.ranges().end())) {
+		if (endIter->value() != nullptr) wait(endIter->value()->normalizeKeySelectorActor(endIter->value(), ryw, &end));
+		end.offset < 1 ? --endIter : ++endIter;
 	}
+	// TODO : change to is FirstGreaterOrEqual
+	actualEndOffset = end.offset;
+	if (endIter == pks->impls.ranges().begin())
+		end.setKey(normalKeys.begin);
+	else if (endIter == pks->impls.ranges().end())
+		end.setKey(normalKeys.end);
+
 	if (end.offset != 1) {
 		// The Key Selector points to key outside the whole special key space
-		TraceEvent(SevWarn, "IllegalEndKeySelector")
+		TraceEvent(SevInfo, "IllegalEndKeySelector")
 		    .detail("TerminateKey", end.getKey())
 		    .detail("TerminateOffset", end.offset);
+		if (end.offset < 1 && endIter == pks->impls.ranges().begin())
+			result.readToBegin = true;
+		else
+			result.readThroughEnd = true;
 		end.offset = 1;
 	}
+	// Handle all corner cases like what RYW does
 	// return if range inverted
-	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
+	if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
 		TEST(true);
-		return Standalone<RangeResultRef>();
+		return RangeResultRef(false, false);
 	}
-	state Standalone<RangeResultRef> result;
+	if (beginIter == pks->impls.ranges().end() || endIter == pks->impls.ranges().begin()) {
+		return result;
+	}
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Ranges ranges =
 	    pks->impls.intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
 	// TODO : workaround to write this two together to make the code compact
@@ -120,10 +152,16 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			// limits handler
 			for (int i = pairs.size() - 1; i >= 0; --i) {
 				result.push_back_deep(result.arena(), pairs[i]);
-				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it is still returned
-				// In other words, the total size of the returned value (less the last entry) will be less than byteLimit
+				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it is still
+				// returned In other words, the total size of the returned value (less the last entry) will be less than
+				// byteLimit
 				limits.decrement(pairs[i]);
-				if (limits.isReached()) return result;
+				if (limits.isReached()) {
+					// result.more = (iter != ranges.begin()) || (iter == ranges.begin() && i != 0);
+					result.more = true;
+					result.readToBegin = false;
+					return result;
+				};
 			}
 		}
 	} else {
@@ -134,12 +172,18 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
 			Standalone<RangeResultRef> pairs = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
 			// limits handler
-			for (const KeyValueRef& kv : pairs) {
-				result.push_back_deep(result.arena(), kv);
-				// Note : behavior here is even the last k-v pari makes total bytes larger than specified, it is still returned
-				// In other words, the total size of the returned value (less the last entry) will be less than byteLimit
-				limits.decrement(kv);
-				if (limits.isReached()) return result;
+			for (int i = 0; i < pairs.size(); ++i) {
+				result.push_back_deep(result.arena(), pairs[i]);
+				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it is still
+				// returned In other words, the total size of the returned value (less the last entry) will be less than
+				// byteLimit
+				limits.decrement(pairs[i]);
+				if (limits.isReached()) {
+					// result.more = (iter != ranges.end()) || (iter == ranges.end() && i != pairs.size() - 1);
+					result.more = true;
+					result.readThroughEnd = false;
+					return result;
+				};
 			}
 		}
 	}

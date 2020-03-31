@@ -102,14 +102,30 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			if (!self->compareRangeResult(correctResult, testResult)) {
 				// TODO : log here
 				// TraceEvent("WrongGetRangeResult"). detail("KeySeleco")
-				// auto temp1 = cx->specialKeySpace->getRange(self->ryw, begin, end, limit, false, reverse);
-				// auto temp2 = self->ryw->getRange(begin, end, limit, false, reverse);
+				auto temp1 = self->ryw->getRange(begin, end, limit, false, reverse);
+				auto temp2 = cx->specialKeySpace->getRange(self->ryw, begin, end, limit, false, reverse);
 				++self->wrongResults;
 			}
 		}
 	}
 
 	bool compareRangeResult(Standalone<RangeResultRef>& res1, Standalone<RangeResultRef>& res2) {
+		if ((res1.more != res2.more) || (res1.readToBegin != res2.readToBegin) ||
+		    (res1.readThroughEnd != res2.readThroughEnd)) {
+			TraceEvent(SevError, "TestFailure")
+			    .detail("Reason", "flags are different")
+			    .detail("More", res1.more)
+			    .detail("ReadToBegin", res1.readToBegin)
+			    .detail("ReadThroughEnd", res1.readThroughEnd)
+			    .detail("More2", res2.more)
+			    .detail("ReadToBegin2", res2.readToBegin)
+			    .detail("ReadThroughEnd2", res2.readThroughEnd);
+			return false;
+		}
+		// if (res1.more != res2.more) {
+		// 	TraceEvent(SevError, "TestFailure").detail("Reason", "More flags are different").detail("More", res1.more);
+		// 	return false;
+		// }
 		if (res1.size() != res2.size()) return false;
 		for (int i = 0; i < res1.size(); ++i) {
 			if (res1[i] != res2[i]) return false;

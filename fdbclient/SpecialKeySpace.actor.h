@@ -47,6 +47,7 @@ public:
 
 	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = allKeys.end) {
 		// Default value is nullptr, begin of KeyRangeMap is Key()
+		// TODO : check do we need stop key here
 		impls = KeyRangeMap<SpecialKeyRangeBaseImpl*>(nullptr, spaceEndKey);
 		range = KeyRangeRef(spaceStartKey, spaceEndKey);
 	}
