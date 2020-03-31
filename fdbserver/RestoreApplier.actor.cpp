@@ -243,7 +243,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 				    .detail("PendingMutationVersion", vm.first.toString())
 				    .detail("PendingMutation", vm.second.toString());
 			}
-			key.second->second.precomputeResult();
+			key.second->second.precomputeResult("getAndComputeStagingKeysError");
 			i++;
 			continue;
 		} else {
@@ -251,7 +251,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			// But as long as it is > 1 and less than the start version of the version batch, it is the same result.
 			MutationRef m(MutationRef::SetValue, key.first, fValues[i].get().get());
 			key.second->second.add(m, LogMessageVersion(1));
-			key.second->second.precomputeResult();
+			key.second->second.precomputeResult("GetAndComputeStagingKeys");
 			i++;
 		}
 	}
@@ -296,8 +296,14 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	    .detail("ClearRanges", batchData->stagingKeyRanges.size());
 	for (auto& rangeMutation : batchData->stagingKeyRanges) {
 		std::map<Key, StagingKey>::iterator lb = batchData->stagingKeys.lower_bound(rangeMutation.mutation.param1);
-		std::map<Key, StagingKey>::iterator ub = batchData->stagingKeys.upper_bound(rangeMutation.mutation.param2);
+		std::map<Key, StagingKey>::iterator ub = batchData->stagingKeys.lower_bound(rangeMutation.mutation.param2);
 		while (lb != ub) {
+			if (lb->first >= rangeMutation.mutation.param2) {
+				TraceEvent(SevError, "FastRestoreApplerPhasePrecomputeMutationsResult_IncorrectUpperBound")
+					.detail("Key", lb->first)
+					.detail("ClearRangeUpperBound", rangeMutation.mutation.param2)
+					.detail("UsedUpperBound", ub->first);
+			}
 			lb->second.add(rangeMutation.mutation, rangeMutation.version);
 			lb++;
 		}
@@ -338,7 +344,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	for (stagingKeyIter = batchData->stagingKeys.begin(); stagingKeyIter != batchData->stagingKeys.end();
 	     stagingKeyIter++) {
 		if (stagingKeyIter->second.hasBaseValue()) {
-			stagingKeyIter->second.precomputeResult();
+			stagingKeyIter->second.precomputeResult("HasBaseValue");
 		}
 	}
 

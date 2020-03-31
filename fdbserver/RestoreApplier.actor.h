@@ -80,6 +80,15 @@ struct StagingKey {
 		// mutations out of order.
 		if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
 			if (version < newVersion) {
+				if (debugMutation("StagingKeyAdd", newVersion.version, m)) {
+					TraceEvent("StagingKeyAdd")
+						.detail("Version", version.toString())
+						.detail("NewVersion", newVersion.toString())
+						.detail("MType", typeString[(int)type])
+						.detail("Key", key)
+						.detail("Val", val)
+						.detail("NewMutation", m.toString());
+				}
 				key = m.param1;
 				val = m.param2;
 				type = (MutationRef::Type)m.type;
@@ -91,6 +100,7 @@ struct StagingKey {
 				pendingMutations.emplace(newVersion, m);
 			} else {
 				// Duplicated mutation ignored.
+				// TODO: Add SevError here
 				TraceEvent("SameVersion")
 				    .detail("Version", version.toString())
 				    .detail("Mutation", m.toString())
@@ -102,12 +112,13 @@ struct StagingKey {
 
 	// Precompute the final value of the key.
 	// TODO: Look at the last LogMessageVersion, if it set or clear, we can ignore the rest of versions.
-	void precomputeResult() {
+	void precomputeResult(const char* context) {
 		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult")
+			.detail("Context", context)
+			.detail("Version", version.toString())
 		    .detail("Key", key)
 			.detail("Value", val)
 			.detail("MType", typeString[(int)type])
-		    .detail("Version", version.toString())
 		    .detail("LargestPendingVersion",
 		            (pendingMutations.empty() ? "[none]" : pendingMutations.rbegin()->first.toString()));
 		std::map<LogMessageVersion, Standalone<MutationRef>>::iterator lb = pendingMutations.lower_bound(version);
@@ -154,6 +165,7 @@ struct StagingKey {
 				    .detail("MutationType", typeString[mutation.type])
 				    .detail("Version", lb->first.toString());
 			}
+			ASSERT(lb->first > version);
 			version = lb->first;
 		}
 	}
