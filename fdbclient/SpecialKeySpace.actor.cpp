@@ -84,18 +84,18 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			wait(beginIter->value()->normalizeKeySelectorActor(beginIter->value(), ryw, &begin));
 		begin.offset < 1 ? --beginIter : ++beginIter;
 	}
-	// TODO : change to is FirstGreaterOrEqual
+
 	actualBeginOffset = begin.offset;
 	if (beginIter == pks->impls.ranges().begin())
 		begin.setKey(normalKeys.begin);
 	else if (beginIter == pks->impls.ranges().end())
 		begin.setKey(normalKeys.end);
 
-	if (begin.offset != 1) {
+	if (!begin.isFirstGreaterOrEqual()) {
 		// The Key Selector points to key outside the whole special key space
-		TraceEvent(SevInfo, "IllegalBeginKeySelector")
-			.detail("TerminateKey", begin.getKey())
-			.detail("TerminateOffset", begin.offset);
+		TraceEvent(SevInfo, "BeginKeySelectorPointsOutside")
+		    .detail("TerminateKey", begin.getKey())
+		    .detail("TerminateOffset", begin.offset);
 		if (begin.offset < 1 && beginIter == pks->impls.ranges().begin())
 			result.readToBegin = true;
 		else
@@ -109,16 +109,16 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 		if (endIter->value() != nullptr) wait(endIter->value()->normalizeKeySelectorActor(endIter->value(), ryw, &end));
 		end.offset < 1 ? --endIter : ++endIter;
 	}
-	// TODO : change to is FirstGreaterOrEqual
+
 	actualEndOffset = end.offset;
 	if (endIter == pks->impls.ranges().begin())
 		end.setKey(normalKeys.begin);
 	else if (endIter == pks->impls.ranges().end())
 		end.setKey(normalKeys.end);
 
-	if (end.offset != 1) {
+	if (!end.isFirstGreaterOrEqual()) {
 		// The Key Selector points to key outside the whole special key space
-		TraceEvent(SevInfo, "IllegalEndKeySelector")
+		TraceEvent(SevInfo, "EndKeySelectorPointsOutside")
 		    .detail("TerminateKey", end.getKey())
 		    .detail("TerminateOffset", end.offset);
 		if (end.offset < 1 && endIter == pks->impls.ranges().begin())
@@ -133,7 +133,9 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 		TEST(true);
 		return RangeResultRef(false, false);
 	}
+	// If touches begin or end, return with readToBegin and readThroughEnd flags
 	if (beginIter == pks->impls.ranges().end() || endIter == pks->impls.ranges().begin()) {
+		TEST(true);
 		return result;
 	}
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Ranges ranges =
@@ -199,7 +201,6 @@ Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourW
 		TEST(true); // read limit 0
 		return Standalone<RangeResultRef>();
 	}
-	// TODO : transform limits like in NativeAPI.actor.cpp there
 	// ignore snapshot, which is not used
 	return getRangeAggregationActor(this, ryw, begin, end, limits, reverse);
 }
@@ -208,7 +209,7 @@ ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* pks, Re
                                                         KeyRef key) {
 	// use getRange to workaround this
 	Standalone<RangeResultRef> result = wait(pks->getRange(
-	    ryw, KeySelector(firstGreaterOrEqual(key)), KeySelector(firstGreaterOrEqual(keyAfter(key))), GetRangeLimits()));
+	    ryw, KeySelector(firstGreaterOrEqual(key)), KeySelector(firstGreaterOrEqual(keyAfter(key))), GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 	ASSERT(result.size() <= 1);
 	if (result.size()) {
 		return Optional<Value>(result[0].value);

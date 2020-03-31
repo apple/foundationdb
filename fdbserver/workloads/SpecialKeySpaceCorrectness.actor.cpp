@@ -22,12 +22,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	int actorCount, minKeysPerRange, maxKeysPerRange, rangeCount, keyBytes, valBytes;
 	double testDuration, absoluteRandomProb, transactionsPerSecond;
-
 	PerfIntCounter wrongResults, keysCount;
-
 	Reference<ReadYourWritesTransaction> ryw; // used to store all populated data
 	std::vector<std::shared_ptr<SPSCTestImpl>> impls;
-
 	Standalone<VectorRef<KeyRangeRef>> keys;
 
 	SpecialKeySpaceCorrectnessWorkload(WorkloadContext const& wcx)
