@@ -53,12 +53,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define ART_IMPL_H
 
 
-//#define art_tree VersionedBTree::art_tree
 using art_tree =  VersionedBTree::art_tree;
-#define art_node art_tree::art_node
-
-//typedef art_tree::art_leaf art_leaf;
 using art_leaf = art_tree::art_leaf;
+#define art_node art_tree::art_node
 
 
 int art_tree::fat_leaf_offset[] = {
@@ -203,7 +200,6 @@ void art_tree::art_bound_iterative(art_node *n, const KeyRef &k, int depth, art_
         if (ret == ART_I_DEPTH) {
             head = new(curr_arena++) stack_entry(n, key[depth], head);
             //if the child is NULL, then we have to look right; i.e., we start backtracking
-            //No need for "child and next": we assume we rarely need to go right. We save allocation space and time and some computation
             child = find_child(n, key[depth]);
             if (!child)break;
             n = *child;
@@ -319,7 +315,7 @@ int art_tree::check_bound_node(art_node *n, const KeyRef &k, int *depth_p, art_l
         if (n->partial_len) {
             art_leaf *l = ART_FAT_NODE_LEAF(n);
             //Note we know target key *does not* end here, so we just need to check the prefix
-            //TO avoid distinguishing whether the prefixc is larger or smaller than min, we compare with the leaf
+            //To avoid distinguishing whether the prefix is larger or smaller than min, we compare with the leaf
             //That is readily available w/o issuing a "min"
             //The fat leaf key includes the prefix for sure
             int cmp = memcmp(((unsigned char *) k.begin()) + depth, ((unsigned char *) l->key.begin()) + depth, n->partial_len);
@@ -567,7 +563,7 @@ void art_tree::find_next(art_node *n, unsigned char c, art_node **out) {
                         break;
                     }
                     break;
-                    //We add a case 1 just in case... (see other similar comment)
+                    //We add a case 1 just in case... (see previous similar comment)
                 case 1:
                     if (p.p1->keys[0] > c) {
                         *out = p.p1->children[0];
@@ -594,18 +590,14 @@ void art_tree::find_next(art_node *n, unsigned char c, art_node **out) {
                     //ALL children greater than char have their bit set
                     //We need the smallest one
                     //let's get the least significant bit that is set in the bitfield
-                    //ctz returns the number of trailing zeroes, so that + 1 is the bit
-                    //we want. Since arrays are 0-offset...
                     int one = __builtin_ctz(bitfield);
                     *out = p.p2->children[one];
                 }
                 break;
             }
-            //@ddi: we can maybe pull off some vectorized wizardry here as well, but let's KIS for now
         case ART_NODE48:
         case ART_NODE48_KV: {
             p.p3 = (art_node48 *) n;
-
 
             if (c == 255)break;
             unsigned char cc = c + 1;
@@ -717,8 +709,6 @@ void art_tree::remove_child256(art_node256 *n, art_node **ref, unsigned char c) 
     n->children[c] = NULL;
     n->n.num_children--;
 
-
-
     // Resize to a node48 on underflow, not immediately to prevent
     // trashing if we sit on the 48/49 boundary
     if (n->n.num_children == 37) {
@@ -818,7 +808,7 @@ void art_tree::remove_fat_child16(art_node16_kv *n, art_node **ref) {
 //Remove a LEAF from a node4/node4kv
 void art_tree::remove_child4(art_node4 *n, art_node **ref, art_node **l, int depth) {
     int pos = l - n->children;
-    //TODO: we should do this only if then we do not remove the node altogether
+    //We should do this only if then we do not remove the node altogether
     memmove(n->keys + pos, n->keys + pos + 1, n->n.num_children - 1 - pos);
     memmove(n->children + pos, n->children + pos + 1, (n->n.num_children - 1 - pos) * sizeof(void *));
     n->n.num_children--;
@@ -853,11 +843,6 @@ void art_tree::remove_child4(art_node4 *n, art_node **ref, art_node **l, int dep
     }
 
         //What can happen now is that the node has ZERO children.
-        //Then, we must convert the fat node to a leaf : we cannot have a fat node with no children
-        //Now, it could happen that n is the only child of his father. Then, we could trigger a compression
-        //FIXME: do this eventually. How? After calling remove, check a condition that tells that you can compress
-        //(i.e., you only have one son which is a leaf or a normal internal node with only one son)
-
         //If you have a fat node, you cannot compress when you get to one child
         //So it can happen that the one child get removed
         //At that point, you transform the fat node into a leaf: the fat key is not prefix of any subtree!
@@ -866,7 +851,6 @@ void art_tree::remove_child4(art_node4 *n, art_node **ref, art_node **l, int dep
         //We still check for depth b/c we want to avoid that root becomes empty and becomes a leaf
     else if (n->n.num_children == 0 && depth) {
         *ref = (art_node *) SET_LEAF((art_node *) ART_FAT_NODE_LEAF(&n->n));
-        //Since we are not recreating the leaf, prev and next should be just fine
     } else if (!depth && n->n.num_children == 0) {
         n->children[0] = nullptr;
     }
@@ -965,11 +949,8 @@ art_leaf *art_tree::iterative_insert(art_node *root, art_node **root_ptr, KeyRef
     //Ref is the memory location of the father that stores the pointer to the child in which we add the new item
     //Of course, the root is not the child of anybody. We need the ptr to root bc it is possible that the root itself
     //Grows by adding nodes, and hence gets relocated. Then, we need to update the ptr to the root
-    ART_PRINT("Inserting (replace = %d) key %s.\n", replace_existing, k.printable().c_str());
     while (n) {
-        ART_PRINT("Insert. Depth %d \n", depth);
         if (ART_IS_LEAF(n)) {
-            ART_PRINT("Inserting leaf. Depth %d \n", depth);
             return insert_leaf(n, ref, k, value, depth, old, replace_existing);
         }
         art_leaf *min_of_n = nullptr;
@@ -980,19 +961,14 @@ art_leaf *art_tree::iterative_insert(art_node *root, art_node **root_ptr, KeyRef
                 depth += n->partial_len;
                 //handle fat key  or go in depth
             } else {
-                ART_PRINT("Inserting internal node. Depth %d \n", depth);
                 return insert_internal_node(n, ref, k, value, depth, old, min_of_n, prefix_diff, replace_existing);
             }
         }
         if (k.size() == (depth)) {
-            ART_PRINT("Inserting fat leaf. Depth %d \n", depth);
             return insert_fat_node(n, ref, k, value, depth, old, min_of_n, replace_existing);
         }
 
         // Find a child to recurse to
-        //NB: second param is child, which is a node**. If we create a >new< node, in fact,
-        //The pointer to the child has to be changed accordingly in the father!!!!
-
         //Child is the pointer to the memory location within the node that contains the ptr to the child
         art_node **child = find_child(n, ((unsigned char *) k.begin())[depth]);
         if (!child) {
@@ -1003,7 +979,6 @@ art_leaf *art_tree::iterative_insert(art_node *root, art_node **root_ptr, KeyRef
         ref = child;
         n = *ref;
     }
-    ART_PRINT("Inserting child. Depth %d \n", depth);
     return insert_child(n, ref, k, value, depth, old, replace_existing);
 }
 
@@ -1038,9 +1013,7 @@ art_leaf *art_tree::insert_child(art_node *n, art_node **ref, const KeyRef &k, v
         //new key is BIGGER than lm
         insert_after(l, lm);
     }//if it is ART_NEITHER, then there's no prev nor next. They have been set to nullptr already
-    else {
-        ART_PRINT("Inserted, neither before nor after.");
-    }
+
     return l;
 }
 
@@ -1144,22 +1117,18 @@ art_leaf *art_tree::insert_internal_node(art_node *n, art_node **ref, const KeyR
 art_leaf *art_tree::insert_fat_node(art_node *n, art_node **ref, const KeyRef &k, void *value, int depth,
                                     int *old, art_leaf *min_of_n, int replace_existing) {
     if (n->type >= ART_NODE4_KV) {
-        ART_PRINT("Node is already fat with type %d\n", n->type);
         //If the node is already fat, it means you already have the key
         *old = 1;
         art_leaf *l = ART_FAT_NODE_LEAF(n);
-        ART_PRINT("Node is already fat with key %s\n", l->key.printable().c_str());
         if (replace_existing) {
-            ART_PRINT("Replacing %p with %p\n", l->value, value);
             l->value = value;
         }
         return l;
     } else {
-        ART_PRINT("Transforming node to fat\n");
         //We have to transform a node into a fat node
         //The minimum function considers the leaf to be the minimum.
         //Let's grab the minimum BEFORE we create the fat node and insert the new leaf :)
-        art_leaf *lm = min_of_n == nullptr ? minimum(n) : min_of_n; //FIXME: reuse from before if already taken
+        art_leaf *lm = min_of_n == nullptr ? minimum(n) : min_of_n;
         art_node *nkv = n;
         //change the type before deferencing the leaf
         nkv->type = static_cast<ART_NODE_TYPE>(n->type + 4);
@@ -1171,7 +1140,6 @@ art_leaf *art_tree::insert_fat_node(art_node *n, art_node **ref, const KeyRef &k
         //Fat leaf is the smallest in this subtree. So the minimum in the subtree is its next
         //new key is LOWER than min
         if (lm) insert_before(l_new, lm);
-        else ART_PRINT("FAT NODE INSERTED W/O CHILDREN\n");
         return l_new;
     }
 
@@ -1195,16 +1163,9 @@ art_leaf *art_tree::insert_leaf(art_node *n, art_node **ref, const KeyRef &k, vo
 
     int longest_prefix = longest_common_prefix(k, l->key, depth);
     int kv_creat = (longest_prefix == (min(key_len, l->key.size()) - depth));
-    /*
-     * In the old case, a key can never be the prefix of another key. So when we reach a leaf that has a key different
-     * from our is because path compression has compressed the part of prefix where the current key differs from the
-     * leaf key. E.g.,  insert AAAAAAB  and the leaf is AAAAAC. I can reach the leaf after vising root at child 'A'
-     * Then we have to figure out how much of the prefix btwn the two keys I can save to compress it
-     */
     if (!kv_creat) {//Common case, old code
         //Recompute longest prefix from depth. Probably can be optimized
-        //longest_prefix = longest_common_prefix(key, key_len, l->key, l->key_len, depth);
-        //Original case
+
         // New value, we must split the leaf into a node4
         art_node4 *new_node = (art_node4 *) alloc_node(ART_NODE4);
         // Create a new leaf
@@ -1229,7 +1190,6 @@ art_leaf *art_tree::insert_leaf(art_node *n, art_node **ref, const KeyRef &k, vo
     }
 
 
-    // Added case 1.
     // The new key  is a superset of the key in the leaf.
     // So the current leaf becomes the value of the kv node
     if (key_len > l->key.size()) {
@@ -1245,17 +1205,15 @@ art_leaf *art_tree::insert_leaf(art_node *n, art_node **ref, const KeyRef &k, vo
         *ref = (art_node *) new_node;
         add_child4((art_node4 * ) & new_node->n, ref, l2->key[depth + longest_prefix], SET_LEAF(l2));
 
-        //No need for stuffing, copying leaves, informing neighbors and copying key
         ART_FAT_NODE_LEAF(&new_node->n.n) = l;
         art_leaf *fat_leaf = ART_FAT_NODE_LEAF(&new_node->n.n);
 
         //The new key goes in the leaf and its predecessor is the key in the new fat node
         insert_after(l2, fat_leaf);
 
-
         return l2;
     } else {
-        // Added case. The key in the leaf is a supertset of the new key
+        // The key in the leaf is a supertset of the new key
         // So the leaf stays a leaf and the new key goes in the kv_node
         art_node4_kv *new_node = (art_node4_kv *) alloc_kv_node(ART_NODE4_KV);
         art_leaf *fat_leaf = make_leaf(k, value);
@@ -1284,7 +1242,6 @@ int art_tree::longest_common_prefix(const KeyRef &k1, const KeyRef &k2, int dept
 }
 
 void art_tree::insert_before(art_leaf *l_new, art_leaf *l_existing) {
-
     l_new->next = l_existing;
     if (l_existing) {
         l_new->prev = l_existing->prev;
@@ -1295,7 +1252,6 @@ void art_tree::insert_before(art_leaf *l_new, art_leaf *l_existing) {
     } else {
         l_new->prev = nullptr;
     }
-    ART_PRINT("AFTER INSERT_BEFORE\n");
 }
 
 void art_tree::insert_after(art_leaf *l_new, art_leaf *l_existing) {
@@ -1309,7 +1265,6 @@ void art_tree::insert_after(art_leaf *l_new, art_leaf *l_existing) {
     } else {
         l_new->next = nullptr;
     }
-    ART_PRINT("AFTER INSERT_AFTER\n");
 }
 
 void art_tree::add_child(art_node *n, art_node **ref, unsigned char c, void *child) {
@@ -1527,7 +1482,7 @@ void art_tree::find_prev(art_node *n, unsigned char c, art_node **out) {
                 }
             }
             if (i == 0 && n->type == ART_NODE4_KV) {
-                *out = n;//&((art_node4_kv *) n)->leaf;
+                *out = n;
             }
 
             break;
@@ -1541,7 +1496,6 @@ void art_tree::find_prev(art_node *n, unsigned char c, art_node **out) {
 
 
                 // Compare the key to all 16 stored keys for less than
-                //https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm_cmpgt_epi8&expand=915
                 cmp = _mm_cmpgt_epu8(_mm_set1_epi8(c), _mm_loadu_si128((__m128i *) p.p2->keys));
 
                 // Use a mask to ignore children that don't exist
@@ -1550,10 +1504,6 @@ void art_tree::find_prev(art_node *n, unsigned char c, art_node **out) {
                 if (bitfield) {
                     //We have at least one bit set to one, so the largest smaller exists
                     int one = __builtin_clz(bitfield);
-                    //Bitfield has B bits. One gives me the number of zeros before the most significant bit set
-                    //B=8  one=5. means there are 5 zeros, a bit to 1 and two bits to boh
-                    //8-5=3 means that the third least significant bit is set to one
-                    //So, the 0-based index of such bit is 2
                     one = (sizeof(bitfield) * 8) - one;
                     *out = p.p2->children[one - 1];
                 } else {
@@ -1565,7 +1515,6 @@ void art_tree::find_prev(art_node *n, unsigned char c, art_node **out) {
 
                 break;
             }
-            //@ddi: we can maybe pull off some vectorized wizardry here as well, but let's KIS for now
         case ART_NODE48_KV:
         case ART_NODE48: {
             p.p3 = (art_node48 *) n;

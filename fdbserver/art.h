@@ -147,7 +147,6 @@ struct art_tree {
 
 /**
  * Small node with only 4 children
- * @ddi: Each children is indexed by the (next) char in the prefix
  */
     struct art_node4 {
         art_node n;
@@ -157,7 +156,6 @@ struct art_tree {
 
 /**
  * Node with 16 children
- * @ddi: Each children is indexed by the (next) char in the prefix
  */
     struct art_node16 {
         art_node n;
@@ -168,7 +166,6 @@ struct art_tree {
 /**
  * Node with 48 children, but
  * a full 256 byte field.
- * @ddi: keys[i] is the index in children such that children[i]'s partial key starts with (char)i (48 means no child)
  */
     struct art_node48 {
         art_node n;
@@ -178,7 +175,6 @@ struct art_tree {
 
 /**
  * Full node with 256 children
- * @ddi: children[i] is the children whose partial key that starts with (char)i
  */
     struct art_node256 {
         art_node n;
@@ -187,7 +183,6 @@ struct art_tree {
 
 /**
  * Small node with only 4 children
- * @ddi: Each children is indexed by the (next) char in the prefix
  */
     struct art_node4_kv {
         art_node4 n;
@@ -196,7 +191,6 @@ struct art_tree {
 
 /**
  * Node with 16 children
- * @ddi: Each children is indexed by the (next) char in the prefix
  */
     struct art_node16_kv {
         art_node16 n;
@@ -206,7 +200,6 @@ struct art_tree {
 /**
  * Node with 48 children, but
  * a full 256 byte field.
- * @ddi: keys[i] is the index in children such that children[i]'s partial key starts with (char)i (48 means no child)
  */
     struct art_node48_kv {
         art_node48 n;
@@ -215,7 +208,6 @@ struct art_tree {
 
 /**
  * Full node with 256 children
- * @ddi: children[i] is the children whose partial key that starts with (char)i
  */
     struct art_node256_kv {
         art_node256 n;
