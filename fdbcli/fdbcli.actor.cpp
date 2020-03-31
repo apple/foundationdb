@@ -2225,7 +2225,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 					       "correct machines before removing them from the cluster!\n",
 					       addr.ip.toString().c_str());
 				else
-					printf("  %s  ---- WARNING: Missing from cluster!Be sure that you excluded the correct processes "
+					printf("  %s  ---- WARNING: Missing from cluster! Be sure that you excluded the correct processes "
 					       "before removing them from the cluster!\n",
 					       addr.toString().c_str());
 			} else if (notExcludedServers.find(_addr) != notExcludedServers.end()) {
@@ -2234,7 +2234,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 					       "machine from the cluster\n",
 					       addr.ip.toString().c_str());
 				else
-					printf("  %s  ---- WARNING: Exclusion in progress! It is not safe to remove this processe from the "
+					printf("  %s  ---- WARNING: Exclusion in progress! It is not safe to remove this process from the "
 					       "cluster\n",
 					       addr.toString().c_str());
 			} else {
