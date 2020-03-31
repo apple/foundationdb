@@ -587,8 +587,12 @@ void splitMutation(std::map<Key, UID>* pRangeToApplier, MutationRef m, Arena& mv
 			curm.param2 = itlow->first;
 		}
 		ASSERT(curm.param1 <= curm.param2);
-		mvector.push_back_deep(mvector_arena, curm);
-		nodeIDs.push_back(nodeIDs_arena, itApplier->second);
+		// itup > m.param2: (itup-1) may be out of mutation m's range
+		// Ensure the added mutations have overlap with mutation m
+		if (m.param1 < curm.param2 && m.param2 > curm.param1) {
+			mvector.push_back_deep(mvector_arena, curm);
+			nodeIDs.push_back(nodeIDs_arena, itApplier->second);
+		}
 	}
 }
 
@@ -923,8 +927,8 @@ TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 		endKey++;
 	}
 	if (beginKey != rangeToApplier.end()) {
-		TraceEvent("KeyRangeMap").detail("BeginKey", beginKey->first).detail("EndKey", systemKeys.end).detail("Node", beginKey->second);
-		krMap.insert(KeyRangeRef(beginKey->first, systemKeys.end), beginKey->second);
+		TraceEvent("KeyRangeMap").detail("BeginKey", beginKey->first).detail("EndKey", normalKeys.end).detail("Node", beginKey->second);
+		krMap.insert(KeyRangeRef(beginKey->first, normalKeys.end), beginKey->second);
 	}
 
 	int splitMutationIndex = 0;
@@ -935,24 +939,24 @@ TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 		// Calculate the overlap range
 		KeyRef rangeBegin = mutation.param1 > i->range().begin ? mutation.param1 : i->range().begin;
 		KeyRef rangeEnd = mutation.param2 < i->range().end ? mutation.param2 : i->range().end;
-		KeyRange krange(KeyRangeRef(rangeBegin, rangeEnd));
+		KeyRange krange1(KeyRangeRef(rangeBegin, rangeEnd));
 		UID nodeID = i->value();
 		// splitMuation result
 		if (splitMutationIndex >= mvector.size()) {
 			correctResult = false;
 			break;
 		}
-		MutationRef mutation = mvector[splitMutationIndex];
+		MutationRef result2M = mvector[splitMutationIndex];
 		UID applierID = nodeIDs[splitMutationIndex];
-		KeyRange krange2(KeyRangeRef(mutation.param1, mutation.param2));
-		TraceEvent("Result").detail("KeyRange1", krange.toString())
+		KeyRange krange2(KeyRangeRef(result2M.param1, result2M.param2));
+		TraceEvent("Result").detail("KeyRange1", krange1.toString())
 				.detail("KeyRange2", krange2.toString())
 				.detail("ApplierID1", nodeID).detail("ApplierID2", applierID);
-		if (krange != krange2 || nodeID != applierID) {
+		if (krange1 != krange2 || nodeID != applierID) {
 			correctResult = false;
 			TraceEvent(SevError, "IncorrectResult")
 				.detail("Mutation", mutation.toString())
-				.detail("KeyRange1", krange.toString())
+				.detail("KeyRange1", krange1.toString())
 				.detail("KeyRange2", krange2.toString())
 				.detail("ApplierID1", nodeID).detail("ApplierID2", applierID);
 		}
@@ -962,6 +966,9 @@ TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 	if (splitMutationIndex != mvector.size()) {
 		correctResult = false;
 		TraceEvent(SevError, "SplitMuationTooMany").detail("SplitMutationIndex", splitMutationIndex).detail("Results", mvector.size());
+		for(; splitMutationIndex < mvector.size(); splitMutationIndex++) {
+			TraceEvent("SplitMuationTooMany").detail("SplitMutationIndex", splitMutationIndex).detail("Result", mvector[splitMutationIndex].toString());
+		}
 	}
 
 	return Void();
