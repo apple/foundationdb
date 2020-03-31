@@ -792,10 +792,6 @@ Most applications should use the read version that FoundationDB determines autom
 
     |infrequent| |transaction-get-committed-version-blurb|
 
-.. method :: Transaction.get_approximate_size()
-
-    |infrequent| |transaction-get-approximate-size-blurb|
-
 .. method :: Transaction.get_versionstamp()
 
     |infrequent| |transaction-get-versionstamp-blurb|
@@ -806,6 +802,10 @@ Transaction misc functions
 .. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
 
     Get the estimated byte size of the given key range. Returns a :class:`FutureInt64`.
+
+.. method:: Transaction.get_approximate_size()
+
+    |transaction-get-approximate-size-blurb|. Returns a :class:`FutureInt64`.
 
 .. _api-python-transaction-options:
 
