@@ -1280,13 +1280,11 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		}
 	}
 
-<<<<<<< HEAD
 	// start with simplest point, special key space are only allowed to query if both begin and end start with \xff\xff
 	const KeyRef specialKeyPrefix = systemKeys.end;
 	if (begin.getKey().startsWith(specialKeyPrefix) && end.getKey().startsWith(specialKeyPrefix))
 		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>(this), begin, end, limits, snapshot, reverse);
 	
-=======
 	// Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
 	// to retrieve keys which caused latest not_committed(conflicting with another transaction) error.
 	// The returned key value pairs are interpretted as :
@@ -1323,7 +1321,6 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		}
 	}
 
->>>>>>> upstream/master
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
 	}
