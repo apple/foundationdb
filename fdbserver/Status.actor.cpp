@@ -2153,13 +2153,25 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<CachedSer
 ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx) {
 	state ReadYourWritesTransaction tr(cx);
 
+	state Future<Void> readTimeout = delay(10); // so that we won't loop forever
 	loop {
 		try {
+			if (readTimeout.isReady()) {
+				throw timed_out();
+			}
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> res = wait(tr.get(primaryDatacenterKey));
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Optional<Value> res = wait(timeoutError(tr.get(primaryDatacenterKey), 5));
+			if (!res.present()) {
+				TraceEvent(SevWarn, "PrimaryDCAbsent");
+			}
 			return res;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			if (e.code() == error_code_timed_out) {
+				TraceEvent(SevWarn, "FetchPrimaryDCTimeout");
+			} else {
+				wait(tr.onError(e));
+			}
 		}
 	}
 }
@@ -2367,7 +2379,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!configObj.empty()) {
 				Optional<Value> primaryDCO = wait(getActivePrimaryDC(cx));
 				if (primaryDCO.present()) {
-					configObj["active_primary_dc"] = primaryDCO.get();
+					statusObj["active_primary_dc"] = primaryDCO.get();
 				}
 				statusObj["configuration"] = configObj;
 			}
