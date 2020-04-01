@@ -39,6 +39,7 @@ protected:
 
 class SpecialKeySpace {
 public:
+	// TODO : remove snapshot parameter
 	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key, bool snapshot = false);
 
 	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeySelector begin,
