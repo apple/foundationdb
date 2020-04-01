@@ -117,12 +117,13 @@ struct StagingKey {
 	// Precompute the final value of the key.
 	// TODO: Look at the last LogMessageVersion, if it set or clear, we can ignore the rest of versions.
 	void precomputeResult(const char* context) {
+		// TODO: Change typeString[(int)type] to a safe function that validate type range
 		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult")
 			.detail("Context", context)
 			.detail("Version", version.toString())
 		    .detail("Key", key)
 			.detail("Value", val)
-			.detail("MType", typeString[(int)type])
+			.detail("MType", type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "[Unset]")
 		    .detail("LargestPendingVersion",
 		            (pendingMutations.empty() ? "[none]" : pendingMutations.rbegin()->first.toString()));
 		std::map<LogMessageVersion, Standalone<MutationRef>>::iterator lb = pendingMutations.lower_bound(version);
