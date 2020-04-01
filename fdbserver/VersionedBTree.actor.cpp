@@ -2704,7 +2704,7 @@ public:
 
 #pragma pack(push, 1)
 	struct MetaKey {
-		static constexpr int FORMAT_VERSION = 4;
+		static constexpr int FORMAT_VERSION = 5;
 		// This serves as the format version for the entire tree, individual pages will not be versioned
 		uint16_t formatVersion;
 		uint8_t height;
@@ -3467,7 +3467,8 @@ private:
 		state int blockCount = 1;
 
 		state int kvBytes = 0;
-		state int compressedBytes = BTreePage::BinaryTree::GetTreeOverhead();
+		state int compressedBytes = BTreePage::BinaryTree::emptyTreeSize();
+		state bool largeTree = false;
 
 		state int start = 0;
 		state int i = 0;
@@ -3495,7 +3496,7 @@ private:
 				int keySize = entry.key.size();
 				int valueSize = entry.value.present() ? entry.value.get().size() : 0;
 
-				int spaceNeeded = sizeof(BTreePage::BinaryTree::Node) + deltaSize;
+				int spaceNeeded = BTreePage::BinaryTree::Node::headerSize(largeTree) + deltaSize;
 
 				debug_printf("Trying to add record %3d of %3lu (i=%3d) klen %4d  vlen %3d  deltaSize %4d  spaceNeeded %4d  compressed %4d / page %4d bytes  %s\n",
 					i + 1, entries.size(), i, keySize, valueSize, deltaSize,
@@ -3516,13 +3517,18 @@ private:
 						// newBlocks = ceil ( additional space needed / block size)
 						int newBlocks = 1 + (spaceNeeded - spaceAvailable - 1) / blockSize;
 						int newPageSize = pageSize + (newBlocks * blockSize);
-						if(newPageSize <= BTreePage::BinaryTree::MaximumTreeSize()) {
-							blockCount += newBlocks;
-							pageSize = newPageSize;
-							fits = true;
+
+						// If we've moved into "large" page range for the delta tree then add the additional overhead
+						if(!largeTree && newPageSize > BTreePage::BinaryTree::SmallSizeLimit) {
+							largeTree = true;
+							newPageSize += count * BTreePage::BinaryTree::LargeNodeExtraOverhead;
 						}
+
+						blockCount += newBlocks;
+						pageSize = newPageSize;
+						fits = true;
 					}
-					if(!fits) {
+					else {
 						pageUpperBound = entry.withoutValue();
 					}
 				}
@@ -3650,7 +3656,7 @@ private:
 
 				start = i;
 				kvBytes = 0;
-				compressedBytes = BTreePage::BinaryTree::GetTreeOverhead();
+				compressedBytes = BTreePage::BinaryTree::emptyTreeSize();
 				pageLowerBound = pageUpperBound.withoutValue();
 			}
 		}
@@ -5868,6 +5874,7 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	std::vector<RedwoodRecordRef> items(uniqueItems.begin(), uniqueItems.end());
 
 	int bufferSize = N * 100;
+	bool largeTree = bufferSize > DeltaTree<RedwoodRecordRef>::SmallSizeLimit;
 	DeltaTree<RedwoodRecordRef> *tree = (DeltaTree<RedwoodRecordRef> *) new uint8_t[bufferSize];
 
 	tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
@@ -5908,24 +5915,26 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	DeltaTree<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::Mirror rValuesOnly(tree, &prev, &next);
 	DeltaTree<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::Cursor fwdValueOnly = rValuesOnly.getCursor();
 
+	printf("Verifying tree contents using forward, reverse, and value-only iterators\n");
 	ASSERT(fwd.moveFirst());
 	ASSERT(fwdValueOnly.moveFirst());
 	ASSERT(rev.moveLast());
+
 	int i = 0;
 	while(1) {
 		if(fwd.get() != items[i]) {
 			printf("forward iterator i=%d\n  %s found\n  %s expected\n", i, fwd.get().toString().c_str(), items[i].toString().c_str());
-			printf("Delta: %s\n", fwd.node->raw->delta().toString().c_str());
+			printf("Delta: %s\n", fwd.node->raw->delta(largeTree).toString().c_str());
 			ASSERT(false);
 		}
 		if(rev.get() != items[items.size() - 1 - i]) {
 			printf("reverse iterator i=%d\n  %s found\n  %s expected\n", i, rev.get().toString().c_str(), items[items.size() - 1 - i].toString().c_str());
-			printf("Delta: %s\n", rev.node->raw->delta().toString().c_str());
+			printf("Delta: %s\n", rev.node->raw->delta(largeTree).toString().c_str());
 			ASSERT(false);
 		}
 		if(fwdValueOnly.get().value != items[i].value) {
 			printf("forward values-only iterator i=%d\n  %s found\n  %s expected\n", i, fwdValueOnly.get().toString().c_str(), items[i].toString().c_str());
-			printf("Delta: %s\n", fwdValueOnly.node->raw->delta().toString().c_str());
+			printf("Delta: %s\n", fwdValueOnly.node->raw->delta(largeTree).toString().c_str());
 			ASSERT(false);
 		}
 		++i;
