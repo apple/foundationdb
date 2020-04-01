@@ -48,7 +48,8 @@ static const char* typeString[] = { "SetValue",
 	                                "ByteMax",
 	                                "MinV2",
 	                                "AndV2",
-	                                "CompareAndClear"};
+	                                "CompareAndClear",
+	                                "MAX_ATOMIC_OP" };
 
 struct MutationRef {
 	static const int OVERHEAD_BYTES = 12; //12 is the size of Header in MutationList entries
