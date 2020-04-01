@@ -5,9 +5,9 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"
 
-class SPSCTestImpl : public SpecialKeyRangeBaseImpl {
+class SKSCTestImpl : public SpecialKeyRangeBaseImpl {
 public:
-	explicit SPSCTestImpl(KeyRef start, KeyRef end) : SpecialKeyRangeBaseImpl(start, end) {}
+	explicit SKSCTestImpl(KeyRef start, KeyRef end) : SpecialKeyRangeBaseImpl(start, end) {}
 	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
 	                                                    KeyRangeRef kr) const {
 		ASSERT(range.contains(kr));
@@ -24,7 +24,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	double testDuration, absoluteRandomProb, transactionsPerSecond;
 	PerfIntCounter wrongResults, keysCount;
 	Reference<ReadYourWritesTransaction> ryw; // used to store all populated data
-	std::vector<std::shared_ptr<SPSCTestImpl>> impls;
+	std::vector<std::shared_ptr<SKSCTestImpl>> impls;
 	Standalone<VectorRef<KeyRangeRef>> keys;
 
 	SpecialKeySpaceCorrectnessWorkload(WorkloadContext const& wcx)
@@ -60,7 +60,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				Key startKey(baseKey + "/");
 				Key endKey(baseKey + "/\xff");
 				self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
-				self->impls.push_back(std::make_shared<SPSCTestImpl>(startKey, endKey));
+				self->impls.push_back(std::make_shared<SKSCTestImpl>(startKey, endKey));
 				cx->specialKeySpace->registerKeyRange(self->keys.back(), self->impls.back().get());
 				// generate keys in each key range
 				int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
