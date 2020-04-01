@@ -540,7 +540,7 @@ DatabaseContext::DatabaseContext(
 
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
-	specialKeySpace = std::make_shared<SpecialKeySpace>(LiteralStringRef(""), LiteralStringRef("\xff"));
+	specialKeySpace = std::make_shared<SpecialKeySpace>(normalKeys.begin, normalKeys.end);
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc), 
