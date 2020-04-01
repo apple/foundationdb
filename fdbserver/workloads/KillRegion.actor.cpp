@@ -68,7 +68,7 @@ struct KillRegionWorkload : TestWorkload {
 
 	ACTOR static Future<Void> waitForStorageRecovered( KillRegionWorkload *self ) {
 		while( self->dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED ) {
-				wait( self->dbInfo->onChange() );
+			wait( self->dbInfo->onChange() );
 		}
 		return Void();
 	}
