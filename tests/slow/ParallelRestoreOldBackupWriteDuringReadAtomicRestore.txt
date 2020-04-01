@@ -34,3 +34,6 @@ testTitle=WriteDuringReadTest
     testDuration=60.0
 
     StderrSeverity=30
+
+    ;timeout is in seconds
+    timeout=360000
