@@ -304,7 +304,8 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 					.detail("ClearRangeUpperBound", rangeMutation.mutation.param2)
 					.detail("UsedUpperBound", ub->first);
 			}
-			lb->second.add(rangeMutation.mutation, rangeMutation.version);
+			MutationRef clearKey(MutationRef::ClearRange, lb->first, lb->first);
+			lb->second.add(clearKey, rangeMutation.version);
 			lb++;
 		}
 	}

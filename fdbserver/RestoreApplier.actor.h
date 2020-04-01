@@ -79,6 +79,10 @@ struct StagingKey {
 		// newVersion can be smaller than version as different loaders can send
 		// mutations out of order.
 		if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
+			if (m.type == MutationRef::ClearRange) {
+				// We should only clear this key! Otherwise, it causes side effect to other keys
+				ASSERT(m.param1 == m.param2);
+			}
 			if (version < newVersion) {
 				if (debugMutation("StagingKeyAdd", newVersion.version, m)) {
 					TraceEvent("StagingKeyAdd")
@@ -122,9 +126,10 @@ struct StagingKey {
 		    .detail("LargestPendingVersion",
 		            (pendingMutations.empty() ? "[none]" : pendingMutations.rbegin()->first.toString()));
 		std::map<LogMessageVersion, Standalone<MutationRef>>::iterator lb = pendingMutations.lower_bound(version);
-		if (lb == pendingMutations.end()) {
+		if (lb == pendingMutations.end()) { //pendingMutations.empty() || 
 			return;
 		}
+		ASSERT(!pendingMutations.empty());
 		if (lb->first == version) {
 			// Sanity check mutations at version are either atomicOps which can be ignored or the same value as buffered
 			MutationRef m = lb->second;
