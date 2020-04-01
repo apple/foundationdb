@@ -171,8 +171,8 @@ public:
 	int DD_EXCLUDE_MIN_REPLICAS;
 	bool DD_VALIDATE_LOCALITY;
 	int DD_CHECK_INVALID_LOCALITY_DELAY;
-	int64_t DD_SS_FAILURE_VERSIONLAG;
-	int64_t DD_SS_ALLOWED_VERSIONLAG;
+	int64_t DD_SS_FAILURE_VERSIONLAG; // Allowed SS version lag from the current read version before marking it as failed.
+	int64_t DD_SS_ALLOWED_VERSIONLAG; // SS will be marked as healthy if it's version lag goes below this value. 
 	
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
