@@ -126,7 +126,7 @@ struct StagingKey {
 		    .detail("LargestPendingVersion",
 		            (pendingMutations.empty() ? "[none]" : pendingMutations.rbegin()->first.toString()));
 		std::map<LogMessageVersion, Standalone<MutationRef>>::iterator lb = pendingMutations.lower_bound(version);
-		if (lb == pendingMutations.end()) { //pendingMutations.empty() || 
+		if (lb == pendingMutations.end()) {
 			return;
 		}
 		ASSERT(!pendingMutations.empty());
@@ -148,7 +148,11 @@ struct StagingKey {
 			MutationRef mutation = lb->second;
 			if (type == MutationRef::CompareAndClear) { // Special atomicOp
 				Arena arena;
-				Optional<ValueRef> retVal = doCompareAndClear(val, mutation.param2, arena);
+				Optional<StringRef> inputVal;
+				if (hasBaseValue()) {
+					inputVal = val;
+				}
+				Optional<ValueRef> retVal = doCompareAndClear(inputVal, mutation.param2, arena);
 				if (!retVal.present()) {
 					val = key;
 					type = MutationRef::ClearRange;

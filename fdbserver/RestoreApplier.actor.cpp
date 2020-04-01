@@ -220,10 +220,12 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			wait(waitForAll(fValues));
 			break;
 		} catch (Error& e) {
-			retries++;
-			TraceEvent(retries > 10 ? SevError : SevWarn, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
-			    .detail("GetKeys", incompleteStagingKeys.size())
-			    .error(e);
+			if (retries++ > 10) {
+				TraceEvent(SevError, "FastRestoreApplierGetAndComputeStagingKeysGetKeysStuck")
+					.detail("GetKeys", incompleteStagingKeys.size())
+					.error(e);
+			}
+
 			wait(tr->onError(e));
 			fValues.clear();
 		}
@@ -233,17 +235,17 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	int i = 0;
 	for (auto& key : incompleteStagingKeys) {
 		if (!fValues[i].get().present()) {
-			TraceEvent(SevError, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
+			TraceEvent(SevDebug, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
 			    .detail("Key", key.first)
 			    .detail("Reason", "Not found in DB")
 			    .detail("PendingMutations", key.second->second.pendingMutations.size())
 			    .detail("StagingKeyType", (int)key.second->second.type);
 			for (auto& vm : key.second->second.pendingMutations) {
-				TraceEvent(SevError, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
+				TraceEvent(SevDebug, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
 				    .detail("PendingMutationVersion", vm.first.toString())
 				    .detail("PendingMutation", vm.second.toString());
 			}
-			key.second->second.precomputeResult("getAndComputeStagingKeysError");
+			key.second->second.precomputeResult("GetAndComputeStagingKeysNoBaseValueInDB");
 			i++;
 			continue;
 		} else {
