@@ -20,6 +20,7 @@
 
 
 #include "flow/Trace.h"
+#include "flow/FBTrace.h"
 #include "flow/FileTraceLogWriter.h"
 #include "flow/XmlTraceLogFormatter.h"
 #include "flow/JsonTraceLogFormatter.h"
@@ -1462,3 +1463,7 @@ std::string traceableStringToString(const char* value, size_t S) {
 
 	return std::string(value, S - 1); // Exclude trailing \0 byte
 }
+
+FBTraceImpl::~FBTraceImpl() {}
+
+void fbTrace(Reference<FBTraceImpl> const& traceLine) {}
