@@ -1214,7 +1214,6 @@ void TraceBatch::dump() {
 		machine = formatIpPort(local.ip, local.port);
 	}
 
-	if (0) {
 	for(int i = 0; i < attachBatch.size(); i++) {
 		if(g_network->isSimulated()) {
 			attachBatch[i].fields.addField("Machine", machine);
@@ -1227,7 +1226,6 @@ void TraceBatch::dump() {
 			eventBatch[i].fields.addField("Machine", machine);
 		}
 		g_traceLog.writeEvent(eventBatch[i].fields, "", false);
-	}
 	}
 
 	for(int i = 0; i < buggifyBatch.size(); i++) {
