@@ -496,7 +496,13 @@ public:
 		return substr( 0, size() - s.size() );
 	}
 
-	std::string toString() const { return std::string( (const char*)data, length ); }
+	std::string toString() const {
+		if (length <= 0) { // Avoid segmentation fault when an empty key is used in TraceEvent
+			return std::string("");
+		} else {
+			return std::string( (const char*)data, length );
+		}
+	}
 
 	static bool isPrintable(char c) { return c > 32 && c < 127; }
 	inline std::string printable() const;
