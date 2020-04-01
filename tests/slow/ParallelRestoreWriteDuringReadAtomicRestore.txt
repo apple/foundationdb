@@ -35,5 +35,9 @@ testTitle=WriteDuringReadTest
 
     StderrSeverity=30
 
+    ; Each testName=RunRestoreWorkerWorkload creates a restore worker
+    ; We need at least 3 restore workers: master, loader, and applier
+    testName=RunRestoreWorkerWorkload
+
     ;timeout is in seconds
     timeout=360000
