@@ -5944,22 +5944,53 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	}
 	ASSERT(i == items.size());
 
-	double start = timer();
-	DeltaTree<RedwoodRecordRef>::Cursor c = r.getCursor();
+	{
+		DeltaTree<RedwoodRecordRef>::Mirror mirror(tree, &prev, &next);
+		DeltaTree<RedwoodRecordRef>::Cursor c = mirror.getCursor();
 
-	for(int i = 0; i < 20000000; ++i) {
-		const RedwoodRecordRef &query = items[deterministicRandom()->randomInt(0, items.size())];
-		if(!c.seekLessThanOrEqual(query)) {
-			printf("Not found!  query=%s\n", query.toString().c_str());
-			ASSERT(false);
+		printf("Doing 20M random seeks using the same cursor from the same mirror.\n");
+		double start = timer();
+	
+		for(int i = 0; i < 20000000; ++i) {
+			const RedwoodRecordRef &query = items[deterministicRandom()->randomInt(0, items.size())];
+			if(!c.seekLessThanOrEqual(query)) {
+				printf("Not found!  query=%s\n", query.toString().c_str());
+				ASSERT(false);
+			}
+			if(c.get() != query) {
+				printf("Found incorrect node!  query=%s  found=%s\n", query.toString().c_str(), c.get().toString().c_str());
+				ASSERT(false);
+			}
 		}
-		if(c.get() != query) {
-			printf("Found incorrect node!  query=%s  found=%s\n", query.toString().c_str(), c.get().toString().c_str());
-			ASSERT(false);
-		}
+		double elapsed = timer() - start;
+		printf("Elapsed %f\n", elapsed);
 	}
-	double elapsed = timer() - start;
-	printf("Elapsed %f\n", elapsed);
+
+	{
+		printf("Doing 5M random seeks using 10k random cursors, each from a different mirror.\n");
+		double start = timer();
+		std::vector<DeltaTree<RedwoodRecordRef>::Mirror *> mirrors;
+		std::vector<DeltaTree<RedwoodRecordRef>::Cursor> cursors;
+		for(int i = 0; i < 10000; ++i) {
+			mirrors.push_back(new DeltaTree<RedwoodRecordRef>::Mirror(tree, &prev, &next));
+			cursors.push_back(mirrors.back()->getCursor());
+		}
+
+		for(int i = 0; i < 5000000; ++i) {
+			const RedwoodRecordRef &query = items[deterministicRandom()->randomInt(0, items.size())];
+			DeltaTree<RedwoodRecordRef>::Cursor &c = cursors[deterministicRandom()->randomInt(0, cursors.size())];
+			if(!c.seekLessThanOrEqual(query)) {
+				printf("Not found!  query=%s\n", query.toString().c_str());
+				ASSERT(false);
+			}
+			if(c.get() != query) {
+				printf("Found incorrect node!  query=%s  found=%s\n", query.toString().c_str(), c.get().toString().c_str());
+				ASSERT(false);
+			}
+		}
+		double elapsed = timer() - start;
+		printf("Elapsed %f\n", elapsed);
+	}
 
 	return Void();
 }
