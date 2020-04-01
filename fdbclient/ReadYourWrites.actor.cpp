@@ -1281,8 +1281,7 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	}
 
 	// start with simplest point, special key space are only allowed to query if both begin and end start with \xff\xff
-	const KeyRef specialKeyPrefix = systemKeys.end;
-	if (begin.getKey().startsWith(specialKeyPrefix) && end.getKey().startsWith(specialKeyPrefix))
+	if (begin.getKey().startsWith(specialKeys.begin) && end.getKey().startsWith(specialKeys.end))
 		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>(this), begin, end, limits, snapshot, reverse);
 	
 	// Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
