@@ -21,6 +21,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
@@ -1970,7 +1971,6 @@ namespace fileBackup {
 
 			if (Params.addBackupLogRangeTasks().get(task)) {
 				wait(startBackupLogRangeInternal(tr, taskBucket, futureBucket, task, taskFuture, beginVersion, endVersion));
-				endVersion = beginVersion;
 			} else {
 				wait(taskFuture->set(tr, taskBucket));
 			}
@@ -2073,12 +2073,14 @@ namespace fileBackup {
 			state EBackupState backupState;
 			state Optional<std::string> tag;
 			state Optional<Version> latestSnapshotEndVersion;
+			state Optional<bool> partitionedLog;
 
 			wait(store(stopWhenDone, config.stopWhenDone().getOrThrow(tr))
 						&& store(restorableVersion, config.getLatestRestorableVersion(tr))
 						&& store(backupState, config.stateEnum().getOrThrow(tr))
 						&& store(tag, config.tag().get(tr))
-						&& store(latestSnapshotEndVersion, config.latestSnapshotEndVersion().get(tr)));
+						&& store(latestSnapshotEndVersion, config.latestSnapshotEndVersion().get(tr))
+						&& store(partitionedLog, config.partitionedLogEnabled().get(tr)));
 
 			// If restorable, update the last restorable version for this tag
 			if(restorableVersion.present() && tag.present()) {
@@ -2114,14 +2116,20 @@ namespace fileBackup {
 			// If a snapshot has ended for this backup then mutations are higher priority to reduce backup lag
 			state int priority = latestSnapshotEndVersion.present() ? 1 : 0;
 
-			// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will run after this batch is done
-			wait(success(BackupLogRangeTaskFunc::addTask(tr, taskBucket, task, priority, beginVersion, endVersion, TaskCompletionKey::joinWith(logDispatchBatchFuture))));
-			wait(success(BackupLogsDispatchTask::addTask(tr, taskBucket, task, priority, beginVersion, endVersion, TaskCompletionKey::signal(onDone), logDispatchBatchFuture)));
+			if (!partitionedLog.present() || !partitionedLog.get()) {
+				// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will run after this batch is done
+				wait(success(BackupLogRangeTaskFunc::addTask(tr, taskBucket, task, priority, beginVersion, endVersion, TaskCompletionKey::joinWith(logDispatchBatchFuture))));
+				wait(success(BackupLogsDispatchTask::addTask(tr, taskBucket, task, priority, beginVersion, endVersion, TaskCompletionKey::signal(onDone), logDispatchBatchFuture)));
 
-			// Do not erase at the first time
-			if (prevBeginVersion > 0) {
-				state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
-				wait( eraseLogData(tr, config.getUidAsKey(), destUidValue, Optional<Version>(beginVersion)) );
+				// Do not erase at the first time
+				if (prevBeginVersion > 0) {
+					state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
+					wait( eraseLogData(tr, config.getUidAsKey(), destUidValue, Optional<Version>(beginVersion)) );
+				}
+			} else {
+				// Skip mutation copy and erase backup mutations. Just check back periodically.
+				Version scheduledVersion = tr->getReadVersion().get() + CLIENT_KNOBS->BACKUP_POLL_PROGRESS_SECONDS * CLIENT_KNOBS->VERSIONS_PER_SECOND;
+				wait(success(BackupLogsDispatchTask::addTask(tr, taskBucket, task, 1, beginVersion, endVersion, TaskCompletionKey::signal(onDone), Reference<TaskFuture>(), scheduledVersion)));
 			}
 
 			wait(taskBucket->finish(tr, task));
@@ -2135,7 +2143,7 @@ namespace fileBackup {
 			return Void();
 		}
 
-		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, int priority, Version prevBeginVersion, Version beginVersion, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
+		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, int priority, Version prevBeginVersion, Version beginVersion, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>(), Version scheduledVersion = invalidVersion) {
 			Key key = wait(addBackupTask(BackupLogsDispatchTask::name,
 										 BackupLogsDispatchTask::version,
 										 tr, taskBucket, completionKey,
@@ -2144,6 +2152,9 @@ namespace fileBackup {
 										 [=](Reference<Task> task) {
 											 Params.prevBeginVersion().set(task, prevBeginVersion);
 											 Params.beginVersion().set(task, beginVersion);
+											 if (scheduledVersion != invalidVersion) {
+												ReservedTaskParams::scheduledVersion().set(task, scheduledVersion);
+											 }
 										 },
 										 priority));
 			return key;
@@ -2453,13 +2464,16 @@ namespace fileBackup {
 
 			state Future<std::vector<KeyRange>> backupRangesFuture = config.backupRanges().getOrThrow(tr);
 			state Future<Key> destUidValueFuture = config.destUidValue().getOrThrow(tr);
-			wait(success(backupRangesFuture) && success(destUidValueFuture));
+			state Future<Optional<bool>> partitionedLog = config.partitionedLogEnabled().get(tr);
+			wait(success(backupRangesFuture) && success(destUidValueFuture) && success(partitionedLog));
 			std::vector<KeyRange> backupRanges = backupRangesFuture.get();
 			Key destUidValue = destUidValueFuture.get();
 
-			// Start logging the mutations for the specified ranges of the tag
-			for (auto &backupRange : backupRanges) {
-				config.startMutationLogs(tr, backupRange, destUidValue);
+			// Start logging the mutations for the specified ranges of the tag if needed
+			if (!partitionedLog.get().present() || !partitionedLog.get().get()) {
+				for (auto& backupRange : backupRanges) {
+					config.startMutationLogs(tr, backupRange, destUidValue);
+				}
 			}
 
 			config.stateEnum().set(tr, EBackupState::STATE_RUNNING);
@@ -3719,9 +3733,10 @@ public:
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 
 		TraceEvent(SevInfo, "FBA_SubmitBackup")
-				.detail("TagName", tagName.c_str())
-				.detail("StopWhenDone", stopWhenDone)
-				.detail("OutContainer", outContainer.toString());
+		    .detail("TagName", tagName.c_str())
+		    .detail("StopWhenDone", stopWhenDone)
+		    .detail("UsePartitionedLog", partitionedLog)
+		    .detail("OutContainer", outContainer.toString());
 
 		state KeyBackedTag tag = makeBackupTag(tagName);
 		Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
