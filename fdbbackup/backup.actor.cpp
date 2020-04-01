@@ -3345,11 +3345,11 @@ int main(int argc, char* argv[]) {
 		}
 
 		delete FLOW_KNOBS;
-		FlowKnobs* flowKnobs = new FlowKnobs(true);
+		FlowKnobs* flowKnobs = new FlowKnobs;
 		FLOW_KNOBS = flowKnobs;
 
 		delete CLIENT_KNOBS;
-		ClientKnobs* clientKnobs = new ClientKnobs(true);
+		ClientKnobs* clientKnobs = new ClientKnobs;
 		CLIENT_KNOBS = clientKnobs;
 
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
@@ -3372,6 +3372,10 @@ int main(int argc, char* argv[]) {
 				}
 			}
 		}
+
+		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
+		flowKnobs->initialize(true);
+		clientKnobs->initialize(true);
 
 		if (trace) {
 			if(!traceLogGroup.empty())

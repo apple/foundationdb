@@ -26,7 +26,11 @@ ClientKnobs const* CLIENT_KNOBS = new ClientKnobs();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
-ClientKnobs::ClientKnobs(bool randomize) {
+ClientKnobs::ClientKnobs() {
+	initialize();
+}
+
+void ClientKnobs::initialize(bool randomize) {
 	// FIXME: These are not knobs, get them out of ClientKnobs!
 	BYTE_LIMIT_UNLIMITED = GetRangeLimits::BYTE_LIMIT_UNLIMITED;
 	ROW_LIMIT_UNLIMITED = GetRangeLimits::ROW_LIMIT_UNLIMITED;

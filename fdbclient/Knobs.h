@@ -202,7 +202,8 @@ public:
 	int CLI_CONNECT_PARALLELISM;
 	double CLI_CONNECT_TIMEOUT;
 
-	ClientKnobs(bool randomize = false);
+	ClientKnobs();
+	void initialize(bool randomize = false);
 };
 
 extern ClientKnobs const* CLIENT_KNOBS;
