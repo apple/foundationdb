@@ -3005,7 +3005,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			}
 			break;
 
-		case FDBTransactionOptions::SET_AS_DEBUG_TRANSACTION:
+		case FDBTransactionOptions::SERVER_REQUEST_TRACING:
 			validateOptionValue(value, false);
 			debugTransaction(deterministicRandom()->randomUniqueID());
 			break;
