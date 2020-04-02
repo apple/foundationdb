@@ -7,14 +7,14 @@ SCRIPTID="${$}"
 SAVEONERROR="${SAVEONERROR:-1}"
 PYTHONDIR="${BINDIR}/tests/python"
 testScript="${BINDIR}/tests/bindingtester/run_binding_tester.sh"
-VERSION="1.5"
+VERSION="1.6"
 
 source ${SCRIPTDIR}/localClusterStart.sh
 
 # Display syntax
 if [ "$#" -lt 1 ]
 then
-	echo "bindingTestScript.ksh <number of test cycles>"
+	echo "bindingTestScript.sh <number of test cycles>"
 	echo "   version: ${VERSION}"
 	exit 1
 fi

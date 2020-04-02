@@ -596,6 +596,29 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile, VersionedMessage 
 	return Void();
 }
 
+ACTOR static Future<Void> updateLogBytesWritten(BackupData* self, std::vector<UID> backupUids,
+                                                std::vector<Reference<IBackupFile>> logFiles) {
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+
+	ASSERT(backupUids.size() == logFiles.size());
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			for (int i = 0; i < backupUids.size(); i++) {
+				BackupConfig config(backupUids[i]);
+				config.logBytesWritten().atomicOp(tr, logFiles[i]->size(), MutationRef::AddValue);
+			}
+			wait(tr->commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 // Saves messages in the range of [0, numMsg) to a file and then remove these
 // messages. The file content format is a sequence of (Version, sub#, msgSize, message).
 // Note only ready backups are saved.
@@ -703,6 +726,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		self->backups[uid].lastSavedVersion = popVersion + 1;
 	}
 
+	wait(updateLogBytesWritten(self, activeUids, logFiles));
 	return Void();
 }
 
