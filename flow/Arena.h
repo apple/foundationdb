@@ -497,11 +497,7 @@ public:
 	}
 
 	std::string toString() const {
-		if (length <= 0) { // Avoid segmentation fault when an empty key is used in TraceEvent
-			return std::string("");
-		} else {
-			return std::string( (const char*)data, length );
-		}
+		return std::string( (const char*)data, length );
 	}
 
 	static bool isPrintable(char c) { return c > 32 && c < 127; }
