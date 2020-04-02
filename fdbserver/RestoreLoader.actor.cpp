@@ -888,7 +888,6 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 	return Void();
 }
 
-
 // Test splitMutation
 TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 	std::map<Key, UID> rangeToApplier;
@@ -911,8 +910,7 @@ TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 	Standalone<MutationRef> mutation(MutationRef(MutationRef::ClearRange, beginK.contents(), endK.contents()));
 
 	// Method 1: Use splitMutation
-	splitMutation(&rangeToApplier, mutation, mvector.arena(), mvector.contents(), nodeIDs.arena(),
-					nodeIDs.contents());
+	splitMutation(&rangeToApplier, mutation, mvector.arena(), mvector.contents(), nodeIDs.arena(), nodeIDs.contents());
 	ASSERT(mvector.size() == nodeIDs.size());
 
 	// Method 2: Use intersection
@@ -921,20 +919,26 @@ TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 	std::map<Key, UID>::iterator endKey = beginKey;
 	endKey++;
 	while (endKey != rangeToApplier.end()) {
-		TraceEvent("KeyRangeMap").detail("BeginKey", beginKey->first).detail("EndKey", endKey->first).detail("Node", beginKey->second);
+		TraceEvent("KeyRangeMap")
+		    .detail("BeginKey", beginKey->first)
+		    .detail("EndKey", endKey->first)
+		    .detail("Node", beginKey->second);
 		krMap.insert(KeyRangeRef(beginKey->first, endKey->first), beginKey->second);
 		beginKey = endKey;
 		endKey++;
 	}
 	if (beginKey != rangeToApplier.end()) {
-		TraceEvent("KeyRangeMap").detail("BeginKey", beginKey->first).detail("EndKey", normalKeys.end).detail("Node", beginKey->second);
+		TraceEvent("KeyRangeMap")
+		    .detail("BeginKey", beginKey->first)
+		    .detail("EndKey", normalKeys.end)
+		    .detail("Node", beginKey->second);
 		krMap.insert(KeyRangeRef(beginKey->first, normalKeys.end), beginKey->second);
 	}
 
 	int splitMutationIndex = 0;
-	auto r = krMap.intersectingRanges( KeyRangeRef(mutation.param1, mutation.param2) );
+	auto r = krMap.intersectingRanges(KeyRangeRef(mutation.param1, mutation.param2));
 	bool correctResult = true;
-	for(auto i = r.begin(); i != r.end(); ++i) {
+	for (auto i = r.begin(); i != r.end(); ++i) {
 		// intersectionRange result
 		// Calculate the overlap range
 		KeyRef rangeBegin = mutation.param1 > i->range().begin ? mutation.param1 : i->range().begin;
@@ -949,25 +953,32 @@ TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 		MutationRef result2M = mvector[splitMutationIndex];
 		UID applierID = nodeIDs[splitMutationIndex];
 		KeyRange krange2(KeyRangeRef(result2M.param1, result2M.param2));
-		TraceEvent("Result").detail("KeyRange1", krange1.toString())
-				.detail("KeyRange2", krange2.toString())
-				.detail("ApplierID1", nodeID).detail("ApplierID2", applierID);
+		TraceEvent("Result")
+		    .detail("KeyRange1", krange1.toString())
+		    .detail("KeyRange2", krange2.toString())
+		    .detail("ApplierID1", nodeID)
+		    .detail("ApplierID2", applierID);
 		if (krange1 != krange2 || nodeID != applierID) {
 			correctResult = false;
 			TraceEvent(SevError, "IncorrectResult")
-				.detail("Mutation", mutation.toString())
-				.detail("KeyRange1", krange1.toString())
-				.detail("KeyRange2", krange2.toString())
-				.detail("ApplierID1", nodeID).detail("ApplierID2", applierID);
+			    .detail("Mutation", mutation.toString())
+			    .detail("KeyRange1", krange1.toString())
+			    .detail("KeyRange2", krange2.toString())
+			    .detail("ApplierID1", nodeID)
+			    .detail("ApplierID2", applierID);
 		}
 		splitMutationIndex++;
 	}
 
 	if (splitMutationIndex != mvector.size()) {
 		correctResult = false;
-		TraceEvent(SevError, "SplitMuationTooMany").detail("SplitMutationIndex", splitMutationIndex).detail("Results", mvector.size());
-		for(; splitMutationIndex < mvector.size(); splitMutationIndex++) {
-			TraceEvent("SplitMuationTooMany").detail("SplitMutationIndex", splitMutationIndex).detail("Result", mvector[splitMutationIndex].toString());
+		TraceEvent(SevError, "SplitMuationTooMany")
+		    .detail("SplitMutationIndex", splitMutationIndex)
+		    .detail("Results", mvector.size());
+		for (; splitMutationIndex < mvector.size(); splitMutationIndex++) {
+			TraceEvent("SplitMuationTooMany")
+			    .detail("SplitMutationIndex", splitMutationIndex)
+			    .detail("Result", mvector[splitMutationIndex].toString());
 		}
 	}
 

@@ -86,12 +86,12 @@ struct StagingKey {
 			if (version < newVersion) {
 				if (debugMutation("StagingKeyAdd", newVersion.version, m)) {
 					TraceEvent("StagingKeyAdd")
-						.detail("Version", version.toString())
-						.detail("NewVersion", newVersion.toString())
-						.detail("MType", typeString[(int)type])
-						.detail("Key", key)
-						.detail("Val", val)
-						.detail("NewMutation", m.toString());
+					    .detail("Version", version.toString())
+					    .detail("NewVersion", newVersion.toString())
+					    .detail("MType", typeString[(int)type])
+					    .detail("Key", key)
+					    .detail("Val", val)
+					    .detail("NewMutation", m.toString());
 				}
 				key = m.param1;
 				val = m.param2;
@@ -119,11 +119,11 @@ struct StagingKey {
 	void precomputeResult(const char* context) {
 		// TODO: Change typeString[(int)type] to a safe function that validate type range
 		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult")
-			.detail("Context", context)
-			.detail("Version", version.toString())
+		    .detail("Context", context)
+		    .detail("Version", version.toString())
 		    .detail("Key", key)
-			.detail("Value", val)
-			.detail("MType", type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "[Unset]")
+		    .detail("Value", val)
+		    .detail("MType", type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "[Unset]")
 		    .detail("LargestPendingVersion",
 		            (pendingMutations.empty() ? "[none]" : pendingMutations.rbegin()->first.toString()));
 		std::map<LogMessageVersion, Standalone<MutationRef>>::iterator lb = pendingMutations.lower_bound(version);

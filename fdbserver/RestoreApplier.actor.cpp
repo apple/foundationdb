@@ -222,8 +222,8 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 		} catch (Error& e) {
 			if (retries++ > 10) {
 				TraceEvent(SevError, "FastRestoreApplierGetAndComputeStagingKeysGetKeysStuck")
-					.detail("GetKeys", incompleteStagingKeys.size())
-					.error(e);
+				    .detail("GetKeys", incompleteStagingKeys.size())
+				    .error(e);
 			}
 
 			wait(tr->onError(e));
@@ -302,9 +302,9 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 		while (lb != ub) {
 			if (lb->first >= rangeMutation.mutation.param2) {
 				TraceEvent(SevError, "FastRestoreApplerPhasePrecomputeMutationsResult_IncorrectUpperBound")
-					.detail("Key", lb->first)
-					.detail("ClearRangeUpperBound", rangeMutation.mutation.param2)
-					.detail("UsedUpperBound", ub->first);
+				    .detail("Key", lb->first)
+				    .detail("ClearRangeUpperBound", rangeMutation.mutation.param2)
+				    .detail("UsedUpperBound", ub->first);
 			}
 			MutationRef clearKey(MutationRef::ClearRange, lb->first, lb->first);
 			lb->second.add(clearKey, rangeMutation.version);
