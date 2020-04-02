@@ -1003,9 +1003,6 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				StatusArray regions;
 				if (statusObjConfig.has("regions")) {
-					if (!activePrimaryDC.present()) {
-						outputString += "\n  WARNING: Unable to determine primary datacenter";
-					}
 					outputString += "\n  Regions: ";
 					regions = statusObjConfig["regions"].get_array();
 					bool isPrimary = false;
