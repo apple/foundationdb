@@ -501,6 +501,7 @@ const KeyRangeRef backupProgressKeys(LiteralStringRef("\xff\x02/backupProgress/"
                                      LiteralStringRef("\xff\x02/backupProgress0"));
 const KeyRef backupProgressPrefix = backupProgressKeys.begin;
 const KeyRef backupStartedKey = LiteralStringRef("\xff\x02/backupStarted");
+extern const KeyRef backupPausedKey = LiteralStringRef("\xff\x02/backupPaused");
 
 const Key backupProgressKeyFor(UID workerID) {
 	BinaryWriter wr(Unversioned());
@@ -520,6 +521,19 @@ UID decodeBackupProgressKey(const KeyRef& key) {
 	BinaryReader rd(key.removePrefix(backupProgressPrefix), Unversioned());
 	rd >> serverID;
 	return serverID;
+}
+
+Value encodeBackupPausedValue(bool pause) {
+	BinaryWriter wr(Unversioned());
+	wr << pause;
+	return wr.toValue();
+}
+
+bool decodeBackupPausedValue(const ValueRef& value) {
+	bool pause;
+	BinaryReader rd(value, Unversioned());
+	rd >> pause;
+	return pause;
 }
 
 WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {

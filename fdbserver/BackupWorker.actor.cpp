@@ -82,6 +82,7 @@ struct BackupData {
 	bool pulling = false;
 	bool stopped = false;
 	bool exitEarly = false; // If the worker is on an old epoch and all backups starts a version >= the endVersion
+	AsyncVar<bool> paused; // Track if "backupPausedKey" is set.
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
@@ -223,7 +224,7 @@ struct BackupData {
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
 	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1),
-	    cc("BackupWorker", myId.toString()), pulledVersion(0) {
+	    cc("BackupWorker", myId.toString()), pulledVersion(0), paused(false) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 
 		specialCounter(cc, "SavedVersion", [this]() { return this->savedVersion; });
@@ -797,6 +798,10 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 
 	TraceEvent("BackupWorkerPull", self->myId);
 	loop {
+		while (self->paused.get()) {
+			wait(self->paused.onChange());
+		}
+
 		loop choose {
 			when (wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
 				break;
@@ -856,7 +861,7 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 			wait(self->pulledVersion.whenAtLeast(currentVersion));
 			pullFinished = Future<Void>(); // cancels pullAsyncData()
 			self->pulling = false;
-			TraceEvent("BackupWorkerPaused", self->myId);
+			TraceEvent("BackupWorkerPaused", self->myId).detail("Reson", "NoBackup");
 		} else {
 			// Backup key is not present, enter this NOOP POP mode.
 			state Future<Version> committedVersion = self->getMinKnownCommittedVersion();
@@ -899,6 +904,33 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, LogEpoch r
 	}
 }
 
+ACTOR static Future<Void> monitorWorkerPause(BackupData* self) {
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	state Future<Void> watch;
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			Optional<Value> value = wait(tr->get(backupPausedKey));
+			bool paused = value.present() && decodeBackupPausedValue(value.get());
+			if (self->paused.get() != paused) {
+				TraceEvent(paused ? "BackupWorkerPaused" : "BackupWorkerResumed", self->myId);
+				self->paused.set(paused);
+			}
+
+			watch = tr->watch(backupPausedKey);
+			wait(tr->commit());
+			wait(watch);
+			tr->reset();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest req,
                                 Reference<AsyncVar<ServerDBInfo>> db) {
 	state BackupData self(interf.id(), db, req);
@@ -921,6 +953,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 		if (req.recruitedEpoch == req.backupEpoch && req.routerTag.id == 0) {
 			addActor.send(monitorBackupProgress(&self));
 		}
+		addActor.send(monitorWorkerPause(&self));
 
 		// Check if backup key is present to avoid race between this check and
 		// noop pop as well as upload data: pop or skip upload before knowing
