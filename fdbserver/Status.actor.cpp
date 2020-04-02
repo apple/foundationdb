@@ -2153,7 +2153,7 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<CachedSer
 ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx) {
 	state ReadYourWritesTransaction tr(cx);
 
-	state Future<Void> readTimeout = delay(10); // so that we won't loop forever
+	state Future<Void> readTimeout = delay(5); // so that we won't loop forever
 	loop {
 		try {
 			if (readTimeout.isReady()) {
