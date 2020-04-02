@@ -388,7 +388,8 @@ public:
 		}
 	}
 
-	void annotateEvent( TraceEventFields &fields ) {
+	void annotateEvent(TraceEventFields& fields) {
+		MutexHolder holder(mutex);
 		if(localAddress.present()) {
 			fields.addField("Machine", formatIpPort(localAddress.get().ip, localAddress.get().port));
 		}
@@ -401,10 +402,11 @@ public:
 		}
 	}
 
-	void writeEvent( TraceEventFields fields, std::string trackLatestKey, bool trackError ) {
+	void writeEvent(TraceEventFields fields, std::string trackLatestKey, bool trackError,
+	                bool alreadyAnnotated = false) {
 		MutexHolder hold(mutex);
 
-		if(opened) {
+		if (opened && !alreadyAnnotated) {
 			annotateEvent(fields);
 		}
 
@@ -1183,25 +1185,35 @@ TraceInterval& TraceInterval::begin() {
 	return *this;
 }
 
+bool TraceBatch::dumpImmediately() {
+	return (g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP);
+}
+
 void TraceBatch::addEvent( const char *name, uint64_t id, const char *location ) {
-	eventBatch.push_back( EventInfo(TraceEvent::getCurrentTime(), name, id, location));
-	if( g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP )
+	auto& eventInfo = eventBatch.emplace_back(EventInfo(TraceEvent::getCurrentTime(), name, id, location));
+	if (dumpImmediately())
 		dump();
+	else
+		g_traceLog.annotateEvent(eventInfo.fields);
 }
 
 void TraceBatch::addAttach( const char *name, uint64_t id, uint64_t to ) {
-	attachBatch.push_back( AttachInfo(TraceEvent::getCurrentTime(), name, id, to));
-	if( g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP )
+	auto& attachInfo = attachBatch.emplace_back(AttachInfo(TraceEvent::getCurrentTime(), name, id, to));
+	if (dumpImmediately())
 		dump();
+	else
+		g_traceLog.annotateEvent(attachInfo.fields);
 }
 
 void TraceBatch::addBuggify( int activated, int line, std::string file ) {
 	if( g_network ) {
-		buggifyBatch.push_back( BuggifyInfo(TraceEvent::getCurrentTime(), activated, line, file));
-		if( g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP )
+		auto& buggifyInfo = buggifyBatch.emplace_back(BuggifyInfo(TraceEvent::getCurrentTime(), activated, line, file));
+		if (dumpImmediately())
 			dump();
+		else
+			g_traceLog.annotateEvent(buggifyInfo.fields);
 	} else {
-		buggifyBatch.push_back( BuggifyInfo(0, activated, line, file));
+		buggifyBatch.push_back(BuggifyInfo(0, activated, line, file));
 	}
 }
 
@@ -1218,21 +1230,21 @@ void TraceBatch::dump() {
 		if(g_network->isSimulated()) {
 			attachBatch[i].fields.addField("Machine", machine);
 		}
-		g_traceLog.writeEvent(attachBatch[i].fields, "", false);
+		g_traceLog.writeEvent(attachBatch[i].fields, "", false, !dumpImmediately());
 	}
 
 	for(int i = 0; i < eventBatch.size(); i++) {
 		if(g_network->isSimulated()) {
 			eventBatch[i].fields.addField("Machine", machine);
 		}
-		g_traceLog.writeEvent(eventBatch[i].fields, "", false);
+		g_traceLog.writeEvent(eventBatch[i].fields, "", false, !dumpImmediately());
 	}
 
 	for(int i = 0; i < buggifyBatch.size(); i++) {
 		if(g_network->isSimulated()) {
 			buggifyBatch[i].fields.addField("Machine", machine);
 		}
-		g_traceLog.writeEvent(buggifyBatch[i].fields, "", false);
+		g_traceLog.writeEvent(buggifyBatch[i].fields, "", false, !dumpImmediately());
 	}
 
 	g_traceLog.flush();

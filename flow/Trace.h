@@ -144,6 +144,7 @@ private:
 	std::vector<EventInfo> eventBatch;
 	std::vector<AttachInfo> attachBatch;
 	std::vector<BuggifyInfo> buggifyBatch;
+	static bool dumpImmediately();
 };
 
 struct DynamicEventMetric;
