@@ -21,6 +21,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
+#include "flow/UnitTest.h"
 
 ClientKnobs const* CLIENT_KNOBS = new ClientKnobs();
 
@@ -215,4 +216,18 @@ void ClientKnobs::initialize(bool randomize) {
 	//fdbcli		
 	init( CLI_CONNECT_PARALLELISM,                  400 );
 	init( CLI_CONNECT_TIMEOUT,                     10.0 );
+}
+
+TEST_CASE("/fdbclient/knobs/initialize") {
+	// This test depends on TASKBUCKET_TIMEOUT_VERSIONS being defined as a constant multiple of CORE_VERSIONSPERSECOND
+	ClientKnobs clientKnobs;
+	int initialCoreVersionsPerSecond = clientKnobs.CORE_VERSIONSPERSECOND;
+	int initialTaskBucketTimeoutVersions = clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS;
+	clientKnobs.setKnob("core_versionspersecond", format("%ld", initialCoreVersionsPerSecond * 2));
+	ASSERT(clientKnobs.CORE_VERSIONSPERSECOND == initialCoreVersionsPerSecond * 2);
+	ASSERT(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS == initialTaskBucketTimeoutVersions);
+	clientKnobs.initialize();
+	ASSERT(clientKnobs.CORE_VERSIONSPERSECOND == initialCoreVersionsPerSecond * 2);
+	ASSERT(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS == initialTaskBucketTimeoutVersions * 2);
+	return Void();
 }
