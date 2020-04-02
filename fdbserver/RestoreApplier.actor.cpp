@@ -161,6 +161,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			// Note: Log and range mutations may be delivered out of order. Can we handle it?
 			if (mutation.type == MutationRef::SetVersionstampedKey ||
 			    mutation.type == MutationRef::SetVersionstampedValue) {
+				ASSERT(false); // No version stamp mutations in backup logs
 				batchData->addVersionStampedKV(mutation, mutationVersion, numVersionStampedKV);
 				numVersionStampedKV++;
 			} else {
@@ -219,11 +220,12 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			wait(waitForAll(fValues));
 			break;
 		} catch (Error& e) {
-			retries++;
-			TraceEvent(retries > 10 ? SevError : SevWarn, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
-			    .detail("GetKeys", incompleteStagingKeys.size())
-			    .detail("Error", e.what())
-			    .detail("ErrorCode", e.code());
+			if (retries++ > 10) {
+				TraceEvent(SevError, "FastRestoreApplierGetAndComputeStagingKeysGetKeysStuck")
+				    .detail("GetKeys", incompleteStagingKeys.size())
+				    .error(e);
+			}
+
 			wait(tr->onError(e));
 			fValues.clear();
 		}
@@ -233,17 +235,17 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	int i = 0;
 	for (auto& key : incompleteStagingKeys) {
 		if (!fValues[i].get().present()) {
-			TraceEvent(SevWarnAlways, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
+			TraceEvent(SevDebug, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
 			    .detail("Key", key.first)
 			    .detail("Reason", "Not found in DB")
 			    .detail("PendingMutations", key.second->second.pendingMutations.size())
 			    .detail("StagingKeyType", (int)key.second->second.type);
 			for (auto& vm : key.second->second.pendingMutations) {
-				TraceEvent(SevWarnAlways, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
+				TraceEvent(SevDebug, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
 				    .detail("PendingMutationVersion", vm.first.toString())
 				    .detail("PendingMutation", vm.second.toString());
 			}
-			key.second->second.precomputeResult();
+			key.second->second.precomputeResult("GetAndComputeStagingKeysNoBaseValueInDB");
 			i++;
 			continue;
 		} else {
@@ -251,7 +253,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			// But as long as it is > 1 and less than the start version of the version batch, it is the same result.
 			MutationRef m(MutationRef::SetValue, key.first, fValues[i].get().get());
 			key.second->second.add(m, LogMessageVersion(1));
-			key.second->second.precomputeResult();
+			key.second->second.precomputeResult("GetAndComputeStagingKeys");
 			i++;
 		}
 	}
@@ -296,9 +298,16 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	    .detail("ClearRanges", batchData->stagingKeyRanges.size());
 	for (auto& rangeMutation : batchData->stagingKeyRanges) {
 		std::map<Key, StagingKey>::iterator lb = batchData->stagingKeys.lower_bound(rangeMutation.mutation.param1);
-		std::map<Key, StagingKey>::iterator ub = batchData->stagingKeys.upper_bound(rangeMutation.mutation.param2);
+		std::map<Key, StagingKey>::iterator ub = batchData->stagingKeys.lower_bound(rangeMutation.mutation.param2);
 		while (lb != ub) {
-			lb->second.add(rangeMutation.mutation, rangeMutation.version);
+			if (lb->first >= rangeMutation.mutation.param2) {
+				TraceEvent(SevError, "FastRestoreApplerPhasePrecomputeMutationsResult_IncorrectUpperBound")
+				    .detail("Key", lb->first)
+				    .detail("ClearRangeUpperBound", rangeMutation.mutation.param2)
+				    .detail("UsedUpperBound", ub->first);
+			}
+			MutationRef clearKey(MutationRef::ClearRange, lb->first, lb->first);
+			lb->second.add(clearKey, rangeMutation.version);
 			lb++;
 		}
 	}
@@ -338,7 +347,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	for (stagingKeyIter = batchData->stagingKeys.begin(); stagingKeyIter != batchData->stagingKeys.end();
 	     stagingKeyIter++) {
 		if (stagingKeyIter->second.hasBaseValue()) {
-			stagingKeyIter->second.precomputeResult();
+			stagingKeyIter->second.precomputeResult("HasBaseValue");
 		}
 	}
 

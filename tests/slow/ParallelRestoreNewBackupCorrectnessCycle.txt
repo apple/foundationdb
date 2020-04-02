@@ -21,6 +21,7 @@ testTitle=BackupAndRestore
      simBackupAgents=BackupToFile
  ; backupRangesCount<0 means backup the entire normal keyspace
      backupRangesCount=-1
+     usePartitionedLogs=true
 
      testName=RandomClogging
      testDuration=90.0

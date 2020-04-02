@@ -657,6 +657,18 @@ public:
 		return dumpFileList_impl(Reference<BackupContainerFileSystem>::addRef(this), begin, end);
 	}
 
+	ACTOR static Future<bool> isPartitionedBackup_impl(Reference<BackupContainerFileSystem> bc) {
+		BackupFileList list = wait(bc->dumpFileList(0, std::numeric_limits<Version>::max()));
+		for (const auto& file : list.logs) {
+			if (file.isPartitionedLog()) return true;
+		}
+		return false;
+	}
+
+	Future<bool> isPartitionedBackup() final {
+		return isPartitionedBackup_impl(Reference<BackupContainerFileSystem>::addRef(this));
+	}
+
 	static Version resolveRelativeVersion(Optional<Version> max, Version v, const char *name, Error e) {
 		if(v == invalidVersion) {
 			TraceEvent(SevError, "BackupExpireInvalidVersion").detail(name, v);
@@ -811,11 +823,17 @@ public:
 			// If we didn't get log versions above then seed them using the first log file
 			if (!desc.contiguousLogEnd.present()) {
 				desc.minLogBegin = logs.begin()->beginVersion;
-				desc.contiguousLogEnd = logs.begin()->endVersion;
+				if (partitioned) {
+					// Cannot use the first file's end version, which may not be contiguous
+					// for other partitions. Set to its beginVersion to be safe.
+					desc.contiguousLogEnd = logs.begin()->beginVersion;
+				} else {
+					desc.contiguousLogEnd = logs.begin()->endVersion;
+				}
 			}
 
 			if (partitioned) {
-				determinePartitionedLogsBeginEnd(&desc, logs);
+				updatePartitionedLogsContinuousEnd(&desc, logs, scanBegin, scanEnd);
 			} else {
 				Version& end = desc.contiguousLogEnd.get();
 				computeRestoreEndVersion(logs, nullptr, &end, std::numeric_limits<Version>::max());
@@ -1137,14 +1155,24 @@ public:
 			indices.push_back(i);
 		}
 
-		// check tag 0 is continuous and create a map of ranges to tags
-		std::map<std::pair<Version, Version>, int> tags; // range [start, end] -> tags
-		if (!isContinuous(files, tagIndices[0], begin, end, &tags)) return false;
+		// check partition 0 is continuous and create a map of ranges to tags
+		std::map<std::pair<Version, Version>, int> tags; // range [begin, end] -> tags
+		if (!isContinuous(files, tagIndices[0], begin, end, &tags)) {
+			TraceEvent(SevWarn, "BackupFileNotContinuous")
+			    .detail("Partition", 0)
+			    .detail("RangeBegin", begin)
+			    .detail("RangeEnd", end);
+			return false;
+		}
 
 		// for each range in tags, check all tags from 1 are continouous
 		for (const auto [beginEnd, count] : tags) {
 			for (int i = 1; i < count; i++) {
-				if (!isContinuous(files, tagIndices[i], beginEnd.first, beginEnd.second, nullptr)) {
+				if (!isContinuous(files, tagIndices[i], beginEnd.first, std::min(beginEnd.second - 1, end), nullptr)) {
+					TraceEvent(SevWarn, "BackupFileNotContinuous")
+					    .detail("Partition", i)
+					    .detail("RangeBegin", beginEnd.first)
+					    .detail("RangeEnd", beginEnd.second);
 					return false;
 				}
 			}
@@ -1172,19 +1200,34 @@ public:
 		return filtered;
 	}
 
-	// Analyze partitioned logs and set minLogBegin and contiguousLogEnd.
-	// For partitioned logs, different tags may start at different versions, so
-	// we need to find the "minLogBegin" version as well.
-	static void determinePartitionedLogsBeginEnd(BackupDescription* desc, const std::vector<LogFile>& logs) {
+	// Analyze partitioned logs and set contiguousLogEnd for "desc" if larger
+	// than the "scanBegin" version.
+	static void updatePartitionedLogsContinuousEnd(BackupDescription* desc, const std::vector<LogFile>& logs,
+	                                               const Version scanBegin, const Version scanEnd) {
 		if (logs.empty()) return;
 
-		for (const LogFile& file : logs) {
-			Version end = getPartitionedLogsContinuousEndVersion(logs, file.beginVersion);
-			if (end > file.beginVersion) {
-				// desc->minLogBegin = file.beginVersion;
+		Version snapshotBeginVersion = desc->snapshots.size() > 0 ? desc->snapshots[0].beginVersion : invalidVersion;
+		Version begin = std::max(scanBegin, desc->minLogBegin.get());
+		TraceEvent("ContinuousLogEnd")
+		    .detail("ScanBegin", scanBegin)
+		    .detail("ScanEnd", scanEnd)
+		    .detail("Begin", begin)
+		    .detail("ContiguousLogEnd", desc->contiguousLogEnd.get());
+		for (const auto& file : logs) {
+			if (file.beginVersion > begin) {
+				if (scanBegin > 0) return;
+
+				// scanBegin is 0
+				desc->minLogBegin = file.beginVersion;
+				begin = file.beginVersion;
+			}
+
+			Version ver = getPartitionedLogsContinuousEndVersion(logs, begin);
+			if (ver >= desc->contiguousLogEnd.get()) {
 				// contiguousLogEnd is not inclusive, so +1 here.
-				desc->contiguousLogEnd.get() = end + 1;
-				return;
+				desc->contiguousLogEnd.get() = ver + 1;
+				TraceEvent("UpdateContinuousLogEnd").detail("Version", ver + 1);
+				if (ver > snapshotBeginVersion) return;
 			}
 		}
 	}
@@ -1196,7 +1239,8 @@ public:
 
 		std::map<int, std::vector<int>> tagIndices; // tagId -> indices in files
 		for (int i = 0; i < logs.size(); i++) {
-			ASSERT(logs[i].tagId >= 0 && logs[i].tagId < logs[i].totalTags);
+			ASSERT(logs[i].tagId >= 0);
+			ASSERT(logs[i].tagId < logs[i].totalTags);
 			auto& indices = tagIndices[logs[i].tagId];
 			// filter out if indices.back() is subset of files[i] or vice versa
 			if (!indices.empty()) {
@@ -1210,26 +1254,32 @@ public:
 			}
 			end = std::max(end, logs[i].endVersion - 1);
 		}
+		TraceEvent("ContinuousLogEnd").detail("Begin", begin).detail("InitVersion", end);
 
-		// check tag 0 is continuous in [begin, end] and create a map of ranges to tags
-		std::map<std::pair<Version, Version>, int> tags; // range [start, end] -> tags
+		// check partition 0 is continuous in [begin, end] and create a map of ranges to partitions
+		std::map<std::pair<Version, Version>, int> tags; // range [start, end] -> partitions
 		isContinuous(logs, tagIndices[0], begin, end, &tags);
 		if (tags.empty() || end <= begin) return 0;
 		end = std::min(end, tags.rbegin()->first.second);
+		TraceEvent("ContinuousLogEnd").detail("Partition", 0).detail("EndVersion", end).detail("Begin", begin);
 
-		// for each range in tags, check all tags from 1 are continouous
+		// for each range in tags, check all partitions from 1 are continouous
 		Version lastEnd = begin;
 		for (const auto [beginEnd, count] : tags) {
-			Version tagEnd = end; // This range's minimum continous tag version
+			Version tagEnd = beginEnd.second; // This range's minimum continous partition version
 			for (int i = 1; i < count; i++) {
 				std::map<std::pair<Version, Version>, int> rangeTags;
 				isContinuous(logs, tagIndices[i], beginEnd.first, beginEnd.second, &rangeTags);
 				tagEnd = rangeTags.empty() ? 0 : std::min(tagEnd, rangeTags.rbegin()->first.second);
-				if (tagEnd == 0) return lastEnd;
+				TraceEvent("ContinuousLogEnd")
+				    .detail("Partition", i)
+				    .detail("EndVersion", tagEnd)
+				    .detail("RangeBegin", beginEnd.first)
+				    .detail("RangeEnd", beginEnd.second);
+				if (tagEnd == 0) return lastEnd == begin ? 0 : lastEnd;
 			}
 			if (tagEnd < beginEnd.second) {
-				end = tagEnd;
-				break;
+				return tagEnd;
 			}
 			lastEnd = beginEnd.second;
 		}

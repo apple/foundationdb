@@ -219,10 +219,16 @@ struct VersionedMutations {
  */
 struct DecodeProgress {
 	DecodeProgress() = default;
-	DecodeProgress(const LogFile& file) : file(file) {}
+	DecodeProgress(const LogFile& file, std::vector<std::tuple<Arena, Version, int32_t, StringRef>> values)
+	  : file(file), keyValues(values) {}
 
-	// If there are no more mutations to pull.
-	bool finished() { return eof && keyValues.empty(); }
+	// If there are no more mutations to pull from the file.
+	// However, we could have unfinished version in the buffer when EOF is true,
+	// which means we should look for data in the next file. The caller
+	// should call getUnfinishedBuffer() to get these left data.
+	bool finished() { return (eof && keyValues.empty()) || (leftover && !keyValues.empty()); }
+
+	std::vector<std::tuple<Arena, Version, int32_t, StringRef>>&& getUnfinishedBuffer() { return std::move(keyValues); }
 
 	// Returns all mutations of the next version in a batch.
 	Future<VersionedMutations> getNextBatch() { return getNextBatchImpl(this); }
@@ -242,12 +248,14 @@ struct DecodeProgress {
 
 	// PRECONDITION: finished() must return false before calling this function.
 	// Returns the next batch of mutations along with the arena backing it.
+	// Note the returned batch can be empty when the file has unfinished
+	// version batch data that are in the next file.
 	ACTOR static Future<VersionedMutations> getNextBatchImpl(DecodeProgress* self) {
 		ASSERT(!self->finished());
 
 		loop {
-			if (self->keyValues.size() == 1) {
-				// Try to decode another block when only one left
+			if (self->keyValues.size() <= 1) {
+				// Try to decode another block when less than one left
 				wait(readAndDecodeFile(self));
 			}
 
@@ -281,19 +289,21 @@ struct DecodeProgress {
 				Standalone<StringRef> buf = self->combineValues(idx, bufSize);
 				value = buf;
 				m.arena = buf.arena();
-			} else {
-				m.arena = std::get<0>(tuple);
 			}
 			if (self->isValueComplete(value)) {
 				m.mutations = decode_value(value);
+				if (m.arena.getSize() == 0) {
+					m.arena = std::get<0>(tuple);
+				}
 				self->keyValues.erase(self->keyValues.begin(), self->keyValues.begin() + idx);
 				return m;
 			} else if (!self->eof) {
 				// Read one more block, hopefully the missing part of the value can be found.
 				wait(readAndDecodeFile(self));
 			} else {
-				TraceEvent(SevError, "MissingValue").detail("Version", m.version);
-				throw restore_corrupted_data();
+				TraceEvent(SevWarn, "MissingValue").detail("Version", m.version);
+				self->leftover = true;
+				return m; // Empty mutations
 			}
 		}
 	}
@@ -407,6 +417,7 @@ struct DecodeProgress {
 	Reference<IAsyncFile> fd;
 	int64_t offset = 0;
 	bool eof = false;
+	bool leftover = false; // Done but has unfinished version batch data left
 	// A (version, part_number)'s mutations and memory arena.
 	std::vector<std::tuple<Arena, Version, int32_t, StringRef>> keyValues;
 };
@@ -432,14 +443,22 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 	printLogFiles("Relevant files are: ", logs);
 
 	state int i = 0;
+	// Previous file's unfinished version data
+	state std::vector<std::tuple<Arena, Version, int32_t, StringRef>> left;
 	for (; i < logs.size(); i++) {
-		state DecodeProgress progress(logs[i]);
+		if (logs[i].fileSize == 0) continue;
+
+		state DecodeProgress progress(logs[i], left);
 		wait(progress.openFile(container));
 		while (!progress.finished()) {
 			VersionedMutations vms = wait(progress.getNextBatch());
 			for (const auto& m : vms.mutations) {
 				std::cout << vms.version << " " << m.toString() << "\n";
 			}
+		}
+		left = progress.getUnfinishedBuffer();
+		if (!left.empty()) {
+			TraceEvent("UnfinishedFile").detail("File", logs[i].fileName).detail("Q", left.size());
 		}
 	}
 	return Void();

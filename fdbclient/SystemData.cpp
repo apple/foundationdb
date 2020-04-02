@@ -31,6 +31,7 @@ const KeyRangeRef systemKeys(systemKeysPrefix, LiteralStringRef("\xff\xff") );
 const KeyRangeRef nonMetadataSystemKeys(LiteralStringRef("\xff\x02"), LiteralStringRef("\xff\x03"));
 const KeyRangeRef allKeys = KeyRangeRef(normalKeys.begin, systemKeys.end);
 const KeyRef afterAllKeys = LiteralStringRef("\xff\xff\x00");
+const KeyRangeRef specialKeys = KeyRangeRef(LiteralStringRef("\xff\xff"), LiteralStringRef("\xff\xff\xff\xff"));
 
 // keyServersKeys.contains(k) iff k.startsWith(keyServersPrefix)
 const KeyRangeRef keyServersKeys( LiteralStringRef("\xff/keyServers/"), LiteralStringRef("\xff/keyServers0") );
@@ -60,6 +61,11 @@ void decodeKeyServersValue( const ValueRef& value, vector<UID>& src, vector<UID>
 		dest.clear();
 	}
 }
+
+const KeyRef conflictingKeysPrefix = LiteralStringRef("/transaction/conflicting_keys/");
+const Key conflictingKeysAbsolutePrefix = conflictingKeysPrefix.withPrefix(specialKeys.begin);
+const ValueRef conflictingKeysTrue = LiteralStringRef("1");
+const ValueRef conflictingKeysFalse = LiteralStringRef("0");
 
 // "\xff/cacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD
@@ -203,7 +209,7 @@ const KeyRangeRef serverTagConflictKeys(
 const KeyRef serverTagConflictPrefix = serverTagConflictKeys.begin;
 // serverTagHistoryKeys is the old tag a storage server uses before it is migrated to a different location.
 // For example, we can copy a SS file to a remote DC and start the SS there;
-//   The new SS will need to cnosume the last bits of data from the old tag it is responsible for.
+//   The new SS will need to consume the last bits of data from the old tag it is responsible for.
 const KeyRangeRef serverTagHistoryKeys(
 	LiteralStringRef("\xff/serverTagHistory/"),
 	LiteralStringRef("\xff/serverTagHistory0") );

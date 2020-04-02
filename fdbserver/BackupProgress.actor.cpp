@@ -47,8 +47,10 @@ void BackupProgress::addBackupStatus(const WorkerBackupStatus& status) {
 void BackupProgress::updateTagVersions(std::map<Tag, Version>* tagVersions, std::set<Tag>* tags,
                                        const std::map<Tag, Version>& progress, Version endVersion, LogEpoch epoch) {
 	for (const auto& [tag, savedVersion] : progress) {
-		tags->erase(tag);
-		if (savedVersion < endVersion - 1) {
+		// If tag is not in "tags", it means the old epoch has more tags than
+		// new epoch's tags. Just ignore the tag here.
+		auto n = tags->erase(tag);
+		if (n > 0 && savedVersion < endVersion - 1) {
 			tagVersions->insert({ tag, savedVersion + 1 });
 			TraceEvent("BackupVersionRange", dbgid)
 			    .detail("OldEpoch", epoch)
