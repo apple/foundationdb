@@ -565,6 +565,10 @@ void initHelp() {
 		"lock",
 		"lock the database with a randomly generated lockUID",
 		"Randomly generates a lockUID, prints this lockUID, and then uses the lockUID to lock the database.");
+	helpMap["unlock"] =
+	    CommandHelp("unlock <UID>", "unlock the database with the provided lockUID",
+	                "Unlocks the database with the provided lockUID. This is a potentially dangerous operation, so the "
+	                "user will be asked to enter a passphrase to confirm their intent.");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -2723,7 +2727,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				continue;
 
 			// Don't put dangerous commands in the command history
-			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos)
+			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos &&
+			    line.find("unlock") == std::string::npos)
 				linenoise.historyAdd(line);
 		}
 
@@ -2947,6 +2952,31 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
 						wait(makeInterruptable(lockDatabase(db, lockUID)));
 						printf("Database locked.\n");
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "unlock")) {
+					if ((tokens.size() != 2) || (tokens[1].size() != 32) ||
+					    !std::all_of(tokens[1].begin(), tokens[1].end(), &isxdigit)) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						state std::string passPhrase = deterministicRandom()->randomAlphaNumeric(10);
+						warn.cancel(); // don't warn while waiting on user input
+						printf("Unlocking the database is a potentially dangerous operation.\n");
+						Optional<std::string> input = wait(linenoise.read(
+						    format("Repeat the following passphrase if you would like to proceed (%s) : ",
+						           passPhrase.c_str())));
+						warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db);
+						if (input.present() && input.get() == passPhrase) {
+							UID unlockUID = UID::fromString(tokens[1].toString());
+							wait(makeInterruptable(unlockDatabase(db, unlockUID)));
+							printf("Database unlocked.\n");
+						} else {
+							printf("ERROR: Incorrect passphrase entered.\n");
+							is_error = true;
+						}
 					}
 					continue;
 				}
