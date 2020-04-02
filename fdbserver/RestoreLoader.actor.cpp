@@ -896,7 +896,7 @@ TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 
 	// Prepare RangeToApplier
 	rangeToApplier.emplace(normalKeys.begin, deterministicRandom()->randomUniqueID());
-	int numAppliers = deterministicRandom()->randomInt(0, 50);
+	int numAppliers = deterministicRandom()->randomInt(1, 50);
 	for (int i = 0; i < numAppliers; ++i) {
 		Key k = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 1000)));
 		UID node = deterministicRandom()->randomUniqueID();
@@ -916,8 +916,7 @@ TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 	// Method 2: Use intersection
 	KeyRangeMap<UID> krMap;
 	std::map<Key, UID>::iterator beginKey = rangeToApplier.begin();
-	std::map<Key, UID>::iterator endKey = beginKey;
-	endKey++;
+	std::map<Key, UID>::iterator endKey = std::next(beginKey, 1);
 	while (endKey != rangeToApplier.end()) {
 		TraceEvent("KeyRangeMap")
 		    .detail("BeginKey", beginKey->first)
