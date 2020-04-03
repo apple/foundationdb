@@ -109,8 +109,9 @@ namespace PTreeImpl {
 	template<class T, class X>
 	bool contains(const Reference<PTree<T>>& p, Version at, const X& x) {
 		if (!p) return false;
-		bool less = x < p->data;
-		if (!less && !(p->data<x)) return true;  // x == p->data
+		int cmp = compare(x, p->data);
+		bool less = cmp < 0;
+		if (cmp == 0) return true;
 		return contains(p->child(!less, at), at, x);
 	}
 
@@ -126,9 +127,10 @@ namespace PTreeImpl {
 			return;
 		}
 		f.push_back(p.getPtr());
-		bool less = x < p->data;
+		int cmp = compare(x, p->data);
+		bool less = cmp < 0;
 		lessThan.push_back(less);
-		if (!less && !(p->data<x)) return;  // x == p->data
+		if (cmp == 0) return;
 		lower_bound(p->child(!less, at), at, x, f, lessThan);
 	}
 
@@ -295,24 +297,27 @@ namespace PTreeImpl {
 	template<class T, class X>
 	void remove(Reference<PTree<T>>& p, Version at, const X& x) {
 		if (!p) ASSERT(false); // attempt to remove item not present in PTree
-		if (x < p->data) {
+		int cmp = compare(x, p->data);
+		if (cmp < 0) {
 			Reference<PTree<T>> child = p->child(0, at);
 			remove(child, at, x);
 			p = update(p, 0, child, at);
-		} else if (p->data < x) {
+		} else if (cmp > 0) {
 			Reference<PTree<T>> child = p->child(1, at);
 			remove(child, at, x);
 			p = update(p, 1, child, at);
-		} else
+		} else {
 			removeRoot(p, at);
+		}
 	}
 
 	template<class T, class X>
 	void remove(Reference<PTree<T>>& p, Version at, const X& begin, const X& end) {
 		if (!p) return;
 		int beginDir, endDir;
-		if (begin < p->data) beginDir = -1;
-		else if (p->data < begin) beginDir = +1;
+		int beginCmp = compare(begin, p->data);
+		if (beginCmp < 0) beginDir = -1;
+		else if (beginCmp > 0) beginDir = +1;
 		else beginDir = 0;
 		if (!(p->data < end)) endDir = -1;
 		else endDir = +1;
@@ -387,7 +392,9 @@ namespace PTreeImpl {
 		if (!right) return left;
 
 		Reference<PTree<T>> r = Reference<PTree<T>>(new PTree<T>(lastNode(left, at)->data, at));
-		ASSERT( r->data < firstNode(right, at)->data);
+		if (EXPENSIVE_VALIDATION) {
+			ASSERT( r->data < firstNode(right, at)->data);
+		}
 		Reference<PTree<T>> a = left;
 		remove(a, at, r->data);
 

@@ -41,11 +41,22 @@ struct KeyValueMapPair {
 	KeyValueMapPair(KeyRef key, ValueRef value)
 	  : arena(key.expectedSize() + value.expectedSize()), key(arena, key), value(arena, value) {}
 
+	int compare(KeyValueMapPair const& r) const { return ::compare(key, r.key); }
+
+	template <class CompatibleWithKey>
+	int compare(CompatibleWithKey const& r) const {
+		return ::compare(key, r);
+	}
+
 	bool operator<(KeyValueMapPair const& r) const { return key < r.key; }
 	bool operator==(KeyValueMapPair const& r) const { return key == r.key; }
 	bool operator!=(KeyValueMapPair const& r) const { return key != r.key; }
 };
 
+template <class CompatibleWithKey>
+int compare(CompatibleWithKey const& l, KeyValueMapPair const& r) {
+	return ::compare(l, r.key);
+}
 template <class CompatibleWithKey>
 bool operator<(KeyValueMapPair const& l, CompatibleWithKey const& r) {
 	return l.key < r;

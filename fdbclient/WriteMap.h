@@ -107,14 +107,30 @@ struct WriteMapEntry {
 
 	WriteMapEntry( KeyRef const& key, OperationStack && stack, bool following_keys_cleared, bool following_keys_conflict, bool is_conflict, bool following_keys_unreadable, bool is_unreadable ) : key(key), stack(std::move(stack)), following_keys_cleared(following_keys_cleared), following_keys_conflict(following_keys_conflict), is_conflict(is_conflict), following_keys_unreadable(following_keys_unreadable), is_unreadable(is_unreadable) {}
 
+	int compare(StringRef const& r) const { return key.compare(r); }
+
+	int compare(ExtStringRef const& r) const { return -r.compare(key); }
+
 	std::string toString() const { return printable(key); }
 };
+
+inline int compare(StringRef const& l, WriteMapEntry const& r) {
+	return l.compare(r.key);
+}
+
+inline int compare(ExtStringRef const& l, WriteMapEntry const& r) {
+	return l.compare(r.key);
+}
 
 inline bool operator < ( const WriteMapEntry& lhs, const WriteMapEntry& rhs ) { return lhs.key < rhs.key; }
 inline bool operator < ( const WriteMapEntry& lhs, const StringRef& rhs ) { return lhs.key < rhs; }
 inline bool operator < ( const StringRef& lhs, const WriteMapEntry& rhs ) { return lhs < rhs.key; }
-inline bool operator < ( const WriteMapEntry& lhs, const ExtStringRef& rhs ) { return rhs.cmp(lhs.key)>0; }
-inline bool operator < ( const ExtStringRef& lhs, const WriteMapEntry& rhs ) { return lhs.cmp(rhs.key)<0; }
+inline bool operator<(const WriteMapEntry& lhs, const ExtStringRef& rhs) {
+	return rhs.compare(lhs.key) > 0;
+}
+inline bool operator<(const ExtStringRef& lhs, const WriteMapEntry& rhs) {
+	return lhs.compare(rhs.key) < 0;
+}
 
 class WriteMap {
 private:
