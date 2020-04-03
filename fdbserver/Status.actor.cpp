@@ -2150,9 +2150,8 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<CachedSer
 	return statusObj;
 }
 
-ACTOR Future<JsonBuilderObject> getActivePrimaryDC(Database cx, Optional<Value>* output, JsonBuilderArray* messages) {
+ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, JsonBuilderArray* messages) {
 	state ReadYourWritesTransaction tr(cx);
-	state JsonBuilderObject dummyReturn;
 
 	state Future<Void> readTimeout = delay(5); // so that we won't loop forever
 	loop {
@@ -2167,13 +2166,12 @@ ACTOR Future<JsonBuilderObject> getActivePrimaryDC(Database cx, Optional<Value>*
 				messages->push_back(
 				    JsonString::makeMessage("primary_dc_missing", "Unable to determine primary datacenter."));
 			}
-			*output = std::move(res);
-			return dummyReturn;
+			return res;
 		} catch (Error& e) {
 			if (e.code() == error_code_timed_out) {
 				messages->push_back(
 				    JsonString::makeMessage("fetch_primary_dc_timedout", "Fetching primary DC timed out."));
-				return dummyReturn;
+				return Optional<Value>();
 			} else {
 				wait(tr.onError(e));
 			}
@@ -2359,14 +2357,13 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state Future<ErrorOr<vector<std::pair<MasterProxyInterface, EventMap>>>> proxyFuture = errorOr(getProxiesAndMetrics(db, address_workers));
 
 			state int minReplicasRemaining = -1;
-			state Optional<Value> primaryDCO;
+			state Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &messages);
 			std::vector<Future<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minReplicasRemaining));
 			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, rkWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 			futures2.push_back(clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
-			futures2.push_back(getActivePrimaryDC(cx, &primaryDCO, &messages));
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 
 			int oldLogFaultTolerance = 100;
@@ -2382,11 +2379,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state JsonBuilderObject configObj =
 			    configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
 
+			wait(success(primaryDCFO));
+			if (primaryDCFO.get().present()) {
+				statusObj["active_primary_dc"] = primaryDCFO.get().get();
+			}
 			// configArr could be empty
 			if (!configObj.empty()) {
-				if (primaryDCO.present()) {
-					statusObj["active_primary_dc"] = primaryDCO.get();
-				}
 				statusObj["configuration"] = configObj;
 			}
 
