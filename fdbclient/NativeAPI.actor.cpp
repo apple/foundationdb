@@ -3028,6 +3028,12 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(value.get().printable(), TransactionLogInfo::DONT_LOG));
 				trLogInfo->maxFieldLength = options.maxTransactionLoggingFieldLength;
 			}
+			if (info.debugID.present()) {
+				TraceEvent(SevInfo, "TransactionBeingTraced")
+					.detail("DebugTransactionID", trLogInfo->identifier)
+					.detail("ServerTraceID", info.debugID.get().toString());
+
+			}
 			break;
 
 		case FDBTransactionOptions::LOG_TRANSACTION:
@@ -3052,6 +3058,16 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			}
 			if(trLogInfo) {
 				trLogInfo->maxFieldLength = options.maxTransactionLoggingFieldLength;
+			}
+			break;
+
+		case FDBTransactionOptions::SERVER_REQUEST_TRACING:
+			validateOptionValue(value, false);
+			debugTransaction(deterministicRandom()->randomUniqueID());
+			if (trLogInfo && !trLogInfo->identifier.empty()) {
+				TraceEvent(SevInfo, "TransactionBeingTraced")
+					.detail("DebugTransactionID", trLogInfo->identifier)
+					.detail("ServerTraceID", info.debugID.get().toString());
 			}
 			break;
 
