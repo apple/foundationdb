@@ -2989,6 +2989,12 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 				TraceEvent(SevWarn, "DebugTransactionIdentifierNotSet").detail("Error", "Debug Transaction Identifier option must be set before logging the transaction");
 				throw client_invalid_operation();
 			}
+			if (info.debugID.present()) {
+				TraceEvent(SevInfo, "TransactionBeingTraced")
+					.detail("DebugTransactionID", trLogInfo->identifier)
+					.detail("ServerTraceID", info.debugID.get().toString());
+
+			}
 			break;
 
 		case FDBTransactionOptions::TRANSACTION_LOGGING_MAX_FIELD_LENGTH:
@@ -3002,12 +3008,6 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			}
 			if(trLogInfo) {
 				trLogInfo->maxFieldLength = options.maxTransactionLoggingFieldLength;
-			}
-			if (info.debugID.present()) {
-				TraceEvent(SevInfo, "TransactionBeingTraced")
-					.detail("DebugTransactionID", trLogInfo->identifier)
-					.detail("ServerTraceID", info.debugID.get().toString());
-
 			}
 			break;
 
