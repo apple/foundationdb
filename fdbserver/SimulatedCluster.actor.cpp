@@ -754,11 +754,6 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		set_config("memory-radixtree-beta");
 		break;
 	}
-	case 3: {
-		TEST(true); // Simulated cluster using radix-tree storage engine
-		set_config("ssd-redwood-experimental");
-		break;
-		}
 	default:
 		ASSERT(false); // Programmer forgot to adjust cases.
 	}
