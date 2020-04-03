@@ -3290,7 +3290,7 @@ private:
 public:
 
 
-#include "ArtMutationBuffer.h"
+//#include "ArtMutationBuffer.h"
 	struct MutationBufferStdMap {
 		MutationBufferStdMap() {
 			// Create range representing the entire keyspace.  This reduces edge cases to applying mutations
@@ -3388,7 +3388,7 @@ public:
 		}
 
 	};
-#define USE_ART_MUTATION_BUFFER 1
+//#define USE_ART_MUTATION_BUFFER 1
 
 #ifdef USE_ART_MUTATION_BUFFER
 	typedef struct MutationBufferART  MutationBuffer;
@@ -5006,7 +5006,7 @@ private:
 
 };
 
-#include "art_impl.h"
+//#include "art_impl.h"
 
 RedwoodRecordRef VersionedBTree::dbBegin(StringRef(), 0);
 RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"));
