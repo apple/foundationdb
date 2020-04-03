@@ -71,6 +71,15 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter;
 	state int actualBeginOffset;
 	state int actualEndOffset;
+	state bool prefixFlag = false;
+
+	// remove specialKeys prefix
+	if (begin.getKey().startsWith(specialKeys.begin)) {
+		prefixFlag = true;
+		ASSERT(end.getKey().startsWith(specialKeys.begin));
+		begin.setKey(begin.getKey().removePrefix(specialKeys.begin));
+		end.setKey(end.getKey().removePrefix(specialKeys.begin));
+	}
 
 	// make sure offset == 1
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator beginIter =
@@ -150,11 +159,13 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			Standalone<RangeResultRef> pairs = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
 			// limits handler
 			for (int i = pairs.size() - 1; i >= 0; --i) {
-				result.push_back_deep(result.arena(), pairs[i]);
+				// TODO : use depends on with push_back
+				KeyValueRef element = prefixFlag ? KeyValueRef(pairs[i].key.withPrefix(specialKeys.begin), pairs[i].value) : pairs[i];
+				result.push_back_deep(result.arena(), element);
 				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it is still
 				// returned In other words, the total size of the returned value (less the last entry) will be less than
 				// byteLimit
-				limits.decrement(pairs[i]);
+				limits.decrement(element);
 				if (limits.isReached()) {
 					result.more = true;
 					result.readToBegin = false;
@@ -171,11 +182,13 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			Standalone<RangeResultRef> pairs = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
 			// limits handler
 			for (int i = 0; i < pairs.size(); ++i) {
-				result.push_back_deep(result.arena(), pairs[i]);
+				// TODO : use depends on with push_back
+				KeyValueRef element = prefixFlag ? KeyValueRef(pairs[i].key.withPrefix(specialKeys.begin), pairs[i].value) : pairs[i];
+				result.push_back_deep(result.arena(), element);
 				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it is still
 				// returned In other words, the total size of the returned value (less the last entry) will be less than
 				// byteLimit
-				limits.decrement(pairs[i]);
+				limits.decrement(element);
 				if (limits.isReached()) {
 					result.more = true;
 					result.readThroughEnd = false;
