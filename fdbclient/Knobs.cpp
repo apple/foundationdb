@@ -214,6 +214,6 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( CLI_CONNECT_TIMEOUT,                     10.0 );
 
 	// trace
-	init( TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH,    1024);
+	init( TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH,      50 );
 	// clang-format on
 }
