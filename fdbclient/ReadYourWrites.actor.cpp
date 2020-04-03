@@ -1281,8 +1281,12 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	}
 
 	// start with simplest point, special key space are only allowed to query if both begin and end start with \xff\xff
-	if (begin.getKey().startsWith(specialKeys.begin) && end.getKey().startsWith(specialKeys.begin))
-		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>(this), begin, end, limits, snapshot, reverse);
+	if (begin.getKey().startsWith(specialKeys.begin) && end.getKey().startsWith(specialKeys.begin)) {
+		Reference<ReadYourWritesTransaction> self = Reference<ReadYourWritesTransaction>(this);
+		auto result = getDatabase()->specialKeySpace->getRange(self, begin, end, limits, snapshot, reverse);
+		self.extractPtr();
+		return result;
+	}
 	
 	// Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
 	// to retrieve keys which caused latest not_committed(conflicting with another transaction) error.

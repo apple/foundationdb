@@ -46,6 +46,7 @@ typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo
 typedef MultiInterface<MasterProxyInterface> ProxyInfo;
 
 class SpecialKeySpace; //forward declaration
+class ConflictingKeysImpl;
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -230,6 +231,7 @@ public:
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 	std::shared_ptr<SpecialKeySpace> specialKeySpace;
+	std::shared_ptr<ConflictingKeysImpl> cKImpl;
 };
 
 #endif

@@ -69,5 +69,17 @@ private:
 	KeyRange range;
 };
 
+class ConflictingKeysImpl : public SpecialKeyRangeBaseImpl {
+public:
+	explicit ConflictingKeysImpl(KeyRef start, KeyRef end) : SpecialKeyRangeBaseImpl(start, end) {}
+	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+	                                                    KeyRangeRef kr) const {
+		auto resultFuture = ryw->getTransaction().info.conflictingKeysRYW->getRange(kr, CLIENT_KNOBS->TOO_MANY);
+		// all keys are written to RYW, since GRV is set, the read should happen locally
+		ASSERT(resultFuture.isReady());
+		return resultFuture.getValue();
+	}
+};
+
 #include "flow/unactorcompiler.h"
 #endif
