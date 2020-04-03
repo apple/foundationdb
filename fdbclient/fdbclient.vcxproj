@@ -91,6 +91,7 @@
     <ActorCompiler Include="RestoreWorkerInterface.actor.h">
         <EnableCompile>false</EnableCompile>
     </ActorCompiler>
+		<ClInclude Include="TagThrottle.h" />
     <ClInclude Include="TaskBucket.h" />
     <ClInclude Include="ThreadSafeTransaction.h" />
     <ClInclude Include="Tuple.h" />
@@ -129,6 +130,7 @@
     <ClCompile Include="Schemas.cpp" />
     <ClCompile Include="SystemData.cpp" />
     <ClCompile Include="sha1\SHA1.cpp" />
+    <ActorCompiler Include="TagThrottle.actor.cpp" />
     <ActorCompiler Include="ThreadSafeTransaction.actor.cpp" />
     <ActorCompiler Include="TaskBucket.actor.cpp" />
     <ClCompile Include="Subspace.cpp" />

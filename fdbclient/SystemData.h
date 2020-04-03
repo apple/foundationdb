@@ -212,6 +212,12 @@ extern const KeyRef moveKeysLockOwnerKey, moveKeysLockWriteKey;
 extern const KeyRef dataDistributionModeKey;
 extern const UID dataDistributionModeLock;
 
+// Keys to view and control tag throttling
+extern const KeyRangeRef tagThrottleKeys;
+extern const KeyRef tagThrottleKeysPrefix;
+extern const KeyRef tagThrottleSignalKey;
+extern const KeyRef tagThrottleAutoEnabledKey;
+TagThrottleInfo decodeTagThrottleValue(const ValueRef& value);
 
 // Log Range constant variables
 // \xff/logRanges/[16-byte UID][begin key] := serialize( make_pair([end key], [destination key prefix]), IncludeVersion() )

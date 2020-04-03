@@ -384,7 +384,8 @@ public:
 
 	int64_t MAX_THROTTLED_TAGS;
 	int64_t MIN_TAG_BUSYNESS;
-
+	double TAG_THROTTLE_DURATION;
+	bool AUTO_TAG_THROTTLING_ENABLED;
 
 	// disk snapshot
 	double SNAP_CREATE_MAX_TIMEOUT;

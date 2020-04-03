@@ -61,6 +61,8 @@ set(FDBCLIENT_SRCS
   Subspace.h
   SystemData.cpp
   SystemData.h
+  TagThrottle.actor.cpp
+  TagThrottle.h
   TaskBucket.actor.cpp
   TaskBucket.h
   ThreadSafeTransaction.actor.cpp

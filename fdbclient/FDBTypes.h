@@ -988,4 +988,41 @@ struct WorkerBackupStatus {
 	}
 };
 
+struct TagThrottleInfo {
+	enum class Priority {
+		BATCH,
+		DEFAULT,
+		IMMEDIATE
+	};
+
+	static const char* priorityToString(Priority priority) {
+		switch(priority) {
+			case Priority::BATCH:
+				return "batch";
+			case Priority::DEFAULT:
+				return "default";
+			case Priority::IMMEDIATE:
+				return "immediate";
+		}
+
+		ASSERT(false);
+		throw internal_error();
+	}
+
+	double rate;
+	double expiration;
+	bool autoThrottled;
+	Priority priority;
+
+	TagThrottleInfo() : rate(0), expiration(0), autoThrottled(false) {}
+	TagThrottleInfo(double rate, double expiration, bool autoThrottled, Priority priority) : rate(rate), expiration(expiration), autoThrottled(autoThrottled), priority(priority) {}
+
+	template<class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rate, expiration, autoThrottled, priority);
+	}
+};
+
+BINARY_SERIALIZABLE(TagThrottleInfo::Priority);
+
 #endif

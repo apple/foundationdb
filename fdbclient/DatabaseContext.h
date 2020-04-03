@@ -125,9 +125,17 @@ public:
 	QueueModel queueModel;
 	bool enableLocalityLoadBalance;
 
+	struct VersionRequest {
+		Promise<GetReadVersionReply> reply;
+		Standalone<VectorRef<StringRef>> tags;
+		Optional<UID> debugID;
+
+		VersionRequest(Standalone<VectorRef<StringRef>> tags = Standalone<VectorRef<StringRef>>(), Optional<UID> debugID = Optional<UID>()) : tags(tags), debugID(debugID) {}
+	};
+
 	// Transaction start request batching
 	struct VersionBatcher {
-		PromiseStream< std::pair< Promise<GetReadVersionReply>, Optional<UID> > > stream;
+		PromiseStream<VersionRequest> stream;
 		Future<Void> actor;
 	};
 	std::map<uint32_t, VersionBatcher> versionBatcher;

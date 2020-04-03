@@ -94,12 +94,18 @@ struct StorageQueueInfo {
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
 	limitReason_t limitReason;
+
+	Optional<Standalone<StringRef>> busiestTag;
+	double busiestTagFractionalBusyness;
+	double busiestTagRate;
+
 	StorageQueueInfo(UID id, LocalityData locality)
 	  : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 	    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited) {
+	    smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited), busiestTagFractionalBusyness(0),
+		busiestTagRate(0) {
 		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
 	}
@@ -164,6 +170,8 @@ struct TransactionCounts {
 };
 
 struct RatekeeperData {
+	Database db;
+
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
 
@@ -178,18 +186,28 @@ struct RatekeeperData {
 	double lastWarning;
 	double lastSSListFetchedTimestamp;
 
+	typedef std::map<Standalone<StringRef>, TagThrottleInfo> ThrottleMap;
+	std::map<TagThrottleInfo::Priority, ThrottleMap> tagThrottles;
+
 	RatekeeperLimits normalLimits;
 	RatekeeperLimits batchLimits;
 
 	Deque<double> actualTpsHistory;
 	Optional<Key> remoteDC;
 
-	RatekeeperData() : smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), 
+	bool autoThrottlingEnabled;
+
+	RatekeeperData(Database db) : db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), 
 		actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")),
 		lastWarning(0), lastSSListFetchedTimestamp(now()),
 		normalLimits("", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER, SERVER_KNOBS->TARGET_BYTES_PER_TLOG, SERVER_KNOBS->SPRING_BYTES_TLOG, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE, SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS),
-		batchLimits("Batch", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH, SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH, SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH, SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH)
-	{}
+		batchLimits("Batch", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH, SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH, SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH, SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
+		autoThrottlingEnabled(false)
+	{
+		tagThrottles.try_emplace(TagThrottleInfo::Priority::IMMEDIATE);
+		tagThrottles.try_emplace(TagThrottleInfo::Priority::DEFAULT);
+		tagThrottles.try_emplace(TagThrottleInfo::Priority::BATCH);
+	}
 };
 
 //SOMEDAY: template trackStorageServerQueueInfo and trackTLogQueueInfo into one function
@@ -222,6 +240,10 @@ ACTOR Future<Void> trackStorageServerQueueInfo( RatekeeperData* self, StorageSer
 					myQueueInfo->value.smoothDurableVersion.setTotal(reply.get().durableVersion);
 					myQueueInfo->value.smoothLatestVersion.setTotal(reply.get().version);
 				}
+
+				myQueueInfo->value.busiestTag = reply.get().busiestTag;
+				myQueueInfo->value.busiestTagFractionalBusyness = reply.get().busiestTagFractionalBusyness;
+				myQueueInfo->value.busiestTagRate = reply.get().busiestTagRate;
 			} else {
 				if(myQueueInfo->value.valid) {
 					TraceEvent("RkStorageServerDidNotRespond", ssi.id());
@@ -312,11 +334,9 @@ ACTOR Future<Void> trackEachStorageServer(
 
 ACTOR Future<Void> monitorServerListChange(
 		RatekeeperData* self,
-		Reference<AsyncVar<ServerDBInfo>> dbInfo,
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges) {
-	state Database db = openDBOnServer(dbInfo, TaskPriority::Ratekeeper, true, true);
 	state std::map<UID, StorageServerInterface> oldServers;
-	state Transaction tr(db);
+	state Transaction tr(self->db);
 
 	loop {
 		try {
@@ -345,7 +365,7 @@ ACTOR Future<Void> monitorServerListChange(
 			}
 
 			oldServers.swap(newServers);
-			tr = Transaction(db);
+			tr = Transaction(self->db);
 			wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
 		} catch(Error& e) {
 			wait( tr.onError(e) );
@@ -353,7 +373,96 @@ ACTOR Future<Void> monitorServerListChange(
 	}
 }
 
-void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
+std::string capitalize(std::string str) {
+	if(str[0] >= 'a' and str[0] <= 'z') {
+		str[0] += 'A' - 'a';
+	}
+
+	return str;
+}
+
+ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
+	loop {
+		state ReadYourWritesTransaction tr(self->db);
+
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+				state Future<Standalone<RangeResultRef>> throttledTags = tr.getRange(tagThrottleKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<Optional<Value>> autoThrottlingEnabled = tr.get(tagThrottleAutoEnabledKey);
+
+				wait(success(throttledTags) && success(autoThrottlingEnabled));
+				ASSERT(!throttledTags.get().more && throttledTags.get().size() < CLIENT_KNOBS->TOO_MANY); // TODO: impose throttled tag limit
+
+				if(autoThrottlingEnabled.get().present() && autoThrottlingEnabled.get().get() == LiteralStringRef("0")) {
+					if(self->autoThrottlingEnabled) {
+						TraceEvent("AutoTagThrottlingDisabled");
+					}
+					self->autoThrottlingEnabled = false;
+				}
+				else if(autoThrottlingEnabled.get().present() && autoThrottlingEnabled.get().get() == LiteralStringRef("1")) {
+					if(!self->autoThrottlingEnabled) {
+						TraceEvent("AutoTagThrottlingEnabled");
+					}
+					self->autoThrottlingEnabled = true;
+				}
+				else {
+					if(autoThrottlingEnabled.get().present()) {
+						TraceEvent(SevWarnAlways, "InvalidAutoTagThrottlingValue").detail("Value", autoThrottlingEnabled.get().get());
+					}
+					self->autoThrottlingEnabled = SERVER_KNOBS->AUTO_TAG_THROTTLING_ENABLED;
+				}
+
+				TraceEvent("RatekeeperReadThrottles").detail("NumThrottledTags", throttledTags.get().size());
+				std::map<TagThrottleInfo::Priority, RatekeeperData::ThrottleMap> newThrottles;
+				std::map<TagThrottleInfo::Priority, std::pair<RatekeeperData::ThrottleMap::iterator, RatekeeperData::ThrottleMap::iterator>> oldThrottleIterators;
+				for(auto t : self->tagThrottles) {
+					oldThrottleIterators[t.first] = std::make_pair(t.second.begin(), t.second.end());
+				}
+
+				for(auto entry : throttledTags.get()) {
+					StringRef tag = entry.key.substr(tagThrottleKeysPrefix.size());
+					TagThrottleInfo throttleInfo = decodeTagThrottleValue(entry.value);
+					TraceEvent("RatekeeperReadThrottleRead").detail("Tag", tag).detail("Expiration", throttleInfo.expiration);
+					if((!self->autoThrottlingEnabled && throttleInfo.autoThrottled) || throttleInfo.expiration <= now()) { // TODO: keep or delete auto throttles when disabling auto-throttling
+						tr.clear(tag);
+					}
+					else {
+						auto oldItr = oldThrottleIterators[throttleInfo.priority];
+						while(oldItr.first != oldItr.second && oldItr.first->first < tag) {
+							++oldItr.first;
+						}
+
+						if(oldItr.first == oldItr.second || oldItr.first->first != tag || oldItr.first->second.rate < throttleInfo.rate * 0.95) {
+							TraceEvent("RatekeeperDetectedThrottle")
+								.detail("Tag", tag)
+								.detail("Rate", throttleInfo.rate)
+								.detail("Priority", capitalize(TagThrottleInfo::priorityToString(throttleInfo.priority)))
+								.detail("SecondsToExpiration", throttleInfo.expiration - now())
+								.detail("AutoThrottled", throttleInfo.autoThrottled);
+						}
+
+						newThrottles[throttleInfo.priority][tag] = throttleInfo;
+					}
+				}
+
+				self->tagThrottles = newThrottles;
+
+				state Future<Void> watchFuture = tr.watch(tagThrottleSignalKey);
+				wait(tr.commit());
+				wait(watchFuture);
+				TraceEvent("RatekeeperThrottleSignaled");
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
+
+void updateRate(RatekeeperData* self, RatekeeperLimits* limits, RatekeeperData::ThrottleMap& throttledTags) {
 	//double controlFactor = ;  // dt / eFoldingTime
 
 	double actualTps = self->smoothReleasedTransactions.smoothRate();
@@ -419,6 +528,29 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		ssMetrics.diskUsage = ss.lastReply.diskUsage;
 
 		double targetRateRatio = std::min(( storageQueue - targetBytes + springBytes ) / (double)springBytes, 2.0);
+
+		// TODO: limit the number of throttles active for a storage server
+		if(storageQueue > targetBytes / 2.0 && ss.busiestTag.present() && ss.busiestTagFractionalBusyness > 0.2
+		   && ss.busiestTagRate > 1000 && throttledTags.size() < 10) {
+			auto &throttle = throttledTags[ss.busiestTag.get()];
+
+			double throttleRate = (storageQueue - targetBytes / 2.0) / targetBytes / 2.0;
+
+			if(throttle.expiration <= now() || throttle.rate < throttleRate * 0.95) {
+				TraceEvent(format("RatekeeperThrottlingTag%s", limits->context).c_str())
+					.detail("Tag", ss.busiestTag.get())
+					.detail("ThrottleRate", throttleRate);
+			}
+
+			if(throttle.expiration <= now()) {
+				throttle.rate = throttleRate;
+			}
+			else {
+				throttle.expiration = std::max(throttle.rate, throttleRate);
+			}
+
+			throttle.expiration = now() + 120.0;
+		}
 
 		double inputRate = ss.smoothInputBytes.smoothRate();
 		//inputRate = std::max( inputRate, actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
@@ -687,14 +819,14 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			.detail("LimitingStorageServerVersionLag", limitingVersionLag)
 			.detail("WorstStorageServerDurabilityLag", worstDurabilityLag)
 			.detail("LimitingStorageServerDurabilityLag", limitingDurabilityLag)
+			.detail("TagsThrottled", throttledTags.size())
 			.trackLatest(name);
 	}
 }
 
-ACTOR Future<Void> configurationMonitor(Reference<AsyncVar<ServerDBInfo>> dbInfo, DatabaseConfiguration* conf) {
-	state Database cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true);
+ACTOR Future<Void> configurationMonitor(RatekeeperData *self) {
 	loop {
-		state ReadYourWritesTransaction tr(cx);
+		state ReadYourWritesTransaction tr(self->db);
 
 		loop {
 			try {
@@ -703,7 +835,7 @@ ACTOR Future<Void> configurationMonitor(Reference<AsyncVar<ServerDBInfo>> dbInfo
 				Standalone<RangeResultRef> results = wait( tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY ) );
 				ASSERT( !results.more && results.size() < CLIENT_KNOBS->TOO_MANY );
 
-				conf->fromKeyValues( (VectorRef<KeyValueRef>) results );
+				self->configuration.fromKeyValues( (VectorRef<KeyValueRef>) results );
 
 				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey) || tr.watch(failedServersVersionKey);
 				wait( tr.commit() );
@@ -717,7 +849,7 @@ ACTOR Future<Void> configurationMonitor(Reference<AsyncVar<ServerDBInfo>> dbInfo
 }
 
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-	state RatekeeperData self;
+	state RatekeeperData self(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true));
 	state Future<Void> timeout = Void();
 	state std::vector<Future<Void>> tlogTrackers;
 	state std::vector<TLogInterface> tlogInterfs;
@@ -726,11 +858,13 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 
 	TraceEvent("RatekeeperStarting", rkInterf.id());
 	self.addActor.send( waitFailureServer(rkInterf.waitFailure.getFuture()) );
-	self.addActor.send( configurationMonitor(dbInfo, &self.configuration) );
+	self.addActor.send( configurationMonitor(&self) );
 
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges;
-	self.addActor.send( monitorServerListChange(&self, dbInfo, serverChanges) );
+	self.addActor.send( monitorServerListChange(&self, serverChanges) );
 	self.addActor.send( trackEachStorageServer(&self, serverChanges.getFuture()) );
+
+	self.addActor.send(monitorThrottlingChanges(&self));
 
 	TraceEvent("RkTLogQueueSizeParameters").detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG).detail("Spring", SERVER_KNOBS->SPRING_BYTES_TLOG)
 		.detail("Rate", (SERVER_KNOBS->TARGET_BYTES_PER_TLOG - SERVER_KNOBS->SPRING_BYTES_TLOG) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0));
@@ -748,8 +882,8 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 		state bool lastLimited = false;
 		loop choose {
 			when (wait( timeout )) {
-				updateRate(&self, &self.normalLimits);
-				updateRate(&self, &self.batchLimits);
+				updateRate(&self, &self.normalLimits, self.tagThrottles[TagThrottleInfo::Priority::DEFAULT]);
+				updateRate(&self, &self.batchLimits, self.tagThrottles[TagThrottleInfo::Priority::BATCH]);
 
 				lastLimited = self.smoothReleasedTransactions.smoothRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * self.batchLimits.tpsLimit;
 				double tooOld = now() - 1.0;
@@ -780,6 +914,19 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 				reply.transactionRate = self.normalLimits.tpsLimit / self.proxy_transactionCounts.size();
 				reply.batchTransactionRate = self.batchLimits.tpsLimit / self.proxy_transactionCounts.size();
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
+
+				// TODO: avoid iteration every time
+				for(auto priorityItr = self.tagThrottles.begin(); priorityItr != self.tagThrottles.end(); ++priorityItr) {
+					for(auto tagItr = priorityItr->second.begin(); tagItr != priorityItr->second.end();) {
+						if(tagItr->second.expiration > now()) {
+							reply.throttledTags[tagItr->first] = tagItr->second.rate;
+							++tagItr;
+						}
+						else {
+							tagItr = priorityItr->second.erase(tagItr);
+						}
+					}
+				}
 
 				reply.healthMetrics.update(self.healthMetrics, true, req.detailed);
 				reply.healthMetrics.tpsLimit = self.normalLimits.tpsLimit;

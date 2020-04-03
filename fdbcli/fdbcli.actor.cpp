@@ -30,6 +30,7 @@
 #include "fdbclient/Schemas.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/TagThrottle.h"
 
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
@@ -565,6 +566,11 @@ void initHelp() {
 		"consistencycheck [on|off]",
 		"permits or prevents consistency checking",
 		"Calling this command with `on' permits consistency check processes to run and `off' will halt their checking. Calling this command with no arguments will display if consistency checking is currently allowed.\n");
+	helpMap["throttle"] = CommandHelp(
+		"throttle <on|off|enable auto|disable auto|list> [ARGS]",
+		"view and control throttled tags",
+		"Use `on' and `off' to manually throttle or unthrottle tags. Use `enable auto' or `disable auto' to enable or disable automatic tag throttling. Use `list' to print the list of throttled tags.\n"
+	);
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -3679,6 +3685,159 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 					}
 
+					continue;
+				}
+
+				if(tokencmp(tokens[0], "throttle")) {
+					if(tokens.size() == 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+						continue;
+					}
+					else if(tokencmp(tokens[1], "list")) {
+						if(tokens.size() > 4) {
+							printf("Usage: throttle list [LIMIT] [PREFIX]\n");
+							printf("\n");
+							printf("Lists tags that are currently throttled, optionally limited to a certain tag PREFIX.\n");
+							printf("The default LIMIT is 100 tags, and by default all tags will be searched.\n");
+							is_error = true;
+							continue;
+						}
+
+						state int throttleListLimit = 100;
+						state StringRef prefix;
+						if(tokens.size() >= 3) {
+							char *end;
+							throttleListLimit = std::strtol((const char*)tokens[2].begin(), &end, 10);
+							if ((tokens.size() > 3 && !std::isspace(*end)) || (tokens.size() == 3 && *end != '\0')) {
+								printf("ERROR: failed to parse limit `%s'.\n", printable(tokens[2]).c_str());
+								is_error = true;
+								continue;
+							}
+						}
+						if(tokens.size() >= 4) {
+							prefix = tokens[3];
+						}
+
+						std::map<Standalone<StringRef>, TagThrottleInfo> tags = wait(ThrottleApi::getTags(db, throttleListLimit, prefix));
+
+						std::string prefixString = "";
+						if(prefix.size() > 0) {
+							prefixString = format(" with prefix `%s'", prefix.toString().c_str());
+						}
+
+						if(tags.size() > 0) {
+							printf("Throttled tags%s:\n\n", prefixString.c_str());
+							printf("  Rate | Expiration (s) | Priority  | Type   | Tag\n");
+							printf(" ------+----------------+-----------+--------+------------------\n");
+							for(auto itr = tags.begin(); itr != tags.end(); ++itr) {
+								printf("  %3d%% | %13ds | %9s | %6s | %s\n", 
+								       (int)(itr->second.rate*100), 
+									   (int)(itr->second.expiration-now()), 
+									   TagThrottleInfo::priorityToString(itr->second.priority), 
+									   itr->second.autoThrottled ? "auto" : "manual", 
+									   itr->first.substr(tagThrottleKeysPrefix.size()).toString().c_str());
+							}
+
+							if(tags.size() == throttleListLimit) {
+								printf("\nThe tag limit `%d' was reached. Use the [LIMIT] or [PREFIX] arguments to view additional tags.\n", throttleListLimit);
+								printf("Usage: throttle list [LIMIT] [PREFIX]\n");
+							}
+						}
+						else {
+							printf("There are no throttled tags%s\n", prefixString.c_str());
+						}
+					}
+					else if(tokencmp(tokens[1], "on") && tokens.size() <=6) {	
+						if(tokens.size() < 4 || !tokencmp(tokens[2], "tag")) {
+							printf("Usage: throttle on tag <TAG> [RATE] [DURATION]\n");
+							printf("\n");
+							printf("Enables throttling for transactions with the specified tag.\n");
+							printf("An optional throttling rate (out of 1.0) can be specified (default 1.0).\n");
+							printf("An optional duration can be specified, which must include a time suffix (s, m, h, d) (default 1h).\n");
+							is_error = true;
+							continue;
+						}
+
+						double rate = 1.0;
+						uint64_t duration = 3600;
+
+						if(tokens.size() >= 5) {
+							char *end;
+							rate = std::strtod((const char*)tokens[4].begin(), &end);
+							if((tokens.size() > 5 && !std::isspace(*end)) || (tokens.size() == 5 && *end != '\0')) {
+								printf("ERROR: failed to parse rate `%s'.\n", printable(tokens[4]).c_str());
+								is_error = true;
+								continue;
+							}
+							if(rate <= 0 || rate > 1) {
+								printf("ERROR: invalid rate `%f'; must satisfy 0 < rate <= 1\n", rate);
+								is_error = true;
+								continue;
+							}
+						}
+						if(tokens.size() == 6) {
+							char *end;
+							Optional<uint64_t> parsedDuration = parseDuration(tokens[5].toString());
+							if(!parsedDuration.present()) {
+								printf("ERROR: failed to parse duration `%s'.\n", printable(tokens[5]).c_str());
+								is_error = true;
+								continue;
+							}
+							duration = parsedDuration.get();
+						}
+
+						wait(ThrottleApi::throttleTag(db, tokens[3], rate, now()+duration, false)); // TODO: express in versions or somehow deal with time?
+						printf("Tag `%s' has been throttled\n", tokens[3].toString().c_str());
+					}
+					else if(tokencmp(tokens[1], "off")) {
+						if(tokencmp(tokens[2], "tag") && tokens.size() == 4) {
+							bool success = wait(ThrottleApi::unthrottleTag(db, tokens[3]));
+							if(success) {
+								printf("Unthrottled tag `%s'\n", tokens[3].toString().c_str());
+							}
+							else {
+								printf("Tag `%s' was not throttled\n", tokens[3].toString().c_str());
+							}
+						}
+						else if(tokencmp(tokens[2], "all") && tokens.size() == 3) {
+							uint64_t unthrottledTags = wait(ThrottleApi::unthrottleAll(db));
+							printf("Unthrottled %lld tags\n", unthrottledTags);
+						}
+						else if(tokencmp(tokens[2], "auto") && tokens.size() == 3) {
+							uint64_t unthrottledTags = wait(ThrottleApi::unthrottleAuto(db));
+							printf("Unthrottled %lld tags\n", unthrottledTags);
+						}
+						else if(tokencmp(tokens[2], "manual") && tokens.size() == 3) {
+							uint64_t unthrottledTags = wait(ThrottleApi::unthrottleManual(db));
+							printf("Unthrottled %lld tags\n", unthrottledTags);
+						}
+						else {
+							printf("Usage: throttle off <all|auto|manual|tag> [TAG]\n");
+							printf("\n");
+							printf("Disables throttling for the specified tag(s).\n");
+							printf("Use `all' to turn off all tag throttles, `auto' to turn off throttles created by\n");
+							printf("the cluster, and `manual' to turn off throttles created manually. Use `tag <TAG>'\n");
+							printf("to turn off throttles for a specific tag\n");
+							is_error = true;
+						}
+					}
+					else if((tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable")) && tokens.size() == 3 && tokencmp(tokens[2], "auto")) {
+						if(tokens.size() != 3 || !tokencmp(tokens[2], "auto")) {
+							printf("Usage: throttle <enable|disable> auto\n");
+							printf("\n");
+							printf("Enables or disable automatic tag throttling.\n");
+							is_error = true;
+							continue;
+						}
+						state bool autoTagThrottlingEnabled = tokencmp(tokens[1], "enable");
+						wait(ThrottleApi::enableAuto(db, autoTagThrottlingEnabled));
+						printf("Automatic tag throttling has been %s\n", autoTagThrottlingEnabled ? "enabled" : "disabled");
+					}
+					else {
+						printUsage(tokens[0]);
+						is_error = true;
+					}
 					continue;
 				}
 

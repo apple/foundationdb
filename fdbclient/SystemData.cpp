@@ -562,6 +562,20 @@ const KeyRef moveKeysLockWriteKey = LiteralStringRef("\xff/moveKeysLock/Write");
 const KeyRef dataDistributionModeKey = LiteralStringRef("\xff/dataDistributionMode");
 const UID dataDistributionModeLock = UID(6345,3425);
 
+// Keys to view and control tag throttling
+const KeyRangeRef tagThrottleKeys = KeyRangeRef(
+	LiteralStringRef("\xff\x02/throttledTags/tag/"),
+	LiteralStringRef("\xff\x02/throttledTags/tag0"));
+const KeyRef tagThrottleKeysPrefix = tagThrottleKeys.begin;
+const KeyRef tagThrottleSignalKey = LiteralStringRef("\xff\x02/throttledTags/signal");
+const KeyRef tagThrottleAutoEnabledKey = LiteralStringRef("\xff\x02/throttledTags/autoThrottlingEnabled");
+TagThrottleInfo decodeTagThrottleValue(const ValueRef& value) {
+	TagThrottleInfo throttleInfo;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> throttleInfo;
+	return throttleInfo;
+}
+
 // Client status info prefix
 const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"), LiteralStringRef("\xff\x02/fdbClientInfo0"));
 const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_sample_rate/");

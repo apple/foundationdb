@@ -3071,13 +3071,13 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 	}
 }
 
-ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx, uint32_t transactionCount, uint32_t flags, Optional<UID> debugID ) {
+ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx, uint32_t transactionCount, uint32_t flags, Standalone<VectorRef<StringRef>> tags, Optional<UID> debugID ) {
 	try {
 		++cx->transactionReadVersionBatches;
 		if( debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
 		loop {
-			state GetReadVersionRequest req( transactionCount, flags, Standalone<VectorRef<StringRef>>(), debugID );
+			state GetReadVersionRequest req( transactionCount, flags, tags, debugID );
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
@@ -3096,13 +3096,15 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 	}
 }
 
-ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::pair< Promise<GetReadVersionReply>, Optional<UID> > > versionStream, uint32_t flags ) {
+ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<DatabaseContext::VersionRequest> versionStream, uint32_t flags ) {
 	state std::vector< Promise<GetReadVersionReply> > requests;
 	state PromiseStream< Future<Void> > addActor;
 	state Future<Void> collection = actorCollection( addActor.getFuture() );
 	state Future<Void> timeout;
 	state Optional<UID> debugID;
 	state bool send_batch;
+
+	state Standalone<VectorRef<StringRef>> tags;
 
 	// dynamic batching
 	state PromiseStream<double> replyTimes;
@@ -3111,18 +3113,21 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 	loop {
 		send_batch = false;
 		choose {
-			when(std::pair<Promise<GetReadVersionReply>, Optional<UID>> req = waitNext(versionStream)) {
-				if (req.second.present()) {
+			// TODO: we have to rethink how we send batches to the MP to deal with tags
+			when(DatabaseContext::VersionRequest req = waitNext(versionStream)) {
+				if (req.debugID.present()) {
 					if (!debugID.present()) {
 						debugID = nondeterministicRandom()->randomUniqueID();
 					}
-					g_traceBatch.addAttach("TransactionAttachID", req.second.get().first(), debugID.get().first());
+					g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
 				}
-				requests.push_back(req.first);
-				if (requests.size() == CLIENT_KNOBS->MAX_BATCH_SIZE)
+				requests.push_back(req.reply);
+				tags = req.tags;
+
+				//if (requests.size() == CLIENT_KNOBS->MAX_BATCH_SIZE)
 					send_batch = true;
-				else if (!timeout.isValid())
-					timeout = delay(batchTime, TaskPriority::GetConsistentReadVersion);
+				//else if (!timeout.isValid())
+					//timeout = delay(batchTime, TaskPriority::GetConsistentReadVersion);
 			}
 			when(wait(timeout.isValid() ? timeout : Never())) { send_batch = true; }
 			// dynamic batching monitors reply latencies
@@ -3141,7 +3146,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 			addActor.send(ready(timeReply(GRVReply.getFuture(), replyTimes)));
 
 			Future<Void> batch = incrementalBroadcastWithError(
-			    getConsistentReadVersion(cx, count, flags, std::move(debugID)),
+			    getConsistentReadVersion(cx, count, flags, tags, std::move(debugID)),
 			    std::vector<Promise<GetReadVersionReply>>(std::move(requests)), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 			debugID = Optional<UID>();
 			requests = std::vector< Promise<GetReadVersionReply> >();
@@ -3208,10 +3213,10 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			batcher.actor = readVersionBatcher( cx.getPtr(), batcher.stream.getFuture(), flags );
 		}
 
-		Promise<GetReadVersionReply> p;
-		batcher.stream.send( std::make_pair( p, info.debugID ) );
+		auto const req = DatabaseContext::VersionRequest(options.tags, info.debugID);
+		batcher.stream.send(req);
 		startTime = now();
-		readVersion = extractReadVersion( cx.getPtr(), flags, trLogInfo, p.getFuture(), options.lockAware, startTime, metadataVersion);
+		readVersion = extractReadVersion( cx.getPtr(), flags, trLogInfo, req.reply.getFuture(), options.lockAware, startTime, metadataVersion);
 	}
 	return readVersion;
 }
