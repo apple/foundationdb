@@ -59,7 +59,8 @@ void decodeKeyServersValue( const ValueRef& value, vector<UID>& src, vector<UID>
 	}
 }
 
-const KeyRef conflictingKeysPrefix = LiteralStringRef("/transaction/conflicting_keys/");
+const KeyRangeRef conflictingKeys = KeyRangeRef(LiteralStringRef("/transaction/conflicting_keys/"), LiteralStringRef("/transaction/conflicting_keys/\xff"));
+const KeyRef conflictingKeysPrefix = conflictingKeys.begin;
 const Key conflictingKeysAbsolutePrefix = conflictingKeysPrefix.withPrefix(specialKeys.begin);
 const ValueRef conflictingKeysTrue = LiteralStringRef("1");
 const ValueRef conflictingKeysFalse = LiteralStringRef("0");

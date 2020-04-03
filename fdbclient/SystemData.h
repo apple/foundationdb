@@ -36,7 +36,7 @@ extern const KeyRangeRef normalKeys; // '' to systemKeys.begin
 extern const KeyRangeRef systemKeys;  // [FF] to [FF][FF]
 extern const KeyRangeRef nonMetadataSystemKeys; // [FF][00] to [FF][01]
 extern const KeyRangeRef allKeys; // '' to systemKeys.end
-extern const KeyRangeRef specialKeys; // [FF][FF] to [FF][FF][FF][FF]
+extern const KeyRangeRef specialKeys; // [FF][FF] to [FF][FF][FF]
 extern const KeyRef afterAllKeys;
 
 //    "\xff/keyServers/[[begin]]" := "[[vector<serverID>, vector<serverID>]]"
@@ -66,6 +66,7 @@ UID serverKeysDecodeServer( const KeyRef& key );
 bool serverHasKey( ValueRef storedValue );
 
 extern const KeyRef conflictingKeysPrefix;
+extern const KeyRangeRef conflictingKeys;
 extern const Key conflictingKeysAbsolutePrefix;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
 
