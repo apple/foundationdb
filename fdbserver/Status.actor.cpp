@@ -2165,7 +2165,7 @@ ACTOR Future<JsonBuilderObject> getActivePrimaryDC(Database cx, Optional<Value>*
 			Optional<Value> res = wait(timeoutError(tr.get(primaryDatacenterKey), 5));
 			if (!res.present()) {
 				messages->push_back(
-				    JsonString::makeMessage("primary_dc_missing", "Unable to determine primary datacenter"));
+				    JsonString::makeMessage("primary_dc_missing", "Unable to determine primary datacenter."));
 			}
 			*output = std::move(res);
 			return dummyReturn;
