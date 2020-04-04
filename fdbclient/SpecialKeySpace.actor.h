@@ -74,10 +74,21 @@ public:
 	explicit ConflictingKeysImpl(KeyRef start, KeyRef end) : SpecialKeyRangeBaseImpl(start, end) {}
 	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
 	                                                    KeyRangeRef kr) const {
-		auto resultFuture = ryw->getTransaction().info.conflictingKeysRYW->getRange(kr, CLIENT_KNOBS->TOO_MANY);
-		// all keys are written to RYW, since GRV is set, the read should happen locally
-		ASSERT(resultFuture.isReady());
-		return resultFuture.getValue();
+		Standalone<RangeResultRef> result;
+		if (ryw->getTransaction().info.conflictingKeys) {
+			auto krMap = ryw->getTransaction().info.conflictingKeys.get();
+			auto beginIter = krMap->rangeContaining(kr.begin);
+			if (beginIter->begin() != kr.begin)
+				++beginIter;
+			auto endIter = krMap->rangeContaining(kr.end);
+			for (auto it = beginIter; it != endIter; ++it) {
+				// TODO : check push_back instead of push_back_deep
+				result.push_back_deep(result.arena(), KeyValueRef(it->begin(), it->value()));
+			}
+			if (endIter->begin() != kr.end)
+				result.push_back_deep(result.arena(), KeyValueRef(endIter->begin(), endIter->value()));
+		}
+		return result;
 	}
 };
 

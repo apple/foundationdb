@@ -2755,42 +2755,20 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					return Void();
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
-					tr->info.conflictingKeysRYW.reset();
+					tr->info.conflictingKeys.reset();
 					if (ci.conflictingKRIndices.present()) {
-						// In general, if we want to use getRange to expose conflicting keys,
-						// we need to support all the parameters getRange provides.
-						// It is difficult to take care of all corner cases of what getRange does.
-						// Consequently, we use a hack way here to achieve it.
-						// We create an empty RYWTransaction and write all conflicting key/values to it.
-						// Since it is RYWTr, we can call getRange on it with same parameters given to the original
-						// getRange.
-						tr->info.conflictingKeysRYW = std::make_shared<ReadYourWritesTransaction>(tr->getDatabase());
-						state Reference<ReadYourWritesTransaction> hackTr =
-						    Reference<ReadYourWritesTransaction>(tr->info.conflictingKeysRYW.get());
-						try {
-							state Standalone<VectorRef<int>> conflictingKRIndices = ci.conflictingKRIndices.get();
-							// To make the getRange call local, we need to explicitly set the read version here.
-							// This version number 100 set here does nothing but prevent getting read version from the
-							// proxy
-							tr->info.conflictingKeysRYW->setVersion(100);
-							// Clear the whole key space, thus, RYWTr knows to only read keys locally
-							tr->info.conflictingKeysRYW->clear(normalKeys);
-							// initialize value
-							tr->info.conflictingKeysRYW->set(conflictingKeysPrefix, conflictingKeysFalse);
-							// drop duplicate indices and merge overlapped ranges
-							// Note: addReadConflictRange in native transaction object does not merge overlapped ranges
-							state std::unordered_set<int> mergedIds(conflictingKRIndices.begin(),
-							                                        conflictingKRIndices.end());
-							for (auto const& rCRIndex : mergedIds) {
-								const KeyRange kr = req.transaction.read_conflict_ranges[rCRIndex];
-								wait(krmSetRangeCoalescing(hackTr, conflictingKeysPrefix, kr, allKeys,
-								                           conflictingKeysTrue));
-							}
-						} catch (Error& e) {
-							hackTr.extractPtr(); // Make sure the RYW is not freed twice in case exception thrown
-							throw;
+						tr->info.conflictingKeys = std::make_shared<CoalescedKeyRangeMap<Value>>(conflictingKeysFalse);
+						state Standalone<VectorRef<int>> conflictingKRIndices = ci.conflictingKRIndices.get();
+						// drop duplicate indices and merge overlapped ranges
+						// Note: addReadConflictRange in native transaction object does not merge overlapped ranges
+						state std::unordered_set<int> mergedIds(conflictingKRIndices.begin(),
+																conflictingKRIndices.end());
+						for (auto const& rCRIndex : mergedIds) {
+							const KeyRangeRef kr = req.transaction.read_conflict_ranges[rCRIndex];
+							const KeyRange krWithPrefix = KeyRangeRef(kr.begin.withPrefix(conflictingKeysPrefix),
+								kr.end.withPrefix(conflictingKeysPrefix));
+							tr->info.conflictingKeys->insert(krWithPrefix, conflictingKeysTrue);
 						}
-						hackTr.extractPtr(); // Avoid the Reference to destroy the RYW object
 					}
 
 					if (info.debugID.present())

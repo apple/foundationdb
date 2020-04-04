@@ -1295,34 +1295,34 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	// Currently, the conflicting keyranges returned are original read_conflict_ranges or union of them.
 	// TODO : This interface needs to be integrated into the framework that handles special keys' calls in the future
-	if (begin.getKey().startsWith(conflictingKeysAbsolutePrefix) &&
-	    end.getKey().startsWith(conflictingKeysAbsolutePrefix)) {
-		// Remove the special key prefix "\xff\xff"
-		KeyRef beginConflictingKey = begin.getKey().removePrefix(specialKeys.begin);
-		KeyRef endConflictingKey = end.getKey().removePrefix(specialKeys.begin);
-		// Check if the conflicting key range to be read is valid
-		KeyRef maxKey = getMaxReadKey();
-		if (beginConflictingKey > maxKey || endConflictingKey > maxKey) return key_outside_legal_range();
-		begin.setKey(beginConflictingKey);
-		end.setKey(endConflictingKey);
-		if (tr.info.conflictingKeysRYW) {
-			Future<Standalone<RangeResultRef>> resultWithoutPrefixFuture =
-			    tr.info.conflictingKeysRYW->getRange(begin, end, limits, snapshot, reverse);
-			// Make sure it happens locally
-			ASSERT(resultWithoutPrefixFuture.isReady());
-			Standalone<RangeResultRef> resultWithoutPrefix = resultWithoutPrefixFuture.get();
-			// Add prefix to results, making keys consistent with the getRange query
-			Standalone<RangeResultRef> resultWithPrefix;
-			resultWithPrefix.reserve(resultWithPrefix.arena(), resultWithoutPrefix.size());
-			for (auto const& kv : resultWithoutPrefix) {
-				KeyValueRef kvWithPrefix(kv.key.withPrefix(specialKeys.begin, resultWithPrefix.arena()), kv.value);
-				resultWithPrefix.push_back(resultWithPrefix.arena(), kvWithPrefix);
-			}
-			return resultWithPrefix;
-		} else {
-			return Standalone<RangeResultRef>();
-		}
-	}
+	// if (begin.getKey().startsWith(conflictingKeysAbsolutePrefix) &&
+	//     end.getKey().startsWith(conflictingKeysAbsolutePrefix)) {
+	// 	// Remove the special key prefix "\xff\xff"
+	// 	KeyRef beginConflictingKey = begin.getKey().removePrefix(specialKeys.begin);
+	// 	KeyRef endConflictingKey = end.getKey().removePrefix(specialKeys.begin);
+	// 	// Check if the conflicting key range to be read is valid
+	// 	KeyRef maxKey = getMaxReadKey();
+	// 	if (beginConflictingKey > maxKey || endConflictingKey > maxKey) return key_outside_legal_range();
+	// 	begin.setKey(beginConflictingKey);
+	// 	end.setKey(endConflictingKey);
+	// 	if (tr.info.conflictingKeysRYW) {
+	// 		Future<Standalone<RangeResultRef>> resultWithoutPrefixFuture =
+	// 		    tr.info.conflictingKeysRYW->getRange(begin, end, limits, snapshot, reverse);
+	// 		// Make sure it happens locally
+	// 		ASSERT(resultWithoutPrefixFuture.isReady());
+	// 		Standalone<RangeResultRef> resultWithoutPrefix = resultWithoutPrefixFuture.get();
+	// 		// Add prefix to results, making keys consistent with the getRange query
+	// 		Standalone<RangeResultRef> resultWithPrefix;
+	// 		resultWithPrefix.reserve(resultWithPrefix.arena(), resultWithoutPrefix.size());
+	// 		for (auto const& kv : resultWithoutPrefix) {
+	// 			KeyValueRef kvWithPrefix(kv.key.withPrefix(specialKeys.begin, resultWithPrefix.arena()), kv.value);
+	// 			resultWithPrefix.push_back(resultWithPrefix.arena(), kvWithPrefix);
+	// 		}
+	// 		return resultWithPrefix;
+	// 	} else {
+	// 		return Standalone<RangeResultRef>();
+	// 	}
+	// }
 
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();

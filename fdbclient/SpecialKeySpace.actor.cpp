@@ -160,8 +160,10 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			// limits handler
 			for (int i = pairs.size() - 1; i >= 0; --i) {
 				// TODO : use depends on with push_back
-				KeyValueRef element = prefixFlag ? KeyValueRef(pairs[i].key.withPrefix(specialKeys.begin), pairs[i].value) : pairs[i];
-				result.push_back_deep(result.arena(), element);
+				KeyValueRef element =
+				    prefixFlag ? KeyValueRef(pairs[i].key.withPrefix(specialKeys.begin, result.arena()), pairs[i].value)
+				               : pairs[i];
+				result.push_back(result.arena(), element);
 				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it is still
 				// returned In other words, the total size of the returned value (less the last entry) will be less than
 				// byteLimit
@@ -183,8 +185,9 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			// limits handler
 			for (int i = 0; i < pairs.size(); ++i) {
 				// TODO : use depends on with push_back
-				KeyValueRef element = prefixFlag ? KeyValueRef(pairs[i].key.withPrefix(specialKeys.begin), pairs[i].value) : pairs[i];
-				result.push_back_deep(result.arena(), element);
+				KeyValueRef element =
+				    prefixFlag ? KeyValueRef(pairs[i].key.withPrefix(specialKeys.begin, result.arena()), pairs[i].value) : pairs[i];
+				result.push_back(result.arena(), element);
 				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it is still
 				// returned In other words, the total size of the returned value (less the last entry) will be less than
 				// byteLimit
