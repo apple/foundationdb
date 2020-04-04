@@ -500,6 +500,7 @@ private:
 								ASSERT(p1.size() > 1);
 								// Get number of bytes borrowed from previous item key
 								int borrowed = *(uint8_t *)p1.begin();
+								ASSERT(borrowed <= lastSnapshotKey.size());
 								// Trim p1 to just the suffix
 								StringRef suffix = p1.substr(1);
 								// Allocate a new string in data arena to hold prefix + suffix
@@ -529,6 +530,7 @@ private:
 							}
 
 							uncommittedNextKey = Key();
+							lastSnapshotKey = Key();
 							++dbgSnapshotEndCount;
 						} else if (h.op == OpSet) { // set mutation
 							recoveryQueue.set( KeyValueRef(p1,p2), &data.arena() );
@@ -676,79 +678,114 @@ private:
 				    .detail("LastOperationWasASnapshot", nextKey == Key() && !nextKeyAfter);
 			lastDiff = diff;
 
-			if (next == self->data.end()) {
-				auto thisSnapshotEnd = self->log_op(OpSnapshotEnd, StringRef(), StringRef());
-				//TraceEvent("SnapshotEnd", self->id)
-				//	.detail("LastKey", lastKey.present() ? lastKey.get() : LiteralStringRef("<none>"))
-				//	.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
-				//	.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
-				//	.detail("ThisSnapshotEnd", thisSnapshotEnd)
-				//	.detail("Items", snapItems)
-				//	.detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
-				//	.detail("SnapshotSize", snapshotBytes);
+			// Don't write a delta for the first snapshot record in the commit.
+			bool useDelta = false;
 
-				ASSERT(thisSnapshotEnd >= self->currentSnapshotEnd);
-				self->previousSnapshotEnd = self->currentSnapshotEnd;
-				self->currentSnapshotEnd = thisSnapshotEnd;
+			// Write snapshot items until the wait above would block because we've used up all of the byte budget
+			loop {
 
-				if (++self->snapshotCount == 2) {
-					self->replaceContent = false;
+				if (next == self->data.end()) {
+					useDelta = false;
+					auto thisSnapshotEnd = self->log_op(OpSnapshotEnd, StringRef(), StringRef());
+					//TraceEvent("SnapshotEnd", self->id)
+					//	.detail("LastKey", lastKey.present() ? lastKey.get() : LiteralStringRef("<none>"))
+					//	.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
+					//	.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
+					//	.detail("ThisSnapshotEnd", thisSnapshotEnd)
+					//	.detail("Items", snapItems)
+					//	.detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
+					//	.detail("SnapshotSize", snapshotBytes);
+
+					ASSERT(thisSnapshotEnd >= self->currentSnapshotEnd);
+					self->previousSnapshotEnd = self->currentSnapshotEnd;
+					self->currentSnapshotEnd = thisSnapshotEnd;
+
+					if (++self->snapshotCount == 2) {
+						self->replaceContent = false;
+					}
+					snapItems = 0;
+
+					snapshotBytes = 0;
+
+					snapshotTotalWrittenBytes += OP_DISK_OVERHEAD;
+
+					// If we're not stopping now, reset next
+					if(snapshotTotalWrittenBytes < self->notifiedCommittedWriteBytes.get()) {
+						next = self->data.begin();
+					}
+					else {
+						// Otherwise, save state for continuing after the next wait and stop
+						nextKey = Key();
+						nextKeyAfter = false;
+						break;
+					}
+
+				} else {
+					// destKey is whichever of the two last key buffers we should write to next.
+					Key &destKey = lastSnapshotKeyUsingA ? lastSnapshotKeyA : lastSnapshotKeyB;
+
+					// Get the key, using destKey as a temporary buffer if needed.
+					KeyRef tempKey = next.getKey(mutateString(destKey));
+					int opKeySize = tempKey.size();
+
+					// If tempKey did not use the start of destKey, then copy tempKey into destKey.
+					// It's technically possible for the source and dest to overlap but with the current container implementations that will not happen.
+					if(tempKey.begin() != destKey.begin()) {
+						memcpy(mutateString(destKey), tempKey.begin(), tempKey.size());
+					}
+
+					// Now, tempKey's bytes definitely exist in memory at destKey.begin() so update destKey's contents to be a proper KeyRef of the key.
+					// This intentionally leaves the Arena alone and doesn't copy anything into it.
+					destKey.contents() = KeyRef(destKey.begin(), tempKey.size());
+
+					// Get the common prefix between this key and the previous one, or 0 if there was no previous one.
+					int commonPrefix;
+					if(useDelta) {
+						commonPrefix = commonPrefixLength(lastSnapshotKeyA, lastSnapshotKeyB);
+					}
+					else {
+						commonPrefix = 0;
+						useDelta = true;
+					}
+
+					// If the common prefix is greater than 1, write a delta item.  It isn't worth doing for 0 or 1 bytes, it would merely add decode overhead (string copying).
+					if(commonPrefix > 1) {
+						// Cap the common prefix length to 255.  Sorry, ridiculously long keys!
+						commonPrefix = std::min<int>(commonPrefix, std::numeric_limits<uint8_t>::max());
+
+						// We're going to temporarily write a 1-byte integer just before the key suffix to create the log op key and log it, then restore that byte.
+						uint8_t &prefixLength = mutateString(destKey)[commonPrefix - 1];
+						uint8_t backupByte = prefixLength;
+						prefixLength = commonPrefix;
+
+						opKeySize = opKeySize - commonPrefix + 1;
+						KeyRef opKey(&prefixLength, opKeySize);
+						self->log_op(OpSnapshotItemDelta, opKey, next.getValue());
+
+						// Restore the overwritten byte
+						prefixLength = backupByte;
+					}
+					else {
+						self->log_op(OpSnapshotItem, tempKey, next.getValue());
+					}
+
+					snapItems++;
+					uint64_t opBytes = opKeySize + next.getValue().size() + OP_DISK_OVERHEAD;
+					snapshotBytes += opBytes;
+					snapshotTotalWrittenBytes += opBytes;
+					lastSnapshotKeyUsingA = !lastSnapshotKeyUsingA;
+
+					// If we're not stopping now, increment next
+					if(snapshotTotalWrittenBytes < self->notifiedCommittedWriteBytes.get()) {
+						++next;
+					}
+					else {
+						// Otherwise, save state for continuing after the next wait and stop
+						nextKey = destKey;
+						nextKeyAfter = true;
+						break;
+					}
 				}
-				nextKey = Key();
-				nextKeyAfter = false;
-				snapItems = 0;
-
-				snapshotBytes = 0;
-
-				snapshotTotalWrittenBytes += OP_DISK_OVERHEAD;
-			} else {
-				// Get a reference to KeyRef part of which standalone lastKey buffer is to be used next.
-				KeyRef &destKey = lastSnapshotKeyUsingA ? lastSnapshotKeyA.contents() : lastSnapshotKeyB.contents();
-
-				// Get the key, using destKey as a temporary buffer if needed.
-				KeyRef tempKey = next.getKey(mutateString(destKey));
-				int opKeySize = tempKey.size();
-
-				// If tempKey did not use the start of destKey, then copy tempKey into destKey.
-				// It's technically possible for the source and dest to overlap but with the current container implementations that will not happen.
-				if(tempKey.begin() != destKey.begin()) {
-					memcpy(mutateString(destKey), tempKey.begin(), tempKey.size());
-				}
-
-				// Now, tempKey's bytes definitely exist in memory at destKey.begin() so update destKey to be a proper KeyRef of the key.
-				destKey = KeyRef(destKey.begin(), tempKey.size());
-
-				// Get the common prefix between this key and the previous one, or 0 if there was no previous one.
-				int commonPrefix = (snapItems == 0) ? 0 : commonPrefixLength(lastSnapshotKeyA, lastSnapshotKeyB);
-
-				// If the common prefix is greater than 1, write a delta item.  It isn't worth doing for 0 or 1 bytes, it would merely add decode overhead (string copying).
-				if(commonPrefix > 1) {
-					// Cap the common prefix length to 255.  Sorry, ridiculously long keys!
-					commonPrefix = std::min<int>(commonPrefix, std::numeric_limits<uint8_t>::max());
-
-					// We're going to temporarily write a 1-byte integer just before the key suffix to create the log op key and log it, then restore that byte.
-					uint8_t &prefixLength = mutateString(destKey)[commonPrefix - 1];
-					uint8_t backupByte = prefixLength;
-					prefixLength = commonPrefix;
-
-					opKeySize = opKeySize - commonPrefix + 1;
-					KeyRef opKey(&prefixLength, opKeySize);
-					self->log_op(OpSnapshotItemDelta, opKey, next.getValue());
-
-					// Restore the overwritten byte
-					prefixLength = backupByte;
-				}
-				else {
-					self->log_op(OpSnapshotItem, tempKey, next.getValue());
-				}
-
-				nextKey = tempKey;
-				nextKeyAfter = true;
-				snapItems++;
-				uint64_t opBytes = opKeySize + next.getValue().size() + OP_DISK_OVERHEAD;
-				snapshotBytes += opBytes;
-				snapshotTotalWrittenBytes += opBytes;
-				lastSnapshotKeyUsingA = !lastSnapshotKeyUsingA;
 			}
 		}
 	}
