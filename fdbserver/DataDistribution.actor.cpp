@@ -111,7 +111,7 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 	}
 };
 
-ACTOR Future<Void> updateServerMetrics( TCServerInfo *server, Database cx ) {
+ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
 	state StorageServerInterface ssi = server->lastKnownInterface;
 	state Future<ErrorOr<GetStorageMetricsReply>> metricsRequest = ssi.getStorageMetrics.tryGetReply( GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch );
 	state Future<Void> resetRequest = Never();
@@ -151,28 +151,21 @@ ACTOR Future<Void> updateServerMetrics( TCServerInfo *server, Database cx ) {
 		}
 	}
 
-	if(cx.getPtr()) {
-		Version versionNow = wait(runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) {
-								tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-								return tr->getReadVersion(); }));
-		Version versionDiff = versionNow - server->serverMetrics.get().version;
-		if(versionDiff > SERVER_KNOBS->DD_SS_FAILURE_VERSIONLAG) {
-			if(server->ssVersionTooFarBehind.get() == false) {
-				TraceEvent(SevInfo, "SSVersionDiffLarge").detail("ServerId", server->id.toString()).detail("VersionNow", versionNow).detail("SSVersion", server->serverMetrics.get().version).detail("Diff", versionDiff);
-				server->ssVersionTooFarBehind.set(true);
-			}
-		} else if(versionDiff < SERVER_KNOBS->DD_SS_ALLOWED_VERSIONLAG) {
-			if(server->ssVersionTooFarBehind.get() == true) {
-				TraceEvent(SevInfo, "SSVersionDiffNormal").detail("ServerId", server->id.toString()).detail("VersionNow", versionNow).detail("SSVersion", server->serverMetrics.get().version).detail("Diff", versionDiff);
-				server->ssVersionTooFarBehind.set(false);
-			}
-		}
+	if ( server->serverMetrics.get().lastUpdate < now() - SERVER_KNOBS->DD_SS_STUCK_TIME_LIMIT &&  server->ssVersionTooFarBehind.get() == false) {
+			TraceEvent(SevInfo, "StorageServerStuck").detail("ServerId", server->id.toString()).detail("LastUpdate", server->serverMetrics.get().lastUpdate);
+			server->ssVersionTooFarBehind.set(true);
+	} else if ( server->serverMetrics.get().versionLag > SERVER_KNOBS->DD_SS_FAILURE_VERSIONLAG  && server->ssVersionTooFarBehind.get() == false ) {
+			TraceEvent(SevInfo, "SSVersionDiffLarge").detail("ServerId", server->id.toString()).detail("VersionLag", server->serverMetrics.get().versionLag);
+			server->ssVersionTooFarBehind.set(true);
+	} else if ( server->serverMetrics.get().versionLag  < SERVER_KNOBS->DD_SS_ALLOWED_VERSIONLAG && server->ssVersionTooFarBehind.get() == true ) {
+			TraceEvent(SevInfo, "SSVersionDiffNormal").detail("ServerId", server->id.toString()).detail("VersionLag", server->serverMetrics.get().versionLag);
+			server->ssVersionTooFarBehind.set(false);
 	}
 	return Void();
 }
 
-ACTOR Future<Void> updateServerMetrics( Reference<TCServerInfo> server, Database cx = Database() ) {
-	wait( updateServerMetrics( server.getPtr(), cx ) );
+ACTOR Future<Void> updateServerMetrics( Reference<TCServerInfo> server) {
+	wait( updateServerMetrics( server.getPtr() ) );
 	return Void();
 }
 
@@ -3353,10 +3346,10 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 	}
 }
 
-ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server, Database cx) {
+ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server ) {
 	state double lastUpdate = now();
 	loop {
-		wait( updateServerMetrics( server, cx ) );
+		wait( updateServerMetrics( server ) );
 		wait( delayUntil( lastUpdate + SERVER_KNOBS->STORAGE_METRICS_POLLING_DELAY + SERVER_KNOBS->STORAGE_METRICS_RANDOM_DELAY * deterministicRandom()->random01(), TaskPriority::DataDistributionLaunch ) );
 		lastUpdate = now();
 	}
@@ -3499,7 +3492,7 @@ ACTOR Future<Void> storageServerTracker(
 	state Future<Void> failureTracker;
 	state ServerStatus status( false, false, server->lastKnownInterface.locality );
 	state bool lastIsUnhealthy = false;
-	state Future<Void> metricsTracker = serverMetricsPolling( server, self->cx );
+	state Future<Void> metricsTracker = serverMetricsPolling( server );
 
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 
