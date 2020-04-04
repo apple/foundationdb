@@ -176,8 +176,10 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					ASSERT(!conflictingKeyRanges.more);
 					for (int i = 0; i < conflictingKeyRanges.size(); i += 2) {
 						KeyValueRef startKeyWithPrefix = conflictingKeyRanges[i];
+						ASSERT(startKeyWithPrefix.key.startsWith(conflictingKeysAbsolutePrefix));
 						ASSERT(startKeyWithPrefix.value == conflictingKeysTrue);
 						KeyValueRef endKeyWithPrefix = conflictingKeyRanges[i + 1];
+						ASSERT(endKeyWithPrefix.key.startsWith(conflictingKeysAbsolutePrefix));
 						ASSERT(endKeyWithPrefix.value == conflictingKeysFalse);
 						// Remove the prefix of returning keys
 						Key startKey = startKeyWithPrefix.key.removePrefix(conflictingKeysAbsolutePrefix);
