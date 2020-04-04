@@ -346,8 +346,7 @@ private:
 	int64_t overheadWriteBytes;
 	NotifiedVersion notifiedCommittedWriteBytes;
 	Key recoveredSnapshotKey; // After recovery, the next key in the currently uncompleted snapshot
-	IDiskQueue::location
-	    currentSnapshotEnd; // The end of the most recently completed snapshot (this snapshot cannot be discarded)
+	IDiskQueue::location currentSnapshotEnd;  // The end of the most recently completed snapshot (this snapshot cannot be discarded)
 	IDiskQueue::location previousSnapshotEnd; // The end of the second most recently completed snapshot (on commit, this
 	                                          // snapshot can be discarded)
 	PromiseStream<Future<Void>> addActor;
@@ -678,14 +677,19 @@ private:
 				    .detail("LastOperationWasASnapshot", nextKey == Key() && !nextKeyAfter);
 			lastDiff = diff;
 
-			// Don't write a delta for the first snapshot record in the commit.
+			// Since notifiedCommittedWriteBytes is only set() once per commit, before logging the commit operation, when
+			// this line is reached it is certain that there are no snapshot items in this commit yet.  Since this commit
+			// could be the first thing read during recovery, we can't write a delta yet.
 			bool useDelta = false;
 
 			// Write snapshot items until the wait above would block because we've used up all of the byte budget
 			loop {
 
 				if (next == self->data.end()) {
+					// After a snapshot end is logged, recovery may not see the last snapshot item logged before it so the 
+					// next snapshot item logged cannot be a delta.
 					useDelta = false;
+
 					auto thisSnapshotEnd = self->log_op(OpSnapshotEnd, StringRef(), StringRef());
 					//TraceEvent("SnapshotEnd", self->id)
 					//	.detail("LastKey", lastKey.present() ? lastKey.get() : LiteralStringRef("<none>"))
@@ -703,10 +707,9 @@ private:
 					if (++self->snapshotCount == 2) {
 						self->replaceContent = false;
 					}
+
 					snapItems = 0;
-
 					snapshotBytes = 0;
-
 					snapshotTotalWrittenBytes += OP_DISK_OVERHEAD;
 
 					// If we're not stopping now, reset next
