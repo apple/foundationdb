@@ -28,6 +28,10 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
 
+// Don't warn on constants being defined in this file.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-variable"
+
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
 struct RestoreMasterInterface;
@@ -39,23 +43,28 @@ extern const KeyRangeRef allKeys; // '' to systemKeys.end
 extern const KeyRangeRef specialKeys; // [FF][FF] to [FF][FF][FF][FF]
 extern const KeyRef afterAllKeys;
 
-//    "\xff/keyServers/[[begin]]" := "[[vector<serverID>, vector<serverID>]]"
+//    "\xff/keyServers/[[begin]]" := "[[vector<serverID>, vector<serverID>]|[vector<Tag>, vector<Tag>]]"
 extern const KeyRangeRef keyServersKeys, keyServersKeyServersKeys;
 extern const KeyRef keyServersPrefix, keyServersEnd, keyServersKeyServersKey;
 const Key keyServersKey( const KeyRef& k );
 const KeyRef keyServersKey( const KeyRef& k, Arena& arena );
 const Value keyServersValue(
-	const vector<UID>& src,
-	const vector<UID>& dest = vector<UID>() );
-void decodeKeyServersValue( const ValueRef& value,
-	vector<UID>& src, vector<UID>& dest  );
+	Standalone<RangeResultRef> result,
+	const std::vector<UID>& src,
+	const std::vector<UID>& dest = std::vector<UID>() );
+const Value keyServersValue(
+	const std::vector<Tag>& srcTag,
+	const std::vector<Tag>& destTag = std::vector<Tag>());
+// `result` must be the full result of getting serverTagKeys
+void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& value,
+	std::vector<UID>& src, std::vector<UID>& dest  );
 
 //    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
 extern const KeyRangeRef storageCacheKeys;
 extern const KeyRef storageCachePrefix;
 const Key storageCacheKey( const KeyRef& k );
-const Value storageCacheValue( const vector<uint16_t>& serverIndices );
-void decodeStorageCacheValue( const ValueRef& value, vector<uint16_t>& serverIndices );
+const Value storageCacheValue( const std::vector<uint16_t>& serverIndices );
+void decodeStorageCacheValue( const ValueRef& value, std::vector<uint16_t>& serverIndices );
 
 //    "\xff/serverKeys/[[serverID]]/[[begin]]" := "" | "1" | "2"
 extern const KeyRef serverKeysPrefix;
@@ -82,6 +91,7 @@ extern const KeyRef cacheChangePrefix;
 const Key cacheChangeKeyFor( uint16_t idx );
 uint16_t cacheChangeKeyDecodeIndex( const KeyRef& key );
 
+// "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 extern const KeyRangeRef serverTagKeys;
 extern const KeyRef serverTagPrefix;
 extern const KeyRangeRef serverTagMaxKeys;
@@ -360,5 +370,7 @@ std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& );
 // All mutations done to this range are blindly copied into txnStateStore.
 // Used to create artifically large txnStateStore instances in testing.
 extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
+
+#pragma clang diagnostic pop
 
 #endif
