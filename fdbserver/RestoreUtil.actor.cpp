@@ -27,6 +27,19 @@
 const std::vector<std::string> RestoreRoleStr = { "Invalid", "Master", "Loader", "Applier" };
 int numRoles = RestoreRoleStr.size();
 
+StringRef debugFRKey = LiteralStringRef("0000000000arl");
+
+bool debugFRMutation( const char* context, Version version, MutationRef const& mutation ) {
+	if (mutation.type != mutation.ClearRange && mutation.param1 == debugFRKey) { // Single key mutation
+		TraceEvent("FastRestoreMutationTracking").detail("At", context).detail("Version", version).detail("MutationType", getTypeString((MutationRef::Type)mutation.type)).detail("Key", mutation.param1).detail("Value", mutation.param2);
+	} else if (mutation.type == mutation.ClearRange && debugFRKey >= mutation.param1 && debugFRKey < mutation.param2) { // debugFRKey is in the range mutation
+		TraceEvent("FastRestoreMutationTracking").detail("At", context).detail("Version", version).detail("MutationType", getTypeString((MutationRef::Type)mutation.type)).detail("Begin", mutation.param1).detail("End", mutation.param2);
+	} else
+		return false;
+
+	return true;
+}
+
 std::string getRoleStr(RestoreRole role) {
 	if ((int)role >= numRoles || (int)role < 0) {
 		printf("[ERROR] role:%d is out of scope\n", (int)role);

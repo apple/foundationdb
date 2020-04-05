@@ -515,13 +515,19 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 	ASSERT(batchData->samplesSize >= 0);
 	int numAppliers = appliersInterf.size();
 	double slotSize = std::max(batchData->samplesSize / numAppliers, 1.0);
-	std::set<Key> keyrangeSplitter; // unique key to split key range for appliers
-	keyrangeSplitter.insert(normalKeys.begin); // First slot
 	double cumulativeSize = slotSize;
 	TraceEvent("FastRestoreMasterPhaseCalculateApplierKeyRangesStart")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("SamplingSize", batchData->samplesSize)
 	    .detail("SlotSize", slotSize);
+
+	std::set<Key> keyrangeSplitter; // unique key to split key range for appliers
+	keyrangeSplitter.insert(normalKeys.begin); // First slot
+	TraceEvent("FastRestoreMasterPhaseCalculateApplierKeyRanges")
+		    .detail("BatchIndex", batchIndex)
+		    .detail("CumulativeSize", cumulativeSize)
+		    .detail("Slot", 0)
+		    .detail("LowerBoundKey", normalKeys.begin);
 	int slotIdx = 1;
 	while (cumulativeSize < batchData->samplesSize) {
 		IndexedSet<Key, int64_t>::iterator lowerBound = batchData->samples.index(cumulativeSize);

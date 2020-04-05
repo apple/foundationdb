@@ -202,13 +202,16 @@ vector< Standalone<VectorRef<DebugEntryRef>> > debugEntries;
 int64_t totalDebugEntriesSize = 0;
 
 #if CENABLED(1, NOT_IN_CLEAN)
-StringRef debugKey2 = LiteralStringRef("");
+StringRef debugKey2 = LiteralStringRef("0000000000ar");
 StringRef debugKey = LiteralStringRef("\xff\xff\xff\xff");
+StringRef debugKeyBegin = LiteralStringRef("0000000000a");
+StringRef debugKeyEnd = LiteralStringRef("z000000000z");
 
 bool debugMutation( const char* context, Version version, MutationRef const& mutation ) {
 	if ((mutation.type == mutation.SetValue || mutation.type == mutation.AddValue || mutation.type==mutation.DebugKey) && (mutation.param1 == debugKey || mutation.param1 == debugKey2))
-		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "SetValue").detail("Key", mutation.param1).detail("Value", mutation.param2);
-	else if ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) && ((mutation.param1<=debugKey && mutation.param2>debugKey) || (mutation.param1<=debugKey2 && mutation.param2>debugKey2)))
+		TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "SetValue").detail("Key", mutation.param1).detail("Value", mutation.param2);
+	//else if ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) && ((mutation.param1<=debugKey && mutation.param2>debugKey) || (mutation.param1<=debugKey2 && mutation.param2>debugKey2)))
+	else if ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) && (mutation.param1>=debugKeyBegin && mutation.param2<=debugKeyEnd))
 		TraceEvent("MutationTracking")
 		    .detail("At", context)
 		    .detail("Version", version)
