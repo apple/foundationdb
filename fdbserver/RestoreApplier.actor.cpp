@@ -383,6 +383,13 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 					tr->set(iter->second.key, iter->second.val);
 					sets++;
 				} else if (iter->second.type == MutationRef::ClearRange) {
+					if (iter->second.key != iter->second.val) {
+						TraceEvent(SevError, "FastRestoreApplierPhaseApplyStagingKeysBatchClearTooMuchData", applierID)
+						    .detail("KeyBegin", iter->second.key)
+						    .detail("KeyEnd", iter->second.val)
+						    .detail("Version", iter->second.version.version)
+						    .detail("SubVersion", iter->second.version.sub);
+					}
 					tr->clear(KeyRangeRef(iter->second.key, iter->second.val));
 					clears++;
 				} else {

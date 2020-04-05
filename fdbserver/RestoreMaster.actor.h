@@ -299,6 +299,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			    getVersionSize(prevEndVersion, nextVersion, rangeFiles, rangeIdx, logFiles);
 
 			TraceEvent("FastRestoreBuildVersionBatch")
+			    .detail("BatchIndex", vb.batchIndex)
 			    .detail("VersionBatchBeginVersion", vb.beginVersion)
 			    .detail("PreviousEndVersion", prevEndVersion)
 			    .detail("NextVersion", nextVersion)
