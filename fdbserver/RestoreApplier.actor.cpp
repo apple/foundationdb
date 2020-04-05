@@ -151,6 +151,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			batchData->counters.receivedAtomicOps += isAtomicOp((MutationRef::Type)mutation.type) ? 1 : 0;
 			// Sanity check
 			if (g_network->isSimulated()) {
+				// TODO: Use asset.isInKeyRange();
 				if (isRangeMutation(mutation)) {
 					ASSERT(mutation.param1 >= req.asset.range.begin &&
 					       mutation.param2 <= req.asset.range.end); // Range mutation's right side is exclusive
@@ -278,6 +279,11 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	double curTxnSize = 0;
 	for (auto& rangeMutation : batchData->stagingKeyRanges) {
 		KeyRangeRef range(rangeMutation.mutation.param1, rangeMutation.mutation.param2);
+		if (debugMutation("FastRestoreApplierPrecomputeMutationsResultClearRange", rangeMutation.version.version, MutationRef(MutationRef::ClearRange, range.begin, range.end))) {
+			TraceEvent("FastRestoreApplierPrecomputeMutationsResultClearRange")
+			    .detail("Version", rangeMutation.version.version)
+			    .detail("Sub", rangeMutation.version.sub);
+		}
 		clearRanges.push_back(clearRanges.arena(), range);
 		curTxnSize += range.expectedSize();
 		if (curTxnSize >= SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES) {
@@ -306,6 +312,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 				    .detail("ClearRangeUpperBound", rangeMutation.mutation.param2)
 				    .detail("UsedUpperBound", ub->first);
 			}
+			// Q: Can beginKey = endKey and clear beginKey?
 			MutationRef clearKey(MutationRef::ClearRange, lb->first, lb->first);
 			lb->second.add(clearKey, rangeMutation.version);
 			lb++;
@@ -320,7 +327,8 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 
 	// Get keys in stagingKeys which does not have a baseline key by reading database cx, and precompute the key's value
 	std::vector<Future<Void>> fGetAndComputeKeys;
-	std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys;
+	std::vector<std::map<Key, std::map<Key, StagingKey>::iterator>> incompleteStagingKeysBuf(1);
+	std::map<Key, std::map<Key, StagingKey>::iterator>& incompleteStagingKeys = incompleteStagingKeysBuf.back();
 	std::map<Key, StagingKey>::iterator stagingKeyIter = batchData->stagingKeys.begin();
 	int numKeysInBatch = 0;
 	for (; stagingKeyIter != batchData->stagingKeys.end(); stagingKeyIter++) {
@@ -332,7 +340,8 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 		if (numKeysInBatch == SERVER_KNOBS->FASTRESTORE_APPLIER_FETCH_KEYS_SIZE) {
 			fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, cx, applierID));
 			numKeysInBatch = 0;
-			incompleteStagingKeys.clear();
+			incompleteStagingKeysBuf.push_back(std::map<Key, std::map<Key, StagingKey>::iterator>());
+			incompleteStagingKeys = incompleteStagingKeysBuf.back();
 		}
 	}
 	if (numKeysInBatch > 0) {
