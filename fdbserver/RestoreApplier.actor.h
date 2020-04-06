@@ -79,7 +79,20 @@ struct StagingKey {
 		// newVersion can be smaller than version as different loaders can send
 		// mutations out of order.
 		if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
+			if (m.type == MutationRef::ClearRange) {
+				// We should only clear this key! Otherwise, it causes side effect to other keys
+				ASSERT(m.param1 == m.param2);
+			}
 			if (version < newVersion) {
+				if (debugMutation("StagingKeyAdd", newVersion.version, m)) {
+					TraceEvent("StagingKeyAdd")
+					    .detail("Version", version.toString())
+					    .detail("NewVersion", newVersion.toString())
+					    .detail("MType", typeString[(int)type])
+					    .detail("Key", key)
+					    .detail("Val", val)
+					    .detail("NewMutation", m.toString());
+				}
 				key = m.param1;
 				val = m.param2;
 				type = (MutationRef::Type)m.type;
@@ -91,6 +104,7 @@ struct StagingKey {
 				pendingMutations.emplace(newVersion, m);
 			} else {
 				// Duplicated mutation ignored.
+				// TODO: Add SevError here
 				TraceEvent("SameVersion")
 				    .detail("Version", version.toString())
 				    .detail("Mutation", m.toString())
@@ -102,16 +116,21 @@ struct StagingKey {
 
 	// Precompute the final value of the key.
 	// TODO: Look at the last LogMessageVersion, if it set or clear, we can ignore the rest of versions.
-	void precomputeResult() {
+	void precomputeResult(const char* context) {
+		// TODO: Change typeString[(int)type] to a safe function that validate type range
 		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult")
-		    .detail("Key", key)
+		    .detail("Context", context)
 		    .detail("Version", version.toString())
+		    .detail("Key", key)
+		    .detail("Value", val)
+		    .detail("MType", type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "[Unset]")
 		    .detail("LargestPendingVersion",
 		            (pendingMutations.empty() ? "[none]" : pendingMutations.rbegin()->first.toString()));
 		std::map<LogMessageVersion, Standalone<MutationRef>>::iterator lb = pendingMutations.lower_bound(version);
 		if (lb == pendingMutations.end()) {
 			return;
 		}
+		ASSERT(!pendingMutations.empty());
 		if (lb->first == version) {
 			// Sanity check mutations at version are either atomicOps which can be ignored or the same value as buffered
 			MutationRef m = lb->second;
@@ -130,7 +149,11 @@ struct StagingKey {
 			MutationRef mutation = lb->second;
 			if (type == MutationRef::CompareAndClear) { // Special atomicOp
 				Arena arena;
-				Optional<ValueRef> retVal = doCompareAndClear(val, mutation.param2, arena);
+				Optional<StringRef> inputVal;
+				if (hasBaseValue()) {
+					inputVal = val;
+				}
+				Optional<ValueRef> retVal = doCompareAndClear(inputVal, mutation.param2, arena);
 				if (!retVal.present()) {
 					val = key;
 					type = MutationRef::ClearRange;
@@ -152,6 +175,7 @@ struct StagingKey {
 				    .detail("MutationType", typeString[mutation.type])
 				    .detail("Version", lb->first.toString());
 			}
+			ASSERT(lb->first > version);
 			version = lb->first;
 		}
 	}
