@@ -48,7 +48,6 @@
     <ClInclude Include="HTTP.h" />
     <ClInclude Include="KeyBackedTypes.h" />
     <ClInclude Include="MetricLogger.h" />
-    <ClInclude Include="FailureMonitorClient.h" />
     <ClInclude Include="IClientApi.h" />
     <ClInclude Include="JsonBuilder.h" />
     <ClInclude Include="JSONDoc.h" />
@@ -89,6 +88,9 @@
     <ClInclude Include="StorageServerInterface.h" />
     <ClInclude Include="Subspace.h" />
     <ClInclude Include="SystemData.h" />
+    <ActorCompiler Include="RestoreWorkerInterface.actor.h">
+        <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="TaskBucket.h" />
     <ClInclude Include="ThreadSafeTransaction.h" />
     <ClInclude Include="Tuple.h" />
@@ -98,6 +100,7 @@
     </ActorCompiler>
     <ClInclude Include="VersionedMap.h" />
     <ClInclude Include="WriteMap.h" />
+    <ClInclude Include="zipf.h" />
   </ItemGroup>
   <ItemGroup>
     <ActorCompiler Include="AsyncFileBlobStore.actor.cpp" />
@@ -107,7 +110,6 @@
     <ActorCompiler Include="BlobStore.actor.cpp" />
     <ActorCompiler Include="DatabaseBackupAgent.actor.cpp" />
     <ClCompile Include="DatabaseConfiguration.cpp" />
-    <ActorCompiler Include="FailureMonitorClient.actor.cpp" />
     <ClCompile Include="FDBOptions.g.cpp" />
     <ActorCompiler Include="FileBackupAgent.actor.cpp" />
     <ActorCompiler Include="HTTP.actor.cpp" />
@@ -132,6 +134,7 @@
     <ClCompile Include="Subspace.cpp" />
     <ClCompile Include="Tuple.cpp" />
     <ClCompile Include="JsonBuilder.cpp" />
+    <ClCompile Include="zipf.c" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGUID>{E2939DAA-238E-4970-96C4-4C57980F93BD}</ProjectGUID>

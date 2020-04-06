@@ -90,15 +90,16 @@ struct StorageQueueInfo {
 	StorageQueuingMetricsReply lastReply;
 	StorageQueuingMetricsReply prevReply;
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
-	Smoother verySmoothDurableVersion, smoothLatestVersion;
+	Smoother smoothDurableVersion, smoothLatestVersion;
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
 	limitReason_t limitReason;
-	StorageQueueInfo(UID id, LocalityData locality) : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-		smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-		verySmoothDurableVersion(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT)
-	{
+	StorageQueueInfo(UID id, LocalityData locality)
+	  : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
+	    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
+	    smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
+	    smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited) {
 		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
 	}
@@ -181,6 +182,7 @@ struct RatekeeperData {
 	RatekeeperLimits batchLimits;
 
 	Deque<double> actualTpsHistory;
+	Optional<Key> remoteDC;
 
 	RatekeeperData() : smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), 
 		actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")),
@@ -208,7 +210,7 @@ ACTOR Future<Void> trackStorageServerQueueInfo( RatekeeperData* self, StorageSer
 					myQueueInfo->value.smoothInputBytes.reset(reply.get().bytesInput);
 					myQueueInfo->value.smoothFreeSpace.reset(reply.get().storageBytes.available);
 					myQueueInfo->value.smoothTotalSpace.reset(reply.get().storageBytes.total);
-					myQueueInfo->value.verySmoothDurableVersion.reset(reply.get().durableVersion);
+					myQueueInfo->value.smoothDurableVersion.reset(reply.get().durableVersion);
 					myQueueInfo->value.smoothLatestVersion.reset(reply.get().version);
 				} else {
 					self->smoothTotalDurableBytes.addDelta( reply.get().bytesDurable - myQueueInfo->value.prevReply.bytesDurable );
@@ -217,7 +219,7 @@ ACTOR Future<Void> trackStorageServerQueueInfo( RatekeeperData* self, StorageSer
 					myQueueInfo->value.smoothInputBytes.setTotal( reply.get().bytesInput );
 					myQueueInfo->value.smoothFreeSpace.setTotal( reply.get().storageBytes.available );
 					myQueueInfo->value.smoothTotalSpace.setTotal( reply.get().storageBytes.total );
-					myQueueInfo->value.verySmoothDurableVersion.setTotal(reply.get().durableVersion);
+					myQueueInfo->value.smoothDurableVersion.setTotal(reply.get().durableVersion);
 					myQueueInfo->value.smoothLatestVersion.setTotal(reply.get().version);
 				}
 			} else {
@@ -383,19 +385,19 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	// Look at each storage server's write queue and local rate, compute and store the desired rate ratio
 	for(auto i = self->storageQueueInfo.begin(); i != self->storageQueueInfo.end(); ++i) {
 		auto& ss = i->value;
-		if (!ss.valid) continue;
+		if (!ss.valid || (self->remoteDC.present() && ss.locality.dcId() == self->remoteDC)) continue;
 		++sscount;
 
 		limitReason_t ssLimitReason = limitReason_t::unlimited;
 
-		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_FREE_SPACE, (int64_t)(SERVER_KNOBS->MIN_FREE_SPACE_RATIO * ss.smoothTotalSpace.smoothTotal()));
+		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE, (int64_t)(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * ss.smoothTotalSpace.smoothTotal()));
 
 		worstFreeSpaceStorageServer = std::min(worstFreeSpaceStorageServer, (int64_t)ss.smoothFreeSpace.smoothTotal() - minFreeSpace);
 
 		int64_t springBytes = std::max<int64_t>(1, std::min<int64_t>(limits->storageSpringBytes, (ss.smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
 		int64_t targetBytes = std::max<int64_t>(1, std::min(limits->storageTargetBytes, (int64_t)ss.smoothFreeSpace.smoothTotal() - minFreeSpace));
 		if (targetBytes != limits->storageTargetBytes) {
-			if (minFreeSpace == SERVER_KNOBS->MIN_FREE_SPACE) {
+			if (minFreeSpace == SERVER_KNOBS->MIN_AVAILABLE_SPACE) {
 				ssLimitReason = limitReason_t::storage_server_min_free_space;
 			} else {
 				ssLimitReason = limitReason_t::storage_server_min_free_space_ratio;
@@ -405,7 +407,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		int64_t storageQueue = ss.lastReply.bytesInput - ss.smoothDurableBytes.smoothTotal();
 		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
 
-		int64_t storageDurabilityLag = ss.smoothLatestVersion.smoothTotal() - ss.verySmoothDurableVersion.smoothTotal();
+		int64_t storageDurabilityLag = ss.smoothLatestVersion.smoothTotal() - ss.smoothDurableVersion.smoothTotal();
 		worstDurabilityLag = std::max(worstDurabilityLag, storageDurabilityLag);
 
 		storageDurabilityLagReverseIndex.insert(std::make_pair(-1*storageDurabilityLag, &ss));
@@ -536,7 +538,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		Version minLimitingSSVer = std::numeric_limits<Version>::max();
 		for (const auto& it : self->storageQueueInfo) {
 			auto& ss = it.value;
-			if (!ss.valid) continue;
+			if (!ss.valid || (self->remoteDC.present() && ss.locality.dcId() == self->remoteDC)) continue;
 
 			minSSVer = std::min(minSSVer, ss.lastReply.version);
 
@@ -553,10 +555,13 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			maxTLVer = std::max(maxTLVer, tl.lastReply.v);
 		}
 
-		// writeToReadLatencyLimit: 0 = infinte speed; 1 = TL durable speed ; 2 = half TL durable speed
-		writeToReadLatencyLimit = ((maxTLVer - minLimitingSSVer) - limits->maxVersionDifference/2) / (limits->maxVersionDifference/4);
-		worstVersionLag = std::max((Version)0, maxTLVer - minSSVer);
-		limitingVersionLag = std::max((Version)0, maxTLVer - minLimitingSSVer);
+		if (minSSVer != std::numeric_limits<Version>::max() && maxTLVer != std::numeric_limits<Version>::min()) {
+			// writeToReadLatencyLimit: 0 = infinte speed; 1 = TL durable speed ; 2 = half TL durable speed
+			writeToReadLatencyLimit =
+			    ((maxTLVer - minLimitingSSVer) - limits->maxVersionDifference / 2) / (limits->maxVersionDifference / 4);
+			worstVersionLag = std::max((Version)0, maxTLVer - minSSVer);
+			limitingVersionLag = std::max((Version)0, maxTLVer - minLimitingSSVer);
+		}
 	}
 
 	int64_t worstFreeSpaceTLog = std::numeric_limits<int64_t>::max();
@@ -569,14 +574,14 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 		limitReason_t tlogLimitReason = limitReason_t::log_server_write_queue;
 
-		int64_t minFreeSpace = std::max( SERVER_KNOBS->MIN_FREE_SPACE, (int64_t)(SERVER_KNOBS->MIN_FREE_SPACE_RATIO * tl.smoothTotalSpace.smoothTotal()));
+		int64_t minFreeSpace = std::max( SERVER_KNOBS->MIN_AVAILABLE_SPACE, (int64_t)(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * tl.smoothTotalSpace.smoothTotal()));
 
 		worstFreeSpaceTLog = std::min(worstFreeSpaceTLog, (int64_t)tl.smoothFreeSpace.smoothTotal() - minFreeSpace);
 
 		int64_t springBytes = std::max<int64_t>(1, std::min<int64_t>(limits->logSpringBytes, (tl.smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
 		int64_t targetBytes = std::max<int64_t>(1, std::min(limits->logTargetBytes, (int64_t)tl.smoothFreeSpace.smoothTotal() - minFreeSpace));
 		if (targetBytes != limits->logTargetBytes) {
-			if (minFreeSpace == SERVER_KNOBS->MIN_FREE_SPACE) {
+			if (minFreeSpace == SERVER_KNOBS->MIN_AVAILABLE_SPACE) {
 				tlogLimitReason = limitReason_t::log_server_min_free_space;
 			} else {
 				tlogLimitReason = limitReason_t::log_server_min_free_space_ratio;
@@ -653,6 +658,9 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		reasonID = UID();
 		TraceEvent(SevWarnAlways, "RkSSListFetchTimeout").suppressFor(1.0);
 	}
+	else if(limits->tpsLimit == std::numeric_limits<double>::infinity()) {
+		limits->tpsLimit = SERVER_KNOBS->RATEKEEPER_DEFAULT_LIMIT;
+	}
 
 	limits->tpsLimitMetric = std::min(limits->tpsLimit, 1e6);
 	limits->reasonMetric = limitReason;
@@ -679,7 +687,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			.detail("LimitingStorageServerVersionLag", limitingVersionLag)
 			.detail("WorstStorageServerDurabilityLag", worstDurabilityLag)
 			.detail("LimitingStorageServerDurabilityLag", limitingDurabilityLag)
-			.trackLatest(name.c_str());
+			.trackLatest(name);
 	}
 }
 
@@ -697,7 +705,7 @@ ACTOR Future<Void> configurationMonitor(Reference<AsyncVar<ServerDBInfo>> dbInfo
 
 				conf->fromKeyValues( (VectorRef<KeyValueRef>) results );
 
-				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey);
+				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey) || tr.watch(failedServersVersionKey);
 				wait( tr.commit() );
 				wait( watchFuture );
 				break;
@@ -733,6 +741,8 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
 	for( int i = 0; i < tlogInterfs.size(); i++ )
 		tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );
+
+	self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
 
 	try {
 		state bool lastLimited = false;
@@ -790,6 +800,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 					for( int i = 0; i < tlogInterfs.size(); i++ )
 						tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );
 				}
+				self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
 			}
 			when ( wait(collection) ) {
 				ASSERT(false);

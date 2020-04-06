@@ -28,10 +28,10 @@
 #endif
 
 #if !defined(FDB_API_VERSION)
-#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 620)
+#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 700)
 #elif FDB_API_VERSION < 13
 #error API version no longer supported (upgrade to 13)
-#elif FDB_API_VERSION > 620
+#elif FDB_API_VERSION > 700
 #error Requested API version requires a newer version of this header
 #endif
 
@@ -91,12 +91,21 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*), void *hook_parameter);
 
 #pragma pack(push, 4)
+#if FDB_API_VERSION >= 700
+    typedef struct keyvalue {
+        const uint8_t* key;
+        int key_length;
+        const uint8_t* value;
+        int value_length;
+    } FDBKeyValue;
+#else
     typedef struct keyvalue {
         const void* key;
         int key_length;
         const void* value;
         int value_length;
     } FDBKeyValue;
+#endif
 #pragma pack(pop)
 
     DLLEXPORT void fdb_future_cancel( FDBFuture* f );
@@ -118,11 +127,6 @@ extern "C" {
 #if FDB_API_VERSION >= 23
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_future_get_error( FDBFuture* f );
-#endif
-
-#if FDB_API_VERSION < 620
-    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
-    fdb_future_get_version( FDBFuture* f, int64_t* out_version );
 #endif
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
@@ -252,6 +256,10 @@ extern "C" {
                                        int end_key_name_length,
                                        FDBConflictRangeType type);
 
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+    fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, uint8_t const* begin_key_name,
+        int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length);
+
     #define FDB_KEYSEL_LAST_LESS_THAN(k, l) k, l, 0, 0
     #define FDB_KEYSEL_LAST_LESS_OR_EQUAL(k, l) k, l, 1, 0
     #define FDB_KEYSEL_FIRST_GREATER_THAN(k, l) k, l, 1, 1
@@ -264,6 +272,13 @@ extern "C" {
     DLLEXPORT const char* fdb_get_client_version();
 
     /* LEGACY API VERSIONS */
+
+#if FDB_API_VERSION < 620
+    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
+    fdb_future_get_version( FDBFuture* f, int64_t* out_version );
+#else
+    #define fdb_future_get_version(f, ov) FDB_REMOVED_FUNCTION
+#endif
 
 #if FDB_API_VERSION < 610 || defined FDB_INCLUDE_LEGACY_TYPES
     typedef struct FDB_cluster FDBCluster;
@@ -292,6 +307,13 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
     fdb_cluster_create_database( FDBCluster* c, uint8_t const* db_name,
                                  int db_name_length );
+#else
+    #define fdb_future_get_cluster(f, oc) FDB_REMOVED_FUNCTION
+    #define fdb_future_get_database(f, od) FDB_REMOVED_FUNCTION
+    #define fdb_create_cluster(cfp) FDB_REMOVED_FUNCTION
+    #define fdb_cluster_destroy(c) FDB_REMOVED_FUNCTION
+    #define fdb_cluster_set_option(c, o, v, vl) FDB_REMOVED_FUNCTION
+    #define fdb_cluster_create_database(c, dn, dnl) FDB_REMOVED_FUNCTION
 #endif
 
 #if FDB_API_VERSION < 23

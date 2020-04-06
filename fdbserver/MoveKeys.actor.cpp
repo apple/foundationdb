@@ -67,12 +67,11 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID ddId ) {
 	loop {
 		try {
 			state MoveKeysLock lock;
+			state UID txnId;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			if( !g_network->isSimulated() ) {
-				UID id(deterministicRandom()->randomUniqueID());
-				TraceEvent("TakeMoveKeysLockTransaction", ddId)
-					.detail("TransactionUID", id);
-				tr.debugTransaction( id );
+				txnId = deterministicRandom()->randomUniqueID();
+				tr.debugTransaction(txnId);
 			}
 			{
 				Optional<Value> readVal = wait( tr.get( moveKeysLockOwnerKey ) );
@@ -85,6 +84,11 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock( Database cx, UID ddId ) {
 			lock.myOwner = deterministicRandom()->randomUniqueID();
 			tr.set(moveKeysLockOwnerKey, BinaryWriter::toValue(lock.myOwner, Unversioned()));
 			wait(tr.commit());
+			TraceEvent("TakeMoveKeysLockTransaction", ddId)
+			    .detail("TransactionUID", txnId)
+			    .detail("PrevOwner", lock.prevOwner.toString())
+			    .detail("PrevWrite", lock.prevWrite.toString())
+			    .detail("MyOwner", lock.myOwner.toString());
 			return lock;
 		} catch (Error &e){
 			wait(tr.onError(e));
@@ -111,11 +115,19 @@ ACTOR Future<Void> checkMoveKeysLock( Transaction* tr, MoveKeysLock lock, bool i
 		}
 
 		// Take the lock
-		if(isWrite) {
-			BinaryWriter wrMyOwner(Unversioned()); wrMyOwner << lock.myOwner;
-			tr->set( moveKeysLockOwnerKey, wrMyOwner.toValue() );
-			BinaryWriter wrLastWrite(Unversioned()); wrLastWrite << deterministicRandom()->randomUniqueID();
-			tr->set( moveKeysLockWriteKey, wrLastWrite.toValue() );
+		if (isWrite) {
+			BinaryWriter wrMyOwner(Unversioned());
+			wrMyOwner << lock.myOwner;
+			tr->set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+			BinaryWriter wrLastWrite(Unversioned());
+			UID lastWriter = deterministicRandom()->randomUniqueID();
+			wrLastWrite << lastWriter;
+			tr->set(moveKeysLockWriteKey, wrLastWrite.toValue());
+			TraceEvent("CheckMoveKeysLock")
+			    .detail("PrevOwner", lock.prevOwner.toString())
+			    .detail("PrevWrite", lock.prevWrite.toString())
+			    .detail("MyOwner", lock.myOwner.toString())
+			    .detail("Writer", lastWriter.toString());
 		}
 
 		return Void();
@@ -588,16 +600,21 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						allServers.insert(srcSet.begin(), srcSet.end());
 						allServers.insert(destSet.begin(), destSet.end());
 
-						alreadyMoved = destSet.empty() && srcSet == intendedTeam;
+						// Because marking a server as failed can shrink a team, do not check for exact equality
+						// Instead, check for a subset of the intended team, which also covers the equality case
+						bool isSubset =
+						    std::includes(intendedTeam.begin(), intendedTeam.end(), srcSet.begin(), srcSet.end());
+						alreadyMoved = destSet.empty() && isSubset;
 						if(destSet != intendedTeam && !alreadyMoved) {
 							TraceEvent(SevWarn, "MoveKeysDestTeamNotIntended", relocationIntervalId)
-								.detail("KeyBegin", keys.begin)
-								.detail("KeyEnd", keys.end)
-								.detail("IterationBegin", begin)
-								.detail("IterationEnd", endKey)
-								.detail("DestSet", describe(destSet))
-								.detail("IntendedTeam", describe(intendedTeam))
-								.detail("KeyServers", keyServers);
+							    .detail("KeyBegin", keys.begin)
+							    .detail("KeyEnd", keys.end)
+							    .detail("IterationBegin", begin)
+							    .detail("IterationEnd", endKey)
+							    .detail("SrcSet", describe(srcSet))
+							    .detail("DestSet", describe(destSet))
+							    .detail("IntendedTeam", describe(intendedTeam))
+							    .detail("KeyServers", keyServers);
 							//ASSERT( false );
 
 							ASSERT(!dest.empty()); //The range has already been moved, but to a different dest (or maybe dest was cleared)
@@ -630,7 +647,11 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 
 						allServers.insert(srcSet.begin(), srcSet.end());
 
-						alreadyMoved = dest2.empty() && srcSet == intendedTeam;
+						// Because marking a server as failed can shrink a team, do not check for exact equality
+						// Instead, check for a subset of the intended team, which also covers the equality case
+						bool isSubset =
+						    std::includes(intendedTeam.begin(), intendedTeam.end(), srcSet.begin(), srcSet.end());
+						alreadyMoved = dest2.empty() && isSubset;
 						if (dest2 != dest && !alreadyMoved) {
 							TraceEvent(SevError,"FinishMoveKeysError", relocationIntervalId)
 								.detail("Reason", "dest mismatch")
@@ -751,13 +772,17 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 				StringRef(encodeExcludedServersKey( AddressExclusion( server.address().ip, server.address().port ))) );
 			state Future<Optional<Value>> fExclIP = tr.get(
 				StringRef(encodeExcludedServersKey( AddressExclusion( server.address().ip ))) );
+			state Future<Optional<Value>> fFailProc = tr.get(
+				StringRef(encodeFailedServersKey( AddressExclusion( server.address().ip, server.address().port ))) );
+			state Future<Optional<Value>> fFailIP = tr.get(
+				StringRef(encodeFailedServersKey( AddressExclusion( server.address().ip ))) );
 			state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
 			state Future<Standalone<RangeResultRef>> fHistoryTags = tr.getRange( serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, true);
 
-			wait( success(fTagLocalities) && success(fv) && success(fExclProc) && success(fExclIP) && success(fTags) && success(fHistoryTags) );
+			wait( success(fTagLocalities) && success(fv) && success(fExclProc) && success(fExclIP) && success(fFailProc) && success(fFailIP) && success(fTags) && success(fHistoryTags) );
 
-			// If we have been added to the excluded state servers list, we have to fail
-			if (fExclProc.get().present() || fExclIP.get().present())
+			// If we have been added to the excluded/failed state servers list, we have to fail
+			if (fExclProc.get().present() || fExclIP.get().present() || fFailProc.get().present() || fFailIP.get().present() )
 				throw recruitment_failed();
 
 			if(fTagLocalities.get().more || fTags.get().more || fHistoryTags.get().more)
@@ -929,6 +954,73 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 			TraceEvent("RemoveStorageServerRetrying").error(err);
 		}
 	}
+}
+// Remove the server from keyServer list and set serverKeysFalse to the server's serverKeys list.
+// Changes to keyServer and serverKey must happen symmetrically in a transaction.
+ACTOR Future<Void> removeKeysFromFailedServer(Database cx, UID serverID, MoveKeysLock lock) {
+	state Key begin = allKeys.begin;
+	// Multi-transactional removal in case of large number of shards, concern in violating 5s transaction limit
+	while (begin < allKeys.end) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.info.taskID = TaskPriority::MoveKeys;
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				wait(checkMoveKeysLock(&tr, lock));
+				TraceEvent("RemoveKeysFromFailedServerLocked")
+				    .detail("ServerID", serverID)
+				    .detail("Version", tr.getReadVersion().get())
+				    .detail("Begin", begin);
+				// Get all values of keyServers and remove serverID from every occurrence
+				// Very inefficient going over every entry in keyServers
+				// No shortcut because keyServers and serverKeys are not guaranteed same shard boundaries
+				state Standalone<RangeResultRef> keyServers =
+				    wait(krmGetRanges(&tr, keyServersPrefix, KeyRangeRef(begin, allKeys.end),
+				                      SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT, SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+				state KeyRange currentKeys = KeyRangeRef(begin, keyServers.end()[-1].key);
+				for (int i = 0; i < keyServers.size() - 1; ++i) {
+					auto it = keyServers[i];
+					vector<UID> src;
+					vector<UID> dest;
+					decodeKeyServersValue(it.value, src, dest);
+
+					// The failed server is not present
+					if (std::find(src.begin(), src.end(), serverID) == src.end() &&
+					    std::find(dest.begin(), dest.end(), serverID) == dest.end()) {
+						continue;
+					}
+
+					// Update the vectors to remove failed server then set the value again
+					// Dest is usually empty, but keep this in case there is parallel data movement
+					src.erase(std::remove(src.begin(), src.end(), serverID), src.end());
+					dest.erase(std::remove(dest.begin(), dest.end(), serverID), dest.end());
+					TraceEvent(SevDebug, "FailedServerSetKey", serverID)
+						.detail("Key", it.key)
+						.detail("ValueSrc", describe(src))
+						.detail("ValueDest", describe(dest));
+					tr.set(keyServersKey(it.key), keyServersValue(src, dest));
+				}
+
+				// Set entire range for our serverID in serverKeys keyspace to false to signal erasure
+				TraceEvent(SevDebug, "FailedServerSetRange", serverID)
+					.detail("Begin", currentKeys.begin)
+					.detail("End", currentKeys.end);
+				wait(krmSetRangeCoalescing(&tr, serverKeysPrefixFor(serverID), currentKeys, allKeys, serverKeysFalse));
+				wait(tr.commit());
+				TraceEvent(SevDebug, "FailedServerCommitSuccess", serverID)
+					.detail("Begin", currentKeys.begin)
+					.detail("End", currentKeys.end)
+					.detail("CommitVersion", tr.getCommittedVersion());
+				// Update beginning of next iteration's range
+				begin = currentKeys.end;
+				break;
+			} catch (Error& e) {
+				TraceEvent("FailedServerError", serverID).error(e);
+				wait(tr.onError(e));
+			}
+		}
+	}
+	return Void();
 }
 
 ACTOR Future<Void> moveKeys(

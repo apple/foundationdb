@@ -74,10 +74,11 @@ struct StorageServerInterface {
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
 	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
+	Optional<NetworkAddress> secondaryAddress() const { return getValue.getEndpoint().addresses.secondaryAddress; }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
-	template <class Ar> 
-	void serialize( Ar& ar ) {
+	template <class Ar>
+	void serialize(Ar& ar) {
 		// StorageServerInterface is persisted in the database and in the tLog's data structures, so changes here have to be
 		// versioned carefully!
 
@@ -189,8 +190,9 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 	VectorRef<KeyValueRef, VecSerStrategy::String> data;
 	Version version; // useful when latestVersion was requested
 	bool more;
+	bool cached;
 
-	GetKeyValuesReply() : version(invalidVersion), more(false) {}
+	GetKeyValuesReply() : version(invalidVersion), more(false), cached(false) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -266,7 +268,7 @@ struct GetShardStateRequest {
 		FETCHING = 1,
 		READABLE = 2
 	};
-	
+
 	KeyRange keys;
 	int32_t mode;
 	ReplyPromise<GetShardStateReply> reply;
@@ -281,38 +283,41 @@ struct GetShardStateRequest {
 
 struct StorageMetrics {
 	constexpr static FileIdentifier file_identifier = 13622226;
-	int64_t bytes;				// total storage
-	int64_t bytesPerKSecond;	// network bandwidth (average over 10s)
-	int64_t iosPerKSecond;
+	int64_t bytes = 0;				// total storage
+	int64_t bytesPerKSecond = 0;	// network bandwidth (average over 10s)
+	int64_t iosPerKSecond = 0;
+	int64_t bytesReadPerKSecond = 0;
 
 	static const int64_t infinity = 1LL<<60;
 
-	StorageMetrics() : bytes(0), bytesPerKSecond(0), iosPerKSecond(0) {}
-
 	bool allLessOrEqual( const StorageMetrics& rhs ) const {
-		return bytes <= rhs.bytes && bytesPerKSecond <= rhs.bytesPerKSecond && iosPerKSecond <= rhs.iosPerKSecond;
+		return bytes <= rhs.bytes && bytesPerKSecond <= rhs.bytesPerKSecond && iosPerKSecond <= rhs.iosPerKSecond &&
+		       bytesReadPerKSecond <= rhs.bytesReadPerKSecond;
 	}
 	void operator += ( const StorageMetrics& rhs ) {
 		bytes += rhs.bytes;
 		bytesPerKSecond += rhs.bytesPerKSecond;
 		iosPerKSecond += rhs.iosPerKSecond;
+		bytesReadPerKSecond += rhs.bytesReadPerKSecond;
 	}
 	void operator -= ( const StorageMetrics& rhs ) {
 		bytes -= rhs.bytes;
 		bytesPerKSecond -= rhs.bytesPerKSecond;
 		iosPerKSecond -= rhs.iosPerKSecond;
+		bytesReadPerKSecond -= rhs.bytesReadPerKSecond;
 	}
 	template <class F>
 	void operator *= ( F f ) {
 		bytes *= f;
 		bytesPerKSecond *= f;
 		iosPerKSecond *= f;
+		bytesReadPerKSecond *= f;
 	}
-	bool allZero() const { return !bytes && !bytesPerKSecond && !iosPerKSecond; }
+	bool allZero() const { return !bytes && !bytesPerKSecond && !iosPerKSecond && !bytesReadPerKSecond; }
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, bytes, bytesPerKSecond, iosPerKSecond);
+		serializer(ar, bytes, bytesPerKSecond, iosPerKSecond, bytesReadPerKSecond);
 	}
 
 	void negate() { operator*=(-1.0); }
@@ -322,11 +327,13 @@ struct StorageMetrics {
 	template <class F> StorageMetrics operator * ( F f ) const { StorageMetrics x(*this); x*=f; return x; }
 
 	bool operator == ( StorageMetrics const& rhs ) const {
-		return bytes == rhs.bytes && bytesPerKSecond == rhs.bytesPerKSecond && iosPerKSecond == rhs.iosPerKSecond;
+		return bytes == rhs.bytes && bytesPerKSecond == rhs.bytesPerKSecond && iosPerKSecond == rhs.iosPerKSecond &&
+		       bytesReadPerKSecond == rhs.bytesReadPerKSecond;
 	}
 
 	std::string toString() const {
-		return format("Bytes: %lld, BPerKSec: %lld, iosPerKSec: %lld", bytes, bytesPerKSecond, iosPerKSecond);
+		return format("Bytes: %lld, BPerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld", bytes, bytesPerKSecond,
+		              iosPerKSecond, bytesReadPerKSecond);
 	}
 };
 
@@ -384,7 +391,7 @@ struct SplitMetricsRequest {
 struct GetStorageMetricsReply {
 	constexpr static FileIdentifier file_identifier = 15491478;
 	StorageMetrics load;
-	StorageMetrics free;
+	StorageMetrics available;
 	StorageMetrics capacity;
 	double bytesInputRate;
 
@@ -392,7 +399,7 @@ struct GetStorageMetricsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, load, free, capacity, bytesInputRate);
+		serializer(ar, load, available, capacity, bytesInputRate);
 	}
 };
 

@@ -26,7 +26,7 @@
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
-#include "flow/SignalSafeUnwind.h"
+#include "flow/TLSConfig.actor.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BackupAgent.actor.h"
@@ -37,8 +37,7 @@
 #include "fdbclient/BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
-#include "fdbrpc/Platform.h"
-#include "fdbrpc/TLSConnection.h"
+#include "flow/Platform.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -84,7 +83,7 @@ enum enumProgramExe {
 };
 
 enum enumBackupType {
-	BACKUP_UNDEFINED=0, BACKUP_START, BACKUP_MODIFY, BACKUP_STATUS, BACKUP_ABORT, BACKUP_WAIT, BACKUP_DISCONTINUE, BACKUP_PAUSE, BACKUP_RESUME, BACKUP_EXPIRE, BACKUP_DELETE, BACKUP_DESCRIBE, BACKUP_LIST, BACKUP_DUMP
+	BACKUP_UNDEFINED=0, BACKUP_START, BACKUP_MODIFY, BACKUP_STATUS, BACKUP_ABORT, BACKUP_WAIT, BACKUP_DISCONTINUE, BACKUP_PAUSE, BACKUP_RESUME, BACKUP_EXPIRE, BACKUP_DELETE, BACKUP_DESCRIBE, BACKUP_LIST, BACKUP_DUMP, BACKUP_CLEANUP
 };
 
 enum enumDBType {
@@ -103,7 +102,8 @@ enum {
 	OPT_EXPIRE_BEFORE_VERSION, OPT_EXPIRE_BEFORE_DATETIME, OPT_EXPIRE_DELETE_BEFORE_DAYS,
 	OPT_EXPIRE_RESTORABLE_AFTER_VERSION, OPT_EXPIRE_RESTORABLE_AFTER_DATETIME, OPT_EXPIRE_MIN_RESTORABLE_DAYS,
 	OPT_BASEURL, OPT_BLOB_CREDENTIALS, OPT_DESCRIBE_DEEP, OPT_DESCRIBE_TIMESTAMPS,
-	OPT_DUMP_BEGIN, OPT_DUMP_END, OPT_JSON,
+	OPT_DUMP_BEGIN, OPT_DUMP_END, OPT_JSON, OPT_DELETE_DATA, OPT_MIN_CLEANUP_SECONDS,
+	OPT_USE_PARTITIONED_LOG,
 
 	// Backup and Restore constants
 	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
@@ -170,6 +170,8 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_NOSTOPWHENDONE,   "--no-stop-when-done",SO_NONE },
 	{ OPT_DESTCONTAINER,    "-d",               SO_REQ_SEP },
 	{ OPT_DESTCONTAINER,    "--destcontainer",  SO_REQ_SEP },
+	{ OPT_USE_PARTITIONED_LOG, "-p",                 SO_NONE },
+	{ OPT_USE_PARTITIONED_LOG, "--partitioned_log",  SO_NONE },
 	{ OPT_SNAPSHOTINTERVAL, "-s",                   SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "--snapshot_interval",  SO_REQ_SEP },
 	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
@@ -261,6 +263,7 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_JSON,            "--json",           SO_NONE},
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -290,6 +293,37 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
+	SO_END_OF_OPTIONS
+};
+
+CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
+#ifdef _WIN32
+	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
+#endif
+	{ OPT_CLUSTERFILE,       "-C",               SO_REQ_SEP },
+	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
+	{ OPT_TRACE,           "--log",            SO_NONE },
+	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,    "--trace_format",   SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup",       SO_REQ_SEP },
+	{ OPT_QUIET,           "-q",               SO_NONE },
+	{ OPT_QUIET,           "--quiet",          SO_NONE },
+	{ OPT_VERSION,         "--version",        SO_NONE },
+	{ OPT_VERSION,         "-v",               SO_NONE },
+	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
+	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
+	{ OPT_DELETE_DATA,     "--delete_data",    SO_NONE },
+	{ OPT_MIN_CLEANUP_SECONDS, "--min_cleanup_seconds", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -321,6 +355,7 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -352,6 +387,7 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -379,6 +415,7 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -648,6 +685,7 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -681,6 +719,7 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -713,6 +752,7 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -745,6 +785,7 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -774,6 +815,7 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -787,7 +829,7 @@ const KeyRef exeFastRestoreAgent = LiteralStringRef("fastrestore_agent"); // mus
 const KeyRef exeDatabaseAgent = LiteralStringRef("dr_agent");
 const KeyRef exeDatabaseBackup = LiteralStringRef("fdbdr");
 
-extern const char* getHGVersion();
+extern const char* getSourceVersion();
 
 #ifdef _WIN32
 void parentWatcher(void *parentHandle) {
@@ -803,7 +845,7 @@ void parentWatcher(void *parentHandle) {
 
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("source version %s\n", getHGVersion());
+	printf("source version %s\n", getSourceVersion());
 	printf("protocol %llx\n", (long long) currentProtocolVersion.version());
 }
 
@@ -840,10 +882,6 @@ static void printAgentUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
-	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
-	       "                 Use object serializer for sending messages. The object serializer\n"
-	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
-	       "                 each other even if they don't have the same version\n");
 	printf("  -m SIZE, --memory SIZE\n"
 		   "                 Memory limit. The default value is 8GiB. When specified\n"
 		   "                 without a unit, MiB is assumed.\n");
@@ -878,7 +916,7 @@ void printBackupContainerInfo() {
 
 static void printBackupUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("Usage: %s (start | status | abort | wait | discontinue | pause | resume | expire | delete | describe | list) [OPTIONS]\n\n", exeBackup.toString().c_str());
+	printf("Usage: %s (start | status | abort | wait | discontinue | pause | resume | expire | delete | describe | list | cleanup) [OPTIONS]\n\n", exeBackup.toString().c_str());
 	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
 		   "                 FoundationDB cluster. The default is first the value of the\n"
 		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
@@ -918,6 +956,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
+	printf("  -p, --partitioned_log  Starts with new type of backup system using partitioned logs.\n");
 	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
 		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
@@ -929,10 +968,11 @@ static void printBackupUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
-	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
-	       "                 Use object serializer for sending messages. The object serializer\n"
-	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
-	       "                 each other even if they don't have the same version\n");
+	printf("  --max_cleanup_seconds SECONDS\n"
+	       "                 Specifies the amount of time a backup or DR needs to be stale before cleanup will\n"
+	       "                 remove mutations for it. By default this is set to one hour.\n");
+	printf("  --delete_data\n"
+		   "                 This flag will cause cleanup to remove mutations for the most stale backup or DR.\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -990,10 +1030,6 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
-	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
-	       "                 Use object serializer for sending messages. The object serializer\n"
-	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
-	       "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -1079,10 +1115,6 @@ static void printDBAgentUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
-	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
-	       "                 Use object serializer for sending messages. The object serializer\n"
-	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
-	       "                 each other even if they don't have the same version\n");
 	printf("  -m SIZE, --memory SIZE\n"
 		   "                 Memory limit. The default value is 8GiB. When specified\n"
 		   "                 without a unit, MiB is assumed.\n");
@@ -1129,10 +1161,6 @@ static void printDBBackupUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
-	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
-	       "                 Use object serializer for sending messages. The object serializer\n"
-	       "                 is currently a beta feature and it allows fdb processes to talk to\n"
-	       "                 each other even if they don't have the same version\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n"
@@ -1266,6 +1294,7 @@ enumBackupType	getBackupType(std::string backupType)
 		values["start"] = BACKUP_START;
 		values["status"] = BACKUP_STATUS;
 		values["abort"] = BACKUP_ABORT;
+		values["cleanup"] = BACKUP_CLEANUP;
 		values["wait"] = BACKUP_WAIT;
 		values["discontinue"] = BACKUP_DISCONTINUE;
 		values["pause"] = BACKUP_PAUSE;
@@ -1317,7 +1346,7 @@ enumDBType getDBType(std::string dbType)
 	return enBackupType;
 }
 
-ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr, std::string name, std::string id, enumProgramExe exe, Database dest) {
+ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr, std::string name, std::string id, enumProgramExe exe, Database dest, bool snapshot = false) {
 	// This process will write a document that looks like this:
 	// { backup : { $expires : {<subdoc>}, version: <version from approximately 30 seconds from now> }
 	// so that the value under 'backup' will eventually expire to null and thus be ignored by
@@ -1368,28 +1397,28 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			totalBlobStats.create(p.first + ".$sum") = p.second;
 
 		state FileBackupAgent fba;
-		state std::vector<KeyBackedTag> backupTags = wait(getAllBackupTags(tr));
+		state std::vector<KeyBackedTag> backupTags = wait(getAllBackupTags(tr, snapshot));
 		state std::vector<Future<Version>> tagLastRestorableVersions;
 		state std::vector<Future<EBackupState>> tagStates;
 		state std::vector<Future<Reference<IBackupContainer>>> tagContainers;
 		state std::vector<Future<int64_t>> tagRangeBytes;
 		state std::vector<Future<int64_t>> tagLogBytes;
-		state Future<Optional<Value>> fBackupPaused = tr->get(fba.taskBucket->getPauseKey());
+		state Future<Optional<Value>> fBackupPaused = tr->get(fba.taskBucket->getPauseKey(), snapshot);
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state std::vector<KeyBackedTag>::iterator tag;
 		state std::vector<UID> backupTagUids;
 		for (tag = backupTags.begin(); tag != backupTags.end(); tag++) {
-			UidAndAbortedFlagT uidAndAbortedFlag = wait(tag->getOrThrow(tr));
+			UidAndAbortedFlagT uidAndAbortedFlag = wait(tag->getOrThrow(tr, snapshot));
 			BackupConfig config(uidAndAbortedFlag.first);
 			backupTagUids.push_back(config.getUid());
 
-			tagStates.push_back(config.stateEnum().getOrThrow(tr));
-			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, false, 0));
-			tagLogBytes.push_back(config.logBytesWritten().getD(tr, false, 0));
-			tagContainers.push_back(config.backupContainer().getOrThrow(tr));
-			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName)));
+			tagStates.push_back(config.stateEnum().getOrThrow(tr, snapshot));
+			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, snapshot, 0));
+			tagLogBytes.push_back(config.logBytesWritten().getD(tr, snapshot, 0));
+			tagContainers.push_back(config.backupContainer().getOrThrow(tr, snapshot));
+			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName), snapshot));
 		}
 
 		wait( waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainers) && waitForAll(tagRangeBytes) && waitForAll(tagLogBytes) && success(fBackupPaused));
@@ -1426,21 +1455,21 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(dest));
 		tr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr2->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state Standalone<RangeResultRef> tagNames = wait(tr2->getRange(dba.tagNames.range(), 10000));
+		state Standalone<RangeResultRef> tagNames = wait(tr2->getRange(dba.tagNames.range(), 10000, snapshot));
 		state std::vector<Future<Optional<Key>>> backupVersion;
 		state std::vector<Future<int>> backupStatus;
 		state std::vector<Future<int64_t>> tagRangeBytesDR;
 		state std::vector<Future<int64_t>> tagLogBytesDR;
-		state Future<Optional<Value>> fDRPaused = tr->get(dba.taskBucket->getPauseKey());
+		state Future<Optional<Value>> fDRPaused = tr->get(dba.taskBucket->getPauseKey(), snapshot);
 
 		state std::vector<UID> drTagUids;
 		for(int i = 0; i < tagNames.size(); i++) {
-			backupVersion.push_back(tr2->get(tagNames[i].value.withPrefix(applyMutationsBeginRange.begin)));
+			backupVersion.push_back(tr2->get(tagNames[i].value.withPrefix(applyMutationsBeginRange.begin), snapshot));
 			UID tagUID = BinaryReader::fromStringRef<UID>(tagNames[i].value, Unversioned());
 			drTagUids.push_back(tagUID);
-			backupStatus.push_back(dba.getStateValue(tr2, tagUID));
-			tagRangeBytesDR.push_back(dba.getRangeBytesWritten(tr2, tagUID));
-			tagLogBytesDR.push_back(dba.getLogBytesWritten(tr2, tagUID));
+			backupStatus.push_back(dba.getStateValue(tr2, tagUID, snapshot));
+			tagRangeBytesDR.push_back(dba.getRangeBytesWritten(tr2, tagUID, snapshot));
+			tagLogBytesDR.push_back(dba.getLogBytesWritten(tr2, tagUID, snapshot));
 		}
 
 		wait(waitForAll(backupStatus) && waitForAll(backupVersion) && waitForAll(tagRangeBytesDR) && waitForAll(tagLogBytesDR) && success(fDRPaused));
@@ -1593,7 +1622,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					state Future<std::string> futureStatusDoc = getLayerStatus(tr, name, id, exe, taskDest);
+					state Future<std::string> futureStatusDoc = getLayerStatus(tr, name, id, exe, taskDest, true);
 					wait(cleanupStatus(tr, rootKey, name, id));
 					std::string statusdoc = wait(futureStatusDoc);
 					tr->set(instanceKey, statusdoc);
@@ -1719,9 +1748,10 @@ ACTOR Future<Void> submitDBBackup(Database src, Database dest, Standalone<Vector
 	return Void();
 }
 
-ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotIntervalSeconds, Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName, bool dryRun, bool waitForCompletion, bool stopWhenDone) {
-	try
-	{
+ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotIntervalSeconds,
+                                Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName, bool dryRun,
+                                bool waitForCompletion, bool stopWhenDone, bool usePartitionedLog) {
+	try {
 		state FileBackupAgent backupAgent;
 
 		// Backup everything, if no ranges were specified
@@ -1764,7 +1794,8 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 		}
 
 		else {
-			wait(backupAgent.submitBackup(db, KeyRef(url), snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone));
+			wait(backupAgent.submitBackup(db, KeyRef(url), snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone,
+			                              usePartitionedLog));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -1786,8 +1817,7 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 				}
 			}
 		}
-	}
-	catch (Error& e) {
+	} catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)
 			throw;
 		switch (e.code())
@@ -1937,6 +1967,21 @@ ACTOR Future<Void> abortBackup(Database db, std::string tagName) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
 			break;
 		}
+		throw;
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> cleanupMutations(Database db, bool deleteData) {
+	try
+	{
+		wait(cleanupBackup(db, deleteData));
+	}
+	catch (Error& e) {
+		if(e.code() == error_code_actor_cancelled)
+			throw;
+		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
 
@@ -2151,7 +2196,7 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
                                        std::string removePrefix) {
 	try {
 		state FileBackupAgent backupAgent;
-		state int64_t restoreVersion = -1;
+		state Version restoreVersion = invalidVersion;
 
 		if (ranges.size() > 1) {
 			fprintf(stderr, "Currently only a single restore range is supported!\n");
@@ -2164,6 +2209,7 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 
 		if (performRestore) {
 			if (dbVersion == invalidVersion) {
+				TraceEvent("FastRestoreAgent").detail("TargetRestoreVersion", "Largest restorable version");
 				BackupDescription desc = wait(IBackupContainer::openContainer(container)->describeBackup());
 				if (!desc.maxRestorableVersion.present()) {
 					fprintf(stderr, "The specified backup is not restorable to any version.\n");
@@ -2171,6 +2217,7 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 				}
 
 				dbVersion = desc.maxRestorableVersion.get();
+				TraceEvent("FastRestoreAgent").detail("TargetRestoreVersion", dbVersion);
 			}
 			Version _restoreVersion = wait(fastRestore(db, KeyRef(tagName), KeyRef(container), waitForDone, dbVersion,
 			                                           verbose, range, KeyRef(addPrefix), KeyRef(removePrefix)));
@@ -2193,20 +2240,20 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 
 			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
 			if (!rset.present()) {
-				fprintf(stderr, "Insufficient data to restore to version %lld\n", restoreVersion);
+				fprintf(stderr, "Insufficient data to restore to version %" PRId64 "\n", restoreVersion);
 				throw restore_invalid_version();
 			}
 
 			// Display the restore information, if requested
 			if (verbose) {
-				printf("[DRY RUN] Restoring backup to version: %lld\n", (long long)restoreVersion);
+				printf("[DRY RUN] Restoring backup to version: %" PRId64 "\n", restoreVersion);
 				printf("%s\n", description.toString().c_str());
 			}
 		}
 
 		if (waitForDone && verbose) {
 			// If restore completed then report version restored
-			printf("Restored to version %lld%s\n", (long long)restoreVersion, (performRestore) ? "" : " (DRY RUN)");
+			printf("Restored to version %" PRId64 "%s\n", restoreVersion, (performRestore) ? "" : " (DRY RUN)");
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) throw;
@@ -2642,7 +2689,6 @@ extern uint8_t *g_extra_memory;
 
 int main(int argc, char* argv[]) {
 	platformInit();
-	initSignalSafeUnwind();
 
 	int	status = FDB_EXIT_SUCCESS;
 
@@ -2692,6 +2738,9 @@ int main(int argc, char* argv[]) {
 					break;
 				case BACKUP_ABORT:
 					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupAbortOptions, SO_O_EXACT);
+					break;
+				case BACKUP_CLEANUP:
+					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupCleanupOptions, SO_O_EXACT);
 					break;
 				case BACKUP_WAIT:
 					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupWaitOptions, SO_O_EXACT);
@@ -2864,6 +2913,7 @@ int main(int argc, char* argv[]) {
 		std::string restoreTimestamp;
 		bool waitForDone = false;
 		bool stopWhenDone = true;
+		bool usePartitionedLog = false; // Set to true to use new backup system
 		bool forceAction = false;
 		bool trace = false;
 		bool quietDisplay = false;
@@ -2885,6 +2935,7 @@ int main(int argc, char* argv[]) {
 		std::string restoreClusterFileDest;
 		std::string restoreClusterFileOrig;
 		bool jsonOutput = false;
+		bool deleteData = false;
 
 		BackupModifyOptions modifyOptions;
 
@@ -2963,6 +3014,12 @@ int main(int argc, char* argv[]) {
 					break;
 				case OPT_DRYRUN:
 					dryRun = true;
+					break;
+				case OPT_DELETE_DATA:
+					deleteData = true;
+					break;
+				case OPT_MIN_CLEANUP_SECONDS:
+					knobs.push_back( std::make_pair( "min_cleanup_seconds", args->OptionArg() ) );
 					break;
 				case OPT_FORCE:
 					forceAction = true;
@@ -3102,6 +3159,9 @@ int main(int argc, char* argv[]) {
 				case OPT_NOSTOPWHENDONE:
 					stopWhenDone = false;
 					break;
+				case OPT_USE_PARTITIONED_LOG:
+					usePartitionedLog = true;
+					break;
 				case OPT_RESTORECONTAINER:
 					restoreContainer = args->OptionArg();
 					// If the url starts with '/' then prepend "file://" for backwards compatibility
@@ -3174,22 +3234,22 @@ int main(int argc, char* argv[]) {
 					blobCredentials.push_back(args->OptionArg());
 					break;
 #ifndef TLS_DISABLED
-				case TLSOptions::OPT_TLS_PLUGIN:
+				case TLSConfig::OPT_TLS_PLUGIN:
 					args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_CERTIFICATES:
+				case TLSConfig::OPT_TLS_CERTIFICATES:
 					tlsCertPath = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_PASSWORD:
+				case TLSConfig::OPT_TLS_PASSWORD:
 					tlsPassword = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_CA_FILE:
+				case TLSConfig::OPT_TLS_CA_FILE:
 					tlsCAPath = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_KEY:
+				case TLSConfig::OPT_TLS_KEY:
 					tlsKeyPath = args->OptionArg();
 					break;
-				case TLSOptions::OPT_TLS_VERIFY_PEERS:
+				case TLSConfig::OPT_TLS_VERIFY_PEERS:
 					tlsVerifyPeers = args->OptionArg();
 					break;
 #endif
@@ -3306,15 +3366,19 @@ int main(int argc, char* argv[]) {
 				if (!flowKnobs->setKnob( k->first, k->second ) &&
 					!clientKnobs->setKnob( k->first, k->second ))
 				{
-					fprintf(stderr, "Unrecognized knob option '%s'\n", k->first.c_str());
-					return FDB_EXIT_ERROR;
+					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
+					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "Invalid value '%s' for option '%s'\n", k->second.c_str(), k->first.c_str());
-					return FDB_EXIT_ERROR;
+					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", k->second.c_str(), k->first.c_str());
+					TraceEvent(SevWarnAlways, "InvalidKnobValue").detail("Knob", printable(k->first)).detail("Value", printable(k->second));
 				}
-				throw;
+				else {
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
+					TraceEvent(SevError, "FailedToSetKnob").detail("Knob", printable(k->first)).detail("Value", printable(k->second)).error(e);
+					throw;
+				}
 			}
 		}
 
@@ -3410,7 +3474,7 @@ int main(int argc, char* argv[]) {
 
 		TraceEvent("ProgramStart")
 			.setMaxEventLength(12000)
-			.detail("SourceVersion", getHGVersion())
+			.detail("SourceVersion", getSourceVersion())
 			.detail("Version", FDB_VT_VERSION )
 			.detail("PackageName", FDB_VT_PACKAGE_NAME)
 			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
@@ -3509,7 +3573,8 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually writeable.
 				openBackupContainer(argv[0], destinationContainer);
-				f = stopAfter( submitBackup(db, destinationContainer, snapshotIntervalSeconds, backupKeys, tagName, dryRun, waitForDone, stopWhenDone) );
+				f = stopAfter(submitBackup(db, destinationContainer, snapshotIntervalSeconds, backupKeys, tagName,
+				                           dryRun, waitForDone, stopWhenDone, usePartitionedLog));
 				break;
 			}
 
@@ -3532,6 +3597,12 @@ int main(int argc, char* argv[]) {
 				if(!initCluster())
 					return FDB_EXIT_ERROR;
 				f = stopAfter( abortBackup(db, tagName) );
+				break;
+
+			case BACKUP_CLEANUP:
+				if(!initCluster())
+					return FDB_EXIT_ERROR;
+				f = stopAfter( cleanupMutations(db, deleteData) );
 				break;
 
 			case BACKUP_WAIT:
@@ -3798,6 +3869,13 @@ int main(int argc, char* argv[]) {
 	} catch (Error& e) {
 		TraceEvent(SevError, "MainError").error(e);
 		status = FDB_EXIT_MAIN_ERROR;
+	} catch (boost::system::system_error& e) {
+		if (g_network) {
+			TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
+		} else {
+			fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code().value());
+		}
+		status = FDB_EXIT_MAIN_EXCEPTION;
 	} catch (std::exception& e) {
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		status = FDB_EXIT_MAIN_EXCEPTION;
@@ -3811,7 +3889,7 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 	// We should wait on all restore to finish before proceeds
 	TraceEvent("FastRestore").detail("Progress", "WaitForRestoreToFinish");
 	state ReadYourWritesTransaction tr(cx);
-	state Future<Void> watchForRestoreRequestDone;
+	state Future<Void> fRestoreRequestDone;
 	state bool restoreRequestDone = false;
 
 	loop {
@@ -3819,6 +3897,7 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			// In case restoreRequestDoneKey is already set before we set watch on it
 			Optional<Value> restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
 			if (restoreRequestDoneKeyValue.present()) {
@@ -3826,12 +3905,13 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 				tr.clear(restoreRequestDoneKey);
 				wait(tr.commit());
 				break;
-			} else {
-				watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
+			} else if (!restoreRequestDone) {
+				fRestoreRequestDone = tr.watch(restoreRequestDoneKey);
 				wait(tr.commit());
+				wait(fRestoreRequestDone);
+			} else {
+				break;
 			}
-			// The clear transaction may fail in uncertain state, which may already clear the restoreRequestDoneKey
-			if (restoreRequestDone) break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -3898,7 +3978,7 @@ ACTOR static Future<Version> _fastRestore(Database cx, Key tagName, Key url, boo
 ACTOR Future<Version> fastRestore(Database cx, Standalone<StringRef> tagName, Standalone<StringRef> url,
                                   bool waitForComplete, long targetVersion, bool verbose, Standalone<KeyRangeRef> range,
                                   Standalone<StringRef> addPrefix, Standalone<StringRef> removePrefix) {
-	Version targetVersion =
+	Version result =
 	    wait(_fastRestore(cx, tagName, url, waitForComplete, targetVersion, verbose, range, addPrefix, removePrefix));
-	return targetVersion;
+	return result;
 }

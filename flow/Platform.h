@@ -375,8 +375,11 @@ int setEnvironmentVar(const char *name, const char *value, int overwrite);
 
 std::string getWorkingDirectory();
 
-// Returns the ... something something figure out plugin locations
-std::string getDefaultPluginPath( const char* plugin_name );
+// Returns the absolute platform-dependant path for server-based files
+std::string getDefaultConfigPath();
+
+// Returns the absolute platform-dependant path for the default fdb.cluster file
+std::string getDefaultClusterFilePath();
 
 void *getImageOffset();
 
@@ -384,6 +387,11 @@ void *getImageOffset();
 size_t raw_backtrace(void** addresses, int maxStackDepth);
 std::string get_backtrace();
 std::string format_backtrace(void **addresses, int numAddresses);
+
+// Avoid in production code: not atomic, not fast, not reliable in all environments
+int eraseDirectoryRecursive(std::string const& directory);
+
+bool isSse42Supported();
 
 } // namespace platform
 
@@ -524,22 +532,14 @@ inline static void aligned_free(void* ptr) { free(ptr); }
 inline static void* aligned_alloc(size_t alignment, size_t size) { return memalign(alignment, size); }
 #endif
 #elif defined(__APPLE__)
+#if !defined(HAS_ALIGNED_ALLOC)
 #include <cstdlib>
 inline static void* aligned_alloc(size_t alignment, size_t size) {
-	// Linux's aligned_alloc() requires alignment to be a power of 2.  While posix_memalign()
-	// also requires this, in addition it requires alignment to be a multiple of sizeof(void *).
-	// Rather than add this requirement to the platform::aligned_alloc() interface we will simply
-	// upgrade powers of 2 which are less than sizeof(void *) to be exactly sizeof(void *).  Non
-	// powers of 2 of any size will fail as they would on other platforms.  This change does not
-	// break the platform::aligned_alloc() contract as all addresses which are aligned to
-	// sizeof(void *) are also aligned to any power of 2 less than sizeof(void *).
-	if(alignment != 0 && alignment < sizeof(void *) && (alignment & (alignment - 1)) == 0) {
-		alignment = sizeof(void *);
-	}
 	void* ptr = nullptr;
 	posix_memalign(&ptr, alignment, size);
 	return ptr;
 }
+#endif
 inline static void aligned_free(void* ptr) { free(ptr); }
 #endif
 
@@ -590,6 +590,11 @@ inline static int clz( uint32_t value ) {
 
 #include <boost/config.hpp>
 // The formerly existing BOOST_NOEXCEPT is now BOOST_NOEXCEPT
+
+// These return thread local counts
+int64_t getNumProfilesDeferred();
+int64_t getNumProfilesOverflowed();
+int64_t getNumProfilesCaptured();
 
 #else
 #define EXTERNC

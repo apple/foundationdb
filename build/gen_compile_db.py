@@ -20,7 +20,6 @@ def actorCommand(cmd: str, build:str, src: str):
     if m1 is None:
         return cmd
     cmd1 = r1.sub('\\1actor.cpp', cmd)
-    cmd1 += " -Wno-unknown-attributes" # Make IDEs not warn on our custom [[flow_*]] attributes
     return rreplace(cmd1, build, src)
 
 
@@ -39,7 +38,8 @@ with open(args.input) as f:
 result = []
 
 for cmd in cmds:
-    cmd['command'] = cmd['command'].replace(' -DNO_INTELLISENSE ', ' ')
+    additional_flags = ['-Wno-unknown-attributes']
+    cmd['command'] = cmd['command'].replace(' -DNO_INTELLISENSE ', ' {} '.format(' '.join(additional_flags)))
     if cmd['file'].endswith('actor.g.cpp'):
         # here we need to rewrite the rule
         cmd['command'] = actorCommand(cmd['command'], args.builddir, args.srcdir)

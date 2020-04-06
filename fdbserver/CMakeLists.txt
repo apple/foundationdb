@@ -1,6 +1,10 @@
 set(FDBSERVER_SRCS
   ApplyMetadataMutation.h
   ApplyMetadataMutation.cpp
+  BackupInterface.h
+  BackupProgress.actor.cpp
+  BackupProgress.actor.h
+  BackupWorker.actor.cpp
   ClusterController.actor.cpp
   ClusterRecruitmentInterface.h
   ConflictSet.h
@@ -24,8 +28,6 @@ set(FDBSERVER_SRCS
   IKeyValueStore.h
   IPager.h
   IVersionedStore.h
-  IndirectShadowPager.actor.cpp
-  IndirectShadowPager.h
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreSQLite.actor.cpp
@@ -45,14 +47,13 @@ set(FDBSERVER_SRCS
   MasterInterface.h
   MasterProxyServer.actor.cpp
   masterserver.actor.cpp
-  MemoryPager.actor.cpp
-  MemoryPager.h
   MoveKeys.actor.cpp
   MoveKeys.actor.h
   networktest.actor.cpp
   NetworkTest.h
   OldTLogServer_4_6.actor.cpp
   OldTLogServer_6_0.actor.cpp
+  OldTLogServer_6_2.actor.cpp
   Orderer.actor.h
   pubsub.actor.cpp
   pubsub.h
@@ -75,7 +76,6 @@ set(FDBSERVER_SRCS
   RestoreLoader.actor.cpp
   RestoreWorker.actor.h
   RestoreWorker.actor.cpp
-  RestoreWorkerInterface.h
   Resolver.actor.cpp
   ResolverInterface.h
   ServerDBInfo.h
@@ -84,6 +84,7 @@ set(FDBSERVER_SRCS
   SkipList.cpp
   Status.actor.cpp
   Status.h
+  StorageCache.actor.cpp
   StorageMetrics.actor.h
   StorageMetrics.h
   storageserver.actor.cpp
@@ -165,6 +166,7 @@ set(FDBSERVER_SRCS
   workloads/RandomSelector.actor.cpp
   workloads/ReadWrite.actor.cpp
   workloads/RemoveServersSafely.actor.cpp
+  workloads/ReportConflictingKeys.actor.cpp
   workloads/Rollback.actor.cpp
   workloads/RyowCorrectness.actor.cpp
   workloads/RYWDisable.actor.cpp

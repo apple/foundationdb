@@ -79,6 +79,7 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A400040000LL, OpenDatabase);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A446020000LL, Locality);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A460010000LL, MultiGenerationTLog);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00A460010000LL, SharedMutations);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A551000000LL, MultiVersionClient);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A560010000LL, TagLocality);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B060000000LL, Fearless);
@@ -87,6 +88,9 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061030000LL, TLogVersion);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061070000LL, PseudoLocalities);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061070000LL, ShardedTxsTags);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063000000LL, UnifiedTLogSpilling);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, BackupWorker);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, ReportConflictingKeys);
 };
 
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys.
@@ -96,7 +100,7 @@ public: // introduced features
 //
 //                                                         xyzdev
 //                                                         vvvv
-constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B063000001LL);
+constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B063010001LL);
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
 static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");

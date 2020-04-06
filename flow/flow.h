@@ -133,8 +133,8 @@ class Never {};
 template <class T>
 class ErrorOr : public ComposedIdentifier<T, 0x1> {
 public:
-	ErrorOr() : error(default_error_or()) {}
-	ErrorOr(Error const& error) : error(error) {}
+	ErrorOr() : ErrorOr(default_error_or()) {}
+	ErrorOr(Error const& error) : error(error) { memset(&value, 0, sizeof(value)); }
 	ErrorOr(const ErrorOr<T>& o) : error(o.error) {
 		if (present()) new (&value) T(o.get());
 	}
@@ -225,13 +225,113 @@ struct union_like_traits<ErrorOr<T>> : std::true_type {
 	}
 
 	template <int i, class Alternative, class Context>
-	static const void assign(Member& m, const Alternative& a, Context&) {
+	static void assign(Member& m, const Alternative& a, Context&) {
 		if constexpr (i == 0) {
 			m = a;
 		} else {
 			static_assert(i == 1);
 			m = a;
 		}
+	}
+};
+
+template <class T>
+class CachedSerialization {
+public:
+	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
+
+	//FIXME: this code will not work for caching a direct serialization from ObjectWriter, because it adds an ErrorOr,
+	// we should create a separate SerializeType for direct serialization
+	enum class SerializeType { None, Binary, Object };
+
+	CachedSerialization() : cacheType(SerializeType::None) {}
+	explicit CachedSerialization(const T& data) : data(data), cacheType(SerializeType::None) {}
+
+	const T& read() const { return data; }
+
+	T& mutate() {
+		cacheType = SerializeType::None;
+		return data;
+	}
+
+	//This should only be called from the ObjectSerializer load function
+	Standalone<StringRef> getCache() const {
+		if(cacheType != SerializeType::Object) {
+			cache = ObjectWriter::toValue(ErrorOr<EnsureTable<T>>(data), AssumeVersion(currentProtocolVersion));
+			cacheType = SerializeType::Object;
+		}
+		return cache;
+	}
+
+	bool operator == (CachedSerialization<T> const& rhs) const {
+		return data == rhs.data;
+	}
+	bool operator != (CachedSerialization<T> const& rhs) const {
+		return !(*this == rhs);
+	}
+	bool operator < (CachedSerialization<T> const& rhs) const {
+		return data < rhs.data;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		if constexpr (is_fb_function<Ar>) {
+			// Suppress vtable collection. Save and load are implemented via the specializations below
+		} else {
+			if (Ar::isDeserializing) {
+				cache = Standalone<StringRef>();
+				cacheType = SerializeType::None;
+				serializer(ar, data);
+			} else {
+				if (cacheType != SerializeType::Binary) {
+					cache = BinaryWriter::toValue(data, AssumeVersion(currentProtocolVersion));
+					cacheType = SerializeType::Binary;
+				}
+				ar.serializeBytes(const_cast<uint8_t*>(cache.begin()), cache.size());
+			}
+		}
+	}
+
+private:
+	T data;
+	mutable SerializeType cacheType;
+	mutable Standalone<StringRef> cache;
+};
+
+// this special case is needed - the code expects
+// Standalone<T> and T to be equivalent for serialization
+namespace detail {
+
+template <class T, class Context>
+struct LoadSaveHelper<CachedSerialization<T>, Context> : Context {
+	LoadSaveHelper(const Context& context)
+		: Context(context), helper(context) {}
+
+	void load(CachedSerialization<T>& member, const uint8_t* current) {
+		helper.load(member.mutate(), current);
+	}
+
+	template <class Writer>
+	RelativeOffset save(const CachedSerialization<T>& member, Writer& writer, const VTableSet* vtables) {
+		throw internal_error();
+	}
+
+private:
+	LoadSaveHelper<T, Context> helper;
+};
+
+} // namespace detail
+
+template <class V>
+struct serialize_raw<ErrorOr<EnsureTable<CachedSerialization<V>>>> : std::true_type {
+	template <class Context>
+	static uint8_t* save_raw(Context& context, const ErrorOr<EnsureTable<CachedSerialization<V>>>& obj) {
+		auto cache = obj.present() ? obj.get().asUnderlyingType().getCache()
+		                           : ObjectWriter::toValue(ErrorOr<EnsureTable<V>>(obj.getError()),
+		                                                   AssumeVersion(currentProtocolVersion));
+		uint8_t* out = context.allocate(cache.size());
+		memcpy(out, cache.begin(), cache.size());
+		return out;
 	}
 };
 
@@ -479,6 +579,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 
 	bool isReady() const { return !queue.empty() || error.isValid(); }
 	bool isError() const { return queue.empty() && error.isValid(); }  // the *next* thing queued is an error
+	uint32_t size() const { return queue.size(); }
 
 	T pop() {
 		if (queue.empty()) {

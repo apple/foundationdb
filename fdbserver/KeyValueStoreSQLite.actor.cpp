@@ -20,7 +20,7 @@
 
 
 #define SQLITE_THREADSAFE 0  // also in sqlite3.amalgamation.c!
-#include "fdbrpc/crc32c.h"
+#include "flow/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
@@ -428,15 +428,16 @@ Value encodeKVFragment( KeyValueRef kv, uint32_t index) {
 	// a signed representation of the index value.  The type code for 0 is 0 (which is
 	// actually the null type in SQLite).
 	int8_t indexCode = 0;
-	uint32_t tmp = index;
-	while(tmp != 0) {
-		++indexCode;
-		tmp >>= 8;
+	if (index != 0) {
+		uint32_t tmp = index;
+		while (tmp != 0) {
+			++indexCode;
+			tmp >>= 8;
+		}
+		// An increment is required if the high bit of the N-byte index value is set, since it is
+		// positive number but SQLite only stores signed values and would interpret it as negative.
+		if (index >> (8 * indexCode - 1)) ++indexCode;
 	}
-	// An increment is required if the high bit of the N-byte index value is set, since it is
-	// positive number but SQLite only stores signed values and would interpret it as negative.
-	if(index >> (8 * indexCode - 1))
-		++indexCode;
 
 	int header_size = sqlite3VarintLen(keyCode) + sizeof(indexCode) + sqlite3VarintLen(valCode);
 	int hh = sqlite3VarintLen(header_size);
@@ -1075,21 +1076,26 @@ struct RawCursor {
 		}
 		return Optional<Value>();
 	}
-	Standalone<VectorRef<KeyValueRef>> getRange( KeyRangeRef keys, int rowLimit, int byteLimit ) {
-		Standalone<VectorRef<KeyValueRef>> result;
+	Standalone<RangeResultRef> getRange( KeyRangeRef keys, int rowLimit, int byteLimit ) {
+		Standalone<RangeResultRef> result;
 		int accumulatedBytes = 0;
 		ASSERT( byteLimit > 0 );
+		if(rowLimit == 0) {
+			return result;
+		}
+
 		if(db.fragment_values) {
-			if(rowLimit >= 0) {
+			if(rowLimit > 0) {
 				int r = moveTo(keys.begin);
 				if (r < 0)
 					moveNext();
 
 				DefragmentingReader i(*this, result.arena(), true);
 				Optional<KeyRef> nextKey = i.peek();
-				while(nextKey.present() && nextKey.get() < keys.end && rowLimit-- && accumulatedBytes < byteLimit) {
+				while(nextKey.present() && nextKey.get() < keys.end && rowLimit != 0 && accumulatedBytes < byteLimit) {
 					Optional<KeyValueRef> kv = i.getNext();
 					result.push_back(result.arena(), kv.get());
+					--rowLimit;
 					accumulatedBytes += sizeof(KeyValueRef) + kv.get().expectedSize();
 					nextKey = i.peek();
 				}
@@ -1100,36 +1106,44 @@ struct RawCursor {
 					movePrevious();
 				DefragmentingReader i(*this, result.arena(), false);
 				Optional<KeyRef> nextKey = i.peek();
-				while(nextKey.present() && nextKey.get() >= keys.begin && rowLimit++ && accumulatedBytes < byteLimit) {
+				while(nextKey.present() && nextKey.get() >= keys.begin && rowLimit != 0 && accumulatedBytes < byteLimit) {
 					Optional<KeyValueRef> kv = i.getNext();
 					result.push_back(result.arena(), kv.get());
+					++rowLimit;
 					accumulatedBytes += sizeof(KeyValueRef) + kv.get().expectedSize();
 					nextKey = i.peek();
 				}
 			}
 		}
 		else {
-			if (rowLimit >= 0) {
+			if (rowLimit > 0) {
 				int r = moveTo( keys.begin );
 				if (r < 0) moveNext();
-				while (this->valid && rowLimit-- && accumulatedBytes < byteLimit) {
+				while (this->valid && rowLimit != 0 && accumulatedBytes < byteLimit) {
 					KeyValueRef kv = decodeKV( getEncodedRow( result.arena() ) );
-					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 					if (kv.key >= keys.end) break;
+					--rowLimit;
+					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 					result.push_back( result.arena(), kv );
 					moveNext();
 				}
 			} else {
 				int r = moveTo( keys.end );
 				if (r >= 0) movePrevious();
-				while (this->valid && rowLimit++ && accumulatedBytes < byteLimit) {
+				while (this->valid && rowLimit != 0 && accumulatedBytes < byteLimit) {
 					KeyValueRef kv = decodeKV( getEncodedRow( result.arena() ) );
-					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 					if (kv.key < keys.begin) break;
+					++rowLimit;
+					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 					result.push_back( result.arena(), kv );
 					movePrevious();
 				}
 			}
+		}
+		result.more = rowLimit == 0 || accumulatedBytes >= byteLimit;
+		if(result.more) {
+			ASSERT(result.size() > 0);
+			result.readThrough = result[result.size()-1].key;
 		}
 		return result;
 	}
@@ -1426,7 +1440,7 @@ struct ThreadSafeCounter {
 	ThreadSafeCounter() : counter(0) {}
 	void operator ++() { interlockedIncrement64(&counter); }
 	void operator --() { interlockedDecrement64(&counter); }
-	operator const int64_t() const { return counter; }
+	operator int64_t() const { return counter; }
 };
 
 class KeyValueStoreSQLite : public IKeyValueStore {
@@ -1450,7 +1464,7 @@ public:
 
 	virtual Future<Optional<Value>> readValue( KeyRef key, Optional<UID> debugID );
 	virtual Future<Optional<Value>> readValuePrefix( KeyRef key, int maxLength, Optional<UID> debugID );
-	virtual Future<Standalone<VectorRef<KeyValueRef>>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 );
+	virtual Future<Standalone<RangeResultRef>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 );
 
 	KeyValueStoreSQLite(std::string const& filename, UID logID, KeyValueStoreType type, bool checkChecksums, bool checkIntegrity);
 	~KeyValueStoreSQLite();
@@ -1549,7 +1563,7 @@ private:
 		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			KeyRange keys;
 			int rowLimit, byteLimit;
-			ThreadReturnPromise<Standalone<VectorRef<KeyValueRef>>> result;
+			ThreadReturnPromise<Standalone<RangeResultRef>> result;
 			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit) : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
 			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
@@ -1999,7 +2013,7 @@ Future<Optional<Value>> KeyValueStoreSQLite::readValuePrefix( KeyRef key, int ma
 	readThreads->post(p);
 	return f;
 }
-Future<Standalone<VectorRef<KeyValueRef>>> KeyValueStoreSQLite::readRange( KeyRangeRef keys, int rowLimit, int byteLimit ) {
+Future<Standalone<RangeResultRef>> KeyValueStoreSQLite::readRange( KeyRangeRef keys, int rowLimit, int byteLimit ) {
 	++readsRequested;
 	auto p = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 	auto f = p->result.getFuture();

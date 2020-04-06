@@ -421,7 +421,8 @@ TEST_CASE("/flow/FlatBuffers/file_identifier") {
 	TestContext context{arena};
 	const uint8_t* out;
 	constexpr FileIdentifier file_identifier{ 1234 };
-	out = save_members(context, file_identifier);
+	Y1 y1;
+	out = save_members(context, file_identifier, y1);
 	// print_buffer(out, arena.get_size(out));
 	ASSERT(read_file_identifier(out) == file_identifier);
 	return Void();
@@ -481,6 +482,22 @@ TEST_CASE("/flow/FlatBuffers/Standalone") {
 	for (int i = 0; i < vecOut.size(); ++i) {
 		ASSERT(vecOut[i] == vecIn[i]);
 	}
+	return Void();
+}
+
+// Meant to be run with valgrind or asan, to catch heap buffer overflows
+TEST_CASE("/flow/FlatBuffers/Void") {
+	Standalone<StringRef> msg = ObjectWriter::toValue(Void(), Unversioned());
+	// Manually verified to be a valid flatbuffers message. This is technically brittle since there are other valid
+	// encodings of this message, but our implementation is unlikely to change.
+	ASSERT(msg == LiteralStringRef("\x14\x00\x00\x00J\xad\x1e\x00\x00\x00\x04\x00\x04\x00\x06\x00\x08\x00\x04\x00\x06"
+	                               "\x00\x00\x00\x04\x00\x00\x00\x12\x00\x00\x00"));
+	auto buffer = std::make_unique<uint8_t[]>(msg.size()); // Make a heap allocation of precisely the right size, so
+	                                                       // that asan or valgrind will catch any overflows
+	memcpy(buffer.get(), msg.begin(), msg.size());
+	ObjectReader rd(buffer.get(), Unversioned());
+	Void x;
+	rd.deserialize(x);
 	return Void();
 }
 

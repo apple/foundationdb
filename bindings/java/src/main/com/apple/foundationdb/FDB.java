@@ -30,12 +30,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * The starting point for accessing FoundationDB.
  *  <br>
- *  <h3>Setting API version</h3>
+ *  <h2>Setting API version</h2>
  *  The FoundationDB API is accessed with a call to {@link #selectAPIVersion(int)}.
  *   This call is required before using any other part of the API. The call allows
  *   an error to be thrown at this point to prevent client code from accessing a later library
  *   with incorrect assumptions from the current version. The API version documented here is version
- *   {@code 620}.<br><br>
+ *   {@code 700}.<br><br>
  *  FoundationDB encapsulates multiple versions of its interface by requiring
  *   the client to explicitly specify the version of the API it uses. The purpose
  *   of this design is to allow you to upgrade the server, client libraries, or
@@ -49,11 +49,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   being used to connect to the cluster. In particular, you should not advance
  *   the API version of your application after upgrading your client until the 
  *   cluster has also been upgraded.<br>
- *  <h3>Getting a database</h3>
+ *  <h2>Getting a database</h2>
  *  Once the API version has been set, the easiest way to get a {@link Database} object to use is
  *   to call {@link #open}.
  *  <br>
- *  <h3>Client networking</h3>
+ *  <h2>Client networking</h2>
  *  The network is started either implicitly with a call to a variant of {@link #open()}
  *  or started explicitly with a call to {@link #startNetwork()}.
  *  <br>
@@ -85,6 +85,8 @@ public class FDB {
 	private volatile boolean netStarted = false;
 	private volatile boolean netStopped = false;
 	volatile boolean warnOnUnclosed = true;
+	private boolean useShutdownHook = true;
+	private Thread shutdownHook;
 	private final Semaphore netRunning = new Semaphore(1);
 	private final NetworkOptions options;
 
@@ -104,15 +106,8 @@ public class FDB {
 	 * Called only once to create the FDB singleton.
 	 */
 	private FDB(int apiVersion) {
-		this(apiVersion, true);
-	}
-
-	private FDB(int apiVersion, boolean controlRuntime) {
 		this.apiVersion = apiVersion;
 		options = new NetworkOptions(this::Network_setOption);
-		if (controlRuntime) {
-			Runtime.getRuntime().addShutdownHook(new Thread(this::stopNetwork));
-		}
 	}
 
 	/**
@@ -167,9 +162,9 @@ public class FDB {
 	 *  object.<br><br>
 	 *
 	 *  Warning: When using the multi-version client API, setting an API version that
-	 *   is not supported by a particular client library will prevent that client from 
+	 *   is not supported by a particular client library will prevent that client from
 	 *   being used to connect to the cluster. In particular, you should not advance
-	 *   the API version of your application after upgrading your client until the 
+	 *   the API version of your application after upgrading your client until the
 	 *   cluster has also been upgraded.
 	 *
 	 * @param version the API version required
@@ -177,13 +172,6 @@ public class FDB {
 	 * @return the FoundationDB API object
 	 */
 	public static FDB selectAPIVersion(final int version) throws FDBException {
-		return selectAPIVersion(version, true);
-	}
-
-	/**
-	   This function is called from C++ if the VM is controlled directly from FDB
-	 */
-	private static synchronized FDB selectAPIVersion(final int version, boolean controlRuntime) throws FDBException {
 		if(singleton != null) {
 			if(version != singleton.getAPIVersion()) {
 				throw new IllegalArgumentException(
@@ -193,13 +181,30 @@ public class FDB {
 		}
 		if(version < 510)
 			throw new IllegalArgumentException("API version not supported (minimum 510)");
-		if(version > 620)
-			throw new IllegalArgumentException("API version not supported (maximum 620)");
+		if(version > 700)
+			throw new IllegalArgumentException("API version not supported (maximum 700)");
 
 		Select_API_version(version);
-		FDB fdb = new FDB(version, controlRuntime);
+		singleton = new FDB(version);
 
-		return singleton = fdb;
+		return singleton;
+	}
+
+	/**
+	 * Disables shutdown hook that stops network thread upon process shutdown. This is useful if you need to run
+	 * your own shutdown hook that uses the FDB instance and you need to avoid race conditions
+	 * with the default shutdown hook. Replacement shutdown hook should stop the network thread manually
+	 * by calling {@link #stopNetwork}.
+	 */
+	public synchronized void disableShutdownHook() {
+		useShutdownHook = false;
+		if(shutdownHook != null) {
+			// If this method was called after network thread started and shutdown hook was installed,
+			// remove this hook
+			Runtime.getRuntime().removeShutdownHook(shutdownHook);
+			// Release thread reference for GC
+			shutdownHook = null;
+		}
 	}
 
 	/**
@@ -292,9 +297,14 @@ public class FDB {
 	}
 
 	/**
-	 * Initializes networking, connects with the
-	 *  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
-	 *  and opens the database.
+	 * Initializes networking if required and connects to the cluster specified by the
+	 *  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.<br>
+	 *  <br>
+	 *  A single client can use this function multiple times to connect to different
+	 *  clusters simultaneously, with each invocation requiring its own cluster file.
+	 *  To connect to multiple clusters running at different, incompatible versions,
+	 *  the <a href="/foundationdb/api-general.html#multi-version-client-api" target="_blank">multi-version client API</a>
+	 *  must be used.
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
 	 */
@@ -303,8 +313,13 @@ public class FDB {
 	}
 
 	/**
-	 * Initializes networking, connects to the cluster specified by {@code clusterFilePath}
-	 *  and opens the database.
+	 * Initializes networking if required and connects to the cluster specified by {@code clusterFilePath}.<br>
+	 *  <br>
+	 *  A single client can use this function multiple times to connect to different
+	 *  clusters simultaneously, with each invocation requiring its own cluster file.
+	 *  To connect to multiple clusters running at different, incompatible versions,
+	 *  the <a href="/foundationdb/api-general.html#multi-version-client-api" target="_blank">multi-version client API</a>
+	 *  must be used.
 	 *
 	 * @param clusterFilePath the
 	 *  <a href="/foundationdb/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
@@ -319,8 +334,13 @@ public class FDB {
 	}
 
 	/**
-	 * Initializes networking, connects to the cluster specified by {@code clusterFilePath}
-	 *  and opens the database.
+	 * Initializes networking if required and connects to the cluster specified by {@code clusterFilePath}.<br>
+	 *  <br>
+	 *  A single client can use this function multiple times to connect to different
+	 *  clusters simultaneously, with each invocation requiring its own cluster file.
+	 *  To connect to multiple clusters running at different, incompatible versions,
+	 *  the <a href="/foundationdb/api-general.html#multi-version-client-api" target="_blank">multi-version client API</a>
+	 *  must be used.
 	 *
 	 * @param clusterFilePath the
 	 *  <a href="/foundationdb/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
@@ -389,6 +409,11 @@ public class FDB {
 			throw new IllegalStateException("Network has been stopped and cannot be restarted");
 		if(netStarted) {
 			return;
+		}
+		if(useShutdownHook) {
+			// Register shutdown hook that stops network thread if user did not opt out
+			shutdownHook = new Thread(this::stopNetwork, "fdb-shutdown-hook");
+			Runtime.getRuntime().addShutdownHook(shutdownHook);
 		}
 		Network_setup();
 		netStarted = true;

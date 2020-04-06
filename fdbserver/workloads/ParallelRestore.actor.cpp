@@ -23,7 +23,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // A workload which test the correctness of backup and restore process
@@ -38,14 +38,14 @@ struct RunRestoreWorkerWorkload : TestWorkload {
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 
 	virtual Future<Void> start(Database const& cx) {
-		int num_myWorkers = 3;
-		TraceEvent("RunParallelRestoreWorkerWorkload").detail("Start", "RestoreAgentDB");
+		int num_myWorkers = SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS + SERVER_KNOBS->FASTRESTORE_NUM_LOADERS + 1;
+		TraceEvent("RunParallelRestoreWorkerWorkload").detail("Start", "RestoreAgentDB").detail("Workers", num_myWorkers);
 		printf("RunParallelRestoreWorkerWorkload, we will start %d restore workers\n", num_myWorkers);
 		std::vector<Future<Void>> myWorkers;
 		for (int i = 0; i < num_myWorkers; ++i) {
 			myWorkers.push_back(_restoreWorker(cx, LocalityData()));
 		}
-		printf("RunParallelRestoreWorkerWorkload, wait on reply from %d restore workers\n", myWorkers.size());
+		printf("RunParallelRestoreWorkerWorkload, wait on reply from %ld restore workers\n", myWorkers.size());
 		worker = waitForAll(myWorkers);
 		printf("RunParallelRestoreWorkerWorkload, got all replies from restore workers\n");
 		return Void();

@@ -25,11 +25,54 @@
 #include "flow/IThreadPool.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
+#include "flow/TLSConfig.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 void forceLinkFlowTests() {}
 
 using std::vector;
+
+constexpr int firstLine = __LINE__;
+TEST_CASE("/flow/actorcompiler/lineNumbers") {
+	loop {
+		try {
+			ASSERT(__LINE__ == firstLine + 4);
+			wait(Future<Void>(Void()));
+			ASSERT(__LINE__ == firstLine + 6);
+			throw success();
+		} catch (Error& e) {
+			ASSERT(__LINE__ == firstLine + 9);
+			wait(Future<Void>(Void()));
+			ASSERT(__LINE__ == firstLine + 11);
+		}
+		break;
+	}
+	ASSERT(LiteralStringRef(__FILE__).endsWith(LiteralStringRef("FlowTests.actor.cpp")));
+	return Void();
+}
+
+TEST_CASE("/flow/buggifiedDelay") {
+	if (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0) {
+		return Void();
+	}
+	loop {
+		state double x = deterministicRandom()->random01();
+		state int last = 0;
+		state Future<Void> f1 = map(delay(x), [last = &last](const Void&) {
+			*last = 1;
+			return Void();
+		});
+		state Future<Void> f2 = map(delay(x), [last = &last](const Void&) {
+			*last = 2;
+			return Void();
+		});
+		wait(f1 && f2);
+		if (last == 1) {
+			TEST(true); // Delays can become ready out of order
+			return Void();
+		}
+	}
+}
 
 template <class T, class Func, class ErrFunc, class CallbackType>
 class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<T,Func,ErrFunc,CallbackType>> {
@@ -191,6 +234,7 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	virtual TaskPriority getCurrentTask() { return baseNetwork->getCurrentTask(); }
 	virtual void setCurrentTask(TaskPriority taskID) { baseNetwork->setCurrentTask(taskID); }
 	virtual double now() { return baseNetwork->now(); }
+	virtual double timer() { return baseNetwork->timer(); }
 	virtual void stop() { return baseNetwork->stop(); }
 	virtual bool isSimulated() const { return baseNetwork->isSimulated(); }
 	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) { return baseNetwork->onMainThread(std::move(signal), taskID); }
@@ -201,6 +245,10 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	virtual void run() { return baseNetwork->run(); }
 	virtual void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total)  { return baseNetwork->getDiskBytes(directory,free,total); }
 	virtual bool isAddressOnThisHost(NetworkAddress const& addr) { return baseNetwork->isAddressOnThisHost(addr); }
+	virtual const TLSConfig& getTLSConfig() {
+		static TLSConfig emptyConfig;
+		return emptyConfig;
+	}
 };
 
 struct NonserializableThing {};
@@ -1205,5 +1253,110 @@ TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel")
 	ASSERT( a == 0 );
 	f.cancel();
 	ASSERT( a == 1 );
+	return Void();
+}
+
+// Tests for https://github.com/apple/foundationdb/issues/1226
+
+template <class>
+struct ShouldNotGoIntoClassContextStack;
+
+ACTOR static Future<Void> shouldNotHaveFriends();
+
+class Foo1 {
+public:
+	explicit Foo1(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo1* self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo1::fooActor(Foo1* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+class [[nodiscard]] Foo2 {
+public:
+	explicit Foo2(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo2 * self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo2::fooActor(Foo2* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+class alignas(4) Foo3 {
+public:
+	explicit Foo3(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo3* self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo3::fooActor(Foo3* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+struct Super {};
+
+class Foo4 : Super {
+public:
+	explicit Foo4(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo4* self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo4::fooActor(Foo4* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+struct Outer {
+	class Foo5 : Super {
+	public:
+		explicit Foo5(int x) : x(x) {}
+		Future<int> foo() { return fooActor(this); }
+		ACTOR static Future<int> fooActor(Foo5* self);
+
+	private:
+		int x;
+	};
+};
+ACTOR Future<int> Outer::Foo5::fooActor(Outer::Foo5* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+ACTOR static Future<Void> shouldNotHaveFriends2();
+
+// Meant to be run with -fsanitize=undefined
+TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
+	deterministicRandom()->randomInt(std::numeric_limits<int>::min(), 0);
+	deterministicRandom()->randomInt(0, std::numeric_limits<int>::max());
+	deterministicRandom()->randomInt(std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
+	ASSERT(deterministicRandom()->randomInt(std::numeric_limits<int>::min(), std::numeric_limits<int>::min() + 1) ==
+	       std::numeric_limits<int>::min());
+	ASSERT(deterministicRandom()->randomInt(std::numeric_limits<int>::max() - 1, std::numeric_limits<int>::max()) ==
+	       std::numeric_limits<int>::max() - 1);
+
+	deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(), 0);
+	deterministicRandom()->randomInt64(0, std::numeric_limits<int64_t>::max());
+	deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
+	ASSERT(deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(),
+	                                          std::numeric_limits<int64_t>::min() + 1) ==
+	       std::numeric_limits<int64_t>::min());
+	ASSERT(deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::max() - 1,
+	                                          std::numeric_limits<int64_t>::max()) ==
+	       std::numeric_limits<int64_t>::max() - 1);
 	return Void();
 }

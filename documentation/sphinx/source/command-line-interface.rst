@@ -128,9 +128,11 @@ For more information on setting the cluster description, see :ref:`configuration
 exclude
 -------
 
-The ``exclude`` command excludes servers from the database. Its syntax is ``exclude <ADDRESS...>``. If no addresses are specified, the command provides the set of excluded servers.
+The ``exclude`` command excludes servers from the database or marks them as failed. Its syntax is ``exclude [failed] <ADDRESS...>``. If no addresses are specified, the command provides the set of excluded and failed servers.
 
 For each IP address or IP:port pair in ``<ADDRESS...>``, the command adds the address to the set of excluded servers. It then waits until all database state has been safely moved off the specified servers.
+
+If the ``failed`` keyword is specified, the address is marked as failed and added to the set of failed servers. It will not wait for the database state to move off the specified servers.
 
 For more information on excluding servers, see :ref:`removing-machines-from-a-cluster`.
 
@@ -159,6 +161,11 @@ getrangekeys
 The ``getrangekeys`` command fetches keys in a range. Its syntax is ``getrangekeys <BEGINKEY> [ENDKEY] [LIMIT]``. It displays up to ``<LIMIT>`` keys for keys between ``<BEGINKEY>`` (inclusive) and ``<ENDKEY>`` (exclusive). If ``<ENDKEY>`` is omitted, then the range will include all keys starting with ``<BEGINKEY>``. ``<LIMIT>`` defaults to 25 if omitted.
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
+
+getversion
+----------
+
+The ``getversion`` command fetches the current read version of the cluster or currently running transaction.
 
 help
 ----
@@ -213,9 +220,13 @@ The following options are available for use with the ``option`` command:
 include
 -------
 
-The ``include`` command permits previously excluded servers to rejoin the database. Its syntax is ``include all|<ADDRESS...>``.
+The ``include`` command permits previously excluded or failed servers to rejoin the database. Its syntax is ``include [failed] all|<ADDRESS...>``.
 
-If ``all`` is specified, the excluded servers list is cleared.
+The ``failed`` keyword is required if the servers were previously marked as failed rather than excluded.
+
+If ``all`` is specified, the excluded servers list is cleared. This will not clear the failed servers list.
+
+If ``failed all`` or ``all failed`` is specified, the failed servers list is cleared. This will not clear the excluded servers list.
 
 For each IP address or IP:port pair in ``<ADDRESS...>``, the command removes any matching exclusions from the excluded servers list. (A specified IP will match all ``IP:*`` exclusion entries).
 

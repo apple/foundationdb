@@ -95,13 +95,14 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("MachineID", machineState.machineId)
 				.detail("AIOSubmitCount", netData.countAIOSubmit - statState->networkState.countAIOSubmit)
 				.detail("AIOCollectCount", netData.countAIOCollect - statState->networkState.countAIOCollect)
-				.detail("AIOSubmitLag", (g_network->networkMetrics.secSquaredSubmit - statState->networkMetricsState.secSquaredSubmit) / currentStats.elapsed)
-				.detail("AIODiskStall", (g_network->networkMetrics.secSquaredDiskStall - statState->networkMetricsState.secSquaredDiskStall) / currentStats.elapsed)
+				.detail("AIOSubmitLag", (g_network->networkInfo.metrics.secSquaredSubmit - statState->networkMetricsState.secSquaredSubmit) / currentStats.elapsed)
+				.detail("AIODiskStall", (g_network->networkInfo.metrics.secSquaredDiskStall - statState->networkMetricsState.secSquaredDiskStall) / currentStats.elapsed)
 				.detail("CurrentConnections", netData.countConnEstablished - netData.countConnClosedWithError - netData.countConnClosedWithoutError)
 				.detail("ConnectionsEstablished", (double) (netData.countConnEstablished - statState->networkState.countConnEstablished) / currentStats.elapsed)
 				.detail("ConnectionsClosed", ((netData.countConnClosedWithError - statState->networkState.countConnClosedWithError) + (netData.countConnClosedWithoutError - statState->networkState.countConnClosedWithoutError)) / currentStats.elapsed)
 				.detail("ConnectionErrors", (netData.countConnClosedWithError - statState->networkState.countConnClosedWithError) / currentStats.elapsed)
-				.trackLatest(eventName.c_str());
+				.detail("TLSPolicyFailures", (netData.countTLSPolicyFailures - statState->networkState.countTLSPolicyFailures) / currentStats.elapsed)
+				.trackLatest(eventName);
 
 			TraceEvent("MemoryMetrics")
 				.DETAILALLOCATORMEMUSAGE(16)
@@ -142,23 +143,22 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("ReactTime", netData.countReactTime - statState->networkState.countReactTime);
 
 			for (int i = 0; i<NetworkMetrics::SLOW_EVENT_BINS; i++) {
-				if (int c = g_network->networkMetrics.countSlowEvents[i] - statState->networkMetricsState.countSlowEvents[i]) {
+				if (int c = g_network->networkInfo.metrics.countSlowEvents[i] - statState->networkMetricsState.countSlowEvents[i]) {
 					n.detail(format("SlowTask%dM", 1 << i).c_str(), c);
 				}
 			}
 
-			for (int i = 0; i < NetworkMetrics::PRIORITY_BINS && g_network->networkMetrics.priorityBins[i] != TaskPriority::Zero; i++) {
-				if(g_network->networkMetrics.priorityBlocked[i]) {
-					double lastSegment = std::min(currentStats.elapsed, now() - g_network->networkMetrics.priorityTimer[i]);
-					g_network->networkMetrics.priorityBlockedDuration[i] += lastSegment;
-					g_network->networkMetrics.secSquaredPriorityBlocked[i] += lastSegment * lastSegment;
-					g_network->networkMetrics.priorityTimer[i] = now();
+			for (int i = 0; i < NetworkMetrics::PRIORITY_BINS && g_network->networkInfo.metrics.priorityBins[i] != TaskPriority::Zero; i++) {
+				if(g_network->networkInfo.metrics.priorityBlocked[i]) {
+					g_network->networkInfo.metrics.priorityBlockedDuration[i] += now() - g_network->networkInfo.metrics.windowedPriorityTimer[i];
+					g_network->networkInfo.metrics.priorityMaxBlockedDuration[i] = std::max(g_network->networkInfo.metrics.priorityMaxBlockedDuration[i], now() - g_network->networkInfo.metrics.priorityTimer[i]);
+					g_network->networkInfo.metrics.windowedPriorityTimer[i] = now();
 				}
 
-				double blocked = g_network->networkMetrics.priorityBlockedDuration[i] - statState->networkMetricsState.priorityBlockedDuration[i];
-				double s2Blocked = g_network->networkMetrics.secSquaredPriorityBlocked[i] - statState->networkMetricsState.secSquaredPriorityBlocked[i];
-				n.detail(format("PriorityBusy%d", g_network->networkMetrics.priorityBins[i]).c_str(), blocked);
-				n.detail(format("SumOfSquaredPriorityBusy%d", g_network->networkMetrics.priorityBins[i]).c_str(), s2Blocked);
+				n.detail(format("PriorityBusy%d", g_network->networkInfo.metrics.priorityBins[i]).c_str(), std::min(currentStats.elapsed, g_network->networkInfo.metrics.priorityBlockedDuration[i] - statState->networkMetricsState.priorityBlockedDuration[i]));
+				n.detail(format("PriorityMaxBusy%d", g_network->networkInfo.metrics.priorityBins[i]).c_str(), g_network->networkInfo.metrics.priorityMaxBlockedDuration[i]);
+
+				g_network->networkInfo.metrics.priorityMaxBlockedDuration[i] = 0;
 			}
 
 			n.trackLatest("NetworkMetrics");
@@ -288,7 +288,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 		}
 	}
 #endif
-	statState->networkMetricsState = g_network->networkMetrics;
+	statState->networkMetricsState = g_network->networkInfo.metrics;
 	statState->networkState = netData;
 	return currentStats;
 }

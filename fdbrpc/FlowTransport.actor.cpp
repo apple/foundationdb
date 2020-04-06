@@ -25,7 +25,7 @@
 #include <memcheck.h>
 #endif
 
-#include "fdbrpc/crc32c.h"
+#include "flow/crc32c.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/genericactors.actor.h"
@@ -179,7 +179,8 @@ public:
 		countConnClosedWithoutError.init(LiteralStringRef("Net2.CountConnClosedWithoutError"));
 	}
 
-	Reference<struct Peer> getPeer( NetworkAddress const& address, bool openConnection = true );
+	Reference<struct Peer> getPeer( NetworkAddress const& address );
+	Reference<struct Peer> getOrOpenPeer( NetworkAddress const& address, bool startConnectionKeeper=true );
 
 	// Returns true if given network address 'address' is one of the address we are listening on.
 	bool isLocalAddress(const NetworkAddress& address) const;
@@ -301,7 +302,7 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 			state double lastRefreshed = now();
 			state int64_t lastBytesReceived = peer->bytesReceived;
 			loop {
-				wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME));
+				wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME, TaskPriority::ReadSocket));
 				if (lastBytesReceived < peer->bytesReceived) {
 					lastRefreshed = now();
 					lastBytesReceived = peer->bytesReceived;
@@ -316,7 +317,7 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 
 		//We cannot let an error be thrown from connectionMonitor while still on the stack from scanPackets in connectionReader
 		//because then it would not call the destructor of connectionReader when connectionReader is cancelled.
-		wait(delay(0));
+		wait(delay(0, TaskPriority::ReadSocket));
 
 		if (peer->reliable.empty() && peer->unsent.empty() && peer->outstandingReplies==0) {
 			if (peer->peerReferences == 0 &&
@@ -324,14 +325,14 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 				// TODO: What about when peerReference == -1?
 				throw connection_unreferenced();
 			} else if (FlowTransport::transport().isClient() && peer->compatible && peer->destination.isPublic() &&
-									(peer->lastConnectTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT) &&
-									(peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT)) {
+			           (peer->lastConnectTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT) &&
+			           (peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT)) {
 				// First condition is necessary because we may get here if we are server.
 				throw connection_idle();
 			}
 		}
 
-		wait (delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME));
+		wait (delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME, TaskPriority::ReadSocket));
 
 		// TODO: Stop monitoring and close the connection with no onDisconnect requests outstanding
 		state ReplyPromise<Void> reply;
@@ -402,22 +403,19 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 		.detail("PeerAddr", self->destination)
 		.detail("ConnSet", (bool)conn);
 
-	// This is used only at client side and is used to override waiting for unsent data to update failure monitoring
-	// status. At client, if an existing connection fails, we retry making a connection and if that fails, then only
-	// we report that address as failed.
-	state bool clientReconnectDelay = false;
+	state Optional<double> firstConnFailedTime = Optional<double>();
 	loop {
 		try {
 			if (!conn) {  // Always, except for the first loop with an incoming connection
 				self->outgoingConnectionIdle = true;
-
 				// Wait until there is something to send.
 				while (self->unsent.empty()) {
-					if (FlowTransport::transport().isClient() && self->destination.isPublic() &&
-							clientReconnectDelay) {
+					if (self->destination.isPublic() &&
+					    IFailureMonitor::failureMonitor().getState(self->destination).isFailed()) {
 						break;
 					}
-					wait(self->dataToSend.onTrigger());
+
+					wait (self->dataToSend.onTrigger());
 				}
 
 				ASSERT( self->destination.isPublic() );
@@ -428,35 +426,47 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				self->lastConnectTime = now();
 
 				TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
-				Reference<IConnection> _conn = wait( timeout( INetworkConnections::net()->connect(self->destination), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Reference<IConnection>() ) );
-				if (_conn) {
-					if (FlowTransport::transport().isClient()) {
-						IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
-					}
-					if (self->unsent.empty()) {
-						_conn->close();
-						clientReconnectDelay = false;
-						continue;
-					} else {
-						conn = _conn;
-						TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
-								.suppressFor(1.0)
-								.detail("PeerAddr", self->destination);
-						self->prependConnectPacket();
-					}
-				} else {
-					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
-					if (FlowTransport::transport().isClient()) {
-						IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
-					}
-					throw connection_failed();
-				}
 
-				reader = connectionReader( self->transport, conn, self, Promise<Reference<Peer>>());
+				try {
+					choose {
+						when( Reference<IConnection> _conn = wait( INetworkConnections::net()->connect(self->destination) ) ) { 
+							conn = _conn;
+							wait(conn->connectHandshake());
+							IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
+							if (self->unsent.empty()) {
+								conn->close();
+								conn = Reference<IConnection>();
+								continue;
+							} else {
+								TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
+										.suppressFor(1.0)
+										.detail("PeerAddr", self->destination);
+								self->prependConnectPacket();
+							}
+							reader = connectionReader( self->transport, conn, self, Promise<Reference<Peer>>());
+						}
+						when( wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) ) ) {
+							throw connection_failed();
+						}
+					}
+				} catch( Error &e ) {
+					if(e.code() != error_code_connection_failed) {
+						throw;
+					}
+					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID())
+					    .suppressFor(1.0)
+					    .detail("PeerAddr", self->destination);
+
+					IFailureMonitor::failureMonitor().setStatus(
+					    self->destination, FailureStatus(e.code() == error_code_connection_failed));
+					throw;
+				}
 			} else {
+				IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 				self->outgoingConnectionIdle = false;
 			}
 
+			firstConnFailedTime.reset();
 			try {
 				self->transport->countConnEstablished++;
 				wait( connectionWriter( self, conn ) || reader || connectionMonitor(self) );
@@ -467,6 +477,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 					self->transport->countConnClosedWithoutError++;
 				else
 					self->transport->countConnClosedWithError++;
+
 				throw e;
 			}
 
@@ -477,6 +488,17 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 			} else {
 				self->reconnectionDelay = std::min(FLOW_KNOBS->MAX_RECONNECTION_TIME, self->reconnectionDelay * FLOW_KNOBS->RECONNECTION_TIME_GROWTH_RATE);
 			}
+
+			if (firstConnFailedTime.present()) {
+				if (now() - firstConnFailedTime.get() > FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT) {
+					TraceEvent(SevWarnAlways, "PeerUnavailableForLongTime", conn ? conn->getDebugID() : UID())
+					    .detail("PeerAddr", self->destination);
+					firstConnFailedTime = now() - FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT/2.0;
+				}
+			} else {
+				firstConnFailedTime = now();
+			}
+
 			self->discardUnreliablePackets();
 			reader = Future<Void>();
 			bool ok = e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled ||
@@ -497,7 +519,10 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 						.detail("PeerAddr", self->destination);
 			}
 
-			if(self->destination.isPublic() && IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()) {
+			if(self->destination.isPublic() 
+				&& IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()
+				&& !FlowTransport::transport().isClient()) 
+			{
 				auto& it = self->transport->closedPeers[self->destination];
 				if(now() - it.second > FLOW_KNOBS->TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY) {
 					it.first = now();
@@ -511,9 +536,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 			}
 
 			if (conn) {
-				if (FlowTransport::transport().isClient() && e.code() != error_code_connection_idle) {
-					clientReconnectDelay = true;
-				}
 				conn->close();
 				conn = Reference<IConnection>();
 			}
@@ -557,9 +579,7 @@ void Peer::prependConnectPacket() {
 
 	pkt.connectPacketLength = sizeof(pkt) - sizeof(pkt.connectPacketLength);
 	pkt.protocolVersion = currentProtocolVersion;
-	if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
-		pkt.protocolVersion.addObjectSerializerFlag();
-	}
+	pkt.protocolVersion.addObjectSerializerFlag();
 	pkt.connectionId = transport->transportId;
 
 	PacketBuffer* pb_first = PacketBuffer::create();
@@ -634,14 +654,10 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 	if (receiver) {
 		try {
 			g_currentDeliveryPeerAddress = destination.addresses;
-			if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
-				StringRef data = reader.arenaReadAll();
-				ASSERT(data.size() > 8);
-				ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
-				receiver->receive(objReader);
-			} else {
-				receiver->receive(reader);
-			}
+			StringRef data = reader.arenaReadAll();
+			ASSERT(data.size() > 8);
+			ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
+			receiver->receive(objReader);
 			g_currentDeliveryPeerAddress = { NetworkAddress() };
 		} catch (Error& e) {
 			g_currentDeliveryPeerAddress = {NetworkAddress()};
@@ -654,7 +670,7 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 			if (self->isLocalAddress(destination.getPrimaryAddress())) {
 				sendLocal(self, SerializeSource<Endpoint>(Endpoint(self->localAddresses, destination.token)), Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
 			} else {
-				Reference<Peer> peer = self->getPeer(destination.getPrimaryAddress());
+				Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
 				sendPacket(self, peer, SerializeSource<Endpoint>(Endpoint(self->localAddresses, destination.token)), Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND), false);
 			}
 		}
@@ -686,7 +702,7 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 		}
 
 		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
-			TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
+			TraceEvent(SevError, "PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
 			throw platform_error();
 		}
 
@@ -740,7 +756,7 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 		++transport->countPacketsReceived;
 
 		if (packetLen > FLOW_KNOBS->PACKET_WARNING) {
-			TraceEvent(transport->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
+			TraceEvent(transport->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "LargePacketReceived")
 				.suppressFor(1.0)
 				.detail("FromPeer", peerAddress.toString())
 				.detail("Length", (int)packetLen)
@@ -767,7 +783,7 @@ static int getNewBufferSize(const uint8_t* begin, const uint8_t* end, const Netw
 	}
 	const uint32_t packetLen = *(uint32_t*)begin;
 	if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
-		TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
+		TraceEvent(SevError, "PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
 		throw platform_error();
 	}
 	return std::max<uint32_t>(FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES,
@@ -807,7 +823,9 @@ ACTOR static Future<Void> connectionReader(
 					const int unproc_len = unprocessed_end - unprocessed_begin;
 					const int len = getNewBufferSize(unprocessed_begin, unprocessed_end, peerAddress);
 					uint8_t* const newBuffer = new (newArena) uint8_t[ len ];
-					memcpy( newBuffer, unprocessed_begin, unproc_len );
+					if (unproc_len > 0) {
+						memcpy(newBuffer, unprocessed_begin, unproc_len);
+					}
 					arena = newArena;
 					unprocessed_begin = newBuffer;
 					unprocessed_end = newBuffer + unproc_len;
@@ -841,8 +859,8 @@ ACTOR static Future<Void> connectionReader(
 						serializer(pktReader, pkt);
 
 						uint64_t connectionId = pkt.connectionId;
-						if((FLOW_KNOBS->USE_OBJECT_SERIALIZER != 0) != pkt.protocolVersion.hasObjectSerializerFlag() ||
-						   !pkt.protocolVersion.isCompatible(currentProtocolVersion)) {
+						if (!pkt.protocolVersion.hasObjectSerializerFlag() ||
+						    !pkt.protocolVersion.isCompatible(currentProtocolVersion)) {
 							incompatibleProtocolVersionNewer = pkt.protocolVersion > currentProtocolVersion;
 							NetworkAddress addr = pkt.canonicalRemotePort
 							                          ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
@@ -873,8 +891,7 @@ ACTOR static Future<Void> connectionReader(
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but it's safer to keep the old behavior.
 								throw incompatible_protocol_version();
 							}
-						}
-						else {
+						} else {
 							compatible = true;
 							TraceEvent("ConnectionEstablished", conn->getDebugID())
 								.suppressFor(1.0)
@@ -908,7 +925,7 @@ ACTOR static Future<Void> connectionReader(
 								peerAddress = NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort, true,
 								                             peerAddress.isTLS());
 							}
-							peer = transport->getPeer(peerAddress);
+							peer = transport->getOrOpenPeer(peerAddress, false);
 							peer->compatible = compatible;
 							peer->incompatibleProtocolVersionNewer = incompatibleProtocolVersionNewer;
 							if (!compatible) {
@@ -949,6 +966,7 @@ ACTOR static Future<Void> connectionReader(
 
 ACTOR static Future<Void> connectionIncoming( TransportData* self, Reference<IConnection> conn ) {
 	try {
+		wait(conn->acceptHandshake());
 		state Promise<Reference<Peer>> onConnected;
 		state Future<Void> reader = connectionReader( self, conn, Reference<Peer>(), onConnected );
 		choose {
@@ -972,14 +990,20 @@ ACTOR static Future<Void> connectionIncoming( TransportData* self, Reference<ICo
 ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr ) {
 	state ActorCollectionNoErrors incoming;  // Actors monitoring incoming connections that haven't yet been associated with a peer
 	state Reference<IListener> listener = INetworkConnections::net()->listen( listenAddr );
+	state uint64_t connectionCount = 0;
 	try {
 		loop {
 			Reference<IConnection> conn = wait( listener->accept() );
-			TraceEvent("ConnectionFrom", conn->getDebugID()).suppressFor(1.0)
-				.detail("FromAddress", conn->getPeerAddress())
-				.detail("ListenAddress", listenAddr.toString());
-			incoming.add( connectionIncoming(self, conn) );
-			wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskPriority::WriteSocket));
+			if(conn) {
+				TraceEvent("ConnectionFrom", conn->getDebugID()).suppressFor(1.0)
+					.detail("FromAddress", conn->getPeerAddress())
+					.detail("ListenAddress", listenAddr.toString());
+				incoming.add( connectionIncoming(self, conn) );
+			}
+			connectionCount++;
+			if( connectionCount%(FLOW_KNOBS->ACCEPT_BATCH_SIZE) == 0 ) {
+				wait(delay(0, TaskPriority::AcceptSocket));
+			}
 		}
 	} catch (Error& e) {
 		TraceEvent(SevError, "ListenError").error(e);
@@ -987,18 +1011,25 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 	}
 }
 
-Reference<Peer> TransportData::getPeer( NetworkAddress const& address, bool openConnection ) {
+Reference<Peer> TransportData::getPeer( NetworkAddress const& address ) {
 	auto peer = peers.find(address);
 	if (peer != peers.end()) {
 		return peer->second;
 	}
-	if(!openConnection) {
-		return Reference<Peer>();
+	return Reference<Peer>();
+}
+
+Reference<Peer> TransportData::getOrOpenPeer( NetworkAddress const& address, bool startConnectionKeeper ) {
+	auto peer = getPeer(address);
+	if(!peer) {
+		peer = Reference<Peer>( new Peer(this, address) );
+		if(startConnectionKeeper) {
+			peer->connect = connectionKeeper(peer);
+		}
+		peers[address] = peer;
 	}
-	Reference<Peer> newPeer = Reference<Peer>( new Peer(this, address) );
-	newPeer->connect = connectionKeeper(newPeer);
-	peers[address] = newPeer;
-	return newPeer;
+
+	return peer;
 }
 
 bool TransportData::isLocalAddress(const NetworkAddress& address) const {
@@ -1074,11 +1105,11 @@ Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
 void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 	if (!isStream || !endpoint.getPrimaryAddress().isValid())
 		return;
-	else if (FlowTransport::transport().isClient())
-		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 
-	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress());
+	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
+
 	if(peer->peerReferences == -1) {
+		IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 		peer->peerReferences = 1;
 	} else {
 		peer->peerReferences++;
@@ -1087,7 +1118,7 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 
 void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream) {
 	if (!isStream || !endpoint.getPrimaryAddress().isValid()) return;
-	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress(), false);
+	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress());
 	if(peer) {
 		peer->peerReferences--;
 		if(peer->peerReferences < 0) {
@@ -1096,7 +1127,7 @@ void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream)
 				.detail("Address", endpoint.getPrimaryAddress())
 				.detail("Token", endpoint.token);
 		}
-		if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty() && peer->outstandingReplies==0) {
+		if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty() && peer->outstandingReplies==0 && peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY) {
 			peer->resetPing.trigger();
 		}
 	}
@@ -1131,15 +1162,9 @@ static void sendLocal( TransportData* self, ISerializeSource const& what, const 
 	// SOMEDAY: Would it be better to avoid (de)serialization by doing this check in flow?
 
 	Standalone<StringRef> copy;
-	if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
-		ObjectWriter wr(AssumeVersion(currentProtocolVersion));
-		what.serializeObjectWriter(wr);
-		copy = wr.toStringRef();
-	} else {
-		BinaryWriter wr( AssumeVersion(currentProtocolVersion) );
-		what.serializeBinaryWriter(wr);
-		copy = wr.toValue();
-	}
+	ObjectWriter wr(AssumeVersion(currentProtocolVersion));
+	what.serializeObjectWriter(wr);
+	copy = wr.toStringRef();
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(copy.begin(), copy.size());
 #endif
@@ -1178,7 +1203,7 @@ static ReliablePacket* sendPacket( TransportData* self, Reference<Peer> peer, IS
 
 	wr.writeAhead(packetInfoSize , &packetInfoBuffer);
 	wr << destination.token;
-	what.serializePacketWriter(wr, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
+	what.serializePacketWriter(wr);
 	pb = wr.finish();
 	len = wr.size() - packetInfoSize;
 
@@ -1209,11 +1234,11 @@ static ReliablePacket* sendPacket( TransportData* self, Reference<Peer> peer, IS
 	}
 
 	if (len > FLOW_KNOBS->PACKET_LIMIT) {
-		TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("ToPeer", destination.getPrimaryAddress()).detail("Length", (int)len);
+		TraceEvent(SevError, "PacketLimitExceeded").detail("ToPeer", destination.getPrimaryAddress()).detail("Length", (int)len);
 		// throw platform_error();  // FIXME: How to recover from this situation?
 	}
 	else if (len > FLOW_KNOBS->PACKET_WARNING) {
-		TraceEvent(self->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
+		TraceEvent(self->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "LargePacketSent")
 			.suppressFor(1.0)
 			.detail("ToPeer", destination.getPrimaryAddress())
 			.detail("Length", (int)len)
@@ -1246,7 +1271,7 @@ ReliablePacket* FlowTransport::sendReliable( ISerializeSource const& what, const
 		sendLocal( self, what, destination );
 		return nullptr;
 	}
-	Reference<Peer> peer = self->getPeer(destination.getPrimaryAddress());
+	Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
 	return sendPacket( self, peer, what, destination, true );
 }
 
@@ -1260,7 +1285,14 @@ Reference<Peer> FlowTransport::sendUnreliable( ISerializeSource const& what, con
 		sendLocal( self, what, destination );
 		return Reference<Peer>();
 	}
-	Reference<Peer> peer = self->getPeer(destination.getPrimaryAddress(), openConnection);
+	Reference<Peer> peer;
+	if(openConnection) { 
+		peer = self->getOrOpenPeer(destination.getPrimaryAddress());
+	}
+	else {
+		peer = self->getPeer(destination.getPrimaryAddress());
+	}
+
 	sendPacket( self, peer, what, destination, false );
 	return peer;
 }

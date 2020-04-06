@@ -34,3 +34,13 @@ std::string getRoleStr(RestoreRole role) {
 	}
 	return RestoreRoleStr[(int)role];
 }
+
+bool isRangeMutation(MutationRef m) {
+	if (m.type == MutationRef::Type::ClearRange) {
+		ASSERT(m.type != MutationRef::Type::DebugKeyRange);
+		return true;
+	} else {
+		ASSERT(m.type == MutationRef::Type::SetValue || isAtomicOp((MutationRef::Type)m.type));
+		return false;
+	}
+}

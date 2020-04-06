@@ -33,6 +33,10 @@ CMake-based build system. Both of them should currently work for most users,
 and CMake should be the preferred choice as it will eventually become the only
 build system available.
 
+If compiling for local development, please set -DUSE_WERROR=ON in
+cmake. Our CI compiles with -Werror on, so this way you'll find out about
+compiler warnings that break the build earlier.
+
 ## CMake
 
 To build with CMake, generally the following is required (works on Linux and
@@ -129,9 +133,9 @@ If you want to create a package you have to tell cmake what platform it is for.
 And then you can build by simply calling `cpack`. So for debian, call:
 
 ```
-cmake -DINSTALL_LAYOUT=DEB  <FDB_SOURCE_DIR>
+cmake <FDB_SOURCE_DIR>
 make
-cpack
+cpack -G DEB
 ```
 
 For RPM simply replace `DEB` with `RPM`.
@@ -151,9 +155,9 @@ To generate a installable package, you have to call CMake with the corresponding
 arguments and then use cpack to generate the package:
 
 ```sh
-cmake -DINSTALL_LAYOUT=OSX  <FDB_SOURCE_DIR>
+cmake <FDB_SOURCE_DIR>
 make
-cpack
+cpack -G productbuild
 ```
 
 ### Windows
@@ -202,7 +206,7 @@ will automatically find it and build with TLS support.
 If you installed WIX before running `cmake` you should find the
 `FDBInstaller.msi` in your build directory under `packaging/msi`. 
 
-## Makefile
+## Makefile (Deprecated - all users should transition to using cmake)
 
 #### MacOS
 
@@ -219,7 +223,7 @@ If you installed WIX before running `cmake` you should find the
 
 1. Install [Docker](https://www.docker.com/).
 1. Check out the foundationdb repo.
-1. Run the docker image interactively [Docker Run](https://docs.docker.com/engine/reference/run/#general-form) with the directory containing the foundationdb repo mounted [Docker Mounts](https://docs.docker.com/storage/volumes/).
+1. Run the docker image interactively with [Docker Run](https://docs.docker.com/engine/reference/run/#general-form), and with the directory containing the foundationdb repo mounted via [Docker Mounts](https://docs.docker.com/storage/volumes/).
 
     ```shell
     docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' foundationdb/foundationdb-build:latest

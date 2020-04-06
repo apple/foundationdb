@@ -71,9 +71,13 @@ Installation
 
 The FoundationDB Python API is compatible with Python 2.7 - 3.7. You will need to have a Python version within this range on your system before the FoundationDB Python API can be installed. Also please note that Python 3.7 no longer bundles a full copy of libffi, which is used for building the _ctypes module on non-macOS UNIX platforms. Hence, if you are using Python 3.7, you should make sure libffi is already installed on your system.
 
-On macOS, the FoundationDB Python API is installed as part of the FoundationDB installation (see :ref:`installing-client-binaries`). On Ubuntu or RHEL/CentOS, you will need to install the FoundationDB Python API manually.
+On macOS, the FoundationDB Python API is installed as part of the FoundationDB installation (see :ref:`installing-client-binaries`). On Ubuntu or RHEL/CentOS, you will need to install the FoundationDB Python API manually via Python's package manager ``pip``:
 
-You can download the FoundationDB Python API source directly from :doc:`downloads`.
+.. code-block:: none
+
+    user@host$ pip install foundationdb
+
+You can also download the FoundationDB Python API source directly from :doc:`downloads`.
 
 .. note:: The Python language binding is compatible with FoundationDB client binaries of version 2.0 or higher. When used with version 2.0.x client binaries, the API version must be set to 200 or lower.
 
@@ -96,7 +100,7 @@ When you import the ``fdb`` module, it exposes only one useful symbol:
 
 .. warning:: |api-version-multi-version-warning|
 
-For API changes between version 13 and |api-version| (for the purpose of porting older programs), see :doc:`release-notes`.
+For API changes between version 13 and |api-version| (for the purpose of porting older programs), see :doc:`release-notes` and :doc:`api-version-upgrade-guide`.
 
 Opening a database
 ==================
@@ -104,12 +108,14 @@ Opening a database
 After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     import fdb
-    fdb.api_version(620)
+    fdb.api_version(700)
     db = fdb.open()
 
 .. function:: open( cluster_file=None, event_model=None )
 
-    |fdb-open-blurb|
+    |fdb-open-blurb1|
+
+    |fdb-open-blurb2|
 
     .. param event_model:: Can be used to select alternate :ref:`api-python-event-models`
 
@@ -136,6 +142,10 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
     .. method :: fdb.options.set_trace_format(format)
 
        |option-trace-format-blurb|
+
+    .. method :: fdb.options.set_trace_clock_source(source)
+
+       |option-trace-clock-source-blurb|
 
     .. method :: fdb.options.set_disable_multi_version_client_api()
 
@@ -283,7 +293,7 @@ A |database-blurb1| |database-blurb2|
 
     If ``limit`` is specified, then only the first ``limit`` keys (and their values) in the range will be returned.
 
-    If ``reverse`` is True, then the last ``limit`` keys in the range will be returned in reverse order.
+    If ``reverse`` is True, then the last ``limit`` keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
     If ``streaming_mode`` is specified, it must be a value from the :data:`StreamingMode` enumeration. It provides a hint to FoundationDB about how to retrieve the specified range. This option should generally not be specified, allowing FoundationDB to retrieve the full range very efficiently.
 
@@ -391,7 +401,7 @@ Database options
 .. method:: Database.options.set_transaction_causal_read_risky()
 
     |option-db-causal-read-risky-blurb|
-    
+
 .. method:: Database.options.set_transaction_logging_max_field_length(size_limit)
 
     |option-db-tr-transaction-logging-max-field-length-blurb|
@@ -495,7 +505,7 @@ Reading data
 
     If ``limit`` is specified, then only the first ``limit`` keys (and their values) in the range will be returned.
 
-    If ``reverse`` is True, then the last ``limit`` keys in the range will be returned in reverse order.
+    If ``reverse`` is True, then the last ``limit`` keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
     If ``streaming_mode`` is specified, it must be a value from the :data:`StreamingMode` enumeration. It provides a hint to FoundationDB about how the returned container is likely to be used.  The default is :data:`StreamingMode.iterator`.
 
@@ -583,6 +593,8 @@ Writing data
 
     Removes all keys ``k`` such that ``begin <= k < end``, and their associated values. |immediate-return|
 
+    |transaction-clear-range-blurb|
+
     .. note :: Unlike in the case of :meth:`get_range`, ``begin`` and ``end`` must be keys (byte strings), not :class:`KeySelector`\ s.  (Resolving arbitrary key selectors would prevent this method from returning immediately, introducing concurrency issues.)
 
 ``del tr[begin:end]``
@@ -591,6 +603,8 @@ Writing data
 .. method:: Transaction.clear_range_startswith(prefix)
 
     Removes all the keys ``k`` such that ``k.startswith(prefix)``, and their associated values. |immediate-return|
+
+    |transaction-clear-range-blurb|
 
 .. _api-python-transaction-atomic-operations:
 
@@ -631,6 +645,10 @@ In each of the methods below, ``param`` should be a string appropriately packed 
 .. method:: Transaction.bit_xor(key, param)
 
     |atomic-xor|
+
+.. method:: Transaction.compare_and_clear(key, param)
+
+    |atomic-compare-and-clear|
 
 .. method:: Transaction.max(key, param)
 
@@ -778,6 +796,13 @@ Most applications should use the read version that FoundationDB determines autom
 
     |infrequent| |transaction-get-versionstamp-blurb|
 
+Transaction misc functions
+--------------------------
+
+.. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
+
+    Get the estimated byte size of the given key range. Returns a :class:`FutureInt64`.
+
 .. _api-python-transaction-options:
 
 Transaction options
@@ -871,6 +896,14 @@ Transaction options
 
     |option-set-transaction-logging-max-field-length-blurb|
 
+.. method:: Transaction.options.set_debug_transaction_identifier(id_string)
+
+    |option-set-debug-transaction-identifier|
+
+.. method:: Transaction.options.set_log_transaction()
+
+    |option-set-log-transaction|
+
 .. _api-python-future:
 
 Future objects
@@ -901,6 +934,8 @@ All future objects are a subclass of the :class:`Future` type.
 .. method:: Future.on_ready(callback)
 
     Calls the specified callback function, passing itself as a single argument, when the future object is ready. If the future object is ready at the time :meth:`on_ready()` is called, the call may occur immediately in the current thread (although this behavior is not guaranteed). Otherwise, the call may be delayed and take place on the thread with which the client was initialized. Therefore, the callback is responsible for any needed thread synchronization (and/or for posting work to your application's event loop, thread pool, etc., as may be required by your application's architecture).
+
+    .. note:: This function guarantees the callback will be executed **at most once**.
 
 .. warning:: |fdb-careful-with-callbacks-blurb|
 
@@ -934,9 +969,9 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
 
     Represents a future string object and responds to the same methods as string in Python. They may be passed to FoundationDB methods that expect a string.
 
-.. class:: FutureVersion
+.. class:: FutureInt64
 
-    Represents a future version (integer). You must call the :meth:`Future.wait()` method on this object to retrieve the version as an integer.
+    Represents a future integer. You must call the :meth:`Future.wait()` method on this object to retrieve the integer.
 
 .. class:: FutureStringArray
 

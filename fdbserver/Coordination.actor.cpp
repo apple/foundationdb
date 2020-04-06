@@ -209,7 +209,7 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 }
 
 ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<AsyncVar<bool>> hasConnectedClients, OpenDatabaseCoordRequest req) {
-	if(db->clientInfo->get().id != req.knownClientInfoID && !db->clientInfo->get().forward.present()) {
+	if(db->clientInfo->get().read().id != req.knownClientInfoID && !db->clientInfo->get().read().forward.present()) {
 		req.reply.send( db->clientInfo->get() );
 		return Void();
 	}
@@ -218,9 +218,9 @@ ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<Asyn
 	
 	db->clientStatusInfoMap[req.reply.getEndpoint().getPrimaryAddress()] = ClientStatusInfo(req.traceLogGroup, req.supportedVersions, req.issues);
 
-	while (db->clientInfo->get().id == req.knownClientInfoID && !db->clientInfo->get().forward.present()) {
+	while (db->clientInfo->get().read().id == req.knownClientInfoID && !db->clientInfo->get().read().forward.present()) {
 		choose {
-			when (wait( db->clientInfo->onChange() )) {}
+			when (wait( yieldedFuture(db->clientInfo->onChange()) )) {}
 			when (wait( delayJittered( SERVER_KNOBS->CLIENT_REGISTER_INTERVAL ) )) { break; }  // The client might be long gone!
 		}
 	}
@@ -315,10 +315,12 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			ClientDBInfo outInfo;
 			outInfo.id = deterministicRandom()->randomUniqueID();
 			outInfo.forward = req.conn.toString();
-			clientData.clientInfo->set(outInfo);
+			clientData.clientInfo->set(CachedSerialization<ClientDBInfo>(outInfo));
 			req.reply.send( Void() );
-			ASSERT(!hasConnectedClients->get());
-			return Void();
+			if(!hasConnectedClients->get()) {
+				return Void();
+			}
+			nextInterval = Future<Void>();
 		}
 		when ( wait(nextInterval.isValid() ? nextInterval : Never()) ) {
 			if (!availableLeaders.size() && !availableCandidates.size() && !notify.size() &&
@@ -399,7 +401,7 @@ struct LeaderRegisterCollection {
 		if( !self->pStore->exists() )
 			return Void();
 		OnDemandStore &store = *self->pStore;
-		Standalone<VectorRef<KeyValueRef>> forwardingInfo = wait( store->readRange( fwdKeys ) );
+		Standalone<RangeResultRef> forwardingInfo = wait( store->readRange( fwdKeys ) );
 		for( int i = 0; i < forwardingInfo.size(); i++ ) {
 			LeaderInfo forwardInfo;
 			forwardInfo.forward = true;
@@ -478,7 +480,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 				ClientDBInfo info;
 				info.id = deterministicRandom()->randomUniqueID();
 				info.forward = forward.get().serializedInfo;
-				req.reply.send( info );
+				req.reply.send( CachedSerialization<ClientDBInfo>(info) );
 			} else {
 				regs.getInterface(req.clusterKey, id).openDatabase.send( req );
 			}

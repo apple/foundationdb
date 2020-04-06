@@ -34,6 +34,7 @@ ERROR( success, 0, "Success" )
 ERROR( end_of_stream, 1, "End of stream" )
 ERROR( operation_failed, 1000, "Operation failed")
 ERROR( wrong_shard_server, 1001, "Shard is not available from this server")
+ERROR( operation_obsolete, 1002, "Operation result no longer necessary")
 ERROR( timed_out, 1004, "Operation timed out" )
 ERROR( coordinated_state_conflict, 1005, "Conflict occurred while changing coordination information" )
 ERROR( all_alternatives_failed, 1006, "All alternatives failed" )
@@ -68,6 +69,7 @@ ERROR( serialization_failed, 1044, "Failed to deserialize an object" )
 ERROR( connection_unreferenced, 1048, "No peer references for connection" )
 ERROR( connection_idle, 1049, "Connection closed after idle timeout" )
 ERROR( disk_adapter_reset, 1050, "The disk queue adpater reset" )
+ERROR(batch_transaction_throttled, 1051, "Batch GRV request rate limit exceeded")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -86,6 +88,7 @@ ERROR( please_reboot_delete, 1208, "Reboot of server process requested, with del
 ERROR( master_proxy_failed, 1209, "Master terminating because a Proxy failed" )
 ERROR( master_resolver_failed, 1210, "Master terminating because a Resolver failed" )
 ERROR( server_overloaded, 1211, "Server is under too much load and cannot respond" )
+ERROR( master_backup_worker_failed, 1212, "Master terminating because a backup worker failed")
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

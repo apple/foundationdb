@@ -21,7 +21,7 @@
 #include <jni.h>
 #include <string.h>
 
-#define FDB_API_VERSION 620
+#define FDB_API_VERSION 700
 
 #include <foundationdb/fdb_c.h>
 
@@ -643,6 +643,35 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 			targetBytes, (FDBStreamingMode)streamingMode, iteration, snapshot, reverse);
 	jenv->ReleaseByteArrayElements( keyBeginBytes, (jbyte *)barrBegin, JNI_ABORT );
 	jenv->ReleaseByteArrayElements( keyEndBytes, (jbyte *)barrEnd, JNI_ABORT );
+	return (jlong)f;
+}
+
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getEstimatedRangeSizeBytes(JNIEnv *jenv, jobject, jlong tPtr, 
+		jbyteArray beginKeyBytes, jbyteArray endKeyBytes) {
+	if( !tPtr || !beginKeyBytes || !endKeyBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBTransaction *tr = (FDBTransaction *)tPtr;
+
+	uint8_t *startKey = (uint8_t *)jenv->GetByteArrayElements( beginKeyBytes, JNI_NULL );
+	if(!startKey) {
+		if( !jenv->ExceptionOccurred() )
+			throwRuntimeEx( jenv, "Error getting handle to native resources" );
+		return 0;
+	}
+
+	uint8_t *endKey = (uint8_t *)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
+	if (!endKey) {
+		jenv->ReleaseByteArrayElements( beginKeyBytes, (jbyte *)startKey, JNI_ABORT );
+		if( !jenv->ExceptionOccurred() )
+			throwRuntimeEx( jenv, "Error getting handle to native resources" );
+		return 0;
+	}
+
+	FDBFuture *f = fdb_transaction_get_estimated_range_size_bytes( tr, startKey, jenv->GetArrayLength( beginKeyBytes ), endKey, jenv->GetArrayLength( endKeyBytes ) );
+	jenv->ReleaseByteArrayElements( beginKeyBytes, (jbyte *)startKey, JNI_ABORT );
+	jenv->ReleaseByteArrayElements( endKeyBytes, (jbyte *)endKey, JNI_ABORT );
 	return (jlong)f;
 }
 

@@ -28,6 +28,7 @@ const KeyRangeRef systemKeys(systemKeysPrefix, LiteralStringRef("\xff\xff") );
 const KeyRangeRef nonMetadataSystemKeys(LiteralStringRef("\xff\x02"), LiteralStringRef("\xff\x03"));
 const KeyRangeRef allKeys = KeyRangeRef(normalKeys.begin, systemKeys.end);
 const KeyRef afterAllKeys = LiteralStringRef("\xff\xff\x00");
+const KeyRangeRef specialKeys = KeyRangeRef(LiteralStringRef("\xff\xff"), LiteralStringRef("\xff\xff\xff\xff"));
 
 // keyServersKeys.contains(k) iff k.startsWith(keyServersPrefix)
 const KeyRangeRef keyServersKeys( LiteralStringRef("\xff/keyServers/"), LiteralStringRef("\xff/keyServers0") );
@@ -58,6 +59,33 @@ void decodeKeyServersValue( const ValueRef& value, vector<UID>& src, vector<UID>
 	}
 }
 
+const KeyRef conflictingKeysPrefix = LiteralStringRef("/transaction/conflicting_keys/");
+const Key conflictingKeysAbsolutePrefix = conflictingKeysPrefix.withPrefix(specialKeys.begin);
+const ValueRef conflictingKeysTrue = LiteralStringRef("1");
+const ValueRef conflictingKeysFalse = LiteralStringRef("0");
+
+//    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
+const KeyRangeRef storageCacheKeys( LiteralStringRef("\xff/storageCache/"), LiteralStringRef("\xff/storageCache0") );
+const KeyRef storageCachePrefix = storageCacheKeys.begin;
+
+const Key storageCacheKey( const KeyRef& k ) {
+	return k.withPrefix( storageCachePrefix );
+}
+
+const Value storageCacheValue( const vector<uint16_t>& serverIndices ) {
+	BinaryWriter wr((IncludeVersion())); 
+	wr << serverIndices;
+	return wr.toValue();
+}
+
+void decodeStorageCacheValue( const ValueRef& value, vector<uint16_t>& serverIndices ) {
+	serverIndices.clear();
+	if (value.size()) {
+		BinaryReader rd(value, IncludeVersion());
+		rd >> serverIndices;
+	}
+}
+
 const Value logsValue( const vector<std::pair<UID, NetworkAddress>>& logs, const vector<std::pair<UID, NetworkAddress>>& oldLogs ) {
 	BinaryWriter wr(IncludeVersion());
 	wr << logs;
@@ -72,7 +100,6 @@ std::pair<vector<std::pair<UID, NetworkAddress>>,vector<std::pair<UID, NetworkAd
 	reader >> oldLogs;
 	return std::make_pair(logs, oldLogs);
 }
-
 
 const KeyRef serverKeysPrefix = LiteralStringRef("\xff/serverKeys/");
 const ValueRef serverKeysTrue = LiteralStringRef("1"), // compatible with what was serverKeysTrue
@@ -103,6 +130,49 @@ bool serverHasKey( ValueRef storedValue ) {
 	return storedValue == serverKeysTrue;
 }
 
+const KeyRef cacheKeysPrefix = LiteralStringRef("\xff\x02/cacheKeys/");
+
+const Key cacheKeysKey( uint16_t idx, const KeyRef& key ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( cacheKeysPrefix );
+	wr << idx;
+	wr.serializeBytes( LiteralStringRef("/") );
+	wr.serializeBytes( key );
+	return wr.toValue();
+}
+const Key cacheKeysPrefixFor( uint16_t idx ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( cacheKeysPrefix );
+	wr << idx;
+	wr.serializeBytes( LiteralStringRef("/") );
+	return wr.toValue();
+}
+uint16_t cacheKeysDecodeIndex( const KeyRef& key ) {
+	uint16_t idx;
+	BinaryReader rd( key.removePrefix(cacheKeysPrefix), Unversioned() );
+	rd >> idx;
+	return idx;
+}
+KeyRef cacheKeysDecodeKey( const KeyRef& key ) {
+	return key.substr( cacheKeysPrefix.size() + sizeof(uint16_t) + 1);
+}
+
+const KeyRef cacheChangeKey = LiteralStringRef("\xff\x02/cacheChangeKey");
+const KeyRangeRef cacheChangeKeys( LiteralStringRef("\xff\x02/cacheChangeKeys/"), LiteralStringRef("\xff\x02/cacheChangeKeys0") );
+const KeyRef cacheChangePrefix = cacheChangeKeys.begin;
+const Key cacheChangeKeyFor( uint16_t idx ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( cacheChangePrefix );
+	wr << idx;
+	return wr.toValue();
+}
+uint16_t cacheChangeKeyDecodeIndex( const KeyRef& key ) {
+	uint16_t idx;
+	BinaryReader rd( key.removePrefix(cacheChangePrefix), Unversioned() );
+	rd >> idx;
+	return idx;
+}
+
 const KeyRangeRef serverTagKeys(
 	LiteralStringRef("\xff/serverTag/"),
 	LiteralStringRef("\xff/serverTag0") );
@@ -113,7 +183,7 @@ const KeyRangeRef serverTagConflictKeys(
 const KeyRef serverTagConflictPrefix = serverTagConflictKeys.begin;
 // serverTagHistoryKeys is the old tag a storage server uses before it is migrated to a different location.
 // For example, we can copy a SS file to a remote DC and start the SS there;
-//   The new SS will need to cnosume the last bits of data from the old tag it is responsible for.
+//   The new SS will need to consume the last bits of data from the old tag it is responsible for.
 const KeyRangeRef serverTagHistoryKeys(
 	LiteralStringRef("\xff/serverTagHistory/"),
 	LiteralStringRef("\xff/serverTagHistory0") );
@@ -380,6 +450,23 @@ std::string encodeExcludedServersKey( AddressExclusion const& addr ) {
 	return excludedServersPrefix.toString() + addr.toString();
 }
 
+const KeyRangeRef failedServersKeys( LiteralStringRef("\xff/conf/failed/"), LiteralStringRef("\xff/conf/failed0") );
+const KeyRef failedServersPrefix = failedServersKeys.begin;
+const KeyRef failedServersVersionKey = LiteralStringRef("\xff/conf/failed");
+const AddressExclusion decodeFailedServersKey( KeyRef const& key ) {
+	ASSERT( key.startsWith( failedServersPrefix ) );
+	// Returns an invalid NetworkAddress if given an invalid key (within the prefix)
+	// Excluded servers have IP in x.x.x.x format, port optional, and no SSL suffix
+	// Returns a valid, public NetworkAddress with a port of 0 if the key represents an IP address alone (meaning all ports)
+	// Returns a valid, public NetworkAddress with nonzero port if the key represents an IP:PORT combination
+
+	return AddressExclusion::parse(key.removePrefix( failedServersPrefix ));
+}
+std::string encodeFailedServersKey( AddressExclusion const& addr ) {
+	//FIXME: make sure what's persisted here is not affected by innocent changes elsewhere
+	return failedServersPrefix.toString() + addr.toString();
+}
+
 const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
 const KeyRef workerListPrefix = workerListKeys.begin;
 
@@ -408,6 +495,51 @@ ProcessData decodeWorkerListValue( ValueRef const& value ) {
 	BinaryReader reader( value, IncludeVersion() );
 	reader >> s;
 	return s;
+}
+
+const KeyRangeRef backupProgressKeys(LiteralStringRef("\xff\x02/backupProgress/"),
+                                     LiteralStringRef("\xff\x02/backupProgress0"));
+const KeyRef backupProgressPrefix = backupProgressKeys.begin;
+const KeyRef backupStartedKey = LiteralStringRef("\xff\x02/backupStarted");
+
+const Key backupProgressKeyFor(UID workerID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(backupProgressPrefix);
+	wr << workerID;
+	return wr.toValue();
+}
+
+const Value backupProgressValue(const WorkerBackupStatus& status) {
+	BinaryWriter wr(IncludeVersion());
+	wr << status;
+	return wr.toValue();
+}
+
+UID decodeBackupProgressKey(const KeyRef& key) {
+	UID serverID;
+	BinaryReader rd(key.removePrefix(backupProgressPrefix), Unversioned());
+	rd >> serverID;
+	return serverID;
+}
+
+WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
+	WorkerBackupStatus status;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> status;
+	return status;
+}
+
+Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids) {
+	BinaryWriter wr(IncludeVersion());
+	wr << ids;
+	return wr.toValue();
+}
+
+std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& value) {
+	std::vector<std::pair<UID, Version>> ids;
+	BinaryReader reader(value, IncludeVersion());
+	if (value.size() > 0) reader >> ids;
+	return ids;
 }
 
 const KeyRef coordinatorsKey = LiteralStringRef("\xff/coordinators");
@@ -619,6 +751,29 @@ const KeyRef restoreRequestDoneKey = LiteralStringRef("\xff\x02/restoreRequestDo
 const KeyRangeRef restoreRequestKeys(LiteralStringRef("\xff\x02/restoreRequests/"),
                                      LiteralStringRef("\xff\x02/restoreRequests0"));
 
+const KeyRangeRef restoreApplierKeys(LiteralStringRef("\xff\x02/restoreApplier/"),
+                                     LiteralStringRef("\xff\x02/restoreApplier0"));
+const KeyRef restoreApplierTxnValue = LiteralStringRef("1");
+
+// restoreApplierKeys: track atomic transaction progress to ensure applying atomicOp exactly once
+// Version and batchIndex are passed in as LittleEndian,
+// they must be converted to BigEndian to maintain ordering in lexical order
+const Key restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(restoreApplierKeys.begin);
+	wr << applierID << bigEndian64(batchIndex) << bigEndian64(version);
+	return wr.toValue();
+}
+
+std::tuple<UID, int64_t, Version> decodeRestoreApplierKey(ValueRef const& key) {
+	BinaryReader rd(key, Unversioned());
+	UID applierID;
+	int64_t batchIndex;
+	Version version;
+	rd >> applierID >> batchIndex >> version;
+	return std::make_tuple(applierID, bigEndian64(batchIndex), bigEndian64(version));
+}
+
 // Encode restore worker key for workerID
 const Key restoreWorkerKeyFor(UID const& workerID) {
 	BinaryWriter wr(Unversioned());
@@ -649,7 +804,7 @@ const Value restoreRequestTriggerValue(UID randomID, int const numRequests) {
 	wr << randomID;
 	return wr.toValue();
 }
-const int decodeRestoreRequestTriggerValue(ValueRef const& value) {
+int decodeRestoreRequestTriggerValue(ValueRef const& value) {
 	int s;
 	UID randomID;
 	BinaryReader reader(value, IncludeVersion());

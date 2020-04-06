@@ -34,7 +34,7 @@
 #include <cstdint>
 #include <cstdarg>
 
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
@@ -52,8 +52,6 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 	Optional<RestoreLoaderInterface> loaderInterf;
 	Optional<RestoreApplierInterface> applierInterf;
 
-	uint32_t inProgressFlag = 0; // To avoid race between duplicate message delivery that invokes the same actor multiple times
-
 	UID id() const { return workerID; };
 
 	RestoreWorkerData() = default;
@@ -70,4 +68,4 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 };
 
 #include "flow/unactorcompiler.h"
-#endif //FDBSERVER_RESTOREWORKER_H
+#endif // FDBSERVER_RESTOREWORKER_H

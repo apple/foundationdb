@@ -1,6 +1,8 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <ActorCompiler Include="BackupProgress.actor.cpp" />
+    <ActorCompiler Include="BackupWorker.actor.cpp" />
     <ActorCompiler Include="ClusterController.actor.cpp" />
     <ActorCompiler Include="DataDistribution.actor.cpp" />
     <ActorCompiler Include="DataDistributionQueue.actor.cpp" />
@@ -197,6 +199,7 @@
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="Resolver.actor.cpp" />
+    <ActorCompiler Include="StorageCache.actor.cpp" />
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
     <ActorCompiler Include="Orderer.actor.h" />
     <ActorCompiler Include="workloads\DiskDurabilityTest.actor.cpp">
@@ -274,8 +277,6 @@
     <ActorCompiler Include="workloads\AtomicRestore.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
-    <ActorCompiler Include="MemoryPager.actor.cpp" />
-    <ActorCompiler Include="IndirectShadowPager.actor.cpp" />
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
     <ActorCompiler Include="LogRouter.actor.cpp" />
     <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp">
@@ -297,6 +298,9 @@
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="workloads\Mako.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\ReportConflictingKeys.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
@@ -323,6 +327,8 @@
     <ClCompile Include="LatencyBandConfig.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="BackupInterface.h" />
+    <ClInclude Include="BackupProgress.h" />
     <ClInclude Include="ConflictSet.h" />
     <ClInclude Include="DataDistribution.actor.h" />
     <ClInclude Include="DataDistributorInterface.h" />
@@ -330,7 +336,6 @@
     <ClInclude Include="pubsub.h" />
     <ClInclude Include="Knobs.h" />
     <ClInclude Include="WorkerInterface.h" />
-    <ClInclude Include="RestoreWorkerInterface.h" />
     <ClInclude Include="RestoreCommon.actor.h" />
     <ClInclude Include="WaitFailure.h" />
     <ClInclude Include="TesterInterface.actor.h" />
@@ -387,8 +392,6 @@
     <ClInclude Include="LogProtocolMessage.h" />
     <ClInclude Include="IPager.h" />
     <ClInclude Include="IVersionedStore.h" />
-    <ClInclude Include="MemoryPager.h" />
-    <ClInclude Include="IndirectShadowPager.h" />
     <ClInclude Include="template_fdb.h" />
     <ClInclude Include="LatencyBandConfig.h" />
   </ItemGroup>

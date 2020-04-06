@@ -1,6 +1,6 @@
-###################
-Release Notes (4.3)
-###################
+#############
+Release Notes
+#############
 
 4.3.0
 =====
@@ -21,6 +21,11 @@ Fixes
 * DR status would crash if called before a DR had been started.
 * Changed the blob restore read pattern to work around blob store issues.
 * External clients do not load environment variable options.
+
+Bindings
+--------
+
+* API version updated to 430. There are no behavior changes in this API version. See the :ref:`API version upgrade guide <api-version-upgrade-guide-430>` for upgrade details.
 
 Earlier release notes
 ---------------------

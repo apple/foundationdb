@@ -1350,10 +1350,11 @@ typedef ContinuousMetric<Standalone<StringRef>> StringMetric;
 //
 template <typename T>
 struct MetricHandle {
-	template<typename ValueType = typename T::ValueType>
-	MetricHandle(StringRef const &name = StringRef(), StringRef const &id = StringRef(), ValueType const &initial = ValueType())
-	  : ref(T::getOrCreateInstance(name, id, true, initial)) {
-	}
+	using ValueType = typename T::ValueType;
+
+	MetricHandle(StringRef const& name = StringRef(), StringRef const& id = StringRef(),
+	             ValueType const& initial = ValueType())
+	  : ref(T::getOrCreateInstance(name, id, true, initial)) {}
 
 	// Initialize this handle to point to a new or existing metric with (name, id).  If a new metric is created then the handle's
 	// current metric's current value will be the new metric's initial value.  This allows Metric handle users to treate their

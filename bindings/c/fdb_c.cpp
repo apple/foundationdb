@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 620
+#define FDB_API_VERSION 700
 #define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
@@ -44,8 +44,9 @@ int g_api_version = 0;
 // Legacy (pre API version 610)
 #define CLUSTER(c) ((char*)c)
 
-/* 
- * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi instance (e.g. from ThreadSafeApi)
+/*
+ * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
+ * instance (e.g. from ThreadSafeApi)
  */
 #define API ((IClientApi*)MultiVersionApi::api)
 
@@ -74,12 +75,10 @@ fdb_bool_t fdb_error_predicate( int predicate_test, fdb_error_t code ) {
 				code == error_code_cluster_version_changed;
 	}
 	if(predicate_test == FDBErrorPredicates::RETRYABLE_NOT_COMMITTED) {
-		return code == error_code_not_committed ||
-				code == error_code_transaction_too_old ||
-				code == error_code_future_version ||
-				code == error_code_database_locked ||
-				code == error_code_proxy_memory_limit_exceeded ||
-				code == error_code_process_behind;
+		return code == error_code_not_committed || code == error_code_transaction_too_old ||
+		       code == error_code_future_version || code == error_code_database_locked ||
+		       code == error_code_proxy_memory_limit_exceeded || code == error_code_batch_transaction_throttled ||
+		       code == error_code_process_behind;
 	}
 	return false;
 }
@@ -107,12 +106,10 @@ fdb_error_t fdb_network_set_option( FDBNetworkOption option,
 		API->setNetworkOption( (FDBNetworkOptions::Option)option, value ? StringRef( value, value_length ) : Optional<StringRef>() ); );
 }
 
-extern "C"
 fdb_error_t fdb_setup_network_impl() {
 	CATCH_AND_RETURN( API->setupNetwork(); );
 }
 
-extern "C"
 fdb_error_t fdb_setup_network_v13( const char* localAddress ) {
 	fdb_error_t errorCode = fdb_network_set_option( FDB_NET_OPTION_LOCAL_ADDRESS, (uint8_t const*)localAddress, strlen(localAddress) );
 	if(errorCode != 0)
@@ -159,7 +156,6 @@ fdb_error_t fdb_future_block_until_ready( FDBFuture* f ) {
 	CATCH_AND_RETURN( TSAVB(f)->blockUntilReady(); );
 }
 
-extern "C" DLLEXPORT
 fdb_bool_t fdb_future_is_error_v22( FDBFuture* f ) {
 	return TSAVB(f)->isError();
 }
@@ -200,12 +196,10 @@ fdb_error_t fdb_future_set_callback( FDBFuture* f,
 	CATCH_AND_RETURN( TSAVB(f)->callOrSetAsCallback( cb, ignore, 0 ); );
 }
 
-extern "C" DLLEXPORT
 fdb_error_t fdb_future_get_error_impl( FDBFuture* f ) {
 	return TSAVB(f)->getErrorCode();
 }
 
-extern "C" DLLEXPORT
 fdb_error_t fdb_future_get_error_v22( FDBFuture* f, const char** description ) {
 	if ( !( TSAVB(f)->isError() ) )
 		return error_code_future_not_error;
@@ -214,7 +208,6 @@ fdb_error_t fdb_future_get_error_v22( FDBFuture* f, const char** description ) {
 	return TSAVB(f)->error.code();
 }
 
-extern "C" DLLEXPORT
 fdb_error_t fdb_future_get_version_v619( FDBFuture* f, int64_t* out_version ) {
 	CATCH_AND_RETURN( *out_version = TSAV(Version, f)->get(); );
 }
@@ -233,14 +226,12 @@ fdb_error_t fdb_future_get_key( FDBFuture* f, uint8_t const** out_key,
 		*out_key_length = key.size(); );
 }
 
-extern "C" DLLEXPORT
 fdb_error_t fdb_future_get_cluster_v609( FDBFuture* f, FDBCluster** out_cluster ) {
 	CATCH_AND_RETURN(
 		*out_cluster = (FDBCluster*)
 		( (TSAV( char*, f )->get() ) ); );
 }
 
-extern "C" DLLEXPORT
 fdb_error_t fdb_future_get_database_v609( FDBFuture* f, FDBDatabase** out_database ) {
 	CATCH_AND_RETURN(
 		*out_database = (FDBDatabase*)
@@ -259,7 +250,6 @@ fdb_error_t fdb_future_get_value( FDBFuture* f, fdb_bool_t* out_present,
 		} );
 }
 
-extern "C"
 fdb_error_t fdb_future_get_keyvalue_array_impl(
 	FDBFuture* f, FDBKeyValue const** out_kv,
 	int* out_count, fdb_bool_t* out_more )
@@ -271,7 +261,6 @@ fdb_error_t fdb_future_get_keyvalue_array_impl(
 		*out_more = rrr.more; );
 }
 
-extern "C"
 fdb_error_t fdb_future_get_keyvalue_array_v13(
 	FDBFuture* f, FDBKeyValue const** out_kv, int* out_count)
 {
@@ -281,7 +270,7 @@ fdb_error_t fdb_future_get_keyvalue_array_v13(
 		*out_count = rrr.size(); );
 }
 
-extern "C"
+extern "C" DLLEXPORT
 fdb_error_t fdb_future_get_string_array(
 	FDBFuture* f, const char*** out_strings, int* out_count)
 {
@@ -292,7 +281,6 @@ fdb_error_t fdb_future_get_string_array(
 	);
 }
 
-extern "C" DLLEXPORT
 FDBFuture* fdb_create_cluster_v609( const char* cluster_file_path ) {
 	char *path;
 	if(cluster_file_path) {
@@ -306,7 +294,6 @@ FDBFuture* fdb_create_cluster_v609( const char* cluster_file_path ) {
 	return (FDBFuture*)ThreadFuture<char*>(path).extractPtr();
 }
 
-extern "C" DLLEXPORT
 fdb_error_t fdb_cluster_set_option_v609( FDBCluster* c,
 							 FDBClusterOption option,
 							 uint8_t const* value,
@@ -316,12 +303,19 @@ fdb_error_t fdb_cluster_set_option_v609( FDBCluster* c,
 	return error_code_success;
 }
 
-extern "C" DLLEXPORT
 void fdb_cluster_destroy_v609( FDBCluster* c ) {
 	CATCH_AND_DIE( delete[] CLUSTER(c); );
 }
 
-extern "C" DLLEXPORT
+// This exists so that fdb_cluster_create_database doesn't need to call the public symbol fdb_create_database.
+// If it does and this is an external client loaded though the multi-version API, then it may inadvertently call
+// the version of the function in the primary library if it was loaded into the global symbols.
+fdb_error_t fdb_create_database_impl( const char* cluster_file_path, FDBDatabase** out_database ) {
+	CATCH_AND_RETURN(
+		*out_database = (FDBDatabase*)API->createDatabase( cluster_file_path ? cluster_file_path : "" ).extractPtr();
+	);
+}
+
 FDBFuture* fdb_cluster_create_database_v609( FDBCluster* c, uint8_t const* db_name,
 											int db_name_length ) 
 {
@@ -330,7 +324,7 @@ FDBFuture* fdb_cluster_create_database_v609( FDBCluster* c, uint8_t const* db_na
 	}
 
 	FDBDatabase *db;
-	fdb_error_t err = fdb_create_database(CLUSTER(c), &db);
+	fdb_error_t err = fdb_create_database_impl(CLUSTER(c), &db);
 	if(err) {
 		return (FDBFuture*)ThreadFuture<Reference<IDatabase>>(Error(err)).extractPtr();
 	}
@@ -340,9 +334,7 @@ FDBFuture* fdb_cluster_create_database_v609( FDBCluster* c, uint8_t const* db_na
 
 extern "C" DLLEXPORT
 fdb_error_t fdb_create_database( const char* cluster_file_path, FDBDatabase** out_database ) {
-	CATCH_AND_RETURN(
-		*out_database = (FDBDatabase*)API->createDatabase( cluster_file_path ? cluster_file_path : "" ).extractPtr();
-	);
+	return fdb_create_database_impl( cluster_file_path, out_database );
 }
 
 extern "C" DLLEXPORT
@@ -394,21 +386,18 @@ FDBFuture* fdb_transaction_get_read_version( FDBTransaction* tr ) {
 	return (FDBFuture*)( TXN(tr)->getReadVersion().extractPtr() );
 }
 
-extern "C"
 FDBFuture* fdb_transaction_get_impl( FDBTransaction* tr, uint8_t const* key_name,
 									 int key_name_length, fdb_bool_t snapshot ) {
 	return (FDBFuture*)
 		( TXN(tr)->get( KeyRef( key_name, key_name_length ), snapshot ).extractPtr() );
 }
 
-extern "C"
 FDBFuture* fdb_transaction_get_v13( FDBTransaction* tr, uint8_t const* key_name,
 									int key_name_length )
 {
 	return fdb_transaction_get_impl( tr, key_name, key_name_length, 0 );
 }
 
-extern "C"
 FDBFuture* fdb_transaction_get_key_impl( FDBTransaction* tr, uint8_t const* key_name,
 										 int key_name_length, fdb_bool_t or_equal,
 										 int offset, fdb_bool_t snapshot ) {
@@ -419,7 +408,6 @@ FDBFuture* fdb_transaction_get_key_impl( FDBTransaction* tr, uint8_t const* key_
 										  snapshot ).extractPtr() );
 }
 
-extern "C"
 FDBFuture* fdb_transaction_get_key_v13( FDBTransaction* tr, uint8_t const* key_name,
 										int key_name_length, fdb_bool_t or_equal,
 										int offset ) {
@@ -427,14 +415,13 @@ FDBFuture* fdb_transaction_get_key_v13( FDBTransaction* tr, uint8_t const* key_n
 										 or_equal, offset, false );
 }
 
-extern "C"
+extern "C" DLLEXPORT
 FDBFuture* fdb_transaction_get_addresses_for_key( FDBTransaction* tr, uint8_t const* key_name,
 									int key_name_length ){
 	return (FDBFuture*)( TXN(tr)->getAddressesForKey( KeyRef(key_name, key_name_length) ).extractPtr() );
 
 }
 
-extern "C"
 FDBFuture* fdb_transaction_get_range_impl(
 		FDBTransaction* tr, uint8_t const* begin_key_name,
 		int begin_key_name_length, fdb_bool_t begin_or_equal, int begin_offset,
@@ -505,7 +492,6 @@ FDBFuture* fdb_transaction_get_range_impl(
 							 snapshot, reverse ).extractPtr() );
 }
 
-extern "C"
 FDBFuture* fdb_transaction_get_range_selector_v13(
 	FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length,
 	fdb_bool_t begin_or_equal, int begin_offset, uint8_t const* end_key_name,
@@ -517,7 +503,6 @@ FDBFuture* fdb_transaction_get_range_selector_v13(
 		limit, 0, FDB_STREAMING_MODE_EXACT, 0, false, false);
 }
 
-extern "C"
 FDBFuture* fdb_transaction_get_range_v13(
 	FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length,
 	uint8_t const* end_key_name, int end_key_name_length, int limit )
@@ -600,7 +585,6 @@ FDBFuture* fdb_transaction_get_versionstamp( FDBTransaction* tr )
 	return (FDBFuture*)(TXN(tr)->getVersionstamp().extractPtr());
 }
 
-extern "C"
 fdb_error_t fdb_transaction_set_option_impl( FDBTransaction* tr,
 								 FDBTransactionOption option,
 								 uint8_t const* value,
@@ -610,7 +594,6 @@ fdb_error_t fdb_transaction_set_option_impl( FDBTransaction* tr,
 		TXN(tr)->setOption( (FDBTransactionOptions::Option)option, value ? StringRef( value, value_length ) : Optional<StringRef>() ); );
 }
 
-extern "C"
 void fdb_transaction_set_option_v13( FDBTransaction* tr,
 									 FDBTransactionOption option )
 {
@@ -642,6 +625,13 @@ fdb_error_t fdb_transaction_add_conflict_range( FDBTransaction*tr, uint8_t const
 			return error_code_client_invalid_operation;
 	);
 
+}
+
+extern "C" DLLEXPORT 
+FDBFuture* fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, uint8_t const* begin_key_name,
+        int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length ) {
+	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	return (FDBFuture*)(TXN(tr)->getEstimatedRangeSizeBytes(range).extractPtr());
 }
 
 #include "fdb_c_function_pointers.g.h"
@@ -680,6 +670,10 @@ fdb_error_t fdb_select_api_version_impl( int runtime_version, int header_version
 	// Versioned API changes -- descending order by version (new changes at top)
 	// FDB_API_CHANGED( function, ver ) means there is a new implementation as of ver, and a function function_(ver-1) is the old implementation
 	// FDB_API_REMOVED( function, ver ) means the function was removed as of ver, and function_(ver-1) is the old implementation
+	//
+	// WARNING: use caution when implementing removed functions by calling public API functions. This can lead to undesired behavior when
+	// using the multi-version API. Instead, it is better to have both the removed and public functions call an internal implementation function.
+	// See fdb_create_database_impl for an example.
 	FDB_API_REMOVED( fdb_future_get_version, 620 );
 	FDB_API_REMOVED( fdb_create_cluster, 610 );
 	FDB_API_REMOVED( fdb_cluster_create_database, 610 );

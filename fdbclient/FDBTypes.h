@@ -42,10 +42,15 @@ enum {
 	tagLocalityRemoteLog = -3,
 	tagLocalityUpgraded = -4,
 	tagLocalitySatellite = -5,
-	tagLocalityLogRouterMapped = -6,
+	tagLocalityLogRouterMapped = -6,  // used by log router to pop from TLogs
 	tagLocalityTxs = -7,
+	tagLocalityBackup = -8,  // used by backup role to pop from TLogs
 	tagLocalityInvalid = -99
 }; //The TLog and LogRouter require these number to be as compact as possible
+
+inline bool isPseudoLocality(int8_t locality) {
+	return locality == tagLocalityLogRouterMapped || locality == tagLocalityBackup;
+}
 
 #pragma pack(push, 1)
 struct Tag {
@@ -68,7 +73,7 @@ struct Tag {
 	}
 
 	template <class Ar>
-	force_inline void serialize_unversioned(Ar& ar) { 
+	force_inline void serialize_unversioned(Ar& ar) {
 		serializer(ar, locality, id);
 	}
 };
@@ -93,7 +98,7 @@ struct struct_like_traits<Tag> : std::true_type {
 	}
 
 	template <int i, class Type, class Context>
-	static const void assign(Member& m, const Type& t, Context&) {
+	static void assign(Member& m, const Type& t, Context&) {
 		if constexpr (i == 0) {
 			m.id = t;
 		} else {
@@ -105,15 +110,16 @@ struct struct_like_traits<Tag> : std::true_type {
 
 static const Tag invalidTag {tagLocalitySpecial, 0};
 static const Tag txsTag {tagLocalitySpecial, 1};
+static const Tag cacheTag {tagLocalitySpecial, 2};
 
 enum { txsTagOld = -1, invalidTagOld = -100 };
 
 struct TagsAndMessage {
 	StringRef message;
-	std::vector<Tag> tags;
+	VectorRef<Tag> tags;
 
 	TagsAndMessage() {}
-	TagsAndMessage(StringRef message, const std::vector<Tag>& tags) : message(message), tags(tags) {}
+	TagsAndMessage(StringRef message, VectorRef<Tag> tags) : message(message), tags(tags) {}
 
 	// Loads tags and message from a serialized buffer. "rd" is checkpointed at
 	// its begining position to allow the caller to rewind if needed.
@@ -123,15 +129,11 @@ struct TagsAndMessage {
 		int32_t messageLength;
 		uint16_t tagCount;
 		uint32_t sub;
-		tags.clear();
 
 		rd->checkpoint();
 		*rd >> messageLength >> sub >> tagCount;
 		if (messageVersionSub) *messageVersionSub = sub;
-		tags.resize(tagCount);
-		for (int i = 0; i < tagCount; i++) {
-			*rd >> tags[i];
-		}
+		tags = VectorRef<Tag>((Tag*)rd->readBytes(tagCount*sizeof(Tag)), tagCount);
 		const int32_t rawLength = messageLength + sizeof(messageLength);
 		rd->rewind();
 		rd->checkpoint();
@@ -160,26 +162,31 @@ void uniquify( Collection& c ) {
 	c.resize( std::unique(c.begin(), c.end()) - c.begin() );
 }
 
-static std::string describe( const Tag item ) {
+inline std::string describe( const Tag item ) {
 	return format("%d:%d", item.locality, item.id);
 }
 
-static std::string describe( const int item ) {
+inline std::string describe( const int item ) {
 	return format("%d", item);
 }
 
+// Allows describeList to work on a vector of std::string
+static std::string describe(const std::string& s) {
+	return s;
+}
+
 template <class T>
-static std::string describe( Reference<T> const& item ) {
+std::string describe( Reference<T> const& item ) {
 	return item->toString();
 }
 
 template <class T>
-static std::string describe( T const& item ) {
+std::string describe( T const& item ) {
 	return item.toString();
 }
 
 template <class K, class V>
-static std::string describe( std::map<K, V> const& items, int max_items = -1 ) {
+std::string describe( std::map<K, V> const& items, int max_items = -1 ) {
 	if(!items.size())
 		return "[no items]";
 
@@ -195,7 +202,7 @@ static std::string describe( std::map<K, V> const& items, int max_items = -1 ) {
 }
 
 template <class T>
-static std::string describeList( T const& items, int max_items ) {
+std::string describeList( T const& items, int max_items ) {
 	if(!items.size())
 		return "[no items]";
 
@@ -211,12 +218,12 @@ static std::string describeList( T const& items, int max_items ) {
 }
 
 template <class T>
-static std::string describe( std::vector<T> const& items, int max_items = -1 ) {
+std::string describe( std::vector<T> const& items, int max_items = -1 ) {
 	return describeList(items, max_items);
 }
 
 template <class T>
-static std::string describe( std::set<T> const& items, int max_items = -1 ) {
+std::string describe( std::set<T> const& items, int max_items = -1 ) {
 	return describeList(items, max_items);
 }
 
@@ -407,7 +414,7 @@ typedef Standalone<KeyRef> Key;
 typedef Standalone<ValueRef> Value;
 typedef Standalone<KeyRangeRef> KeyRange;
 typedef Standalone<KeyValueRef> KeyValue;
-typedef Standalone<struct KeySelectorRef> KeySelector; 
+typedef Standalone<struct KeySelectorRef> KeySelector;
 
 enum { invalidVersion = -1, latestVersion = -2 };
 
@@ -553,6 +560,10 @@ inline KeySelectorRef operator + (const KeySelectorRef& s, int off) {
 inline KeySelectorRef operator - (const KeySelectorRef& s, int off) {
 	return KeySelectorRef(s.getKey(), s.orEqual, s.offset-off);
 }
+inline bool selectorInRange( KeySelectorRef const& sel, KeyRangeRef const& range ) {
+	// Returns true if the given range suffices to at least begin to resolve the given KeySelectorRef
+	return sel.getKey() >= range.begin && (sel.isBackward() ? sel.getKey() <= range.end : sel.getKey() < range.end);
+}
 
 template <class Val>
 struct KeyRangeWith : KeyRange {
@@ -567,7 +578,7 @@ struct KeyRangeWith : KeyRange {
 	}
 };
 template <class Val>
-static inline KeyRangeWith<Val> keyRangeWith( const KeyRangeRef& range, const Val& value ) {
+KeyRangeWith<Val> keyRangeWith( const KeyRangeRef& range, const Val& value ) {
 	return KeyRangeWith<Val>(range, value);
 }
 
@@ -642,6 +653,7 @@ struct KeyValueStoreType {
 		MEMORY,
 		SSD_BTREE_V2,
 		SSD_REDWOOD_V1,
+		MEMORY_RADIXTREE,
 		END
 	};
 
@@ -651,6 +663,7 @@ struct KeyValueStoreType {
 			this->type = END;
 	}
 	operator StoreType() const { return StoreType(type); }
+	StoreType storeType() const { return StoreType(type); }
 
 	template <class Ar>
 	void serialize(Ar& ar) { serializer(ar, type); }
@@ -661,6 +674,7 @@ struct KeyValueStoreType {
 			case SSD_BTREE_V2: return "ssd-2";
 			case SSD_REDWOOD_V1: return "ssd-redwood-experimental";
 			case MEMORY: return "memory";
+			case MEMORY_RADIXTREE: return "memory-radixtree-beta";
 			default: return "unknown";
 		}
 	}
@@ -681,14 +695,18 @@ struct TLogVersion {
 		UNSET = 0,
 		// Everything between BEGIN and END should be densely packed, so that we
 		// can iterate over them easily.
+		// V3 was the introduction of spill by reference;
+		// V4 changed how data gets written to satellite TLogs so that we can peek from them;
+		// V5 merged reference and value spilling
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
 		V4 = 4, // 6.2
+		V5 = 5, // 7.0
 		MIN_SUPPORTED = V2,
-		MAX_SUPPORTED = V4,
-		MIN_RECRUITABLE = V2,
-		DEFAULT = V3,
+		MAX_SUPPORTED = V5,
+		MIN_RECRUITABLE = V3,
+		DEFAULT = V4,
 	} version;
 
 	TLogVersion() : version(UNSET) {}
@@ -709,6 +727,7 @@ struct TLogVersion {
 		if (s == LiteralStringRef("2")) return V2;
 		if (s == LiteralStringRef("3")) return V3;
 		if (s == LiteralStringRef("4")) return V4;
+		if (s == LiteralStringRef("5")) return V5;
 		return default_error_or();
 	}
 };
@@ -757,7 +776,6 @@ struct TLogSpillType {
 		return default_error_or();
 	}
 
-private:
 	uint32_t type;
 };
 
@@ -842,7 +860,7 @@ struct AddressExclusion {
 	}
 };
 
-static bool addressExcluded( std::set<AddressExclusion> const& exclusions, NetworkAddress const& addr ) {
+inline bool addressExcluded( std::set<AddressExclusion> const& exclusions, NetworkAddress const& addr ) {
 	return exclusions.count( AddressExclusion(addr.ip, addr.port) ) || exclusions.count( AddressExclusion(addr.ip) );
 }
 
@@ -874,7 +892,9 @@ struct ClusterControllerPriorityInfo {
 	uint8_t dcFitness;
 
 	bool operator== (ClusterControllerPriorityInfo const& r) const { return processClassFitness == r.processClassFitness && isExcluded == r.isExcluded && dcFitness == r.dcFitness; }
-
+	ClusterControllerPriorityInfo()
+	  : ClusterControllerPriorityInfo(/*ProcessClass::UnsetFit*/ 2, false,
+	                                  ClusterControllerPriorityInfo::FitnessUnknown) {}
 	ClusterControllerPriorityInfo(uint8_t processClassFitness, bool isExcluded, uint8_t dcFitness) : processClassFitness(processClassFitness), isExcluded(isExcluded), dcFitness(dcFitness) {}
 
 	template <class Ar>
@@ -954,6 +974,21 @@ struct HealthMetrics {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, worstStorageQueue, worstStorageDurabilityLag, worstTLogQueue, tpsLimit, batchLimited, storageStats, tLogQueue);
+	}
+};
+
+struct WorkerBackupStatus {
+	LogEpoch epoch;
+	Version version;
+	Tag tag;
+	int32_t totalTags;
+
+	WorkerBackupStatus() : epoch(0), version(invalidVersion) {}
+	WorkerBackupStatus(LogEpoch e, Version v, Tag t, int32_t total) : epoch(e), version(v), tag(t), totalTags(total) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, epoch, version, tag, totalTags);
 	}
 };
 
