@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Tester.actor.h"
+#include "tester/Tester.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using namespace FDB;

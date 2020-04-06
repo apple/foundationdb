@@ -56,7 +56,7 @@
 #include "fdbserver/CoroFlow.h"
 #include "flow/TLSConfig.actor.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "versions.h"
+#include "fdbclient/versions.h"
 #endif
 
 #include "fdbmonitor/SimpleIni.h"

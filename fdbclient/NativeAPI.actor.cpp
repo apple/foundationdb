@@ -49,7 +49,7 @@
 #include "flow/UnitTest.h"
 
 #if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "versions.h"
+#include "fdbclient/versions.h"
 #endif
 
 #ifdef WIN32

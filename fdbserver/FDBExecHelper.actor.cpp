@@ -8,7 +8,7 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #if defined(CMAKE_BUILD) || !defined(_WIN32)
-#include "versions.h"
+#include "fdbclient/versions.h"
 #endif
 #include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.

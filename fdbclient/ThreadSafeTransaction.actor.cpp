@@ -22,7 +22,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseContext.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "versions.h"
+#include "fdbclient/versions.h"
 #endif
 #include <new>
 
