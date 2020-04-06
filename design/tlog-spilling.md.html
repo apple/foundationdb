@@ -4,22 +4,51 @@
 
 ## Background
 
-(This assumes a basic familiarity with [FoundationDB's architecture][fdbsummit-technical-overview].)
+(This assumes a basic familiarity with [FoundationDB's architecture](https://www.youtu.be/EMwhsGsxfPU).)
 
 Transaction logs are a distributed Write-Ahead-Log for FoundationDB.  They
-receive commits from proxies that are written to a sequential *disk queue* in
-version order.  A commit is sent as a list of tagged mutations, where a *tag*
-is a small identifier that represents one storage server as a destination.  The
-transaction logs are then later *peeked* by storage servers to receive data
-destined for their tag.  This is how committed data becomes available to
-clients for reading.
+receive commits from proxies, and are responsible for durably storing those
+commits, and making them available to storage servers for reading.
+
+Clients send *mutations*, the list of their set, clears, atomic operations,
+etc., to proxies.  Proxies collect mutations into a *batch*, which is the list
+of all changes that need to be applied to the database to bring it from version
+`N-1` to `N`.  Proxies then walk through their in-memory mapping of shard
+boundaries to associate one or more *tags*, a small integer uniquely
+identifying a destination storage server, with each mutation.  They then send a
+*commit*, the full list of `(tags, mutation)` for each mutation in a batch, to
+the transaction logs.
+
+The transaction log has two responsibilities: it must persist the commits to
+disk and notify the proxy when a commit is durably stored, and it must make the
+commit available for consumption by the storage server.  Each storage server
+*peeks* its own tag, which requests all mutations from the transaction log with
+the given tag at a given version or above.  After a storage server durably
+applies the mutations to disk, it *pops* the transaction logs with the same tag
+and its new durable version, notifying the transaction logs that they may
+discard mutations with the given tag and a lesser version.
+
+To persist commits, a transaction log appends commits to a growable on-disk
+ring buffer, called a *disk queue*, in version order.  Commit data is *pushed*
+onto the disk queue, and when all mutations in the oldest commit persisted are
+no longer needed, the disk queue is *popped* to trim its tail.
+
+To make commits available to storage servers efficiently, a transaction log
+maintains a copy of the commit in-memory, and maintains one queue per tag that
+indexes the location of each mutation in each commit with the specific tag,
+sequentially.  This way, responding to a peek from a storage server only
+requires sequentailly walking through the queue, and copying each mutation
+referenced into the response buffer.
 
 Transaction logs internally handle commits via performing two operations
 concurrently.  First, they walk through each mutation in the commit, and push
 the mutation onto an in-memory queue of mutations destined for that tag.
 Second, they include the data in the next batch of pages to durably persist to
-disk.  These queues are popped from when the corresponding storage server has
-persisted the data to its own disk.
+disk.  These in-memory queues are popped from when the corresponding storage
+server has persisted the data to its own disk.  The disk queue only exists to
+allow the in-memory queues to be rebuilt if the transaction log crashes, is
+never read from except during a transaction log recovering post-crash, and is
+popped when the oldest version it contains is no longer needed in memory.
 
 TLogs will need to hold the last 5-7 seconds of mutations.  In normal
 operation, the default 1.5GB of memory is enough such that the last 5-7 seconds
@@ -36,30 +65,17 @@ to exceed `TLOG_SPILL_THREASHOLD` bytes, the transaction log offloads the
 oldest data to disk.  This writing of data to disk to reduce TLog memory
 pressure is referred to as *spilling*.
 
-Previously, spilling would work by writing the data to a SQLite B-tree.  The
-key would be `(tag, version)`, and the value would be all the mutations
-destined for the given tag at the given version.  Peek requests have a start
-version, that is the latest version for which the storage server knows about,
-and the TLog responds by range-reading the B-tree from the start version.  Pop
-requests allow the TLog to forget all mutations for a tag until a specific
-version, and the TLog thus issues a range clear from `(tag, 0)` to
-`(tag, pop_version)`.  After spilling, the durably written data in the disk
-queue would be trimmed to only include from the spilled version on, as any
-required data is now entirely, durably held in the B-tree.  As the entire value
-is copied into the B-tree, this method of spilling will be referred to as
-*spill-by-value* in the rest of this document.
-
 **************************************************************
 *                      Transaction Log                       *
 *                                                            *
 *                                                            *
-*  +------------------+  appends   +------------+            *
+*  +------------------+   pushes   +------------+            *
 *  | Incoming Commits |----------->| Disk Queue |  +------+  *
 *  +------------------+            +------------+  |SQLite|  *
 *          |                                ^      +------+  *
 *          |                                |        ^       *
 *          |                               pops      |       *
-*          +------+--------------+          |       writes   *
+*          +------+-------+------+          |       writes   *
 *                 |       |      |          |        |       *
 *                 v       v      v         +----------+      *
 *    in-memory  +---+   +---+  +---+       |Spill Loop|      *
@@ -73,14 +89,31 @@ is copied into the B-tree, this method of spilling will be referred to as
 *                                                            *
 **************************************************************
 
+## Overview
+
+Previously, spilling would work by writing the data to a SQLite B-tree.  The
+key would be `(tag, version)`, and the value would be all the mutations
+destined for the given tag at the given version.  Peek requests have a start
+version, that is the latest version for which the storage server knows about,
+and the TLog responds by range-reading the B-tree from the start version.  Pop
+requests allow the TLog to forget all mutations for a tag until a specific
+version, and the TLog thus issues a range clear from `(tag, 0)` to
+`(tag, pop_version)`.  After spilling, the durably written data in the disk
+queue would be trimmed to only include from the spilled version on, as any
+required data is now entirely, durably held in the B-tree.  As the entire value
+is copied into the B-tree, this method of spilling will be referred to as
+*spill-by-value* in the rest of this document.
+
 Unfortunately, it turned out that spilling in this fashion greatly impacts TLog
 performance.  A write bandwidth saturation test was run against a cluster, with
 a modification to the transaction logs to have them act as if there was one
 storage server that was permanently failed; it never sent pop requests to allow
 the TLog to remove data from memory.  After 15min, the write bandwidth had
 reduced to 30% of its baseline.  After 30min, that became 10%.  After 60min,
-that became 5%.  (This is an intentional hyperbole due to the saturating write
-load.  See experiments at the end for more detail and data.)
+that became 5%.  Writing entire values gives an immediate 3x additional write
+amplification, and the actual write amplification increases as the B-tree gets
+deeper.  (This is an intentional illustration of the worst case, due to the
+workload being a saturating write load.)
 
 With the recent multi-DC/multi-region work, a failure of a remote data center
 would cause transaction logs to need to buffer all commits, as every commit is
@@ -89,8 +122,6 @@ transaction logs into a spilling regime, and thus write bandwidth would begin
 to rapidly degrade.  It is unacceptable for a remote datacenter failure to so
 drastically affect the primary datacenter's performance in the case of a
 failure, so a more performant way of spilling data is required.
-
-## Overview
 
 Whereas spill-by-value copied the entire mutation into the B-tree and removes
 it from the disk queue, spill-by-reference leaves the mutations in the disk
@@ -106,7 +137,7 @@ versions to be written together.
 ************************************************************************
 *                              DiskQueue                               *
 *                                                                      *
-*    -------- Index on disk --------     ---- Index in memory ----     *
+*    ------- Index in B-tree -------     ---- Index in memory ----     *
 *   /                               \   /                         \    *
 * +-----------------------------------+-----------------------------+  *
 * |            Spilled Data           |       Most Recent Data      |  *
@@ -118,7 +149,7 @@ versions to be written together.
 Spill-by-reference works by taking a larger range of versions, and building a
 single key-value pair per tag that describes where in the disk queue is every
 relevant commit for that tag.  Concretely, this takes the form
-`(tag, last_version) -> [(version, start, end, mutation bytes)]`, where...
+`(tag, last_version) -> [(version, start, end, mutation_bytes), ...]`, where:
 
  * `tag` is the small integer representing the storage server this mutation batch is destined for.
  * `last_version` is the last/maximum version contained in the value's batch.
@@ -128,12 +159,14 @@ relevant commit for that tag.  Concretely, this takes the form
  * `mutation_bytes` is the number of bytes in the commit that are relevant for this tag.
 
 And then writing only once per tag spilled into the B-tree for each iteration
-through spilling.
+through spilling.  This turns the number of writes into the B-Tree from
+`O(tags * versions)` to `O(tags)`.
 
 Note that each tuple in the list represents a commit, and not a mutation.  This
-means that peeking spilled commits will involve reading mutations unrelated to
-the requested tag.  Alternatively, one could have each tuple represent a
-mutation within a commit, to prevent over-reading when peeking.  There exist
+means that peeking spilled commits will involve reading all mutations that were
+a part of the commit, and then filtering them to only the ones that have the
+tag of interest.  Alternatively, one could have each tuple represent a mutation
+within a commit, to prevent over-reading when peeking.  There exist
 pathological workloads for each strategy.  The purpose of this work is most
 importantly to support spilling of log router tags.  These exist on every
 mutation, so that it will get copied to other datacenters.  This is the exact
@@ -144,30 +177,31 @@ to record mutation(s) versus the entire commit, but performance testing hasn't
 surfaced this as important enough to include in the initial version of this
 work.
 
-Peeking now works by issuing a range read to the B-tree from `(tag, peek_begin)`
-to `(tag, infinity)`.  This is why the key contains the last version of the
-batch, rather than the beginning, so that a range read from the peek request's
-version will always return all relevant batches.  For each batched tuple, if
-the version is greater than our peek request's version, then we read the commit
-containing that mutation from disk, extract the relevant mutations, and append
-them to our response.  There is a target size of the response, 150KB by
-default.  As we iterate through the tuples, we sum `mutation_bytes`, which
-already informs us how many bytes of relevant mutations we'll get from a given
-commit.  This allows us to make sure we won't waste disk IOs on reads that will
-end up being discarded as unnecessary.
+Peeking spilled data now works by issuing a range read to the B-tree from
+`(tag, peek_begin)` to `(tag, infinity)`.  This is why the key contains the
+last version of the batch, rather than the beginning, so that a range read from
+the peek request's version will always return all relevant batches.  For each
+batched tuple, if the version is greater than our peek request's version, then
+we read the commit containing that mutation from disk, extract the relevant
+mutations, and append them to our response.  There is a target size of the
+response, 150KB by default.  As we iterate through the tuples, we sum
+`mutation_bytes`, which already informs us how many bytes of relevant mutations
+we'll get from a given commit.  This allows us to make sure we won't waste disk
+IOs on reads that will end up being discarded as unnecessary.
 
-Popping works similarly to before, but now requires recovering information from
-disk.  Previously, we would maintain a map from version to location in the disk
-queue for every version we hadn't yet spilled.  Once spilling has copied the
-value into the B-tree, knowing where the commit was in the disk queue is
-useless to us, and is removed.  In spill-by-reference, that information is
-still needed to know how to map "pop until version 7" to "pop until byte 87" in
-the disk queue.  Unfortunately, keeping this information in memory would result
-in TLogs slowly consuming more and more memory[^versionmap-memory] as more data
-is spilled.  Instead, we issue a range read of the B-tree from `(tag, pop_version)`
-to `(tag, infinity)` and look at the first commit we find with a version
-greater than our own.  We then use its starting disk queue location as the
-limit of what we could pop the disk queue until for this tag.
+Popping spilled data works similarly to before, but now requires recovering
+information from disk.  Previously, we would maintain a map from version to
+location in the disk queue for every version we hadn't yet spilled.  Once
+spilling has copied the value into the B-tree, knowing where the commit was in
+the disk queue is useless to us, and is removed.  In spill-by-reference, that
+information is still needed to know how to map "pop until version 7" to "pop
+until byte 87" in the disk queue.  Unfortunately, keeping this information in
+memory would result in TLogs slowly consuming more and more
+memory[^versionmap-memory] as more data is spilled.  Instead, we issue a range
+read of the B-tree from `(tag, pop_version)` to `(tag, infinity)` and look at
+the first commit we find with a version greater than our own.  We then use its
+starting disk queue location as the limit of what we could pop the disk queue
+until for this tag.
 
 [^versionmap-memory]: Pessimistic assumptions would suggest that a TLog spilling 1TB of data would require ~50GB of memory to hold this map, which isn't acceptable.
 
@@ -181,15 +215,120 @@ The rough outline of concrete changes proposed looks like:
 0. Modify popping in new TLogServer
 0. Spill txsTag specially
 
+### Configuring and Upgrading
+
+Modifying how transaction logs spill data is a change to the on-disk files of
+transaction logs.  The work for enabling safe upgrades and rollbacks of
+persistent state changes to transaction logs was split off into a seperate
+design document: "Forward Compatibility for Transaction Logs".
+
+That document describes a `log_version` configuration setting that controls the
+availability of new transaction log features.  A similar configuration setting
+was created, `log_spill`, that at `log_version >= 3`, one may `fdbcli>
+configure log_spill:=2` to enable spill-by-reference.  Only FDB 6.1 or newer
+will be unable to recover transaction log files that were using
+spill-by-reference.  FDB 6.2 will use spill-by-reference by default.
+
+| FDB Version | Default | Configurable |
++-------------+---------+--------------+
+| 6.0         | No      | No           |
+| 6.1         | No      | Yes          |
+| 6.2         | Yes     | Yes          |
+
+If running FDB 6.1, the full command to enable spill-by-reference is
+`fdbcli> configure log_version:=3 log_spill:=2`.
+
+The TLog implementing spill-by-value was moved to `OldTLogServer_6_0.actor.cpp`
+and namespaced similarly.  `tLogFnForOptions` takes a `TLogOptions`, which is
+the version and spillType, and returns the correct TLog implementation
+according to those settings.  We maintain a map of
+`(TLogVersion, StoreType, TLogSpillType)` to TLog instance, so that only
+one SharedTLog exists per configuration variant.
+
+### Generations
+
+As a background, each time FoundationDB goes through a recovery, it will
+recruit a new generation of transaction logs.  This new generation of
+transaction logs will often be recruited on the same worker that hosted the
+previous generation's transaction log.  The old generation of transaction logs
+will only shut down once all the data that they have has been fully popped.
+This means that there can be multiple instances of a transaction log in the
+same process.
+
+Naively, this would create resource issues.  Each instance would think that it
+is allowed its own 1.5GB buffer of in-memory mutations.  Instead, internally to
+the TLog implmentation, the transaction log is split into two parts.  A
+`SharedTLog` is all the data that should be shared across multiple generations.
+A TLog is all the data that is private to one generation.  Most notably, the
+1.5GB mutation buffer and the on-disk files are owned by the `SharedTLog`.  The
+index for the data added to that buffer is maintained within each TLog.  In the
+code, a SharedTLog is `struct TLogData`, and a TLog is `struct LogData`.
+(I didn't choose these names.)
+
+This background is required, because one needs to keep in mind that we might be
+committing in one TLog instance, a different one might be spilling, and yet
+another might be the one popping data.
+
+*********************************************************
+*                   SharedTLog                          *
+*                                                       *
+* +--------+--------+--------+--------+--------+        *
+* | TLog 1 | TLog 2 | TLog 3 | TLog 4 | TLog 5 |        *
+* +--------+--------+--------+--------+--------+        *
+*   ^ popping         ^spilling         ^committing     * 
+*********************************************************
+
+Conceptually, this is because each TLog owns a separate part of the same Disk
+Queue file.  The earliest TLog instance needs to be the one that controls when
+the earliest part of the file can be discarded.  We spill in version order, and
+thus whatever TLog is responsible for the earliest unspilled version needs to
+be the one doing the spilling.  We always commit the newest version, so the
+newest TLog must be the one writing to the disk queue and inserting new data
+into the buffer of mutations.
+
+
 ### Spilling
 
-In spill-by-reference, spilling is now the act of persisting the index of 
+`updatePersistentData()` is the core of the spilling loop, that takes a new
+persistent data version, writes the in-memory index for all commits less than
+that version to disk, and then removes them from memory.  By contact, once
+spilling commits an updated persistentDataVersion to the B-tree, then those
+bytes will not need to be recovered into memory after a crash, nor will the
+in-memory bytes be needed to serve a peek response.
+
+Our new method of spilling iterates through each tag, and builds up a
+`vector<SpilledData>` for each tag, where `SpilledData` is:
+
+``` CPP
+struct SpilledData {
+  Version version;
+  IDiskQueue::location start;
+  uint32_t length;
+  uint32_t mutationBytes;
+};
+```
+
+And then this vector is serialized, and written to the B-tree as
+`(logId, tag, max(SpilledData.version))` = `serialized(vector<SpilledData>)`
+
+As we iterate through each commit, we record the number of mutation bytes in
+this commit that have our tag of interest.  This is so that later, peeking can
+read exactly the number of commits that it needs from disk.
+
+Although the focus of this project is on the topic of spilling, the code
+implementing itself saw the least amount of total change.
 
 ### Peeking
 
 A `TLogPeekRequest` contains a `Tag` and a `Version`, and is a request for all
 commits with the specified tag with a commit version greater than or equal to
 the given version.  The goal is to return a 150KB block of mutations.
+
+When servicing a peek request, we will read up to 150KB of mutations from the
+in-memory index.  If the peek version is lower than the version that we've
+spilled to disk, then we consult the on-disk index for up to 150KB of
+mutations.  (If we tried to read from disk first, and then read from memory, we
+would then be racing with the spilling loop moving data from memory to disk.)
 
 **************************************************************************
 *                                                                        *
@@ -207,7 +346,7 @@ the given version.  The goal is to return a 150KB block of mutations.
 *                                                                        *
 **************************************************************************
 
-Spill-by-value and memory storage engine only ever read from DiskQueue when
+Spill-by-value and memory storage engine only ever read from the DiskQueue when
 recovering, and read the entire file linearly.  Therefore, `IDiskQueue` had no
 API for random reads to the DiskQueue.  That ability is now required for
 peeking, and thus, `IDiskQueue`'s API has been enhanced correspondingly:
@@ -233,7 +372,23 @@ directly, the responsibility for verifing data integrity falls upon the
 DiskQueue.  `CheckHashes::YES` will cause the DiskQueue to use the checksum in
 each DiskQueue page to verify data integrity.  If an externally maintained
 checksums exists to verify the returned data, then `CheckHashes::NO` can be
-used to elide the checksumming.
+used to elide the checksumming.  A page failing its checksum will cause the
+transaction log to die with an `io_error()`.  
+
+What is read from disk is a `TLogQueueEntry`:
+
+``` CPP
+struct TLogQueueEntryRef {
+    UID id;
+    Version version;
+    Version knownCommittedVersion;
+    StringRef messages;
+}
+```
+
+Which provides the commit version and the logId of the TLog generation that
+produced this commit, in addition to all of the mutations for that version.
+(`knownCommittedVersion` is only used during FDB's recovery process.)
 
 ### Popping
 
@@ -242,25 +397,26 @@ transaction log to notify it that it is allowed to discard data for `tag` up
 through `version`.  Once all the tags have been popped from the oldest commit
 in the DiskQueue, the tail of the DiskQueue can be discarded to reclaim space.
 
+If our popped version is in the range of what has been spilled, then we need to
+consult our on-disk index to see what is the next location in the disk queue
+that has data which is useful to us.  This act would race with the spilling
+loop changing what data is spilled, and thus disk queue popping
+(`popDiskQueue()`) was made to run serially after spilling completes.
 
-Each time FoundationDB goes through a recovery, it will recruit a new
-generation of transaction logs.  This new generation of transaction logs will
-often be recruited on the same worker that hosted the previous generation's
-transaction log.  The old generation of transaction logs will only shut down
-once all the data that they have has been fully popped.  This means that there
-can be multiple instances of a transaction log 
+Also due to spilling and popping largely overlapping in state, the disk queue
+popping loop does not immediately react to a pop request from a storage server
+changing the popped version for a tag.  Spilling saves the popped version for
+each tag when the spill loop runs, and if that version changed, then
+`popDiskQueue()` refreshes its knowledge of what the minimum location in the
+disk queue is required for that tag.  We can pop the disk queue to the minimum
+of all minimum tag locations, or to the minimum location needed for an
+in-memory mutation if there is no spilled data.
 
-*********************************************************
-*                   SharedTLog                          *
-*                                                       *
-* +--------+--------+--------+--------+--------+        *
-* | TLog 1 | TLog 2 | TLog 3 | TLog 4 | TLog 5 |        *
-* +--------+--------+--------+--------+--------+        *
-*   ^ popping         ^spilling         ^committing     * 
-*********************************************************
-
-
-
+As a post implementation note, this ended up being a "here be dragons"
+experience, with a surprising number of edge cases in races between
+spilling/popping, various situations of having/not having/having inaccurate
+data for tags, or that tags can stop being pushed to when storage servers are
+removed but their corresponding `TagData` is never removed.
 
 ### Transaction State Store
 
@@ -343,8 +499,6 @@ can only happen at scale:
   * Verify that peek requests get limited
 	* See if tlog commits can get starved by excessive peeking
 
-[fdbsummit-technical-overview]: https://www.youtube.com/watch?v=EMwhsGsxfPU
-
 # TLog Spill-By-Reference Operational Guide
 
 ## Notable Behavior Changes
@@ -391,7 +545,7 @@ The expected implication of this are:
 ### Popping
 
 Popping will transition from being an only in-memory operation to one that
-involves reads from disk.
+can involve reads from disk if the popped tag has spilled data.
 
 Due to a strange quirk, TLogs will allocate up to 2GB of memory as a read cache
 for SQLite's B-tree.  The expected maximum size of the B-tree has drastically
@@ -446,7 +600,7 @@ minor impacts on recovery times:
   Increasing it could increase throughput in spilling regimes.<br>
   Decreasing it will decrease how sawtooth-like TLog memory usage is.<br>
 
-`TLOG_UPDATE_STORAGE`
+`UPDATE_STORAGE_BYTE_LIMIT`
 : How many bytes of mutations should be spilled at once in a spill-by-value TLog.<br>
   This knob is pre-existing, and has only been "changed" to only apply to spill-by-value.<br>
 
@@ -484,21 +638,9 @@ With the new changes, we must ensure that sufficent information has been exposed
 1. If something goes wrong in production, we can understand what and why from trace logs.
 2. We can understand if the TLog is performing suboptimally, and if so, which knob we should change and by how much.
 
-All of the below are planned to be additions to TLogMetrics.
+The following metrics were added to `TLogMetrics`:
 
 ### Spilling
-
-!!! warning
-    Only metrics above this line have been implemented.
-
-`SpillReferenceBatchSize`
-: Stats about the total size of batches written to the B-tree, excluding `txsTag`.
-
-`SpillReferenceTagCount`
-: Stats about the number of distinct tags that have been spilled on each loop iteration, excluding `txsTag`.
-
-`SpillReferenceIterationCount`
-: The number of times we committed data to the B-tree to spill.
 
 ### Peeking
 
@@ -508,42 +650,16 @@ All of the below are planned to be additions to TLogMetrics.
 `PeekMemoryReserved`
 : The amount of memory currently reserved for serving peek requests.
 
-!!! warning
-    Only metrics above this line have been implemented.
-
-`PeekMemoryAverage`
-: The average amount of memory allocated per peek of spilled data.
-
-`PeekMemoryLimitHit`
-: The number of times a peek was cut short due to hitting the maximum memory limit.
-
-`PeekReferenceSpilledCount`
-: The number of times a peek request required reading spilled data from the disk queue.
-
-`PeekReferenceReadAmp`
-: Stats about the read amplification encountered.
-
 ### Popping
 
-!!! warning
-    Only metrics above this line have been implemented.
-
-`DQOldestVersion`
+`QueuePoppedVersion`
 : The oldest version that's still useful.
 
-`BytesPopped`
-: The total bytes discarded from the queue *and* the `IDiskQueue::location` of the first useful byte.
+`MinPoppedTagLocality`
+: The locality of the tag that's preventing the DiskQueue from being further popped.
 
-`OldestUnpoppedTag`
-: The tag that's preventing the DiskQueue from being further popped.
-
-### Disk Queue
-
-!!! warning
-    Only metrics above this line have been implemented.
-
-`DiskQueueExcessBytes`
-: The number of bytes that the disk queue doesn't need, and will truncate to free over time.  This should be roughly equal to `BytesInput - BytesPopped`, but computed at a different layer.
+`MinPoppedTagId`
+: The id of the tag that's preventing the DiskQueue from being further popped.
 
 ## Monitoring and Alerting
 
@@ -559,28 +675,7 @@ Of which I'm aware of:
 * Any current alerts on "Disk Queue files more than [constant size] GB" will need to be removed.
 * Any alerting or monitoring of `log*.sqlite` as an indication of spilling will no longer be effective.
 
-
 * A graph of `BytesInput - BytesPopped` will give an idea of the number of "active" bytes in the DiskQueue file.
-
-
-
-# Appendix
-
-## Experiments
-
-### SQLite B-tree costs
-
-| Experiment                    | result  |
-|-------------------------------|---------|
-| Baseline                      | 60 MB/s |
-| Write value to B-tree         | 20 MB/s |
-| Write pointer to B-tree       | 20 MB/s |
-| " once per spill loop         | 40 MB/s |
-| " spill 10x the data per loop | 60 MB/s |
-
-### Spilling speeds
-
-2. speed over time with 1 storage server dead
 
 <!-- Force long-style table of contents -->
 <script>window.markdeepOptions={}; window.markdeepOptions.tocStyle="long";</script>
