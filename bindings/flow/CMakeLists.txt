@@ -18,7 +18,12 @@ set(SRCS
 
 add_flow_target(STATIC_LIBRARY NAME fdb_flow SRCS ${SRCS})
 target_link_libraries(fdb_flow PUBLIC fdb_c)
-target_include_directories(fdb_flow PUBLIC "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(fdb_flow PUBLIC
+  "${CMAKE_CURRENT_BINARY_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tester"
+  "${CMAKE_CURRENT_BINARY_DIR}/tester"
+  )
 
 add_subdirectory(tester)
 

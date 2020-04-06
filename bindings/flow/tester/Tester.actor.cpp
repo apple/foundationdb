@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "tester/Tester.actor.h"
+#include "Tester.actor.h"
 #include <cinttypes>
 #ifdef  __linux__
 #include <string.h>
