@@ -238,6 +238,27 @@ Future<Optional<Value>> SpecialKeySpace::get(Reference<ReadYourWritesTransaction
 	return getActor(this, ryw, key);
 }
 
+ConflictingKeysImpl::ConflictingKeysImpl(KeyRef start, KeyRef end) : SpecialKeyRangeBaseImpl(start, end) {}
+
+Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(Reference<ReadYourWritesTransaction> ryw,
+	                                                    KeyRangeRef kr) const {
+	Standalone<RangeResultRef> result;
+	if (ryw->getTransaction().info.conflictingKeys) {
+		auto krMap = ryw->getTransaction().info.conflictingKeys.get();
+		auto beginIter = krMap->rangeContaining(kr.begin);
+		if (beginIter->begin() != kr.begin)
+			++beginIter;
+		auto endIter = krMap->rangeContaining(kr.end);
+		for (auto it = beginIter; it != endIter; ++it) {
+			// TODO : check push_back instead of push_back_deep
+			result.push_back_deep(result.arena(), KeyValueRef(it->begin(), it->value()));
+		}
+		if (endIter->begin() != kr.end)
+			result.push_back_deep(result.arena(), KeyValueRef(endIter->begin(), endIter->value()));
+	}
+	return result;
+}
+
 class SpecialKeyRangeTestImpl : public SpecialKeyRangeBaseImpl {
 public:
 	explicit SpecialKeyRangeTestImpl(KeyRef start, KeyRef end, const std::string& prefix, int size)

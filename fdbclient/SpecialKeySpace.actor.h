@@ -15,13 +15,6 @@
 
 class SpecialKeyRangeBaseImpl {
 public:
-	// TO DISCUSS : do we need this general getRange interface here?
-	// Since a keyRange doesn't have any knowledge about other keyRanges, parameters like KeySelector,
-	// GetRangeLimits should be handled together in SpecialKeySpace
-	// Thus, having this general interface looks unnessary.
-	// virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin,
-	// KeySelector end, GetRangeLimits limits, bool snapshot = false, bool reverse = false) const = 0;
-
 	// Each derived class only needs to implement this simple version of getRange
 	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
 	                                                    KeyRangeRef kr) const = 0;
@@ -71,25 +64,8 @@ private:
 
 class ConflictingKeysImpl : public SpecialKeyRangeBaseImpl {
 public:
-	explicit ConflictingKeysImpl(KeyRef start, KeyRef end) : SpecialKeyRangeBaseImpl(start, end) {}
-	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
-	                                                    KeyRangeRef kr) const {
-		Standalone<RangeResultRef> result;
-		if (ryw->getTransaction().info.conflictingKeys) {
-			auto krMap = ryw->getTransaction().info.conflictingKeys.get();
-			auto beginIter = krMap->rangeContaining(kr.begin);
-			if (beginIter->begin() != kr.begin)
-				++beginIter;
-			auto endIter = krMap->rangeContaining(kr.end);
-			for (auto it = beginIter; it != endIter; ++it) {
-				// TODO : check push_back instead of push_back_deep
-				result.push_back_deep(result.arena(), KeyValueRef(it->begin(), it->value()));
-			}
-			if (endIter->begin() != kr.end)
-				result.push_back_deep(result.arena(), KeyValueRef(endIter->begin(), endIter->value()));
-		}
-		return result;
-	}
+	explicit ConflictingKeysImpl(KeyRef start, KeyRef end);
+	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr) const;
 };
 
 #include "flow/unactorcompiler.h"
