@@ -186,7 +186,8 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			for (int i = 0; i < pairs.size(); ++i) {
 				// TODO : use depends on with push_back
 				KeyValueRef element =
-				    prefixFlag ? KeyValueRef(pairs[i].key.withPrefix(specialKeys.begin, result.arena()), pairs[i].value) : pairs[i];
+				    prefixFlag ? KeyValueRef(pairs[i].key.withPrefix(specialKeys.begin, result.arena()), pairs[i].value)
+				               : pairs[i];
 				result.push_back(result.arena(), element);
 				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it is still
 				// returned In other words, the total size of the returned value (less the last entry) will be less than
@@ -241,14 +242,13 @@ Future<Optional<Value>> SpecialKeySpace::get(Reference<ReadYourWritesTransaction
 ConflictingKeysImpl::ConflictingKeysImpl(KeyRef start, KeyRef end) : SpecialKeyRangeBaseImpl(start, end) {}
 
 Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(Reference<ReadYourWritesTransaction> ryw,
-	                                                    KeyRangeRef kr) const {
+                                                                 KeyRangeRef kr) const {
 	Standalone<RangeResultRef> result;
-	if (ryw->getTransaction().info.conflictingKeys) {
-		auto krMap = ryw->getTransaction().info.conflictingKeys.get();
-		auto beginIter = krMap->rangeContaining(kr.begin);
-		if (beginIter->begin() != kr.begin)
-			++beginIter;
-		auto endIter = krMap->rangeContaining(kr.end);
+	if (ryw->getTransactionInfo().conflictingKeys) {
+		auto krMapPtr = ryw->getTransactionInfo().conflictingKeys.get();
+		auto beginIter = krMapPtr->rangeContaining(kr.begin);
+		if (beginIter->begin() != kr.begin) ++beginIter;
+		auto endIter = krMapPtr->rangeContaining(kr.end);
 		for (auto it = beginIter; it != endIter; ++it) {
 			// TODO : check push_back instead of push_back_deep
 			result.push_back_deep(result.arena(), KeyValueRef(it->begin(), it->value()));
