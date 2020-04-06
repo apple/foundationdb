@@ -58,6 +58,7 @@ struct NetworkOptions {
 	std::string traceLogGroup;
 	std::string traceFormat;
 	std::string traceClockSource;
+	std::string traceFileIdentifier;
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool slowTaskProfilingEnabled;

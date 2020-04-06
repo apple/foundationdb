@@ -21,6 +21,7 @@
 // This file implements the functions and actors used by the RestoreLoader role.
 // The RestoreLoader role starts with the restoreLoaderCore actor
 
+#include "flow/UnitTest.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
@@ -201,7 +202,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
 			}
 
-			TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
+			TraceEvent(SevFRMutationInfo, "FastRestoreDecodePartitionedLogFile")
 			    .detail("CommitVersion", msgVersion.toString())
 			    .detail("ParsedMutation", mutation.toString());
 			it->second.push_back_deep(it->second.arena(), mutation);
@@ -586,8 +587,12 @@ void splitMutation(std::map<Key, UID>* pRangeToApplier, MutationRef m, Arena& mv
 			curm.param2 = itlow->first;
 		}
 		ASSERT(curm.param1 <= curm.param2);
-		mvector.push_back_deep(mvector_arena, curm);
-		nodeIDs.push_back(nodeIDs_arena, itApplier->second);
+		// itup > m.param2: (itup-1) may be out of mutation m's range
+		// Ensure the added mutations have overlap with mutation m
+		if (m.param1 < curm.param2 && m.param2 > curm.param1) {
+			mvector.push_back_deep(mvector_arena, curm);
+			nodeIDs.push_back(nodeIDs_arena, itApplier->second);
+		}
 	}
 }
 
@@ -716,7 +721,7 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 
 			cc->sampledLogBytes += mutation.totalSize();
 
-			TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
+			TraceEvent(SevFRMutationInfo, "FastRestoreDecodeLogFile")
 			    .detail("CommitVersion", commitVersion)
 			    .detail("ParsedMutation", mutation.toString());
 
@@ -805,7 +810,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
 		auto it = kvOps.insert(std::make_pair(msgVersion, MutationsVec()));
-		TraceEvent(SevFRMutationInfo, "FastRestore_VerboseDebug")
+		TraceEvent(SevFRMutationInfo, "FastRestoreDecodeRangeFile")
 		    .detail("CommitVersion", version)
 		    .detail("ParsedMutationKV", m.toString());
 
@@ -880,5 +885,101 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 		self->checkMemory.trigger();
 	}
 	req.reply.send(RestoreCommonReply(self->id(), false));
+	return Void();
+}
+
+// Test splitMutation
+TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
+	std::map<Key, UID> rangeToApplier;
+	MutationsVec mvector;
+	Standalone<VectorRef<UID>> nodeIDs;
+
+	// Prepare RangeToApplier
+	rangeToApplier.emplace(normalKeys.begin, deterministicRandom()->randomUniqueID());
+	int numAppliers = deterministicRandom()->randomInt(1, 50);
+	for (int i = 0; i < numAppliers; ++i) {
+		Key k = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 1000)));
+		UID node = deterministicRandom()->randomUniqueID();
+		rangeToApplier.emplace(k, node);
+		TraceEvent("RangeToApplier").detail("Key", k).detail("Node", node);
+	}
+	Key k1 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 500)));
+	Key k2 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 1000)));
+	Key beginK = k1 < k2 ? k1 : k2;
+	Key endK = k1 < k2 ? k2 : k1;
+	Standalone<MutationRef> mutation(MutationRef(MutationRef::ClearRange, beginK.contents(), endK.contents()));
+
+	// Method 1: Use splitMutation
+	splitMutation(&rangeToApplier, mutation, mvector.arena(), mvector.contents(), nodeIDs.arena(), nodeIDs.contents());
+	ASSERT(mvector.size() == nodeIDs.size());
+
+	// Method 2: Use intersection
+	KeyRangeMap<UID> krMap;
+	std::map<Key, UID>::iterator beginKey = rangeToApplier.begin();
+	std::map<Key, UID>::iterator endKey = std::next(beginKey, 1);
+	while (endKey != rangeToApplier.end()) {
+		TraceEvent("KeyRangeMap")
+		    .detail("BeginKey", beginKey->first)
+		    .detail("EndKey", endKey->first)
+		    .detail("Node", beginKey->second);
+		krMap.insert(KeyRangeRef(beginKey->first, endKey->first), beginKey->second);
+		beginKey = endKey;
+		endKey++;
+	}
+	if (beginKey != rangeToApplier.end()) {
+		TraceEvent("KeyRangeMap")
+		    .detail("BeginKey", beginKey->first)
+		    .detail("EndKey", normalKeys.end)
+		    .detail("Node", beginKey->second);
+		krMap.insert(KeyRangeRef(beginKey->first, normalKeys.end), beginKey->second);
+	}
+
+	int splitMutationIndex = 0;
+	auto r = krMap.intersectingRanges(KeyRangeRef(mutation.param1, mutation.param2));
+	bool correctResult = true;
+	for (auto i = r.begin(); i != r.end(); ++i) {
+		// intersectionRange result
+		// Calculate the overlap range
+		KeyRef rangeBegin = mutation.param1 > i->range().begin ? mutation.param1 : i->range().begin;
+		KeyRef rangeEnd = mutation.param2 < i->range().end ? mutation.param2 : i->range().end;
+		KeyRange krange1(KeyRangeRef(rangeBegin, rangeEnd));
+		UID nodeID = i->value();
+		// splitMuation result
+		if (splitMutationIndex >= mvector.size()) {
+			correctResult = false;
+			break;
+		}
+		MutationRef result2M = mvector[splitMutationIndex];
+		UID applierID = nodeIDs[splitMutationIndex];
+		KeyRange krange2(KeyRangeRef(result2M.param1, result2M.param2));
+		TraceEvent("Result")
+		    .detail("KeyRange1", krange1.toString())
+		    .detail("KeyRange2", krange2.toString())
+		    .detail("ApplierID1", nodeID)
+		    .detail("ApplierID2", applierID);
+		if (krange1 != krange2 || nodeID != applierID) {
+			correctResult = false;
+			TraceEvent(SevError, "IncorrectResult")
+			    .detail("Mutation", mutation.toString())
+			    .detail("KeyRange1", krange1.toString())
+			    .detail("KeyRange2", krange2.toString())
+			    .detail("ApplierID1", nodeID)
+			    .detail("ApplierID2", applierID);
+		}
+		splitMutationIndex++;
+	}
+
+	if (splitMutationIndex != mvector.size()) {
+		correctResult = false;
+		TraceEvent(SevError, "SplitMuationTooMany")
+		    .detail("SplitMutationIndex", splitMutationIndex)
+		    .detail("Results", mvector.size());
+		for (; splitMutationIndex < mvector.size(); splitMutationIndex++) {
+			TraceEvent("SplitMuationTooMany")
+			    .detail("SplitMutationIndex", splitMutationIndex)
+			    .detail("Result", mvector[splitMutationIndex].toString());
+		}
+	}
+
 	return Void();
 }

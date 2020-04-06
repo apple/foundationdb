@@ -164,6 +164,9 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 	init( ALLOCATION_TRACING_ENABLED,                         true );
 
+	// Flatbuffers Traces
+	init( FBTRACES_ENABLED,                                   true );
+
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
 	init( MAX_METRIC_SIZE,                                    2500 );
