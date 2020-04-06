@@ -48,9 +48,7 @@
 #include "flow/TLSConfig.actor.h"
 #include "flow/UnitTest.h"
 
-#if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "fdbclient/versions.h"
-#endif
+#include "fdbclient/IncludeVersions.h"
 
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN

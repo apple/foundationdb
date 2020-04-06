@@ -32,9 +32,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
-#if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "fdbclient/versions.h"
-#endif
+#include "fdbclient/IncludeVersions.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 #undef max

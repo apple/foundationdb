@@ -30,9 +30,7 @@
 
 #include "..\flow\SimpleOpt.h"
 #include "..\fdbmonitor\SimpleIni.h"
-#if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "fdbclient/versions.h"
-#endif
+#include "fdbclient/IncludeVersions.h"
 
 // For PathFileExists
 #include "Shlwapi.h"
