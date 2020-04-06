@@ -398,7 +398,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 						    .detail("Version", iter->second.version.version)
 						    .detail("SubVersion", iter->second.version.sub);
 					}
-					tr->clear(KeyRangeRef(iter->second.key, iter->second.val));
+					tr->clear(singleKeyRange(iter->second.key));
 					TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseApplyStagingKeysBatch", applierID).detail("ClearKey", iter->second.key);
 					clears++;
 				} else {
