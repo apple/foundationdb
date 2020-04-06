@@ -164,6 +164,9 @@ public:
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
 
+	Future<Void> FlowTransport::onIncompatibleChanged();
+	// Returns when getIncompatiblePeers has at least one peer which is incompatible.
+
 	void addPeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is being used, even if no messages are currently being sent to the peer
 

@@ -63,14 +63,15 @@ struct WorkerInfo : NonCopyable {
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
 	Optional<uint16_t> storageCacheInfo;
+	Standalone<VectorRef<StringRef>> issues;
 
 	WorkerInfo() : gen(-1), reboots(0), priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
-	WorkerInfo( Future<Void> watcher, ReplyPromise<RegisterWorkerReply> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, bool degraded ) :
-		watcher(watcher), reply(reply), gen(gen), reboots(0), initialClass(initialClass), priorityInfo(priorityInfo), details(interf, processClass, degraded) {}
+	WorkerInfo( Future<Void> watcher, ReplyPromise<RegisterWorkerReply> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, bool degraded, Standalone<VectorRef<StringRef>> issues ) :
+		watcher(watcher), reply(reply), gen(gen), reboots(0), initialClass(initialClass), priorityInfo(priorityInfo), details(interf, processClass, degraded), issues(issues) {}
 
 	WorkerInfo( WorkerInfo&& r ) BOOST_NOEXCEPT : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen),
 		reboots(r.reboots), initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
-		haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor), storageCacheInfo(r.storageCacheInfo) {}
+		haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor), storageCacheInfo(r.storageCacheInfo), issues(r.issues) {}
 	void operator=( WorkerInfo&& r ) BOOST_NOEXCEPT {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
@@ -82,6 +83,7 @@ struct WorkerInfo : NonCopyable {
 		haltRatekeeper = r.haltRatekeeper;
 		haltDistributor = r.haltDistributor;
 		storageCacheInfo = r.storageCacheInfo;
+		issues = r.issues;
 	}
 };
 
@@ -99,12 +101,10 @@ public:
 	struct DBInfo {
 		Reference<AsyncVar<ClientDBInfo>> clientInfo;
 		Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> serverInfo;
-		CachedSerialization<ServerDBInfo> serverInfoMasterOnly;
-		std::set<NetworkAddress> requiredAddresses;
-		ProcessIssuesMap workersWithIssues;
 		std::map<NetworkAddress, double> incompatibleConnections;
 		AsyncTrigger forceMasterFailure;
 		int64_t masterRegistrationCount;
+		int64_t dbInfoCount;
 		bool recoveryStalled;
 		bool forceRecovery;
 		DatabaseConfiguration config;   // Asynchronously updated via master registration
@@ -117,22 +117,17 @@ public:
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 
 		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0), logGenerations(0), cachePopulated(false),
-			clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ),
+			clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ), dbInfoCount(0),
 			serverInfo( new AsyncVar<CachedSerialization<ServerDBInfo>>( CachedSerialization<ServerDBInfo>() ) ),
 			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskPriority::DefaultEndpoint, true ) )  // SOMEDAY: Locality!
 		{
-		}
-
-		void addRequiredAddresses(const std::vector<WorkerInterface>& interfaces) {
-			for(auto& it : interfaces) {
-				requiredAddresses.insert(it.address());
-			}
 		}
 
 		void setDistributor(const DataDistributorInterface& interf) {
 			CachedSerialization<ServerDBInfo> newInfoCache = serverInfo->get();
 			auto& newInfo = newInfoCache.mutate();
 			newInfo.id = deterministicRandom()->randomUniqueID();
+			newInfo.infoGeneration = ++dbInfoCount;
 			newInfo.distributor = interf;
 			serverInfo->set( newInfoCache );
 		}
@@ -141,6 +136,7 @@ public:
 			CachedSerialization<ServerDBInfo> newInfoCache = serverInfo->get();
 			auto& newInfo = newInfoCache.mutate();
 			newInfo.id = deterministicRandom()->randomUniqueID();
+			newInfo.infoGeneration = ++dbInfoCount;
 			newInfo.ratekeeper = interf;
 			serverInfo->set( newInfoCache );
 		}
@@ -153,6 +149,7 @@ public:
 				if(it.first == id) {
 					if(it.second != interf) {
 						newInfo.id = deterministicRandom()->randomUniqueID();
+						newInfo.infoGeneration = ++dbInfoCount;
 						it.second = interf;
 					}
 					found = true;
@@ -161,6 +158,7 @@ public:
 			}
 			if(!found) {
 				newInfo.id = deterministicRandom()->randomUniqueID();
+				newInfo.infoGeneration = ++dbInfoCount;
 				newInfo.storageCaches.push_back(std::make_pair(id, interf));
 			}
 			serverInfo->set( newInfoCache );
@@ -170,6 +168,7 @@ public:
 			CachedSerialization<ServerDBInfo> newInfoCache = serverInfo->get();
 			auto& newInfo = newInfoCache.mutate();
 			newInfo.id = deterministicRandom()->randomUniqueID();
+			newInfo.infoGeneration = ++dbInfoCount;
 			if (t == ProcessClass::DataDistributorClass) {
 				newInfo.distributor = Optional<DataDistributorInterface>();
 			} else if (t == ProcessClass::RatekeeperClass) {
@@ -184,13 +183,13 @@ public:
 			for(auto it = newInfo.storageCaches.begin(); it != newInfo.storageCaches.end(); ++it) {
 				if(it->first == id) {
 					newInfo.id = deterministicRandom()->randomUniqueID();
+					newInfo.infoGeneration = ++dbInfoCount;
 					newInfo.storageCaches.erase(it);
 					break;
 				}
 			}
 			serverInfo->set( newInfoCache );
 		}
-
 	};
 
 	struct UpdateWorkerList {
@@ -1331,6 +1330,9 @@ public:
 	UpdateWorkerList updateWorkerList;
 	Future<Void> outstandingRequestChecker;
 	Future<Void> outstandingRemoteRequestChecker;
+	AsyncTrigger updateDBInfo;
+	std::vector<Endpoint> updateDBInfoEndpoints;
+	std::set<Endpoint> removedDBInfoEndpoints;
 
 	DBInfo db;
 	Database cx;
@@ -1351,7 +1353,6 @@ public:
 	Counter getWorkersRequests;
 	Counter getClientWorkersRequests;
 	Counter registerMasterRequests;
-	Counter getServerDBInfoRequests;
 	Counter statusRequests;
 	Counter failureMonitoringRequests;
 
@@ -1370,18 +1371,18 @@ public:
 			getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),
 			getClientWorkersRequests("GetClientWorkersRequests", clusterControllerMetrics),
 			registerMasterRequests("RegisterMasterRequests", clusterControllerMetrics),
-			getServerDBInfoRequests("GetServerDBInfoRequests", clusterControllerMetrics),
 			statusRequests("StatusRequests", clusterControllerMetrics),
 			failureMonitoringRequests("FailureMonitoringRequests", clusterControllerMetrics),
 			serversFailed("ServersFailed", clusterControllerMetrics),
 			serversUnfailed("ServersUnfailed", clusterControllerMetrics)
 	{
-		auto& serverInfo = db.serverInfoMasterOnly.mutate();
+		ServerDBInfo serverInfo;
 		serverInfo.id = deterministicRandom()->randomUniqueID();
+		serverInfo.infoGeneration = ++db.dbInfoCount;
 		serverInfo.masterLifetime.ccID = id;
 		serverInfo.clusterInterface = ccInterface;
 		serverInfo.myLocality = locality;
-		db.serverInfo->set( db.serverInfoMasterOnly );
+		db.serverInfo->set( serverInfo );
 		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, true, true);
 	}
 
@@ -1436,11 +1437,10 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				db->masterRegistrationCount = 0;
 				db->recoveryStalled = false;
 
-				db->serverInfoMasterOnly = CachedSerialization<ServerDBInfo>();
-				auto& dbInfo = db->serverInfoMasterOnly.mutate();
-
+				ServerDBInfo dbInfo;
 				dbInfo.master = iMaster;
 				dbInfo.id = deterministicRandom()->randomUniqueID();
+				dbInfo.infoGeneration = ++db->dbInfoCount;
 				dbInfo.masterLifetime = db->serverInfo->get().read().masterLifetime;
 				++dbInfo.masterLifetime;
 				dbInfo.clusterInterface = db->serverInfo->get().read().clusterInterface;
@@ -1450,8 +1450,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				dbInfo.latencyBandConfig = db->serverInfo->get().read().latencyBandConfig;
 
 				TraceEvent("CCWDB", cluster->id).detail("Lifetime", dbInfo.masterLifetime.toString()).detail("ChangeID", dbInfo.id);
-				db->requiredAddresses.clear();
-				db->serverInfo->set( db->serverInfoMasterOnly );
+				db->serverInfo->set( dbInfo );
 
 				state Future<Void> spinDelay = delay(SERVER_KNOBS->MASTER_SPIN_DELAY);  // Don't retry master recovery more than once per second, but don't delay the "first" recovery after more than a second of normal operation
 
@@ -1485,34 +1484,6 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 	}
 }
 
-ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db, UID knownServerInfoID,
-                                        Standalone<VectorRef<StringRef>> issues,
-                                        std::vector<NetworkAddress> incompatiblePeers,
-                                        ReplyPromise<CachedSerialization<ServerDBInfo>> reply) {
-	state Optional<UID> issueID;
-	state bool useMasterOnly = false;
-	setIssues(db->workersWithIssues, reply.getEndpoint().getPrimaryAddress(), issues, issueID);
-	for(auto it : incompatiblePeers) {
-		db->incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
-	}
-
-	loop {
-		useMasterOnly = db->serverInfo->get().read().recoveryState < RecoveryState::ACCEPTING_COMMITS && !db->requiredAddresses.count(reply.getEndpoint().getPrimaryAddress());
-		if((useMasterOnly ? db->serverInfoMasterOnly.read().id : db->serverInfo->get().read().id) != knownServerInfoID) {
-			break;
-		}
-		choose {
-			when (wait( yieldedFuture(db->serverInfo->onChange()) )) {}
-			when (wait( delayJittered( 300 ) )) { break; }  // The server might be long gone!
-		}
-	}
-
-	removeIssues(db->workersWithIssues, reply.getEndpoint().getPrimaryAddress(), issueID);
-
-	reply.send( useMasterOnly ? db->serverInfoMasterOnly : db->serverInfo->get() );
-	return Void();
-}
-
 ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDatabaseRequest req) {
 	db->clientStatus[req.reply.getEndpoint().getPrimaryAddress()] = std::make_pair(now(), req);
 	if(db->clientStatus.size() > 10000) {
@@ -1535,12 +1506,6 @@ void checkOutstandingRecruitmentRequests( ClusterControllerData* self ) {
 		RecruitFromConfigurationRequest& req = self->outstandingRecruitmentRequests[i];
 		try {
 			RecruitFromConfigurationReply rep = self->findWorkersForConfiguration( req );
-			self->db.addRequiredAddresses(rep.oldLogRouters);
-			self->db.addRequiredAddresses(rep.proxies);
-			self->db.addRequiredAddresses(rep.resolvers);
-			self->db.addRequiredAddresses(rep.satelliteTLogs);
-			self->db.addRequiredAddresses(rep.tLogs);
-			self->db.serverInfo->trigger();
 			req.reply.send( rep );
 			swapAndPop( &self->outstandingRecruitmentRequests, i-- );
 		} catch (Error& e) {
@@ -1559,9 +1524,6 @@ void checkOutstandingRemoteRecruitmentRequests( ClusterControllerData* self ) {
 		RecruitRemoteFromConfigurationRequest& req = self->outstandingRemoteRecruitmentRequests[i];
 		try {
 			RecruitRemoteFromConfigurationReply rep = self->findRemoteWorkersForConfiguration( req );
-			self->db.addRequiredAddresses(rep.remoteTLogs);
-			self->db.addRequiredAddresses(rep.logRouters);
-			self->db.serverInfo->trigger();
 			req.reply.send( rep );
 			swapAndPop( &self->outstandingRemoteRecruitmentRequests, i-- );
 		} catch (Error& e) {
@@ -1757,12 +1719,14 @@ ACTOR Future<Void> rebootAndCheck( ClusterControllerData* cluster, Optional<Stan
 	return Void();
 }
 
-ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass startingClass, ClusterControllerData* cluster ) {
+ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass startingClass, ClusterControllerData* cluster) {
 	state Future<Void> failed =
 	    (worker.address() == g_network->getLocalAddress() || startingClass.classType() == ProcessClass::TesterClass)
 	        ? Never()
 	        : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
 	cluster->updateWorkerList.set( worker.locality.processId(), ProcessData(worker.locality, startingClass, worker.address()) );
+	cluster->updateDBInfoEndpoints.push_back(worker.updateServerDBInfo.getEndpoint());
+	cluster->updateDBInfo.trigger();
 	// This switching avoids a race where the worker can be added to id_worker map after the workerAvailabilityWatch fails for the worker.
 	wait(delay(0));
 
@@ -1801,6 +1765,7 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 				if (worker.locality.processId() == cluster->masterProcessId) {
 					cluster->masterProcessId = Optional<Key>();
 				}
+				cluster->removedDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
 				cluster->id_worker.erase( worker.locality.processId() );
 				cluster->updateWorkerList.set( worker.locality.processId(), Optional<ProcessData>() );
 				return Void();
@@ -1996,12 +1961,6 @@ ACTOR Future<Void> clusterRecruitFromConfiguration( ClusterControllerData* self,
 	loop {
 		try {
 			auto rep = self->findWorkersForConfiguration( req );
-			self->db.addRequiredAddresses(rep.oldLogRouters);
-			self->db.addRequiredAddresses(rep.proxies);
-			self->db.addRequiredAddresses(rep.resolvers);
-			self->db.addRequiredAddresses(rep.satelliteTLogs);
-			self->db.addRequiredAddresses(rep.tLogs);
-			self->db.serverInfo->trigger();
 			req.reply.send( rep );
 			return Void();
 		} catch (Error& e) {
@@ -2027,9 +1986,6 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration( ClusterControllerData*
 	loop {
 		try {
 			RecruitRemoteFromConfigurationReply rep = self->findRemoteWorkersForConfiguration( req );
-			self->db.addRequiredAddresses(rep.remoteTLogs);
-			self->db.addRequiredAddresses(rep.logRouters);
-			self->db.serverInfo->trigger();
 			req.reply.send( rep );
 			return Void();
 		} catch (Error& e) {
@@ -2133,6 +2089,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 
 	if( isChanged ) {
 		dbInfo.id = deterministicRandom()->randomUniqueID();
+		dbInfo.infoGeneration = ++self->db.dbInfoCount;
 		self->db.serverInfo->set( cachedInfo );
 	}
 
@@ -2145,6 +2102,10 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	auto info = self->id_worker.find( w.locality.processId() );
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
+
+	for(auto it : req.incompatiblePeers) {
+		db->incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
+	}
 
 	if(info == self->id_worker.end()) {
 		TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerId",w.id()).detail("ProcessId", w.locality.processId()).detail("ZoneId", w.locality.zoneId()).detail("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
@@ -2190,7 +2151,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	}
 
 	if( info == self->id_worker.end() ) {
-		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass, newPriorityInfo, req.degraded );
+		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass, newPriorityInfo, req.degraded, req.issues );
 		if (!self->masterProcessId.present() && w.locality.processId() == self->db.serverInfo->get().read().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
@@ -2205,8 +2166,10 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		info->second.initialClass = req.initialClass;
 		info->second.details.degraded = req.degraded;
 		info->second.gen = req.generation;
+		info->second.issues = req.issues;
 
 		if(info->second.details.interf.id() != w.id()) {
+			self->removedDBInfoEndpoints.insert(info->second.details.interf.updateServerDBInfo.getEndpoint());
 			info->second.details.interf = w;
 			info->second.watcher = workerAvailabilityWatch( w, newProcessClass, self );
 		}
@@ -2416,8 +2379,14 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 
 			// Get status but trap errors to send back to client.
 			vector<WorkerDetails> workers;
-			for(auto& it : self->id_worker)
+			std::vector<std::pair<NetworkAddress, Standalone<VectorRef<StringRef>>>> workerIssues;
+
+			for(auto& it : self->id_worker) {
 				workers.push_back(it.second.details);
+				if(it.second.issues.size()) {
+					workerIssues.push_back(std::make_pair(it.second.details.interf.address(), it.second.issues));
+				}
+			}
 
 			std::vector<NetworkAddress> incompatibleConnections;
 			for(auto it = self->db.incompatibleConnections.begin(); it != self->db.incompatibleConnections.end();) {
@@ -2429,7 +2398,7 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 				}
 			}
 
-			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, &self->db.clientStatus, coordinators, incompatibleConnections, self->datacenterVersionDifference)));
+			state ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, workerIssues, &self->db.clientStatus, coordinators, incompatibleConnections, self->datacenterVersionDifference)));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
@@ -2561,6 +2530,7 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 				if(config != serverInfo.latencyBandConfig) {
 					TraceEvent("LatencyBandConfigChanged").detail("Present", config.present());
 					serverInfo.id = deterministicRandom()->randomUniqueID();
+					serverInfo.infoGeneration = ++db->serverInfo->dbInfoCount;
 					serverInfo.latencyBandConfig = config;
 					db->serverInfo->set(cachedInfo);
 				}
@@ -3036,6 +3006,52 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData *self) {
 	}
 }
 
+ACTOR Future<Void> dbInfoUpdater( ClusterControllerData* self ) {
+	state Future<Void> dbInfoChange = self->db.serverInfo->onChange();
+	state Future<Void> updateDBInfo = self->updateDBInfo.onTrigger();
+	loop {
+		choose {
+			when(wait(updateDBInfo)) {
+				wait(delay(0.1) || dbInfoChange);
+			}
+			when(wait(dbInfoChange)) {}
+		}
+		
+		if(dbInfoChange.isReady()) {
+			self->updateDBInfoEndpoints.clear();
+			for(auto &it : self->id_worker) {
+				self->updateDBInfoEndpoints.push_back(it.second.details.interf.updateServerDBInfo.getEndpoint());
+			}
+		} else {
+			for(int i = 0; i < self->updateDBInfoEndpoints.size(); i++) {
+				if(self->removedDBInfoEndpoints.count(self->updateDBInfoEndpoints[i])) {
+					self->updateDBInfoEndpoints[i] = self->updateDBInfoEndpoints.back();
+					self->updateDBInfoEndpoints.pop_back();
+				}
+			}
+		}
+
+		self->removedDBInfoEndpoints.clear();
+		dbInfoChange = self->db.serverInfo->onChange();
+		updateDBInfo = self->updateDBInfo.onTrigger();
+
+		UpdateServerDBInfoRequest req;
+		//FIXME: cache serialization
+		req.dbInfo = self->db.serverInfo->get().read();
+		req.broadcastInfo.endpoints = self->updateDBInfoEndpoints;
+
+		choose {
+			when(std::vector<Endpoint> notUpdated = wait( broadcastDBInfoRequest(req, 2, Optional<Endpoint>(), false) )) {
+				self->updateDBInfoEndpoints.insert(self->updateDBInfoEndpoints.end(), notUpdated.begin(), notUpdated.end());
+				if(notUpdated.size()) {
+					self->updateDBInfo.trigger();
+				}
+			}
+			when(wait(dbInfoChange)) {}
+		}
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf, Future<Void> leaderFail, ServerCoordinators coordinators, LocalityData locality ) {
 	state ClusterControllerData self( interf, locality );
 	state Future<Void> coordinationPingDelay = delay( SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY );
@@ -3057,6 +3073,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	self.addActor.send( monitorDataDistributor(&self) );
 	self.addActor.send( monitorRatekeeper(&self) );
 	self.addActor.send( monitorStorageCache(&self) );
+	self.addActor.send( dbInfoUpdater(&self) );
 	self.addActor.send( traceCounters("ClusterControllerMetrics", self.id, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self.clusterControllerMetrics, self.id.toString() + "/ClusterControllerMetrics") );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
@@ -3127,11 +3144,6 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 		when( RegisterMasterRequest req = waitNext( interf.registerMaster.getFuture() ) ) {
 			++self.registerMasterRequests;
 			clusterRegisterMaster( &self, req );
-		}
-		when( GetServerDBInfoRequest req = waitNext( interf.getServerDBInfo.getFuture() ) ) {
-			++self.getServerDBInfoRequests;
-			self.addActor.send(
-			    clusterGetServerInfo(&self.db, req.knownServerInfoID, req.issues, req.incompatiblePeers, req.reply));
 		}
 		when( wait( leaderFail ) ) {
 			// We are no longer the leader if this has changed.

@@ -35,28 +35,6 @@
 #include "fdbclient/JsonBuilder.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-void setIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, VectorRef<StringRef> const& issues,
-               Optional<UID>& issueID) {
-	if (issues.size()) {
-		auto& e = issueMap[addr];
-		e.first = issues;
-		e.second = deterministicRandom()->randomUniqueID();
-		issueID = e.second;
-	} else {
-		issueMap.erase(addr);
-		issueID = Optional<UID>();
-	}
-}
-
-void removeIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, Optional<UID>& issueID) {
-	if (!issueID.present()) {
-		return;
-	}
-	if (issueMap.count(addr) && issueMap[addr].second == issueID.get()) {
-		issueMap.erase( addr );
-	}
-}
-
 const char* RecoveryStatus::names[] = {
 	"reading_coordinated_state", "locking_coordinated_state", "locking_old_transaction_servers", "reading_transaction_system_state",
 	"configuration_missing", "configuration_never_created", "configuration_invalid",
@@ -1986,13 +1964,12 @@ static std::string getIssueDescription(std::string name) {
 }
 
 static std::map<std::string, std::vector<JsonBuilderObject>> getProcessIssuesAsMessages(
-    ProcessIssuesMap const& _issues) {
+    std::vector<std::pair<NetworkAddress, Standalone<VectorRef<StringRef>>>> const& issues) {
 	std::map<std::string, std::vector<JsonBuilderObject>> issuesMap;
 
 	try {
-		ProcessIssuesMap issues = _issues;
 		for (auto processIssues : issues) {
-			for (auto issue : processIssues.second.first) {
+			for (auto issue : processIssues.second) {
 				std::string issueStr = issue.toString();
 				issuesMap[processIssues.first.toString()].push_back(
 				    JsonString::makeMessage(issueStr.c_str(), getIssueDescription(issueStr).c_str()));
@@ -2155,7 +2132,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> db,
 		Database cx,
 		vector<WorkerDetails> workers,
-		ProcessIssuesMap workerIssues,
+		std::vector<std::pair<NetworkAddress, Standalone<VectorRef<StringRef>>>> workerIssues,
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
 		ServerCoordinators coordinators,
 		std::vector<NetworkAddress> incompatibleConnections,

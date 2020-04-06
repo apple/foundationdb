@@ -37,6 +37,7 @@
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbrpc/MultiInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "flow/actorcompiler.h"
 
 struct WorkerInterface {
@@ -60,8 +61,9 @@ struct WorkerInterface {
 	RequestStream< struct EventLogRequest > eventLogRequest;
 	RequestStream< struct TraceBatchDumpRequest > traceBatchDumpRequest;
 	RequestStream< struct DiskStoreRequest > diskStoreRequest;
-	RequestStream<struct ExecuteRequest> execReq;
-	RequestStream<struct WorkerSnapRequest> workerSnapReq;
+	RequestStream< struct ExecuteRequest> execReq;
+	RequestStream< struct WorkerSnapRequest> workerSnapReq;
+	RequestStream< struct UpdateServerDBInfoRequest > updateServerDBInfo;
 
 	TesterInterface testerInterface;
 
@@ -80,11 +82,12 @@ struct WorkerInterface {
 		logRouter.getEndpoint( TaskPriority::Worker );
 		debugPing.getEndpoint( TaskPriority::Worker );
 		coordinationPing.getEndpoint( TaskPriority::Worker );
+		updateServerDBInfo.getEndpoint( TaskPriority::Worker );
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq, backup);
+		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq, backup, updateServerDBInfo);
 	}
 };
 
@@ -417,6 +420,22 @@ struct DiskStoreRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, includePartialStores, reply);
+	}
+};
+
+ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply);
+
+ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req, int sendAmount, Optional<Endpoint> sender, bool sendReply);
+
+struct UpdateServerDBInfoRequest {
+	constexpr static FileIdentifier file_identifier = 9467438;
+	ServerDBInfo dbInfo;
+	TreeBroadcastInfo broadcastInfo;
+	ReplyPromise<std::vector<Endpoint>> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, dbInfo, broadcastInfo, reply);
 	}
 };
 

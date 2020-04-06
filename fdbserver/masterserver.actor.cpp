@@ -733,22 +733,28 @@ ACTOR Future<Void> sendInitialCommitToResolvers( Reference<MasterData> self ) {
 	ASSERT(self->recoveryTransactionVersion);
 
 	state Standalone<RangeResultRef> data = self->txnStateStore->readRange(txnKeys, BUGGIFY ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES).get();
-	state vector<Future<Void>> txnReplies;
+	state std::vector<Future<Void>> txnReplies;
 	state int64_t dataOutstanding = 0;
+
+	state std::vector<Endpoint> endpoints;
+	state int sendAmount = 2;
+	for(auto& it : self->proxies) {
+		endpoints.push_back(it.txnState.getEndpoint());
+	}
+
 	loop {
 		if(!data.size()) break;
 		((KeyRangeRef&)txnKeys) = KeyRangeRef( keyAfter(data.back().key, txnKeys.arena()), txnKeys.end );
 		Standalone<RangeResultRef> nextData = self->txnStateStore->readRange(txnKeys, BUGGIFY ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES).get();
 
-		for(auto& r : self->proxies) {
-			TxnStateRequest req;
-			req.arena = data.arena();
-			req.data = data;
-			req.sequence = txnSequence;
-			req.last = !nextData.size();
-			txnReplies.push_back( brokenPromiseToNever( r.txnState.getReply( req ) ) );
-			dataOutstanding += data.arena().getSize();
-		}
+		TxnStateRequest req;
+		req.arena = data.arena();
+		req.data = data;
+		req.sequence = txnSequence;
+		req.last = !nextData.size();
+		req.broadcastInfo.endpoints = endpoints;
+		txnReplies.push_back(broadcastTxnRequest(req, sendAmount, false));
+		dataOutstanding += sendAmount*data.arena().getSize();
 		data = nextData;
 		txnSequence++;
 

@@ -67,6 +67,43 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 # define KV_STORE(filename,uid) keyValueStoreMemory(filename,uid)
 #endif
 
+ACTOR Future<std::vector<Endpoint>> tryDBInfoBroadcast(RequestStream<UpdateServerDBInfoRequest> stream, UpdateServerDBInfoRequest req) {
+	ErrorOr<std::vector<Endpoint>> rep = wait( stream.getReplyUnlessFailedFor(req, 1.0) );
+	if(rep.present()) {
+		return rep.get();
+	}
+	req.broadcastInfo.endpoints.push_back(stream.getEndpoint());
+	return req.broadcastInfo.endpoints;
+}
+
+ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req, int sendAmount, Optional<Endpoint> sender, bool sendReply) {
+	state std::vector<Future<std::vector<Endpoint>>> replies;
+	state ReplyPromise<std::vector<Endpoint>> reply = req.reply;
+	resetReply( req );
+	int currentStream = 0;
+	for(int i = 0; i < sendAmount && currentStream < req.broadcastInfo.endpoints.size(); i++) {
+		TreeBroadcastInfo info;
+		RequestStream<TxnStateRequest> cur(req.broadcastInfo.endpoints[currentStream++]);
+		while(currentStream < req.broadcastInfo.endpoints.size()*(i+1)/sendAmount) {
+			info.endpoints.push_back(req.broadcastInfo.endpoints[currentStream++]);
+		}
+		req.broadcastInfo = info;
+		replies.push_back( tryDBInfoBroadcast( cur, req ) );
+		resetReply( req );
+	}
+	wait( waitForAll(replies) );
+	std::vector<Endpoint> notUpdated;
+	if(sender.present()) {
+		notUpdated.push_back(sender.get());
+	}
+	for(auto& it : replies) {
+		notUpdated.insert(notUpdated.end(), it.get().begin(), it.get().end());
+	}
+	if(sendReply) {
+		reply.send(notUpdated);
+	}
+	return notUpdated;
+}
 
 ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
 	state std::vector<UID> lastProxyUIDs;
@@ -410,7 +447,8 @@ ACTOR Future<Void> registrationClient(
 		Reference<AsyncVar<bool>> degraded,
 		PromiseStream< ErrorInfo > errors,
 		LocalityData locality,
-		Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+		Reference<AsyncVar<ServerDBInfo>> dbInfo,
+		Reference<ClusterConnectionFile> connFile) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply (requiring us to re-register)
 	// The registration request piggybacks optional distributor interface if it exists.
@@ -419,8 +457,38 @@ ACTOR Future<Void> registrationClient(
 	state Reference<AsyncVar<Optional<std::pair<uint16_t,StorageServerInterface>>>> scInterf( new AsyncVar<Optional<std::pair<uint16_t,StorageServerInterface>>>() );
 	state Future<Void> cacheProcessFuture;
 	state Future<Void> cacheErrorsFuture;
+	state Optional<double> incorrectTime;
 	loop {
 		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), scInterf->get(), degraded->get());
+		ClusterConnectionString fileConnectionString;
+		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
+			request.issues.push_back_deep(request.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
+			std::string connectionString = connFile->getConnectionString().toString();
+			if(!incorrectTime.present()) {
+				incorrectTime = now();
+			}
+			if(connFile->canGetFilename()) {
+				// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing the file right before us)
+				TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
+					.detail("Filename", connFile->getFilename())
+					.detail("ConnectionStringFromFile", fileConnectionString.toString())
+					.detail("CurrentConnectionString", connectionString);
+			}
+		}
+		else {
+			incorrectTime = Optional<double>();
+		}
+
+		auto peers = FlowTransport::transport().getIncompatiblePeers();
+		for(auto it = peers->begin(); it != peers->end();) {
+			if( now() - it->second.second > SERVER_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING ) {
+				req.incompatiblePeers.push_back(it->first);
+				it = peers->erase(it);
+			} else {
+				it++;
+			}
+		}
+
 		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply(request) ) : Never();
 		choose {
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
@@ -461,6 +529,7 @@ ACTOR Future<Void> registrationClient(
 			when ( wait( rkInterf->onChange() ) ) {}
 			when ( wait( scInterf->onChange() ) ) {}
 			when ( wait( degraded->onChange() ) ) {}
+			when ( wait( FlowTransport::transport().onIncompatibleChanged() ) ) {}
 		}
 	}
 }
@@ -746,66 +815,6 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFol
 	return Void();
 }
 
-ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
-                                       Reference<ClusterConnectionFile> connFile, LocalityData locality,
-                                       Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-	// Initially most of the serverDBInfo is not known, but we know our locality right away
-	ServerDBInfo localInfo;
-	localInfo.myLocality = locality;
-	dbInfo->set(localInfo);
-
-	state Optional<double> incorrectTime;
-	loop {
-		GetServerDBInfoRequest req;
-		req.knownServerInfoID = dbInfo->get().id;
-
-		ClusterConnectionString fileConnectionString;
-		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
-			req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
-			std::string connectionString = connFile->getConnectionString().toString();
-			if(!incorrectTime.present()) {
-				incorrectTime = now();
-			}
-			if(connFile->canGetFilename()) {
-				// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing the file right before us)
-				TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
-					.detail("Filename", connFile->getFilename())
-					.detail("ConnectionStringFromFile", fileConnectionString.toString())
-					.detail("CurrentConnectionString", connectionString);
-			}
-		}
-		else {
-			incorrectTime = Optional<double>();
-		}
-
-		auto peers = FlowTransport::transport().getIncompatiblePeers();
-		for(auto it = peers->begin(); it != peers->end();) {
-			if( now() - it->second.second > SERVER_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING ) {
-				req.incompatiblePeers.push_back(it->first);
-				it = peers->erase(it);
-			} else {
-				it++;
-			}
-		}
-
-		choose {
-			when( CachedSerialization<ServerDBInfo> ni = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
-				ServerDBInfo localInfo = ni.read();
-				TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
-				.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
-				.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
-
-				localInfo.myLocality = locality;
-				dbInfo->set(localInfo);
-			}
-			when( wait( ccInterface->onChange() ) ) {
-				if(ccInterface->get().present())
-					TraceEvent("GotCCInterfaceChange").detail("CCID", ccInterface->get().get().id()).detail("CCMachine", ccInterface->get().get().getWorkers.getEndpoint().getPrimaryAddress());
-			}
-		}
-	}
-}
-
 class SharedLogsKey {
 	TLogVersion logVersion;
 	TLogSpillType spillType;
@@ -1010,7 +1019,23 @@ ACTOR Future<Void> workerServer(
 		TraceEvent("RecoveriesComplete", interf.id());
 
 		loop choose {
+			when( UpdateServerDBInfoRequest req = waitNext( interf.updateServerDBInfo.getFuture() ) ) {
+				if(req.dbInfo.clusterInterface == ccInterface->get().get() && (req.dbInfo.infoGeneration > dbInfo->infoGeneration || dbInfo->clusterInterface != ccInterface->get().get())) {
+					ServerDBInfo localInfo = req.dbInfo;
+					TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
+					.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
+					.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
 
+					localInfo.myLocality = locality;
+					dbInfo->set(localInfo);
+				}
+
+				Optional<Endpoint> notUpdated;
+				if(req.dbInfo.clusterInterface != ccInterface->get().get() || (req.dbInfo.infoGeneration < dbInfo->infoGeneration && dbInfo->clusterInterface == ccInterface->get().get())) {
+					notUpdated = interf.updateServerDBInfo.getEndpoint();
+				}
+				errorForwarders.add(success(broadcastDBInfoRequest(req, 2, notUpdated, true)));
+			}
 			when( RebootRequest req = waitNext( interf.clientInterface.reboot.getFuture() ) ) {
 				state RebootRequest rebootReq = req;
 				// If suspendDuration is INT_MAX, the trace will not be logged if it was inside the next block

@@ -47,7 +47,6 @@ struct ClusterControllerFullInterface {
 	RequestStream< struct RegisterWorkerRequest > registerWorker;
 	RequestStream< struct GetWorkersRequest > getWorkers;
 	RequestStream< struct RegisterMasterRequest > registerMaster;
-	RequestStream< struct GetServerDBInfoRequest > getServerDBInfo;
 
 	UID id() const { return clientInterface.id(); }
 	bool operator == (ClusterControllerFullInterface const& r) const { return id() == r.id(); }
@@ -60,8 +59,7 @@ struct ClusterControllerFullInterface {
 				recruitStorage.getFuture().isReady() ||
 				registerWorker.getFuture().isReady() || 
 				getWorkers.getFuture().isReady() || 
-				registerMaster.getFuture().isReady() ||
-				getServerDBInfo.getFuture().isReady();
+				registerMaster.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -72,7 +70,6 @@ struct ClusterControllerFullInterface {
 		registerWorker.getEndpoint( TaskPriority::ClusterControllerWorker );
 		getWorkers.getEndpoint( TaskPriority::ClusterController );
 		registerMaster.getEndpoint( TaskPriority::ClusterControllerRegister );
-		getServerDBInfo.getEndpoint( TaskPriority::ClusterController );
 	}
 
 	template <class Ar>
@@ -81,7 +78,7 @@ struct ClusterControllerFullInterface {
 			ASSERT(ar.protocolVersion().isValid());
 		}
 		serializer(ar, clientInterface, recruitFromConfiguration, recruitRemoteFromConfiguration, recruitStorage,
-		           registerWorker, getWorkers, registerMaster, getServerDBInfo);
+		           registerWorker, getWorkers, registerMaster);
 	}
 };
 
@@ -201,6 +198,8 @@ struct RegisterWorkerRequest {
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
 	Optional<std::pair<uint16_t,StorageServerInterface>> storageCacheInterf;
+	Standalone<VectorRef<StringRef>> issues;
+	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
 	bool degraded;
 
@@ -210,7 +209,7 @@ struct RegisterWorkerRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, distributorInterf, ratekeeperInterf, storageCacheInterf, reply, degraded);
+		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, distributorInterf, ratekeeperInterf, storageCacheInterf, issues, incompatiblePeers, reply, degraded);
 	}
 };
 

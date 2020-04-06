@@ -48,6 +48,28 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply) {
+	state ReplyPromise<Void> reply = req.reply;
+	resetReply( req );
+	std::vector<Future<Void>> replies;
+	int currentStream = 0;
+	for(int i = 0; i < sendAmount && currentStream < req.broadcastInfo.endpoints.size(); i++) {
+		TreeBroadcastInfo info;
+		RequestStream<TxnStateRequest> cur(req.broadcastInfo.endpoints[currentStream++]);
+		while(currentStream < req.broadcastInfo.endpoints.size()*(i+1)/sendAmount) {
+			info.endpoints.push_back(req.broadcastInfo.endpoints[currentStream++]);
+		}
+		req.broadcastInfo = info;
+		replies.push_back(brokenPromiseToNever( cur.getReply( req ) ));
+		resetReply( req );
+	}
+	wait( waitForAll(replies) );
+	if(sendReply) {
+		reply.send(Void());
+	}
+	return Void();
+}
+
 struct ProxyStats {
 	CounterCollection cc;
 	Counter txnRequestIn, txnRequestOut, txnRequestErrors;
@@ -1871,7 +1893,7 @@ ACTOR Future<Void> masterProxyServerCore(
 		when(ExclusionSafetyCheckRequest exclCheckReq = waitNext(proxy.exclusionSafetyCheckReq.getFuture())) {
 			addActor.send(proxyCheckSafeExclusion(db, exclCheckReq));
 		}
-		when(TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {
+		when(state TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {
 			state ReplyPromise<Void> reply = req.reply;
 			if(req.last) maxSequence = req.sequence + 1;
 			if (!txnSequences.count(req.sequence)) {
@@ -1938,7 +1960,7 @@ ACTOR Future<Void> masterProxyServerCore(
 					commitData.txnStateStore->enableSnapshot();
 				}
 			}
-			reply.send(Void());
+			addActor.send(broadcastTxnRequest(req, 2, true));
 			wait(yield());
 		}
 	}
