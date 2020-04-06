@@ -28,6 +28,7 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "flow/FBTrace.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 
@@ -233,7 +234,7 @@ ACTOR Future<Version> waitForVersionNoTooOld( StorageCacheData* data, Version ve
 
 ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 	state int64_t resultSize = 0;
-
+	state Reference<GetValueDebugTrace> getValueTrace;
 	try {
 		++data->counters.getValueQueries;
 		++data->counters.allQueries;
@@ -247,8 +248,12 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 		//TODO what's this?
 		wait( delay(0, TaskPriority::DefaultEndpoint) );
 
-		if( req.debugID.present() )
+		if( req.debugID.present() ) {
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
+			//FIXME
+			getValueTrace = GetValueDebugTrace(req.debugID.get().first(), now(), GetValueDebugTrace::STORAGECACHE_GETVALUE_DO_READ);
+			fbTrace(getValueTrace);
+		}
 
 		state Optional<Value> v;
 		state Version version = wait( waitForVersion( data, req.version ) );
