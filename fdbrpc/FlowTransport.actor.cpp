@@ -477,18 +477,23 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 						         wait(INetworkConnections::net()->connect(self->destination))) {
 							conn = _conn;
 							wait(conn->connectHandshake());
-							if (FlowTransport::transport().isClient() && self->unsent.empty()) {
-								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
-								conn->close();
-								conn = Reference<IConnection>();
-								continue;
-							} else {
-								TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
-								    .suppressFor(1.0)
-								    .detail("PeerAddr", self->destination);
-								self->prependConnectPacket();
+							if (self->unsent.empty()) {
+								state Future<Void> statusUpdate = delayedHealthUpdate(self->destination);
+								choose {
+									when(wait(statusUpdate)) {
+										conn->close();
+										conn = Reference<IConnection>();
+										continue;
+									}
+									when(wait(self->dataToSend.onTrigger())) {}
+								}
 							}
-							reader = connectionReader( self->transport, conn, self, Promise<Reference<Peer>>());
+
+							TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID())
+							    .suppressFor(1.0)
+							    .detail("PeerAddr", self->destination);
+							self->prependConnectPacket();
+							reader = connectionReader(self->transport, conn, self, Promise<Reference<Peer>>());
 						}
 						when( wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) ) ) {
 							throw connection_failed();
