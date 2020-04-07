@@ -21,6 +21,7 @@
 
 #include <stdint.h>
 #include "flow/Arena.h"
+#include "flow/Platform.h"
 
 #ifndef ART_H
 #define ART_H
