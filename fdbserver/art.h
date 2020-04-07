@@ -25,21 +25,6 @@
 
 #ifndef ART_H
 #define ART_H
-//#define DEBUG
-
-#ifdef DEBUG
-#define ARTRACE(format, arg...)\
-    do {                        \
-        fprintf(stdout,  "%s:%d:" format , __FUNCTION__, __LINE__,##arg); fflush(stdout);\
-    } while (0)
-
-#define ART_PRINT(format, arg...) fprintf(stdout,  "" format , ##arg); fflush(stdout);
-
-#else //NO DEBUG
-
-
-#define ART_PRINT(format, arg...)
-#endif //DEBUG
 
 
 struct art_iterator;
