@@ -451,7 +451,7 @@ art_node **art_tree::find_child(art_node *n, unsigned char c) {
                  * the index.
                  */
                 if (bitfield)
-                    return &p.p2->children[__builtin_ctz(bitfield)];
+                    return &p.p2->children[ctz(bitfield)];
                 break;
             }
 
@@ -559,7 +559,7 @@ void art_tree::find_next(art_node *n, unsigned char c, art_node **out) {
                     //ALL children greater than char have their bit set
                     //We need the smallest one
                     //let's get the least significant bit that is set in the bitfield
-                    int one = __builtin_ctz(bitfield);
+                    int one = ctz(bitfield);
                     *out = p.p2->children[one];
                 }
                 break;
@@ -1303,7 +1303,7 @@ void art_tree::add_child16(art_node16 *n, art_node **ref, unsigned char c, void 
         // Check if less than any
         unsigned idx;
         if (bitfield) {
-            idx = __builtin_ctz(bitfield);
+            idx = ctz(bitfield);
             memmove(n->keys + idx + 1, n->keys + idx, n->n.num_children - idx);
             memmove(n->children + idx + 1, n->children + idx,
                     (n->n.num_children - idx) * sizeof(void *));
@@ -1472,7 +1472,7 @@ void art_tree::find_prev(art_node *n, unsigned char c, art_node **out) {
                 bitfield = _mm_movemask_epi8(cmp) & mask;
                 if (bitfield) {
                     //We have at least one bit set to one, so the largest smaller exists
-                    int one = __builtin_clz(bitfield);
+                    int one = clz(bitfield);
                     one = (sizeof(bitfield) * 8) - one;
                     *out = p.p2->children[one - 1];
                 } else {
