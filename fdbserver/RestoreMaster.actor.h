@@ -281,7 +281,10 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					if (logIdx < logFiles.size()) {
 						nextVersion = logFiles[logIdx].endVersion;
 					} else {
-						TraceEvent("FastRestoreBuildVersionBatch").detail("FinishAllLogFiles", logIdx).detail("CurBatchIndex", vb.batchIndex).detail("CurBatchSize", vb.size);
+						TraceEvent("FastRestoreBuildVersionBatch")
+						    .detail("FinishAllLogFiles", logIdx)
+						    .detail("CurBatchIndex", vb.batchIndex)
+						    .detail("CurBatchSize", vb.size);
 						if (prevEndVersion < nextVersion) {
 							// Ensure the last log file is included in version batch
 							lastLogFile = true;
@@ -311,7 +314,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			    .detail("VersionBatchBeginVersion", vb.beginVersion)
 			    .detail("PreviousEndVersion", prevEndVersion)
 			    .detail("NextVersion", nextVersion)
-				.detail("TargetVersion", targetVersion)
+			    .detail("TargetVersion", targetVersion)
 			    .detail("RangeIndex", rangeIdx)
 			    .detail("RangeFiles", rangeFiles.size())
 			    .detail("LogIndex", logIdx)
@@ -321,9 +324,9 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			    .detail("NextVersionIntervalSize", nextVersionSize)
 			    .detail("NextRangeIndex", nextRangeIdx)
 			    .detail("UsedLogFiles", curLogFiles.size())
-				.detail("VersionBatchCurRangeFiles", vb.rangeFiles.size())
-				.detail("VersionBatchCurLogFiles", vb.logFiles.size())
-				.detail("LastLogFile", lastLogFile);
+			    .detail("VersionBatchCurRangeFiles", vb.rangeFiles.size())
+			    .detail("VersionBatchCurLogFiles", vb.logFiles.size())
+			    .detail("LastLogFile", lastLogFile);
 
 			ASSERT(prevEndVersion < nextVersion); // Ensure progress
 			if (vb.size + nextVersionSize <= SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES ||
@@ -382,16 +385,16 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				// Finalize the current version batch
 				versionBatches->emplace(vb.beginVersion, vb); // copy vb to versionBatch
 				TraceEvent("FastRestoreBuildVersionBatch")
-					.detail("FinishBatchIndex", vb.batchIndex)
-					.detail("VersionBatchBeginVersion", vb.beginVersion)
-					.detail("VersionBatchEndVersion", vb.endVersion)
-					.detail("VersionBatchLogFiles", vb.logFiles.size())
-					.detail("VersionBatchRangeFiles", vb.rangeFiles.size())
-					.detail("VersionBatchSize", vb.size)
-					.detail("RangeIndex", rangeIdx)
-					.detail("LogIndex", logIdx)
-					.detail("NewVersionBatchBeginVersion", prevEndVersion)
-					.detail("RewriteNextVersion", rewriteNextVersion);
+				    .detail("FinishBatchIndex", vb.batchIndex)
+				    .detail("VersionBatchBeginVersion", vb.beginVersion)
+				    .detail("VersionBatchEndVersion", vb.endVersion)
+				    .detail("VersionBatchLogFiles", vb.logFiles.size())
+				    .detail("VersionBatchRangeFiles", vb.rangeFiles.size())
+				    .detail("VersionBatchSize", vb.size)
+				    .detail("RangeIndex", rangeIdx)
+				    .detail("LogIndex", logIdx)
+				    .detail("NewVersionBatchBeginVersion", prevEndVersion)
+				    .detail("RewriteNextVersion", rewriteNextVersion);
 
 				// start finding the next version batch
 				vb.reset();
@@ -407,12 +410,12 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			versionBatches->emplace(vb.beginVersion, vb);
 		}
 		// Invariant: The last vb endverion should be no smaller than targetVersion
-		if(maxVBVersion < targetVersion) {
+		if (maxVBVersion < targetVersion) {
 			// Q: Is the restorable version always less than the maximum version from all backup filenames?
 			// A: This is true for the raw backup files returned by backup container before we remove the empty files.
 			TraceEvent(SevWarnAlways, "FastRestoreBuildVersionBatch")
-				.detail("TargetVersion", targetVersion)
-				.detail("MaxVersionBatchVersion", maxVBVersion);
+			    .detail("TargetVersion", targetVersion)
+			    .detail("MaxVersionBatchVersion", maxVBVersion);
 		}
 	}
 

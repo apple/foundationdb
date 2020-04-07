@@ -32,11 +32,22 @@ int numRoles = RestoreRoleStr.size();
 StringRef debugFRKey = LiteralStringRef("\xff\xff\xff\xff");
 
 // Track any mutation in fast restore that has overlap with debugFRKey
-bool debugFRMutation( const char* context, Version version, MutationRef const& mutation ) {
+bool debugFRMutation(const char* context, Version version, MutationRef const& mutation) {
 	if (mutation.type != mutation.ClearRange && mutation.param1 == debugFRKey) { // Single key mutation
-		TraceEvent("FastRestoreMutationTracking").detail("At", context).detail("Version", version).detail("MutationType", getTypeString((MutationRef::Type)mutation.type)).detail("Key", mutation.param1).detail("Value", mutation.param2);
-	} else if (mutation.type == mutation.ClearRange && debugFRKey >= mutation.param1 && debugFRKey < mutation.param2) { // debugFRKey is in the range mutation
-		TraceEvent("FastRestoreMutationTracking").detail("At", context).detail("Version", version).detail("MutationType", getTypeString((MutationRef::Type)mutation.type)).detail("Begin", mutation.param1).detail("End", mutation.param2);
+		TraceEvent("FastRestoreMutationTracking")
+		    .detail("At", context)
+		    .detail("Version", version)
+		    .detail("MutationType", getTypeString((MutationRef::Type)mutation.type))
+		    .detail("Key", mutation.param1)
+		    .detail("Value", mutation.param2);
+	} else if (mutation.type == mutation.ClearRange && debugFRKey >= mutation.param1 &&
+	           debugFRKey < mutation.param2) { // debugFRKey is in the range mutation
+		TraceEvent("FastRestoreMutationTracking")
+		    .detail("At", context)
+		    .detail("Version", version)
+		    .detail("MutationType", getTypeString((MutationRef::Type)mutation.type))
+		    .detail("Begin", mutation.param1)
+		    .detail("End", mutation.param2);
 	} else
 		return false;
 
@@ -44,7 +55,9 @@ bool debugFRMutation( const char* context, Version version, MutationRef const& m
 }
 #else
 // Default implementation.
-bool debugFRMutation( const char* context, Version version, MutationRef const& mutation ) { return false; }
+bool debugFRMutation(const char* context, Version version, MutationRef const& mutation) {
+	return false;
+}
 #endif
 
 std::string getRoleStr(RestoreRole role) {
