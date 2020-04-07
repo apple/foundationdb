@@ -2017,20 +2017,6 @@ struct RedwoodRecordRef {
 
 		byte *wptr;
 
-		template<typename T> void write(const T &in) {
-			*(T *)wptr = in;
-			wptr += sizeof(T);
-		}
-
-		// Write a big endian 1 or 2 byte integer using the high bit of the first byte as an "extension" bit.
-		// Values > 15 bits in length are not valid input but this is not checked for.
-		void writeVarInt(int x) {
-			if(x >= 128) {
-				*wptr++ = (uint8_t)( (x >> 8) | 0x80 );
-			}
-			*wptr++ = (uint8_t)x;
-		}
-
 		void writeString(StringRef s) {
 			memcpy(wptr, s.begin(), s.size());
 			wptr += s.size();
@@ -2042,10 +2028,6 @@ struct RedwoodRecordRef {
 				memcpy(wptr, ((byte *)&x) + sizeof(int64_t) - len, len);
 				wptr += len;
 			}
-		}
-
-		static int varIntLen(int x) {
-			return x < 0x80 ? 1 : 2;
 		}
 
 		// Find the number of bytes of precision to store for a version delta
@@ -2069,28 +2051,6 @@ struct RedwoodRecordRef {
 		Reader(const void *ptr) : rptr((const byte *)ptr) {}
 
 		const byte *rptr;
-
-		template<typename T> T read() {
-			T r = *(const T *)rptr;
-			rptr += sizeof(T);
-			return r;
-		}
-
-		// Read a big endian 1 or 2 byte integer using the high bit of the first byte as an "extension" bit.
-		int readVarInt() {
-			int x = *rptr++;
-			// If the high bit is set
-			if(x & 0x80) {
-				// Clear the high bit
-				x &= 0x7f;
-				// Shift low byte left
-				x <<= 8;
-				// Read the new low byte and OR it in
-				x |= *rptr++;
-			}
-
-			return x;
-		}
 
 		int64_t readFixedBigEndian(int len) {
 			if(len == 0) {
@@ -2127,49 +2087,124 @@ struct RedwoodRecordRef {
 #pragma pack(push,1)
 	struct Delta {
 
+		uint8_t flags;
+
+		// Four field sizing schemes ranging from 3 to 8 bytes, with 3 being the most common.
+		union {
+			struct {
+				uint8_t prefixLength;
+				uint8_t suffixLength;
+				uint8_t valueLength;
+			} LengthFormat0;
+
+			struct {
+				uint8_t prefixLength;
+				uint8_t suffixLength;
+				uint16_t valueLength;
+			} LengthFormat1;
+
+			struct {
+				uint8_t prefixLength;
+				uint8_t suffixLength;
+				uint32_t valueLength;
+			} LengthFormat2;
+
+			struct {
+				uint16_t prefixLength;
+				uint16_t suffixLength;
+				uint32_t valueLength;
+			} LengthFormat3;
+		};
+
+		static constexpr int LengthFormatSizes[] = {sizeof(LengthFormat0), sizeof(LengthFormat1), sizeof(LengthFormat2), sizeof(LengthFormat3)};
+
 		// Serialized Format
 		//
-		// Byte 1
+		// Flags - 1 byte
 		//    1 bit - borrow source is prev ancestor (otherwise next ancestor)
 		//    1 bit - item is deleted
 		//    1 bit - has value (this is different from having a zero-length value)
-		//    2 bits - part type enum
 		//    3 bits - version delta length
+		//    2 bits - length fields format
         //
-		// Remaining field sizes are variable length, 1-2 byte integers
-		//    1-2 bytes - key prefix length to borrow
-		//    1-2 bytes - key suffix length
-		//    1-2 bytes - value length if has value is set
+		// Length fields using 3 to 7 bytes total depending on length fields format
 		//
-		// Data bytes, variable length based on values above
+		// Byte strings 
 		//    Key suffix bytes
-		//    Version delta bytes
 		//    Value bytes
+		//    Version delta bytes
 		//
-		// Large chunked key-value pairs consist of at most 2 additional records, having overhead of 8 to 10 bytes each.
-		//   4 bytes of child pointers in the DeltaTree Node
-		//   1 flag byte
-		//   1 or 2 bytes for prefix borrow length (usually 1)
-		//   1 key suffix length byte (will be 0)
-		//   1 or 2 bytes for value length (usually 2)
 
 		enum EFlags {
 			PREFIX_SOURCE_PREV = 0x80,
 			IS_DELETED = 0x40,
 			HAS_VALUE = 0x20,
-			// 0x10 unused
-			// 0x08 unused
-			VERSION_DELTA_LEN = 0x07
+			VERSION_DELTA_LEN = 0x1C,
+			FORMAT = 0x03
 		};
 
-		uint8_t flags;
-
-		byte * data() {
-			return (byte *)(this + 1);
+		static inline int determineLengthFormat(int prefixLength, int suffixLength, int valueLength) {
+			// Large prefix or suffix length, which should be rare, is format 3
+			if(prefixLength > 0xFF || suffixLength > 0xFF) {
+				return 3;
+			}
+			else if(valueLength < 0x100) {
+				return 0;
+			}
+			else if(valueLength < 0x10000) {
+				return 1;
+			}
+			else {
+				return 2;
+			}
 		}
 
-		const byte * data() const {
-			return (const byte *)(this + 1);
+		byte * data() const {
+			switch(flags & FORMAT) {
+				case 0:  return (byte *)(&LengthFormat0 + 1);
+				case 1:  return (byte *)(&LengthFormat1 + 1);
+				case 2:  return (byte *)(&LengthFormat2 + 1);
+				case 3:
+				default: return (byte *)(&LengthFormat3 + 1);
+			}
+		}
+
+		int getKeyPrefixLength() const {
+			switch(flags & FORMAT) {
+				case 0:  return LengthFormat0.prefixLength;
+				case 1:  return LengthFormat1.prefixLength;
+				case 2:  return LengthFormat2.prefixLength;
+				case 3:
+				default: return LengthFormat3.prefixLength;
+			}
+		}
+
+		int getKeySuffixLength() const {
+			switch(flags & FORMAT) {
+				case 0:  return LengthFormat0.suffixLength;
+				case 1:  return LengthFormat1.suffixLength;
+				case 2:  return LengthFormat2.suffixLength;
+				case 3:
+				default: return LengthFormat3.suffixLength;
+			}
+		}
+
+		int getValueLength() const {
+			switch(flags & FORMAT) {
+				case 0:  return LengthFormat0.valueLength;
+				case 1:  return LengthFormat1.valueLength;
+				case 2:  return LengthFormat2.valueLength;
+				case 3:
+				default: return LengthFormat3.valueLength;
+			}
+		}
+
+		StringRef getKeySuffix() const {
+			return StringRef(data(), getKeySuffixLength());
+		}
+
+		StringRef getValue() const {
+			return StringRef(data() + getKeySuffixLength(), getValueLength());
 		}
 
 		// version delta length is only 3 bits, so 0-7 represents length 0 and 2-8
@@ -2178,11 +2213,11 @@ struct RedwoodRecordRef {
 			if(len > 0) {
 				--len;
 			}
-			flags |= (uint8_t)len;
+			flags |= (uint8_t)(len << 2);
 		}
 
 		int getVersionDeltaLength() const {
-			int len = flags & VERSION_DELTA_LEN;
+			int len = (flags & VERSION_DELTA_LEN) >> 2;
 			if(len != 0) {
 				++len;
 			}
@@ -2220,14 +2255,13 @@ struct RedwoodRecordRef {
 		}
 
 		RedwoodRecordRef apply(const RedwoodRecordRef &base, Arena &arena) const {
-			Reader r(data());
-
-			int keyPrefixLen = r.readVarInt();
-			int keySuffixLen = r.readVarInt();
-			int valueLen = hasValue() ? r.readVarInt() : 0;
+			int keyPrefixLen = getKeyPrefixLength();
+			int keySuffixLen = getKeySuffixLength();
+			int valueLen = hasValue() ? getValueLength() : 0;
 
 			StringRef k;
 
+			Reader r(data());
 			// If there is a key suffix, reconstitute the complete key into a contiguous string
 			if(keySuffixLen > 0) {
 				StringRef keySuffix = r.readString(keySuffixLen);
@@ -2240,30 +2274,26 @@ struct RedwoodRecordRef {
 				k = base.key.substr(0, keyPrefixLen);
 			}
 
-			Version versionDelta = r.readFixedBigEndian(getVersionDeltaLength());
-			Version v = base.version + versionDelta;
-
 			Optional<ValueRef> value;
 			if(hasValue()) {
 				value = r.readString(valueLen);
 			}
 
+			Version versionDelta = r.readFixedBigEndian(getVersionDeltaLength());
+			Version v = base.version + versionDelta;
+
 			return RedwoodRecordRef(k, v, value);
 		}
 
 		int size() const {
-			Reader r(data());
-
-			// skip prefix length
-			r.readVarInt();
-
-			// get key suffix length		
-			int keySuffixLen = r.readVarInt();
-			// get value length, if present
-			int valueLen = hasValue() ? r.readVarInt() : 0;
-
-			// Static delta size, plus variable sized length bytes, plus length of stored bytes for key suffix, version delta, and value.
-			return sizeof(Delta) + (r.rptr - data()) + keySuffixLen + getVersionDeltaLength() + valueLen;
+			int size = 1 + getVersionDeltaLength();
+			switch(flags & FORMAT) {
+				case 0:  return size + sizeof(LengthFormat0) + LengthFormat0.suffixLength + LengthFormat0.valueLength;
+				case 1:  return size + sizeof(LengthFormat1) + LengthFormat1.suffixLength + LengthFormat1.valueLength;
+				case 2:  return size + sizeof(LengthFormat2) + LengthFormat2.suffixLength + LengthFormat2.valueLength;
+				case 3:
+				default: return size + sizeof(LengthFormat3) + LengthFormat3.suffixLength + LengthFormat3.valueLength;
+			}
 		}
 
 		std::string toString() const {
@@ -2277,14 +2307,15 @@ struct RedwoodRecordRef {
 			if(hasValue()) {
 				flagString += "HasValue";
 			}
+			int lengthFormat = flags & FORMAT;
 
 			Reader r(data());
-			int prefixLen = r.readVarInt();
-			int keySuffixLen = r.readVarInt();
-			int valueLen = hasValue() ? r.readVarInt() : 0;
+			int prefixLen = getKeyPrefixLength();
+			int keySuffixLen = getKeySuffixLength();
+			int valueLen = getValueLength();
 
-			return format("len: %d  flags: %s prefixLen: %d  keySuffixLen: %d  versionDeltaLen: %d  valueLen %d  raw: %s",
-				size(), flagString.c_str(), prefixLen, keySuffixLen, getVersionDeltaLength(), valueLen, StringRef((const uint8_t *)this, size()).toHexString().c_str());
+			return format("lengthFormat: %d  totalDeltaSize: %d  flags: %s  prefixLen: %d  keySuffixLen: %d  versionDeltaLen: %d  valueLen %d  raw: %s",
+				lengthFormat, size(), flagString.c_str(), prefixLen, keySuffixLen, getVersionDeltaLength(), valueLen, StringRef((const uint8_t *)this, size()).toHexString().c_str());
 		}
 	};
 
@@ -2292,25 +2323,10 @@ struct RedwoodRecordRef {
 	// its values, so the Reader does not require the original prev/next ancestors.
 	struct DeltaValueOnly : Delta {
 		RedwoodRecordRef apply(const RedwoodRecordRef &base, Arena &arena) const {
-			Reader r(data());
-
 			Optional<ValueRef> value;
 
 			if(hasValue()) {
-				// Skip prefix length
-				r.readVarInt();
-				// Get key suffix length
-				int keySuffixLen = r.readVarInt();
-				// Get value length
-				int valueLen = r.readVarInt();
-
-				// Skip key suffix bytes
-				r.readString(keySuffixLen);
-				// Skip version delta bytes
-				r.readBytes(getVersionDeltaLength());
-
-				// Read value bytes
-				value = r.readString(valueLen);
+				value = getValue();
 			}
 
 			return RedwoodRecordRef(StringRef(), 0, value);
@@ -2343,53 +2359,45 @@ struct RedwoodRecordRef {
 	}
 
 	int deltaSize(const RedwoodRecordRef &base, bool worstCase = true, int skipLen = 0) const {
-		int size = sizeof(Delta);
-
-		// Add size of prefix length
 		int prefixLen = getCommonPrefixLen(base, skipLen);
-		size += Writer::varIntLen(prefixLen);
-
-		// Add size of key suffix length and the suffix length itself
 		int keySuffixLen = key.size() - prefixLen;
-		size += Writer::varIntLen(keySuffixLen);
-		size += keySuffixLen;
+		int valueLen = value.present() ? value.get().size() : 0;
 
-		// Add size of version delta
-		size += Writer::versionDeltaLen(version - base.version);
-
-		// Add value length size and the value size
-		if(value.present()) {
-			size += Writer::varIntLen(value.get().size());
-			size += value.get().size();
-		}
-
-		return size;
+		int formatType = Delta::determineLengthFormat(prefixLen, keySuffixLen, valueLen);
+		return 1 + Delta::LengthFormatSizes[formatType] + keySuffixLen + valueLen + Writer::versionDeltaLen(version - base.version);
 	}
 
 	// commonPrefix between *this and base can be passed if known
-	int writeDelta(Delta &d, const RedwoodRecordRef &base, int commonPrefix = -1) const {
+	int writeDelta(Delta &d, const RedwoodRecordRef &base, int keyPrefixLen = -1) const {
 		d.flags = value.present() ? Delta::HAS_VALUE : 0;
 
-		if(commonPrefix < 0) {
-			commonPrefix = getCommonPrefixLen(base, 0);
+		if(keyPrefixLen < 0) {
+			keyPrefixLen = getCommonPrefixLen(base, 0);
 		}
+
+		StringRef keySuffix = key.substr(keyPrefixLen);
+		int valueLen = value.present() ? value.get().size() : 0;
+
+		int formatType = Delta::determineLengthFormat(keyPrefixLen, keySuffix.size(), valueLen);
+		d.flags |= formatType;
+
+		switch(formatType) {
+			case 0:  d.LengthFormat0.prefixLength = keyPrefixLen; d.LengthFormat0.suffixLength = keySuffix.size(); d.LengthFormat0.valueLength = valueLen; break;
+			case 1:  d.LengthFormat1.prefixLength = keyPrefixLen; d.LengthFormat1.suffixLength = keySuffix.size(); d.LengthFormat1.valueLength = valueLen; break;
+			case 2:  d.LengthFormat2.prefixLength = keyPrefixLen; d.LengthFormat2.suffixLength = keySuffix.size(); d.LengthFormat2.valueLength = valueLen; break;
+			case 3:
+			default: d.LengthFormat3.prefixLength = keyPrefixLen; d.LengthFormat3.suffixLength = keySuffix.size(); d.LengthFormat3.valueLength = valueLen; break;
+		}
+	
+		d.flags |= Delta::determineLengthFormat(keyPrefixLen, keySuffix.size(), valueLen);
 
 		Writer w(d.data());
-
-		// prefix len
-		w.writeVarInt(commonPrefix);
-
-		// key suffix len
-		StringRef keySuffix = key.substr(commonPrefix);
-		w.writeVarInt(keySuffix.size());
-
-		// value len
-		if(value.present()) {
-			w.writeVarInt(value.get().size());
-		}
-
 		// key suffix bytes
 		w.writeString(keySuffix);
+		// value bytes
+		if(value.present()) {
+			w.writeString(value.get());
+		}
 
 		// version delta bytes, and set version delta len flags
 		Version versionDelta = version - base.version;
@@ -2397,12 +2405,7 @@ struct RedwoodRecordRef {
 		d.setVersionDeltaLen(versionDeltaLen);
 		w.writeFixedBigEndian(versionDelta, versionDeltaLen);
 
-		// value
-		if(value.present()) {
-			w.writeString(value.get());
-		}
-
-		return w.wptr - d.data() + sizeof(Delta);
+		return w.wptr - (uint8_t *)&d;
 	}
 
 	static std::string kvformat(StringRef s, int hexLimit = -1) {
@@ -5530,16 +5533,6 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 			  RedwoodRecordRef(LiteralStringRef("abc"), 2, LiteralStringRef(""))
 	);
 
-	RedwoodRecordRef::byte varInts[100];
-	RedwoodRecordRef::Writer w(varInts);
-	RedwoodRecordRef::Reader r(varInts);
-	w.writeVarInt(1);
-	w.writeVarInt(128);
-	w.writeVarInt(32000);
-	ASSERT(r.readVarInt() == 1);
-	ASSERT(r.readVarInt() == 128);
-	ASSERT(r.readVarInt() == 32000);
-
 	Arena mem;
 	double start;
 	uint64_t total;
@@ -6120,8 +6113,8 @@ TEST_CASE("!/redwood/correctness/btree") {
 
 	// We must be able to fit at least two any two keys plus overhead in a page to prevent
 	// a situation where the tree cannot be grown upward with decreasing level size.
-	state int maxKeySize = deterministicRandom()->randomInt(4, pageSize * 2);
-	state int maxValueSize = deterministicRandom()->randomInt(0, pageSize * 4);
+	state int maxKeySize = deterministicRandom()->randomInt(1, pageSize * 2);
+	state int maxValueSize = randomSize(pageSize * 25);
 	state int maxCommitSize = shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6));
 	state int mutationBytesTarget = shortTest ? 5000 : randomSize(std::min<int>(maxCommitSize * 100, 100e6));
 	state double clearProbability = deterministicRandom()->random01() * .1;
