@@ -69,6 +69,7 @@ struct WorkerInterface {
 
 	UID id() const { return tLog.getEndpoint().token; }
 	NetworkAddress address() const { return tLog.getEndpoint().getPrimaryAddress(); }
+	Optional<NetworkAddress> secondaryAddress() const { return tLog.getEndpoint().addresses.secondaryAddress; }
 
 	WorkerInterface() {}
 	WorkerInterface( const LocalityData& locality ) : locality( locality ) {}
@@ -396,6 +397,7 @@ struct InitializeBackupRequest {
 	LogEpoch backupEpoch; // The epoch the worker should work on. If different from the recruitedEpoch, then it refers
 	                      // to some previous epoch with unfinished work.
 	Tag routerTag;
+	int totalTags;
 	Version startVersion;
 	Optional<Version> endVersion;
 	ReplyPromise<struct InitializeBackupReply> reply;
@@ -405,7 +407,7 @@ struct InitializeBackupRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, recruitedEpoch, backupEpoch, routerTag, startVersion, endVersion, reply);
+		serializer(ar, reqId, recruitedEpoch, backupEpoch, routerTag, totalTags, startVersion, endVersion, reply);
 	}
 };
 

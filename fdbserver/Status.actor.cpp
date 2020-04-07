@@ -2127,6 +2127,35 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<CachedSer
 	return statusObj;
 }
 
+ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, JsonBuilderArray* messages) {
+	state ReadYourWritesTransaction tr(cx);
+
+	state Future<Void> readTimeout = delay(5); // so that we won't loop forever
+	loop {
+		try {
+			if (readTimeout.isReady()) {
+				throw timed_out();
+			}
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Optional<Value> res = wait(timeoutError(tr.get(primaryDatacenterKey), 5));
+			if (!res.present()) {
+				messages->push_back(
+				    JsonString::makeMessage("primary_dc_missing", "Unable to determine primary datacenter."));
+			}
+			return res;
+		} catch (Error& e) {
+			if (e.code() == error_code_timed_out) {
+				messages->push_back(
+				    JsonString::makeMessage("fetch_primary_dc_timedout", "Fetching primary DC timed out."));
+				return Optional<Value>();
+			} else {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
+
 // constructs the cluster section of the json status output
 ACTOR Future<StatusReply> clusterGetStatus(
 		Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> db,
@@ -2305,6 +2334,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state Future<ErrorOr<vector<std::pair<MasterProxyInterface, EventMap>>>> proxyFuture = errorOr(getProxiesAndMetrics(db, address_workers));
 
 			state int minReplicasRemaining = -1;
+			state Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &messages);
 			std::vector<Future<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minReplicasRemaining));
 			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, rkWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
@@ -2323,11 +2353,17 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(configuration.get(), coordinators, workers, extraTlogEligibleZones, minReplicasRemaining, loadResult.present() && loadResult.get().healthyZone.present());
 			}
 
-			JsonBuilderObject configObj = configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
+			state JsonBuilderObject configObj =
+			    configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
 
+			wait(success(primaryDCFO));
+			if (primaryDCFO.get().present()) {
+				statusObj["active_primary_dc"] = primaryDCFO.get().get();
+			}
 			// configArr could be empty
-			if (!configObj.empty())
+			if (!configObj.empty()) {
 				statusObj["configuration"] = configObj;
+			}
 
 			// workloadStatusFetcher returns the workload section but also optionally writes the qos section and adds to the data_overlay object
 			if (!workerStatuses[1].empty())

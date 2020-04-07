@@ -93,7 +93,7 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 700
+    FDB.api_version 630
     db = FDB.open
 
 .. function:: open( cluster_file=nil ) -> Database
@@ -519,7 +519,7 @@ Snapshot reads
 
     Like :meth:`Transaction.get_range_start_with`, but as a snapshot read.
 
-.. method:: Transaction.snapshot.get_read_version() -> Version
+.. method:: Transaction.snapshot.get_read_version() -> Int64Future
 
     Identical to :meth:`Transaction.get_read_version` (since snapshot and strictly serializable reads use the same read version).
 
@@ -728,7 +728,7 @@ Most applications should use the read version that FoundationDB determines autom
 
     |infrequent| Sets the database version that the transaction will read from the database.  The database cannot guarantee causal consistency if this method is used (the transaction's reads will be causally consistent only if the provided read version has that property).
 
-.. method:: Transaction.get_read_version() -> Version
+.. method:: Transaction.get_read_version() -> Int64Future
 
     |infrequent| Returns the transaction's read version.
 
@@ -739,6 +739,13 @@ Most applications should use the read version that FoundationDB determines autom
 .. method:: Transaction.get_verionstamp() -> String
 
     |infrequent| |transaction-get-versionstamp-blurb|
+
+Transaction misc functions
+--------------------------
+
+.. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
+
+    Get the estimated byte size of the given key range. Returns a :class:`Int64Future`.
 
 Transaction options
 -------------------
@@ -946,7 +953,7 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
 
     An implementation quirk of :class:`Value` is that it will never evaluate to ``false``, even if its value is ``nil``. It is important to use ``if value.nil?`` rather than ``if ~value`` when checking to see if a key was not present in the database.
 
-.. class:: Version
+.. class:: Int64Future
 
     This type is a future :class:`Integer` object. Objects of this type respond to the same methods as objects of type :class:`Integer`, and may be passed to any method that expects a :class:`Integer`.
 
@@ -961,6 +968,7 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
     .. method:: FutureNil.wait() -> nil
 
         For a :class:`FutureNil` object returned by :meth:`Transaction.commit` or :meth:`Transaction.on_error`, you must call :meth:`FutureNil.wait`, which will return ``nil`` if the operation succeeds or raise an :exc:`FDB::Error` if an error occurred. Failure to call :meth:`FutureNil.wait` on a returned :class:`FutureNil` object means that any potential errors raised by the asynchronous operation that returned the object *will not be seen*, and represents a significant error in your code.
+
 
 .. _ruby streaming mode:
 

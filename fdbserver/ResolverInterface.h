@@ -77,10 +77,12 @@ struct ResolveTransactionBatchReply {
 	VectorRef<uint8_t> committed;
 	Optional<UID> debugID;
 	VectorRef<VectorRef<StateTransactionRef>> stateMutations;  // [version][transaction#] -> (committed, [mutation#])
+	std::map<int, VectorRef<int>>
+	    conflictingKeyRangeMap; // transaction index -> conflicting read_conflict_range ids given by the resolver
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, committed, stateMutations, arena, debugID);
+		serializer(ar, committed, stateMutations, debugID, conflictingKeyRangeMap, arena);
 	}
 
 };

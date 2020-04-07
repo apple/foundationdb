@@ -31,6 +31,7 @@ namespace file_converter {
 enum {
 	OPT_CONTAINER,
 	OPT_BEGIN_VERSION,
+	OPT_CRASHONERROR,
 	OPT_END_VERSION,
 	OPT_TRACE,
 	OPT_TRACE_DIR,
@@ -44,6 +45,7 @@ CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 	                                        { OPT_CONTAINER, "--container", SO_REQ_SEP },
 	                                        { OPT_BEGIN_VERSION, "-b", SO_REQ_SEP },
 	                                        { OPT_BEGIN_VERSION, "--begin", SO_REQ_SEP },
+	                                        { OPT_CRASHONERROR, "--crash", SO_NONE },
 	                                        { OPT_END_VERSION, "-e", SO_REQ_SEP },
 	                                        { OPT_END_VERSION, "--end", SO_REQ_SEP },
 	                                        { OPT_TRACE, "--log", SO_NONE },
@@ -58,8 +60,5 @@ CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 	                                        SO_END_OF_OPTIONS };
 
 }  // namespace file_converter
-
-// Mutation log version written by old FileBackupAgent
-static const uint32_t BACKUP_AGENT_MLOG_VERSION = 2001;
 
 #endif  // FDBBACKUP_FILECONVERTER_H

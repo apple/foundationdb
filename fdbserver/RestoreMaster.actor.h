@@ -231,19 +231,17 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			}
 			++rangeIdx;
 		}
-		int logIdx = 0;
 		std::vector<RestoreFileFR> retLogs;
 		// Scan all logFiles every time to avoid assumption on log files' version ranges.
 		// For example, we do not assume each version range only exists in one log file
-		while (logIdx < logFiles.size()) {
-			Version begin = std::max(prevVersion, logFiles[logIdx].beginVersion);
-			Version end = std::min(nextVersion, logFiles[logIdx].endVersion);
+		for (const auto& file : logFiles) {
+			Version begin = std::max(prevVersion, file.beginVersion);
+			Version end = std::min(nextVersion, file.endVersion);
 			if (begin < end) { // logIdx file overlap in [prevVersion, nextVersion)
-				double ratio = (end - begin) * 1.0 / (logFiles[logIdx].endVersion - logFiles[logIdx].beginVersion);
-				size += logFiles[logIdx].fileSize * ratio;
-				retLogs.push_back(logFiles[logIdx]);
+				double ratio = (end - begin) * 1.0 / (file.endVersion - file.beginVersion);
+				size += file.fileSize * ratio;
+				retLogs.push_back(file);
 			}
-			++logIdx;
 		}
 		return std::make_tuple(size, rangeIdx, retLogs);
 	}
@@ -251,13 +249,13 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	// Split backup files into version batches, each of which has similar data size
 	// Input: sorted range files, sorted log files;
 	// Output: a set of version batches whose size is less than SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES
-	//    	   and each mutation in backup files is included in the version batches exactly once.
+	//         and each mutation in backup files is included in the version batches exactly once.
 	// Assumption 1: input files has no empty files;
 	// Assumption 2: range files at one version <= FASTRESTORE_VERSIONBATCH_MAX_BYTES.
 	// Note: We do not allow a versionBatch size larger than the FASTRESTORE_VERSIONBATCH_MAX_BYTES because the range
 	// file size at a version depends on the number of backupAgents and its upper bound is hard to get.
 	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles, const std::vector<RestoreFileFR>& logFiles,
-	                         std::map<Version, VersionBatch>* versionBatches) {
+	                         std::map<Version, VersionBatch>* versionBatches, Version targetVersion) {
 		bool rewriteNextVersion = false;
 		int rangeIdx = 0;
 		int logIdx = 0; // Ensure each log file is included in version batch
@@ -342,7 +340,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					vb.logFiles.insert(log);
 				}
 
-				vb.endVersion = nextVersion;
+				vb.endVersion = std::min(nextVersion, targetVersion + 1);
 				prevEndVersion = vb.endVersion;
 			} else {
 				if (vb.size < 1) {
@@ -378,7 +376,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		}
 		// The last wip version batch has some files
 		if (vb.size > 0) {
-			vb.endVersion = nextVersion;
+			vb.endVersion = std::min(nextVersion, targetVersion + 1);
 			versionBatches->emplace(vb.beginVersion, vb);
 		}
 	}

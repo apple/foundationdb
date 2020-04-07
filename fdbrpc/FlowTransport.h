@@ -46,7 +46,7 @@ public:
 	void choosePrimaryAddress() {
 		if(addresses.secondaryAddress.present() && !g_network->getLocalAddresses().secondaryAddress.present() && (addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS())) {
 			std::swap(addresses.address, addresses.secondaryAddress.get());
-		}	
+		}
 	}
 
 	bool isValid() const { return token.isValid(); }

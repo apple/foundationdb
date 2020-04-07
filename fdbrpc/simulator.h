@@ -81,6 +81,12 @@ public:
 		bool isAvailable() const { return !isExcluded() && isReliable(); }
 		bool isExcluded() const { return excluded; }
 		bool isCleared() const { return cleared; }
+		std::string getReliableInfo() {
+			std::stringstream ss;
+			ss << "failed:" << failed << " fault_injection_p1:" << fault_injection_p1
+			   << " fault_injection_p2:" << fault_injection_p2;
+			return ss.str();
+		}
 
 		// Returns true if the class represents an acceptable worker
 		bool isAvailableClass() const {

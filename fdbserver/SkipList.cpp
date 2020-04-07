@@ -70,8 +70,14 @@ struct ReadConflictRange {
 	StringRef begin, end;
 	Version version;
 	int transaction;
-	ReadConflictRange(StringRef begin, StringRef end, Version version, int transaction)
-	  : begin(begin), end(end), version(version), transaction(transaction) {}
+	int indexInTx;
+	VectorRef<int>* conflictingKeyRange;
+	Arena* cKRArena;
+
+	ReadConflictRange(StringRef begin, StringRef end, Version version, int transaction, int indexInTx,
+	                  VectorRef<int>* cKR = nullptr, Arena* cKRArena = nullptr)
+	  : begin(begin), end(end), version(version), transaction(transaction), indexInTx(indexInTx),
+	    conflictingKeyRange(cKR), cKRArena(cKRArena) {}
 	bool operator<(const ReadConflictRange& rhs) const { return compare(begin, rhs.begin) < 0; }
 };
 
@@ -287,10 +293,10 @@ private:
 		int nPointers, valueLength;
 	};
 
-	static force_inline bool less( const uint8_t* a, int aLen, const uint8_t* b, int bLen ) {
-		int c = memcmp(a,b,min(aLen,bLen));
-		if (c<0) return true;
-		if (c>0) return false;
+	static force_inline bool less(const uint8_t* a, int aLen, const uint8_t* b, int bLen) {
+		int c = memcmp(a, b, min(aLen, bLen));
+		if (c < 0) return true;
+		if (c > 0) return false;
 		return aLen < bLen;
 	}
 
@@ -415,7 +421,8 @@ public:
 
 		int started = min(M, count);
 		for (int i = 0; i < started; i++) {
-			inProgress[i].init(ranges[i], header, transactionConflictStatus);
+			inProgress[i].init(ranges[i], header, transactionConflictStatus, ranges[i].indexInTx,
+			                   ranges[i].conflictingKeyRange, ranges[i].cKRArena);
 			nextJob[i] = i + 1;
 		}
 		nextJob[started - 1] = 0;
@@ -429,8 +436,11 @@ public:
 					if (prevJob == job) break;
 					nextJob[prevJob] = nextJob[job];
 					job = prevJob;
-				} else
-					inProgress[job].init(ranges[started++], header, transactionConflictStatus);
+				} else {
+					int temp = started++;
+					inProgress[job].init(ranges[temp], header, transactionConflictStatus, ranges[temp].indexInTx,
+					                     ranges[temp].conflictingKeyRange, ranges[temp].cKRArena);
+				}
 			}
 			prevJob = job;
 			job = nextJob[job];
@@ -598,18 +608,26 @@ private:
 		Version version;
 		bool* result;
 		int state;
+		int indexInTx;
+		VectorRef<int>* conflictingKeyRange; // nullptr if report_conflicting_keys is not enabled.
+		Arena* cKRArena; // nullptr if report_conflicting_keys is not enabled.
 
-		void init(const ReadConflictRange& r, Node* header, bool* tCS) {
+		void init(const ReadConflictRange& r, Node* header, bool* tCS, int indexInTx, VectorRef<int>* cKR,
+		          Arena* cKRArena) {
 			this->start.init(r.begin, header);
 			this->end.init(r.end, header);
 			this->version = r.version;
+			this->indexInTx = indexInTx;
+			this->cKRArena = cKRArena;
 			result = &tCS[r.transaction];
+			conflictingKeyRange = cKR;
 			this->state = 0;
 		}
 
 		bool noConflict() { return true; }
 		bool conflict() {
 			*result = true;
+			if (conflictingKeyRange != nullptr) conflictingKeyRange->push_back(*cKRArena, indexInTx);
 			return true;
 		}
 
@@ -728,7 +746,10 @@ void destroyConflictSet(ConflictSet* cs) {
 	delete cs;
 }
 
-ConflictBatch::ConflictBatch(ConflictSet* cs) : cs(cs), transactionCount(0) {}
+ConflictBatch::ConflictBatch(ConflictSet* cs, std::map<int, VectorRef<int>>* conflictingKeyRangeMap,
+                             Arena* resolveBatchReplyArena)
+  : cs(cs), transactionCount(0), conflictingKeyRangeMap(conflictingKeyRangeMap),
+    resolveBatchReplyArena(resolveBatchReplyArena) {}
 
 ConflictBatch::~ConflictBatch() {}
 
@@ -736,6 +757,7 @@ struct TransactionInfo {
 	VectorRef<std::pair<int, int>> readRanges;
 	VectorRef<std::pair<int, int>> writeRanges;
 	bool tooOld;
+	bool reportConflictingKeys;
 };
 
 void ConflictBatch::addTransaction(const CommitTransactionRef& tr) {
@@ -743,6 +765,7 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr) {
 
 	Arena& arena = transactionInfo.arena();
 	TransactionInfo* info = new (arena) TransactionInfo;
+	info->reportConflictingKeys = tr.report_conflicting_keys;
 
 	if (tr.read_snapshot < cs->oldestVersion && tr.read_conflict_ranges.size()) {
 		info->tooOld = true;
@@ -756,7 +779,10 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr) {
 			const KeyRangeRef& range = tr.read_conflict_ranges[r];
 			points.emplace_back(range.begin, true, false, t, &info->readRanges[r].first);
 			points.emplace_back(range.end, false, false, t, &info->readRanges[r].second);
-			combinedReadConflictRanges.emplace_back(range.begin, range.end, tr.read_snapshot, t);
+			combinedReadConflictRanges.emplace_back(range.begin, range.end, tr.read_snapshot, t, r,
+			                                        tr.report_conflicting_keys ? &(*conflictingKeyRangeMap)[t]
+			                                                                   : nullptr,
+			                                        tr.report_conflicting_keys ? resolveBatchReplyArena : nullptr);
 		}
 		for (int r = 0; r < tr.write_conflict_ranges.size(); r++) {
 			const KeyRangeRef& range = tr.write_conflict_ranges[r];
@@ -793,11 +819,15 @@ void ConflictBatch::checkIntraBatchConflicts() {
 		const TransactionInfo& tr = *transactionInfo[t];
 		if (transactionConflictStatus[t]) continue;
 		bool conflict = tr.tooOld;
-		for (int i = 0; i < tr.readRanges.size(); i++)
+		for (int i = 0; i < tr.readRanges.size(); i++) {
 			if (mcs.any(tr.readRanges[i].first, tr.readRanges[i].second)) {
+				if (tr.reportConflictingKeys) {
+					(*conflictingKeyRangeMap)[t].push_back(*resolveBatchReplyArena, i);
+				}
 				conflict = true;
 				break;
 			}
+		}
 		transactionConflictStatus[t] = conflict;
 		if (!conflict)
 			for (int i = 0; i < tr.writeRanges.size(); i++) mcs.set(tr.writeRanges[i].first, tr.writeRanges[i].second);
