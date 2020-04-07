@@ -234,7 +234,6 @@ ACTOR Future<Version> waitForVersionNoTooOld( StorageCacheData* data, Version ve
 
 ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 	state int64_t resultSize = 0;
-	state Reference<GetValueDebugTrace> getValueTrace;
 	try {
 		++data->counters.getValueQueries;
 		++data->counters.allQueries;
@@ -244,15 +243,14 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
-
+	
 		//TODO what's this?
 		wait( delay(0, TaskPriority::DefaultEndpoint) );
 
 		if( req.debugID.present() ) {
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
 			//FIXME
-			getValueTrace = GetValueDebugTrace(req.debugID.get().first(), now(), GetValueDebugTrace::STORAGECACHE_GETVALUE_DO_READ);
-			fbTrace(getValueTrace);
+			fbTrace(Reference<GetValueDebugTrace>(new GetValueDebugTrace(req.debugID.get().first(), now(), GetValueDebugTrace::STORAGECACHE_GETVALUE_DO_READ)));
 		}
 
 		state Optional<Value> v;

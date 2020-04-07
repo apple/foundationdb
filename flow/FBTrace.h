@@ -32,7 +32,7 @@ public:
 };
 
 template <class T>
-class FDBTrace : FBTraceImpl {
+class FDBTrace : public FBTraceImpl {
 	protected:
 	void write(ObjectWriter& writer) override {
 		writer.serialize(*static_cast<T*>(this));
@@ -40,8 +40,8 @@ class FDBTrace : FBTraceImpl {
 };
 
 class GetValueDebugTrace : public FDBTrace<GetValueDebugTrace> {
-	constexpr static FileIdentifier file_identifier = 617894;
 public:
+	constexpr static FileIdentifier file_identifier = 617894;
 	enum codeLocation {
 		STORAGESERVER_GETVALUE_RECEIVED = 0,
 		STORAGESERVER_GETVALUE_DO_READ = 1,
@@ -70,6 +70,7 @@ public:
 };
 
 class WatchValueDebugTrace : public FDBTrace<WatchValueDebugTrace> {
+public:
 	constexpr static FileIdentifier file_identifier = 14486715;
 	enum codeLocation {
 		STORAGESERVER_WATCHVALUE_BEFORE = 1,
@@ -92,6 +93,7 @@ class WatchValueDebugTrace : public FDBTrace<WatchValueDebugTrace> {
 };
 
 class CommitDebugTrace : public FDBTrace<CommitDebugTrace> {
+public:
 	constexpr static FileIdentifier file_identifier = 7691518;
 	enum codeLocation {
 		STORAGESERVER_COMMIT_BEORE = 0,
@@ -130,6 +132,7 @@ class CommitDebugTrace : public FDBTrace<CommitDebugTrace> {
 };
 
 class TransactionDebugTrace : public FDBTrace<TransactionDebugTrace> {
+public:
 	constexpr static FileIdentifier file_identifier = 6868728;
 	enum codeLocation {
 		STORAGESERVER_GETKEYVALUES_BEFORE = 0,
@@ -184,7 +187,7 @@ class TransactionDebugTrace : public FDBTrace<TransactionDebugTrace> {
 void fbTrace(Reference<FBTraceImpl> const& traceLine);
 
 template <class T>
-void fbTrace(Reference<T> const& traceLine) {
+void fbTrace(Reference<T> traceLine) {
 	static_assert(std::is_base_of<FBTraceImpl, T>::value, "fbTrace only accepts FBTraceImpl as argument");
 	fbTrace(traceLine.template castTo<FBTraceImpl>());
 }
