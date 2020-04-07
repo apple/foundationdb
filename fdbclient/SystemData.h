@@ -179,7 +179,7 @@ const Value workerListValue( ProcessData const& );
 Key decodeWorkerListKey( KeyRef const& );
 ProcessData decodeWorkerListValue( ValueRef const& );
 
-//    "\xff/backupProgress/[[workerID]]" := "[[WorkerBackupStatus]]"
+//    "\xff\x02/backupProgress/[[workerID]]" := "[[WorkerBackupStatus]]"
 extern const KeyRangeRef backupProgressKeys;
 extern const KeyRef backupProgressPrefix;
 const Key backupProgressKeyFor(UID workerID);
@@ -187,10 +187,15 @@ const Value backupProgressValue(const WorkerBackupStatus& status);
 UID decodeBackupProgressKey(const KeyRef& key);
 WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value);
 
-//    "\xff/backupStarted" := "[[vector<UID,Version1>]]"
+// The key to signal backup workers a new backup job is submitted.
+//    "\xff\x02/backupStarted" := "[[vector<UID,Version1>]]"
 extern const KeyRef backupStartedKey;
 Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids);
 std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& value);
+
+// The key to signal backup workers that they should pause or resume.
+//    "\xff\x02/backupPaused" := "[[0|1]]"
+extern const KeyRef backupPausedKey;
 
 extern const KeyRef coordinatorsKey;
 extern const KeyRef logsKey;

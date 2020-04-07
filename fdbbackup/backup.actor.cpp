@@ -2051,8 +2051,8 @@ ACTOR Future<Void> discontinueBackup(Database db, std::string tagName, bool wait
 
 ACTOR Future<Void> changeBackupResumed(Database db, bool pause) {
 	try {
-		state FileBackupAgent backupAgent;
-		wait(backupAgent.taskBucket->changePause(db, pause));
+		FileBackupAgent backupAgent;
+		wait(backupAgent.changePause(db, pause));
 		printf("All backup agents have been %s.\n", pause ? "paused" : "resumed");
 	}
 	catch (Error& e) {
