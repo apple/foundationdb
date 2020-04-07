@@ -25,7 +25,7 @@ ACTOR Future<Void> SpecialKeyRangeBaseImpl::normalizeKeySelectorActor(const Spec
 		if (pkrImpl->range.contains(ks->getKey())) startKey = ks->getKey();
 	}
 
-	TraceEvent("NormalizeKeySelector")
+	TraceEvent(SevDebug, "NormalizeKeySelector")
 	    .detail("OriginalKey", ks->getKey())
 	    .detail("OriginalOffset", ks->offset)
 	    .detail("SpecialKeyRangeStart", pkrImpl->range.begin)
@@ -54,7 +54,7 @@ ACTOR Future<Void> SpecialKeyRangeBaseImpl::normalizeKeySelectorActor(const Spec
 			ks->offset -= result.size();
 		}
 	}
-	TraceEvent("NormalizeKeySelector")
+	TraceEvent(SevDebug, "NormalizeKeySelector")
 	    .detail("NormalizedKey", ks->getKey())
 	    .detail("NormalizedOffset", ks->offset)
 	    .detail("SpecialKeyRangeStart", pkrImpl->range.begin)
