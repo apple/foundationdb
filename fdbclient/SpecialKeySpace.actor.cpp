@@ -212,8 +212,7 @@ Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourW
 		TEST(true); // read limit 0
 		return Standalone<RangeResultRef>();
 	}
-	if (withPrefix)
-		ASSERT(begin.getKey().startsWith(specialKeys.begin) && end.getKey().startsWith(specialKeys.begin));
+	if (withPrefix) ASSERT(begin.getKey().startsWith(specialKeys.begin) && end.getKey().startsWith(specialKeys.begin));
 	// make sure orEqual == false
 	begin.removeOrEqual(begin.arena());
 	end.removeOrEqual(end.arena());
@@ -251,11 +250,13 @@ Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(Reference<ReadY
 		if (beginIter->begin() != kr.begin) ++beginIter;
 		auto endIter = krMapPtr->rangeContaining(kr.end);
 		for (auto it = beginIter; it != endIter; ++it) {
-			// TODO : check push_back instead of push_back_deep
-			result.push_back_deep(result.arena(), KeyValueRef(it->begin(), it->value()));
+			// it->begin() is stored in the CoalescedKeyRangeMap in TransactionInfo
+			// it->value() is always constants in SystemData.cpp
+			// Thus, push_back() can be used
+			result.push_back(result.arena(), KeyValueRef(it->begin(), it->value()));
 		}
 		if (endIter->begin() != kr.end)
-			result.push_back_deep(result.arena(), KeyValueRef(endIter->begin(), endIter->value()));
+			result.push_back(result.arena(), KeyValueRef(endIter->begin(), endIter->value()));
 	}
 	return result;
 }
@@ -295,10 +296,8 @@ private:
 TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	SpecialKeySpace pks(normalKeys.begin, normalKeys.end);
 	SpecialKeyRangeTestImpl pkr1(LiteralStringRef("/cat/"), LiteralStringRef("/cat/\xff"), "small", 10);
-	SpecialKeyRangeTestImpl pkr2(LiteralStringRef("/dog/"), LiteralStringRef("/dog/\xff"), "medium",
-	                             100);
-	SpecialKeyRangeTestImpl pkr3(LiteralStringRef("/pig/"), LiteralStringRef("/pig/\xff"), "large",
-	                             1000);
+	SpecialKeyRangeTestImpl pkr2(LiteralStringRef("/dog/"), LiteralStringRef("/dog/\xff"), "medium", 100);
+	SpecialKeyRangeTestImpl pkr3(LiteralStringRef("/pig/"), LiteralStringRef("/pig/\xff"), "large", 1000);
 	pks.registerKeyRange(pkr1.getKeyRange(), &pkr1);
 	pks.registerKeyRange(pkr2.getKeyRange(), &pkr2);
 	pks.registerKeyRange(pkr3.getKeyRange(), &pkr3);
