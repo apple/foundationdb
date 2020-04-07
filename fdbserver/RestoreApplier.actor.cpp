@@ -129,7 +129,6 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	if (curFilePos.get() == req.prevVersion) {
 		isDuplicated = false;
 		const Version commitVersion = req.version;
-		uint16_t numVersionStampedKV = 0;
 		// Sanity check: mutations in range file is in [beginVersion, endVersion);
 		// mutations in log file is in [beginVersion, endVersion], both inclusive.
 		ASSERT(commitVersion >= req.asset.beginVersion);
@@ -159,14 +158,10 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 				}
 			}
 			// Note: Log and range mutations may be delivered out of order. Can we handle it?
-			if (mutation.type == MutationRef::SetVersionstampedKey ||
-			    mutation.type == MutationRef::SetVersionstampedValue) {
-				ASSERT(false); // No version stamp mutations in backup logs
-				batchData->addVersionStampedKV(mutation, mutationVersion, numVersionStampedKV);
-				numVersionStampedKV++;
-			} else {
-				batchData->addMutation(mutation, mutationVersion);
-			}
+			batchData->addMutation(mutation, mutationVersion);
+
+			ASSERT(mutation.type != MutationRef::SetVersionstampedKey &&
+			       mutation.type != MutationRef::SetVersionstampedValue);
 		}
 		curFilePos.set(req.version);
 	}
