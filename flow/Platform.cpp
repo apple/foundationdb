@@ -2843,7 +2843,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	__eraseDirectoryRecurseiveCount = 0;
 #ifdef _WIN32
 	system( ("rd /s /q \"" + dir + "\"").c_str() );
-#elif defined(__linux__) || defined(__APPLE__)
+#elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
 	int error =
 		nftw(dir.c_str(),
 			[](const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf) -> int {
