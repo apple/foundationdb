@@ -99,10 +99,13 @@ ACTOR Future<Void> healthMonitorClient(Reference<AsyncVar<Optional<struct Cluste
 		wait(Never());
 	}
 
-	state Reference<HealthMonitorClientState> hmState = Reference<HealthMonitorClientState>(new HealthMonitorClientState());
-	loop {
-		state Future<Void> client =
-		    ci->get().present() ? healthMonitorClientLoop(ci->get().get(), hmState) : Void();
-		wait(ci->onChange());
-	}
+	return Never();
+	// TODO: Re-enable centralized health monitoring.
+	// state Reference<HealthMonitorClientState> hmState =
+	//     Reference<HealthMonitorClientState>(new HealthMonitorClientState());
+	// loop {
+	// 	state Future<Void> client =
+	// 	    ci->get().present() ? healthMonitorClientLoop(ci->get().get(), hmState) : Void();
+	// 	wait(ci->onChange());
+	// }
 }
