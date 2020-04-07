@@ -61,6 +61,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				Key endKey(baseKey + "/\xff");
 				self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
 				self->impls.push_back(std::make_shared<SKSCTestImpl>(startKey, endKey));
+				// Although there are already ranges registered, the testing range will replace them
 				cx->specialKeySpace->registerKeyRange(self->keys.back(), self->impls.back().get());
 				// generate keys in each key range
 				int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
@@ -175,7 +176,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// 8 here refers to bytes of KeyValueRef
 		int byteLimits = deterministicRandom()->randomInt(
 		    1, keysCount.getValue() * (keyBytes + (rangeCount + 1) + valBytes + 8) + 1);
-		// TODO : check setRequestLimits in RYW
+
 		return GetRangeLimits(rowLimits, byteLimits);
 	}
 };
