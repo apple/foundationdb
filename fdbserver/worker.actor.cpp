@@ -68,12 +68,12 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #endif
 
 ACTOR Future<std::vector<Endpoint>> tryDBInfoBroadcast(RequestStream<UpdateServerDBInfoRequest> stream, UpdateServerDBInfoRequest req) {
-	ErrorOr<std::vector<Endpoint>> rep = wait( stream.getReplyUnlessFailedFor(req, 1.0) );
+	ErrorOr<std::vector<Endpoint>> rep = wait( stream.getReplyUnlessFailedFor(req, 1.0, 0) );
 	if(rep.present()) {
 		return rep.get();
 	}
-	req.broadcastInfo.endpoints.push_back(stream.getEndpoint());
-	return req.broadcastInfo.endpoints;
+	req.broadcastInfo.push_back(stream.getEndpoint());
+	return req.broadcastInfo;
 }
 
 ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req, int sendAmount, Optional<Endpoint> sender, bool sendReply) {
@@ -81,13 +81,13 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 	state ReplyPromise<std::vector<Endpoint>> reply = req.reply;
 	resetReply( req );
 	int currentStream = 0;
-	for(int i = 0; i < sendAmount && currentStream < req.broadcastInfo.endpoints.size(); i++) {
-		TreeBroadcastInfo info;
-		RequestStream<TxnStateRequest> cur(req.broadcastInfo.endpoints[currentStream++]);
-		while(currentStream < req.broadcastInfo.endpoints.size()*(i+1)/sendAmount) {
-			info.endpoints.push_back(req.broadcastInfo.endpoints[currentStream++]);
+	for(int i = 0; i < sendAmount && currentStream < req.broadcastInfo.size(); i++) {
+		std::vector<Endpoint> endpoints;
+		RequestStream<UpdateServerDBInfoRequest> cur(req.broadcastInfo[currentStream++]);
+		while(currentStream < req.broadcastInfo.size()*(i+1)/sendAmount) {
+			endpoints.push_back(req.broadcastInfo[currentStream++]);
 		}
-		req.broadcastInfo = info;
+		req.broadcastInfo = endpoints;
 		replies.push_back( tryDBInfoBroadcast( cur, req ) );
 		resetReply( req );
 	}
@@ -482,7 +482,7 @@ ACTOR Future<Void> registrationClient(
 		auto peers = FlowTransport::transport().getIncompatiblePeers();
 		for(auto it = peers->begin(); it != peers->end();) {
 			if( now() - it->second.second > SERVER_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING ) {
-				req.incompatiblePeers.push_back(it->first);
+				request.incompatiblePeers.push_back(it->first);
 				it = peers->erase(it);
 			} else {
 				it++;
@@ -898,7 +898,6 @@ ACTOR Future<Void> workerServer(
 	errorForwarders.add( resetAfter(degraded, SERVER_KNOBS->DEGRADED_RESET_INTERVAL, false, SERVER_KNOBS->DEGRADED_WARNING_LIMIT, SERVER_KNOBS->DEGRADED_WARNING_RESET_DELAY, "DegradedReset"));
 	errorForwarders.add( loadedPonger( interf.debugPing.getFuture() ) );
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
-	errorForwarders.add(monitorServerDBInfo(ccInterface, connFile, locality, dbInfo));
 	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo, locality ) );
 	errorForwarders.add(monitorHighMemory(memoryProfileThreshold));
 
@@ -1014,13 +1013,17 @@ ACTOR Future<Void> workerServer(
 		wait(waitForAll(recoveries));
 		recoveredDiskFiles.send(Void());
 
-		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, ddInterf, rkInterf, degraded, errors, locality, dbInfo ) );
+		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, ddInterf, rkInterf, degraded, errors, locality, dbInfo, connFile) );
 
 		TraceEvent("RecoveriesComplete", interf.id());
 
 		loop choose {
 			when( UpdateServerDBInfoRequest req = waitNext( interf.updateServerDBInfo.getFuture() ) ) {
-				if(req.dbInfo.clusterInterface == ccInterface->get().get() && (req.dbInfo.infoGeneration > dbInfo->infoGeneration || dbInfo->clusterInterface != ccInterface->get().get())) {
+				Optional<Endpoint> notUpdated;
+				if(req.dbInfo.clusterInterface != ccInterface->get().get() || (req.dbInfo.infoGeneration < dbInfo->get().infoGeneration && dbInfo->get().clusterInterface == ccInterface->get().get())) {
+					notUpdated = interf.updateServerDBInfo.getEndpoint();
+				}
+				if(req.dbInfo.clusterInterface == ccInterface->get().get() && (req.dbInfo.infoGeneration > dbInfo->get().infoGeneration || dbInfo->get().clusterInterface != ccInterface->get().get())) {
 					ServerDBInfo localInfo = req.dbInfo;
 					TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
 					.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
@@ -1028,11 +1031,6 @@ ACTOR Future<Void> workerServer(
 
 					localInfo.myLocality = locality;
 					dbInfo->set(localInfo);
-				}
-
-				Optional<Endpoint> notUpdated;
-				if(req.dbInfo.clusterInterface != ccInterface->get().get() || (req.dbInfo.infoGeneration < dbInfo->infoGeneration && dbInfo->clusterInterface == ccInterface->get().get())) {
-					notUpdated = interf.updateServerDBInfo.getEndpoint();
 				}
 				errorForwarders.add(success(broadcastDBInfoRequest(req, 2, notUpdated, true)));
 			}

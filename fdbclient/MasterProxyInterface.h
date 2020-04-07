@@ -268,22 +268,13 @@ struct GetStorageServerRejoinInfoRequest {
 	}
 };
 
-struct TreeBroadcastInfo {
-	std::vector<Endpoint> endpoints;
-
-	template <class Ar> 
-	void serialize(Ar& ar) { 
-		serializer(ar, endpoints);
-	}
-};
-
 struct TxnStateRequest {
 	constexpr static FileIdentifier file_identifier = 15250781;
 	Arena arena;
 	VectorRef<KeyValueRef> data;
 	Sequence sequence;
 	bool last;
-	TreeBroadcastInfo broadcastInfo;
+	std::vector<Endpoint> broadcastInfo;
 	ReplyPromise<Void> reply;
 
 	template <class Ar> 

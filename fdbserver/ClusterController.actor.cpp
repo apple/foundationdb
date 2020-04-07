@@ -1376,13 +1376,14 @@ public:
 			serversFailed("ServersFailed", clusterControllerMetrics),
 			serversUnfailed("ServersUnfailed", clusterControllerMetrics)
 	{
-		ServerDBInfo serverInfo;
+		CachedSerialization<ServerDBInfo> newInfoCache;
+		auto& serverInfo = newInfoCache.mutate();
 		serverInfo.id = deterministicRandom()->randomUniqueID();
 		serverInfo.infoGeneration = ++db.dbInfoCount;
 		serverInfo.masterLifetime.ccID = id;
 		serverInfo.clusterInterface = ccInterface;
 		serverInfo.myLocality = locality;
-		db.serverInfo->set( serverInfo );
+		db.serverInfo->set( newInfoCache );
 		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, true, true);
 	}
 
@@ -1437,7 +1438,8 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				db->masterRegistrationCount = 0;
 				db->recoveryStalled = false;
 
-				ServerDBInfo dbInfo;
+				CachedSerialization<ServerDBInfo> newInfoCache;
+				auto& dbInfo = newInfoCache.mutate();
 				dbInfo.master = iMaster;
 				dbInfo.id = deterministicRandom()->randomUniqueID();
 				dbInfo.infoGeneration = ++db->dbInfoCount;
@@ -1450,7 +1452,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				dbInfo.latencyBandConfig = db->serverInfo->get().read().latencyBandConfig;
 
 				TraceEvent("CCWDB", cluster->id).detail("Lifetime", dbInfo.masterLifetime.toString()).detail("ChangeID", dbInfo.id);
-				db->serverInfo->set( dbInfo );
+				db->serverInfo->set( newInfoCache );
 
 				state Future<Void> spinDelay = delay(SERVER_KNOBS->MASTER_SPIN_DELAY);  // Don't retry master recovery more than once per second, but don't delay the "first" recovery after more than a second of normal operation
 
@@ -1482,6 +1484,18 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 			wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
 		}
 	}
+}
+
+ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db, UID knownServerInfoID,
+                                        ReplyPromise<CachedSerialization<ServerDBInfo>> reply) {
+	while(db->serverInfo->get().read().id == knownServerInfoID) {
+		choose {
+			when (wait( yieldedFuture(db->serverInfo->onChange()) )) {}
+			when (wait( delayJittered( 300 ) )) { break; }  // The server might be long gone!
+		}
+	}
+	reply.send( db->serverInfo->get() );
+	return Void();
 }
 
 ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDatabaseRequest req) {
@@ -2104,7 +2118,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
 
 	for(auto it : req.incompatiblePeers) {
-		db->incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
+		self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	}
 
 	if(info == self->id_worker.end()) {
@@ -2530,7 +2544,7 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 				if(config != serverInfo.latencyBandConfig) {
 					TraceEvent("LatencyBandConfigChanged").detail("Present", config.present());
 					serverInfo.id = deterministicRandom()->randomUniqueID();
-					serverInfo.infoGeneration = ++db->serverInfo->dbInfoCount;
+					serverInfo.infoGeneration = ++db->dbInfoCount;
 					serverInfo.latencyBandConfig = config;
 					db->serverInfo->set(cachedInfo);
 				}
@@ -3038,7 +3052,7 @@ ACTOR Future<Void> dbInfoUpdater( ClusterControllerData* self ) {
 		UpdateServerDBInfoRequest req;
 		//FIXME: cache serialization
 		req.dbInfo = self->db.serverInfo->get().read();
-		req.broadcastInfo.endpoints = self->updateDBInfoEndpoints;
+		req.broadcastInfo = self->updateDBInfoEndpoints;
 
 		choose {
 			when(std::vector<Endpoint> notUpdated = wait( broadcastDBInfoRequest(req, 2, Optional<Endpoint>(), false) )) {
@@ -3144,6 +3158,9 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 		when( RegisterMasterRequest req = waitNext( interf.registerMaster.getFuture() ) ) {
 			++self.registerMasterRequests;
 			clusterRegisterMaster( &self, req );
+		}
+		when( GetServerDBInfoRequest req = waitNext( interf.getServerDBInfo.getFuture() ) ) {
+			self.addActor.send( clusterGetServerInfo(&self.db, req.knownServerInfoID, req.reply) );
 		}
 		when( wait( leaderFail ) ) {
 			// We are no longer the leader if this has changed.

@@ -752,7 +752,7 @@ ACTOR Future<Void> sendInitialCommitToResolvers( Reference<MasterData> self ) {
 		req.data = data;
 		req.sequence = txnSequence;
 		req.last = !nextData.size();
-		req.broadcastInfo.endpoints = endpoints;
+		req.broadcastInfo = endpoints;
 		txnReplies.push_back(broadcastTxnRequest(req, sendAmount, false));
 		dataOutstanding += sendAmount*data.arena().getSize();
 		data = nextData;

@@ -29,6 +29,7 @@
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LatencyBandConfig.h"
+#include "fdbserver/WorkerInterface.actor.h"
 
 struct ServerDBInfo {
 	constexpr static FileIdentifier file_identifier = 13838807;
@@ -53,7 +54,7 @@ struct ServerDBInfo {
 	std::vector<std::pair<uint16_t,StorageServerInterface>> storageCaches;
 	int64_t infoGeneration;
 
-	explicit ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0), infoGeneration(0) {}
+	ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0), infoGeneration(0) {}
 
 	bool operator == (ServerDBInfo const& r) const { return id == r.id; }
 	bool operator != (ServerDBInfo const& r) const { return id != r.id; }
@@ -63,5 +64,33 @@ struct ServerDBInfo {
 		serializer(ar, id, clusterInterface, client, distributor, master, ratekeeper, resolvers, recoveryCount, recoveryState, masterLifetime, logSystemConfig, priorCommittedLogServers, latencyBandConfig, storageCaches, infoGeneration);
 	}
 };
+
+struct UpdateServerDBInfoRequest {
+	constexpr static FileIdentifier file_identifier = 9467438;
+	ServerDBInfo dbInfo;
+	std::vector<Endpoint> broadcastInfo;
+	ReplyPromise<std::vector<Endpoint>> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, dbInfo, broadcastInfo, reply);
+	}
+};
+
+struct GetServerDBInfoRequest {
+	constexpr static FileIdentifier file_identifier = 9467439;
+	UID knownServerInfoID;
+	ReplyPromise< CachedSerialization<struct ServerDBInfo> > reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, knownServerInfoID, reply);
+	}
+};
+
+
+Future<Void> broadcastTxnRequest(TxnStateRequest const& req, int const& sendAmount, bool const& sendReply);
+
+Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest const& req, int const& sendAmount, Optional<Endpoint> const& sender, bool const& sendReply);
 
 #endif
