@@ -369,7 +369,7 @@
                   "consistencycheck_suspendkey_fetch_timeout",
                   "consistencycheck_disabled",
                   "primary_dc_missing",
-                  "fetch_primary_dc_timedout"
+                  "fetch_primary_dc_timeout"
                ]
             },
             "issues":[
