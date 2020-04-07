@@ -32,7 +32,7 @@ protected:
 
 class SpecialKeySpace {
 public:
-	// withPrefix is true if the passing keys are prefixed with \xff\xff (cases from RYW), 
+	// withPrefix is true if the passing keys are prefixed with \xff\xff (cases from RYW),
 	// otherwise, false(cases from tests)
 	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key, bool withPrefix = true);
 
@@ -74,7 +74,7 @@ private:
 class ConflictingKeysImpl : public SpecialKeyRangeBaseImpl {
 public:
 	explicit ConflictingKeysImpl(KeyRef start, KeyRef end);
-	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr) const;
+	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr) const override;
 };
 
 #include "flow/unactorcompiler.h"

@@ -276,7 +276,7 @@ public:
 
 	Key getKeyForIndex(int idx) { return Key(prefix + format("%010d", idx)).withPrefix(range.begin); }
 	int getSize() { return size; }
-	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
 	                                                    KeyRangeRef kr) const override {
 		int startIndex = 0, endIndex = size;
 		while (startIndex < size && kvs[startIndex].key < kr.begin) ++startIndex;
