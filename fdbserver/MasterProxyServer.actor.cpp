@@ -98,8 +98,8 @@ struct ProxyStats {
 };
 
 ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, double* outTransactionRate,
-						   double* outBatchTransactionRate, std::map<Standalone<StringRef>, double> *throttledTags, std::map<Standalone<StringRef>, double> *throttledBatchTags, 
-						   GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply) {
+						   double* outBatchTransactionRate, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply,
+						   std::map<TagThrottleInfo::Priority, std::map<Standalone<StringRef>, TagThrottleInfo>> *throttledTags) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -141,7 +141,6 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			}
 
 			*throttledTags = std::move(rep.throttledTags);
-			*throttledBatchTags = std::move(rep.throttledBatchTags);
 		}
 		when ( wait( leaseTimeout ) ) {
 			*outTransactionRate = 0;
@@ -155,8 +154,6 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 struct TransactionRateInfo {
 	double rate;
 	double limit;
-
-	std::map<Standalone<StringRef>, double> throttledTags; // TODO: unordered map?
 
 	TransactionRateInfo(double rate) : rate(rate), limit(0) {}
 
@@ -183,8 +180,6 @@ ACTOR Future<Void> queueTransactionStartRequests(
 	FutureStream<GetReadVersionRequest> readVersionRequests,
 	PromiseStream<Void> GRVTimer, double *lastGRVTime,
 	double *GRVBatchTime, FutureStream<double> replyTimes,
-	std::map<Standalone<StringRef>, double> *throttledTags,
-	std::map<Standalone<StringRef>, double> *throttledBatchTags,
 	ProxyStats* stats, TransactionRateInfo* batchRateInfo) 
 {
 	loop choose{
@@ -201,21 +196,6 @@ ACTOR Future<Void> queueTransactionStartRequests(
 			} else {
 				if (req.debugID.present())
 					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterProxyServer.queueTransactionStartRequests.Before");
-
-				if(req.priority() != GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
-					double maxThrottle = 0;
-					std::map<Standalone<StringRef>, double> *tagsToCheck = (req.priority() == GetReadVersionRequest::PRIORITY_DEFAULT) ? throttledTags : throttledBatchTags;
-					for(auto& tag : req.tags) {
-						auto itr = tagsToCheck->find(tag);
-						if(itr != tagsToCheck->end()) { 
-							maxThrottle = std::max(maxThrottle, itr->second);
-						}
-					}
-					if(deterministicRandom()->random01() < maxThrottle) {
-						req.reply.sendError(tag_throttled());
-						continue;
-					}
-				}
 
 				if (systemQueue->empty() && defaultQueue->empty() && batchQueue->empty()) {
 					forwardPromise(GRVTimer, delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)), TaskPriority::ProxyGRVTimer));
@@ -1239,7 +1219,9 @@ ACTOR Future<Void> updateLastCommit(ProxyCommitData* self, Optional<UID> debugID
 	return Void();
 }
 
-ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commitData, uint32_t flags, vector<MasterProxyInterface> *otherProxies, Optional<UID> debugID, int transactionCount, int systemTransactionCount, int defaultPriTransactionCount, int batchPriTransactionCount)
+ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commitData, uint32_t flags, vector<MasterProxyInterface> *otherProxies, Optional<UID> debugID, 
+                                                          int transactionCount, int systemTransactionCount, int defaultPriTransactionCount, int batchPriTransactionCount,
+                                                          std::map<TagThrottleInfo::Priority)
 {
 	// Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
 	// (1) The version returned is the committedVersion of some proxy at some point before the request returns, so it is committed.
@@ -1286,21 +1268,54 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 }
 
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests,
-                                  ProxyStats* stats, Version minKnownCommittedVersion) {
-	GetReadVersionReply reply = wait(replyFuture);
+                                  ProxyStats* stats, Version minKnownCommittedVersion, std::map<TagThrottleInfo::Priority, std::map<Standalone<StringRef>, TagThrottleInfo>> throttledTags) {
+	GetReadVersionReply _baseReply = wait(replyFuture);
+	GetReadVersionReply baseReply = _baseReply;
 	double end = g_network->timer();
 	for(GetReadVersionRequest const& request : requests) {
 		if(request.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
 			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
 		}
+
+		GetReadVersionReply &reply = baseReply;
 		if (request.flags & GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION) {
 			// Only backup worker may infrequently use this flag.
-			GetReadVersionReply minKCVReply = reply;
-			minKCVReply.version = minKnownCommittedVersion;
-			request.reply.send(minKCVReply);
-		} else {
-			request.reply.send(reply);
+			GetReadVersionReply minKcvReply = reply;
+			minKcvReply.version = minKnownCommittedVersion;
+			reply = minKcvReply;
+		} 
+
+		reply.tagThrottleInfo.clear();
+
+		for(auto tag : request.tags) {
+			TagThrottleInfo::Priority priority;
+			if(request.priority() == GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
+				priority = TagThrottleInfo::Priority::IMMEDIATE;
+			}
+			else if(request.priority() == GetReadVersionRequest::PRIORITY_DEFAULT) {
+				priority = TagThrottleInfo::Priority::DEFAULT;
+			}
+			else if(request.priority() == GetReadVersionRequest::PRIORITY_BATCH) {
+				priority = TagThrottleInfo::Priority::BATCH;
+			}
+			else {
+				ASSERT(false);
+			}
+
+			auto itr = throttledTags.find(priority);
+			ASSERT(itr != throttledTags.end());
+
+			auto tagItr = itr->second.find(tag);
+			while(tagItr == itr->second.end() && itr != throttledTags.begin()) {
+				--itr;
+			}
+
+			if(tagItr != itr->second.end()) {
+				reply.tagThrottleInfo[tag] = tagItr->second;
+			}
 		}
+
+		request.reply.send(reply);
 		++stats->txnRequestOut;
 	}
 
@@ -1328,11 +1343,12 @@ ACTOR static Future<Void> transactionStarter(
 	state Deque<GetReadVersionRequest> batchQueue;
 	state vector<MasterProxyInterface> otherProxies;
 
+	state std::map<TagThrottleInfo::Priority, std::map<Standalone<StringRef>, TagThrottleInfo>> throttledTags;
+
 	state PromiseStream<double> replyTimes;
-	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate, &batchRateInfo.rate, &normalRateInfo.throttledTags, &batchRateInfo.throttledTags, healthMetricsReply, detailedHealthMetricsReply));
+	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate, &batchRateInfo.rate, healthMetricsReply, detailedHealthMetricsReply, &throttledTags));
 	addActor.send(queueTransactionStartRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(), 
-	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &normalRateInfo.throttledTags, 
-	                                            &batchRateInfo.throttledTags, &commitData->stats, &batchRateInfo));
+	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats, &batchRateInfo));
 
 	// Get a list of the other proxies that go together with us
 	while (std::find(db->get().client.proxies.begin(), db->get().client.proxies.end(), proxy) == db->get().client.proxies.end())
@@ -1439,7 +1455,7 @@ ACTOR static Future<Void> transactionStarter(
 			if (start[i].size()) {
 				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(commitData, i, &otherProxies, debugID, transactionsStarted[i], systemTransactionsStarted[i], defaultPriTransactionsStarted[i], batchPriTransactionsStarted[i]);
 				addActor.send(sendGrvReplies(readVersionReply, start[i], &commitData->stats,
-				                             commitData->minKnownCommittedVersion));
+				                             commitData->minKnownCommittedVersion, throttledTags));
 
 				// for now, base dynamic batching on the time for normal requests (not read_risky)
 				if (i == 0) {

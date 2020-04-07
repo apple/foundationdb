@@ -3777,7 +3777,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 						}
 						if(tokens.size() == 6) {
-							char *end;
 							Optional<uint64_t> parsedDuration = parseDuration(tokens[5].toString());
 							if(!parsedDuration.present()) {
 								printf("ERROR: failed to parse duration `%s'.\n", printable(tokens[5]).c_str());
@@ -3787,7 +3786,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							duration = parsedDuration.get();
 						}
 
-						wait(ThrottleApi::throttleTag(db, tokens[3], rate, now()+duration, false)); // TODO: express in versions or somehow deal with time?
+						wait(ThrottleApi::throttleTag(db, tokens[3], rate, now()+duration, true, false));
 						printf("Tag `%s' has been throttled\n", tokens[3].toString().c_str());
 					}
 					else if(tokencmp(tokens[1], "off")) {

@@ -1014,12 +1014,29 @@ struct TagThrottleInfo {
 	bool autoThrottled;
 	Priority priority;
 
-	TagThrottleInfo() : rate(0), expiration(0), autoThrottled(false) {}
-	TagThrottleInfo(double rate, double expiration, bool autoThrottled, Priority priority) : rate(rate), expiration(expiration), autoThrottled(autoThrottled), priority(priority) {}
+	bool serializeExpirationAsDuration;
+
+	TagThrottleInfo() : rate(0), expiration(0), autoThrottled(false), priority(Priority::DEFAULT), serializeExpirationAsDuration(true) {}
+	TagThrottleInfo(double rate, double expiration, bool autoThrottled, Priority priority, bool serializeExpirationAsDuration) 
+		: rate(rate), expiration(expiration), autoThrottled(autoThrottled), priority(priority), 
+		  serializeExpirationAsDuration(serializeExpirationAsDuration) {}
 
 	template<class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rate, expiration, autoThrottled, priority);
+		if(ar.isDeserializing) {
+			serializer(ar, rate, expiration, autoThrottled, priority, serializeExpirationAsDuration);
+			if(serializeExpirationAsDuration) {
+				expiration += now();
+			}
+		}
+		else {
+			double serializedExpiration = expiration;
+			if(serializeExpirationAsDuration) {
+				serializedExpiration = std::max(expiration - now(), 0.0);
+			}
+
+			serializer(ar, rate, serializedExpiration, autoThrottled, priority, serializeExpirationAsDuration);
+		}
 	}
 };
 

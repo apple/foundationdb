@@ -23,6 +23,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/RatekeeperInterface.h"
@@ -427,9 +428,19 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 					TagThrottleInfo throttleInfo = decodeTagThrottleValue(entry.value);
 					TraceEvent("RatekeeperReadThrottleRead").detail("Tag", tag).detail("Expiration", throttleInfo.expiration);
 					if((!self->autoThrottlingEnabled && throttleInfo.autoThrottled) || throttleInfo.expiration <= now()) { // TODO: keep or delete auto throttles when disabling auto-throttling
-						tr.clear(tag);
+						tr.clear(entry.key);
 					}
 					else {
+						// Convert serialized version to absolute time
+						if(throttleInfo.serializeExpirationAsDuration) {
+							throttleInfo.serializeExpirationAsDuration = false;
+							BinaryWriter wr(IncludeVersion());
+							wr << throttleInfo;
+							state Value value = wr.toValue();
+
+							tr.set(entry.key, value);
+						}
+
 						auto oldItr = oldThrottleIterators[throttleInfo.priority];
 						while(oldItr.first != oldItr.second && oldItr.first->first < tag) {
 							++oldItr.first;
@@ -917,9 +928,10 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 
 				// TODO: avoid iteration every time
 				for(auto priorityItr = self.tagThrottles.begin(); priorityItr != self.tagThrottles.end(); ++priorityItr) {
+					auto &priorityTags = reply.throttledTags[priorityItr->first];
 					for(auto tagItr = priorityItr->second.begin(); tagItr != priorityItr->second.end();) {
 						if(tagItr->second.expiration > now()) {
-							reply.throttledTags[tagItr->first] = tagItr->second.rate;
+							priorityTags[tagItr->first] = tagItr->second;
 							++tagItr;
 						}
 						else {

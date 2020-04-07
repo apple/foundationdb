@@ -165,9 +165,12 @@ public:
 	UID dbId;
 	bool internal; // Only contexts created through the C client and fdbcli are non-internal
 
+	std::map<TagThrottleInfo::Priority, std::map<Standalone<StringRef>, TagThrottleInfo>> throttledTags;
+
 	CounterCollection cc;
 
 	Counter transactionReadVersions;
+	Counter transactionReadVersionsThrottled;
 	Counter transactionReadVersionsCompleted;
 	Counter transactionReadVersionBatches;
 	Counter transactionBatchReadVersions;

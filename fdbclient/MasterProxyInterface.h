@@ -158,11 +158,13 @@ struct GetReadVersionReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 
+	std::map<Standalone<StringRef>, TagThrottleInfo> tagThrottleInfo;
+
 	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked, metadataVersion);
+		serializer(ar, version, locked, metadataVersion, tagThrottleInfo);
 	}
 };
 

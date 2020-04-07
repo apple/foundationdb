@@ -59,12 +59,11 @@ struct GetRateInfoReply {
 	double leaseDuration;
 	HealthMetrics healthMetrics;
 
-	std::map<Standalone<StringRef>, double> throttledTags;
-	std::map<Standalone<StringRef>, double> throttledBatchTags;
+	std::map<TagThrottleInfo::Priority, std::map<Standalone<StringRef>, TagThrottleInfo>> throttledTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionRate, batchTransactionRate, leaseDuration, healthMetrics, throttledTags, throttledBatchTags);
+		serializer(ar, transactionRate, batchTransactionRate, leaseDuration, healthMetrics, throttledTags);
 	}
 };
 
