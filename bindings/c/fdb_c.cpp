@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 700
+#define FDB_API_VERSION 630
 #define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
@@ -107,12 +107,7 @@ fdb_error_t fdb_network_set_option( FDBNetworkOption option,
 }
 
 fdb_error_t fdb_setup_network_impl() {
-	CATCH_AND_RETURN(
-			try {
-				API->setupNetwork();
-			} catch (boost::system::system_error& e) {
-				return error_code_tls_error;
-			} );
+	CATCH_AND_RETURN( API->setupNetwork(); );
 }
 
 fdb_error_t fdb_setup_network_v13( const char* localAddress ) {

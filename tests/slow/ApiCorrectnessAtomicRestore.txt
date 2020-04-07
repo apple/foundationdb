@@ -26,3 +26,5 @@ startAfter=10.0
 restoreAfter=50.0
 clearAfterTest=false
 simBackupAgents=BackupToFile
+; This test file uses old restore, which does not work on new backup format
+usePartitionedLogs=false

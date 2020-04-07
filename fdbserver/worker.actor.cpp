@@ -41,6 +41,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"
+#include "flow/ThreadHelper.actor.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -400,6 +401,8 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	return result;
 }
 
+// Register the worker interf to cluster controller (cc) and
+// re-register the worker when key roles interface, e.g., cc, dd, ratekeeper, change.
 ACTOR Future<Void> registrationClient(
 		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
 		WorkerInterface interf,
@@ -424,7 +427,7 @@ ACTOR Future<Void> registrationClient(
 		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply(request) ) : Never();
 		choose {
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
-				processClass = reply.processClass;	
+				processClass = reply.processClass;
 				asyncPriorityInfo->set( reply.priorityInfo );
 
 				if(!reply.storageCache.present()) {
@@ -434,7 +437,7 @@ ACTOR Future<Void> registrationClient(
 					StorageServerInterface recruited;
 					recruited.locality = locality;
 					recruited.initEndpoints();
-					
+
 					std::map<std::string, std::string> details;
 					startRole( Role::STORAGE_CACHE, recruited.id(), interf.id(), details );
 
@@ -673,7 +676,7 @@ void startRole(const Role &role, UID roleId, UID workerId, const std::map<std::s
 	for(auto it = details.begin(); it != details.end(); it++)
 		ev.detail(it->first.c_str(), it->second);
 
-	ev.trackLatest( (roleId.shortString() + ".Role" ).c_str() );
+	ev.trackLatest( roleId.shortString() + ".Role"  );
 
 	// Update roles map, log Roles metrics
 	g_roles.insert({role.roleName, roleId.shortString()});
@@ -691,7 +694,7 @@ void endRole(const Role &role, UID id, std::string reason, bool ok, Error e) {
 			.detail("As", role.roleName)
 			.detail("Reason", reason);
 
-		ev.trackLatest( (id.shortString() + ".Role").c_str() );
+		ev.trackLatest( id.shortString() + ".Role" );
 	}
 
 	if(!ok) {
@@ -746,7 +749,41 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFol
 	return Void();
 }
 
-ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, Reference<ClusterConnectionFile> connFile, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
+ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::set<std::string>>>> issues) {
+	state bool pingTimeout = false;
+	loop {
+		wait(delay(SERVER_KNOBS->TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS));
+		TraceEvent("CrashDebugPingActionSetupInWorker");
+		Future<Void> pingAck = pingTraceLogWriterThread();
+		try {
+			wait(timeoutError(pingAck, SERVER_KNOBS->TRACE_LOG_PING_TIMEOUT_SECONDS));
+		} catch (Error& e) {
+			if (e.code() == error_code_timed_out) {
+				pingTimeout = true;
+			} else {
+				throw;
+			}
+		}
+		if (issues.present()) {
+			std::set<std::string> _issues;
+			retriveTraceLogIssues(_issues);
+			if (pingTimeout) {
+				// Ping trace log writer thread timeout.
+				_issues.insert("trace_log_writer_thread_unresponsive");
+				pingTimeout = false;
+			}
+			issues.get()->set(_issues);
+		}
+	}
+}
+
+// TODO: `issues` is right now only updated by `monitorTraceLogIssues` and thus is being `set` on every update.
+// It could be changed to `insert` and `trigger` later if we want to use it as a generic way for the caller of this
+// function to report issues to cluster controller.
+ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                       Reference<ClusterConnectionFile> connFile, LocalityData locality,
+                                       Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                       Optional<Reference<AsyncVar<std::set<std::string>>>> issues) {
 	// Initially most of the serverDBInfo is not known, but we know our locality right away
 	ServerDBInfo localInfo;
 	localInfo.myLocality = locality;
@@ -756,6 +793,12 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 	loop {
 		GetServerDBInfoRequest req;
 		req.knownServerInfoID = dbInfo->get().id;
+
+		if (issues.present()) {
+			for (auto const& i : issues.get()->get()) {
+				req.issues.push_back_deep(req.issues.arena(), i);
+			}
+		}
 
 		ClusterConnectionString fileConnectionString;
 		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
@@ -800,6 +843,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 				if(ccInterface->get().present())
 					TraceEvent("GotCCInterfaceChange").detail("CCID", ccInterface->get().get().id()).detail("CCMachine", ccInterface->get().get().getWorkers.getEndpoint().getPrimaryAddress());
 			}
+			when(wait(issues.present() ? issues.get()->onChange() : Never())) {}
 		}
 	}
 }
@@ -862,11 +906,14 @@ ACTOR Future<Void> workerServer(
 	// here is no, so that when running with log_version==3, all files should say V=3.
 	state std::map<SharedLogsKey, SharedLogsValue> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
+	state WorkerCache<InitializeBackupReply> backupWorkerCache;
 
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf( locality );
 	interf.initEndpoints();
+
+	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
 
 	folder = abspath(folder);
 
@@ -887,7 +934,8 @@ ACTOR Future<Void> workerServer(
 	errorForwarders.add( resetAfter(degraded, SERVER_KNOBS->DEGRADED_RESET_INTERVAL, false, SERVER_KNOBS->DEGRADED_WARNING_LIMIT, SERVER_KNOBS->DEGRADED_WARNING_RESET_DELAY, "DegradedReset"));
 	errorForwarders.add( loadedPonger( interf.debugPing.getFuture() ) );
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
-	errorForwarders.add( monitorServerDBInfo( ccInterface, connFile, locality, dbInfo ) );
+	errorForwarders.add(monitorTraceLogIssues(issues));
+	errorForwarders.add(monitorServerDBInfo(ccInterface, connFile, locality, dbInfo, issues));
 	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo, locality ) );
 	errorForwarders.add(monitorHighMemory(memoryProfileThreshold));
 
@@ -1117,17 +1165,24 @@ ACTOR Future<Void> workerServer(
 				req.reply.send(recruited);
 			}
 			when (InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
-				BackupInterface recruited(locality);
-				recruited.initEndpoints();
+				if (!backupWorkerCache.exists(req.reqId)) {
+					BackupInterface recruited(locality);
+					recruited.initEndpoints();
 
-				startRole(Role::BACKUP, recruited.id(), interf.id());
-				DUMPTOKEN(recruited.waitFailure);
+					startRole(Role::BACKUP, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.waitFailure);
 
-				Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
-				errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
-				TraceEvent("Backup_InitRequest", req.reqId).detail("BackupId", recruited.id());
-				InitializeBackupReply reply(recruited, req.backupEpoch);
-				req.reply.send(reply);
+					ReplyPromise<InitializeBackupReply> backupReady = req.reply;
+					backupWorkerCache.set(req.reqId, backupReady.getFuture());
+					Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
+					backupProcess = storageCache.removeOnReady(req.reqId, backupProcess);
+					errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
+					TraceEvent("BackupInitRequest", req.reqId).detail("BackupId", recruited.id());
+					InitializeBackupReply reply(recruited, req.backupEpoch);
+					backupReady.send(reply);
+				} else {
+					forwardPromise(req.reply, backupWorkerCache.get(req.reqId));
+				}
 			}
 			when( InitializeTLogRequest req = waitNext(interf.tLog.getFuture()) ) {
 				// For now, there's a one-to-one mapping of spill type to TLogVersion.

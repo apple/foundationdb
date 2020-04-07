@@ -82,20 +82,21 @@ inline typename Archive::READER& operator >> (Archive& ar, Item& item ) {
 	return ar;
 }
 
-template <class Archive>
-void serializer(Archive& ar) {}
-
 template <class Archive, class Item, class... Items>
 typename Archive::WRITER& serializer(Archive& ar, const Item& item, const Items&... items) {
 	save(ar, item);
-	serializer(ar, items...);
+	if constexpr (sizeof...(Items) > 0) {
+		serializer(ar, items...);
+	}
 	return ar;
 }
 
 template <class Archive, class Item, class... Items>
 typename Archive::READER& serializer(Archive& ar, Item& item, Items&... items) {
 	load(ar, item);
-	serializer(ar, items...);
+	if constexpr (sizeof...(Items) > 0) {
+		serializer(ar, items...);
+	}
 	return ar;
 }
 

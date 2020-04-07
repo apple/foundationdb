@@ -375,8 +375,11 @@ int setEnvironmentVar(const char *name, const char *value, int overwrite);
 
 std::string getWorkingDirectory();
 
-// Returns the ... something something figure out plugin locations
-std::string getDefaultPluginPath( const char* plugin_name );
+// Returns the absolute platform-dependant path for server-based files
+std::string getDefaultConfigPath();
+
+// Returns the absolute platform-dependant path for the default fdb.cluster file
+std::string getDefaultClusterFilePath();
 
 void *getImageOffset();
 
@@ -384,6 +387,11 @@ void *getImageOffset();
 size_t raw_backtrace(void** addresses, int maxStackDepth);
 std::string get_backtrace();
 std::string format_backtrace(void **addresses, int numAddresses);
+
+// Avoid in production code: not atomic, not fast, not reliable in all environments
+int eraseDirectoryRecursive(std::string const& directory);
+
+bool isSse42Supported();
 
 } // namespace platform
 

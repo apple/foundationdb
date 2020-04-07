@@ -26,6 +26,7 @@
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
+#include "flow/TLSConfig.actor.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BackupAgent.actor.h"
@@ -36,7 +37,7 @@
 #include "fdbclient/BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
-#include "fdbrpc/Platform.h"
+#include "flow/Platform.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -102,6 +103,7 @@ enum {
 	OPT_EXPIRE_RESTORABLE_AFTER_VERSION, OPT_EXPIRE_RESTORABLE_AFTER_DATETIME, OPT_EXPIRE_MIN_RESTORABLE_DAYS,
 	OPT_BASEURL, OPT_BLOB_CREDENTIALS, OPT_DESCRIBE_DEEP, OPT_DESCRIBE_TIMESTAMPS,
 	OPT_DUMP_BEGIN, OPT_DUMP_END, OPT_JSON, OPT_DELETE_DATA, OPT_MIN_CLEANUP_SECONDS,
+	OPT_USE_PARTITIONED_LOG,
 
 	// Backup and Restore constants
 	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
@@ -168,6 +170,8 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_NOSTOPWHENDONE,   "--no-stop-when-done",SO_NONE },
 	{ OPT_DESTCONTAINER,    "-d",               SO_REQ_SEP },
 	{ OPT_DESTCONTAINER,    "--destcontainer",  SO_REQ_SEP },
+	{ OPT_USE_PARTITIONED_LOG, "-p",                 SO_NONE },
+	{ OPT_USE_PARTITIONED_LOG, "--partitioned_log",  SO_NONE },
 	{ OPT_SNAPSHOTINTERVAL, "-s",                   SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "--snapshot_interval",  SO_REQ_SEP },
 	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
@@ -952,6 +956,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
+	printf("  -p, --partitioned_log  Starts with new type of backup system using partitioned logs.\n");
 	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
 		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
@@ -1743,9 +1748,10 @@ ACTOR Future<Void> submitDBBackup(Database src, Database dest, Standalone<Vector
 	return Void();
 }
 
-ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotIntervalSeconds, Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName, bool dryRun, bool waitForCompletion, bool stopWhenDone) {
-	try
-	{
+ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotIntervalSeconds,
+                                Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName, bool dryRun,
+                                bool waitForCompletion, bool stopWhenDone, bool usePartitionedLog) {
+	try {
 		state FileBackupAgent backupAgent;
 
 		// Backup everything, if no ranges were specified
@@ -1788,7 +1794,8 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 		}
 
 		else {
-			wait(backupAgent.submitBackup(db, KeyRef(url), snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone));
+			wait(backupAgent.submitBackup(db, KeyRef(url), snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone,
+			                              usePartitionedLog));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -1810,8 +1817,7 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 				}
 			}
 		}
-	}
-	catch (Error& e) {
+	} catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)
 			throw;
 		switch (e.code())
@@ -2907,6 +2913,7 @@ int main(int argc, char* argv[]) {
 		std::string restoreTimestamp;
 		bool waitForDone = false;
 		bool stopWhenDone = true;
+		bool usePartitionedLog = false; // Set to true to use new backup system
 		bool forceAction = false;
 		bool trace = false;
 		bool quietDisplay = false;
@@ -3152,6 +3159,9 @@ int main(int argc, char* argv[]) {
 				case OPT_NOSTOPWHENDONE:
 					stopWhenDone = false;
 					break;
+				case OPT_USE_PARTITIONED_LOG:
+					usePartitionedLog = true;
+					break;
 				case OPT_RESTORECONTAINER:
 					restoreContainer = args->OptionArg();
 					// If the url starts with '/' then prepend "file://" for backwards compatibility
@@ -3224,22 +3234,22 @@ int main(int argc, char* argv[]) {
 					blobCredentials.push_back(args->OptionArg());
 					break;
 #ifndef TLS_DISABLED
-				case TLSParams::OPT_TLS_PLUGIN:
+				case TLSConfig::OPT_TLS_PLUGIN:
 					args->OptionArg();
 					break;
-				case TLSParams::OPT_TLS_CERTIFICATES:
+				case TLSConfig::OPT_TLS_CERTIFICATES:
 					tlsCertPath = args->OptionArg();
 					break;
-				case TLSParams::OPT_TLS_PASSWORD:
+				case TLSConfig::OPT_TLS_PASSWORD:
 					tlsPassword = args->OptionArg();
 					break;
-				case TLSParams::OPT_TLS_CA_FILE:
+				case TLSConfig::OPT_TLS_CA_FILE:
 					tlsCAPath = args->OptionArg();
 					break;
-				case TLSParams::OPT_TLS_KEY:
+				case TLSConfig::OPT_TLS_KEY:
 					tlsKeyPath = args->OptionArg();
 					break;
-				case TLSParams::OPT_TLS_VERIFY_PEERS:
+				case TLSConfig::OPT_TLS_VERIFY_PEERS:
 					tlsVerifyPeers = args->OptionArg();
 					break;
 #endif
@@ -3356,15 +3366,19 @@ int main(int argc, char* argv[]) {
 				if (!flowKnobs->setKnob( k->first, k->second ) &&
 					!clientKnobs->setKnob( k->first, k->second ))
 				{
-					fprintf(stderr, "Unrecognized knob option '%s'\n", k->first.c_str());
-					return FDB_EXIT_ERROR;
+					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
+					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "Invalid value '%s' for option '%s'\n", k->second.c_str(), k->first.c_str());
-					return FDB_EXIT_ERROR;
+					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", k->second.c_str(), k->first.c_str());
+					TraceEvent(SevWarnAlways, "InvalidKnobValue").detail("Knob", printable(k->first)).detail("Value", printable(k->second));
 				}
-				throw;
+				else {
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
+					TraceEvent(SevError, "FailedToSetKnob").detail("Knob", printable(k->first)).detail("Value", printable(k->second)).error(e);
+					throw;
+				}
 			}
 		}
 
@@ -3559,7 +3573,8 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually writeable.
 				openBackupContainer(argv[0], destinationContainer);
-				f = stopAfter( submitBackup(db, destinationContainer, snapshotIntervalSeconds, backupKeys, tagName, dryRun, waitForDone, stopWhenDone) );
+				f = stopAfter(submitBackup(db, destinationContainer, snapshotIntervalSeconds, backupKeys, tagName,
+				                           dryRun, waitForDone, stopWhenDone, usePartitionedLog));
 				break;
 			}
 
@@ -3874,7 +3889,7 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 	// We should wait on all restore to finish before proceeds
 	TraceEvent("FastRestore").detail("Progress", "WaitForRestoreToFinish");
 	state ReadYourWritesTransaction tr(cx);
-	state Future<Void> watchForRestoreRequestDone;
+	state Future<Void> fRestoreRequestDone;
 	state bool restoreRequestDone = false;
 
 	loop {
@@ -3882,6 +3897,7 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			// In case restoreRequestDoneKey is already set before we set watch on it
 			Optional<Value> restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
 			if (restoreRequestDoneKeyValue.present()) {
@@ -3889,12 +3905,13 @@ ACTOR static Future<FileBackupAgent::ERestoreState> waitFastRestore(Database cx,
 				tr.clear(restoreRequestDoneKey);
 				wait(tr.commit());
 				break;
-			} else {
-				watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
+			} else if (!restoreRequestDone) {
+				fRestoreRequestDone = tr.watch(restoreRequestDoneKey);
 				wait(tr.commit());
+				wait(fRestoreRequestDone);
+			} else {
+				break;
 			}
-			// The clear transaction may fail in uncertain state, which may already clear the restoreRequestDoneKey
-			if (restoreRequestDone) break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}

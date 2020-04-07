@@ -1,5 +1,5 @@
 /*
- * TLSPolicy.cpp
+ * TLSConfig.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,11 +18,21 @@
  * limitations under the License.
  */
 
-#include "flow/TLSPolicy.h"
+#define PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP public
+#include "flow/TLSConfig.actor.h"
+#undef PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP
 
+// To force typeinfo to only be emitted once.
 TLSPolicy::~TLSPolicy() {}
 
-#ifndef TLS_DISABLED
+#ifdef TLS_DISABLED
+
+void LoadedTLSConfig::print(FILE *fp) {
+	fprintf(fp, "Cannot print LoadedTLSConfig.  TLS support is not enabled.\n");
+}
+
+#else // TLS is enabled
+
 #include <algorithm>
 #include <cstring>
 #include <exception>
@@ -39,17 +49,260 @@ TLSPolicy::~TLSPolicy() {}
 #include <string>
 #include <sstream>
 #include <utility>
+#include <boost/asio/ssl/context.hpp>
+
+// This include breaks module dependencies, but we need to do async file reads.
+// So either we include fdbrpc here, or this file is moved to fdbrpc/, and then
+// Net2, which depends on us, includes fdbrpc/.
+//
+// Either way, the only way to break this dependency cycle is to move all of
+// AsyncFile to flow/
+#include "fdbrpc/IAsyncFile.h"
+#include "flow/Platform.h"
 
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
+#include "flow/genericactors.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
+
+
+std::vector<std::string> LoadedTLSConfig::getVerifyPeers() const {
+	if (tlsVerifyPeers.size()) {
+		return tlsVerifyPeers;
+	}
+
+	std::string envVerifyPeers;
+	if (platform::getEnvironmentVar("FDB_TLS_VERIFY_PEERS", envVerifyPeers)) {
+		return {envVerifyPeers};
+	}
+
+	return {"Check.Valid=1"};
+}
+
+std::string LoadedTLSConfig::getPassword() const {
+	if (tlsPassword.size()) {
+		return tlsPassword;
+	}
+
+	std::string envPassword;
+	platform::getEnvironmentVar("FDB_TLS_PASSWORD", envPassword);
+	return envPassword;
+}
+
+void LoadedTLSConfig::print(FILE* fp) {
+	int num_certs = 0;
+	boost::asio::ssl::context context(boost::asio::ssl::context::tls);
+	try {
+		ConfigureSSLContext(*this, &context);
+	} catch (Error& e) {
+		fprintf(fp, "There was an error in loading the certificate chain.\n");
+		throw;
+	}
+
+	X509_STORE* store = SSL_CTX_get_cert_store(context.native_handle());
+	X509_STORE_CTX* store_ctx = X509_STORE_CTX_new();
+	X509* cert = SSL_CTX_get0_certificate(context.native_handle());
+	X509_STORE_CTX_init(store_ctx, store, cert, NULL);
+
+	X509_verify_cert(store_ctx);
+	STACK_OF(X509)* chain = X509_STORE_CTX_get0_chain(store_ctx);
+
+	X509_print_fp(fp, cert);
+
+	num_certs = sk_X509_num(chain);
+	if (num_certs) {
+		for ( int i = 0; i < num_certs; i++ ) {
+			printf("\n");
+			X509* cert = sk_X509_value(chain, i);
+			X509_print_fp(fp, cert);
+		}
+	}
+
+	X509_STORE_CTX_free(store_ctx);
+}
+
+void ConfigureSSLContext( const LoadedTLSConfig& loaded, boost::asio::ssl::context* context, std::function<void()> onPolicyFailure ) {
+	try {
+		context->set_options(boost::asio::ssl::context::default_workarounds);
+		context->set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
+
+		if (loaded.isTLSEnabled()) {
+			Reference<TLSPolicy> tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(loaded.getEndpointType()));
+			tlsPolicy->set_verify_peers({ loaded.getVerifyPeers() });
+
+			context->set_verify_callback([policy=tlsPolicy, onPolicyFailure](bool preverified, boost::asio::ssl::verify_context& ctx) {
+					bool success = policy->verify_peer(preverified, ctx.native_handle());
+					if (!success) {
+						onPolicyFailure();
+					}
+					return success;
+				});
+		} else {
+			// Insecurely always except if TLS is not enabled.
+			context->set_verify_callback([](bool, boost::asio::ssl::verify_context&){ return true; });
+		}
+
+		context->set_password_callback(
+				[password=loaded.getPassword()](size_t, boost::asio::ssl::context::password_purpose) {
+					return password;
+				});
+
+		const std::string& CABytes = loaded.getCABytes();
+		if ( CABytes.size() ) {
+			context->add_certificate_authority(boost::asio::buffer(CABytes.data(), CABytes.size()));
+		}
+
+		const std::string& keyBytes = loaded.getKeyBytes();
+		if (keyBytes.size()) {
+			context->use_private_key(boost::asio::buffer(keyBytes.data(), keyBytes.size()), boost::asio::ssl::context::pem);
+		}
+
+		const std::string& certBytes = loaded.getCertificateBytes();
+		if ( certBytes.size() ) {
+			context->use_certificate_chain(boost::asio::buffer(certBytes.data(), certBytes.size()));
+		}
+	} catch (boost::system::system_error& e) {
+		TraceEvent("TLSConfigureError").detail("What", e.what()).detail("Value", e.code().value()).detail("WhichMeans", TLSPolicy::ErrorString(e.code()));
+		throw tls_error();
+	}
+}
+
+std::string TLSConfig::getCertificatePathSync() const {
+	if (tlsCertPath.size()) {
+		return tlsCertPath;
+	}
+
+	std::string envCertPath;
+	if (platform::getEnvironmentVar("FDB_TLS_CERTIFICATE_FILE", envCertPath)) {
+		return envCertPath;
+	}
+
+	const char *defaultCertFileName = "fdb.pem";
+	if( fileExists(defaultCertFileName) ) {
+		return defaultCertFileName;
+	}
+
+	if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
+		return joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+	}
+
+	return std::string();
+}
+
+std::string TLSConfig::getKeyPathSync() const {
+	if (tlsKeyPath.size()) {
+		return tlsKeyPath;
+	}
+
+	std::string envKeyPath;
+	if (platform::getEnvironmentVar("FDB_TLS_KEY_FILE", envKeyPath)) {
+		return envKeyPath;
+	}
+
+	const char *defaultCertFileName = "fdb.pem";
+	if( fileExists(defaultCertFileName) ) {
+		return defaultCertFileName;
+	}
+
+	if( fileExists( joinPath(platform::getDefaultConfigPath(), defaultCertFileName) ) ) {
+		return joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+	}
+
+	return std::string();
+}
+
+std::string TLSConfig::getCAPathSync() const {
+	if (tlsCAPath.size()) {
+		return tlsCAPath;
+	}
+
+	std::string envCAPath;
+	platform::getEnvironmentVar("FDB_TLS_CA_FILE", envCAPath);
+	return envCAPath;
+}
+
+LoadedTLSConfig TLSConfig::loadSync() const {
+	LoadedTLSConfig loaded;
+
+	const std::string certPath = getCertificatePathSync();
+	if (certPath.size()) {
+		loaded.tlsCertBytes = readFileBytes( certPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE );
+	} else {
+		loaded.tlsCertBytes = tlsCertBytes;
+	}
+
+	const std::string keyPath = getKeyPathSync();
+	if (keyPath.size()) {
+		loaded.tlsKeyBytes = readFileBytes( keyPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE );
+	} else {
+		loaded.tlsKeyBytes = tlsKeyBytes;
+	}
+
+	const std::string CAPath = getCAPathSync();
+	if (CAPath.size()) {
+		loaded.tlsCABytes = readFileBytes( CAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE );
+	} else {
+		loaded.tlsCABytes = tlsCABytes;
+	}
+
+	loaded.tlsPassword = tlsPassword;
+	loaded.tlsVerifyPeers = tlsVerifyPeers;
+	loaded.endpointType = endpointType;
+
+	return loaded;
+}
+
+// And now do the same thing, but async...
+
+ACTOR static Future<Void> readEntireFile( std::string filename, std::string* destination ) {
+	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
+	state int64_t filesize = wait(file->size());
+	if (filesize > FLOW_KNOBS->CERT_FILE_MAX_SIZE) {
+		throw file_too_large();
+	}
+	destination->resize(filesize);
+	wait(success(file->read(const_cast<char*>(destination->c_str()), filesize, 0)));
+	return Void();
+}
+
+ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
+	state LoadedTLSConfig loaded;
+	state std::vector<Future<Void>> reads;
+
+	const std::string& certPath = self->getCertificatePathSync();
+	if (certPath.size()) {
+		reads.push_back( readEntireFile( certPath, &loaded.tlsCertBytes ) );
+	} else {
+		loaded.tlsCertBytes = self->tlsCertBytes;
+	}
+
+	const std::string& keyPath = self->getKeyPathSync();
+	if (keyPath.size()) {
+		reads.push_back( readEntireFile( keyPath, &loaded.tlsKeyBytes ) );
+	} else {
+		loaded.tlsKeyBytes = self->tlsKeyBytes;
+	}
+
+	const std::string& CAPath = self->getCAPathSync();
+	if (CAPath.size()) {
+		reads.push_back( readEntireFile( CAPath, &loaded.tlsCABytes ) );
+	} else {
+		loaded.tlsCABytes = self->tlsKeyBytes;
+	}
+
+	wait(waitForAll(reads));
+
+	loaded.tlsPassword = self->tlsPassword;
+	loaded.tlsVerifyPeers = self->tlsVerifyPeers;
+	loaded.endpointType = self->endpointType;
+
+	return loaded;
+}
 
 std::string TLSPolicy::ErrorString(boost::system::error_code e) {
 	char* str = ERR_error_string(e.value(), NULL);
 	return std::string(str);
 }
-
-// To force typeinfo to only be emitted once.
-
 
 std::string TLSPolicy::toString() const {
 	std::stringstream ss;
@@ -215,7 +468,7 @@ static X509Location locationForNID(NID nid) {
 	}
 }
 
-bool TLSPolicy::set_verify_peers(std::vector<std::string> verify_peers) {
+void TLSPolicy::set_verify_peers(std::vector<std::string> verify_peers) {
 	for (int i = 0; i < verify_peers.size(); i++) {
 		try {
 			std::string& verifyString = verify_peers[i];
@@ -235,10 +488,9 @@ bool TLSPolicy::set_verify_peers(std::vector<std::string> verify_peers) {
 			rules.clear();
 			std::string& verifyString = verify_peers[i];
 			TraceEvent(SevError, "FDBLibTLSVerifyPeersParseError").detail("Config", verifyString);
-			return false;
+			throw tls_error();
 		}
 	}
-	return true;
 }
 
 TLSPolicy::Rule::Rule(std::string input) {
