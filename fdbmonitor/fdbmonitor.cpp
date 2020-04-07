@@ -1176,7 +1176,11 @@ int main(int argc, char** argv) {
 	// testPathOps(); return -1;
 
 	std::string lockfile = "/var/run/fdbmonitor.pid";
+#ifdef __FreeBSD__
+	std::string _confpath = "/usr/local/etc/foundationdb/foundationdb.conf";
+#else
 	std::string _confpath = "/etc/foundationdb/foundationdb.conf";
+#endif
 
 	std::vector<const char *> additional_watch_paths;
 
