@@ -39,6 +39,7 @@
 
 #ifdef __FreeBSD__
 #include <sys/event.h>
+#define O_EVTONLY O_RDONLY
 #endif
 
 #ifdef __APPLE__
