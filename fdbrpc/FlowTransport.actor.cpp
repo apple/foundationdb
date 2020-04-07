@@ -440,6 +440,10 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 		.detail("PeerAddr", self->destination)
 		.detail("ConnSet", (bool)conn);
 
+	if (FlowTransport::transport().getLocalAddress() == self->destination) {
+		return Never();
+	}
+
 	state Optional<double> firstConnFailedTime = Optional<double>();
 	loop {
 		try {
@@ -473,7 +477,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 						         wait(INetworkConnections::net()->connect(self->destination))) {
 							conn = _conn;
 							wait(conn->connectHandshake());
-							if (self->unsent.empty()) {
+							if (FlowTransport::transport().isClient() && self->unsent.empty()) {
 								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 								conn->close();
 								conn = Reference<IConnection>();
