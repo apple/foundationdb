@@ -1924,23 +1924,21 @@ std::string toString(BTreePageID id) {
 struct RedwoodRecordRef {
 	typedef uint8_t byte;
 
-	RedwoodRecordRef(KeyRef key = KeyRef(), Version ver = 0, Optional<ValueRef> value = {}, uint32_t chunkTotal = 0, uint32_t chunkStart = 0)
-		: key(key), version(ver), value(value), chunk({chunkTotal, chunkStart})
+	RedwoodRecordRef(KeyRef key = KeyRef(), Version ver = 0, Optional<ValueRef> value = {})
+		: key(key), version(ver), value(value)
 	{
 	}
 
 	RedwoodRecordRef(Arena &arena, const RedwoodRecordRef &toCopy)
-	  : key(arena, toCopy.key), version(toCopy.version), chunk(toCopy.chunk)
+	  : key(arena, toCopy.key), version(toCopy.version)
 	{
 		if(toCopy.value.present()) {
 			value = ValueRef(arena, toCopy.value.get());
 		}
 	}
 
-	RedwoodRecordRef(KeyRef key, Optional<ValueRef> value, const byte intFields[14])
-		: key(key), value(value)
-	{
-		deserializeIntFields(intFields);
+	KeyValueRef toKeyValueRef() const {
+		return KeyValueRef(key, value.get());
 	}
 
 	// RedwoodRecordRefs are used for both internal and leaf pages of the BTree.
@@ -1960,65 +1958,28 @@ struct RedwoodRecordRef {
 	}
 
 	inline RedwoodRecordRef withPageID(BTreePageID id) const {
-		return RedwoodRecordRef(key, version, ValueRef((const uint8_t *)id.begin(), id.size() * sizeof(LogicalPageID)), chunk.total, chunk.start);
+		return RedwoodRecordRef(key, version, ValueRef((const uint8_t *)id.begin(), id.size() * sizeof(LogicalPageID)));
 	}
 
 	inline RedwoodRecordRef withoutValue() const {
-		return RedwoodRecordRef(key, version, {}, chunk.total, chunk.start);
+		return RedwoodRecordRef(key, version);
 	}
 
-	// Returns how many bytes are in common between the integer fields of *this and other, assuming that 
-	// all values are BigEndian, version is 64 bits, chunk total is 24 bits, and chunk start is 24 bits
-	int getCommonIntFieldPrefix(const RedwoodRecordRef &other) const {
-		if(version != other.version) {
-			return clzll(version ^ other.version) >> 3;
-		}
-
-		if(chunk.total != other.chunk.total) {
-			// the -1 is because we are only considering the lower 3 bytes
-			return 8 + (clz(chunk.total ^ other.chunk.total) >> 3) - 1;
-		}
-		
-		if(chunk.start != other.chunk.start) {
-			// the -1 is because we are only considering the lower 3 bytes
-			return 11 + (clz(chunk.start ^ other.chunk.start) >> 3) - 1;
-		}
-
-		return 14;
-	}
-
-	// Truncate (key, version, chunk.total, chunk.start) tuple to len bytes.
+	// Truncate (key, version, part) tuple to len bytes.
 	void truncate(int len) {
-		if(len <= key.size()) {
-			key = key.substr(0, len);
-			version = 0;
-			chunk.total = 0;
-			chunk.start = 0;
-		}
-		else {
-			byte fields[intFieldArraySize];
-			serializeIntFields(fields);
-			int end = len - key.size();
-			for(int i = intFieldArraySize - 1; i >= end; --i) {
-				fields[i] = 0;
-			}
-		}
+		ASSERT(len <= key.size());
+		key = key.substr(0, len);
+		version = 0;
 	}
 
-	// Find the common prefix between two records, assuming that the first
-	// skip bytes are the same.
-	inline int getCommonPrefixLen(const RedwoodRecordRef &other, int skip = 0) const {
-		int skipStart = std::min(skip, key.size());
-		int common = skipStart + commonPrefixLength(key.begin() + skipStart, other.key.begin() + skipStart, std::min(other.key.size(), key.size()) - skipStart);
-
-		if(common == key.size() && key.size() == other.key.size()) {
-			common += getCommonIntFieldPrefix(other);
-		}
-
-		return common;
+	// Find the common key prefix between two records, assuming that the first skipLen bytes are the same
+	inline int getCommonPrefixLen(const RedwoodRecordRef &other, int skipLen = 0) const {
+		int skipStart = std::min(skipLen, key.size());
+		return skipStart + commonPrefixLength(key.begin() + skipStart, other.key.begin() + skipStart, std::min(other.key.size(), key.size()) - skipStart);
 	}
 
-	// Compares and orders by key, version, chunk.start, chunk.total, value
+	// Compares and orders by key, version, chunk.total, chunk.start, value
+	// This is the same order that delta compression uses for prefix borrowing
 	int compare(const RedwoodRecordRef &rhs, int skip = 0) const {
 		int keySkip = std::min(skip, key.size());
 		int cmp = key.substr(keySkip).compare(rhs.key.substr(keySkip));
@@ -2026,16 +1987,7 @@ struct RedwoodRecordRef {
 		if(cmp == 0) {
 			cmp = version - rhs.version;
 			if(cmp == 0) {
-				// It is assumed that in any data set there will never be more than one
-				// unique chunk total size for the same key and version, so sort by start, total 
-				// Chunked (represented by chunk.total > 0) sorts higher than whole
-				cmp = chunk.start - rhs.chunk.start;
-				if(cmp == 0) {
-					cmp = chunk.total - rhs.chunk.total;
-					if(cmp == 0) {
-						cmp = value.compare(rhs.value);
-					}
-				}
+				cmp = value.compare(rhs.value);
 			}
 		}
 		return cmp;
@@ -2043,52 +1995,20 @@ struct RedwoodRecordRef {
 
 	bool sameUserKey(const StringRef &k, int skipLen) const {
 		// Keys are the same if the sizes are the same and either the skipLen is longer or the non-skipped suffixes are the same.
-		return key.size() == k.size() && ( skipLen > key.size() || key.substr(skipLen) == k.substr(skipLen) );
+		return (key.size() == k.size()) && (key.substr(skipLen) == k.substr(skipLen));
 	}
 
 	bool sameExceptValue(const RedwoodRecordRef &rhs, int skipLen = 0) const {
-		return sameUserKey(rhs.key, skipLen) && version == rhs.version && chunk.total == rhs.chunk.total && chunk.start == rhs.chunk.start;
-	}
-
-	static const int intFieldArraySize = 14;
-
-	// Write big endian values of version (64 bits), total (24 bits), and start (24 bits) fields
-	// to an array of 14 bytes
-	void serializeIntFields(byte *dst) const {
-		*(uint32_t *)(dst + 10) = bigEndian32(chunk.start);
-		*(uint32_t *)(dst + 7) = bigEndian32(chunk.total);
-		*(uint64_t *)dst = bigEndian64(version);
-	}
-
-	// Initialize int fields from the array format that serializeIntFields produces
-	void deserializeIntFields(const byte *src) {
-		version = bigEndian64(*(uint64_t *)src);
-		chunk.total = bigEndian32(*(uint32_t *)(src + 7)) & 0xffffff;
-		chunk.start = bigEndian32(*(uint32_t *)(src + 10)) & 0xffffff;
+		return sameUserKey(rhs.key, skipLen) && version == rhs.version;
 	}
 
 	// TODO: Use SplitStringRef (unless it ends up being slower)
 	KeyRef key;
 	Optional<ValueRef> value;
 	Version version;
-	struct {
-		uint32_t total;
-		// TODO:  Change start to chunk number?
-		uint32_t start;
-	} chunk;
 
 	int expectedSize() const {
 		return key.expectedSize() + value.expectedSize();
-	}
-
-	bool isMultiPart() const {
-		return chunk.total != 0;
-	}
-
-	// Generate a kv shard from a complete kv
-	RedwoodRecordRef split(int start, int len) {
-		ASSERT(!isMultiPart());
-		return RedwoodRecordRef(key, version, value.get().substr(start, len), value.get().size(), start);
 	}
 
 	class Writer {
@@ -2116,6 +2036,32 @@ struct RedwoodRecordRef {
 			wptr += s.size();
 		}
 
+		void writeFixedBigEndian(int64_t x, int len) {
+			if(len != 0) {
+				x = bigEndian64(x);
+				memcpy(wptr, ((byte *)&x) + sizeof(int64_t) - len, len);
+				wptr += len;
+			}
+		}
+
+		static int varIntLen(int x) {
+			return x < 0x80 ? 1 : 2;
+		}
+
+		// Find the number of bytes of precision to store for a version delta
+		// Possible return values are: 0, 2-8
+		static int versionDeltaLen(Version x) {
+			if(x == 0) {
+				return 0;
+			}
+
+			if(x < 0) {
+				x = ~x + 1;
+			}
+			x >>= 8;
+
+			return 1 + sizeof(Version) - (clzll(x) >> 3);
+		}
 	};
 
 	class Reader {
@@ -2146,6 +2092,25 @@ struct RedwoodRecordRef {
 			return x;
 		}
 
+		int64_t readFixedBigEndian(int len) {
+			if(len == 0) {
+				return 0;
+			}
+
+			// Start with all 0's or all 1's depending on sign
+			bool negative = int8_t(*rptr) < 0;
+			int64_t x = negative ? -1 : 0;
+
+			// Copy len low bytes (in big endian form) into place
+			memcpy((uint8_t *)&x + sizeof(int64_t) - len, rptr, len);
+			rptr += len;
+
+			// Convert to host byte order
+			x = bigEndian64(x);
+
+			return x;
+		}
+
 		StringRef readString(int len) {
 			StringRef s(rptr, len);
 			rptr += len;
@@ -2164,50 +2129,68 @@ struct RedwoodRecordRef {
 
 		// Serialized Format
 		//
-		// TODO:  Optimize this format better.  Non-versioned non-multipart records should have the lowest overhead.
-		//
 		// Byte 1
 		//    1 bit - borrow source is prev ancestor (otherwise next ancestor)
-		//    1 bit - is deleted
+		//    1 bit - item is deleted
 		//    1 bit - has value (this is different from having a zero-length value)
-		//    1 bit - has version
-		//    4 bits - length of suffix bytes for optional integer fields version, total bytes, start offset
-		//
-		// Remaining field sizes are variable length.  1-2 byte ints use high byte to indicate use of second byte.
-		//    1-2 bytes - prefix length to borrow
+		//    2 bits - part type enum
+		//    3 bits - version delta length
+        //
+		// Remaining field sizes are variable length, 1-2 byte integers
+		//    1-2 bytes - key prefix length to borrow
 		//    1-2 bytes - key suffix length
-		//    1 byte - value length, if has_value
+		//    1-2 bytes - value length if has value is set
 		//
 		// Data bytes, variable length based on values above
 		//    Key suffix bytes
-		//    Optional int field suffix bytes
+		//    Version delta bytes
 		//    Value bytes
 		//
-		// For a series of RedwoodRecordRef's containing shards of the same KV pair where the key size is < 114 bytes (single byte prefixLen)
-		// the overhead per middle chunk is 9 bytes:
+		// Large chunked key-value pairs consist of at most 2 additional records, having overhead of 8 to 10 bytes each.
 		//   4 bytes of child pointers in the DeltaTree Node
 		//   1 flag byte
-		//   1 prefix borrow length byte
-		//   1 suffix length byte (which will be zero)
-		//   1 value length byte
-		//   ~1 optional int field suffix byte describing chunk start position (higher bytes will be borrowed as part of prefix len))
- 
+		//   1 or 2 bytes for prefix borrow length (usually 1)
+		//   1 key suffix length byte (will be 0)
+		//   1 or 2 bytes for value length (usually 2)
+
 		enum EFlags {
 			PREFIX_SOURCE_PREV = 0x80,
 			IS_DELETED = 0x40,
 			HAS_VALUE = 0x20,
-			HAS_VERSION = 0x10,
-			INT_FIELD_SUFFIX_BITS = 0x0f
+			// 0x10 unused
+			// 0x08 unused
+			VERSION_DELTA_LEN = 0x07
 		};
 
 		uint8_t flags;
 
-		inline byte * data() {
+		byte * data() {
 			return (byte *)(this + 1);
 		}
 
-		inline const byte * data() const {
+		const byte * data() const {
 			return (const byte *)(this + 1);
+		}
+
+		// version delta length is only 3 bits, so 0-7 represents length 0 and 2-8
+		// Length of 1 is fairly useless anyway as version changes very rapidly.
+		void setVersionDeltaLen(int len) {
+			if(len > 0) {
+				--len;
+			}
+			flags |= (uint8_t)len;
+		}
+
+		int getVersionDeltaLength() const {
+			int len = flags & VERSION_DELTA_LEN;
+			if(len != 0) {
+				++len;
+			}
+			return len;
+		}
+
+		bool hasValue() const {
+			return flags & HAS_VALUE;
 		}
 
 		void setPrefixSource(bool val) {
@@ -2239,87 +2222,69 @@ struct RedwoodRecordRef {
 		RedwoodRecordRef apply(const RedwoodRecordRef &base, Arena &arena) const {
 			Reader r(data());
 
-			int intFieldSuffixLen = flags & INT_FIELD_SUFFIX_BITS;
-			int prefixLen = r.readVarInt();
+			int keyPrefixLen = r.readVarInt();
 			int keySuffixLen = r.readVarInt();
-			int valueLen = (flags & HAS_VALUE) ? r.read<uint8_t>() : 0;
+			int valueLen = hasValue() ? r.readVarInt() : 0;
 
 			StringRef k;
 
-			// Separate the borrowed key string byte count from the borrowed int field byte count
-			int keyPrefixLen = std::min(prefixLen, base.key.size());
-			int intFieldPrefixLen = prefixLen - keyPrefixLen;
-
 			// If there is a key suffix, reconstitute the complete key into a contiguous string
 			if(keySuffixLen > 0) {
+				StringRef keySuffix = r.readString(keySuffixLen);
 				k = makeString(keyPrefixLen + keySuffixLen, arena);
 				memcpy(mutateString(k), base.key.begin(), keyPrefixLen);
-				memcpy(mutateString(k) + keyPrefixLen, r.readString(keySuffixLen).begin(), keySuffixLen);
+				memcpy(mutateString(k) + keyPrefixLen, keySuffix.begin(), keySuffixLen);
 			}
 			else {
+				// Otherwise just reference the base key's memory
 				k = base.key.substr(0, keyPrefixLen);
 			}
 
-			// Now decode the optional integer fields
-			const byte *intFieldSuffix = r.readBytes(intFieldSuffixLen);
+			Version versionDelta = r.readFixedBigEndian(getVersionDeltaLength());
+			Version v = base.version + versionDelta;
 
-			// Create big endian array in which to reassemble the integer fields from prefix and suffix bytes
-			byte intFields[intFieldArraySize];
-
-			// If borrowing any bytes, get the source's integer field array
-			if(intFieldPrefixLen > 0) {
-				base.serializeIntFields(intFields);
-			}
-			else {
-				memset(intFields, 0, intFieldArraySize);
+			Optional<ValueRef> value;
+			if(hasValue()) {
+				value = r.readString(valueLen);
 			}
 
-			// Version offset is used to skip the version bytes in the int field array when version is missing (aka 0)
-			int versionOffset = ( (intFieldPrefixLen == 0) && (~flags & HAS_VERSION) ) ? 8 : 0;
-
-			// If there are suffix bytes, copy those into place after the prefix
-			if(intFieldSuffixLen > 0) {
-				memcpy(intFields + versionOffset + intFieldPrefixLen, intFieldSuffix, intFieldSuffixLen);
-			}
-
-			// Zero out any remaining bytes if the array was initialized from base
-			if(intFieldPrefixLen > 0) {
-				for(int i = versionOffset + intFieldPrefixLen + intFieldSuffixLen; i < intFieldArraySize; ++i) {
-					intFields[i] = 0;
-				}
-			}
-
-			return RedwoodRecordRef(k, flags & HAS_VALUE ? r.readString(valueLen) : Optional<ValueRef>(), intFields);
+			return RedwoodRecordRef(k, v, value);
 		}
 
 		int size() const {
 			Reader r(data());
 
-			int intFieldSuffixLen = flags & INT_FIELD_SUFFIX_BITS;
-			r.readVarInt();  // skip prefix length
-			int keySuffixLen = r.readVarInt();
-			int valueLen = (flags & HAS_VALUE) ? r.read<uint8_t>() : 0;
+			// skip prefix length
+			r.readVarInt();
 
-			return sizeof(Delta) + r.rptr - data() + intFieldSuffixLen + valueLen + keySuffixLen;
+			// get key suffix length		
+			int keySuffixLen = r.readVarInt();
+			// get value length, if present
+			int valueLen = hasValue() ? r.readVarInt() : 0;
+
+			// Static delta size, plus variable sized length bytes, plus length of stored bytes for key suffix, version delta, and value.
+			return sizeof(Delta) + (r.rptr - data()) + keySuffixLen + getVersionDeltaLength() + valueLen;
 		}
 
-		// Delta can't be determined without the RedwoodRecordRef upon which the Delta is based.
 		std::string toString() const {
-			Reader r(data());
-
 			std::string flagString = " ";
-			if(flags & PREFIX_SOURCE_PREV) flagString += "PrefixSource ";
-			if(flags & IS_DELETED) flagString += "IsDeleted ";
-			if(flags & HAS_VERSION) flagString += "Version ";
-			if(flags & HAS_VALUE) flagString += "HasValue ";
+			if(flags & PREFIX_SOURCE_PREV) {
+				flagString += "PrefixSource ";
+			}
+			if(flags & IS_DELETED) {
+				flagString += "IsDeleted";
+			}
+			if(hasValue()) {
+				flagString += "HasValue";
+			}
 
-			int intFieldSuffixLen = flags & INT_FIELD_SUFFIX_BITS;
+			Reader r(data());
 			int prefixLen = r.readVarInt();
 			int keySuffixLen = r.readVarInt();
-			int valueLen = (flags & HAS_VALUE) ? r.read<uint8_t>() : 0;
+			int valueLen = hasValue() ? r.readVarInt() : 0;
 
-			return format("len: %d  flags: %s prefixLen: %d  keySuffixLen: %d  intFieldSuffix: %d  valueLen %d  raw: %s",
-				size(), flagString.c_str(), prefixLen, keySuffixLen, intFieldSuffixLen, valueLen, StringRef((const uint8_t *)this, size()).toHexString().c_str());
+			return format("len: %d  flags: %s prefixLen: %d  keySuffixLen: %d  versionDeltaLen: %d  valueLen %d  raw: %s",
+				size(), flagString.c_str(), prefixLen, keySuffixLen, getVersionDeltaLength(), valueLen, StringRef((const uint8_t *)this, size()).toHexString().c_str());
 		}
 	};
 
@@ -2329,20 +2294,26 @@ struct RedwoodRecordRef {
 		RedwoodRecordRef apply(const RedwoodRecordRef &base, Arena &arena) const {
 			Reader r(data());
 
-			// Skip prefix length
-			r.readVarInt();
-			
-			int keySuffixLen = r.readVarInt();
+			Optional<ValueRef> value;
 
-			// Get value length
-			int valueLen = (flags & HAS_VALUE) ? r.read<uint8_t>() : 0;
+			if(hasValue()) {
+				// Skip prefix length
+				r.readVarInt();
+				// Get key suffix length
+				int keySuffixLen = r.readVarInt();
+				// Get value length
+				int valueLen = r.readVarInt();
 
-			// Skip key suffix bytes and int field suffix bytes
-			r.readString(keySuffixLen);
-			r.readBytes(flags & INT_FIELD_SUFFIX_BITS);
+				// Skip key suffix bytes
+				r.readString(keySuffixLen);
+				// Skip version delta bytes
+				r.readBytes(getVersionDeltaLength());
 
-			// Return record with only the optional value populated
-			return RedwoodRecordRef(StringRef(), 0, (flags & HAS_VALUE ? r.readString(valueLen) : Optional<ValueRef>()) );
+				// Read value bytes
+				value = r.readString(valueLen);
+			}
+
+			return RedwoodRecordRef(StringRef(), 0, value);
 		}
 	};
 #pragma pack(pop)
@@ -2374,57 +2345,22 @@ struct RedwoodRecordRef {
 	int deltaSize(const RedwoodRecordRef &base, bool worstCase = true, int skipLen = 0) const {
 		int size = sizeof(Delta);
 
-		if(value.present()) {
-			// value size byte
-			++size;
-			// value bytes
-			size += value.get().size();
-		}
-
-		// Size of prefix length
+		// Add size of prefix length
 		int prefixLen = getCommonPrefixLen(base, skipLen);
-		size += (worstCase || prefixLen >= 128) ? 2 : 1;
+		size += Writer::varIntLen(prefixLen);
 
-		int intFieldPrefixLen;
+		// Add size of key suffix length and the suffix length itself
+		int keySuffixLen = key.size() - prefixLen;
+		size += Writer::varIntLen(keySuffixLen);
+		size += keySuffixLen;
 
-		// First byte of suffix len
-		++size;
+		// Add size of version delta
+		size += Writer::versionDeltaLen(version - base.version);
 
-		// Currently using a worst-guess guess where int fields in suffix are stored in their entirety if nonzero.
-		if(prefixLen < key.size()) {
-			int keySuffixLen = key.size() - prefixLen;
-			if(worstCase || keySuffixLen >= 128) {
-				// Second byte of suffix len
-				++size;
-			}
-			size += keySuffixLen;
-			intFieldPrefixLen = 0;
-		}
-		else {
-			intFieldPrefixLen = prefixLen - key.size();
-			if(worstCase) {
-				// Second byte of suffix len
-				++size;
-			}
-		}
-
-		if(version == 0 && chunk.total == 0 && chunk.start == 0) {
-			// No int field suffix needed
-		}
-		else {
-			byte fields[intFieldArraySize];
-			serializeIntFields(fields);
-
-			const byte *end = fields + intFieldArraySize - 1;
-			int trailingNulls = 0;
-			while(*end-- == 0) {
-				++trailingNulls;
-			}
-
-			size += std::max(0, intFieldArraySize - intFieldPrefixLen - trailingNulls);
-			if(intFieldPrefixLen == 0 && version == 0) {
-				size -= 8;
-			}
+		// Add value length size and the value size
+		if(value.present()) {
+			size += Writer::varIntLen(value.get().size());
+			size += value.get().size();
 		}
 
 		return size;
@@ -2432,7 +2368,7 @@ struct RedwoodRecordRef {
 
 	// commonPrefix between *this and base can be passed if known
 	int writeDelta(Delta &d, const RedwoodRecordRef &base, int commonPrefix = -1) const {
-		d.flags = version == 0 ? 0 : Delta::HAS_VERSION;
+		d.flags = value.present() ? Delta::HAS_VALUE : 0;
 
 		if(commonPrefix < 0) {
 			commonPrefix = getCommonPrefixLen(base, 0);
@@ -2444,42 +2380,22 @@ struct RedwoodRecordRef {
 		w.writeVarInt(commonPrefix);
 
 		// key suffix len
-		StringRef keySuffix( (key.size() > commonPrefix) ? key.substr(commonPrefix) : StringRef());
+		StringRef keySuffix = key.substr(commonPrefix);
 		w.writeVarInt(keySuffix.size());
 
 		// value len
 		if(value.present()) {
-			d.flags |= Delta::HAS_VALUE;
-			w.write<uint8_t>(value.get().size());
+			w.writeVarInt(value.get().size());
 		}
 
 		// key suffix bytes
 		w.writeString(keySuffix);
 
-		// extra int fields suffix
-		// This is a common case, where no int suffix is needed
-		if(version == 0 && chunk.total == 0 && chunk.start == 0) {
-			// The suffixLen bits in flags are already zero, so nothing to do here.
-		}
-		else {
-			byte fields[intFieldArraySize];
-			serializeIntFields(fields);
-
-			// Find the position of the first null byte from the right
-			// This for loop has no endPos > 0 check because it is known that the array contains non-null bytes
-			int endPos;
-			for(endPos = intFieldArraySize; fields[endPos - 1] == 0; --endPos);
-
-			// Start copying after any prefix bytes that matched the int fields of the base
-			int intFieldPrefixLen = std::max(0, commonPrefix - key.size());
-			int startPos = intFieldPrefixLen + (intFieldPrefixLen == 0 && version == 0 ? 8 : 0);
-			int suffixLen = std::max(0, endPos - startPos);
-
-			if(suffixLen > 0) {
-				w.writeString(StringRef(fields + startPos, suffixLen));
-				d.flags |= suffixLen;
-			}
-		}
+		// version delta bytes, and set version delta len flags
+		Version versionDelta = version - base.version;
+		int versionDeltaLen = Writer::versionDeltaLen(versionDelta);
+		d.setVersionDeltaLen(versionDeltaLen);
+		w.writeFixedBigEndian(versionDelta, versionDeltaLen);
 
 		// value
 		if(value.present()) {
@@ -2489,8 +2405,7 @@ struct RedwoodRecordRef {
 		return w.wptr - d.data() + sizeof(Delta);
 	}
 
-	template<typename StringRefT>
-	static std::string kvformat(StringRefT s, int hexLimit = -1) {
+	static std::string kvformat(StringRef s, int hexLimit = -1) {
 		bool hex = false;
 
 		for(auto c : s) {
@@ -2503,21 +2418,19 @@ struct RedwoodRecordRef {
 		return hex ? s.toHexString(hexLimit) : s.toString();
 	}
 
-	std::string toString(int hexLimit = 15) const {
+	std::string toString(bool leaf = true) const {
 		std::string r;
-		r += format("'%s'@%" PRId64, kvformat(key, hexLimit).c_str(), version);
-		r += format("[%u/%u]->", chunk.start, chunk.total);
+		r += format("'%s'@%" PRId64 " => ", kvformat(key).c_str(), version);
 		if(value.present()) {
-			// Assume that values the size of a page ID are page IDs.  It's not perfect but it's just for debugging.
-			if(value.get().size() == sizeof(LogicalPageID)) {
-				r += format("[%s]", ::toString(getChildPage()).c_str());
+			if(leaf) {
+				r += format("'%s'", kvformat(value.get()).c_str());
 			}
 			else {
-				r += format("'%s'", kvformat(value.get(), hexLimit).c_str());
+				r += format("[%s]", ::toString(getChildPage()).c_str());
 			}
 		}
 		else {
-			r += "null";
+			r += "(absent)";
 		}
 		return r;
 	}
@@ -2559,7 +2472,7 @@ struct BTreePage {
 		std::string r;
 		r += format("BTreePage op=%s %s @%" PRId64 " ptr=%p height=%d count=%d kvBytes=%d\n  lowerBound: %s\n  upperBound: %s\n",
 					write ? "write" : "read", ::toString(id).c_str(), ver, this, height, (int)tree().numItems, (int)kvBytes,
-					lowerBound->toString().c_str(), upperBound->toString().c_str());
+					lowerBound->toString(false).c_str(), upperBound->toString(false).c_str());
 		try {
 			if(tree().numItems > 0) {
 				// This doesn't use the cached reader for the page but it is only for debugging purposes
@@ -2572,10 +2485,10 @@ struct BTreePage {
 				bool anyOutOfRange = false;
 				do {
 					r += "  ";
-					r += c.get().toString();
+					r += c.get().toString(height == 1);
 
-					bool tooLow = c.get().key < lowerBound->key;
-					bool tooHigh = c.get().key > upperBound->key;
+					bool tooLow = c.get().withoutValue() < lowerBound->withoutValue();
+					bool tooHigh = c.get().withoutValue() >= upperBound->withoutValue();
 					if(tooLow || tooHigh) {
 						anyOutOfRange = true;
 						if(tooLow) {
@@ -2704,7 +2617,7 @@ public:
 
 #pragma pack(push, 1)
 	struct MetaKey {
-		static constexpr int FORMAT_VERSION = 5;
+		static constexpr int FORMAT_VERSION = 6;
 		// This serves as the format version for the entire tree, individual pages will not be versioned
 		uint16_t formatVersion;
 		uint8_t height;
@@ -2984,7 +2897,6 @@ public:
 
 		debug_printf("Recovered btree at version %" PRId64 ": %s\n", latest, self->m_header.toString().c_str());
 
-		self->m_maxPartSize = std::min(255, self->m_pager->getUsablePageSize() / 5);
 		self->m_lastCommittedVersion = latest;
 		return Void();
 	}
@@ -3454,16 +3366,17 @@ private:
 	};
 
 	LazyDeleteQueueT m_lazyDeleteQueue;
-	int m_maxPartSize;
 
 	// Writes entries to 1 or more pages and return a vector of boundary keys with their IPage(s)
-	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>> writePages(VersionedBTree *self, bool minimalBoundaries, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound, VectorRef<RedwoodRecordRef> entries, int height, Version v, BTreePageID previousID) {
+	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>> writePages(VersionedBTree *self, const RedwoodRecordRef *lowerBound, const RedwoodRecordRef *upperBound, VectorRef<RedwoodRecordRef> entries, int height, Version v, BTreePageID previousID) {
 		ASSERT(entries.size() > 0);
 		state Standalone<VectorRef<RedwoodRecordRef>> records;
 
 		// This is how much space for the binary tree exists in the page, after the header
 		state int blockSize = self->m_pager->getUsablePageSize();
 		state int pageSize = blockSize - sizeof(BTreePage);
+		state float fillFactor = 0.66;  // TODO: Make this a knob
+		state int pageFillTarget = pageSize * fillFactor;
 		state int blockCount = 1;
 
 		state int kvBytes = 0;
@@ -3472,193 +3385,184 @@ private:
 
 		state int start = 0;
 		state int i = 0;
-		state bool end;
 
-		// For leaf level where minimal boundaries are used require at least 1 entry, otherwise require 4 to enforce a minimum branching factor
-		state int minimumEntries = minimalBoundaries ? 1 : 4;
+		// Leaves can have just one record if it's large, but internal pages should have at least 4
+		state int minimumEntries = (height == 1 ? 1 : 4);
 					
 		// Lower bound of the page being added to
 		state RedwoodRecordRef pageLowerBound = lowerBound->withoutValue();
 		state RedwoodRecordRef pageUpperBound;
 
-		while(i <= entries.size()) {
-			end = i == entries.size();
-			bool flush = end;
-
-			// If not the end, add i to the page if necessary
-			if(end) {
-				pageUpperBound = upperBound->withoutValue();
-			}
-			else {
-				// Get delta from previous record
+		while(1) {
+			// While there are still entries to add and the page isn't full enough, add an entry
+			while(i < entries.size() && (i - start < minimumEntries || compressedBytes < pageFillTarget) ) {
 				const RedwoodRecordRef &entry = entries[i];
+
+				// If this is an internal page, first entry, and it has a null value, skip it.
+				// It only exists to serve as an upper boundary for a child page that has not been rewritten in the
+				// current commit, and that purpose will now be served by the parent page's upper boundary
+				if(i == start && height != 1 && !entry.value.present()) {
+					++i;
+					++start;
+					continue;
+				}
+
+				// Get delta from previous record
 				int deltaSize = entry.deltaSize((i == start) ? pageLowerBound : entries[i - 1]);
 				int keySize = entry.key.size();
 				int valueSize = entry.value.present() ? entry.value.get().size() : 0;
 
-				int spaceNeeded = BTreePage::BinaryTree::Node::headerSize(largeTree) + deltaSize;
+				int nodeSize = BTreePage::BinaryTree::Node::headerSize(largeTree) + deltaSize;
 
-				debug_printf("Trying to add record %3d of %3lu (i=%3d) klen %4d  vlen %3d  deltaSize %4d  spaceNeeded %4d  compressed %4d / page %4d bytes  %s\n",
-					i + 1, entries.size(), i, keySize, valueSize, deltaSize,
-					spaceNeeded, compressedBytes, pageSize, entry.toString().c_str());
+				debug_printf("Adding %3d of %3lu (i=%3d) klen %4d  vlen %3d  nodeSize %4d  page usage: %d/%d (%.2f%%)  record=%s\n",
+					i + 1, entries.size(), i, keySize, valueSize, nodeSize, compressedBytes, pageSize, (float)compressedBytes / pageSize * 100, entry.toString(height == 1).c_str());
 
+				// If node doesn't fit, expand the page
 				int spaceAvailable = pageSize - compressedBytes;
+				if(nodeSize > spaceAvailable) {
+					// Figure out how many additional whole or partial blocks are needed
+					// newBlocks = ceil ( additional space needed / block size)
+					int newBlocks = 1 + (nodeSize - spaceAvailable - 1) / blockSize;
+					int newPageSize = pageSize + (newBlocks * blockSize);
 
-				// Does it fit?
-				bool fits = spaceAvailable >= spaceNeeded;
-
-				// If it doesn't fit, either end the current page or increase the page size
-				if(!fits) {
-					int count = i - start;
-
-					// If not enough entries or page less than half full, increase page size to make the entry fit
-					if(count < minimumEntries || spaceAvailable > pageSize / 2) {
-						// Figure out how many additional whole or partial blocks are needed
-						// newBlocks = ceil ( additional space needed / block size)
-						int newBlocks = 1 + (spaceNeeded - spaceAvailable - 1) / blockSize;
-						int newPageSize = pageSize + (newBlocks * blockSize);
-
-						// If we've moved into "large" page range for the delta tree then add the additional overhead
-						if(!largeTree && newPageSize > BTreePage::BinaryTree::SmallSizeLimit) {
-							largeTree = true;
-							newPageSize += count * BTreePage::BinaryTree::LargeNodeExtraOverhead;
-						}
-
-						blockCount += newBlocks;
-						pageSize = newPageSize;
-						fits = true;
+					// If we've moved into "large" page range for the delta tree then add the additional overhead
+					if(!largeTree && newPageSize > BTreePage::BinaryTree::SmallSizeLimit) {
+						largeTree = true;
+						newPageSize += (i - start) * BTreePage::BinaryTree::LargeTreePerNodeExtraOverhead;
 					}
-					else {
-						pageUpperBound = entry.withoutValue();
-					}
+
+					blockCount += newBlocks;
+					pageSize = newPageSize;
+					pageFillTarget = pageSize * fillFactor;
 				}
 
-				// If the record fits then add it to the page set
-				if(fits) {
-					kvBytes += keySize + valueSize;
-					compressedBytes += spaceNeeded;
-					++i;
-				}
-
-				flush = !fits;
+				kvBytes += keySize + valueSize;
+				compressedBytes += nodeSize;
+				++i;
 			}
 
-			// If flush then write a page using records from start to i.  It's guaranteed that pageUpperBound has been set above.
-			if(flush) {
-				int remaining = entries.size() - i;
-				end = remaining == 0;  // i could have been moved above
-				int count = i - start;
+			// If there are no records to write to this page, it is because it would have been an internal page
+			// with exactly one record which would be childless and so it was skipped above.
+			if(start == i) {
+				ASSERT(height != 1);
+				break;
+			}
 
-				// If
-				//    - this is not the last page
-				//    - the number of entries remaining after this page is less than the count of the current page
-				//    - the page that would be written ends on a user key boundary
-				// Then adjust the current page item count to half the amount remaining after the start position.
-				if(!end && remaining < count && !entries[i - 1].sameUserKey(entries[i].key, 0)) {
-					i = (start + entries.size()) / 2;
-					pageUpperBound = entries[i].withoutValue();
-				}
+			// Flush the accumulated records to a page
+			state bool isLastPage = (i == entries.size());
+			pageUpperBound = isLastPage ? upperBound->withoutValue() : entries[i].withoutValue();
 
-				// If this isn't the final page, shorten the upper boundary
-				if(!end && minimalBoundaries) {
-					int commonPrefix = pageUpperBound.getCommonPrefixLen(entries[i - 1], 0);
-					pageUpperBound.truncate(commonPrefix + 1);
-				}
+			// If this is a leaf page, and not the last one to be written, shorten the upper boundary
+			if(!isLastPage && height == 1) {
+				int commonPrefix = pageUpperBound.getCommonPrefixLen(entries[i - 1], 0);
+				pageUpperBound.truncate(commonPrefix + 1);
+			}
 
-				state std::vector<Reference<IPage>> pages;
-				BTreePage *btPage;
+			state std::vector<Reference<IPage>> pages;
+			BTreePage *btPage;
 
-				if(blockCount == 1) {
+			if(blockCount == 1) {
+				Reference<IPage> page = self->m_pager->newPageBuffer();
+				btPage = (BTreePage *)page->mutate();
+				pages.push_back(std::move(page));
+			}
+			else {
+				ASSERT(blockCount > 1);
+				int size = blockSize * blockCount;
+				btPage = (BTreePage *)new uint8_t[size];
+			}
+
+			btPage->height = height;
+			btPage->kvBytes = kvBytes;
+
+			int written = btPage->tree().build(pageSize, &entries[start], &entries[i], &pageLowerBound, &pageUpperBound);
+			if(written > pageSize) {
+				fprintf(stderr, "ERROR:  Wrote %d bytes to %d byte page (%d blocks). recs %d  kvBytes %d  compressed %d\n", written, pageSize, blockCount, i - start, kvBytes, compressedBytes);
+				ASSERT(false);
+			}
+
+			// Create chunked pages
+			// TODO: Avoid copying page bytes, but this is not trivial due to how pager checksums are currently handled.
+			if(blockCount != 1) {
+				// Mark the slack in the page buffer as defined
+				VALGRIND_MAKE_MEM_DEFINED(((uint8_t *)btPage) + written, (blockCount * blockSize) - written);
+				const uint8_t *rptr = (const uint8_t *)btPage;
+				for(int b = 0; b < blockCount; ++b) {
 					Reference<IPage> page = self->m_pager->newPageBuffer();
-					btPage = (BTreePage *)page->mutate();
+					memcpy(page->mutate(), rptr, blockSize);
+					rptr += blockSize;
 					pages.push_back(std::move(page));
 				}
-				else {
-					ASSERT(blockCount > 1);
-					int size = blockSize * blockCount;
-					btPage = (BTreePage *)new uint8_t[size];
-				}
-
-				btPage->height = height;
-				btPage->kvBytes = kvBytes;
-
-				int written = btPage->tree().build(pageSize, &entries[start], &entries[i], &pageLowerBound, &pageUpperBound);
-				if(written > pageSize) {
-					fprintf(stderr, "ERROR:  Wrote %d bytes to %d byte page (%d blocks). recs %d  kvBytes %d  compressed %d\n", written, pageSize, blockCount, i - start, kvBytes, compressedBytes);
-					ASSERT(false);
-				}
-
-				// Create chunked pages
-				// TODO: Avoid copying page bytes, but this is not trivial due to how pager checksums are currently handled.
-				if(blockCount != 1) {
-					// Mark the slack in the page buffer as defined
-					VALGRIND_MAKE_MEM_DEFINED(((uint8_t *)btPage) + written, (blockCount * blockSize) - written);
-					const uint8_t *rptr = (const uint8_t *)btPage;
-					for(int b = 0; b < blockCount; ++b) {
-						Reference<IPage> page = self->m_pager->newPageBuffer();
-						memcpy(page->mutate(), rptr, blockSize);
-						rptr += blockSize;
-						pages.push_back(std::move(page));
-					}
-					delete [] (uint8_t *)btPage;
-				}
-
-				// Write this btree page, which is made of 1 or more pager pages.
-				state int p;
-				state BTreePageID childPageID;
-
-				// If we are only writing 1 page and it has the same BTreePageID size as the original they try to reuse the
-				// LogicalPageIDs in previousID and try to update them atomically.
-				if(end && records.empty() && previousID.size() == pages.size()) {
-					for(p = 0; p < pages.size(); ++p) {
-						LogicalPageID id = wait(self->m_pager->atomicUpdatePage(previousID[p], pages[p], v));
-						childPageID.push_back(records.arena(), id);
-					}
-				}
-				else {
-					// Either the original page is being split, or it's not but it has changed BTreePageID size.
-					// Either way, there is no point in reusing any of the original page IDs because the parent
-					// must be rewritten anyway to count for the change in child count or child links.
-					// Free the old IDs, but only once (before the first output record is added).
-					if(records.empty()) {
-						self->freeBtreePage(previousID, v);
-					}
-					for(p = 0; p < pages.size(); ++p) {
-						LogicalPageID id = wait(self->m_pager->newPageID());
-						self->m_pager->updatePage(id, pages[p]);
-						childPageID.push_back(records.arena(), id);
-					}
-				}
-				wait(yield());
-
-				// Update activity counts
-				++counts.pageWrites;
-				if(pages.size() > 1) {
-					counts.extPageWrites += pages.size() - 1;
-				}
-
-				debug_printf("Flushing %s original=%s start=%d i=%d count=%d\nlower: %s\nupper: %s\n", toString(childPageID).c_str(), toString(previousID).c_str(), start, i, i - start, pageLowerBound.toString().c_str(), pageUpperBound.toString().c_str());
-				if(REDWOOD_DEBUG) {
-					for(int j = start; j < i; ++j) {
-						debug_printf(" %3d: %s\n", j, entries[j].toString().c_str());
-					}
-					ASSERT(pageLowerBound.key <= pageUpperBound.key);
-				}
-
-				// Push a new record onto the results set, without the child page, copying it into the records arena
-				records.push_back_deep(records.arena(), pageLowerBound.withoutValue());
-				// Set the child page value of the inserted record to childPageID, which has already been allocated in records.arena() above
-				records.back().setChildPage(childPageID);
-
-				if(end) {
-					break;
-				}
-
-				start = i;
-				kvBytes = 0;
-				compressedBytes = BTreePage::BinaryTree::emptyTreeSize();
-				pageLowerBound = pageUpperBound.withoutValue();
+				delete [] (uint8_t *)btPage;
 			}
+
+			// Write this btree page, which is made of 1 or more pager pages.
+			state int p;
+			state BTreePageID childPageID;
+
+			// If we are only writing 1 page and it has the same BTreePageID size as the original they try to reuse the
+			// LogicalPageIDs in previousID and try to update them atomically.
+			bool isOnlyPage = isLastPage && (start == 0);
+			if(isOnlyPage && previousID.size() == pages.size()) {
+				for(p = 0; p < pages.size(); ++p) {
+					LogicalPageID id = wait(self->m_pager->atomicUpdatePage(previousID[p], pages[p], v));
+					childPageID.push_back(records.arena(), id);
+				}
+			}
+			else {
+				// Either the original page is being split, or it's not but it has changed BTreePageID size.
+				// Either way, there is no point in reusing any of the original page IDs because the parent
+				// must be rewritten anyway to count for the change in child count or child links.
+				// Free the old IDs, but only once (before the first output record is added).
+				if(records.empty()) {
+					self->freeBtreePage(previousID, v);
+				}
+				for(p = 0; p < pages.size(); ++p) {
+					LogicalPageID id = wait(self->m_pager->newPageID());
+					self->m_pager->updatePage(id, pages[p]);
+					childPageID.push_back(records.arena(), id);
+				}
+			}
+
+			wait(yield());
+
+			// Update activity counts
+			++counts.pageWrites;
+			if(pages.size() > 1) {
+				counts.extPageWrites += pages.size() - 1;
+			}
+
+			debug_printf("Flushing %s  lastPage=%d  original=%s  start=%d  i=%d  count=%d  page usage: %d/%d (%.2f%%) bytes\nlower: %s\nupper: %s\n", toString(childPageID).c_str(), isLastPage, toString(previousID).c_str(), start, i, i - start, 
+				compressedBytes, pageSize, (float)compressedBytes / pageSize * 100, pageLowerBound.toString(false).c_str(), pageUpperBound.toString(false).c_str());
+
+			if(REDWOOD_DEBUG) {
+				for(int j = start; j < i; ++j) {
+					debug_printf(" %3d: %s\n", j, entries[j].toString(height == 1).c_str());
+				}
+				ASSERT(pageLowerBound.key <= pageUpperBound.key);
+			}
+
+			// Push a new record onto the results set, without the child page, copying it into the records arena
+			records.push_back_deep(records.arena(), pageLowerBound.withoutValue());
+			// Set the child page value of the inserted record to childPageID, which has already been allocated in records.arena() above
+			records.back().setChildPage(childPageID);
+
+			if(isLastPage) {
+				break;
+			}
+
+			start = i;
+			kvBytes = 0;
+			compressedBytes = BTreePage::BinaryTree::emptyTreeSize();
+			pageLowerBound = pageUpperBound;
+		}
+
+		// If we're writing internal pages, if pageUpperBound is not upperBound then we ended on an empty page because it contained only one childless internal record
+		// So, we have to add a childless internal record for that upper bound for the output set so that the parent of these new pages includes it so the child
+		// page to its left is still decoded correctly.
+		if(height != 1 && !pageUpperBound.sameExceptValue(*upperBound)) {
+			debug_printf("Adding dummy record to avoid writing useless page: %s\n", pageUpperBound.toString(false).c_str());
+			records.push_back_deep(records.arena(), pageUpperBound);
 		}
 
 		return records;
@@ -3670,7 +3574,7 @@ private:
 		// While there are multiple child pages for this version we must write new tree levels.
 		while(records.size() > 1) {
 			self->m_header.height = ++height;
-			Standalone<VectorRef<RedwoodRecordRef>> newRecords = wait(writePages(self, false, &dbBegin, &dbEnd, records, height, version, BTreePageID()));
+			Standalone<VectorRef<RedwoodRecordRef>> newRecords = wait(writePages(self, &dbBegin, &dbEnd, records, height, version, BTreePageID()));
 			debug_printf("Wrote a new root level at version %" PRId64 " height %d size %lu pages\n", version, height, newRecords.size());
 			records = newRecords;
 		}
@@ -4085,49 +3989,20 @@ private:
 					RedwoodRecordRef rec(iMutationBoundary.key(), 0, iMutationBoundary.mutation().boundaryValue.get());
 					changesMade = true;
 
-					if(rec.value.get().size() <= self->m_maxPartSize) {
-						// If updating, add to the page, else add to the output set
-						if(updating) {
-							if(cursor.mirror->insert(rec, skipLen, maxHeightAllowed)) {
-								debug_printf("%s Inserted non-split %s [mutation, boundary start]\n", context.c_str(), rec.toString().c_str());
-							}
-							else {
-								debug_printf("%s Inserted failed for non-split %s [mutation, boundary start]\n", context.c_str(), rec.toString().c_str());
-								switchToLinearMerge();
-							}
+					// If updating, add to the page, else add to the output set
+					if(updating) {
+						if(cursor.mirror->insert(rec, skipLen, maxHeightAllowed)) {
+							debug_printf("%s Inserted %s [mutation, boundary start]\n", context.c_str(), rec.toString().c_str());
 						}
-						if(!updating) {
-							merged.push_back(merged.arena(), rec);
-							debug_printf("%s Added non-split %s [mutation, boundary start]\n", context.c_str(), rec.toString().c_str());
+						else {
+							debug_printf("%s Inserted failed for %s [mutation, boundary start]\n", context.c_str(), rec.toString().c_str());
+							switchToLinearMerge();
 						}
-
 					}
-					else {
-						int bytesLeft = rec.value.get().size();
-						int start = 0;
-						while(bytesLeft > 0) {
-							int partSize = std::min(bytesLeft, self->m_maxPartSize);
-							// Don't copy the value chunk because mutation buffer will stay in memory until after the new page is written
-							RedwoodRecordRef part = rec.split(start, partSize);
-							bytesLeft -= partSize;
 
-							if(updating) {
-								if(cursor.mirror->insert(part, skipLen, maxHeightAllowed)) {
-									debug_printf("%s Inserted split %s [mutation, boundary start] bytesLeft %d\n", context.c_str(), rec.toString().c_str(), bytesLeft);
-								}
-								else {
-									debug_printf("%s Inserted failed for split %s [mutation, boundary start] bytesLeft %d\n", context.c_str(), rec.toString().c_str(), bytesLeft);
-									switchToLinearMerge();
-								}
-							}
-
-							if(!updating) {
-								merged.push_back(merged.arena(), part);
-								debug_printf("%s Added split %s [mutation, boundary start] bytesLeft %d\n", context.c_str(), rec.toString().c_str(), bytesLeft);
-							}
-
-							start += partSize;
-						}
+					if(!updating) {
+						merged.push_back(merged.arena(), rec);
+						debug_printf("%s Added %s [mutation, boundary start]\n", context.c_str(), rec.toString().c_str());
 					}
 				}
 
@@ -4249,7 +4124,7 @@ private:
 				return result;
 			}
 
-			state Standalone<VectorRef<RedwoodRecordRef>> entries = wait(writePages(self, true, lowerBound, upperBound, merged, btPage->height, writeVersion, rootID));
+			state Standalone<VectorRef<RedwoodRecordRef>> entries = wait(writePages(self, lowerBound, upperBound, merged, btPage->height, writeVersion, rootID));
 			result.arena().dependsOn(entries.arena());
 			result.contents() = ChildLinksRef(entries, *upperBound);
 			debug_printf("%s Merge complete, returning %s\n", context.c_str(), toString(result).c_str());
@@ -4342,10 +4217,11 @@ private:
 				else {
 					debug_printf("%s Internal page modified, creating replacements.\n", context.c_str());
 					debug_printf("%s newChildren=%s  lastUpperBound=%s  upperBound=%s\n", context.c_str(), toString(pageBuilder.entries).c_str(), pageBuilder.lastUpperBound.toString().c_str(), upperBound->toString().c_str());
+					debug_printf("pagebuilder entries: %s\n", ::toString(pageBuilder.entries).c_str());
 
-					ASSERT(pageBuilder.lastUpperBound.sameExceptValue(*upperBound));
+					ASSERT(!pageBuilder.entries.back().value.present() || pageBuilder.lastUpperBound.sameExceptValue(*upperBound));
 
- 					Standalone<VectorRef<RedwoodRecordRef>> childEntries = wait(holdWhile(pageBuilder.entries, writePages(self, false, lowerBound, upperBound, pageBuilder.entries, btPage->height, writeVersion, rootID)));
+ 					Standalone<VectorRef<RedwoodRecordRef>> childEntries = wait(holdWhile(pageBuilder.entries, writePages(self, lowerBound, upperBound, pageBuilder.entries, btPage->height, writeVersion, rootID)));
 
 					result.arena().dependsOn(childEntries.arena());
 					result.contents() = ChildLinksRef(childEntries, *upperBound);
@@ -4447,8 +4323,11 @@ private:
 		return Void();
 	}
 
-	// InternalCursor is for seeking to and iterating over the 'internal' records (not user-visible) in the Btree.
-	// These records are versioned and they can represent deletedness or partial values.
+	public:
+
+	// InternalCursor is for seeking to and iterating over the leaf-level RedwoodRecordRef records in the tree.
+	// The records could represent multiple values for the same key at different versions, including a non-present value representing a clear.
+	// Currently, however, all records are at version 0 and no clears are present in the tree.
 	struct InternalCursor {
 	private:
 		// Each InternalCursor's position is represented by a reference counted PageCursor, which links
@@ -4492,6 +4371,7 @@ private:
 				Future<Reference<const IPage>> child = readPage(pager, id, &rec, &next.getOrUpperBound());
 
 				// Read ahead siblings at level 2
+				// TODO:  Application of readAheadBytes is not taking into account the size of the current page or any of the adjacent pages it is preloading.
 				if(readAheadBytes > 0 && btPage()->height == 2 && next.valid()) {
 					do {
 						debug_printf("preloading %s %d bytes left\n", ::toString(next.get().getChildPage()).c_str(), readAheadBytes);
@@ -4549,28 +4429,27 @@ private:
 			return pageCursor && pageCursor->isLeaf() && pageCursor->cursor.valid();
 		}
 
-		// Returns true if cursor position is valid() and has a present record value
-		bool present() {
-			return valid() && pageCursor->cursor.get().value.present();
-		}
+// Returns true if cursor position is valid() and has a present record value
+bool present() const {
+	return valid() && pageCursor->cursor.get().value.present();
+}
 
-		// Returns true if cursor position is present() and has an effective version <= v
-		bool presentAtVersion(Version v) {
-			return present() && pageCursor->cursor.get().version <= v;
-		}
+// Returns true if cursor position is present() and has an effective version <= v
+bool presentAtVersion(Version v) {
+	return present() && pageCursor->cursor.get().version <= v;
+}
 
-		// This is to enable an optimization for the case where all internal records are at the
-		// same version and there are no implicit clears
-		// *this MUST be valid()
-		bool presentAtExactVersionUnsharded(Version v) const {
-			auto const &rec = pageCursor->cursor.get();
-			return rec.value.present() && rec.version == v && rec.chunk.total == 0;
-		}
+// This is to enable an optimization for the case where all internal records are at the
+// same version and there are no implicit clears
+// *this MUST be valid()
+bool presentAtExactVersion(Version v) const {
+	return present() && pageCursor->cursor.get().version == v;
+}
 
-		// Returns true if cursor position is present() and has an effective version <= v
-		bool validAtVersion(Version v) {
-			return valid() && pageCursor->cursor.get().version <= v;
-		}
+// Returns true if cursor position is present() and has an effective version <= v
+bool validAtVersion(Version v) {
+	return valid() && pageCursor->cursor.get().version <= v;
+}
 
 		const RedwoodRecordRef & get() const {
 			return pageCursor->cursor.get();
@@ -4600,21 +4479,20 @@ private:
 			});
 		}
 
-		ACTOR Future<bool> seekLessThanOrEqual_impl(InternalCursor *self, RedwoodRecordRef query, int prefetchBytes) {
+		ACTOR Future<bool> seekLessThan_impl(InternalCursor *self, RedwoodRecordRef query, int prefetchBytes) {
 			Future<Void> f = self->moveToRoot();
-
 			// f will almost always be ready
 			if(!f.isReady()) {
 				wait(f);
 			}
 
 			self->ensureUnshared();
-
 			loop {
-				bool success = self->pageCursor->cursor.seekLessThanOrEqual(query);
+				bool isLeaf = self->pageCursor->isLeaf();
+				bool success = self->pageCursor->cursor.seekLessThan(query);
 
 				// Skip backwards over internal page entries that do not link to child pages
-				if(!self->pageCursor->isLeaf()) {
+				if(!isLeaf) {
 					// While record has no value, move again
 					while(success && !self->pageCursor->cursor.get().value.present()) {
 						success = self->pageCursor->cursor.movePrev();
@@ -4622,8 +4500,8 @@ private:
 				}
 
 				if(success) {
-					// If we found a record <= query at a leaf page then return success
-					if(self->pageCursor->isLeaf()) {
+					// If we found a record < query at a leaf page then return success
+					if(isLeaf) {
 						return true;
 					}
 
@@ -4631,15 +4509,15 @@ private:
 					self->pageCursor = child;
 				}
 				else {
-					// No records <= query on this page, so move to immediate previous record at leaf level
+					// No records < query on this page, so move to immediate previous record at leaf level
 					bool success = wait(self->move(false));
 					return success;
 				}
 			}
 		}
 
-		Future<bool> seekLTE(RedwoodRecordRef query, int prefetchBytes) {
-			return seekLessThanOrEqual_impl(this, query, prefetchBytes);
+		Future<bool> seekLessThan(RedwoodRecordRef query, int prefetchBytes) {
+			return seekLessThan_impl(this, query, prefetchBytes);
 		}
 
 		ACTOR Future<bool> move_impl(InternalCursor *self, bool forward) {
@@ -4829,31 +4707,28 @@ private:
 		// for greater than or equal use cmp > 0
 		// for equal use cmp == 0
 		ACTOR static Future<Void> find_impl(Cursor *self, KeyRef key, int cmp, int prefetchBytes = 0) {
-			// Search for the last key at or before (key, version, \xff)
-			state RedwoodRecordRef query(key, self->m_version, {}, 0, std::numeric_limits<int32_t>::max());
+			state RedwoodRecordRef query(key, self->m_version + 1);
 			self->m_kv.reset();
 
-			wait(success(self->m_cur1.seekLTE(query, prefetchBytes)));
+			wait(success(self->m_cur1.seekLessThan(query, prefetchBytes)));
 			debug_printf("find%sE(%s): %s\n", cmp > 0 ? "GT" : (cmp == 0 ? "" : "LT"), query.toString().c_str(), self->toString().c_str());
 
 			// If we found the target key with a present value then return it as it is valid for any cmp type
 			if(self->m_cur1.present() && self->m_cur1.get().key == key) {
-				debug_printf("Target key found, reading full KV pair.  Cursor: %s\n", self->toString().c_str());
-				wait(self->readFullKVPair(self));
+				debug_printf("Target key found.  Cursor: %s\n", self->toString().c_str());
+				self->m_kv = self->m_cur1.get().toKeyValueRef();
 				return Void();
 			}
 
-			// Mode is ==, so if we're still here we didn't find it.
+			// If cmp type is Equal and we reached here, we didn't find it
 			if(cmp == 0) {
 				return Void();
 			}
 
-			// Mode is >=, so if we're here we have to go to the next present record at the target version
-			// because the seek done above was <= query
+			// cmp mode is GreaterThanOrEqual, so if we've reached here an equal key was not found and cur1 either
+			// points to a lesser key or is invalid.
 			if(cmp > 0) {
-				// icur is at a record < query or invalid.
-
-				// If cursor is invalid, try to go to start of tree
+				// If cursor is invalid, query was less than the first key in database so go to the first record
 				if(!self->m_cur1.valid()) {
 					bool valid = wait(self->m_cur1.moveFirst());
 					if(!valid) {
@@ -4862,6 +4737,9 @@ private:
 					}
 				}
 				else {
+					// Otherwise, move forward until we find a key greater than the target key.
+					// If multiversion data is present, the next record could have the same key as the initial
+					// record found but be at a newer version.
 					loop {
 						bool valid = wait(self->m_cur1.move(true));
 						if(!valid) {
@@ -4879,7 +4757,7 @@ private:
 				wait(self->next());
 			}
 			else if(cmp < 0) {
-				// Mode is <=, which is the same as the seekLTE(query)
+				// cmp mode is LessThanOrEqual.  An equal key to the target key was already checked above, and the search was for LessThan query, so cur1 is already in the right place.
 				if(!self->m_cur1.valid()) {
 					self->m_kv.reset();
 					return Void();
@@ -4911,29 +4789,27 @@ private:
 			}
 
 			// Given two consecutive cursors c1 and c2, c1 represents a returnable record if
-			//    c1.presentAtVersion(v) || (!c2.validAtVersion() || c2.get().key != c1.get().key())
+			//    c1 is present at exactly version v
+			//  OR
+			//    c1 is.presentAtVersion(v) && (!c2.validAtVersion() || c2.get().key != c1.get().key())
 			// Note the distinction between 'present' and 'valid'.  Present means the value for the key
 			// exists at the version (but could be the empty string) while valid just means the internal
 			// record is in effect at that version but it could indicate that the key was cleared and
 			// no longer exists from the user's perspective at that version
-			//
-			// cur2 must be the record immediately after cur1
-			// TODO:  This may already be the case, store state to track this condition and avoid the reset here
 			if(self->m_cur1.valid()) {
 				self->m_cur2 = self->m_cur1;
 				debug_printf("Cursor::move(%d): Advancing cur2 %s\n", fwd, self->toString().c_str());
 				wait(success(self->m_cur2.move(true)));
 			}
 
-			self->m_kv.reset();
 			while(self->m_cur1.valid()) {
 
-				if(self->m_cur1.presentAtExactVersionUnsharded(self->m_version) ||
+				if(self->m_cur1.get().version == self->m_version ||
 					(self->m_cur1.presentAtVersion(self->m_version) &&
 					(!self->m_cur2.validAtVersion(self->m_version) ||
 					self->m_cur2.get().key != self->m_cur1.get().key))
 				) {
-					wait(readFullKVPair(self));
+					self->m_kv = self->m_cur1.get().toKeyValueRef();
 					return Void();
 				}
 
@@ -4953,50 +4829,9 @@ private:
 			}
 
 			debug_printf("Cursor::move(%d): Exit, end of db reached.  Cursor = %s\n", fwd, self->toString().c_str());
-			return Void();
-		}
-
-		// Read all of the current key-value record starting at cur1 into kv
-		ACTOR static Future<Void> readFullKVPair(Cursor *self) {
-			self->m_arena = Arena();
-			const RedwoodRecordRef &rec = self->m_cur1.get();
-	
 			self->m_kv.reset();
-			debug_printf("readFullKVPair:  Starting at %s\n", self->toString().c_str());
 
-			// Unsplit value, cur1 will hold the key and value memory
-			if(!rec.isMultiPart()) {
-				self->m_kv = KeyValueRef(rec.key, rec.value.get());
-				debug_printf("readFullKVPair:  Unsplit, exit.  %s\n", self->toString().c_str());
-
-				return Void();
-			}
-
-			debug_printf("readFullKVPair:  Split, first record %s\n", rec.toString().c_str());
-
-			// Split value, need to coalesce split value parts into a buffer in arena,
-			// after which cur1 will point to the first part and kv.key will reference its key
-			ASSERT(rec.chunk.start + rec.value.get().size() == rec.chunk.total);
-
-			// Allocate space for the entire value in the same arena as the key
-			state int bytesLeft = rec.chunk.total;
-			state StringRef dst = makeString(bytesLeft, self->m_arena);
-
-			loop {
-				const RedwoodRecordRef &rec = self->m_cur1.get();
-				int partSize = rec.value.get().size();
-				memcpy(mutateString(dst) + rec.chunk.start, rec.value.get().begin(), partSize);
-				bytesLeft -= partSize;
-				debug_printf("readFullKVPair:  Added chunk %s (%d bytes, %d bytes left afterward)\n", rec.toString().c_str(), partSize, bytesLeft);
-				if(bytesLeft == 0) {
-					self->m_kv = KeyValueRef(rec.key, dst);
-					return Void();
-				}
-				ASSERT(bytesLeft > 0);
-				// Move backward
-				bool success = wait(self->m_cur1.move(false));
-				ASSERT(success);
-			}
+			return Void();
 		}
 	};
 
@@ -5240,16 +5075,16 @@ ACTOR Future<int> verifyRange(VersionedBTree *btree, Key start, Key end, Version
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iLast;
 
 	state Reference<IStoreCursor> cur = btree->readAtVersion(v);
-	debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Start cur=%p\n", v, start.toString().c_str(), end.toString().c_str(), cur.getPtr());
+	debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Start cur=%p\n", v, start.toHexString().c_str(), end.toHexString().c_str(), cur.getPtr());
 
 	// Randomly use the cursor for something else first.
 	if(deterministicRandom()->coinflip()) {
 		state Key randomKey = randomKV().key;
-		debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Dummy seek to '%s'\n", v, start.toString().c_str(), end.toString().c_str(), randomKey.toString().c_str());
+		debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Dummy seek to '%s'\n", v, start.toHexString().c_str(), end.toHexString().c_str(), randomKey.toString().c_str());
 		wait(deterministicRandom()->coinflip() ? cur->findFirstEqualOrGreater(randomKey) : cur->findLastLessOrEqual(randomKey));
 	}
 
-	debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Actual seek\n", v, start.toString().c_str(), end.toString().c_str());
+	debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Actual seek\n", v, start.toHexString().c_str(), end.toHexString().c_str());
 	wait(cur->findFirstEqualOrGreater(start));
 
 	state std::vector<KeyValue> results;
@@ -5270,7 +5105,7 @@ ACTOR Future<int> verifyRange(VersionedBTree *btree, Key start, Key end, Version
 					|| i->first.second > v
 				)
 			) {
-				debug_printf("VerifyRange(@%" PRId64 ", %s, %s) Found key in written map: %s\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.first.c_str());
+				debug_printf("VerifyRange(@%" PRId64 ", %s, %s) Found key in written map: %s\n", v, start.toHexString().c_str(), end.toHexString().c_str(), iLast->first.first.c_str());
 				break;
 			}
 		}
@@ -5278,20 +5113,20 @@ ACTOR Future<int> verifyRange(VersionedBTree *btree, Key start, Key end, Version
 		if(iLast == iEnd) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
+			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toHexString().c_str(), end.toHexString().c_str(), cur->getKey().toString().c_str());
 			break;
 		}
 
 		if(cur->getKey() != iLast->first.first) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), iLast->first.first.c_str());
+			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toHexString().c_str(), end.toHexString().c_str(), cur->getKey().toString().c_str(), iLast->first.first.c_str());
 			break;
 		}
 		if(cur->getValue() != iLast->second.get()) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), iLast->second.get().c_str());
+			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toHexString().c_str(), end.toHexString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), iLast->second.get().c_str());
 			break;
 		}
 
@@ -5321,10 +5156,10 @@ ACTOR Future<int> verifyRange(VersionedBTree *btree, Key start, Key end, Version
 	if(iLast != iEnd) {
 		++errors;
 		++*pErrorCount;
-		printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree range ended but written has @%" PRId64 " '%s'\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.second, iLast->first.first.c_str());
+		printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree range ended but written has @%" PRId64 " '%s'\n", v, start.toHexString().c_str(), end.toHexString().c_str(), iLast->first.second, iLast->first.first.c_str());
 	}
 
-	debug_printf("VerifyRangeReverse(@%" PRId64 ", %s, %s): start\n", v, start.toString().c_str(), end.toString().c_str());
+	debug_printf("VerifyRangeReverse(@%" PRId64 ", %s, %s): start\n", v, start.toHexString().c_str(), end.toHexString().c_str());
 
 	// Randomly use a new cursor at the same version for the reverse range read, if the version is still available for opening new cursors
 	if(v >= btree->getOldestVersion() && deterministicRandom()->coinflip()) {
@@ -5342,20 +5177,20 @@ ACTOR Future<int> verifyRange(VersionedBTree *btree, Key start, Key end, Version
 		if(r == results.rend()) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
+			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toHexString().c_str(), end.toHexString().c_str(), cur->getKey().toString().c_str());
 			break;
 		}
 
 		if(cur->getKey() != r->key) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), r->key.toString().c_str());
+			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toHexString().c_str(), end.toHexString().c_str(), cur->getKey().toString().c_str(), r->key.toString().c_str());
 			break;
 		}
 		if(cur->getValue() != r->value) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), r->value.toString().c_str());
+			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toHexString().c_str(), end.toHexString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), r->value.toString().c_str());
 			break;
 		}
 
@@ -5366,7 +5201,7 @@ ACTOR Future<int> verifyRange(VersionedBTree *btree, Key start, Key end, Version
 	if(r != results.rend()) {
 		++errors;
 		++*pErrorCount;
-		printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree range ended but written has '%s'\n", v, start.toString().c_str(), end.toString().c_str(), r->key.toString().c_str());
+		printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree range ended but written has '%s'\n", v, start.toHexString().c_str(), end.toHexString().c_str(), r->key.toString().c_str());
 	}
 
 	return errors;
@@ -5594,27 +5429,8 @@ struct IntIntPair {
 	}
 };
 
-int getCommonIntFieldPrefix2(const RedwoodRecordRef &a, const RedwoodRecordRef &b) {
-	RedwoodRecordRef::byte aFields[RedwoodRecordRef::intFieldArraySize];
-	RedwoodRecordRef::byte bFields[RedwoodRecordRef::intFieldArraySize];
-
-	a.serializeIntFields(aFields);
-	b.serializeIntFields(bFields);
-
-	//printf("a: %s\n", StringRef(aFields, RedwoodRecordRef::intFieldArraySize).toHexString().c_str());
-	//printf("b: %s\n", StringRef(bFields, RedwoodRecordRef::intFieldArraySize).toHexString().c_str());
-
-	int i = 0;
-	while(i < RedwoodRecordRef::intFieldArraySize && aFields[i] == bFields[i]) {
-		++i;
-	}
-
-	//printf("%d\n", i);
-	return i;
-}
-
 void deltaTest(RedwoodRecordRef rec, RedwoodRecordRef base) {
-	char buf[500];
+	char buf[1000];
 	RedwoodRecordRef::Delta &d = *(RedwoodRecordRef::Delta *)buf;
 
 	Arena mem;
@@ -5624,20 +5440,20 @@ void deltaTest(RedwoodRecordRef rec, RedwoodRecordRef base) {
 
 	if(decoded != rec || expectedSize != deltaSize) {
 		printf("\n");
-		printf("Base:         %s\n", base.toString().c_str());
-		printf("ExpectedSize: %d\n", expectedSize);
-		printf("DeltaSize:    %d\n", deltaSize);
-		printf("Delta:        %s\n", d.toString().c_str());
-		printf("Record:       %s\n", rec.toString().c_str());
-		printf("Decoded:      %s\n", decoded.toString().c_str());
+		printf("Base:                %s\n", base.toString().c_str());
+		printf("ExpectedSize:        %d\n", expectedSize);
+		printf("DeltaSizeWritten:    %d\n", deltaSize);
+		printf("DeltaToString:       %s\n", d.toString().c_str());
+		printf("Record:              %s\n", rec.toString().c_str());
+		printf("Decoded:             %s\n", decoded.toString().c_str());
 		printf("RedwoodRecordRef::Delta test failure!\n");
 		ASSERT(false);
 	}
 }
 
-Standalone<RedwoodRecordRef> randomRedwoodRecordRef(int maxKeySize = 3, int maxValueSize = 255) {
+Standalone<RedwoodRecordRef> randomRedwoodRecordRef(int maxKeySize = 3, int maxValueSize = 500) {
 	RedwoodRecordRef rec;
-	KeyValue kv = randomKV(3, 10);
+	KeyValue kv = randomKV(maxKeySize, maxValueSize);
 	rec.key = kv.key;
 
 	if(deterministicRandom()->random01() < .9) {
@@ -5645,11 +5461,6 @@ Standalone<RedwoodRecordRef> randomRedwoodRecordRef(int maxKeySize = 3, int maxV
 	}
 
 	rec.version = deterministicRandom()->coinflip() ? 0 : deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max());
-
-	if(deterministicRandom()->coinflip()) {
-		rec.chunk.total = deterministicRandom()->randomInt(1, 100000);
-		rec.chunk.start = deterministicRandom()->randomInt(0, rec.chunk.total);
-	}
 
 	return Standalone<RedwoodRecordRef>(rec, kv.arena());
 }
@@ -5673,28 +5484,28 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 	// Testing common prefix calculation for integer fields using the member function that calculates this directly
 	// and by serializing the integer fields to arrays and finding the common prefix length of the two arrays
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), 0, LiteralStringRef(""), 0, 0),
-			  RedwoodRecordRef(LiteralStringRef(""), 0, LiteralStringRef(""), 0, 0)
+	deltaTest(RedwoodRecordRef(LiteralStringRef(""), 0, LiteralStringRef("")),
+			  RedwoodRecordRef(LiteralStringRef(""), 0, LiteralStringRef(""))
 	);
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), 0, LiteralStringRef(""), 0, 0),
-			  RedwoodRecordRef(LiteralStringRef("abc"), 0, LiteralStringRef(""), 0, 0)
+	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), 0, LiteralStringRef("")),
+			  RedwoodRecordRef(LiteralStringRef("abc"), 0, LiteralStringRef(""))
 	);
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"),  0, LiteralStringRef(""), 0, 0),
-			  RedwoodRecordRef(LiteralStringRef("abcd"), 0, LiteralStringRef(""), 0, 0)
+	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"),  0, LiteralStringRef("")),
+			  RedwoodRecordRef(LiteralStringRef("abcd"), 0, LiteralStringRef(""))
 	);
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), 2, LiteralStringRef(""), 0, 0),
-			  RedwoodRecordRef(LiteralStringRef("abc"), 2, LiteralStringRef(""), 0, 0)
+	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), 2, LiteralStringRef("")),
+			  RedwoodRecordRef(LiteralStringRef("abc"), 2, LiteralStringRef(""))
 	);
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), 2, LiteralStringRef(""), 0, 0),
-			  RedwoodRecordRef(LiteralStringRef("ab"),  2, LiteralStringRef(""), 1, 3)
+	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), 2, LiteralStringRef("")),
+			  RedwoodRecordRef(LiteralStringRef("ab"),  2, LiteralStringRef(""))
 	);
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), 2, LiteralStringRef(""), 5, 0),
-			  RedwoodRecordRef(LiteralStringRef("abc"), 2, LiteralStringRef(""), 5, 1)
+	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), 2, LiteralStringRef("")),
+			  RedwoodRecordRef(LiteralStringRef("abc"), 2, LiteralStringRef(""))
 	);
 
 	RedwoodRecordRef::byte varInts[100];
@@ -5707,52 +5518,6 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 	ASSERT(r.readVarInt() == 128);
 	ASSERT(r.readVarInt() == 32000);
 
-	RedwoodRecordRef rec1;
-	RedwoodRecordRef rec2;
-
-	rec1.version = 0x12345678;
-	rec2.version = 0x12995678;
-	ASSERT(rec1.getCommonIntFieldPrefix(rec2) == 5);
-	ASSERT(rec1.getCommonIntFieldPrefix(rec2) == getCommonIntFieldPrefix2(rec1, rec2));
-
-	rec1.version = 0x12345678;
-	rec2.version = 0x12345678;
-	ASSERT(rec1.getCommonIntFieldPrefix(rec2) == 14);
-	ASSERT(rec1.getCommonIntFieldPrefix(rec2) == getCommonIntFieldPrefix2(rec1, rec2));
-
-	rec1.version = invalidVersion;
-	rec2.version = 0;
-	ASSERT(rec1.getCommonIntFieldPrefix(rec2) == 0);
-	ASSERT(rec1.getCommonIntFieldPrefix(rec2) == getCommonIntFieldPrefix2(rec1, rec2));
-
-	rec1.version = 0x12345678;
-	rec2.version = 0x12345678;
-	rec1.chunk.total = 4;
-	rec2.chunk.total = 4;
-	ASSERT(rec1.getCommonIntFieldPrefix(rec2) == 14);
-	ASSERT(rec1.getCommonIntFieldPrefix(rec2) == getCommonIntFieldPrefix2(rec1, rec2));
-
-	rec1.version = 0x12345678;
-	rec2.version = 0x12345678;
-	rec1.chunk.start = 4;
-	rec2.chunk.start = 4;
-	ASSERT(rec1.getCommonIntFieldPrefix(rec2) == 14);
-	ASSERT(rec1.getCommonIntFieldPrefix(rec2) == getCommonIntFieldPrefix2(rec1, rec2));
-
-	rec1.version = 0x12345678;
-	rec2.version = 0x12345678;
-	rec1.chunk.start = 4;
-	rec2.chunk.start = 5;
-	ASSERT(rec1.getCommonIntFieldPrefix(rec2) == 13);
-	ASSERT(rec1.getCommonIntFieldPrefix(rec2) == getCommonIntFieldPrefix2(rec1, rec2));
-
-	rec1.version = 0x12345678;
-	rec2.version = 0x12345678;
-	rec1.chunk.total = 256;
-	rec2.chunk.total = 512;
-	ASSERT(rec1.getCommonIntFieldPrefix(rec2) == 9);
-	ASSERT(rec1.getCommonIntFieldPrefix(rec2) == getCommonIntFieldPrefix2(rec1, rec2));
-
 	Arena mem;
 	double start;
 	uint64_t total;
@@ -5761,37 +5526,27 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 
 	start = timer();
 	total = 0;
-	count = 1e9;
+	count = 1e6;
 	for(i = 0; i < count; ++i) {
-		rec1.chunk.total = i & 0xffffff;
-		rec2.chunk.total = i & 0xffffff;
-		rec1.chunk.start = i & 0xffffff;
-		rec2.chunk.start = (i + 1) & 0xffffff;
-		total += rec1.getCommonIntFieldPrefix(rec2);
+		Standalone<RedwoodRecordRef> a = randomRedwoodRecordRef();
+		Standalone<RedwoodRecordRef> b = randomRedwoodRecordRef();
+		deltaTest(a, b);
 	}
-	printf("%" PRId64 " getCommonIntFieldPrefix() %g M/s\n", total, count / (timer() - start) / 1e6);
+	printf("Random deltaTest() %g M/s\n", count / (timer() - start) / 1e6);
 
-	rec1.key = LiteralStringRef("alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf");
-	rec2.key = LiteralStringRef("alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf");
+	RedwoodRecordRef rec1;
+	RedwoodRecordRef rec2;
 
-	start = timer();
-	total = 0;
-	count = 1e9;
-	for(i = 0; i < count; ++i) {
-		RedwoodRecordRef::byte fields[RedwoodRecordRef::intFieldArraySize];
-		rec1.chunk.start = i & 0xffffff;
-		rec2.chunk.start = (i + 1) & 0xffffff;
-		rec1.serializeIntFields(fields);
-		total += fields[RedwoodRecordRef::intFieldArraySize - 1];
-	}
-	printf("%" PRId64 " serializeIntFields() %g M/s\n", total, count / (timer() - start) / 1e6);
+	rec1.key = LiteralStringRef("alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf1");
+	rec2.key = LiteralStringRef("alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf234");
+
+	rec1.version = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max());
+	rec2.version = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max());
 
 	start = timer();
 	total = 0;
 	count = 100e6;
 	for(i = 0; i < count; ++i) {
-		rec1.chunk.start = i & 0xffffff;
-		rec2.chunk.start = (i + 1) & 0xffffff;
 		total += rec1.getCommonPrefixLen(rec2, 50);
 	}
 	printf("%" PRId64 " getCommonPrefixLen(skip=50) %g M/s\n", total, count / (timer() - start) / 1e6);
@@ -5800,8 +5555,6 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 	total = 0;
 	count = 100e6;
 	for(i = 0; i < count; ++i) {
-		rec1.chunk.start = i & 0xffffff;
-		rec2.chunk.start = (i + 1) & 0xffffff;
 		total += rec1.getCommonPrefixLen(rec2, 0);
 	}
 	printf("%" PRId64 " getCommonPrefixLen(skip=0) %g M/s\n", total, count / (timer() - start) / 1e6);
@@ -5815,8 +5568,6 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 	int commonPrefix = rec1.getCommonPrefixLen(rec2, 0);
 
 	for(i = 0; i < count; ++i) {
-		rec1.chunk.start = i & 0xffffff;
-		rec2.chunk.start = (i + 1) & 0xffffff;
 		total += rec1.writeDelta(d, rec2, commonPrefix);
 	}
 	printf("%" PRId64 " writeDelta(commonPrefix=%d) %g M/s\n", total, commonPrefix, count / (timer() - start) / 1e6);
@@ -5825,27 +5576,19 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 	total = 0;
 	count = 10e6;
 	for(i = 0; i < count; ++i) {
-		rec1.chunk.start = i & 0xffffff;
-		rec2.chunk.start = (i + 1) & 0xffffff;
 		total += rec1.writeDelta(d, rec2);
 	}
 	printf("%" PRId64 " writeDelta() %g M/s\n", total, count / (timer() - start) / 1e6);
-
-	start = timer();
-	total = 0;
-	count = 1e6;
-	for(i = 0; i < count; ++i) {
-		Standalone<RedwoodRecordRef> a = randomRedwoodRecordRef();
-		Standalone<RedwoodRecordRef> b = randomRedwoodRecordRef();
-		deltaTest(a, b);
-	}
-	printf("Random deltaTest() %g M/s\n", count / (timer() - start) / 1e6);
 
 	return Void();
 }
 
 TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
-	const int N = 200;
+	// Sanity check on delta tree node format
+	ASSERT(DeltaTree<RedwoodRecordRef>::Node::headerSize(false) == 4);
+	ASSERT(DeltaTree<RedwoodRecordRef>::Node::headerSize(true) == 8);
+
+	const int N = deterministicRandom()->randomInt(200, 1000);
 
 	RedwoodRecordRef prev;
 	RedwoodRecordRef next(LiteralStringRef("\xff\xff\xff\xff"));
@@ -5862,10 +5605,6 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 		rec.version = deterministicRandom()->coinflip() ? deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max()) : invalidVersion;
 		if(deterministicRandom()->coinflip()) {
 			rec.value = StringRef(arena, v);
-			if(deterministicRandom()->coinflip()) {
-				rec.chunk.start = deterministicRandom()->randomInt(0, 100000);
-				rec.chunk.total = rec.chunk.start + v.size() + deterministicRandom()->randomInt(0, 100000);
-			}
 		}
 		if(uniqueItems.count(rec) == 0) {
 			uniqueItems.insert(rec);
@@ -5879,7 +5618,7 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 
 	tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
 
-	printf("Count=%d  Size=%d  InitialHeight=%d\n", (int)items.size(), (int)tree->size(), (int)tree->initialHeight);
+	printf("Count=%d  Size=%d  InitialHeight=%d  largeTree=%d\n", (int)items.size(), (int)tree->size(), (int)tree->initialHeight, largeTree);
 	debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t *)tree, tree->size()).toHexString().c_str());
 
 	DeltaTree<RedwoodRecordRef>::Mirror r(tree, &prev, &next);
@@ -6204,6 +5943,7 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 			if(s.get() != p) {
 				printItems();
 				printf("i=%d  j=%d\n", i, j);
+				printf("seekLessThanOrEqual(%s) found %s expected %s\n", q.toString().c_str(), s.get().toString().c_str(), p.toString().c_str());
 				ASSERT(false);
 			}
 		}
@@ -6225,7 +5965,7 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 		}
 	}
 
-	auto skipSeekPerformance = [&](int jumpMax, bool useHint, int count) {
+	auto skipSeekPerformance = [&](int jumpMax, bool old, bool useHint, int count) {
 		// Skip to a series of increasing items, jump by up to jumpMax units forward in the
 		// items, wrapping around to 0.
 		double start = timer();
@@ -6242,20 +5982,34 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 			}
 			IntIntPair q = items[newPos];
 			++q.v;
-			if(useHint) {
-				s.seekLessThanOrEqual(q, 0, &s, newPos - pos);
+			if(old) {
+				if(useHint) {
+					s.seekLessThanOrEqualOld(q, 0, &s, newPos - pos);
+				}
+				else {
+					s.seekLessThanOrEqualOld(q, 0, nullptr, 0);
+				}
 			}
 			else {
-				s.seekLessThanOrEqual(q);
+				if(useHint) {
+					s.seekLessThanOrEqual(q, 0, &s, newPos - pos);
+				}
+				else {
+					s.seekLessThanOrEqual(q);
+				}
 			}
 			pos = newPos;
 		}
 		double elapsed = timer() - start;
-		printf("Seek/skip test, jumpMax=%d, items=%d, useHint=%d:  Elapsed %f s\n", jumpMax, items.size(), useHint, elapsed);
+		printf("Seek/skip test, jumpMax=%d, items=%d, oldSeek=%d useHint=%d:  Elapsed %f s\n", jumpMax, items.size(), old, useHint, elapsed);
 	};
 
-	skipSeekPerformance(10, false, 20e6);
-	skipSeekPerformance(10, true, 20e6);
+	// Compare seeking to nearby elements with and without hints, using the old and new SeekLessThanOrEqual methods.
+	// TODO:  Once seekLessThanOrEqual() with a hint is as fast as seekLessThanOrEqualOld, remove it.
+	skipSeekPerformance(8, true, false, 80e6);
+	skipSeekPerformance(8, true, true, 80e6);
+	skipSeekPerformance(8, false, false, 80e6);
+	skipSeekPerformance(8, false, true, 80e6);
 
 	// Repeatedly seek for one of a set of pregenerated random pairs and time it.
 	std::vector<IntIntPair> randomPairs;
@@ -6263,7 +6017,7 @@ TEST_CASE("!/redwood/correctness/unit/deltaTree/IntIntPair") {
 		randomPairs.push_back(randomPair());
 	}
 
-	// Random seeeks
+	// Random seeks
 	double start = timer();
 	for(int i = 0; i < 20000000; ++i) {
 		IntIntPair p = randomPairs[i % randomPairs.size()];

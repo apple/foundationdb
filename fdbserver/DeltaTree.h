@@ -150,8 +150,6 @@ static int perfectSubtreeSplitPointCached(int subtree_size) {
 #pragma pack(push,1)
 template <typename T, typename DeltaT = typename T::Delta>
 struct DeltaTree {
-	static constexpr int SmallSizeLimit = std::numeric_limits<uint16_t>::max();
-	static constexpr int LargeNodeExtraOverhead = 4;
 	struct Node {
 		union {
 			struct {
@@ -210,6 +208,9 @@ struct DeltaTree {
 			return delta(large).size() + (large ? sizeof(smallOffsets) : sizeof(largeOffsets));
 		}
 	};
+
+	static constexpr int SmallSizeLimit = std::numeric_limits<uint16_t>::max();
+	static constexpr int LargeTreePerNodeExtraOverhead = sizeof(Node::largeOffsets) - sizeof(Node::smallOffsets);
 
 	struct {
 		uint16_t numItems;         // Number of items in the tree.
@@ -288,6 +289,32 @@ public:
 
 		DecodedNode * getNextAncestor() const {
 			return otherAncestorNext() ? otherAncestor : parent;
+		}
+
+		DecodedNode * jumpUpNext(DecodedNode *root, bool &othersChild) const {
+			if(parent != nullptr) {
+				if(parent->rightChild == this) {
+					return otherAncestor;
+				}
+				if(otherAncestor != nullptr) {
+					othersChild = true;
+					return otherAncestor->rightChild;
+				}
+			}
+			return parent;
+		}
+
+		DecodedNode * jumpUpPrev(DecodedNode *root, bool &othersChild) const {
+			if(parent != nullptr) {
+				if(parent->leftChild == this) {
+					return otherAncestor;
+				}
+				if(otherAncestor != nullptr) {
+					othersChild = true;
+					return otherAncestor->leftChild;
+				}
+			}
+			return parent;
 		}
 
 		DecodedNode * jumpNext(DecodedNode *root) const {
@@ -509,11 +536,13 @@ public:
 		// Erase k by setting its deleted flag to true.  Returns true only if k existed
 		bool erase(const T &k, int skipLen = 0) {
 			Cursor c = getCursor();
-			bool r = c.seek(k);
-			if(r) {
+			int cmp = c.seek(k);
+			// If exactly k is found
+			if(cmp == 0 && !c.node->isDeleted()) {
 				c.erase();
+				return true;
 			}
-			return r;
+			return false;
 		}
 	};
 
@@ -555,22 +584,8 @@ public:
 			moveNext();
 		}
 
-		bool seekLessThanOrEqual(const T &s, int skipLen = 0) {
-			return seekLessThanOrEqual(s, skipLen, nullptr, 0);
-		}
-
-		bool seekLessThanOrEqual(const T &s, int skipLen, const Cursor *pHint) {
-			if(pHint->valid()) {
-				return seekLessThanOrEqual(s, skipLen, pHint, s.compare(pHint->get(), skipLen));
-			}
-			return seekLessThanOrEqual(s, skipLen, nullptr, 0);
-		}
-
-		// Moves the cursor to the node with the greatest key less than or equal to s.  If successful,
-		// returns true, otherwise returns false and the cursor position will be invalid.
-		// If pHint is given then initialCmp must be logically equivalent to s.compare(pHint->get())
-		// If hintFwd is omitted, it will be calculated (see other definitions above)
-		bool seekLessThanOrEqual(const T &s, int skipLen, const Cursor *pHint, int initialCmp) {
+		// TODO:  Make hint-based seek() use the hint logic in this, which is better and actually improves seek times, then remove this function.
+		bool seekLessThanOrEqualOld(const T &s, int skipLen, const Cursor *pHint, int initialCmp) {
 			DecodedNode *n;
 
 			// If there's a hint position, use it
@@ -588,7 +603,6 @@ public:
 						if(n == nullptr) {
 							break;
 						}
-
 						int cmp = s.compare(n->item, skipLen);
 						if(cmp > 0) {
 							node = n;
@@ -646,54 +660,133 @@ public:
 			return _hideDeletedBackward();
 		}
 
-		// Moves the cursor to the node with the lowest key greater than or equal to s.  If successful,
-		// returns true, otherwise returns false and the cursor position will be invalid.
-		bool seekGreaterThanOrEqual(const T &s, int skipLen = 0) {
-			DecodedNode *n = mirror->root;
-			node = nullptr;
-
-			while(n != nullptr) {
-				int cmp = s.compare(n->item, skipLen);
-
-				if(cmp > 0) {
-					n = n->getRightChild(mirror->arena);
-				}
-				else {
-					// n >= s so store it in node as a potential result
-					node = n;
-
-					if(cmp == 0) {
-						break;
-					}
-
-					n = n->getLeftChild(mirror->arena);
-				}
+		// The seek methods, of the form seek[Less|Greater][orEqual](...) are very similar.
+		// They attempt move the cursor to the [Greatest|Least] item, based on the name of the function.
+		// Then will not "see" erased records.
+		// If successful, they return true, and if not then false a while making the cursor invalid.
+		// These methods forward arguments to the seek() overloads, see those for argument descriptions.
+		template<typename ...Args>
+		bool seekLessThan(Args... args) {
+			int cmp = seek(args...);
+			if(cmp < 0 || (cmp == 0 && node != nullptr)) {
+				movePrev();
 			}
+			return _hideDeletedBackward();
+		}
 
+		template<typename ...Args>
+		bool seekLessThanOrEqual(Args... args) {
+			int cmp = seek(args...);
+			if(cmp < 0) {
+				movePrev();
+			}
+			return _hideDeletedBackward();
+		}
+
+		template<typename ...Args>
+		bool seekGreaterThan(Args... args) {
+			int cmp = seek(args...);
+			if(cmp > 0 || (cmp == 0 && node != nullptr)) {
+				moveNext();
+			}
 			return _hideDeletedForward();
 		}
 
-		// Moves the cursor to the node with exactly item s
-		// If successful, returns true, otherwise returns false and the cursor position will be invalid.
-		bool seek(const T &s, int skipLen = 0) {
+		template<typename ...Args>
+		bool seekGreaterThanOrEqual(Args... args) {
+			int cmp = seek(args...);
+			if(cmp > 0) {
+				moveNext();
+			}
+			return _hideDeletedForward();
+		}
+
+		// seek() moves the cursor to a node containing s or the node that would be the parent of s if s were to be added to the tree.
+		// If the tree was empty, the cursor will be invalid and the return value will be 0.
+		// Otherwise, returns the result of s.compare(item at cursor position)
+		// Does not skip/avoid deleted nodes.
+		int seek(const T &s, int skipLen = 0) {
 			DecodedNode *n = mirror->root;
 			node = nullptr;
-
+			int cmp = 0;
 			while(n != nullptr) {
-				int cmp = s.compare(n->item, skipLen);
-
+				node = n;
+				cmp = s.compare(n->item, skipLen);
 				if(cmp == 0) {
-					if(n->isDeleted()) {
-						return false;
-					}
-					node = n;
-					return true;
+					break;
 				}
 
 				n = (cmp > 0) ? n->getRightChild(mirror->arena) : n->getLeftChild(mirror->arena);
 			}
 
-			return false;
+			return cmp;
+		}
+
+		// Same usage as seek() but with a hint of a cursor, which can't be null, whose starting position
+		// should be close to s in the tree to improve seek time.
+		// initialCmp should be logically equivalent to s.compare(pHint->get()) or 0, in which 
+		// case the comparison will be done in this method.
+		// TODO:  This is broken, it's not faster than not using a hint.  See Make thisUnfortunately in a microbenchmark attempting to approximate a common use case, this version
+		// of using a cursor hint is actually slower than not using a hint.
+		int seek(const T &s, int skipLen, const Cursor *pHint, int initialCmp = 0) {
+			DecodedNode *n = mirror->root;
+			node = nullptr;
+			int cmp;
+
+			// If there's a hint position, use it
+			// At the end of using the hint, if n is valid it should point to a node which has not yet been compared to.
+			if(pHint->node != nullptr) {
+				n = pHint->node;
+				if(initialCmp == 0) {
+					initialCmp = s.compare(pHint->get());
+				}
+				cmp = initialCmp;
+
+				while(true) {
+					node = n;
+					if(cmp == 0) {
+						return cmp;
+					}
+
+					// Attempt to jump up and past s
+					bool othersChild = false;
+					n = (initialCmp > 0) ? n->jumpUpNext(mirror->root, othersChild) : n->jumpUpPrev(mirror->root, othersChild);
+					if(n == nullptr) {
+						n = (cmp > 0) ? node->rightChild : node->leftChild;
+						break;
+					}
+
+					// Compare s to the node jumped to
+					cmp = s.compare(n->item, skipLen);
+
+					// n is on the oposite side of s than node is, then n is too far.
+					if(cmp != 0 && ((initialCmp ^ cmp) < 0)) {
+						if(!othersChild) {
+							n = (cmp < 0) ? node->rightChild : node->leftChild;
+						}
+						break;
+					}
+				}
+			}
+			else {
+				// Start at root, clear current position
+				n = mirror->root;
+				node = nullptr;
+				cmp = 0;
+			}
+
+			// Search starting from n, which is either the root or the result of applying the hint
+			while(n != nullptr) {
+				node = n;
+				cmp = s.compare(n->item, skipLen);
+				if(cmp == 0) {
+					break;
+				}
+
+				n = (cmp > 0) ? n->getRightChild(mirror->arena) : n->getLeftChild(mirror->arena);
+			}
+
+			return cmp;
 		}
 
 		bool moveFirst() {
