@@ -64,19 +64,16 @@ ACTOR Future<Void> SpecialKeyRangeBaseImpl::normalizeKeySelectorActor(const Spec
 
 ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationActor(
     SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeySelector begin, KeySelector end,
-    GetRangeLimits limits, bool reverse) {
+    GetRangeLimits limits, bool reverse, bool withPrefix) {
 	// This function handles ranges which cover more than one keyrange and aggregates all results
 	// KeySelector, GetRangeLimits and reverse are all handled here
 	state Standalone<RangeResultRef> result;
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter;
 	state int actualBeginOffset;
 	state int actualEndOffset;
-	state bool prefixFlag = false;
 
 	// remove specialKeys prefix
-	if (begin.getKey().startsWith(specialKeys.begin)) {
-		prefixFlag = true;
-		ASSERT(end.getKey().startsWith(specialKeys.begin));
+	if (withPrefix) {
 		begin.setKey(begin.getKey().removePrefix(specialKeys.begin));
 		end.setKey(end.getKey().removePrefix(specialKeys.begin));
 	}
@@ -157,11 +154,12 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
 			Standalone<RangeResultRef> pairs = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
+			result.arena().dependsOn(pairs.arena());
 			// limits handler
 			for (int i = pairs.size() - 1; i >= 0; --i) {
 				// TODO : use depends on with push_back
 				KeyValueRef element =
-				    prefixFlag ? KeyValueRef(pairs[i].key.withPrefix(specialKeys.begin, result.arena()), pairs[i].value)
+				    withPrefix ? KeyValueRef(pairs[i].key.withPrefix(specialKeys.begin, result.arena()), pairs[i].value)
 				               : pairs[i];
 				result.push_back(result.arena(), element);
 				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it is still
@@ -182,11 +180,12 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
 			Standalone<RangeResultRef> pairs = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
+			result.arena().dependsOn(pairs.arena());
 			// limits handler
 			for (int i = 0; i < pairs.size(); ++i) {
 				// TODO : use depends on with push_back
 				KeyValueRef element =
-				    prefixFlag ? KeyValueRef(pairs[i].key.withPrefix(specialKeys.begin, result.arena()), pairs[i].value)
+				    withPrefix ? KeyValueRef(pairs[i].key.withPrefix(specialKeys.begin, result.arena()), pairs[i].value)
 				               : pairs[i];
 				result.push_back(result.arena(), element);
 				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it is still
@@ -206,26 +205,28 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 
 Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourWritesTransaction> ryw,
                                                              KeySelector begin, KeySelector end, GetRangeLimits limits,
-                                                             bool reverse) {
+                                                             bool reverse, bool withPrefix) {
 	// validate limits here
 	if (!limits.isValid()) return range_limits_invalid();
 	if (limits.isReached()) {
 		TEST(true); // read limit 0
 		return Standalone<RangeResultRef>();
 	}
+	if (withPrefix)
+		ASSERT(begin.getKey().startsWith(specialKeys.begin) && end.getKey().startsWith(specialKeys.begin));
 	// make sure orEqual == false
 	begin.removeOrEqual(begin.arena());
 	end.removeOrEqual(end.arena());
 
-	return getRangeAggregationActor(this, ryw, begin, end, limits, reverse);
+	return getRangeAggregationActor(this, ryw, begin, end, limits, reverse, withPrefix);
 }
 
 ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw,
-                                                        KeyRef key) {
+                                                        KeyRef key, bool withPrefix) {
 	// use getRange to workaround this
 	Standalone<RangeResultRef> result =
 	    wait(pks->getRange(ryw, KeySelector(firstGreaterOrEqual(key)), KeySelector(firstGreaterOrEqual(keyAfter(key))),
-	                       GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+	                       GetRangeLimits(CLIENT_KNOBS->TOO_MANY), false, withPrefix));
 	ASSERT(result.size() <= 1);
 	if (result.size()) {
 		return Optional<Value>(result[0].value);
@@ -234,8 +235,9 @@ ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* pks, Re
 	}
 }
 
-Future<Optional<Value>> SpecialKeySpace::get(Reference<ReadYourWritesTransaction> ryw, const Key& key) {
-	return getActor(this, ryw, key);
+Future<Optional<Value>> SpecialKeySpace::get(Reference<ReadYourWritesTransaction> ryw, const Key& key,
+                                             bool withPrefix) {
+	return getActor(this, ryw, key, withPrefix);
 }
 
 ConflictingKeysImpl::ConflictingKeysImpl(KeyRef start, KeyRef end) : SpecialKeyRangeBaseImpl(start, end) {}
@@ -291,11 +293,11 @@ private:
 };
 
 TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
-	SpecialKeySpace pks(LiteralStringRef("\xff\xff"), LiteralStringRef("\xff\xff\xff"));
-	SpecialKeyRangeTestImpl pkr1(LiteralStringRef("\xff\xff/cat/"), LiteralStringRef("\xff\xff/cat/\xff"), "small", 10);
-	SpecialKeyRangeTestImpl pkr2(LiteralStringRef("\xff\xff/dog/"), LiteralStringRef("\xff\xff/dog/\xff"), "medium",
+	SpecialKeySpace pks(normalKeys.begin, normalKeys.end);
+	SpecialKeyRangeTestImpl pkr1(LiteralStringRef("/cat/"), LiteralStringRef("/cat/\xff"), "small", 10);
+	SpecialKeyRangeTestImpl pkr2(LiteralStringRef("/dog/"), LiteralStringRef("/dog/\xff"), "medium",
 	                             100);
-	SpecialKeyRangeTestImpl pkr3(LiteralStringRef("\xff\xff/pig/"), LiteralStringRef("\xff\xff/pig/\xff"), "large",
+	SpecialKeyRangeTestImpl pkr3(LiteralStringRef("/pig/"), LiteralStringRef("/pig/\xff"), "large",
 	                             1000);
 	pks.registerKeyRange(pkr1.getKeyRange(), &pkr1);
 	pks.registerKeyRange(pkr2.getKeyRange(), &pkr2);
@@ -303,20 +305,20 @@ TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	auto nullRef = Reference<ReadYourWritesTransaction>();
 	// get
 	{
-		auto resultFuture = pks.get(nullRef, LiteralStringRef("\xff\xff/cat/small0000000009"));
+		auto resultFuture = pks.get(nullRef, LiteralStringRef("/cat/small0000000009"), false);
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue().get();
 		ASSERT(result == pkr1.getKeyValueForIndex(9).value);
-		auto emptyFuture = pks.get(nullRef, LiteralStringRef("\xff\xff/cat/small0000000010"));
+		auto emptyFuture = pks.get(nullRef, LiteralStringRef("/cat/small0000000010"), false);
 		ASSERT(emptyFuture.isReady());
 		auto emptyResult = emptyFuture.getValue();
 		ASSERT(!emptyResult.present());
 	}
 	// general getRange
 	{
-		KeySelector start = KeySelectorRef(LiteralStringRef("\xff\xff/elepant"), false, -9);
-		KeySelector end = KeySelectorRef(LiteralStringRef("\xff\xff/frog"), false, +11);
-		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits());
+		KeySelector start = KeySelectorRef(LiteralStringRef("/elepant"), false, -9);
+		KeySelector end = KeySelectorRef(LiteralStringRef("/frog"), false, +11);
+		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(), false, false);
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		ASSERT(result.size() == 20);
@@ -327,7 +329,7 @@ TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	{
 		KeySelector start = KeySelectorRef(pkr3.getKeyForIndex(999), true, -1110);
 		KeySelector end = KeySelectorRef(pkr1.getKeyForIndex(0), false, +1112);
-		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits());
+		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(), false, false);
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		ASSERT(result.size() == 1110);
@@ -338,7 +340,7 @@ TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	{
 		KeySelector start = KeySelectorRef(pkr2.getKeyForIndex(0), true, 0);
 		KeySelector end = KeySelectorRef(pkr3.getKeyForIndex(0), false, 0);
-		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(2));
+		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(2), false, false);
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		ASSERT(result.size() == 2);
@@ -349,7 +351,7 @@ TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	{
 		KeySelector start = KeySelectorRef(pkr2.getKeyForIndex(0), true, 0);
 		KeySelector end = KeySelectorRef(pkr3.getKeyForIndex(0), false, 0);
-		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(10, 100));
+		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(10, 100), false, false);
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		int bytes = 0;
@@ -361,7 +363,7 @@ TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	{
 		KeySelector start = KeySelectorRef(pkr2.getKeyForIndex(0), true, 0);
 		KeySelector end = KeySelectorRef(pkr3.getKeyForIndex(999), true, +1);
-		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(1100), true);
+		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(1100), true, false);
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		for (int i = 0; i < pkr3.getSize(); ++i) ASSERT(result[i] == pkr3.getKeyValueForIndex(pkr3.getSize() - 1 - i));

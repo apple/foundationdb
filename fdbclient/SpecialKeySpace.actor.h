@@ -32,10 +32,13 @@ protected:
 
 class SpecialKeySpace {
 public:
-	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key);
+	// withPrefix is true if the passing keys are prefixed with \xff\xff (cases from RYW), 
+	// otherwise, false(cases from tests)
+	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key, bool withPrefix = true);
 
 	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeySelector begin,
-	                                            KeySelector end, GetRangeLimits limits, bool reverse = false);
+	                                            KeySelector end, GetRangeLimits limits, bool reverse = false,
+	                                            bool withPrefix = true);
 
 	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end) {
 		// Default value is nullptr, begin of KeyRangeMap is Key()
@@ -49,12 +52,14 @@ public:
 	}
 
 private:
-	ACTOR Future<Optional<Value>> getActor(SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeyRef key);
+	ACTOR Future<Optional<Value>> getActor(SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeyRef key,
+	                                       bool withPrefix);
 
 	ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(SpecialKeySpace* pks,
 	                                                                  Reference<ReadYourWritesTransaction> ryw,
 	                                                                  KeySelector begin, KeySelector end,
-	                                                                  GetRangeLimits limits, bool reverse);
+	                                                                  GetRangeLimits limits, bool reverse,
+	                                                                  bool withPrefix);
 
 	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
 	KeyRange range;
