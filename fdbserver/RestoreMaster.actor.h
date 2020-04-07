@@ -282,8 +282,11 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 						nextVersion = logFiles[logIdx].endVersion;
 					} else {
 						TraceEvent("FastRestoreBuildVersionBatch").detail("FinishAllLogFiles", logIdx).detail("CurBatchIndex", vb.batchIndex).detail("CurBatchSize", vb.size);
-						lastLogFile = true;
-						// break; // Finished all log files
+						if (prevEndVersion < nextVersion) {
+							lastLogFile = true;
+						} else {
+							break; // Finished all log files
+						}
 					}
 				} else {
 					TraceEvent(SevError, "FastRestoreBuildVersionBatch")
@@ -307,6 +310,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			    .detail("VersionBatchBeginVersion", vb.beginVersion)
 			    .detail("PreviousEndVersion", prevEndVersion)
 			    .detail("NextVersion", nextVersion)
+				.detail("TargetVersion", targetVersion)
 			    .detail("RangeIndex", rangeIdx)
 			    .detail("RangeFiles", rangeFiles.size())
 			    .detail("LogIndex", logIdx)
@@ -402,7 +406,11 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			versionBatches->emplace(vb.beginVersion, vb);
 		}
 		// Invariant: The last vb endverion should be no smaller than targetVersion
-		ASSERT(maxVBVersion >= targetVersion);
+		if(maxVBVersion < targetVersion) {
+			TraceEvent(SevError, "FastRestoreBuildVersionBatch")
+				.detail("TargetVersion", targetVersion)
+				.detail("MaxVersionBatchVersion", maxVBVersion);
+		}
 	}
 
 	void initBackupContainer(Key url) {
