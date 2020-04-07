@@ -150,15 +150,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			batchData->counters.receivedMutations += 1;
 			batchData->counters.receivedAtomicOps += isAtomicOp((MutationRef::Type)mutation.type) ? 1 : 0;
 			// Sanity check
-			if (g_network->isSimulated()) {
-				// TODO: Use asset.isInKeyRange();
-				if (isRangeMutation(mutation)) {
-					ASSERT(mutation.param1 >= req.asset.range.begin &&
-					       mutation.param2 <= req.asset.range.end); // Range mutation's right side is exclusive
-				} else {
-					ASSERT(mutation.param1 >= req.asset.range.begin && mutation.param1 < req.asset.range.end);
-				}
-			}
+			ASSERT_WE_THINK(req.asset.isInKeyRange(mutation));
+
 			// Note: Log and range mutations may be delivered out of order. Can we handle it?
 			if (mutation.type == MutationRef::SetVersionstampedKey ||
 			    mutation.type == MutationRef::SetVersionstampedValue) {
@@ -309,7 +302,8 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 				    .detail("ClearRangeUpperBound", rangeMutation.mutation.param2)
 				    .detail("UsedUpperBound", ub->first);
 			}
-			// Q: Can beginKey = endKey and clear beginKey?
+			// We make the beginKey = endKey for the ClearRange on purpose so that
+			// we can sanity check ClearRange mutation when we apply it to DB.
 			MutationRef clearKey(MutationRef::ClearRange, lb->first, lb->first);
 			lb->second.add(clearKey, rangeMutation.version);
 			lb++;

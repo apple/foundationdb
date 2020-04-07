@@ -322,6 +322,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 
 	int paramIdx = 0;
 	for (auto& file : *files) {
+		// TODO: Allow empty files in version batch; Filter out them here.
 		if (loader == loadersInterf.end()) {
 			loader = loadersInterf.begin();
 		}

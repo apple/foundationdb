@@ -283,6 +283,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					} else {
 						TraceEvent("FastRestoreBuildVersionBatch").detail("FinishAllLogFiles", logIdx).detail("CurBatchIndex", vb.batchIndex).detail("CurBatchSize", vb.size);
 						if (prevEndVersion < nextVersion) {
+							// Ensure the last log file is included in version batch
 							lastLogFile = true;
 						} else {
 							break; // Finished all log files
@@ -407,7 +408,9 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		}
 		// Invariant: The last vb endverion should be no smaller than targetVersion
 		if(maxVBVersion < targetVersion) {
-			TraceEvent(SevError, "FastRestoreBuildVersionBatch")
+			// Q: Is the restorable version always less than the maximum version from all backup filenames?
+			// A: This is true for the raw backup files returned by backup container before we remove the empty files.
+			TraceEvent(SevWarnAlways, "FastRestoreBuildVersionBatch")
 				.detail("TargetVersion", targetVersion)
 				.detail("MaxVersionBatchVersion", maxVBVersion);
 		}

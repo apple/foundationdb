@@ -253,7 +253,8 @@ struct RestoreAsset {
 
 	// Is mutation's begin and end keys are in RestoreAsset's range
 	bool isInKeyRange(MutationRef mutation) const {
-		if (mutation.type == MutationRef::ClearRange) {
+		if (isRangeMutation(mutation)) {
+			// Range mutation's right side is exclusive
 			return mutation.param1 >= range.begin && mutation.param2 <= range.end;
 		} else {
 			return mutation.param1 >= range.begin && mutation.param1 < range.end;

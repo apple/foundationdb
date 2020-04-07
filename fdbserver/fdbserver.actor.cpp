@@ -201,23 +201,15 @@ bool enableFailures = true;
 vector< Standalone<VectorRef<DebugEntryRef>> > debugEntries;
 int64_t totalDebugEntriesSize = 0;
 
-#if CENABLED(1, NOT_IN_CLEAN)
-StringRef debugKey2 = LiteralStringRef("0000000000ar");
-StringRef debugKey = LiteralStringRef("\xff\xff\xff\xff");
-StringRef debugKeyBegin = LiteralStringRef("0000000000a");
-StringRef debugKeyEnd = LiteralStringRef("z000000000z");
+#if CENABLED(0, NOT_IN_CLEAN)
+StringRef debugKey = LiteralStringRef("");
+StringRef debugKey2 = LiteralStringRef("\xff\xff\xff\xff");
 
 bool debugMutation( const char* context, Version version, MutationRef const& mutation ) {
 	if ((mutation.type == mutation.SetValue || mutation.type == mutation.AddValue || mutation.type==mutation.DebugKey) && (mutation.param1 == debugKey || mutation.param1 == debugKey2))
-		TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "SetValue").detail("Key", mutation.param1).detail("Value", mutation.param2);
-	//else if ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) && ((mutation.param1<=debugKey && mutation.param2>debugKey) || (mutation.param1<=debugKey2 && mutation.param2>debugKey2)))
-	else if ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) && (mutation.param1>=debugKeyBegin && mutation.param2<=debugKeyEnd))
-		TraceEvent("MutationTracking")
-		    .detail("At", context)
-		    .detail("Version", version)
-		    .detail("MutationType", "ClearRange")
-		    .detail("KeyBegin", mutation.param1)
-		    .detail("KeyEnd", mutation.param2);
+		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "SetValue").detail("Key", mutation.param1).detail("Value", mutation.param2);
+	else if ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) && ((mutation.param1<=debugKey && mutation.param2>debugKey) || (mutation.param1<=debugKey2 && mutation.param2>debugKey2)))
+		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "ClearRange").detail("KeyBegin", mutation.param1).detail("KeyEnd", mutation.param2);
 	else
 		return false;
 	const char* type =
@@ -227,9 +219,7 @@ bool debugMutation( const char* context, Version version, MutationRef const& mut
 		mutation.type == MutationRef::DebugKeyRange ? "DebugKeyRange" :
 		mutation.type == MutationRef::DebugKey ? "DebugKey" :
 		"UnknownMutation";
-	// printf("DEBUGMUTATION:\t%.6f\t%s\t%s\t%lld\t%s\t%s\t%s\n", now(),
-	// g_network->getLocalAddress().toString().c_str(), context, version, type, printable(mutation.param1).c_str(),
-	// printable(mutation.param2).c_str());
+	printf("DEBUGMUTATION:\t%.6f\t%s\t%s\t%lld\t%s\t%s\t%s\n", now(), g_network->getLocalAddress().toString().c_str(), context, version, type, printable(mutation.param1).c_str(), printable(mutation.param2).c_str());
 
 	return true;
 }
