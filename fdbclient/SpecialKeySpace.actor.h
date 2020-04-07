@@ -32,12 +32,10 @@ protected:
 
 class SpecialKeySpace {
 public:
-	// TODO : remove snapshot parameter
-	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key, bool snapshot = false);
+	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key);
 
 	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeySelector begin,
-	                                            KeySelector end, GetRangeLimits limits, bool snapshot = false,
-	                                            bool reverse = false);
+	                                            KeySelector end, GetRangeLimits limits, bool reverse = false);
 
 	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end) {
 		// Default value is nullptr, begin of KeyRangeMap is Key()
@@ -62,6 +60,12 @@ private:
 	KeyRange range;
 };
 
+// Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
+// to retrieve keys which caused latest not_committed(conflicting with another transaction) error.
+// The returned key value pairs are interpretted as :
+// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
+// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
+// Currently, the conflicting keyranges returned are original read_conflict_ranges or union of them.
 class ConflictingKeysImpl : public SpecialKeyRangeBaseImpl {
 public:
 	explicit ConflictingKeysImpl(KeyRef start, KeyRef end);

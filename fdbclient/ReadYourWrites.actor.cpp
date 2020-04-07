@@ -1229,6 +1229,14 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 		return Optional<Value>();
 	}
 
+	// special key space are only allowed to query if both begin and end start with \xff\xff
+	if (key.startsWith(specialKeys.begin)) {
+		Reference<ReadYourWritesTransaction> self = Reference<ReadYourWritesTransaction>(this);
+		auto result = getDatabase()->specialKeySpace->get(self, key);
+		self.extractPtr(); // avoid to destory the transaction object itself
+		return result;
+	}
+
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
 	}
@@ -1280,20 +1288,13 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		}
 	}
 
-	// start with simplest point, special key space are only allowed to query if both begin and end start with \xff\xff
+	// special key space are only allowed to query if both begin and end start with \xff\xff
 	if (begin.getKey().startsWith(specialKeys.begin) && end.getKey().startsWith(specialKeys.begin)) {
 		Reference<ReadYourWritesTransaction> self = Reference<ReadYourWritesTransaction>(this);
-		auto result = getDatabase()->specialKeySpace->getRange(self, begin, end, limits, snapshot, reverse);
-		self.extractPtr();
+		auto result = getDatabase()->specialKeySpace->getRange(self, begin, end, limits, reverse);
+		self.extractPtr(); // avoid to destory the transaction object itself
 		return result;
 	}
-	
-	// Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
-	// to retrieve keys which caused latest not_committed(conflicting with another transaction) error.
-	// The returned key value pairs are interpretted as :
-	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
-	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
-	// Currently, the conflicting keyranges returned are original read_conflict_ranges or union of them.
 
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();

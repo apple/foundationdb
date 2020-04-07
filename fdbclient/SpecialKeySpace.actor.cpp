@@ -206,7 +206,7 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 
 Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourWritesTransaction> ryw,
                                                              KeySelector begin, KeySelector end, GetRangeLimits limits,
-                                                             bool snapshot, bool reverse) {
+                                                             bool reverse) {
 	// validate limits here
 	if (!limits.isValid()) return range_limits_invalid();
 	if (limits.isReached()) {
@@ -216,7 +216,7 @@ Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourW
 	// make sure orEqual == false
 	begin.removeOrEqual(begin.arena());
 	end.removeOrEqual(end.arena());
-	// ignore snapshot, which is not used
+
 	return getRangeAggregationActor(this, ryw, begin, end, limits, reverse);
 }
 
@@ -234,8 +234,7 @@ ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* pks, Re
 	}
 }
 
-Future<Optional<Value>> SpecialKeySpace::get(Reference<ReadYourWritesTransaction> ryw, const Key& key, bool snapshot) {
-	// ignore snapshot, which is not used
+Future<Optional<Value>> SpecialKeySpace::get(Reference<ReadYourWritesTransaction> ryw, const Key& key) {
 	return getActor(this, ryw, key);
 }
 
@@ -362,7 +361,7 @@ TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	{
 		KeySelector start = KeySelectorRef(pkr2.getKeyForIndex(0), true, 0);
 		KeySelector end = KeySelectorRef(pkr3.getKeyForIndex(999), true, +1);
-		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(1100), false, true);
+		auto resultFuture = pks.getRange(nullRef, start, end, GetRangeLimits(1100), true);
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		for (int i = 0; i < pkr3.getSize(); ++i) ASSERT(result[i] == pkr3.getKeyValueForIndex(pkr3.getSize() - 1 - i));

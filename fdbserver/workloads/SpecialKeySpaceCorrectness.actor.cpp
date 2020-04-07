@@ -89,7 +89,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			auto correctResultFuture = self->ryw->getRange(begin, end, limit, false, reverse);
 			ASSERT(correctResultFuture.isReady());
 			auto correctResult = correctResultFuture.getValue();
-			auto testResultFuture = cx->specialKeySpace->getRange(self->ryw, begin, end, limit, false, reverse);
+			auto testResultFuture = cx->specialKeySpace->getRange(self->ryw, begin, end, limit, reverse);
 			ASSERT(testResultFuture.isReady());
 			auto testResult = testResultFuture.getValue();
 
