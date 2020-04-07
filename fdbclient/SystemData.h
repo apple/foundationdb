@@ -196,8 +196,6 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 // The key to signal backup workers that they should pause or resume.
 //    "\xff\x02/backupPaused" := "[[0|1]]"
 extern const KeyRef backupPausedKey;
-Value encodeBackupPausedValue(bool pause);
-bool decodeBackupPausedValue(const ValueRef& value);
 
 extern const KeyRef coordinatorsKey;
 extern const KeyRef logsKey;

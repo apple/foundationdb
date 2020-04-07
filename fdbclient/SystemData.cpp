@@ -523,19 +523,6 @@ UID decodeBackupProgressKey(const KeyRef& key) {
 	return serverID;
 }
 
-Value encodeBackupPausedValue(bool pause) {
-	BinaryWriter wr(Unversioned());
-	wr << pause;
-	return wr.toValue();
-}
-
-bool decodeBackupPausedValue(const ValueRef& value) {
-	bool pause;
-	BinaryReader rd(value, Unversioned());
-	rd >> pause;
-	return pause;
-}
-
 WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
 	WorkerBackupStatus status;
 	BinaryReader reader(value, IncludeVersion());

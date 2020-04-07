@@ -4059,7 +4059,7 @@ public:
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			try {
-				tr->set(backupPausedKey, encodeBackupPausedValue(pause));
+				tr->set(backupPausedKey, pause ? LiteralStringRef("1") : LiteralStringRef("0"));
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -4067,7 +4067,7 @@ public:
 			}
 		}
 		wait(change);
-		TraceEvent("FBA_ChangePaused").detail("Action", pause ? "Paused" : "Resumed");
+		TraceEvent("FileBackupAgentChangePaused").detail("Action", pause ? "Paused" : "Resumed");
 		return Void();
 	}
 
