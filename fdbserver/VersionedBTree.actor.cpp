@@ -3427,7 +3427,9 @@ private:
 				debug_printf("Adding %3d of %3lu (i=%3d) klen %4d  vlen %3d  nodeSize %4d  page usage: %d/%d (%.2f%%)  record=%s\n",
 					i + 1, entries.size(), i, keySize, valueSize, nodeSize, compressedBytes, pageSize, (float)compressedBytes / pageSize * 100, entry.toString(height == 1).c_str());
 
-				// If node doesn't fit, expand the page
+				// While the node doesn't fit, expand the page.
+				// This is a loop because if the page size moves into "large" range for DeltaTree
+				// then the overhead will increase, which could require another page expansion.
 				int spaceAvailable = pageSize - compressedBytes;
 				if(nodeSize > spaceAvailable) {
 					// Figure out how many additional whole or partial blocks are needed
@@ -3435,10 +3437,18 @@ private:
 					int newBlocks = 1 + (nodeSize - spaceAvailable - 1) / blockSize;
 					int newPageSize = pageSize + (newBlocks * blockSize);
 
-					// If we've moved into "large" page range for the delta tree then add the additional overhead
+					// If we've moved into "large" page range for the delta tree then add additional overhead required
 					if(!largeTree && newPageSize > BTreePage::BinaryTree::SmallSizeLimit) {
 						largeTree = true;
-						newPageSize += (i - start) * BTreePage::BinaryTree::LargeTreePerNodeExtraOverhead;
+						// Add increased overhead for the current node to nodeSize
+						nodeSize += BTreePage::BinaryTree::LargeTreePerNodeExtraOverhead;
+						// Add increased overhead for all previously added nodes
+						compressedBytes += (i - start) * BTreePage::BinaryTree::LargeTreePerNodeExtraOverhead;
+		
+						// Update calculations above made with previous overhead sizes
+						spaceAvailable = pageSize - compressedBytes;
+						newBlocks = 1 + (nodeSize - spaceAvailable - 1) / blockSize;
+						newPageSize = pageSize + (newBlocks * blockSize);
 					}
 
 					blockCount += newBlocks;
