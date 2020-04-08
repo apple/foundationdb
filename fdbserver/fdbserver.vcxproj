@@ -136,6 +136,8 @@
     <ActorCompiler Include="workloads\Throttling.actor.cpp" />
     <ActorCompiler Include="workloads\Throughput.actor.cpp" />
     <ActorCompiler Include="workloads\WriteBandwidth.actor.cpp" />
+    <ActorCompiler Include="workloads\TPCC.actor.cpp" />
+    <ActorCompiler Include="workloads\PopulateTPCC.actor.cpp" />
     <ActorCompiler Include="workloads\QueuePush.actor.cpp" />
     <ActorCompiler Include="workloads\Rollback.actor.cpp" />
     <ActorCompiler Include="workloads\LogMetrics.actor.cpp" />
@@ -263,6 +265,7 @@
     <ActorCompiler Include="workloads\AsyncFile.actor.h" />
     <ClInclude Include="workloads\ApiWorkload.h" />
     <ClInclude Include="workloads\MemoryKeyValueStore.h" />
+    <ClInclude Include="workloads\TPCCWorkload.h" />
     <ActorCompiler Include="workloads\workloads.actor.h">
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
