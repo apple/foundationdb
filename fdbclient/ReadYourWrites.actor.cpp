@@ -1286,7 +1286,8 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 
 	// special key space are only allowed to query if both begin and end start with \xff\xff
 	if (begin.getKey().startsWith(specialKeys.begin) && end.getKey().startsWith(specialKeys.begin))
-		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin, end, limits, reverse);
+		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin, end,
+		                                                limits, reverse);
 
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
