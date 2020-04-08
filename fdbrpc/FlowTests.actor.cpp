@@ -80,7 +80,6 @@ class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<
 	ErrFunc errFunc;
 
 	virtual void fire(T const& t) { CallbackType::remove(); func(t); delete this; }
-	virtual void fire(T &&t) { CallbackType::remove(); func(std::move(t)); delete this; }
 	virtual void error(Error e) { CallbackType::remove(); errFunc(e); delete this; }
 
 public:
@@ -1370,6 +1369,13 @@ struct Tracker {
 		ASSERT(!other.moved);
 		other.moved = true;
 	}
+	Tracker& operator=(Tracker&& other) {
+		ASSERT(!other.moved);
+		other.moved = true;
+		this->moved = false;
+		this->copied = other.copied;
+		return *this;
+	}
 	Tracker(const Tracker& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
 	Tracker& operator=(const Tracker& other) {
 		ASSERT(!other.moved);
@@ -1386,18 +1392,27 @@ struct Tracker {
 	}
 };
 
-TEST_CASE("/flow/PromiseStream/move") {
+TEST_CASE("/flow/flow/PromiseStream/move") {
 	state PromiseStream<Tracker> stream;
 	{
 		// This tests the case when a callback is added before
-		// a value is sent
-		Future<Void> listener = Tracker::listen(stream.getFuture());
+		// a movable value is sent
+		state Future<Void> listener = Tracker::listen(stream.getFuture());
 		stream.send(Tracker{});
+		wait(listener);
+	}
+
+	{
+		// This tests the case when a callback is added before
+		// a unmovable value is sent
+		listener = Tracker::listen(stream.getFuture());
+		Tracker namedTracker;
+		stream.send(namedTracker);
 		wait(listener);
 	}
 	{
 		// This tests the case when no callback is added until
-		// after a value is sent
+		// after a movable value is sent
 		stream.send(Tracker{});
 		stream.send(Tracker{});
 		{
@@ -1409,6 +1424,27 @@ TEST_CASE("/flow/PromiseStream/move") {
 			when(Tracker t = waitNext(stream.getFuture())) {
 				ASSERT(!t.moved);
 				ASSERT(t.copied == 0);
+			}
+		}
+	}
+	{
+		// This tests the case when no callback is added until
+		// after an unmovable value is sent
+		Tracker namedTracker1;
+		Tracker namedTracker2;
+		stream.send(namedTracker1);
+		stream.send(namedTracker2);
+		{
+			Tracker t = waitNext(stream.getFuture());
+			ASSERT(!t.moved);
+			// must copy onto queue
+			ASSERT(t.copied == 1);
+		}
+		choose {
+			when(Tracker t = waitNext(stream.getFuture())) {
+				ASSERT(!t.moved);
+				// must copy onto queue
+				ASSERT(t.copied == 1);
 			}
 		}
 	}
