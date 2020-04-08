@@ -251,7 +251,7 @@ the order they are declared.</div>
 <li class="blockList">
 <h4>ITERATOR</h4>
 <pre>public static final&nbsp;<a href="../../../com/apple/foundationdb/StreamingMode.html" title="enum in com.apple.foundationdb">StreamingMode</a> ITERATOR</pre>
-<div class="block">The default. The client doesn't know how much of the range it is likely to used and wants different performance concerns to be balanced. Only a small portion of data is transferred to the client initially (in order to minimize costs if the client doesn't read the entire range), and as the caller iterates over more items in the range larger batches will be transferred in order to minimize latency.</div>
+<div class="block">The default. The client doesn't know how much of the range it is likely to used and wants different performance concerns to be balanced. Only a small portion of data is transferred to the client initially (in order to minimize costs if the client doesn't read the entire range), and as the caller iterates over more items in the range larger batches will be transferred in order to minimize latency. After enough iterations, the iterator mode will eventually reach the same byte limit as <code>WANT_ALL</code>.</div>
 </li>
 </ul>
 <a name="EXACT">

@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.11',
+        VERSION:     '6.2.19',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -96,7 +96,7 @@
 <li><a class="reference internal" href="#default-password">Default Password</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#parameters-and-client-bindings">Parameters and client bindings</a></li>
+<li><a class="reference internal" href="#permissions">Permissions</a></li>
 <li><a class="reference internal" href="#automatic-tls-certificate-refresh">Automatic TLS certificate refresh</a></li>
 </ul>
 </li>
@@ -177,7 +177,7 @@
 <li><a class="reference internal" href="#default-password">Default Password</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#parameters-and-client-bindings">Parameters and client bindings</a></li>
+<li><a class="reference internal" href="#permissions">Permissions</a></li>
 <li><a class="reference internal" href="#automatic-tls-certificate-refresh">Automatic TLS certificate refresh</a></li>
 </ul>
 </li>
@@ -350,13 +350,11 @@ to trust</td>
 <div class="section" id="certificate-file-default-location">
 <h4>Certificate file default location</h4>
 <p>The default behavior when the certificate or key file is not specified is to look for a file named <code class="docutils literal"><span class="pre">fdb.pem</span></code> in the current working directory. If this file is not present, an attempt is made to load a file from a system-dependent location as follows:</p>
-<blockquote>
-<div><ul class="simple">
+<ul class="simple">
 <li>Linux: <code class="docutils literal"><span class="pre">/etc/foundationdb/fdb.pem</span></code></li>
 <li>macOS: <code class="docutils literal"><span class="pre">/usr/local/etc/foundationdb/fdb.pem</span></code></li>
 <li>Windows: <code class="docutils literal"><span class="pre">C:\ProgramData\foundationdb\fdb.pem</span></code></li>
 </ul>
-</div></blockquote>
 </div>
 <div class="section" id="default-peer-verification">
 <h4>Default Peer Verification</h4>
@@ -367,19 +365,18 @@ to trust</td>
 <p>There is no default password. If no password is specified, it is assumed that the private key is unencrypted.</p>
 </div>
 </div>
-<div class="section" id="parameters-and-client-bindings">
-<h3>Parameters and client bindings</h3>
+<div class="section" id="permissions">
+<h3>Permissions</h3>
+<p>All files used by TLS must have sufficient read permissions such that the user running the FoundationDB server or client process can access them. It may also be necessary to have similar read permissions on the parent directories of the files used in the TLS configuration.</p>
 </div>
 <div class="section" id="automatic-tls-certificate-refresh">
 <h3>Automatic TLS certificate refresh</h3>
 <p>The TLS certificate will be automatically refreshed on a configurable cadence. The server will inspect the CA, certificate, and key files in the specified locations periodically, and will begin using the new versions if following criterion were met:</p>
-<blockquote>
-<div><ul class="simple">
+<ul class="simple">
 <li>They are changed, judging by the last modified time.</li>
 <li>They are valid certificates.</li>
 <li>The key file matches the certificate file.</li>
 </ul>
-</div></blockquote>
 <p>The refresh rate is controlled by <code class="docutils literal"><span class="pre">--knob_tls_cert_refresh_delay_seconds</span></code>. Setting it to 0 will disable the refresh.</p>
 </div>
 </div>
@@ -669,7 +666,7 @@ to proceed.</td>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 23, 2020.<br/>
+      Last updated on Apr 08, 2020.<br/>
     </p>
   </div>
 </footer>

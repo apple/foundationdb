@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.11',
+        VERSION:     '6.2.19',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -372,6 +372,10 @@ void <code class="descname">fdb_future_destroy</code><span class="sig-paren">(</
 <dt id="c.fdb_future_set_callback">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_future_set_callback</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>*<em>&nbsp;future</em>, <a class="reference internal" href="#c.FDBCallback" title="FDBCallback">FDBCallback</a><em>&nbsp;callback</em>, void*<em>&nbsp;callback_parameter</em><span class="sig-paren">)</span></dt>
 <dd><p>Causes the <a class="reference internal" href="#c.FDBCallback" title="FDBCallback"><code class="xref c c-type docutils literal"><span class="pre">FDBCallback</span></code></a> function to be invoked as <code class="docutils literal"><span class="pre">callback(future,</span> <span class="pre">callback_parameter)</span></code> when the given Future is ready. If the Future is already ready, the call may occur in the current thread before this function returns (but this behavior is not guaranteed). Alternatively, the call may be delayed indefinitely and take place on the thread on which <a class="reference internal" href="#c.fdb_run_network" title="fdb_run_network"><code class="xref c c-func docutils literal"><span class="pre">fdb_run_network()</span></code></a> was invoked, and the callback is responsible for any necessary thread synchronization (and/or for posting work back to your application event loop, thread pool, etc. if your application&#8217;s architecture calls for that).</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">This function guarantees the callback will be executed <strong>at most once</strong>.</p>
+</div>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
 <p class="last">Never call <a class="reference internal" href="#c.fdb_future_block_until_ready" title="fdb_future_block_until_ready"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_block_until_ready()</span></code></a> from a callback passed to this function. This may block the thread on which <a class="reference internal" href="#c.fdb_run_network" title="fdb_run_network"><code class="xref c c-func docutils literal"><span class="pre">fdb_run_network()</span></code></a> was invoked, resulting in a deadlock.</p>
@@ -500,6 +504,7 @@ void <code class="descname">fdb_future_release_memory</code><span class="sig-par
 <dt id="c.fdb_create_database">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_create_database</code><span class="sig-paren">(</span>const char*<em>&nbsp;cluster_file_path</em>, <a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase">FDBDatabase</a>**<em>&nbsp;out_database</em><span class="sig-paren">)</span></dt>
 <dd><p>Creates a new database connected the specified cluster. The caller assumes ownership of the <a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><code class="xref c c-type docutils literal"><span class="pre">FDBDatabase</span></code></a> object and must destroy it with <a class="reference internal" href="#c.fdb_database_destroy" title="fdb_database_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_database_destroy()</span></code></a>.</p>
+<p>A single client can use this function multiple times to connect to different clusters simultaneously, with each invocation requiring its own cluster file. To connect to multiple clusters running at different, incompatible versions, the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a> must be used.</p>
 <dl class="docutils">
 <dt><code class="docutils literal"><span class="pre">cluster_file_path</span></code></dt>
 <dd>A NULL-terminated string giving a local path of a <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a> (often called &#8216;fdb.cluster&#8217;) which contains connection information for the FoundationDB cluster. If cluster_file_path is NULL or an empty string, then a <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a> will be used.</dd>
@@ -642,10 +647,9 @@ void <code class="descname">fdb_transaction_set_read_version</code><span class="
 <dd>If <code class="docutils literal"><span class="pre">mode</span></code> is <code class="xref c c-data docutils literal"><span class="pre">FDB_STREAMING_MODE_ITERATOR</span></code>, this parameter should start at 1 and be incremented by 1 for each successive call while reading this range. In all other cases it is ignored.</dd>
 <dt><code class="docutils literal"><span class="pre">snapshot</span></code></dt>
 <dd>Non-zero if this is a <a class="reference internal" href="#snapshots"><span class="std std-ref">snapshot read</span></a>.</dd>
+<dt><code class="docutils literal"><span class="pre">reverse</span></code></dt>
+<dd>If non-zero, key-value pairs will be returned in reverse lexicographical order beginning at the end of the range. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.</dd>
 </dl>
-<p><code class="docutils literal"><span class="pre">reverse</span></code></p>
-<blockquote>
-<div>If non-zero, key-value pairs will be returned in reverse lexicographical order beginning at the end of the range.</div></blockquote>
 </dd></dl>
 
 <dl class="type">
@@ -653,26 +657,19 @@ void <code class="descname">fdb_transaction_set_read_version</code><span class="
 <code class="descname">FDBStreamingMode</code></dt>
 <dd><p>An enumeration of available streaming modes to be passed to <a class="reference internal" href="#c.fdb_transaction_get_range" title="fdb_transaction_get_range"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_get_range()</span></code></a>.</p>
 <p><code class="docutils literal"><span class="pre">FDB_STREAMING_MODE_ITERATOR</span></code></p>
-<blockquote>
-<div>The caller is implementing an iterator (most likely in a binding to a higher level language). The amount of data returned depends on the value of the <code class="docutils literal"><span class="pre">iteration</span></code> parameter to <a class="reference internal" href="#c.fdb_transaction_get_range" title="fdb_transaction_get_range"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_get_range()</span></code></a>.</div></blockquote>
+<p>The caller is implementing an iterator (most likely in a binding to a higher level language). The amount of data returned depends on the value of the <code class="docutils literal"><span class="pre">iteration</span></code> parameter to <a class="reference internal" href="#c.fdb_transaction_get_range" title="fdb_transaction_get_range"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_get_range()</span></code></a>.</p>
 <p><code class="docutils literal"><span class="pre">FDB_STREAMING_MODE_SMALL</span></code></p>
-<blockquote>
-<div>Data is returned in small batches (not much more expensive than reading individual key-value pairs).</div></blockquote>
+<p>Data is returned in small batches (not much more expensive than reading individual key-value pairs).</p>
 <p><code class="docutils literal"><span class="pre">FDB_STREAMING_MODE_MEDIUM</span></code></p>
-<blockquote>
-<div>Data is returned in batches between _SMALL and _LARGE.</div></blockquote>
+<p>Data is returned in batches between _SMALL and _LARGE.</p>
 <p><code class="docutils literal"><span class="pre">FDB_STREAMING_MODE_LARGE</span></code></p>
-<blockquote>
-<div>Data is returned in batches large enough to be, in a high-concurrency environment, nearly as efficient as possible. If the caller does not need the entire range, some disk and network bandwidth may be wasted. The batch size may be still be too small to allow a single client to get high throughput from the database.</div></blockquote>
+<p>Data is returned in batches large enough to be, in a high-concurrency environment, nearly as efficient as possible. If the caller does not need the entire range, some disk and network bandwidth may be wasted. The batch size may be still be too small to allow a single client to get high throughput from the database.</p>
 <p><code class="docutils literal"><span class="pre">FDB_STREAMING_MODE_SERIAL</span></code></p>
-<blockquote>
-<div>Data is returned in batches large enough that an individual client can get reasonable read bandwidth from the database. If the caller does not need the entire range, considerable disk and network bandwidth may be wasted.</div></blockquote>
+<p>Data is returned in batches large enough that an individual client can get reasonable read bandwidth from the database. If the caller does not need the entire range, considerable disk and network bandwidth may be wasted.</p>
 <p><code class="docutils literal"><span class="pre">FDB_STREAMING_MODE_WANT_ALL</span></code></p>
-<blockquote>
-<div>The caller intends to consume the entire range and would like it all transferred as early as possible.</div></blockquote>
+<p>The caller intends to consume the entire range and would like it all transferred as early as possible.</p>
 <p><code class="docutils literal"><span class="pre">FDB_STREAMING_MODE_EXACT</span></code></p>
-<blockquote>
-<div>The caller has passed a specific row limit and wants that many rows delivered in a single batch.</div></blockquote>
+<p>The caller has passed a specific row limit and wants that many rows delivered in a single batch.</p>
 </dd></dl>
 
 <dl class="function">
@@ -710,6 +707,7 @@ void <code class="descname">fdb_transaction_clear</code><span class="sig-paren">
 void <code class="descname">fdb_transaction_clear_range</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;transaction</em>, uint8_t const*<em>&nbsp;begin_key_name</em>, int<em>&nbsp;begin_key_name_length</em>, uint8_t const*<em>&nbsp;end_key_name</em>, int<em>&nbsp;end_key_name_length</em><span class="sig-paren">)</span></dt>
 <dd><p>Modify the database snapshot represented by <code class="docutils literal"><span class="pre">transaction</span></code> to remove all keys (if any) which are lexicographically greater than or equal to the given begin key and lexicographically less than the given end_key.</p>
 <p>The modification affects the actual database only if <code class="docutils literal"><span class="pre">transaction</span></code> is later committed with <a class="reference internal" href="#c.fdb_transaction_commit" title="fdb_transaction_commit"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_commit()</span></code></a>.</p>
+<p>Range clears are efficient with FoundationDB &#8211; clearing large amounts of data will be fast. However, this will not immediately free up disk - data for the deleted range is cleaned up in the background. For purposes of computing the transaction size, only the begin and end keys of a clear range are counted. The size of the data stored in the range does not count against the transaction size limit.</p>
 <dl class="docutils">
 <dt><code class="docutils literal"><span class="pre">begin_key_name</span></code></dt>
 <dd>A pointer to the name of the key specifying the beginning of the range to clear. The value does not need to be NULL-terminated.</dd>
@@ -761,6 +759,8 @@ void <code class="descname">fdb_transaction_atomic_op</code><span class="sig-par
 <p>Performs a bitwise &#8220;or&#8221; operation. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
 <p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_XOR</span></code></p>
 <p>Performs a bitwise &#8220;xor&#8221; operation. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
+<p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_COMPARE_AND_CLEAR</span></code></p>
+<p>Performs an atomic <code class="docutils literal"><span class="pre">compare</span> <span class="pre">and</span> <span class="pre">clear</span></code> operation. If the existing value in the database is equal to the given value, then given key is cleared.</p>
 <p><code class="docutils literal"><span class="pre">FDB_MUTATION_TYPE_MAX</span></code></p>
 <p>Sets the value in the database to the larger of the existing value and <code class="docutils literal"><span class="pre">param</span></code>. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
 <p>Both the existing value and <code class="docutils literal"><span class="pre">param</span></code> are treated as unsigned integers. (This differs from the behavior of atomic addition.)</p>
@@ -997,7 +997,7 @@ const char* <code class="descname">fdb_get_error</code><span class="sig-paren">(
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 23, 2020.<br/>
+      Last updated on Apr 08, 2020.<br/>
     </p>
   </div>
 </footer>
