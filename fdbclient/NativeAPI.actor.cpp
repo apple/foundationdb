@@ -520,7 +520,8 @@ DatabaseContext::DatabaseContext(
 	transactionKeyServerLocationRequests("KeyServerLocationRequests", cc), transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc), transactionsTooOld("TooOld", cc), 
 	transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc), 
 	transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000), commitLatencies(1000), 
-	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal)
+	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
+	specialKeySpace(std::make_shared<SpecialKeySpace>(normalKeys.begin, specialKeys.end)), cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeys.begin, conflictingKeys.end))
 {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
@@ -540,8 +541,8 @@ DatabaseContext::DatabaseContext(
 
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
-	specialKeySpace = std::make_shared<SpecialKeySpace>(normalKeys.begin, normalKeys.end);
-	cKImpl = std::make_shared<ConflictingKeysImpl>(conflictingKeys.begin, conflictingKeys.end);
+	// specialKeySpace = std::make_shared<SpecialKeySpace>(normalKeys.begin, normalKeys.end);
+	// cKImpl = std::make_shared<ConflictingKeysImpl>(conflictingKeys.begin, conflictingKeys.end);
 	specialKeySpace->registerKeyRange(conflictingKeys, cKImpl.get());
 }
 

@@ -1230,12 +1230,8 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 	}
 
 	// special key space are only allowed to query if both begin and end start with \xff\xff
-	if (key.startsWith(specialKeys.begin)) {
-		Reference<ReadYourWritesTransaction> self = Reference<ReadYourWritesTransaction>(this);
-		auto result = getDatabase()->specialKeySpace->get(self, key);
-		self.extractPtr(); // avoid to destory the transaction object itself
-		return result;
-	}
+	if (key.startsWith(specialKeys.begin))
+		return getDatabase()->specialKeySpace->get(Reference<ReadYourWritesTransaction>::addRef(this), key);
 
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
@@ -1289,12 +1285,8 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	}
 
 	// special key space are only allowed to query if both begin and end start with \xff\xff
-	if (begin.getKey().startsWith(specialKeys.begin) && end.getKey().startsWith(specialKeys.begin)) {
-		Reference<ReadYourWritesTransaction> self = Reference<ReadYourWritesTransaction>(this);
-		auto result = getDatabase()->specialKeySpace->getRange(self, begin, end, limits, reverse);
-		self.extractPtr(); // avoid to destory the transaction object itself
-		return result;
-	}
+	if (begin.getKey().startsWith(specialKeys.begin) && end.getKey().startsWith(specialKeys.begin))
+		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin, end, limits, reverse);
 
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
