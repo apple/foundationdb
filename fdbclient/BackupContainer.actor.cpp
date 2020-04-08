@@ -243,10 +243,10 @@ std::string BackupDescription::toJSON() const {
  *       /plogs/...log,startVersion,endVersion,UID,tagID-of-N,blocksize
  *       /logs/.../log,startVersion,endVersion,UID,blockSize
  *     where ... is a multi level path which sorts lexically into version order and results in approximately 1
- *     unique folder per day containing about 5,000 files. Logs after 7.0 are stored in "plogs"
- *     directory and are partitioned according to tagIDs (0, 1, 2, ...) and the total number
- *     partitions is N. Logs before 7.0 are
- *     stored in "logs" directory and are not partitioned.
+ *     unique folder per day containing about 5,000 files. Logs after FDB 6.3 are stored in "plogs"
+ *     directory and are partitioned according to tagIDs (0, 1, 2, ...) and the total number partitions is N.
+ *     Old backup logs FDB 6.2 and earlier are stored in "logs" directory and are not partitioned.
+ *     After FDB 6.3, users can choose to use the new partitioned logs or old logs.
  *
  *
  *   BACKWARD COMPATIBILITY
@@ -704,7 +704,8 @@ public:
 		}
 	}
 
-	ACTOR static Future<BackupDescription> describeBackup_impl(Reference<BackupContainerFileSystem> bc, bool deepScan, Version logStartVersionOverride, bool partitioned) {
+	ACTOR static Future<BackupDescription> describeBackup_impl(Reference<BackupContainerFileSystem> bc, bool deepScan,
+	                                                           Version logStartVersionOverride) {
 		state BackupDescription desc;
 		desc.url = bc->getURL();
 
@@ -722,8 +723,7 @@ public:
 		// from which to resolve the relative version.
 		// This could be handled more efficiently without recursion but it's tricky, this will do for now.
 		if(logStartVersionOverride != invalidVersion && logStartVersionOverride < 0) {
-			BackupDescription tmp = wait(partitioned ? bc->describePartitionedBackup(false, invalidVersion)
-			                                         : bc->describeBackup(false, invalidVersion));
+			BackupDescription tmp = wait(bc->describeBackup(false, invalidVersion));
 			logStartVersionOverride = resolveRelativeVersion(tmp.maxLogEnd, logStartVersionOverride,
 			                                                 "LogStartVersionOverride", invalid_option_value());
 		}
@@ -811,8 +811,17 @@ public:
 		}
 
 		state std::vector<LogFile> logs;
-		wait(store(logs, bc->listLogFiles(scanBegin, scanEnd, partitioned)) &&
+		state std::vector<LogFile> plogs;
+		wait(store(logs, bc->listLogFiles(scanBegin, scanEnd, false)) &&
+		     store(plogs, bc->listLogFiles(scanBegin, scanEnd, true)) &&
 		     store(desc.snapshots, bc->listKeyspaceSnapshots()));
+
+		if (plogs.size() > 0) {
+			desc.partitioned = true;
+			logs.swap(plogs);
+		} else {
+			desc.partitioned = false;
+		}
 
 		// List logs in version order so log continuity can be analyzed
 		std::sort(logs.begin(), logs.end());
@@ -823,7 +832,7 @@ public:
 			// If we didn't get log versions above then seed them using the first log file
 			if (!desc.contiguousLogEnd.present()) {
 				desc.minLogBegin = logs.begin()->beginVersion;
-				if (partitioned) {
+				if (desc.partitioned) {
 					// Cannot use the first file's end version, which may not be contiguous
 					// for other partitions. Set to its beginVersion to be safe.
 					desc.contiguousLogEnd = logs.begin()->beginVersion;
@@ -832,7 +841,7 @@ public:
 				}
 			}
 
-			if (partitioned) {
+			if (desc.partitioned) {
 				updatePartitionedLogsContinuousEnd(&desc, logs, scanBegin, scanEnd);
 			} else {
 				Version& end = desc.contiguousLogEnd.get();
@@ -906,11 +915,8 @@ public:
 
 	// Uses the virtual methods to describe the backup contents
 	Future<BackupDescription> describeBackup(bool deepScan, Version logStartVersionOverride) final {
-		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this), deepScan, logStartVersionOverride, false);
-	}
-
-	Future<BackupDescription> describePartitionedBackup(bool deepScan, Version logStartVersionOverride) final {
-		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this), deepScan, logStartVersionOverride, true);
+		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this), deepScan,
+		                           logStartVersionOverride);
 	}
 
 	ACTOR static Future<Void> expireData_impl(Reference<BackupContainerFileSystem> bc, Version expireEndVersion, bool force, ExpireProgress *progress, Version restorableBeginVersion) {

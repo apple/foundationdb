@@ -178,6 +178,7 @@ struct BackupDescription {
 	// The minimum version which this backup can be used to restore to
 	Optional<Version> minRestorableVersion;
 	std::string extendedDetail;  // Freeform container-specific info.
+	bool partitioned; // If this backup contains partitioned mutation logs.
 
 	// Resolves the versions above to timestamps using a given database's TimeKeeper data.
 	// toString will use this information if present.
@@ -259,9 +260,6 @@ public:
 	// of this describe operation.  This can be used to calculate what the restorability of a backup would
 	// be after deleting all data prior to logStartVersionOverride.
 	virtual Future<BackupDescription> describeBackup(bool deepScan = false, Version logStartVersionOverride = invalidVersion) = 0;
-
-	// The same as above, except using partitioned mutation logs.
-	virtual Future<BackupDescription> describePartitionedBackup(bool deepScan = false, Version logStartVersionOverride = invalidVersion) = 0;
 
 	virtual Future<BackupFileList> dumpFileList(Version begin = 0, Version end = std::numeric_limits<Version>::max()) = 0;
 

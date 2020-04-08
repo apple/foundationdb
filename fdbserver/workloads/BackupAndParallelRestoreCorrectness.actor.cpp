@@ -213,13 +213,12 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 					state bool restorable = false;
 					if (lastBackupContainer) {
-						state Future<BackupDescription> fdesc = self->usePartitionedLogs
-						                                            ? lastBackupContainer->describePartitionedBackup()
-						                                            : lastBackupContainer->describeBackup();
+						state Future<BackupDescription> fdesc = lastBackupContainer->describeBackup();
 						wait(ready(fdesc));
 
 						if(!fdesc.isError()) {
 							state BackupDescription desc = fdesc.get();
+							ASSERT(self->usePartitionedLogs == desc.partitioned);
 							wait(desc.resolveVersionTimes(cx));
 							printf("BackupDescription:\n%s\n", desc.toString().c_str());
 							restorable = desc.maxRestorableVersion.present();
@@ -436,8 +435,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				    .detail("BackupTag", printable(self->backupTag));
 
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
-				BackupDescription desc = wait(self->usePartitionedLogs ? container->describePartitionedBackup()
-				                                                       : container->describeBackup());
+				BackupDescription desc = wait(container->describeBackup());
+				ASSERT(self->usePartitionedLogs == desc.partitioned);
 
 				TraceEvent("BAFRW_Restore", randomID)
 				    .detail("LastBackupContainer", lastBackupContainer->getURL())
