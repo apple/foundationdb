@@ -521,7 +521,7 @@ DatabaseContext::DatabaseContext(
 	transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc), 
 	transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000), commitLatencies(1000), 
 	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
-	specialKeySpace(std::make_shared<SpecialKeySpace>(normalKeys.begin, specialKeys.end)), cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeys.begin, conflictingKeys.end))
+	specialKeySpace(std::make_shared<SpecialKeySpace>(normalKeys.begin, specialKeys.end)), cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeysRange.begin, conflictingKeysRange.end))
 {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
@@ -541,9 +541,7 @@ DatabaseContext::DatabaseContext(
 
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
-	// specialKeySpace = std::make_shared<SpecialKeySpace>(normalKeys.begin, normalKeys.end);
-	// cKImpl = std::make_shared<ConflictingKeysImpl>(conflictingKeys.begin, conflictingKeys.end);
-	specialKeySpace->registerKeyRange(conflictingKeys, cKImpl.get());
+	specialKeySpace->registerKeyRange(conflictingKeysRange, cKImpl.get());
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc), 
@@ -2758,7 +2756,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					// clear the RYW transaction which contains previous conflicting keys
 					tr->info.conflictingKeys.reset();
 					if (ci.conflictingKRIndices.present()) {
-						tr->info.conflictingKeys = std::make_shared<CoalescedKeyRangeMap<Value>>(conflictingKeysFalse);
+						tr->info.conflictingKeys = std::make_shared<CoalescedKeyRangeMap<Value>>(conflictingKeysFalse, specialKeys.end);
 						state Standalone<VectorRef<int>> conflictingKRIndices = ci.conflictingKRIndices.get();
 						// drop duplicate indices and merge overlapped ranges
 						// Note: addReadConflictRange in native transaction object does not merge overlapped ranges
@@ -2766,8 +2764,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 																conflictingKRIndices.end());
 						for (auto const& rCRIndex : mergedIds) {
 							const KeyRangeRef kr = req.transaction.read_conflict_ranges[rCRIndex];
-							const KeyRange krWithPrefix = KeyRangeRef(kr.begin.withPrefix(conflictingKeysPrefix),
-								kr.end.withPrefix(conflictingKeysPrefix));
+							const KeyRange krWithPrefix = KeyRangeRef(kr.begin.withPrefix(conflictingKeysRange.begin),
+								kr.end.withPrefix(conflictingKeysRange.begin));
 							tr->info.conflictingKeys->insert(krWithPrefix, conflictingKeysTrue);
 						}
 					}

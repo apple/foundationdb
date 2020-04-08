@@ -162,8 +162,8 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 				if (foundConflict) {
 					// \xff\xff/transaction/conflicting_keys is always initialized to false, skip it here
 					state KeyRange ckr =
-					    KeyRangeRef(keyAfter(LiteralStringRef("").withPrefix(conflictingKeysAbsolutePrefix)),
-					                LiteralStringRef("\xff\xff").withPrefix(conflictingKeysAbsolutePrefix));
+					    KeyRangeRef(keyAfter(LiteralStringRef("").withPrefix(conflictingKeysRange.begin)),
+					                LiteralStringRef("\xff\xff").withPrefix(conflictingKeysRange.begin));
 					// The getRange here using the special key prefix "\xff\xff/transaction/conflicting_keys/" happens
 					// locally Thus, the error handling is not needed here
 					Future<Standalone<RangeResultRef>> conflictingKeyRangesFuture =
@@ -176,14 +176,14 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					ASSERT(!conflictingKeyRanges.more);
 					for (int i = 0; i < conflictingKeyRanges.size(); i += 2) {
 						KeyValueRef startKeyWithPrefix = conflictingKeyRanges[i];
-						ASSERT(startKeyWithPrefix.key.startsWith(conflictingKeysAbsolutePrefix));
+						ASSERT(startKeyWithPrefix.key.startsWith(conflictingKeysRange.begin));
 						ASSERT(startKeyWithPrefix.value == conflictingKeysTrue);
 						KeyValueRef endKeyWithPrefix = conflictingKeyRanges[i + 1];
-						ASSERT(endKeyWithPrefix.key.startsWith(conflictingKeysAbsolutePrefix));
+						ASSERT(endKeyWithPrefix.key.startsWith(conflictingKeysRange.begin));
 						ASSERT(endKeyWithPrefix.value == conflictingKeysFalse);
 						// Remove the prefix of returning keys
-						Key startKey = startKeyWithPrefix.key.removePrefix(conflictingKeysAbsolutePrefix);
-						Key endKey = endKeyWithPrefix.key.removePrefix(conflictingKeysAbsolutePrefix);
+						Key startKey = startKeyWithPrefix.key.removePrefix(conflictingKeysRange.begin);
+						Key endKey = endKeyWithPrefix.key.removePrefix(conflictingKeysRange.begin);
 						KeyRangeRef kr = KeyRangeRef(startKey, endKey);
 						if (!std::any_of(readConflictRanges.begin(), readConflictRanges.end(), [&kr](KeyRange rCR) {
 							    // Read_conflict_range remains same in the resolver.
