@@ -202,8 +202,8 @@ vector< Standalone<VectorRef<DebugEntryRef>> > debugEntries;
 int64_t totalDebugEntriesSize = 0;
 
 #if CENABLED(0, NOT_IN_CLEAN)
-StringRef debugKey = LiteralStringRef( "" );
-StringRef debugKey2 = LiteralStringRef( "\xff\xff\xff\xff" );
+StringRef debugKey = LiteralStringRef("");
+StringRef debugKey2 = LiteralStringRef("\xff\xff\xff\xff");
 
 bool debugMutation( const char* context, Version version, MutationRef const& mutation ) {
 	if ((mutation.type == mutation.SetValue || mutation.type == mutation.AddValue || mutation.type==mutation.DebugKey) && (mutation.param1 == debugKey || mutation.param1 == debugKey2))

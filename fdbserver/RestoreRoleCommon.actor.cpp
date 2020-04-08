@@ -112,6 +112,7 @@ ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatch
 			if (memory >= SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT) {
 				TraceEvent(SevWarn, "FastRestoreMemoryUsageAboveThreshold")
 				    .detail("BatchIndex", actorBatchIndex)
+				    .detail("FinishedBatch", self->finishedBatch.get())
 				    .detail("Actor", name);
 			}
 			self->delayedActors--;
