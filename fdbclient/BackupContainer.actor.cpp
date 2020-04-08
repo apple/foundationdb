@@ -657,18 +657,6 @@ public:
 		return dumpFileList_impl(Reference<BackupContainerFileSystem>::addRef(this), begin, end);
 	}
 
-	ACTOR static Future<bool> isPartitionedBackup_impl(Reference<BackupContainerFileSystem> bc) {
-		BackupFileList list = wait(bc->dumpFileList(0, std::numeric_limits<Version>::max()));
-		for (const auto& file : list.logs) {
-			if (file.isPartitionedLog()) return true;
-		}
-		return false;
-	}
-
-	Future<bool> isPartitionedBackup() final {
-		return isPartitionedBackup_impl(Reference<BackupContainerFileSystem>::addRef(this));
-	}
-
 	static Version resolveRelativeVersion(Optional<Version> max, Version v, const char *name, Error e) {
 		if(v == invalidVersion) {
 			TraceEvent(SevError, "BackupExpireInvalidVersion").detail(name, v);

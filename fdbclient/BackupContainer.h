@@ -263,9 +263,6 @@ public:
 
 	virtual Future<BackupFileList> dumpFileList(Version begin = 0, Version end = std::numeric_limits<Version>::max()) = 0;
 
-	// If there are partitioned log files, then returns true; otherwise, returns false.
-	virtual Future<bool> isPartitionedBackup() = 0;
-
 	// Get exactly the files necessary to restore to targetVersion.  Returns non-present if
 	// restore to given version is not possible.
 	virtual Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) = 0;
