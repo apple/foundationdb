@@ -279,10 +279,18 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 
 			state std::vector<Future<REPLY_TYPE(Request)>> ongoingReplies;
 			state std::vector<int> ongoingRepliesIndex;
+			state int loopCount = 0;
 			loop {
 				ongoingReplies.clear();
 				ongoingRepliesIndex.clear();
 				for (int i = 0; i < cmdReplies.size(); ++i) {
+					TraceEvent(SevInfo, "FastRestoreGetBatchReplies")
+					    .detail("Requests", requests.size())
+					    .detail("OutstandingReplies", oustandingReplies)
+					    .detail("ReplyIndex", i)
+					    .detail("ReplyReady", cmdReplies[i].isReady())
+					    .detail("RequestNode", requests[i].first)
+					    .detail("Request", requests[i].second.toString());
 					if (!cmdReplies[i].isReady()) { // still wait for reply
 						ongoingReplies.push_back(cmdReplies[i]);
 						ongoingRepliesIndex.push_back(i);
