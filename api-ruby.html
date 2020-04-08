@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.11',
+        VERSION:     '6.2.19',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -244,7 +244,7 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <p class="first admonition-title">Warning</p>
 <p class="last">When using the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>, setting an API version that is not supported by a particular client library will prevent that client from being used to connect to the cluster. In particular, you should not advance the API version of your application after upgrading your client until the cluster has also been upgraded.</p>
 </div>
-<p>For API changes between version 14 and 620 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes.html"><span class="doc">Release Notes</span></a>.</p>
+<p>For API changes between version 14 and 620 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes.html"><span class="doc">Release Notes</span></a> and <a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a>.</p>
 </div>
 <div class="section" id="opening-a-database">
 <h2>Opening a database</h2>
@@ -257,7 +257,8 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <dl class="function">
 <dt id="FDB.open">
 <code class="descclassname">FDB.</code><code class="descname">open</code><span class="sig-paren">(</span><em>cluster_file=nil</em><span class="sig-paren">)</span> &#x2192; Database</dt>
-<dd><p>Initializes the FoundationDB API and connects to the cluster specified by the <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a>. This function is often called without any parameters, using only the defaults. If no cluster file is passed, FoundationDB automatically <a class="reference internal" href="administration.html#specifying-a-cluster-file"><span class="std std-ref">determines a cluster file</span></a> with which to connect to a cluster.</p>
+<dd><p>Connects to the cluster specified by the <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a>. This function is often called without any parameters, using only the defaults. If no cluster file is passed, FoundationDB automatically <a class="reference internal" href="administration.html#specifying-a-cluster-file"><span class="std std-ref">determines a cluster file</span></a> with which to connect to a cluster.</p>
+<p>A single client can use this function multiple times to connect to different clusters simultaneously, with each invocation requiring its own cluster file. To connect to multiple clusters running at different, incompatible versions, the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a> must be used.</p>
 </dd></dl>
 
 <dl class="global">
@@ -408,8 +409,7 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <dt id="FDB::KeySelector">
 <em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">KeySelector</code><span class="sig-paren">(</span><em>key</em>, <em>or_equal</em>, <em>offset</em><span class="sig-paren">)</span></dt>
 <dd><p>Creates a key selector with the given reference key, equality flag, and offset. It is usually more convenient to obtain a key selector with one of the following methods:</p>
-<blockquote>
-<div><dl class="classmethod">
+<dl class="classmethod">
 <dt id="FDB::KeySelector.last_less_than">
 <em class="property">classmethod KeySelector.</em><code class="descname">last_less_than</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; KeySelector</dt>
 <dd><p>Returns a key selector referencing the last (greatest) key in the database less than the specified key.</p>
@@ -433,7 +433,6 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <dd><p>Returns a key selector referencing the first key greater than, or equal to, the specified key.</p>
 </dd></dl>
 
-</div></blockquote>
 </dd></dl>
 
 <dl class="method">
@@ -504,18 +503,16 @@ value of the key is also retrieved, using network bandwidth.</p>
 <dd><p>Returns all keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">begin</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end</span></code> and their associated values as an <code class="xref rb rb-class docutils literal"><span class="pre">Array</span></code> of <a class="reference internal" href="#FDB::KeyValue" title="FDB::KeyValue"><code class="xref rb rb-class docutils literal"><span class="pre">KeyValue</span></code></a> objects. Note the exclusion of <code class="docutils literal"><span class="pre">end</span></code> from the range. This read is fully synchronous.</p>
 <p>Each of <code class="docutils literal"><span class="pre">begin</span></code> and <code class="docutils literal"><span class="pre">end</span></code> may be a key (<code class="xref rb rb-class docutils literal"><span class="pre">String</span></code> or <a class="reference internal" href="#FDB::Key" title="FDB::Key"><code class="xref rb rb-class docutils literal"><span class="pre">Key</span></code></a>) or a <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a>. Note that in the case of a <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a>, the exclusion of <code class="docutils literal"><span class="pre">end</span></code> from the range still applies.</p>
 <p>The <code class="docutils literal"><span class="pre">options</span></code> hash accepts the following optional parameters:</p>
-<blockquote>
-<div><dl class="docutils">
+<dl class="docutils">
 <dt><code class="docutils literal"><span class="pre">:limit</span></code></dt>
 <dd>Only the first <code class="docutils literal"><span class="pre">limit</span></code> keys (and their values) in the range will be returned.</dd>
 <dt><code class="docutils literal"><span class="pre">:reverse</span></code></dt>
-<dd><p class="first">If <code class="docutils literal"><span class="pre">true</span></code>, then the keys in the range will be returned in reverse order.</p>
+<dd><p class="first">If <code class="docutils literal"><span class="pre">true</span></code>, then the keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.</p>
 <p class="last">If <code class="docutils literal"><span class="pre">:limit</span></code> is also specified, the <em>last</em> <code class="docutils literal"><span class="pre">limit</span></code> keys in the range will be returned in reverse order.</p>
 </dd>
 <dt><code class="docutils literal"><span class="pre">:streaming_mode</span></code></dt>
 <dd>A valid <a class="reference internal" href="#ruby-streaming-mode"><span class="std std-ref">streaming mode</span></a>, which provides a hint to FoundationDB about how to retrieve the specified range. This option should generally not be specified, allowing FoundationDB to retrieve the full range very efficiently.</dd>
 </dl>
-</div></blockquote>
 </dd></dl>
 
 <dl class="method">
@@ -748,18 +745,16 @@ both the caching and the increased network bandwidth.</p>
 <p>Like a <a class="reference internal" href="#api-ruby-future"><span class="std std-ref">Future</span></a> object, the returned enumerable issues asynchronous read operations to fetch data in the range, and may block while enumerating its values if the read has not completed. Data will be fetched in one more more efficient batches (depending on the value of the <code class="docutils literal"><span class="pre">:streaming_mode</span></code> parameter).</p>
 <p>Each of <code class="docutils literal"><span class="pre">begin</span></code> and <code class="docutils literal"><span class="pre">end</span></code> may be a key (<code class="xref rb rb-class docutils literal"><span class="pre">String</span></code> or <a class="reference internal" href="#FDB::Key" title="FDB::Key"><code class="xref rb rb-class docutils literal"><span class="pre">Key</span></code></a>) or a <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a>. Note that in the case of a <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a>, the exclusion of <code class="docutils literal"><span class="pre">end</span></code> from the range still applies.</p>
 <p>The <code class="docutils literal"><span class="pre">options</span></code> hash accepts the following optional parameters:</p>
-<blockquote>
-<div><dl class="docutils">
+<dl class="docutils">
 <dt><code class="docutils literal"><span class="pre">:limit</span></code></dt>
 <dd>Only the first <code class="docutils literal"><span class="pre">limit</span></code> keys (and their values) in the range will be returned.</dd>
 <dt><code class="docutils literal"><span class="pre">:reverse</span></code></dt>
-<dd><p class="first">If true, then the keys in the range will be returned in reverse order.</p>
+<dd><p class="first">If <code class="docutils literal"><span class="pre">true</span></code>, then the keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.</p>
 <p class="last">If <code class="docutils literal"><span class="pre">:limit</span></code> is also specified, the <em>last</em> <code class="docutils literal"><span class="pre">limit</span></code> keys in the range will be returned in reverse order.</p>
 </dd>
 <dt><code class="docutils literal"><span class="pre">:streaming_mode</span></code></dt>
 <dd>A valid <a class="reference internal" href="#ruby-streaming-mode"><span class="std std-ref">streaming mode</span></a>, which provides a hint to FoundationDB about how the returned enumerable is likely to be used.  The default is <code class="docutils literal"><span class="pre">:iterator</span></code>.</dd>
 </dl>
-</div></blockquote>
 </dd></dl>
 
 <dl class="method">
@@ -864,6 +859,7 @@ both the caching and the increased network bandwidth.</p>
 <dt id="FDB::Transaction.clear_range">
 <code class="descclassname">Transaction.</code><code class="descname">clear_range</code><span class="sig-paren">(</span><em>begin</em>, <em>end</em><span class="sig-paren">)</span> &#x2192; nil</dt>
 <dd><p>Removes all keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">begin</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end</span></code>, and their associated values. Returns immediately, having modified the snapshot represented by this <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal"><span class="pre">Transaction</span></code></a>.</p>
+<p>Range clears are efficient with FoundationDB &#8211; clearing large amounts of data will be fast. However, this will not immediately free up disk - data for the deleted range is cleaned up in the background. For purposes of computing the transaction size, only the begin and end keys of a clear range are counted. The size of the data stored in the range does not count against the transaction size limit.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
 <p class="last">Unlike in the case of <a class="reference internal" href="#FDB::Transaction.get_range" title="FDB::Transaction.get_range"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_range</span></code></a>, <code class="docutils literal"><span class="pre">begin</span></code> and <code class="docutils literal"><span class="pre">end</span></code> must be keys (<code class="xref rb rb-class docutils literal"><span class="pre">String</span></code> or <a class="reference internal" href="#FDB::Key" title="FDB::Key"><code class="xref rb rb-class docutils literal"><span class="pre">Key</span></code></a>), not <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a>s.  (Resolving arbitrary key selectors would prevent this method from returning immediately, introducing concurrency issues.)</p>
@@ -874,6 +870,7 @@ both the caching and the increased network bandwidth.</p>
 <dt id="FDB::Transaction.clear_range_start_with">
 <code class="descclassname">Transaction.</code><code class="descname">clear_range_start_with</code><span class="sig-paren">(</span><em>prefix</em><span class="sig-paren">)</span> &#x2192; nil</dt>
 <dd><p>Removes all the keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">k.start_with?</span> <span class="pre">prefix</span></code>, and their associated values. Returns immediately, having modified the snapshot represented by this <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal"><span class="pre">Transaction</span></code></a>.</p>
+<p>Range clears are efficient with FoundationDB &#8211; clearing large amounts of data will be fast. However, this will not immediately free up disk - data for the deleted range is cleaned up in the background. For purposes of computing the transaction size, only the begin and end keys of a clear range are counted. The size of the data stored in the range does not count against the transaction size limit.</p>
 </dd></dl>
 
 </div>
@@ -917,6 +914,12 @@ both the caching and the increased network bandwidth.</p>
 <dt id="FDB::Transaction.bit_xor">
 <code class="descclassname">Transaction.</code><code class="descname">bit_xor</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
 <dd><p>Performs a bitwise &#8220;xor&#8221; operation. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.compare_and_clear">
+<code class="descclassname">Transaction.</code><code class="descname">compare_and_clear</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Performs an atomic <code class="docutils literal"><span class="pre">compare</span> <span class="pre">and</span> <span class="pre">clear</span></code> operation. If the existing value in the database is equal to the given value, then given key is cleared.</p>
 </dd></dl>
 
 <dl class="method">
@@ -1228,6 +1231,18 @@ both the caching and the increased network bandwidth.</p>
 <dd><p>Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option, after which the field will be truncated. A negative value disables truncation. One can set the default max field length for all transactions by calling <a class="reference internal" href="#FDB::Database.options.set_transaction_logging_max_field_length" title="FDB::Database.options.set_transaction_logging_max_field_length"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_transaction_logging_max_field_length</span></code></a>.</p>
 </dd></dl>
 
+<dl class="method">
+<dt id="FDB::Transaction.options.set_debug_transaction_identifier">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_debug_transaction_identifier</code><span class="sig-paren">(</span><em>id_string</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Sets a client provided string identifier for the transaction that will be used in scenarios like tracing or profiling. Client trace logging or transaction profiling must be separately enabled.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_log_transaction">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_log_transaction</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled to get log output.</p>
+</dd></dl>
+
 </div>
 </div>
 <div class="section" id="the-transact-method">
@@ -1315,6 +1330,10 @@ both the caching and the increased network bandwidth.</p>
 <dt>
 <code class="descname">Future.on_ready() {|future| block } -&gt; nil</code></dt>
 <dd><p>Yields <code class="docutils literal"><span class="pre">self</span></code> to the given block when the future object is ready. If the future object is ready at the time <code class="xref rb rb-meth docutils literal"><span class="pre">on_ready</span></code> is called, the block may be called immediately in the current thread (although this behavior is not guaranteed). Otherwise, the call may be delayed and take place on the thread with which the client was initialized. Therefore, the block is responsible for any needed thread synchronization (and/or for posting work to your application&#8217;s event loop, thread pool, etc., as may be required by your application&#8217;s architecture).</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">This function guarantees the callback will be executed <strong>at most once</strong>.</p>
+</div>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
 <p class="last">There are a number of requirements and constraints to be aware of when using callbacks with FoundationDB. Please read <a class="reference internal" href="developer-guide.html#developer-guide-programming-with-futures"><span class="std std-ref">Programming with futures</span></a>.</p>
@@ -1846,7 +1865,7 @@ of the UUID bytes.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 23, 2020.<br/>
+      Last updated on Apr 08, 2020.<br/>
     </p>
   </div>
 </footer>

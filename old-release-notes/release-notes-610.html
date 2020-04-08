@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    '../',
-        VERSION:     '6.2.11',
+        VERSION:     '6.2.19',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -330,7 +330,7 @@ have the included IP address as a prefix (for example <code class="docutils lite
 <div class="section" id="bindings">
 <h3>Bindings</h3>
 <ul class="simple">
-<li>API version updated to 610.</li>
+<li>API version updated to 610. See the <a class="reference internal" href="../api-version-upgrade-guide.html#api-version-upgrade-guide-610"><span class="std std-ref">API version upgrade guide</span></a> for upgrade details.</li>
 <li>The API to create a database has been simplified across the bindings. All changes are backward compatible with previous API versions, with one exception in Java noted below. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></li>
 <li>C: <code class="docutils literal"><span class="pre">FDBCluster</span></code> objects and related methods (<code class="docutils literal"><span class="pre">fdb_create_cluster</span></code>, <code class="docutils literal"><span class="pre">fdb_cluster_create_database</span></code>, <code class="docutils literal"><span class="pre">fdb_cluster_set_option</span></code>, <code class="docutils literal"><span class="pre">fdb_cluster_destroy</span></code>, <code class="docutils literal"><span class="pre">fdb_future_get_cluster</span></code>) have been removed. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></li>
 <li>C: Added <code class="docutils literal"><span class="pre">fdb_create_database</span></code> that creates a new <code class="docutils literal"><span class="pre">FDBDatabase</span></code> object synchronously and removed <code class="docutils literal"><span class="pre">fdb_future_get_database</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/942">(PR #942)</a></li>
@@ -424,7 +424,7 @@ have the included IP address as a prefix (for example <code class="docutils lite
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 23, 2020.<br/>
+      Last updated on Apr 08, 2020.<br/>
     </p>
   </div>
 </footer>

@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.11',
+        VERSION:     '6.2.19',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -291,10 +291,10 @@
          <span class="p">],</span>
          <span class="s2">&quot;command_line&quot;</span><span class="o">:</span><span class="s2">&quot;-r simulation&quot;</span><span class="p">,</span>
          <span class="s2">&quot;memory&quot;</span><span class="o">:</span><span class="p">{</span>
-            <span class="s2">&quot;available_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span> <span class="c1">//an estimate of the process&#39; fair share of the memory available to fdbservers</span>
+            <span class="s2">&quot;available_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span> <span class="c1">// an estimate of the process&#39; fair share of the memory available to fdbservers</span>
             <span class="s2">&quot;limit_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span> <span class="c1">// memory limit per process</span>
             <span class="s2">&quot;unused_allocated_memory&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
-            <span class="s2">&quot;used_bytes&quot;</span><span class="o">:</span><span class="mi">0</span>
+            <span class="s2">&quot;used_bytes&quot;</span><span class="o">:</span><span class="mi">0</span> <span class="c1">// virtual memory size of the process</span>
          <span class="p">},</span>
          <span class="s2">&quot;messages&quot;</span><span class="o">:</span><span class="p">[</span>
             <span class="p">{</span>
@@ -354,6 +354,9 @@
                <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span>
             <span class="p">},</span>
             <span class="s2">&quot;megabits_received&quot;</span><span class="o">:</span><span class="p">{</span>
+               <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+            <span class="p">},</span>
+            <span class="s2">&quot;tls_policy_failures&quot;</span><span class="o">:</span><span class="p">{</span>
                <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span>
             <span class="p">}</span>
          <span class="p">},</span>
@@ -566,6 +569,7 @@
       <span class="p">},</span>
       <span class="s2">&quot;required_logs&quot;</span><span class="o">:</span><span class="mi">3</span><span class="p">,</span>
       <span class="s2">&quot;missing_logs&quot;</span><span class="o">:</span><span class="s2">&quot;7f8d623d0cb9966e&quot;</span><span class="p">,</span>
+      <span class="s2">&quot;active_generations&quot;</span><span class="o">:</span><span class="mi">1</span><span class="p">,</span>
       <span class="s2">&quot;description&quot;</span><span class="o">:</span><span class="s2">&quot;Recovery complete.&quot;</span>
    <span class="p">},</span>
    <span class="s2">&quot;workload&quot;</span><span class="o">:</span><span class="p">{</span>
@@ -575,18 +579,28 @@
             <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
             <span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span>
          <span class="p">},</span>
-         <span class="s2">&quot;reads&quot;</span><span class="o">:</span><span class="p">{</span>
+         <span class="s2">&quot;reads&quot;</span><span class="o">:</span><span class="p">{</span> <span class="c1">// measures number of completed read requests</span>
             <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
             <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
             <span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span>
          <span class="p">},</span>
-         <span class="s2">&quot;read_requests&quot;</span><span class="o">:</span><span class="p">{</span>
+         <span class="s2">&quot;read_requests&quot;</span><span class="o">:</span><span class="p">{</span> <span class="c1">// measures number of incoming read requests</span>
+            <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+            <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+            <span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+         <span class="p">},</span>
+         <span class="s2">&quot;location_requests&quot;</span><span class="o">:</span><span class="p">{</span> <span class="c1">// measures number of outgoing key server location responses</span>
+            <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+            <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+            <span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+         <span class="p">},</span>
+         <span class="s2">&quot;memory_errors&quot;</span><span class="o">:</span><span class="p">{</span> <span class="c1">// measures number of proxy_memory_limit_exceeded errors</span>
             <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
             <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
             <span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span>
          <span class="p">}</span>
       <span class="p">},</span>
-      <span class="s2">&quot;bytes&quot;</span><span class="o">:</span><span class="p">{</span> <span class="c1">// of operations (independent of hz). Perfectly spaced operations will have a roughness of 1.0 . Randomly spaced (Poisson-distributed) operations will have a roughness of 2.0, with increased bunching resulting in increased values. Higher roughness can result in increased latency due to increased queuing.</span>
+      <span class="s2">&quot;bytes&quot;</span><span class="o">:</span><span class="p">{</span> <span class="c1">// measures number of logical bytes read/written (ignoring replication factor and overhead on disk). Perfectly spaced operations will have a roughness of 1.0. Randomly spaced (Poisson-distributed) operations will have a roughness of 2.0, with increased bunching resulting in increased values. Higher roughness can result in increased latency due to increased queuing.</span>
          <span class="s2">&quot;written&quot;</span><span class="o">:</span><span class="p">{</span>
             <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
             <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
@@ -733,6 +747,7 @@
                <span class="s2">&quot;missing_data&quot;</span><span class="p">,</span>
                <span class="s2">&quot;healing&quot;</span><span class="p">,</span>
                <span class="s2">&quot;optimizing_team_collections&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;healthy_populating_region&quot;</span><span class="p">,</span>
                <span class="s2">&quot;healthy_repartitioning&quot;</span><span class="p">,</span>
                <span class="s2">&quot;healthy_removing_server&quot;</span><span class="p">,</span>
                <span class="s2">&quot;healthy_rebalancing&quot;</span><span class="p">,</span>
@@ -748,9 +763,9 @@
       <span class="s2">&quot;system_kv_size_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span> <span class="c1">// estimated</span>
       <span class="s2">&quot;partitions_count&quot;</span><span class="o">:</span><span class="mi">2</span><span class="p">,</span>
       <span class="s2">&quot;moving_data&quot;</span><span class="o">:</span><span class="p">{</span>
-         <span class="s2">&quot;total_written_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
-         <span class="s2">&quot;in_flight_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
-         <span class="s2">&quot;in_queue_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+         <span class="s2">&quot;total_written_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span> <span class="c1">// reset whenever data distributor is re-recruited</span>
+         <span class="s2">&quot;in_flight_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span> <span class="c1">// number of bytes currently being moved between storage servers</span>
+         <span class="s2">&quot;in_queue_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span> <span class="c1">// number of bytes in the data distributor queue that should be moved (but are not yet being transferred between storage servers)</span>
          <span class="s2">&quot;highest_priority&quot;</span><span class="o">:</span><span class="mi">0</span>
       <span class="p">},</span>
       <span class="s2">&quot;team_trackers&quot;</span><span class="o">:</span><span class="p">[</span>
@@ -767,6 +782,7 @@
                        <span class="s2">&quot;missing_data&quot;</span><span class="p">,</span>
                        <span class="s2">&quot;healing&quot;</span><span class="p">,</span>
                        <span class="s2">&quot;optimizing_team_collections&quot;</span><span class="p">,</span>
+                       <span class="s2">&quot;healthy_populating_region&quot;</span><span class="p">,</span>
                        <span class="s2">&quot;healthy_repartitioning&quot;</span><span class="p">,</span>
                        <span class="s2">&quot;healthy_removing_server&quot;</span><span class="p">,</span>
                        <span class="s2">&quot;healthy_rebalancing&quot;</span><span class="p">,</span>
@@ -795,7 +811,7 @@
          <span class="p">},</span>
          <span class="s2">&quot;memory&quot;</span><span class="o">:</span><span class="p">{</span>
             <span class="s2">&quot;free_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span> <span class="c1">// an estimate of how many bytes are free to allocate to fdbservers without swapping</span>
-            <span class="s2">&quot;committed_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+            <span class="s2">&quot;committed_bytes&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span> <span class="c1">// an estimate of the number of bytes of memory on the machine that are not free for allocation</span>
             <span class="s2">&quot;total_bytes&quot;</span><span class="o">:</span><span class="mi">0</span> <span class="c1">// an estimate of total physical RAM</span>
          <span class="p">},</span>
          <span class="s2">&quot;contributing_workers&quot;</span><span class="o">:</span><span class="mi">4</span><span class="p">,</span>
@@ -1109,7 +1125,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 23, 2020.<br/>
+      Last updated on Apr 08, 2020.<br/>
     </p>
   </div>
 </footer>

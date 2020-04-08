@@ -141,7 +141,7 @@ Status
 Bindings
 --------
 
-* API version updated to 500.
+* API version updated to 500. See the :ref:`API version upgrade guide <api-version-upgrade-guide-500>` for upgrade details.  
 * Tuples now support single- and double-precision floating point numbers, UUIDs, booleans, and nested tuples. <rdar://problem/30053926>
 * Add ``TRANSACTION_LOGGING_ENABLE`` transaction option that causes the details of a transaction's operations to be logged to the client trace logs. <rdar://problem/32074484>
 * Add ``USED_DURING_COMMIT_PROTECTION_DISABLE`` transaction option that prevents operations performed during that transaction's commit from causing the commit to fail. <rdar://problem/30378251>

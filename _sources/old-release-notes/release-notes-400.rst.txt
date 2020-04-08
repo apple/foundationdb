@@ -1,6 +1,6 @@
-###################
-Release Notes (4.0)
-###################
+#############
+Release Notes
+#############
 
 4.0.2
 =====
@@ -40,6 +40,11 @@ Fixes
 -----
 
 * It was not safe to allocate multiple directories concurrently in the same transaction in the directory layer.
+
+Bindings
+--------
+
+* API version updated to 400. See the :ref:`API version upgrade guide <api-version-upgrade-guide-400>` for upgrade details.
 
 Java
 ----

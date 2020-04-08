@@ -1,6 +1,6 @@
-###################
-Release Notes (4.4)
-###################
+#############
+Release Notes
+#############
 
 4.4.2
 =====
@@ -43,6 +43,11 @@ Fixes
 * A long running process would have a local estimate of time which differed greatly from system clock of the machine the process was running on.
 * DR errors were not being reported properly in DR status.
 * Backup and DR layer status expiration and cleanup now use database read version instead of time. <rdar://problem/24805824>
+
+Bindings
+--------
+
+* API version updated to 440. There are no behavior changes in this API version. See the :ref:`API version upgrade guide <api-version-upgrade-guide-440>` for upgrade details.
 
 Java
 ----

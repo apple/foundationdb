@@ -9,9 +9,9 @@ What is the CAP Theorem?
 
 In 2000, Eric Brewer conjectured that a distributed system cannot simultaneously provide all three of the following desirable properties:
 
-    * Consistency: A read sees all previously completed writes.
-    * Availability: Reads and writes always succeed.
-    * Partition tolerance: Guaranteed properties are maintained even when network failures prevent some machines from communicating with others.
+* Consistency: A read sees all previously completed writes.
+* Availability: Reads and writes always succeed.
+* Partition tolerance: Guaranteed properties are maintained even when network failures prevent some machines from communicating with others.
 
 In 2002, Gilbert and Lynch proved this in the asynchronous and partially synchronous network models, so it is now commonly called the `CAP Theorem <http://en.wikipedia.org/wiki/CAP_theorem>`_.
 

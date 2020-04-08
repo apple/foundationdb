@@ -586,7 +586,9 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
   <i>first</i> keys in the range. Pass <a href="../../../com/apple/foundationdb/ReadTransaction.html#ROW_LIMIT_UNLIMITED"><code>ROW_LIMIT_UNLIMITED</code></a> if this query
   should not limit the number of results. If <code>reverse</code> is <code>true</code> rows
   will be limited starting at the end of the range.</dd>
-<dd><code>reverse</code> - return results starting at the end of the range in reverse order</dd>
+<dd><code>reverse</code> - return results starting at the end of the range in reverse order.
+  Reading ranges in reverse is supported natively by the database and should
+  have minimal extra cost.</dd>
 <dt><span class="returnLabel">Returns:</span></dt>
 <dd>a handle to access the results of the asynchronous call</dd>
 <dt><span class="seeLabel">See Also:</span></dt>
@@ -617,10 +619,22 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
   <i>first</i> keys in the range. Pass <a href="../../../com/apple/foundationdb/ReadTransaction.html#ROW_LIMIT_UNLIMITED"><code>ROW_LIMIT_UNLIMITED</code></a> if this query
   should not limit the number of results. If <code>reverse</code> is <code>true</code> rows
   will be limited starting at the end of the range.</dd>
-<dd><code>reverse</code> - return results starting at the end of the range in reverse order</dd>
+<dd><code>reverse</code> - return results starting at the end of the range in reverse order.
+  Reading ranges in reverse is supported natively by the database and should
+  have minimal extra cost.</dd>
 <dd><code>mode</code> - provide a hint about how the results are to be used. This
   can provide speed improvements or efficiency gains based on the caller's
-  knowledge of the upcoming access pattern.</dd>
+  knowledge of the upcoming access pattern.
+
+ <p>
+     When converting the result of this query to a list using <a href="../../../com/apple/foundationdb/async/AsyncIterable.html#asList--"><code>AsyncIterable.asList()</code></a> with the <code>ITERATOR</code> streaming
+     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+     known in advance that the <a href="../../../com/apple/foundationdb/async/AsyncIterable.html#asList--"><code>AsyncIterable.asList()</code></a> function will fetch all results in the range. If a limit is specified,
+     the <code>EXACT</code> streaming mode will be used, and otherwise it will use <code>WANT_ALL</code>.
+
+     To achieve comparable performance when iterating over an entire range without using <a href="../../../com/apple/foundationdb/async/AsyncIterable.html#asList--"><code>AsyncIterable.asList()</code></a>, the same
+     streaming mode would need to be used.
+ </p></dd>
 <dt><span class="returnLabel">Returns:</span></dt>
 <dd>a handle to access the results of the asynchronous call</dd>
 <dt><span class="seeLabel">See Also:</span></dt>
@@ -700,7 +714,9 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
   <i>first</i> keys in the range. Pass <a href="../../../com/apple/foundationdb/ReadTransaction.html#ROW_LIMIT_UNLIMITED"><code>ROW_LIMIT_UNLIMITED</code></a> if this query
   should not limit the number of results. If <code>reverse</code> is <code>true</code> rows
   will be limited starting at the end of the range.</dd>
-<dd><code>reverse</code> - return results starting at the end of the range in reverse order</dd>
+<dd><code>reverse</code> - return results starting at the end of the range in reverse order.
+  Reading ranges in reverse is supported natively by the database and should
+  have minimal extra cost.</dd>
 <dt><span class="returnLabel">Returns:</span></dt>
 <dd>a handle to access the results of the asynchronous call</dd>
 <dt><span class="seeLabel">See Also:</span></dt>
@@ -731,10 +747,22 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
   <i>first</i> keys in the range. Pass <a href="../../../com/apple/foundationdb/ReadTransaction.html#ROW_LIMIT_UNLIMITED"><code>ROW_LIMIT_UNLIMITED</code></a> if this query
   should not limit the number of results. If <code>reverse</code> is <code>true</code> rows
   will be limited starting at the end of the range.</dd>
-<dd><code>reverse</code> - return results starting at the end of the range in reverse order</dd>
+<dd><code>reverse</code> - return results starting at the end of the range in reverse order.
+  Reading ranges in reverse is supported natively by the database and should
+  have minimal extra cost.</dd>
 <dd><code>mode</code> - provide a hint about how the results are to be used. This
   can provide speed improvements or efficiency gains based on the caller's
-  knowledge of the upcoming access pattern.</dd>
+  knowledge of the upcoming access pattern.
+
+ <p>
+     When converting the result of this query to a list using <a href="../../../com/apple/foundationdb/async/AsyncIterable.html#asList--"><code>AsyncIterable.asList()</code></a> with the <code>ITERATOR</code> streaming
+     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+     known in advance that the <a href="../../../com/apple/foundationdb/async/AsyncIterable.html#asList--"><code>AsyncIterable.asList()</code></a> function will fetch all results in the range. If a limit is specified,
+     the <code>EXACT</code> streaming mode will be used, and otherwise it will use <code>WANT_ALL</code>.
+
+     To achieve comparable performance when iterating over an entire range without using <a href="../../../com/apple/foundationdb/async/AsyncIterable.html#asList--"><code>AsyncIterable.asList()</code></a>, the same
+     streaming mode would need to be used.
+ </p></dd>
 <dt><span class="returnLabel">Returns:</span></dt>
 <dd>a handle to access the results of the asynchronous call</dd>
 <dt><span class="seeLabel">See Also:</span></dt>
@@ -820,7 +848,9 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
   <i>first</i> keys in the range. Pass <a href="../../../com/apple/foundationdb/ReadTransaction.html#ROW_LIMIT_UNLIMITED"><code>ROW_LIMIT_UNLIMITED</code></a> if this query
   should not limit the number of results. If <code>reverse</code> is <code>true</code> rows
   will be limited starting at the end of the range.</dd>
-<dd><code>reverse</code> - return results starting at the end of the range in reverse order</dd>
+<dd><code>reverse</code> - return results starting at the end of the range in reverse order.
+  Reading ranges in reverse is supported natively by the database and should
+  have minimal extra cost.</dd>
 <dt><span class="returnLabel">Returns:</span></dt>
 <dd>a handle to access the results of the asynchronous call</dd>
 <dt><span class="seeLabel">See Also:</span></dt>
@@ -853,10 +883,22 @@ extends <a href="../../../com/apple/foundationdb/ReadTransactionContext.html" ti
   <i>first</i> keys in the range. Pass <a href="../../../com/apple/foundationdb/ReadTransaction.html#ROW_LIMIT_UNLIMITED"><code>ROW_LIMIT_UNLIMITED</code></a> if this query
   should not limit the number of results. If <code>reverse</code> is <code>true</code> rows
   will be limited starting at the end of the range.</dd>
-<dd><code>reverse</code> - return results starting at the end of the range in reverse order</dd>
+<dd><code>reverse</code> - return results starting at the end of the range in reverse order.
+  Reading ranges in reverse is supported natively by the database and should
+  have minimal extra cost.</dd>
 <dd><code>mode</code> - provide a hint about how the results are to be used. This
   can provide speed improvements or efficiency gains based on the caller's
-  knowledge of the upcoming access pattern.</dd>
+  knowledge of the upcoming access pattern.
+
+ <p>
+     When converting the result of this query to a list using <a href="../../../com/apple/foundationdb/async/AsyncIterable.html#asList--"><code>AsyncIterable.asList()</code></a> with the <code>ITERATOR</code> streaming
+     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+     known in advance that the <a href="../../../com/apple/foundationdb/async/AsyncIterable.html#asList--"><code>AsyncIterable.asList()</code></a> function will fetch all results in the range. If a limit is specified,
+     the <code>EXACT</code> streaming mode will be used, and otherwise it will use <code>WANT_ALL</code>.
+
+     To achieve comparable performance when iterating over an entire range without using <a href="../../../com/apple/foundationdb/async/AsyncIterable.html#asList--"><code>AsyncIterable.asList()</code></a>, the same
+     streaming mode would need to be used.
+ </p></dd>
 <dt><span class="returnLabel">Returns:</span></dt>
 <dd>a handle to access the results of the asynchronous call</dd>
 <dt><span class="seeLabel">See Also:</span></dt>

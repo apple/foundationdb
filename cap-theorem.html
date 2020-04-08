@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.11',
+        VERSION:     '6.2.19',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -152,13 +152,11 @@
 <div class="section" id="what-is-the-cap-theorem">
 <h2>What is the CAP Theorem?</h2>
 <p>In 2000, Eric Brewer conjectured that a distributed system cannot simultaneously provide all three of the following desirable properties:</p>
-<blockquote>
-<div><ul class="simple">
+<ul class="simple">
 <li>Consistency: A read sees all previously completed writes.</li>
 <li>Availability: Reads and writes always succeed.</li>
 <li>Partition tolerance: Guaranteed properties are maintained even when network failures prevent some machines from communicating with others.</li>
 </ul>
-</div></blockquote>
 <p>In 2002, Gilbert and Lynch proved this in the asynchronous and partially synchronous network models, so it is now commonly called the <a class="reference external" href="http://en.wikipedia.org/wiki/CAP_theorem">CAP Theorem</a>.</p>
 <p>Brewer originally described this impossibility result as forcing a choice of &#8220;two out of the three&#8221; <strong>CAP</strong> properties, leaving three viable design options: <strong>CP</strong>, <strong>AP</strong>, and <strong>CA</strong>. However, further consideration shows that <strong>CA</strong> is not really a coherent option because a system that is not Partition-tolerant will, by definition, be forced to give up Consistency or Availability during a partition. Therefore, a more <a class="reference external" href="http://dbmsmusings.blogspot.com/2010/04/problems-with-cap-and-yahoos-little.html">modern interpretation</a> of the theorem is: <em>during a network partition, a distributed system must choose either Consistency or Availability.</em></p>
 </div>
@@ -222,7 +220,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 23, 2020.<br/>
+      Last updated on Apr 08, 2020.<br/>
     </p>
   </div>
 </footer>

@@ -214,7 +214,7 @@ extends java.lang.Object</pre>
 <tr id="i11" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/DatabaseOptions.html#setTransactionRetryLimit-long-">setTransactionRetryLimit</a></span>(long&nbsp;value)</code>
-<div class="block">Set a timeout in milliseconds which, when elapsed, will cause a transaction automatically to be cancelled.</div>
+<div class="block">Set a maximum number of retries after which additional calls to <code>onError</code> will throw the most recently seen error code.</div>
 </td>
 </tr>
 <tr id="i12" class="altColor">
@@ -379,7 +379,7 @@ extends java.lang.Object</pre>
 <li class="blockList">
 <h4>setTransactionRetryLimit</h4>
 <pre>public&nbsp;void&nbsp;setTransactionRetryLimit(long&nbsp;value)</pre>
-<div class="block">Set a timeout in milliseconds which, when elapsed, will cause a transaction automatically to be cancelled. This sets the <code>retry_limit</code> option of each transaction created by this database. See the transaction option description for more information.</div>
+<div class="block">Set a maximum number of retries after which additional calls to <code>onError</code> will throw the most recently seen error code. This sets the <code>retry_limit</code> option of each transaction created by this database. See the transaction option description for more information.</div>
 <dl>
 <dt><span class="paramLabel">Parameters:</span></dt>
 <dd><code>value</code> - number of times to retry</dd>

@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.11',
+        VERSION:     '6.2.19',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -102,6 +102,7 @@
 <li><a class="reference internal" href="#converting-an-existing-cluster-to-use-tls">Converting an existing cluster to use TLS</a></li>
 <li><a class="reference internal" href="#monitoring-cluster-status">Monitoring cluster status</a><ul>
 <li><a class="reference internal" href="#process-details">Process details</a></li>
+<li><a class="reference internal" href="#machine-readable-status">Machine-readable status</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#fdbmonitor-and-fdbserver"><code class="docutils literal"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal"><span class="pre">fdbserver</span></code></a></li>
@@ -197,6 +198,7 @@
 <li><a class="reference internal" href="#converting-an-existing-cluster-to-use-tls">Converting an existing cluster to use TLS</a></li>
 <li><a class="reference internal" href="#monitoring-cluster-status">Monitoring cluster status</a><ul>
 <li><a class="reference internal" href="#process-details">Process details</a></li>
+<li><a class="reference internal" href="#machine-readable-status">Machine-readable status</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#fdbmonitor-and-fdbserver"><code class="docutils literal"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal"><span class="pre">fdbserver</span></code></a></li>
@@ -386,26 +388,22 @@ host:~ user$ sudo launchctl unload /Library/LaunchDaemons/com.foundationdb.fdbmo
 </div>
 </li>
 <li><p class="first">If you have previously <a class="reference internal" href="#removing-machines-from-a-cluster"><span class="std std-ref">excluded</span></a> a machine from the cluster, you will need to take it off the exclusion list using the <code class="docutils literal"><span class="pre">include</span> <span class="pre">&lt;ip&gt;</span></code> command of fdbcli before it can be a full participant in the cluster.</p>
-<blockquote>
-<div><div class="admonition note">
+</li>
+</ol>
+<div class="admonition note">
 <p class="first admonition-title">Note</p>
 <p class="last">Addresses have the form <code class="docutils literal"><span class="pre">IP</span></code>:<code class="docutils literal"><span class="pre">PORT</span></code>. This form is used even if TLS is enabled.</p>
 </div>
-</div></blockquote>
-</li>
-</ol>
 </div>
 <div class="section" id="removing-machines-from-a-cluster">
 <span id="id5"></span><h2>Removing machines from a cluster</h2>
 <p>To temporarily or permanently remove one or more machines from a FoundationDB cluster without compromising fault tolerance or availability, perform the following steps:</p>
-<ol class="arabic">
-<li><p class="first">Make sure that your current redundancy mode will still make sense after removing the machines you want to remove. For example, if you are currently using <code class="docutils literal"><span class="pre">triple</span></code> redundancy and are reducing the number of servers to fewer than five, you should probably switch to a lower redundancy mode first. See <a class="reference internal" href="configuration.html#configuration-choosing-redundancy-mode"><span class="std std-ref">Choosing a redundancy mode</span></a>.</p>
-</li>
-<li><p class="first">If any of the machines that you would like to remove is a coordinator, you should <a class="reference internal" href="configuration.html#configuration-changing-coordination-servers"><span class="std std-ref">change coordination servers</span></a> to a set of servers that you will not be removing. Remember that even after changing coordinators, the old coordinators need to remain available until all servers and clients of the cluster have automatically updated their cluster files.</p>
-</li>
-<li><p class="first">Use the <code class="docutils literal"><span class="pre">exclude</span></code> command in <code class="docutils literal"><span class="pre">fdbcli</span></code> on the machines you plan to remove:</p>
-<blockquote>
-<div><div class="highlight-default"><div class="highlight"><pre><span></span>user@host1$ fdbcli
+<ol class="arabic simple">
+<li>Make sure that your current redundancy mode will still make sense after removing the machines you want to remove. For example, if you are currently using <code class="docutils literal"><span class="pre">triple</span></code> redundancy and are reducing the number of servers to fewer than five, you should probably switch to a lower redundancy mode first. See <a class="reference internal" href="configuration.html#configuration-choosing-redundancy-mode"><span class="std std-ref">Choosing a redundancy mode</span></a>.</li>
+<li>If any of the machines that you would like to remove is a coordinator, you should <a class="reference internal" href="configuration.html#configuration-changing-coordination-servers"><span class="std std-ref">change coordination servers</span></a> to a set of servers that you will not be removing. Remember that even after changing coordinators, the old coordinators need to remain available until all servers and clients of the cluster have automatically updated their cluster files.</li>
+<li>Use the <code class="docutils literal"><span class="pre">exclude</span></code> command in <code class="docutils literal"><span class="pre">fdbcli</span></code> on the machines you plan to remove:</li>
+</ol>
+<div class="highlight-default"><div class="highlight"><pre><span></span>user@host1$ fdbcli
 Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
 
 The database is available.
@@ -423,8 +421,7 @@ It is now safe to remove these machines or processes from the cluster.
 </div>
 <p>Excluding a server doesn&#8217;t shut it down immediately; data on the machine is first moved away. When the <code class="docutils literal"><span class="pre">exclude</span></code> command completes successfully (by returning control to the command prompt), the machines that you specified are no longer required to maintain the configured redundancy mode. A large amount of data might need to be transferred first, so be patient. When the process is complete, the excluded machine or process can be shut down without fault tolerance or availability consequences.</p>
 <p>If you interrupt the exclude command with Ctrl-C after seeing the &#8220;waiting for state to be removed&#8221; message, the exclusion work will continue in the background. Repeating the command will continue waiting for the exclusion to complete. To reverse the effect of the <code class="docutils literal"><span class="pre">exclude</span></code> command, use the <code class="docutils literal"><span class="pre">include</span></code> command.</p>
-</div></blockquote>
-</li>
+<ol class="arabic" start="4">
 <li><p class="first">On each removed machine, stop the FoundationDB server and prevent it from starting at the next boot. Follow the <a class="reference internal" href="#administration-running-foundationdb"><span class="std std-ref">instructions for your platform</span></a>. For example, on Ubuntu:</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span>user@host3$ sudo service foundationdb stop
 user@host3$ sudo update-rc.d foundationdb disable
@@ -579,8 +576,9 @@ Client time: 03/19/18 08:51:51
 </tbody>
 </table>
 <p>The &#8220;Memory availability&#8221; is a conservative estimate of the minimal RAM available to any <code class="docutils literal"><span class="pre">fdbserver</span></code> process across all machines in the cluster. This value is calculated in two steps. Memory available per process is first calculated <em>for each machine</em> by taking:</p>
-<blockquote>
-<div>availability = ((total - committed) + sum(processSize)) / processes</div></blockquote>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">availability</span> <span class="o">=</span> <span class="p">((</span><span class="n">total</span> <span class="o">-</span> <span class="n">committed</span><span class="p">)</span> <span class="o">+</span> <span class="nb">sum</span><span class="p">(</span><span class="n">processSize</span><span class="p">))</span> <span class="o">/</span> <span class="n">processes</span>
+</pre></div>
+</div>
 <p>where:</p>
 <table border="1" class="docutils">
 <colgroup>
@@ -775,6 +773,31 @@ Client time: 03/19/18 08:59:37
 </pre></div>
 </div>
 </div>
+<div class="section" id="machine-readable-status">
+<h3>Machine-readable status</h3>
+<p>The status command can provide a complete summary of statistics about the cluster and the database with the <code class="docutils literal"><span class="pre">json</span></code> argument. Full documentation for <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code> output can be found <a class="reference internal" href="mr-status.html"><span class="doc">here</span></a>.
+From the output of <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code>, operators can find useful health metrics to determine whether or not their cluster is hitting performance limits.</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="4%" />
+<col width="96%" />
+</colgroup>
+<tbody valign="top">
+<tr class="row-odd"><td>Ratekeeper limit</td>
+<td><code class="docutils literal"><span class="pre">cluster.qos.transactions_per_second_limit</span></code> contains the number of read versions per second that the cluster can give out. A low ratekeeper limit indicates that the cluster performance is limited in some way. The reason for a low ratekeeper limit can be found at <code class="docutils literal"><span class="pre">cluster.qos.performance_limited_by</span></code>. <code class="docutils literal"><span class="pre">cluster.qos.released_transactions_per_second</span></code> describes the number of read versions given out per second, and can be used to tell how close the ratekeeper is to throttling.</td>
+</tr>
+<tr class="row-even"><td>Storage queue size</td>
+<td><code class="docutils literal"><span class="pre">cluster.qos.worst_queue_bytes_storage_server</span></code> contains the maximum size in bytes of a storage queue. Each storage server has mutations that have not yet been made durable, stored in its storage queue. If this value gets too large, it indicates a storage server is falling behind. A large storage queue will cause the ratekeeper to increase throttling. However, depending on the configuration, the ratekeeper can ignore the worst storage queue from one fault domain. Thus, ratekeeper uses <code class="docutils literal"><span class="pre">cluster.qos.limiting_queue_bytes_storage_server</span></code> to determine the throttling level.</td>
+</tr>
+<tr class="row-odd"><td>Durable version lag</td>
+<td><code class="docutils literal"><span class="pre">cluster.qos.worst_durability_lag_storage_server</span></code> contains information about the worst storage server durability lag. The <code class="docutils literal"><span class="pre">versions</span></code> subfield contains the maximum number of versions in a storage queue. Ideally, this should be near 5 million. The <code class="docutils literal"><span class="pre">seconds</span></code> subfield contains the maximum number of seconds of non-durable data in a storage queue. Ideally, this should be near 5 seconds. If a storage server is overwhelmed, the durability lag could rise, causing performance issues.</td>
+</tr>
+<tr class="row-even"><td>Transaction log queue</td>
+<td><code class="docutils literal"><span class="pre">cluster.qos.worst_queue_bytes_log_server</span></code> contains the maximum size in bytes of the mutations stored on a transaction log that have not yet been popped by storage servers. A large transaction log queue size can potentially cause the ratekeeper to increase throttling.</td>
+</tr>
+</tbody>
+</table>
+</div>
 </div>
 <div class="section" id="fdbmonitor-and-fdbserver">
 <span id="administration-fdbmonitor"></span><h2><code class="docutils literal"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal"><span class="pre">fdbserver</span></code></h2>
@@ -789,8 +812,7 @@ Client time: 03/19/18 08:59:37
 </div>
 <div class="section" id="managing-trace-files">
 <span id="administration-managing-trace-files"></span><h2>Managing trace files</h2>
-<blockquote>
-<div>By default, trace files are output to:</div></blockquote>
+<p>By default, trace files are output to:</p>
 <ul class="simple">
 <li><code class="docutils literal"><span class="pre">/var/log/foundationdb/</span></code> on Linux</li>
 <li><code class="docutils literal"><span class="pre">/usr/local/foundationdb/logs/</span></code> on macOS</li>
@@ -885,6 +907,10 @@ Client time: 03/19/18 08:59:37
 <p class="first admonition-title">Warning</p>
 <p class="last">The macOS version of the FoundationDB server is intended for single-machine development use only; its use in multi-machine clusters is not supported. In the present release, the Linux version is the best-tested and most performant platform for multi-machine clusters.</p>
 </div>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">For information about upgrading client application code to newer API versions, see the <a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a>.</p>
+</div>
 <div class="section" id="install-updated-client-binaries">
 <h3>Install updated client binaries</h3>
 <p>Apart from patch version upgrades, you should install the new client binary on all your clients and restart them to ensure they can reconnect after the upgrade. See <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">Multi-version client</span></a> for more information. Running <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code> will show you which versions clients are connecting with so you can verify before upgrading that clients are correctly configured.</p>
@@ -897,13 +923,13 @@ Client time: 03/19/18 08:59:37
 <h3>Perform the upgrade</h3>
 <p>For <strong>Ubuntu</strong>, perform the upgrade using the dpkg command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo dpkg -i foundationdb-clients_6.2.11-1_amd64.deb \
-foundationdb-server_6.2.11-1_amd64.deb
+user&#64;host$ sudo dpkg -i foundationdb-clients_6.2.19-1_amd64.deb \
+foundationdb-server_6.2.19-1_amd64.deb
 </pre>
 <p>For <strong>RHEL/CentOS</strong>, perform the upgrade using the rpm command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo rpm -Uvh foundationdb-clients-6.2.11-1.el7.x86_64.rpm \
-foundationdb-server-6.2.11-1.el7.x86_64.rpm
+user&#64;host$ sudo rpm -Uvh foundationdb-clients-6.2.19-1.el7.x86_64.rpm \
+foundationdb-server-6.2.19-1.el7.x86_64.rpm
 </pre>
 <p>The <code class="docutils literal"><span class="pre">foundationdb-clients</span></code> package also installs the <a class="reference internal" href="api-python.html"><span class="doc">Python</span></a> and <a class="reference internal" href="api-c.html"><span class="doc">C</span></a> APIs. If your clients use <a class="reference internal" href="api-ruby.html"><span class="doc">Ruby</span></a>, <a class="reference external" href="javadoc/index.html">Java</a>, or <a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go</a>, follow the instructions in the corresponding language documentation to install the APIs.</p>
 </div>
@@ -928,11 +954,17 @@ foundationdb-server-6.2.11-1.el7.x86_64.rpm
 </div>
 <div class="section" id="upgrading-from-6-0-x">
 <h3>Upgrading from 6.0.x</h3>
-<p>Upgrades from 6.0.x will keep all your old data and configuration settings. Data distribution will slowly reorganize how data is spread across storage servers.</p>
+<p>Upgrades from 6.0.x will keep all your old data and configuration settings.</p>
 </div>
 <div class="section" id="upgrading-from-5-2-x">
 <h3>Upgrading from 5.2.x</h3>
-<p>Upgrades from 5.2.x will keep all your old data and configuration settings.</p>
+<p>Upgrades from 5.2.x will keep all your old data and configuration settings. Some affinities that certain roles have for running on processes that haven&#8217;t set a process class have changed, which may result in these processes running in different locations after upgrading. To avoid this, set process classes as needed. The following changes were made:</p>
+<ul class="simple">
+<li>The proxies and master no longer prefer <code class="docutils literal"><span class="pre">resolution</span></code> or <code class="docutils literal"><span class="pre">transaction</span></code> class processes to processes with unset class.</li>
+<li>The resolver no longer prefers <code class="docutils literal"><span class="pre">transaction</span></code> class processes to processes with unset class.</li>
+<li>The cluster controller no longer prefers <code class="docutils literal"><span class="pre">master</span></code>, <code class="docutils literal"><span class="pre">resolution</span></code> or <code class="docutils literal"><span class="pre">proxy</span></code> class processes to processes with unset class.</li>
+</ul>
+<p>See <a class="reference internal" href="configuration.html#guidelines-process-class-config"><span class="std std-ref">Guidelines for setting process class</span></a> for recommendations on setting process classes. All of the above roles will prefer <code class="docutils literal"><span class="pre">stateless</span></code> class processes to ones that don&#8217;t set a class.</p>
 </div>
 <div class="section" id="upgrading-from-5-0-x-5-1-x">
 <h3>Upgrading from 5.0.x - 5.1.x</h3>
@@ -965,7 +997,7 @@ foundationdb-server-6.2.11-1.el7.x86_64.rpm
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 23, 2020.<br/>
+      Last updated on Apr 08, 2020.<br/>
     </p>
   </div>
 </footer>

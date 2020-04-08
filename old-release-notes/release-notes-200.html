@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Release Notes (2.0) &#8212; FoundationDB 6.2</title>
+    <title>Release Notes &#8212; FoundationDB 6.2</title>
     
     <link rel="stylesheet" href="../_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    '../',
-        VERSION:     '6.2.11',
+        VERSION:     '6.2.19',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -31,8 +31,8 @@
     <script type="text/javascript" src="../_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
     <script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="Release Notes (3.0)" href="release-notes-300.html" />
-    <link rel="prev" title="Release Notes (1.0)" href="release-notes-100.html" />
+    <link rel="next" title="Release Notes" href="release-notes-300.html" />
+    <link rel="prev" title="Release Notes" href="release-notes-100.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
@@ -81,7 +81,7 @@
   <ul class="dropdown-menu localtoc"
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
-<li><a class="reference internal" href="#">Release Notes (2.0)</a><ul>
+<li><a class="reference internal" href="#">Release Notes</a><ul>
 <li><a class="reference internal" href="#id1">2.0.10</a><ul>
 <li><a class="reference internal" href="#fixes">Fixes</a></li>
 </ul>
@@ -137,6 +137,7 @@
 <li><a class="reference internal" href="#id24">Performance</a></li>
 <li><a class="reference internal" href="#id25">Fixes</a></li>
 <li><a class="reference internal" href="#other-changes">Other changes</a></li>
+<li><a class="reference internal" href="#bindings">Bindings</a></li>
 <li><a class="reference internal" href="#id26">Java</a></li>
 <li><a class="reference internal" href="#node">Node</a></li>
 <li><a class="reference internal" href="#ruby">Ruby</a></li>
@@ -157,11 +158,11 @@
               
                 
   <li>
-    <a href="release-notes-100.html" title="Previous Chapter: Release Notes (1.0)"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes (1.0)</span>
+    <a href="release-notes-100.html" title="Previous Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes</span>
     </a>
   </li>
   <li>
-    <a href="release-notes-300.html" title="Next Chapter: Release Notes (3.0)"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Release Notes (3.0) &raquo;</span>
+    <a href="release-notes-300.html" title="Next Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Release Notes &raquo;</span>
     </a>
   </li>
               
@@ -189,7 +190,7 @@
   <div class="row">
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
-<li><a class="reference internal" href="#">Release Notes (2.0)</a><ul>
+<li><a class="reference internal" href="#">Release Notes</a><ul>
 <li><a class="reference internal" href="#id1">2.0.10</a><ul>
 <li><a class="reference internal" href="#fixes">Fixes</a></li>
 </ul>
@@ -245,6 +246,7 @@
 <li><a class="reference internal" href="#id24">Performance</a></li>
 <li><a class="reference internal" href="#id25">Fixes</a></li>
 <li><a class="reference internal" href="#other-changes">Other changes</a></li>
+<li><a class="reference internal" href="#bindings">Bindings</a></li>
 <li><a class="reference internal" href="#id26">Java</a></li>
 <li><a class="reference internal" href="#node">Node</a></li>
 <li><a class="reference internal" href="#ruby">Ruby</a></li>
@@ -262,8 +264,8 @@
       </div>
     <div class="col-md-9 content">
       
-  <div class="section" id="release-notes-2-0">
-<h1>Release Notes (2.0)</h1>
+  <div class="section" id="release-notes">
+<h1>Release Notes</h1>
 <div class="section" id="id1">
 <h2>2.0.10</h2>
 <p>Release 2.0.10 is protocol-compatible with all prior 2.0.x releases. Users should continue to employ the bindings released with 2.0.0, with the exception of the following bindings:</p>
@@ -505,10 +507,15 @@
 <li>Discontinued testing and support for Ubuntu 11.04. We continue to support Ubuntu 11.10 and later.</li>
 </ul>
 </div>
+<div class="section" id="bindings">
+<h3>Bindings</h3>
+<ul class="simple">
+<li>API version updated to 200. See the <a class="reference internal" href="../api-version-upgrade-guide.html#api-version-upgrade-guide-200"><span class="std std-ref">API version upgrade guide</span></a> for upgrade details.</li>
+</ul>
+</div>
 <div class="section" id="id26">
 <h3>Java</h3>
 <ul class="simple">
-<li>Support for API version 200 and backwards compatibility with previous API versions.</li>
 <li>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</li>
 <li>In most cases, exceptions thrown in synchronous-style Java programs will have the original calling line of code in the backtrace.</li>
 <li>Native resources are handled in a safer and more efficient manner.</li>
@@ -520,7 +527,6 @@
 <div class="section" id="node">
 <h3>Node</h3>
 <ul class="simple">
-<li>Support for API version 200 and backwards compatibility with previous API versions.</li>
 <li>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</li>
 <li>Support for the Promise/A+ specification with supporting utilities.</li>
 <li>Futures can take multiple callbacks. Callbacks can be added if the original function was called with a callback. The Future type is exposed in our binding.</li>
@@ -536,7 +542,6 @@
 <div class="section" id="ruby">
 <h3>Ruby</h3>
 <ul class="simple">
-<li>Support for API version 200 and backwards compatibility with previous API versions.</li>
 <li>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</li>
 <li>Tuple and subspace range assume the empty tuple if none is passed.</li>
 <li>Added <code class="docutils literal"><span class="pre">as_foundationdb_key</span></code> and <code class="docutils literal"><span class="pre">as_foundationdb_value</span></code> support.</li>
@@ -548,7 +553,6 @@
 <div class="section" id="id27">
 <h3>Python</h3>
 <ul class="simple">
-<li>Support for API version 200 and backwards compatibility with previous API versions.</li>
 <li>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</li>
 <li>Snapshot transactions can be used in retry loops.</li>
 <li>Support for gevent 1.0.</li>
@@ -566,7 +570,6 @@
 <div class="section" id="net">
 <h3>.NET</h3>
 <ul class="simple">
-<li>Support for API version 200 and backwards compatibility with previous API versions.</li>
 <li>New APIs for allocating and managing keyspace (<a class="reference internal" href="../developer-guide.html#developer-guide-directories"><span class="std std-ref">Directory</span></a>).</li>
 </ul>
 </div>
@@ -604,7 +607,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 23, 2020.<br/>
+      Last updated on Apr 08, 2020.<br/>
     </p>
   </div>
 </footer>

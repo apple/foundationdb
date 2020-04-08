@@ -1,6 +1,6 @@
-###################
-Release Notes (4.2)
-###################
+#############
+Release Notes
+#############
 
 4.2.1
 =====
@@ -20,6 +20,11 @@ Features
 * A new version of the `Java bindings <../javadoc-completable/index.html>`_  adds support for Java 8 Completable Futures.
 * Information on the versions of connected clients has been added to :doc:`Machine-Readable Status </mr-status>`.
 * Information on the status of running backups has been added to :doc:`Machine-Readable Status </mr-status>`.
+
+Bindings
+--------
+
+* API version updated to 420. There are no behavior changes in this API version. See the :ref:`API version upgrade guide <api-version-upgrade-guide-420>` for upgrade details.
 
 Earlier release notes
 ---------------------

@@ -128,9 +128,9 @@ Certificate file default location
 
 The default behavior when the certificate or key file is not specified is to look for a file named ``fdb.pem`` in the current working directory. If this file is not present, an attempt is made to load a file from a system-dependent location as follows:
 
-  * Linux: ``/etc/foundationdb/fdb.pem``
-  * macOS: ``/usr/local/etc/foundationdb/fdb.pem``
-  * Windows: ``C:\ProgramData\foundationdb\fdb.pem``
+* Linux: ``/etc/foundationdb/fdb.pem``
+* macOS: ``/usr/local/etc/foundationdb/fdb.pem``
+* Windows: ``C:\ProgramData\foundationdb\fdb.pem``
 
 Default Peer Verification
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -138,21 +138,23 @@ Default Peer Verification
 The default peer verification is ``Check.Valid=1``.
 
 Default Password
-^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^
 
 There is no default password. If no password is specified, it is assumed that the private key is unencrypted.
 
-Parameters and client bindings
-------------------------------
+Permissions
+-----------
+
+All files used by TLS must have sufficient read permissions such that the user running the FoundationDB server or client process can access them. It may also be necessary to have similar read permissions on the parent directories of the files used in the TLS configuration.
 
 Automatic TLS certificate refresh
 ---------------------------------
 
 The TLS certificate will be automatically refreshed on a configurable cadence. The server will inspect the CA, certificate, and key files in the specified locations periodically, and will begin using the new versions if following criterion were met:
 
-  * They are changed, judging by the last modified time.
-  * They are valid certificates.
-  * The key file matches the certificate file.
+* They are changed, judging by the last modified time.
+* They are valid certificates.
+* The key file matches the certificate file.
 
 The refresh rate is controlled by ``--knob_tls_cert_refresh_delay_seconds``. Setting it to 0 will disable the refresh.
 

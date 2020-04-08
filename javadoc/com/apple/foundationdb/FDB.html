@@ -222,24 +222,30 @@ extends java.lang.Object</pre>
 <tr id="i6" class="altColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#open--">open</a></span>()</code>
-<div class="block">Initializes networking, connects with the
-  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
-  and opens the database.</div>
+<div class="block">Initializes networking if required and connects to the cluster specified by the
+  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.<br>
+  <br>
+  A single client can use this function multiple times to connect to different
+  clusters simultaneously, with each invocation requiring its own cluster file.</div>
 </td>
 </tr>
 <tr id="i7" class="rowColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#open-java.lang.String-">open</a></span>(java.lang.String&nbsp;clusterFilePath)</code>
-<div class="block">Initializes networking, connects to the cluster specified by <code>clusterFilePath</code>
-  and opens the database.</div>
+<div class="block">Initializes networking if required and connects to the cluster specified by <code>clusterFilePath</code>.<br>
+  <br>
+  A single client can use this function multiple times to connect to different
+  clusters simultaneously, with each invocation requiring its own cluster file.</div>
 </td>
 </tr>
 <tr id="i8" class="altColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#open-java.lang.String-java.util.concurrent.Executor-">open</a></span>(java.lang.String&nbsp;clusterFilePath,
     java.util.concurrent.Executor&nbsp;e)</code>
-<div class="block">Initializes networking, connects to the cluster specified by <code>clusterFilePath</code>
-  and opens the database.</div>
+<div class="block">Initializes networking if required and connects to the cluster specified by <code>clusterFilePath</code>.<br>
+  <br>
+  A single client can use this function multiple times to connect to different
+  clusters simultaneously, with each invocation requiring its own cluster file.</div>
 </td>
 </tr>
 <tr id="i9" class="rowColor">
@@ -528,9 +534,14 @@ public&nbsp;<a href="../../../com/apple/foundationdb/Cluster.html" title="class 
 <h4>open</h4>
 <pre>public&nbsp;<a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a>&nbsp;open()
               throws <a href="../../../com/apple/foundationdb/FDBException.html" title="class in com.apple.foundationdb">FDBException</a></pre>
-<div class="block">Initializes networking, connects with the
-  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
-  and opens the database.</div>
+<div class="block">Initializes networking if required and connects to the cluster specified by the
+  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.<br>
+  <br>
+  A single client can use this function multiple times to connect to different
+  clusters simultaneously, with each invocation requiring its own cluster file.
+  To connect to multiple clusters running at different, incompatible versions,
+  the <a href="/foundationdb/api-general.html#multi-version-client-api" target="_blank">multi-version client API</a>
+  must be used.</div>
 <dl>
 <dt><span class="returnLabel">Returns:</span></dt>
 <dd>a <code>CompletableFuture</code> that will be set to a FoundationDB <a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb"><code>Database</code></a></dd>
@@ -547,8 +558,13 @@ public&nbsp;<a href="../../../com/apple/foundationdb/Cluster.html" title="class 
 <h4>open</h4>
 <pre>public&nbsp;<a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a>&nbsp;open(java.lang.String&nbsp;clusterFilePath)
               throws <a href="../../../com/apple/foundationdb/FDBException.html" title="class in com.apple.foundationdb">FDBException</a></pre>
-<div class="block">Initializes networking, connects to the cluster specified by <code>clusterFilePath</code>
-  and opens the database.</div>
+<div class="block">Initializes networking if required and connects to the cluster specified by <code>clusterFilePath</code>.<br>
+  <br>
+  A single client can use this function multiple times to connect to different
+  clusters simultaneously, with each invocation requiring its own cluster file.
+  To connect to multiple clusters running at different, incompatible versions,
+  the <a href="/foundationdb/api-general.html#multi-version-client-api" target="_blank">multi-version client API</a>
+  must be used.</div>
 <dl>
 <dt><span class="paramLabel">Parameters:</span></dt>
 <dd><code>clusterFilePath</code> - the
@@ -572,8 +588,13 @@ public&nbsp;<a href="../../../com/apple/foundationdb/Cluster.html" title="class 
 <pre>public&nbsp;<a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a>&nbsp;open(java.lang.String&nbsp;clusterFilePath,
                      java.util.concurrent.Executor&nbsp;e)
               throws <a href="../../../com/apple/foundationdb/FDBException.html" title="class in com.apple.foundationdb">FDBException</a></pre>
-<div class="block">Initializes networking, connects to the cluster specified by <code>clusterFilePath</code>
-  and opens the database.</div>
+<div class="block">Initializes networking if required and connects to the cluster specified by <code>clusterFilePath</code>.<br>
+  <br>
+  A single client can use this function multiple times to connect to different
+  clusters simultaneously, with each invocation requiring its own cluster file.
+  To connect to multiple clusters running at different, incompatible versions,
+  the <a href="/foundationdb/api-general.html#multi-version-client-api" target="_blank">multi-version client API</a>
+  must be used.</div>
 <dl>
 <dt><span class="paramLabel">Parameters:</span></dt>
 <dd><code>clusterFilePath</code> - the

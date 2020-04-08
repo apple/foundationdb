@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    '../',
-        VERSION:     '6.2.11',
+        VERSION:     '6.2.19',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -331,7 +331,7 @@
 <div class="section" id="bindings">
 <h3>Bindings</h3>
 <ul class="simple">
-<li>API version updated to 600. There are no changes since API version 520.</li>
+<li>API version updated to 600. See the <a class="reference internal" href="../api-version-upgrade-guide.html#api-version-upgrade-guide-600"><span class="std std-ref">API version upgrade guide</span></a> for upgrade details.</li>
 <li>Several cases where functions in go might previously cause a panic now return a non-<code class="docutils literal"><span class="pre">nil</span></code> error. <a class="reference external" href="https://github.com/apple/foundationdb/pull/532">(PR #532)</a></li>
 <li>C API calls made on the network thread could be reordered with calls made from other threads. [6.0.2] <a class="reference external" href="https://github.com/apple/foundationdb/issues/518">(Issue #518)</a></li>
 <li>The TLS_PLUGIN option is now a no-op and has been deprecated. [6.0.10] <a class="reference external" href="https://github.com/apple/foundationdb/pull/710">(PR #710)</a></li>
@@ -349,6 +349,7 @@
 <ul class="simple">
 <li>Does not support upgrades from any version older than 5.0.</li>
 <li>Normalized the capitalization of trace event names and attributes. <a class="reference external" href="https://github.com/apple/foundationdb/pull/455">(PR #455)</a></li>
+<li>Various stateless processes now have a higher affinity for running on processes with unset process class, which may result in those roles changing location upon upgrade. See <a class="reference internal" href="../administration.html#version-specific-upgrading"><span class="std std-ref">Version-specific notes on upgrading</span></a> for details. <a class="reference external" href="https://github.com/apple/foundationdb/pull/526">(PR #526)</a></li>
 <li>Increased the memory requirements of the transaction log by 400MB. [6.0.5] <a class="reference external" href="https://github.com/apple/foundationdb/pull/673">(PR #673)</a></li>
 </ul>
 </div>
@@ -398,7 +399,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 23, 2020.<br/>
+      Last updated on Apr 08, 2020.<br/>
     </p>
   </div>
 </footer>
