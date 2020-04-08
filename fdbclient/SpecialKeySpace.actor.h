@@ -32,13 +32,10 @@ protected:
 
 class SpecialKeySpace {
 public:
-	// withPrefix is true if the passing keys are prefixed with \xff\xff (cases from RYW),
-	// otherwise, false(cases from tests)
-	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key, bool withPrefix = true);
+	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key);
 
 	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeySelector begin,
-	                                            KeySelector end, GetRangeLimits limits, bool reverse = false,
-	                                            bool withPrefix = true);
+	                                            KeySelector end, GetRangeLimits limits, bool reverse = false);
 
 	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end) {
 		// Default value is nullptr, begin of KeyRangeMap is Key()
@@ -47,19 +44,18 @@ public:
 	}
 	void registerKeyRange(const KeyRangeRef& kr, SpecialKeyRangeBaseImpl* impl) {
 		// range check
+		// TODO: add range check not to be replaced by overlapped ones
 		ASSERT(kr.begin >= range.begin && kr.end <= range.end);
 		impls.insert(kr, impl);
 	}
 
 private:
-	ACTOR Future<Optional<Value>> getActor(SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeyRef key,
-	                                       bool withPrefix);
+	ACTOR Future<Optional<Value>> getActor(SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeyRef key);
 
 	ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(SpecialKeySpace* pks,
 	                                                                  Reference<ReadYourWritesTransaction> ryw,
 	                                                                  KeySelector begin, KeySelector end,
-	                                                                  GetRangeLimits limits, bool reverse,
-	                                                                  bool withPrefix);
+	                                                                  GetRangeLimits limits, bool reverse);
 
 	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
 	KeyRange range;
@@ -74,7 +70,8 @@ private:
 class ConflictingKeysImpl : public SpecialKeyRangeBaseImpl {
 public:
 	explicit ConflictingKeysImpl(KeyRef start, KeyRef end);
-	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr) const override;
+	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+	                                            KeyRangeRef kr) const override;
 };
 
 #include "flow/unactorcompiler.h"
