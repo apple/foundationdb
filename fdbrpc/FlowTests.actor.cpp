@@ -1360,3 +1360,57 @@ TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 	       std::numeric_limits<int64_t>::max() - 1);
 	return Void();
 }
+
+struct Tracker {
+	int copied;
+	bool moved;
+	Tracker(int copied = 0) : moved(false), copied(copied) {}
+	Tracker(Tracker&& other) : Tracker(other.copied) {
+		ASSERT(!other.moved);
+		other.moved = true;
+	}
+	Tracker(const Tracker& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
+	Tracker& operator=(const Tracker& other) {
+		ASSERT(!other.moved);
+		this->moved = false;
+		this->copied = other.copied + 1;
+		return *this;
+	}
+
+	ACTOR static Future<Void> listen(FutureStream<Tracker> stream) {
+		Tracker t = waitNext(stream);
+		ASSERT(!t.moved);
+		ASSERT(t.copied == 0);
+		return Void();
+	}
+};
+
+TEST_CASE("/flow/PromiseStream/move") {
+	state PromiseStream<Tracker> stream;
+	{
+		// This tests the case when a callback is added before
+		// a value is sent
+		Future<Void> listener = Tracker::listen(stream.getFuture());
+		stream.send(Tracker{});
+		wait(listener);
+	}
+	{
+		// This tests the case when no callback is added until
+		// after a value is sent
+		stream.send(Tracker{});
+		stream.send(Tracker{});
+		{
+			Tracker t = waitNext(stream.getFuture());
+			ASSERT(!t.moved);
+			ASSERT(t.copied == 0);
+		}
+		choose {
+			when(Tracker t = waitNext(stream.getFuture())) {
+				ASSERT(!t.moved);
+				ASSERT(t.copied == 0);
+			}
+		}
+	}
+
+	return Void();
+}
