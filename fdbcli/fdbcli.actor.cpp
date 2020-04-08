@@ -523,6 +523,9 @@ void initHelp() {
 		"getrangekeys <BEGINKEY> [ENDKEY] [LIMIT]",
 		"fetch keys in a range of keys",
 		"Displays up to LIMIT keys for keys between BEGINKEY (inclusive) and ENDKEY (exclusive). If ENDKEY is omitted, then the range will include all keys starting with BEGINKEY. LIMIT defaults to 25 if omitted." ESCAPINGK);
+	helpMap["getversion"] =
+	    CommandHelp("getversion", "Fetch the current read version",
+	                "Displays the current read version of the database or currently running transaction.");
 	helpMap["reset"] = CommandHelp(
 		"reset",
 		"reset the current transaction",
@@ -939,7 +942,11 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 			StatusObjectReader statusObjConfig;
 			StatusArray excludedServersArr;
+			Optional<std::string> activePrimaryDC;
 
+			if (statusObjCluster.has("active_primary_dc")) {
+				activePrimaryDC = statusObjCluster["active_primary_dc"].get_str();
+			}
 			if (statusObjCluster.get("configuration", statusObjConfig)) {
 				if (statusObjConfig.has("excluded_servers"))
 					excludedServersArr = statusObjConfig.last().get_array();
@@ -995,6 +1002,73 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				if (statusObjConfig.get("log_routers", intVal))
 					outputString += format("\n  Desired Log Routers    - %d", intVal);
+
+				outputString += "\n  Usable Regions         - ";
+				if (statusObjConfig.get("usable_regions", intVal)) {
+					outputString += std::to_string(intVal);
+				} else {
+					outputString += "unknown";
+				}
+
+				StatusArray regions;
+				if (statusObjConfig.has("regions")) {
+					outputString += "\n  Regions: ";
+					regions = statusObjConfig["regions"].get_array();
+					bool isPrimary = false;
+					std::vector<std::string> regionSatelliteDCs;
+					std::string regionDC;
+					for (StatusObjectReader region : regions) {
+						for (StatusObjectReader dc : region["datacenters"].get_array()) {
+							if (!dc.has("satellite")) {
+								regionDC = dc["id"].get_str();
+								if (activePrimaryDC.present() && dc["id"].get_str() == activePrimaryDC.get()) {
+									isPrimary = true;
+								}
+							} else if (dc["satellite"].get_int() == 1) {
+								regionSatelliteDCs.push_back(dc["id"].get_str());
+							}
+						}
+						if (activePrimaryDC.present()) {
+							if (isPrimary) {
+								outputString += "\n    Primary -";
+							} else {
+								outputString += "\n    Remote -";
+							}
+						} else {
+							outputString += "\n    Region -";
+						}
+						outputString += format("\n        Datacenter                    - %s", regionDC.c_str());
+						if (regionSatelliteDCs.size() > 0) {
+							outputString += "\n        Satellite datacenters         - ";
+							for (int i = 0; i < regionSatelliteDCs.size(); i++) {
+								if (i != regionSatelliteDCs.size() - 1) {
+									outputString += format("%s, ", regionSatelliteDCs[i].c_str());
+								} else {
+									outputString += format("%s", regionSatelliteDCs[i].c_str());
+								}
+							}
+						}
+						isPrimary = false;
+						if (region.get("satellite_redundancy_mode", strVal)) {
+							outputString += format("\n        Satellite Redundancy Mode     - %s", strVal.c_str());
+						}
+						if (region.get("satellite_anti_quorum", intVal)) {
+							outputString += format("\n        Satellite Anti Quorum         - %d", intVal);
+						}
+						if (region.get("satellite_logs", intVal)) {
+							outputString += format("\n        Satellite Logs                - %d", intVal);
+						}
+						if (region.get("satellite_log_policy", strVal)) {
+							outputString += format("\n        Satellite Log Policy          - %s", strVal.c_str());
+						}
+						if (region.get("satellite_log_replicas", intVal)) {
+							outputString += format("\n        Satellite Log Replicas        - %d", intVal);
+						}
+						if (region.get("satellite_usable_dcs", intVal)) {
+							outputString += format("\n        Satellite Usable DCs          - %d", intVal);
+						}
+					}
+				}
 			}
 			catch (std::runtime_error& ) {
 				outputString = outputStringCache;
@@ -2214,36 +2288,44 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			workerPorts[addr.address.ip].insert(addr.address.port);
 
 		// Print a list of all excluded addresses that don't have a corresponding worker
-		std::vector<AddressExclusion> absentExclusions;
+		std::set<AddressExclusion> absentExclusions;
 		for(auto addr : addresses) {
 			auto worker = workerPorts.find(addr.ip);
 			if(worker == workerPorts.end())
-				absentExclusions.push_back(addr);
+				absentExclusions.insert(addr);
 			else if(addr.port > 0 && worker->second.count(addr.port) == 0)
-				absentExclusions.push_back(addr);
+				absentExclusions.insert(addr);
 		}
 
-		if(!absentExclusions.empty()) {
-			printf("\nWARNING: the following servers were not present in the cluster. Be sure that you\n"
-					"excluded the correct machines or processes before removing them from the cluster:\n");
-			for(auto addr : absentExclusions) {
+		for (auto addr : addresses) {
+			NetworkAddress _addr(addr.ip, addr.port);
+			if (absentExclusions.find(addr) != absentExclusions.end()) {
 				if(addr.port == 0)
-					printf("  %s\n", addr.ip.toString().c_str());
+					printf("  %s(Whole machine)  ---- WARNING: Missing from cluster!Be sure that you excluded the "
+					       "correct machines before removing them from the cluster!\n",
+					       addr.ip.toString().c_str());
 				else
-					printf("  %s\n", addr.toString().c_str());
-			}
-
-			printf("\n");
-		} else if (notExcludedServers.empty()) {
-			printf("\nIt is now safe to remove these machines or processes from the cluster.\n");
-		} else {
-			printf("\nWARNING: Exclusion in progress. It is not safe to remove the following machines\n"
-			       "or processes from the cluster:\n");
-			for (auto addr : notExcludedServers) {
+					printf("  %s  ---- WARNING: Missing from cluster! Be sure that you excluded the correct processes "
+					       "before removing them from the cluster!\n",
+					       addr.toString().c_str());
+			} else if (notExcludedServers.find(_addr) != notExcludedServers.end()) {
 				if (addr.port == 0)
-					printf("  %s\n", addr.ip.toString().c_str());
+					printf("  %s(Whole machine)  ---- WARNING: Exclusion in progress! It is not safe to remove this "
+					       "machine from the cluster\n",
+					       addr.ip.toString().c_str());
 				else
-					printf("  %s\n", addr.toString().c_str());
+					printf("  %s  ---- WARNING: Exclusion in progress! It is not safe to remove this process from the "
+					       "cluster\n",
+					       addr.toString().c_str());
+			} else {
+				if (addr.port == 0)
+					printf("  %s(Whole machine)  ---- Successfully excluded. It is now safe to remove this machine "
+					       "from the cluster.\n",
+					       addr.ip.toString().c_str());
+				else
+					printf(
+					    "  %s  ---- Successfully excluded. It is now safe to remove this process from the cluster.\n",
+					    addr.toString().c_str());
 			}
 		}
 
@@ -3067,6 +3149,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								   printable(v.get()).c_str());
 						else
 							printf("`%s': not found\n", printable(tokens[1]).c_str());
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "getversion")) {
+					if (tokens.size() != 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						Version v = wait(makeInterruptable(getTransaction(db, tr, options, intrans)->getReadVersion()));
+						printf("%ld\n", v);
 					}
 					continue;
 				}

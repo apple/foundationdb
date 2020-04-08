@@ -550,6 +550,11 @@ public:
 		}
 	}
 
+	void setLogGroup(const std::string& logGroup) {
+		MutexHolder holder(mutex);
+		this->logGroup = logGroup;
+	}
+
 	Future<Void> pingWriterThread() {
 		auto ping = new WriterThread::Ping;
 		auto f = ping->ack.getFuture();
@@ -711,7 +716,8 @@ void flushTraceFileVoid() {
 	}
 }
 
-void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogsSize, std::string directory, std::string baseOfBase, std::string logGroup) {
+void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogsSize, std::string directory,
+                   std::string baseOfBase, std::string logGroup, std::string identifier) {
 	if(g_traceLog.isOpen())
 		return;
 
@@ -723,7 +729,12 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 
 	std::string ip = na.ip.toString();
 	std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
-	std::string baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.port);
+	std::string baseName;
+	if (identifier.size() > 0) {
+		baseName = format("%s.%s.%s", baseOfBase.c_str(), ip.c_str(), identifier.c_str());
+	} else {
+		baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.port);
+	}
 	g_traceLog.open( directory, baseName, logGroup, format("%lld", time(NULL)), rollsize, maxLogsSize, !g_network->isSimulated() ? na : Optional<NetworkAddress>());
 
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
@@ -748,6 +759,10 @@ void addTraceRole(std::string role) {
 
 void removeTraceRole(std::string role) {
 	g_traceLog.removeRole(role);
+}
+
+void setTraceLogGroup(const std::string& logGroup) {
+	g_traceLog.setLogGroup(logGroup);
 }
 
 TraceEvent::TraceEvent() : initialized(true), enabled(false), logged(true) {}
