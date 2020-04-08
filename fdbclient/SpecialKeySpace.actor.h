@@ -46,6 +46,9 @@ public:
 		// range check
 		// TODO: add range check not to be replaced by overlapped ones
 		ASSERT(kr.begin >= range.begin && kr.end <= range.end);
+		// make sure the registered range is not overlapping with existing ones
+		// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
+		ASSERT(impls.rangeContaining(kr.begin) == impls.rangeContaining(kr.end) && impls[kr.begin] == nullptr);
 		impls.insert(kr, impl);
 	}
 
