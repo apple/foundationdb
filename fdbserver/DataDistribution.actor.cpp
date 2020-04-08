@@ -689,8 +689,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	void removeLaggingStorageServer(Key zoneId) {
-		ASSERT(lagging_zones.find(zoneId) != lagging_zones.end())
 		auto iter = lagging_zones.find(zoneId);
+		ASSERT(iter != lagging_zones.end());
 		iter->second--;
 		ASSERT(iter->second >= 0);
 		if (iter->second == 0)
@@ -2613,18 +2613,24 @@ ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
 		}
 	}
 
-	if ( server->serverMetrics.get().lastUpdate < now() - SERVER_KNOBS->DD_SS_STUCK_TIME_LIMIT &&  server->ssVersionTooFarBehind.get() == false ) {
-			TraceEvent("StorageServerStuck", server->collection->distributorId).detail("ServerId", server->id.toString()).detail("LastUpdate", server->serverMetrics.get().lastUpdate);
-			server->ssVersionTooFarBehind.set(true);
-			server->collection->addLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
-	} else if ( server->serverMetrics.get().versionLag > SERVER_KNOBS->DD_SS_FAILURE_VERSIONLAG  && server->ssVersionTooFarBehind.get() == false ) {
+	if ( server->serverMetrics.get().lastUpdate < now() - SERVER_KNOBS->DD_SS_STUCK_TIME_LIMIT ) {
+			if (server->ssVersionTooFarBehind.get() == false) {
+				TraceEvent("StorageServerStuck", server->collection->distributorId).detail("ServerId", server->id.toString()).detail("LastUpdate", server->serverMetrics.get().lastUpdate);
+				server->ssVersionTooFarBehind.set(true);
+				server->collection->addLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
+			}
+	} else if ( server->serverMetrics.get().versionLag > SERVER_KNOBS->DD_SS_FAILURE_VERSIONLAG  ) {
+		if (server->ssVersionTooFarBehind.get() == false) {
 			TraceEvent("SSVersionDiffLarge", server->collection->distributorId).detail("ServerId", server->id.toString()).detail("VersionLag", server->serverMetrics.get().versionLag);
 			server->ssVersionTooFarBehind.set(true);
 			server->collection->addLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
-	} else if ( server->serverMetrics.get().versionLag  < SERVER_KNOBS->DD_SS_ALLOWED_VERSIONLAG && server->ssVersionTooFarBehind.get() == true ) {
+		}
+	} else if ( server->serverMetrics.get().versionLag  < SERVER_KNOBS->DD_SS_ALLOWED_VERSIONLAG ) {
+		if (server->ssVersionTooFarBehind.get() == true) {
 			TraceEvent("SSVersionDiffNormal", server->collection->distributorId).detail("ServerId", server->id.toString()).detail("VersionLag", server->serverMetrics.get().versionLag);
 			server->ssVersionTooFarBehind.set(false);
 			server->collection->removeLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
+		}
 	}
 	return Void();
 }
@@ -3803,12 +3809,8 @@ ACTOR Future<Void> storageServerTracker(
 					server->wakeUpTracker = Promise<Void>();
 				}
 				when(wait(storeTypeTracker)) {}
-				when(wait(server->ssVersionTooFarBehind.onChange())) { 
-					TraceEvent("SSVersionTooFarBehindGotUpdate", self->distributorId).detail("ServerID", server->id).detail("SSVersionTooFarBehind", server->ssVersionTooFarBehind.get());
-				}
-				when(wait(self->disableFailingLaggingServers.onChange())) {
-					TraceEvent("DisableFailingLaggingServersGotUpdate", self->distributorId).detail("ServerID", server->id).detail("DisableFailingLaggingServers", self->disableFailingLaggingServers.get());
-				}
+				when(wait(server->ssVersionTooFarBehind.onChange())) { }
+				when(wait(self->disableFailingLaggingServers.onChange())) {	}
 			}
 
 			if (recordTeamCollectionInfo) {
