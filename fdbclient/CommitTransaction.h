@@ -48,7 +48,8 @@ static const char* typeString[] = { "SetValue",
 	                                "ByteMax",
 	                                "MinV2",
 	                                "AndV2",
-	                                "CompareAndClear"};
+	                                "CompareAndClear",
+	                                "MAX_ATOMIC_OP" };
 
 struct MutationRef {
 	static const int OVERHEAD_BYTES = 12; //12 is the size of Header in MutationList entries
@@ -123,6 +124,10 @@ struct MutationRef {
 		                       (1 << CompareAndClear)
 	};
 };
+
+static inline std::string getTypeString(MutationRef::Type type) {
+	return type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "Unset";
+}
 
 // A 'single key mutation' is one which affects exactly the value of the key specified by its param1
 static inline bool isSingleKeyMutation(MutationRef::Type type) {

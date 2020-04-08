@@ -32,6 +32,7 @@ ClientKnobs::ClientKnobs() {
 }
 
 void ClientKnobs::initialize(bool randomize) {
+	// clang-format off
 	// FIXME: These are not knobs, get them out of ClientKnobs!
 	BYTE_LIMIT_UNLIMITED = GetRangeLimits::BYTE_LIMIT_UNLIMITED;
 	ROW_LIMIT_UNLIMITED = GetRangeLimits::ROW_LIMIT_UNLIMITED;
@@ -216,6 +217,10 @@ void ClientKnobs::initialize(bool randomize) {
 	//fdbcli		
 	init( CLI_CONNECT_PARALLELISM,                  400 );
 	init( CLI_CONNECT_TIMEOUT,                     10.0 );
+
+	// trace
+	init( TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH,      50 );
+	// clang-format on
 }
 
 TEST_CASE("/fdbclient/knobs/initialize") {

@@ -936,7 +936,11 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 			StatusObjectReader statusObjConfig;
 			StatusArray excludedServersArr;
+			Optional<std::string> activePrimaryDC;
 
+			if (statusObjCluster.has("active_primary_dc")) {
+				activePrimaryDC = statusObjCluster["active_primary_dc"].get_str();
+			}
 			if (statusObjCluster.get("configuration", statusObjConfig)) {
 				if (statusObjConfig.has("excluded_servers"))
 					excludedServersArr = statusObjConfig.last().get_array();
@@ -992,6 +996,73 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				if (statusObjConfig.get("log_routers", intVal))
 					outputString += format("\n  Desired Log Routers    - %d", intVal);
+
+				outputString += "\n  Usable Regions         - ";
+				if (statusObjConfig.get("usable_regions", intVal)) {
+					outputString += std::to_string(intVal);
+				} else {
+					outputString += "unknown";
+				}
+
+				StatusArray regions;
+				if (statusObjConfig.has("regions")) {
+					outputString += "\n  Regions: ";
+					regions = statusObjConfig["regions"].get_array();
+					bool isPrimary = false;
+					std::vector<std::string> regionSatelliteDCs;
+					std::string regionDC;
+					for (StatusObjectReader region : regions) {
+						for (StatusObjectReader dc : region["datacenters"].get_array()) {
+							if (!dc.has("satellite")) {
+								regionDC = dc["id"].get_str();
+								if (activePrimaryDC.present() && dc["id"].get_str() == activePrimaryDC.get()) {
+									isPrimary = true;
+								}
+							} else if (dc["satellite"].get_int() == 1) {
+								regionSatelliteDCs.push_back(dc["id"].get_str());
+							}
+						}
+						if (activePrimaryDC.present()) {
+							if (isPrimary) {
+								outputString += "\n    Primary -";
+							} else {
+								outputString += "\n    Remote -";
+							}
+						} else {
+							outputString += "\n    Region -";
+						}
+						outputString += format("\n        Datacenter                    - %s", regionDC.c_str());
+						if (regionSatelliteDCs.size() > 0) {
+							outputString += "\n        Satellite datacenters         - ";
+							for (int i = 0; i < regionSatelliteDCs.size(); i++) {
+								if (i != regionSatelliteDCs.size() - 1) {
+									outputString += format("%s, ", regionSatelliteDCs[i].c_str());
+								} else {
+									outputString += format("%s", regionSatelliteDCs[i].c_str());
+								}
+							}
+						}
+						isPrimary = false;
+						if (region.get("satellite_redundancy_mode", strVal)) {
+							outputString += format("\n        Satellite Redundancy Mode     - %s", strVal.c_str());
+						}
+						if (region.get("satellite_anti_quorum", intVal)) {
+							outputString += format("\n        Satellite Anti Quorum         - %d", intVal);
+						}
+						if (region.get("satellite_logs", intVal)) {
+							outputString += format("\n        Satellite Logs                - %d", intVal);
+						}
+						if (region.get("satellite_log_policy", strVal)) {
+							outputString += format("\n        Satellite Log Policy          - %s", strVal.c_str());
+						}
+						if (region.get("satellite_log_replicas", intVal)) {
+							outputString += format("\n        Satellite Log Replicas        - %d", intVal);
+						}
+						if (region.get("satellite_usable_dcs", intVal)) {
+							outputString += format("\n        Satellite Usable DCs          - %d", intVal);
+						}
+					}
+				}
 			}
 			catch (std::runtime_error& ) {
 				outputString = outputStringCache;
