@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.11',
+        VERSION:     '6.2.19',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -250,7 +250,7 @@
 <p class="first admonition-title">Warning</p>
 <p class="last">When using the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>, setting an API version that is not supported by a particular client library will prevent that client from being used to connect to the cluster. In particular, you should not advance the API version of your application after upgrading your client until the cluster has also been upgraded.</p>
 </div>
-<p>For API changes between version 13 and 620 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes.html"><span class="doc">Release Notes</span></a>.</p>
+<p>For API changes between version 13 and 620 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes.html"><span class="doc">Release Notes</span></a> and <a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a>.</p>
 </div>
 <div class="section" id="opening-a-database">
 <h2>Opening a database</h2>
@@ -263,7 +263,8 @@
 <dl class="function">
 <dt id="fdb.open">
 <code class="descclassname">fdb.</code><code class="descname">open</code><span class="sig-paren">(</span><em>cluster_file=None</em>, <em>event_model=None</em><span class="sig-paren">)</span></dt>
-<dd><p>Initializes the FoundationDB API and connects to the cluster specified by the <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a>. This function is often called without any parameters, using only the defaults. If no cluster file is passed, FoundationDB automatically <a class="reference internal" href="administration.html#specifying-a-cluster-file"><span class="std std-ref">determines a cluster file</span></a> with which to connect to a cluster.</p>
+<dd><p>Connects to the cluster specified by the <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a>. This function is often called without any parameters, using only the defaults. If no cluster file is passed, FoundationDB automatically <a class="reference internal" href="administration.html#specifying-a-cluster-file"><span class="std std-ref">determines a cluster file</span></a> with which to connect to a cluster.</p>
+<p>A single client can use this function multiple times to connect to different clusters simultaneously, with each invocation requiring its own cluster file. To connect to multiple clusters running at different, incompatible versions, the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a> must be used.</p>
 </dd></dl>
 
 <dl class="data">
@@ -492,7 +493,7 @@ value of the key is also retrieved, using network bandwidth.</p>
 <dd><p>Returns all keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">begin</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end</span></code> and their associated values as a list of <a class="reference internal" href="#fdb.KeyValue" title="fdb.KeyValue"><code class="xref py py-class docutils literal"><span class="pre">KeyValue</span></code></a> objects. Note the exclusion of <code class="docutils literal"><span class="pre">end</span></code> from the range. This read is fully synchronous.</p>
 <p>Each of <code class="docutils literal"><span class="pre">begin</span></code> and <code class="docutils literal"><span class="pre">end</span></code> may be a key or a <a class="reference internal" href="#fdb.KeySelector" title="fdb.KeySelector"><code class="xref py py-class docutils literal"><span class="pre">KeySelector</span></code></a>. Note that in the case of a <a class="reference internal" href="#fdb.KeySelector" title="fdb.KeySelector"><code class="xref py py-class docutils literal"><span class="pre">KeySelector</span></code></a>, the exclusion of <code class="docutils literal"><span class="pre">end</span></code> from the range still applies.</p>
 <p>If <code class="docutils literal"><span class="pre">limit</span></code> is specified, then only the first <code class="docutils literal"><span class="pre">limit</span></code> keys (and their values) in the range will be returned.</p>
-<p>If <code class="docutils literal"><span class="pre">reverse</span></code> is True, then the last <code class="docutils literal"><span class="pre">limit</span></code> keys in the range will be returned in reverse order.</p>
+<p>If <code class="docutils literal"><span class="pre">reverse</span></code> is True, then the last <code class="docutils literal"><span class="pre">limit</span></code> keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.</p>
 <p>If <code class="docutils literal"><span class="pre">streaming_mode</span></code> is specified, it must be a value from the <a class="reference internal" href="#fdb.StreamingMode" title="fdb.StreamingMode"><code class="xref py py-data docutils literal"><span class="pre">StreamingMode</span></code></a> enumeration. It provides a hint to FoundationDB about how to retrieve the specified range. This option should generally not be specified, allowing FoundationDB to retrieve the full range very efficiently.</p>
 </dd></dl>
 
@@ -763,7 +764,7 @@ both the caching and the increased network bandwidth.</p>
 <p>Like a <a class="reference internal" href="#api-python-future"><span class="std std-ref">Future</span></a> object, the returned iterator issues asynchronous read operations. It fetches the data in one or more efficient batches (depending on the value of the <code class="docutils literal"><span class="pre">streaming_mode</span></code> parameter). However, the iterator will block if iteration reaches a value whose read has not yet completed.</p>
 <p>Each of <code class="docutils literal"><span class="pre">begin</span></code> and <code class="docutils literal"><span class="pre">end</span></code> may be a key or a <a class="reference internal" href="#fdb.KeySelector" title="fdb.KeySelector"><code class="xref py py-class docutils literal"><span class="pre">KeySelector</span></code></a>. Note that in the case of a <a class="reference internal" href="#fdb.KeySelector" title="fdb.KeySelector"><code class="xref py py-class docutils literal"><span class="pre">KeySelector</span></code></a>, the exclusion of <code class="docutils literal"><span class="pre">end</span></code> from the range still applies.</p>
 <p>If <code class="docutils literal"><span class="pre">limit</span></code> is specified, then only the first <code class="docutils literal"><span class="pre">limit</span></code> keys (and their values) in the range will be returned.</p>
-<p>If <code class="docutils literal"><span class="pre">reverse</span></code> is True, then the last <code class="docutils literal"><span class="pre">limit</span></code> keys in the range will be returned in reverse order.</p>
+<p>If <code class="docutils literal"><span class="pre">reverse</span></code> is True, then the last <code class="docutils literal"><span class="pre">limit</span></code> keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.</p>
 <p>If <code class="docutils literal"><span class="pre">streaming_mode</span></code> is specified, it must be a value from the <a class="reference internal" href="#fdb.StreamingMode" title="fdb.StreamingMode"><code class="xref py py-data docutils literal"><span class="pre">StreamingMode</span></code></a> enumeration. It provides a hint to FoundationDB about how the returned container is likely to be used.  The default is <a class="reference internal" href="#fdb.StreamingMode.iterator" title="fdb.StreamingMode.iterator"><code class="xref py py-data docutils literal"><span class="pre">StreamingMode.iterator</span></code></a>.</p>
 </dd></dl>
 
@@ -865,6 +866,7 @@ both the caching and the increased network bandwidth.</p>
 <dt id="fdb.Transaction.clear_range">
 <code class="descclassname">Transaction.</code><code class="descname">clear_range</code><span class="sig-paren">(</span><em>begin</em>, <em>end</em><span class="sig-paren">)</span></dt>
 <dd><p>Removes all keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">begin</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end</span></code>, and their associated values. Returns immediately, having modified the snapshot represented by this <a class="reference internal" href="#fdb.Transaction" title="fdb.Transaction"><code class="xref py py-class docutils literal"><span class="pre">Transaction</span></code></a>.</p>
+<p>Range clears are efficient with FoundationDB &#8211; clearing large amounts of data will be fast. However, this will not immediately free up disk - data for the deleted range is cleaned up in the background. For purposes of computing the transaction size, only the begin and end keys of a clear range are counted. The size of the data stored in the range does not count against the transaction size limit.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
 <p class="last">Unlike in the case of <a class="reference internal" href="#fdb.Transaction.get_range" title="fdb.Transaction.get_range"><code class="xref py py-meth docutils literal"><span class="pre">get_range()</span></code></a>, <code class="docutils literal"><span class="pre">begin</span></code> and <code class="docutils literal"><span class="pre">end</span></code> must be keys (byte strings), not <a class="reference internal" href="#fdb.KeySelector" title="fdb.KeySelector"><code class="xref py py-class docutils literal"><span class="pre">KeySelector</span></code></a>s.  (Resolving arbitrary key selectors would prevent this method from returning immediately, introducing concurrency issues.)</p>
@@ -879,6 +881,7 @@ both the caching and the increased network bandwidth.</p>
 <dt id="fdb.Transaction.clear_range_startswith">
 <code class="descclassname">Transaction.</code><code class="descname">clear_range_startswith</code><span class="sig-paren">(</span><em>prefix</em><span class="sig-paren">)</span></dt>
 <dd><p>Removes all the keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">k.startswith(prefix)</span></code>, and their associated values. Returns immediately, having modified the snapshot represented by this <a class="reference internal" href="#fdb.Transaction" title="fdb.Transaction"><code class="xref py py-class docutils literal"><span class="pre">Transaction</span></code></a>.</p>
+<p>Range clears are efficient with FoundationDB &#8211; clearing large amounts of data will be fast. However, this will not immediately free up disk - data for the deleted range is cleaned up in the background. For purposes of computing the transaction size, only the begin and end keys of a clear range are counted. The size of the data stored in the range does not count against the transaction size limit.</p>
 </dd></dl>
 
 </div>
@@ -923,6 +926,12 @@ both the caching and the increased network bandwidth.</p>
 <dt id="fdb.Transaction.bit_xor">
 <code class="descclassname">Transaction.</code><code class="descname">bit_xor</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span></dt>
 <dd><p>Performs a bitwise &#8220;xor&#8221; operation. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="fdb.Transaction.compare_and_clear">
+<code class="descclassname">Transaction.</code><code class="descname">compare_and_clear</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span></dt>
+<dd><p>Performs an atomic <code class="docutils literal"><span class="pre">compare</span> <span class="pre">and</span> <span class="pre">clear</span></code> operation. If the existing value in the database is equal to the given value, then given key is cleared.</p>
 </dd></dl>
 
 <dl class="method">
@@ -1233,6 +1242,18 @@ both the caching and the increased network bandwidth.</p>
 <dd><p>Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option, after which the field will be truncated. A negative value disables truncation. One can set the default max field length for all transactions by calling <a class="reference internal" href="#fdb.Database.options.set_transaction_logging_max_field_length" title="fdb.Database.options.set_transaction_logging_max_field_length"><code class="xref py py-func docutils literal"><span class="pre">Database.options.set_transaction_logging_max_field_length()</span></code></a>.</p>
 </dd></dl>
 
+<dl class="method">
+<dt id="fdb.Transaction.options.set_debug_transaction_identifier">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_debug_transaction_identifier</code><span class="sig-paren">(</span><em>id_string</em><span class="sig-paren">)</span></dt>
+<dd><p>Sets a client provided string identifier for the transaction that will be used in scenarios like tracing or profiling. Client trace logging or transaction profiling must be separately enabled.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="fdb.Transaction.options.set_log_transaction">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_log_transaction</code><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
+<dd><p>Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled to get log output.</p>
+</dd></dl>
+
 </div>
 </div>
 <div class="section" id="future-objects">
@@ -1267,6 +1288,10 @@ both the caching and the increased network bandwidth.</p>
 <dt id="fdb.Future.on_ready">
 <code class="descclassname">Future.</code><code class="descname">on_ready</code><span class="sig-paren">(</span><em>callback</em><span class="sig-paren">)</span></dt>
 <dd><p>Calls the specified callback function, passing itself as a single argument, when the future object is ready. If the future object is ready at the time <a class="reference internal" href="#fdb.Future.on_ready" title="fdb.Future.on_ready"><code class="xref py py-meth docutils literal"><span class="pre">on_ready()</span></code></a> is called, the call may occur immediately in the current thread (although this behavior is not guaranteed). Otherwise, the call may be delayed and take place on the thread with which the client was initialized. Therefore, the callback is responsible for any needed thread synchronization (and/or for posting work to your application&#8217;s event loop, thread pool, etc., as may be required by your application&#8217;s architecture).</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">This function guarantees the callback will be executed <strong>at most once</strong>.</p>
+</div>
 </dd></dl>
 
 <div class="admonition warning">
@@ -1998,7 +2023,7 @@ this subspace and the passed tuple.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 23, 2020.<br/>
+      Last updated on Apr 08, 2020.<br/>
     </p>
   </div>
 </footer>

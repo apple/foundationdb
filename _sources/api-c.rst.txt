@@ -277,6 +277,8 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    Causes the :type:`FDBCallback` function to be invoked as ``callback(future, callback_parameter)`` when the given Future is ready. If the Future is already ready, the call may occur in the current thread before this function returns (but this behavior is not guaranteed). Alternatively, the call may be delayed indefinitely and take place on the thread on which :func:`fdb_run_network()` was invoked, and the callback is responsible for any necessary thread synchronization (and/or for posting work back to your application event loop, thread pool, etc. if your application's architecture calls for that).
 
+   .. note:: This function guarantees the callback will be executed **at most once**.
+
    .. warning:: Never call :func:`fdb_future_block_until_ready()` from a callback passed to this function. This may block the thread on which :func:`fdb_run_network()` was invoked, resulting in a deadlock.
 
 .. type:: FDBCallback
@@ -392,6 +394,8 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 .. function:: fdb_error_t fdb_create_database(const char* cluster_file_path, FDBDatabase** out_database)
 
    Creates a new database connected the specified cluster. The caller assumes ownership of the :type:`FDBDatabase` object and must destroy it with :func:`fdb_database_destroy()`.
+
+   |fdb-open-blurb2|
 
    ``cluster_file_path``
       A NULL-terminated string giving a local path of a :ref:`cluster file <foundationdb-cluster-file>` (often called 'fdb.cluster') which contains connection information for the FoundationDB cluster. If cluster_file_path is NULL or an empty string, then a :ref:`default cluster file <default-cluster-file>` will be used.
@@ -526,8 +530,7 @@ Applications must provide error handling and an appropriate retry loop around th
       |snapshot|
 
    ``reverse``
-
-      If non-zero, key-value pairs will be returned in reverse lexicographical order beginning at the end of the range.
+      If non-zero, key-value pairs will be returned in reverse lexicographical order beginning at the end of the range. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
 .. type:: FDBStreamingMode
 
@@ -535,31 +538,31 @@ Applications must provide error handling and an appropriate retry loop around th
 
    ``FDB_STREAMING_MODE_ITERATOR``
 
-      The caller is implementing an iterator (most likely in a binding to a higher level language). The amount of data returned depends on the value of the ``iteration`` parameter to :func:`fdb_transaction_get_range()`.
+   The caller is implementing an iterator (most likely in a binding to a higher level language). The amount of data returned depends on the value of the ``iteration`` parameter to :func:`fdb_transaction_get_range()`.
 
    ``FDB_STREAMING_MODE_SMALL``
 
-      Data is returned in small batches (not much more expensive than reading individual key-value pairs).
+   Data is returned in small batches (not much more expensive than reading individual key-value pairs).
 
    ``FDB_STREAMING_MODE_MEDIUM``
 
-      Data is returned in batches between _SMALL and _LARGE.
+   Data is returned in batches between _SMALL and _LARGE.
 
    ``FDB_STREAMING_MODE_LARGE``
 
-      Data is returned in batches large enough to be, in a high-concurrency environment, nearly as efficient as possible. If the caller does not need the entire range, some disk and network bandwidth may be wasted. The batch size may be still be too small to allow a single client to get high throughput from the database.
+   Data is returned in batches large enough to be, in a high-concurrency environment, nearly as efficient as possible. If the caller does not need the entire range, some disk and network bandwidth may be wasted. The batch size may be still be too small to allow a single client to get high throughput from the database.
 
    ``FDB_STREAMING_MODE_SERIAL``
 
-      Data is returned in batches large enough that an individual client can get reasonable read bandwidth from the database. If the caller does not need the entire range, considerable disk and network bandwidth may be wasted.
+   Data is returned in batches large enough that an individual client can get reasonable read bandwidth from the database. If the caller does not need the entire range, considerable disk and network bandwidth may be wasted.
 
    ``FDB_STREAMING_MODE_WANT_ALL``
 
-      The caller intends to consume the entire range and would like it all transferred as early as possible.
+   The caller intends to consume the entire range and would like it all transferred as early as possible.
 
    ``FDB_STREAMING_MODE_EXACT``
 
-      The caller has passed a specific row limit and wants that many rows delivered in a single batch.
+   The caller has passed a specific row limit and wants that many rows delivered in a single batch.
 
 .. function:: void fdb_transaction_set(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, uint8_t const* value, int value_length)
 
@@ -596,6 +599,8 @@ Applications must provide error handling and an appropriate retry loop around th
    |sets-and-clears1| to remove all keys (if any) which are lexicographically greater than or equal to the given begin key and lexicographically less than the given end_key.
 
    |sets-and-clears2|
+
+   |transaction-clear-range-blurb|
 
    ``begin_key_name``
       A pointer to the name of the key specifying the beginning of the range to clear. |no-null|
@@ -659,6 +664,10 @@ Applications must provide error handling and an appropriate retry loop around th
     ``FDB_MUTATION_TYPE_XOR``
 
     |atomic-xor|
+
+    ``FDB_MUTATION_TYPE_COMPARE_AND_CLEAR``
+
+    |atomic-compare-and-clear|
 
     ``FDB_MUTATION_TYPE_MAX``
 

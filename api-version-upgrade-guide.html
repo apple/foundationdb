@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>API Version Upgrade Guide &#8212; FoundationDB 6.2</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '6.2.19',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Design Recipes" href="design-recipes.html" />
+    <link rel="prev" title="Known Limitations" href="known-limitations.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">API Version Upgrade Guide</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#api-version-620">API version 620</a><ul>
+<li><a class="reference internal" href="#c-bindings">C bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-610">API version 610</a><ul>
+<li><a class="reference internal" href="#general">General</a></li>
+<li><a class="reference internal" href="#id1">C bindings</a></li>
+<li><a class="reference internal" href="#python-bindings">Python bindings</a></li>
+<li><a class="reference internal" href="#java-bindings">Java bindings</a></li>
+<li><a class="reference internal" href="#ruby-bindings">Ruby bindings</a></li>
+<li><a class="reference internal" href="#go-bindings">Go bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-600">API version 600</a><ul>
+<li><a class="reference internal" href="#id2">General</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-520">API version 520</a><ul>
+<li><a class="reference internal" href="#id3">General</a></li>
+<li><a class="reference internal" href="#java-and-python-bindings">Java and Python bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-510">API version 510</a><ul>
+<li><a class="reference internal" href="#id4">General</a></li>
+<li><a class="reference internal" href="#id5">Java bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-500">API version 500</a><ul>
+<li><a class="reference internal" href="#id6">Java bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-460">API version 460</a></li>
+<li><a class="reference internal" href="#api-version-450">API version 450</a></li>
+<li><a class="reference internal" href="#api-version-440">API version 440</a></li>
+<li><a class="reference internal" href="#api-version-430">API version 430</a></li>
+<li><a class="reference internal" href="#api-version-420">API version 420</a></li>
+<li><a class="reference internal" href="#api-version-410">API version 410</a><ul>
+<li><a class="reference internal" href="#id7">General</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-400">API version 400</a><ul>
+<li><a class="reference internal" href="#id8">Java bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-300">API version 300</a><ul>
+<li><a class="reference internal" href="#id9">General</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-200">API version 200</a><ul>
+<li><a class="reference internal" href="#id10">General</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-100">API version 100</a><ul>
+<li><a class="reference internal" href="#id11">Java bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#older-api-versions">Older API versions</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="known-limitations.html" title="Previous Chapter: Known Limitations"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Known Limitations</span>
+    </a>
+  </li>
+  <li>
+    <a href="design-recipes.html" title="Next Chapter: Design Recipes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Design Recipes &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">API Version Upgrade Guide</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#api-version-620">API version 620</a><ul>
+<li><a class="reference internal" href="#c-bindings">C bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-610">API version 610</a><ul>
+<li><a class="reference internal" href="#general">General</a></li>
+<li><a class="reference internal" href="#id1">C bindings</a></li>
+<li><a class="reference internal" href="#python-bindings">Python bindings</a></li>
+<li><a class="reference internal" href="#java-bindings">Java bindings</a></li>
+<li><a class="reference internal" href="#ruby-bindings">Ruby bindings</a></li>
+<li><a class="reference internal" href="#go-bindings">Go bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-600">API version 600</a><ul>
+<li><a class="reference internal" href="#id2">General</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-520">API version 520</a><ul>
+<li><a class="reference internal" href="#id3">General</a></li>
+<li><a class="reference internal" href="#java-and-python-bindings">Java and Python bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-510">API version 510</a><ul>
+<li><a class="reference internal" href="#id4">General</a></li>
+<li><a class="reference internal" href="#id5">Java bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-500">API version 500</a><ul>
+<li><a class="reference internal" href="#id6">Java bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-460">API version 460</a></li>
+<li><a class="reference internal" href="#api-version-450">API version 450</a></li>
+<li><a class="reference internal" href="#api-version-440">API version 440</a></li>
+<li><a class="reference internal" href="#api-version-430">API version 430</a></li>
+<li><a class="reference internal" href="#api-version-420">API version 420</a></li>
+<li><a class="reference internal" href="#api-version-410">API version 410</a><ul>
+<li><a class="reference internal" href="#id7">General</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-400">API version 400</a><ul>
+<li><a class="reference internal" href="#id8">Java bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-300">API version 300</a><ul>
+<li><a class="reference internal" href="#id9">General</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-200">API version 200</a><ul>
+<li><a class="reference internal" href="#id10">General</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-version-100">API version 100</a><ul>
+<li><a class="reference internal" href="#id11">Java bindings</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#older-api-versions">Older API versions</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="api-version-upgrade-guide">
+<h1>API Version Upgrade Guide</h1>
+<div class="section" id="overview">
+<h2>Overview</h2>
+<p>This document provides an overview of changes that an application developer may need to make or effects that they should consider when upgrading the API version in their code. For each version, a list is provided that details the relevant changes when upgrading to that version from a prior version. To upgrade across multiple versions, make sure you apply changes from each version starting after your start version up to and including your target version.</p>
+<p>For more details about API versions, see <a class="reference internal" href="api-general.html#api-versions"><span class="std std-ref">API versions</span></a>.</p>
+</div>
+<div class="section" id="api-version-620">
+<span id="api-version-upgrade-guide-620"></span><h2>API version 620</h2>
+<div class="section" id="c-bindings">
+<h3>C bindings</h3>
+<ul class="simple">
+<li><code class="docutils literal"><span class="pre">fdb_future_get_version</span></code> has been renamed to <code class="docutils literal"><span class="pre">fdb_future_get_int64</span></code>.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="api-version-610">
+<span id="api-version-upgrade-guide-610"></span><h2>API version 610</h2>
+<div class="section" id="general">
+<h3>General</h3>
+<ul class="simple">
+<li>The concept of opening a cluster has been removed from the API. Instead, databases are opened directly. See binding specific notes for the details as they apply to your language binding.</li>
+<li>The <code class="docutils literal"><span class="pre">TIMEOUT</span></code>, <code class="docutils literal"><span class="pre">MAX_RETRY_DELAY</span></code>, and <code class="docutils literal"><span class="pre">RETRY_LIMIT</span></code> transaction options are no longer reset by calls to <code class="docutils literal"><span class="pre">onError</span></code>.</li>
+<li>Calling <code class="docutils literal"><span class="pre">onError</span></code> with a non-retryable error will now put a transaction into an error state. Previously, this would partially reset the transaction.</li>
+<li>The <code class="docutils literal"><span class="pre">TRANSACTION_LOGGING_ENABLE</span></code> option has been deprecated. Its behavior can be replicated by setting the <code class="docutils literal"><span class="pre">DEBUG_TRANSACTION_IDENTIFIER</span></code> and <code class="docutils literal"><span class="pre">LOG_TRANSACTION</span></code> options.</li>
+</ul>
+</div>
+<div class="section" id="id1">
+<h3>C bindings</h3>
+<ul class="simple">
+<li>Creating a database is now done by calling <code class="docutils literal"><span class="pre">fdb_create_database</span></code>, which is a synchronous operation.</li>
+<li>The <code class="docutils literal"><span class="pre">FDBCluster</span></code> type has been eliminated and the following functions have been removed: <code class="docutils literal"><span class="pre">fdb_create_cluster</span></code>, <code class="docutils literal"><span class="pre">fdb_cluster_create_database</span></code>, <code class="docutils literal"><span class="pre">fdb_cluster_set_option</span></code>, <code class="docutils literal"><span class="pre">fdb_cluster_destroy</span></code>, <code class="docutils literal"><span class="pre">fdb_future_get_cluster</span></code>, and <code class="docutils literal"><span class="pre">fdb_future_get_database</span></code>.</li>
+</ul>
+</div>
+<div class="section" id="python-bindings">
+<h3>Python bindings</h3>
+<ul class="simple">
+<li><code class="docutils literal"><span class="pre">fdb.open</span></code> no longer accepts a <code class="docutils literal"><span class="pre">database_name</span></code> parameter.</li>
+<li>Removed <code class="docutils literal"><span class="pre">fdb.init</span></code>, <code class="docutils literal"><span class="pre">fdb.create_cluster</span></code>, and <code class="docutils literal"><span class="pre">fdb.Cluster</span></code>. <code class="docutils literal"><span class="pre">fdb.open</span></code> should be used instead.</li>
+</ul>
+</div>
+<div class="section" id="java-bindings">
+<h3>Java bindings</h3>
+<ul class="simple">
+<li><code class="docutils literal"><span class="pre">FDB.createCluster</span></code> and  the <code class="docutils literal"><span class="pre">Cluster</span></code> class have been deprecated. <code class="docutils literal"><span class="pre">FDB.open</span></code> should be used instead.</li>
+</ul>
+</div>
+<div class="section" id="ruby-bindings">
+<h3>Ruby bindings</h3>
+<ul class="simple">
+<li><code class="docutils literal"><span class="pre">FDB.open</span></code> no longer accepts a <code class="docutils literal"><span class="pre">database_name</span></code> parameter.</li>
+<li>Removed <code class="docutils literal"><span class="pre">FDB.init</span></code>, <code class="docutils literal"><span class="pre">FDB.create_cluster</span></code>, and <code class="docutils literal"><span class="pre">FDB.Cluster</span></code>. <code class="docutils literal"><span class="pre">FDB.open</span></code> should be used instead.</li>
+</ul>
+</div>
+<div class="section" id="go-bindings">
+<h3>Go bindings</h3>
+<ul class="simple">
+<li>Added <code class="docutils literal"><span class="pre">fdb.OpenDatabase</span></code> and <code class="docutils literal"><span class="pre">fdb.MustOpenDatabase</span></code> to open a connection to the database by specifying a cluster file.</li>
+<li>Deprecated <code class="docutils literal"><span class="pre">fdb.StartNetwork</span></code>, <code class="docutils literal"><span class="pre">fdb.Open</span></code>, <code class="docutils literal"><span class="pre">fdb.MustOpen</span></code>, and <code class="docutils literal"><span class="pre">fdb.CreateCluster</span></code>. <code class="docutils literal"><span class="pre">fdb.OpenDatabase</span></code> or <code class="docutils literal"><span class="pre">fdb.OpenDefault</span></code> should be used instead.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="api-version-600">
+<span id="api-version-upgrade-guide-600"></span><h2>API version 600</h2>
+<div class="section" id="id2">
+<h3>General</h3>
+<ul class="simple">
+<li>The <code class="docutils literal"><span class="pre">TLS_PLUGIN</span></code> option is now a no-op and has been deprecated. TLS support is now included in the published binaries.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="api-version-520">
+<span id="api-version-upgrade-guide-520"></span><h2>API version 520</h2>
+<div class="section" id="id3">
+<h3>General</h3>
+<ul class="simple">
+<li>The <code class="docutils literal"><span class="pre">SET_VERSIONSTAMPED_KEY</span></code> atomic operation now uses four bytes instead of two to specify the versionstamp offset.</li>
+<li>The <code class="docutils literal"><span class="pre">SET_VERSIONSTAMPED_VALUE</span></code> atomic operation now requires a four byte versionstamp offset to be specified at the end of the value, similar to the behavior with <code class="docutils literal"><span class="pre">SET_VERSIONSTAMPED_KEY</span></code>.</li>
+<li>The <code class="docutils literal"><span class="pre">READ_AHEAD_DISABLE</span></code> option has been deprecated.</li>
+</ul>
+</div>
+<div class="section" id="java-and-python-bindings">
+<h3>Java and Python bindings</h3>
+<ul class="simple">
+<li>Tuples packed with versionstamps will be encoded with four byte offsets instead of two.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="api-version-510">
+<span id="api-version-upgrade-guide-510"></span><h2>API version 510</h2>
+<div class="section" id="id4">
+<h3>General</h3>
+<ul class="simple">
+<li>The atomic operations <code class="docutils literal"><span class="pre">AND</span></code> and <code class="docutils literal"><span class="pre">MIN</span></code> have changed behavior when used on a key that isn&#8217;t present in the database. Previously, these operations would set an unset key to a value of equal length with the specified value but containing all null bytes (0x00). Now, an unset key will be set with the value passed to the operation (equivalent to a set).</li>
+</ul>
+</div>
+<div class="section" id="id5">
+<h3>Java bindings</h3>
+<ul class="simple">
+<li>Note: the Java bindings as of 5.1 no longer support API versions older that 510.</li>
+<li>The Java bindings have moved packages from <code class="docutils literal"><span class="pre">com.apple.cie.foundationdb</span></code> to <code class="docutils literal"><span class="pre">com.apple.foundationdb</span></code>.</li>
+<li>The version of the Java bindings using our custom futures library has been deprecated and is no longer being maintained. The Java bindings using <code class="docutils literal"><span class="pre">CompletableFuture</span></code> are the only ones that remain.</li>
+<li>Finalizers now log a warning to <code class="docutils literal"><span class="pre">stderr</span></code> if an object with native resources is not closed. This can be disabled by calling <code class="docutils literal"><span class="pre">FDB.setUnclosedWarning()</span></code>.</li>
+<li>Implementers of the <code class="docutils literal"><span class="pre">Disposable</span></code> interface now implement <code class="docutils literal"><span class="pre">AutoCloseable</span></code> instead, with <code class="docutils literal"><span class="pre">close()</span></code> replacing <code class="docutils literal"><span class="pre">dispose()</span></code>.</li>
+<li><code class="docutils literal"><span class="pre">AutoCloseable</span></code> objects will continue to be closed in object finalizers, but this behavior is being deprecated. All <code class="docutils literal"><span class="pre">AutoCloseable</span></code> objects should be explicitly closed.</li>
+<li><code class="docutils literal"><span class="pre">AsyncIterator</span></code> is no longer closeable.</li>
+<li><code class="docutils literal"><span class="pre">getBoundaryKeys()</span></code> now returns a <code class="docutils literal"><span class="pre">CloseableAsyncIterable</span></code> rather than an <code class="docutils literal"><span class="pre">AsyncIterator</span></code>.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="api-version-500">
+<span id="api-version-upgrade-guide-500"></span><h2>API version 500</h2>
+<div class="section" id="id6">
+<h3>Java bindings</h3>
+<ul class="simple">
+<li>Note: the Java bindings as of 5.0 no longer support API versions older than 500.</li>
+<li><code class="docutils literal"><span class="pre">FDB.open</span></code> and <code class="docutils literal"><span class="pre">Cluster.openDatabase</span></code> no longer take a DB name parameter.</li>
+<li><code class="docutils literal"><span class="pre">Transaction.onError</span></code> invalidates its transaction and asynchronously return a new replacement <code class="docutils literal"><span class="pre">Transaction</span></code>.</li>
+<li><code class="docutils literal"><span class="pre">Transaction.reset</span></code> has been removed.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="api-version-460">
+<span id="api-version-upgrade-guide-460"></span><h2>API version 460</h2>
+<p>There are no behavior changes in this API version.</p>
+</div>
+<div class="section" id="api-version-450">
+<span id="api-version-upgrade-guide-450"></span><h2>API version 450</h2>
+<p>There are no behavior changes in this API version.</p>
+</div>
+<div class="section" id="api-version-440">
+<span id="api-version-upgrade-guide-440"></span><h2>API version 440</h2>
+<p>There are no behavior changes in this API version.</p>
+</div>
+<div class="section" id="api-version-430">
+<span id="api-version-upgrade-guide-430"></span><h2>API version 430</h2>
+<p>There are no behavior changes in this API version.</p>
+</div>
+<div class="section" id="api-version-420">
+<span id="api-version-upgrade-guide-420"></span><h2>API version 420</h2>
+<p>There are no behavior changes in this API version.</p>
+</div>
+<div class="section" id="api-version-410">
+<span id="api-version-upgrade-guide-410"></span><h2>API version 410</h2>
+<div class="section" id="id7">
+<h3>General</h3>
+<ul class="simple">
+<li>Transactions no longer reset after a successful commit.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="api-version-400">
+<span id="api-version-upgrade-guide-400"></span><h2>API version 400</h2>
+<div class="section" id="id8">
+<h3>Java bindings</h3>
+<ul class="simple">
+<li>The Java bindings have moved packages from <code class="docutils literal"><span class="pre">com.foundationdb</span></code> to <code class="docutils literal"><span class="pre">com.apple.cie.foundationdb</span></code>.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="api-version-300">
+<span id="api-version-upgrade-guide-300"></span><h2>API version 300</h2>
+<div class="section" id="id9">
+<h3>General</h3>
+<ul class="simple">
+<li>Snapshot reads now see the effects of prior writes within the same transaction. The previous behavior can be achieved using the <code class="docutils literal"><span class="pre">SNAPSHOT_RYW_DISABLE</span></code> transaction option.</li>
+<li>The transaction size limit now includes the size of conflict ranges in its calculation. The size of a conflict range is the sum of the lengths of its begin and end keys.</li>
+<li>Adding conflict ranges or watches in the system keyspace (beginning with <code class="docutils literal"><span class="pre">\xFF</span></code>) now requires setting the <code class="docutils literal"><span class="pre">READ_SYSTEM_KEYS</span></code> or <code class="docutils literal"><span class="pre">ACCESS_SYSTEM_KEYS</span></code> option.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="api-version-200">
+<span id="api-version-upgrade-guide-200"></span><h2>API version 200</h2>
+<div class="section" id="id10">
+<h3>General</h3>
+<ul class="simple">
+<li>Read version requests will now fail when the transaction is reset or has experienced another error.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="api-version-100">
+<span id="api-version-upgrade-guide-100"></span><h2>API version 100</h2>
+<div class="section" id="id11">
+<h3>Java bindings</h3>
+<ul class="simple">
+<li><code class="docutils literal"><span class="pre">Transaction.clearRangeStartsWith</span></code> has been deprecated. <code class="docutils literal"><span class="pre">Transaction.clear(Range)</span></code> should be used instead.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="older-api-versions">
+<h2>Older API versions</h2>
+<p>API versions from the beta and alpha releases of Foundationdb (pre-100) are not documented here. See <a class="reference internal" href="old-release-notes/release-notes-023.html"><span class="doc">Release Notes</span></a> for details about changes in those releases.</p>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/api-version-upgrade-guide.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 08, 2020.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

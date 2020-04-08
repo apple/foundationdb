@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.11',
+        VERSION:     '6.2.19',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -553,7 +553,7 @@ until it&#8217;s ready.</p>
 <p>Another approach to programming with futures in FoundationDB is to set a callback function to be invoked asynchronously when the future is ready.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">Be very careful when mixing callbacks with explicit or implicit blocking. Blocking in a callback on a non-ready future will cause a deadlock. Blocking on anything else or performing CPU intensive tasks will block the FoundationDB client thread and therefore all database access from that client.</p>
+<p class="last">Be very careful when mixing callbacks with explicit or implicit blocking. Blocking in a callback on a non-ready future will cause a deadlock. Blocking on anything else or performing CPU intensive tasks will block the FoundationDB <a class="reference internal" href="api-general.html#client-network-thread"><span class="std std-ref">client thread</span></a> and therefore all database access from that client.</p>
 </div>
 <p>For further details, see the <a class="reference internal" href="api-reference.html"><span class="doc">API reference</span></a> documentation for your language.</p>
 </div>
@@ -646,10 +646,21 @@ of the data while concurrently writing the new version.</p>
 <div class="section" id="atomic-operations">
 <span id="developer-guide-atomic-operations"></span><h3>Atomic operations</h3>
 <p>An atomic operation is a single database command that carries out several logical steps: reading the value of a key, performing a transformation on that value, and writing the result. Different atomic operations perform different transformations. Like other database operations, an atomic operation is used within a transaction; however, its use within a transaction will not cause the transaction to conflict.</p>
-<p>Atomic operations are ideal for operating on keys that multiple clients modify frequently. For example, you can use a key as a counter and increment it with atomic <code class="xref py py-func docutils literal"><span class="pre">add()</span></code>:</p>
+<p>Atomic operations are ideal for operating on keys that multiple clients modify frequently. For example, you can use a key as a counter and increment/decrement it with atomic <code class="xref py py-func docutils literal"><span class="pre">add()</span></code>:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">increment</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counter</span><span class="p">):</span>
     <span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">counter</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;&lt;i&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<span class="k">def</span> <span class="nf">decrement</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counter</span><span class="p">):</span>
+    <span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">counter</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;&lt;i&#39;</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>When the counter value is decremented down to 0, you may want to clear the key from database. An easy way to do that is to use <code class="xref py py-func docutils literal"><span class="pre">compare_and_clear()</span></code>, which atomically compares the value against given parameter and clears it without issuing a read from client:</p>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<span class="k">def</span> <span class="nf">decrement</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counter</span><span class="p">):</span>
+    <span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">counter</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;&lt;i&#39;</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+    <span class="n">tr</span><span class="o">.</span><span class="n">compare_and_clear</span><span class="p">(</span><span class="n">counter</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;&lt;i&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
 </pre></div>
 </div>
 <p>Similarly, you can use a key as a flag and toggle it with atomic <code class="xref py py-func docutils literal"><span class="pre">xor()</span></code>:</p>
@@ -930,7 +941,7 @@ of the data while concurrently writing the new version.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 23, 2020.<br/>
+      Last updated on Apr 08, 2020.<br/>
     </p>
   </div>
 </footer>

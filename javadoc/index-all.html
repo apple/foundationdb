@@ -1244,19 +1244,25 @@
 <dd>&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDB.html#open--">open()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></dt>
 <dd>
-<div class="block">Initializes networking, connects with the
-  <a href="./com/apple/foundationdb//foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
-  and opens the database.</div>
+<div class="block">Initializes networking if required and connects to the cluster specified by the
+  <a href="./com/apple/foundationdb//foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.<br>
+  <br>
+  A single client can use this function multiple times to connect to different
+  clusters simultaneously, with each invocation requiring its own cluster file.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDB.html#open-java.lang.String-">open(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></dt>
 <dd>
-<div class="block">Initializes networking, connects to the cluster specified by <code>clusterFilePath</code>
-  and opens the database.</div>
+<div class="block">Initializes networking if required and connects to the cluster specified by <code>clusterFilePath</code>.<br>
+  <br>
+  A single client can use this function multiple times to connect to different
+  clusters simultaneously, with each invocation requiring its own cluster file.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDB.html#open-java.lang.String-java.util.concurrent.Executor-">open(String, Executor)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></dt>
 <dd>
-<div class="block">Initializes networking, connects to the cluster specified by <code>clusterFilePath</code>
-  and opens the database.</div>
+<div class="block">Initializes networking if required and connects to the cluster specified by <code>clusterFilePath</code>.<br>
+  <br>
+  A single client can use this function multiple times to connect to different
+  clusters simultaneously, with each invocation requiring its own cluster file.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Cluster.html#openDatabase--">openDatabase()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/Cluster.html" title="class in com.apple.foundationdb">Cluster</a></dt>
 <dd>
@@ -1658,7 +1664,7 @@
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setLockAware--">setLockAware()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
-<div class="block">The transaction can read and write to locked databases, and is resposible for checking that it took the lock.</div>
+<div class="block">The transaction can read and write to locked databases, and is responsible for checking that it took the lock.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setLogTransaction--">setLogTransaction()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
@@ -1822,7 +1828,7 @@
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/DatabaseOptions.html#setTransactionRetryLimit-long-">setTransactionRetryLimit(long)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/DatabaseOptions.html" title="class in com.apple.foundationdb">DatabaseOptions</a></dt>
 <dd>
-<div class="block">Set a timeout in milliseconds which, when elapsed, will cause a transaction automatically to be cancelled.</div>
+<div class="block">Set a maximum number of retries after which additional calls to <code>onError</code> will throw the most recently seen error code.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/DatabaseOptions.html#setTransactionSizeLimit-long-">setTransactionSizeLimit(long)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/DatabaseOptions.html" title="class in com.apple.foundationdb">DatabaseOptions</a></dt>
 <dd>

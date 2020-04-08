@@ -1,6 +1,6 @@
-###################
-Release Notes (4.1)
-###################
+#############
+Release Notes
+#############
 
 4.1.1
 =====
@@ -39,6 +39,11 @@ Fixes
 * A log could attempt to recover from a partially recovered set of logs when fast recovery was enabled.
 * A rare scenario could cause a crash when a master is recovering metadata from the previous generation of logs.
 * Streaming mode ``EXACT`` was ignoring the ``target_bytes`` parameter.
+
+Bindings
+--------
+
+* API version updated to 410. See the :ref:`API version upgrade guide <api-version-upgrade-guide-410>` for upgrade details.
 
 Earlier release notes
 ---------------------
