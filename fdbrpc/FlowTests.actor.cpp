@@ -80,6 +80,7 @@ class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<
 	ErrFunc errFunc;
 
 	virtual void fire(T const& t) { CallbackType::remove(); func(t); delete this; }
+	virtual void fire(T &&t) { CallbackType::remove(); func(std::move(t)); delete this; }
 	virtual void error(Error e) { CallbackType::remove(); errFunc(e); delete this; }
 
 public:
