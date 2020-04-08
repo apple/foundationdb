@@ -3362,7 +3362,7 @@ private:
 
 	// MetaKey changes size so allocate space for it to expand into
 	union {
-		uint8_t headerSpace[sizeof(MetaKey) + sizeof(LogicalPageID) * 20];
+		uint8_t headerSpace[sizeof(MetaKey) + sizeof(LogicalPageID) * 30];
 		MetaKey m_header;
 	};
 
