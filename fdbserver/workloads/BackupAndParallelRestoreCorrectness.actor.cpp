@@ -218,7 +218,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 						if(!fdesc.isError()) {
 							state BackupDescription desc = fdesc.get();
-							ASSERT(self->usePartitionedLogs == desc.partitioned);
 							wait(desc.resolveVersionTimes(cx));
 							printf("BackupDescription:\n%s\n", desc.toString().c_str());
 							restorable = desc.maxRestorableVersion.present();

@@ -723,10 +723,12 @@ public:
 		state Optional<Version> metaLogEnd;
 		state Optional<Version> metaExpiredEnd;
 		state Optional<Version> metaUnreliableEnd;
+		state Optional<Version> metaLogType;
 
 		std::vector<Future<Void>> metaReads;
 		metaReads.push_back(store(metaExpiredEnd, bc->expiredEndVersion().get()));
 		metaReads.push_back(store(metaUnreliableEnd, bc->unreliableEndVersion().get()));
+		metaReads.push_back(store(metaLogType, bc->logType().get()));
 
 		// Only read log begin/end versions if not doing a deep scan, otherwise scan files and recalculate them.
 		if(!deepScan) {
@@ -737,12 +739,13 @@ public:
 		wait(waitForAll(metaReads));
 
 		TraceEvent("BackupContainerDescribe2")
-			.detail("URL", bc->getURL())
-			.detail("LogStartVersionOverride", logStartVersionOverride)
-			.detail("ExpiredEndVersion", metaExpiredEnd.orDefault(invalidVersion))
-			.detail("UnreliableEndVersion", metaUnreliableEnd.orDefault(invalidVersion))
-			.detail("LogBeginVersion", metaLogBegin.orDefault(invalidVersion))
-			.detail("LogEndVersion", metaLogEnd.orDefault(invalidVersion));
+		    .detail("URL", bc->getURL())
+		    .detail("LogStartVersionOverride", logStartVersionOverride)
+		    .detail("ExpiredEndVersion", metaExpiredEnd.orDefault(invalidVersion))
+		    .detail("UnreliableEndVersion", metaUnreliableEnd.orDefault(invalidVersion))
+		    .detail("LogBeginVersion", metaLogBegin.orDefault(invalidVersion))
+		    .detail("LogEndVersion", metaLogEnd.orDefault(invalidVersion))
+		    .detail("LogType", metaLogType.orDefault(-1));
 
 		// If the logStartVersionOverride is positive (not relative) then ensure that unreliableEndVersion is equal or greater
 		if(logStartVersionOverride != invalidVersion && metaUnreliableEnd.orDefault(invalidVersion) < logStartVersionOverride) {
@@ -810,7 +813,7 @@ public:
 			desc.partitioned = true;
 			logs.swap(plogs);
 		} else {
-			desc.partitioned = false;
+			desc.partitioned = metaLogType.present() && metaLogType.get() == PARTITIONED_MUTATION_LOG;
 		}
 
 		// List logs in version order so log continuity can be analyzed
@@ -855,6 +858,11 @@ public:
 
 				if(desc.contiguousLogEnd.present() && metaLogEnd != desc.contiguousLogEnd) {
 					updates = updates && bc->logEndVersion().set(desc.contiguousLogEnd.get());
+				}
+
+				if (!metaLogType.present()) {
+					updates = updates && bc->logType().set(desc.partitioned ? PARTITIONED_MUTATION_LOG
+					                                                        : NON_PARTITIONED_MUTATION_LOG);
 				}
 
 				wait(updates);
@@ -1383,6 +1391,11 @@ public:
 	VersionProperty logEndVersion() {   return {Reference<BackupContainerFileSystem>::addRef(this), "log_end_version"}; }
 	VersionProperty expiredEndVersion() {   return {Reference<BackupContainerFileSystem>::addRef(this), "expired_end_version"}; }
 	VersionProperty unreliableEndVersion() {   return {Reference<BackupContainerFileSystem>::addRef(this), "unreliable_end_version"}; }
+
+	// Backup log types
+	const static Version NON_PARTITIONED_MUTATION_LOG = 0;
+	const static Version PARTITIONED_MUTATION_LOG = 1;
+	VersionProperty logType() { return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" }; }
 
 	ACTOR static Future<Void> writeVersionProperty(Reference<BackupContainerFileSystem> bc, std::string path, Version v) {
 		try {
