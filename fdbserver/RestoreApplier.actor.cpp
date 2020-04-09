@@ -320,8 +320,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 
 	// Get keys in stagingKeys which does not have a baseline key by reading database cx, and precompute the key's value
 	std::vector<Future<Void>> fGetAndComputeKeys;
-	std::vector<std::map<Key, std::map<Key, StagingKey>::iterator>> incompleteStagingKeysBuf(1);
-	std::map<Key, std::map<Key, StagingKey>::iterator>& incompleteStagingKeys = incompleteStagingKeysBuf.back();
+	std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys;
 	std::map<Key, StagingKey>::iterator stagingKeyIter = batchData->stagingKeys.begin();
 	int numKeysInBatch = 0;
 	for (; stagingKeyIter != batchData->stagingKeys.end(); stagingKeyIter++) {
@@ -333,8 +332,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 		if (numKeysInBatch == SERVER_KNOBS->FASTRESTORE_APPLIER_FETCH_KEYS_SIZE) {
 			fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, cx, applierID));
 			numKeysInBatch = 0;
-			incompleteStagingKeysBuf.push_back(std::map<Key, std::map<Key, StagingKey>::iterator>());
-			incompleteStagingKeys = incompleteStagingKeysBuf.back();
+			incompleteStagingKeys.clear();
 		}
 	}
 	if (numKeysInBatch > 0) {
