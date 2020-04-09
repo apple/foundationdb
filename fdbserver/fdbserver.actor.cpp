@@ -202,8 +202,8 @@ vector< Standalone<VectorRef<DebugEntryRef>> > debugEntries;
 int64_t totalDebugEntriesSize = 0;
 
 #if CENABLED(0, NOT_IN_CLEAN)
-StringRef debugKey = LiteralStringRef( "" );
-StringRef debugKey2 = LiteralStringRef( "\xff\xff\xff\xff" );
+StringRef debugKey = LiteralStringRef("");
+StringRef debugKey2 = LiteralStringRef("\xff\xff\xff\xff");
 
 bool debugMutation( const char* context, Version version, MutationRef const& mutation ) {
 	if ((mutation.type == mutation.SetValue || mutation.type == mutation.AddValue || mutation.type==mutation.DebugKey) && (mutation.param1 == debugKey || mutation.param1 == debugKey2))
@@ -1554,9 +1554,9 @@ int main(int argc, char* argv[]) {
 		delete FLOW_KNOBS;
 		delete SERVER_KNOBS;
 		delete CLIENT_KNOBS;
-		FlowKnobs* flowKnobs = new FlowKnobs(true, role == Simulation);
-		ClientKnobs* clientKnobs = new ClientKnobs(true);
-		ServerKnobs* serverKnobs = new ServerKnobs(true, clientKnobs, role == Simulation);
+		FlowKnobs* flowKnobs = new FlowKnobs;
+		ClientKnobs* clientKnobs = new ClientKnobs;
+		ServerKnobs* serverKnobs = new ServerKnobs;
 		FLOW_KNOBS = flowKnobs;
 		SERVER_KNOBS = serverKnobs;
 		CLIENT_KNOBS = clientKnobs;
@@ -1587,6 +1587,11 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(opts.memLimit))) ASSERT(false);
+
+		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
+		flowKnobs->initialize(true, role == Simulation);
+		clientKnobs->initialize(true);
+		serverKnobs->initialize(true, clientKnobs, role == Simulation);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);

@@ -520,7 +520,8 @@ public:
 	int64_t FASTRESTORE_HEARTBEAT_MAX_DELAY; // master claim a node is down if no heart beat from the node for this delay
 	int64_t FASTRESTORE_APPLIER_FETCH_KEYS_SIZE; // number of keys to fetch in a txn on applier
 
-	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
+	ServerKnobs();
+	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
 
 extern ServerKnobs const* SERVER_KNOBS;

@@ -150,14 +150,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			batchData->counters.receivedMutations += 1;
 			batchData->counters.receivedAtomicOps += isAtomicOp((MutationRef::Type)mutation.type) ? 1 : 0;
 			// Sanity check
-			if (g_network->isSimulated()) {
-				if (isRangeMutation(mutation)) {
-					ASSERT(mutation.param1 >= req.asset.range.begin &&
-					       mutation.param2 <= req.asset.range.end); // Range mutation's right side is exclusive
-				} else {
-					ASSERT(mutation.param1 >= req.asset.range.begin && mutation.param1 < req.asset.range.end);
-				}
-			}
+			ASSERT_WE_THINK(req.asset.isInKeyRange(mutation));
+
 			// Note: Log and range mutations may be delivered out of order. Can we handle it?
 			if (mutation.type == MutationRef::SetVersionstampedKey ||
 			    mutation.type == MutationRef::SetVersionstampedValue) {
@@ -189,6 +183,8 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (auto& range : ranges) {
+				debugFRMutation("FastRestoreApplierApplyClearRangeMutation", 0,
+				                MutationRef(MutationRef::ClearRange, range.begin, range.end));
 				tr->clear(range);
 			}
 			wait(tr->commit());
@@ -278,6 +274,8 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	double curTxnSize = 0;
 	for (auto& rangeMutation : batchData->stagingKeyRanges) {
 		KeyRangeRef range(rangeMutation.mutation.param1, rangeMutation.mutation.param2);
+		debugFRMutation("FastRestoreApplierPrecomputeMutationsResultClearRange", rangeMutation.version.version,
+		                MutationRef(MutationRef::ClearRange, range.begin, range.end));
 		clearRanges.push_back(clearRanges.arena(), range);
 		curTxnSize += range.expectedSize();
 		if (curTxnSize >= SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES) {
@@ -306,6 +304,8 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 				    .detail("ClearRangeUpperBound", rangeMutation.mutation.param2)
 				    .detail("UsedUpperBound", ub->first);
 			}
+			// We make the beginKey = endKey for the ClearRange on purpose so that
+			// we can sanity check ClearRange mutation when we apply it to DB.
 			MutationRef clearKey(MutationRef::ClearRange, lb->first, lb->first);
 			lb->second.add(clearKey, rangeMutation.version);
 			lb++;
@@ -371,6 +371,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int sets = 0;
 	state int clears = 0;
+	state Key endKey = begin->second.key;
 	TraceEvent("FastRestoreApplierPhaseApplyStagingKeysBatch", applierID).detail("Begin", begin->first);
 	loop {
 		try {
@@ -381,13 +382,25 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 			while (iter != end) {
 				if (iter->second.type == MutationRef::SetValue) {
 					tr->set(iter->second.key, iter->second.val);
+					TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseApplyStagingKeysBatch", applierID)
+					    .detail("SetKey", iter->second.key);
 					sets++;
 				} else if (iter->second.type == MutationRef::ClearRange) {
-					tr->clear(KeyRangeRef(iter->second.key, iter->second.val));
+					if (iter->second.key != iter->second.val) {
+						TraceEvent(SevError, "FastRestoreApplierPhaseApplyStagingKeysBatchClearTooMuchData", applierID)
+						    .detail("KeyBegin", iter->second.key)
+						    .detail("KeyEnd", iter->second.val)
+						    .detail("Version", iter->second.version.version)
+						    .detail("SubVersion", iter->second.version.sub);
+					}
+					tr->clear(singleKeyRange(iter->second.key));
+					TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseApplyStagingKeysBatch", applierID)
+					    .detail("ClearKey", iter->second.key);
 					clears++;
 				} else {
 					ASSERT(false);
 				}
+				endKey = iter != end ? iter->second.key : endKey;
 				iter++;
 				if (sets > 10000000 || clears > 10000000) {
 					TraceEvent(SevError, "FastRestoreApplierPhaseApplyStagingKeysBatchInfiniteLoop", applierID)
@@ -398,6 +411,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 			}
 			TraceEvent("FastRestoreApplierPhaseApplyStagingKeysBatchPrecommit", applierID)
 			    .detail("Begin", begin->first)
+			    .detail("End", endKey)
 			    .detail("Sets", sets)
 			    .detail("Clears", clears);
 			wait(tr->commit());

@@ -26,7 +26,11 @@ ServerKnobs const* SERVER_KNOBS = new ServerKnobs();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
-ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimulated) {
+ServerKnobs::ServerKnobs() {
+	initialize();
+}
+
+void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSimulated) {
 	// clang-format off
 	// Versions
 	init( VERSIONS_PER_SECOND,                                   1e6 );
