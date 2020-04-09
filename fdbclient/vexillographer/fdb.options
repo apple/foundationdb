@@ -178,7 +178,7 @@ description is not currently required but encouraged.
             description="The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock."
             defaultFor="20"/>
     <Option name="transaction_include_port_in_address" code="505"
-            description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 700, this option is enabled by default and setting this has no effect."
+            description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect."
             defaultFor="23"/>
   </Scope>
   
@@ -189,7 +189,7 @@ description is not currently required but encouraged.
             description="The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock."/>
     <Option name="causal_read_disable" code="21" />
     <Option name="include_port_in_address" code="23"
-            description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 700, this option is enabled by default and setting this has no effect." />
+            description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect." />
     <Option name="next_write_no_write_conflict_range" code="30"
             description="The next write performed on this transaction will not generate a write conflict range. As a result, other transactions which read the key(s) being modified by the next write will not conflict with this transaction. Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on." />
     <Option name="commit_on_first_proxy" code="40"

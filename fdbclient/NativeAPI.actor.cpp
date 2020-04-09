@@ -912,8 +912,17 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 
 			std::string knobName = optionValue.substr(0, eq);
 			std::string knobValue = optionValue.substr(eq+1);
-			if (!const_cast<FlowKnobs*>(FLOW_KNOBS)->setKnob( knobName, knobValue ) &&
-				!const_cast<ClientKnobs*>(CLIENT_KNOBS)->setKnob( knobName, knobValue ))
+			if (const_cast<FlowKnobs*>(FLOW_KNOBS)->setKnob(knobName, knobValue))
+			{
+				// update dependent knobs
+				const_cast<FlowKnobs*>(FLOW_KNOBS)->initialize();
+			}
+			else if (const_cast<ClientKnobs*>(CLIENT_KNOBS)->setKnob(knobName, knobValue))
+			{
+				// update dependent knobs
+				const_cast<ClientKnobs*>(CLIENT_KNOBS)->initialize();
+			}
+			else
 			{
 				TraceEvent(SevWarnAlways, "UnrecognizedKnob").detail("Knob", knobName.c_str());
 				fprintf(stderr, "FoundationDB client ignoring unrecognized knob option '%s'\n", knobName.c_str());
@@ -2503,7 +2512,7 @@ void TransactionOptions::reset(Database const& cx) {
 	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
 	sizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 	lockAware = cx->lockAware;
-	if (cx->apiVersionAtLeast(700)) {
+	if (cx->apiVersionAtLeast(630)) {
 		includePort = true;
 	}
 }

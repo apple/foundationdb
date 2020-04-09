@@ -25,6 +25,7 @@
 #include "flow/Platform.h"
 
 #include <map>
+#include <set>
 #include <string>
 #include <stdint.h>
 
@@ -45,6 +46,7 @@ protected:
 	std::map<std::string, int*> int_knobs;
 	std::map<std::string, std::string*> string_knobs;
 	std::map<std::string, bool*> bool_knobs;
+	std::set<std::string> explicitlySetKnobs;
 };
 
 class FlowKnobs : public Knobs {
@@ -224,7 +226,8 @@ public:
 	int HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS;
 	int HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
 
-	FlowKnobs(bool randomize = false, bool isSimulated = false);
+	FlowKnobs();
+	void initialize(bool randomize = false, bool isSimulated = false);
 };
 
 extern FlowKnobs const* FLOW_KNOBS;
