@@ -71,6 +71,8 @@ public:
 	size_t sizeBytes() const;
 	FieldIterator begin() const;
 	FieldIterator end() const;
+	bool isAnnotated() const;
+	void setAnnotated();
 
 	void addField(const std::string& key, const std::string& value);
 	void addField(std::string&& key, std::string&& value);
@@ -95,6 +97,7 @@ public:
 private:
 	FieldContainer fields;
 	size_t bytes;
+	bool annotated;
 };
 
 template <class Archive>

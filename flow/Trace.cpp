@@ -377,11 +377,11 @@ public:
 			eventBuffer.clear();
 		}
 
+		opened = true;
 		for(TraceEventFields &fields : eventBuffer) {
 			annotateEvent(fields);
 		}
 
-		opened = true;
 		if(preopenOverflowCount > 0) {
 			TraceEvent(SevWarn, "TraceLogPreopenOverflow").detail("OverflowEventCount", preopenOverflowCount);
 			preopenOverflowCount = 0;
@@ -389,6 +389,8 @@ public:
 	}
 
 	void annotateEvent(TraceEventFields& fields) {
+		if (!opened || fields.isAnnotated())
+			return;
 		MutexHolder holder(mutex);
 		if(localAddress.present()) {
 			fields.addField("Machine", formatIpPort(localAddress.get().ip, localAddress.get().port));
@@ -400,15 +402,13 @@ public:
 		if(r.rolesString.size() > 0) {
 			fields.addField("Roles", r.rolesString);
 		}
+		fields.setAnnotated();
 	}
 
-	void writeEvent(TraceEventFields fields, std::string trackLatestKey, bool trackError,
-	                bool alreadyAnnotated = false) {
+	void writeEvent(TraceEventFields fields, std::string trackLatestKey, bool trackError) {
 		MutexHolder hold(mutex);
 
-		if (opened && !alreadyAnnotated) {
-			annotateEvent(fields);
-		}
+		annotateEvent(fields);
 
 		if(!trackLatestKey.empty()) {
 			fields.addField("TrackLatestType", "Original");
@@ -420,6 +420,7 @@ public:
 		}
 
 		// FIXME: What if we are using way too much memory for buffer?
+		ASSERT(!isOpen() || fields.isAnnotated());
 		eventBuffer.push_back(fields);
 		bufferLength += fields.sizeBytes();
 
@@ -1230,21 +1231,21 @@ void TraceBatch::dump() {
 		if(g_network->isSimulated()) {
 			attachBatch[i].fields.addField("Machine", machine);
 		}
-		g_traceLog.writeEvent(attachBatch[i].fields, "", false, !dumpImmediately());
+		g_traceLog.writeEvent(attachBatch[i].fields, "", false);
 	}
 
 	for(int i = 0; i < eventBatch.size(); i++) {
 		if(g_network->isSimulated()) {
 			eventBatch[i].fields.addField("Machine", machine);
 		}
-		g_traceLog.writeEvent(eventBatch[i].fields, "", false, !dumpImmediately());
+		g_traceLog.writeEvent(eventBatch[i].fields, "", false);
 	}
 
 	for(int i = 0; i < buggifyBatch.size(); i++) {
 		if(g_network->isSimulated()) {
 			buggifyBatch[i].fields.addField("Machine", machine);
 		}
-		g_traceLog.writeEvent(buggifyBatch[i].fields, "", false, !dumpImmediately());
+		g_traceLog.writeEvent(buggifyBatch[i].fields, "", false);
 	}
 
 	g_traceLog.flush();
@@ -1278,7 +1279,7 @@ TraceBatch::BuggifyInfo::BuggifyInfo(double time, int activated, int line, std::
 	fields.addField("Line", format("%d", line));
 }
 
-TraceEventFields::TraceEventFields() : bytes(0) {}
+TraceEventFields::TraceEventFields() : bytes(0), annotated(false) {}
 
 void TraceEventFields::addField(const std::string& key, const std::string& value) {
 	bytes += key.size() + value.size();
@@ -1304,6 +1305,14 @@ TraceEventFields::FieldIterator TraceEventFields::begin() const {
 
 TraceEventFields::FieldIterator TraceEventFields::end() const {
 	return fields.cend();
+}
+
+bool TraceEventFields::isAnnotated() const {
+	return annotated;
+}
+
+void TraceEventFields::setAnnotated() {
+	annotated = true;
 }
 
 const TraceEventFields::Field &TraceEventFields::operator[] (int index) const {
