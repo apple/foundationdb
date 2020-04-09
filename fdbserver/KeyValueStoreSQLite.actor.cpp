@@ -25,6 +25,7 @@
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Hash3.h"
+#include "flow/FBTrace.h"
 
 extern "C" {
 #include "fdbserver/sqlite/sqliteInt.h"
@@ -1530,12 +1531,22 @@ private:
 		};
 		void action( ReadValueAction& rv ) {
 			//double t = timer();
-			if (rv.debugID.present()) g_traceBatch.addEvent("GetValueDebug", rv.debugID.get().first(), "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
+			if (rv.debugID.present()) {
+				g_traceBatch.addEvent("GetValueDebug", rv.debugID.get().first(), "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
+				//FIXME
+				fbTrace(Reference<GetValueDebugTrace>(new GetValueDebugTrace(rv.debugID.get().first(), now(),
+																			 GetValueDebugTrace::READER_GETVALUE_BEFORE)));
+			}
 
 			rv.result.send( getCursor()->get().get(rv.key) );
 			++counter;
 
-			if (rv.debugID.present()) g_traceBatch.addEvent("GetValueDebug", rv.debugID.get().first(), "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
+			if (rv.debugID.present()) {
+				g_traceBatch.addEvent("GetValueDebug", rv.debugID.get().first(), "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
+				//FIXME
+				fbTrace(Reference<GetValueDebugTrace>(new GetValueDebugTrace(rv.debugID.get().first(), now(),
+																			 GetValueDebugTrace::READER_GETVALUE_AFTER)));
+			}
 			//t = timer()-t;
 			//if (t >= 1.0) TraceEvent("ReadValueActionSlow",dbgid).detail("Elapsed", t);
 		}
@@ -1550,12 +1561,22 @@ private:
 		};
 		void action( ReadValuePrefixAction& rv ) {
 			//double t = timer();
-			if (rv.debugID.present()) g_traceBatch.addEvent("GetValuePrefixDebug", rv.debugID.get().first(), "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
+			if (rv.debugID.present()) {
+				g_traceBatch.addEvent("GetValuePrefixDebug", rv.debugID.get().first(), "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
+				//FIXME
+				fbTrace(Reference<GetValueDebugTrace>(new GetValueDebugTrace(rv.debugID.get().first(), now(),
+																						 GetValueDebugTrace::READER_GETVALUEPREFIX_BEFORE)));
+			}
 
 			rv.result.send( getCursor()->get().getPrefix(rv.key, rv.maxLength) );
 			++counter;
 
-			if (rv.debugID.present()) g_traceBatch.addEvent("GetValuePrefixDebug", rv.debugID.get().first(), "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
+			if (rv.debugID.present()) {
+				g_traceBatch.addEvent("GetValuePrefixDebug", rv.debugID.get().first(), "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
+				//FIXME
+				fbTrace(Reference<GetValueDebugTrace>(new GetValueDebugTrace(rv.debugID.get().first(), now(),
+																			 GetValueDebugTrace::READER_GETVALUEPREFIX_AFTER)));
+			}
 			//t = timer()-t;
 			//if (t >= 1.0) TraceEvent("ReadValuePrefixActionSlow",dbgid).detail("Elapsed", t);
 		}

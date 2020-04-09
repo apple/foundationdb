@@ -51,6 +51,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
 #include "flow/Stats.h"
+#include "flow/FBTrace.h"
 #include "flow/TDMetric.actor.h"
 #include <type_traits>
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -838,13 +839,21 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 		// so we need to downgrade here
 		wait( delay(0, TaskPriority::DefaultEndpoint) );
 
-		if( req.debugID.present() )
+		if( req.debugID.present() ) {
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
+			//FIXME
+			fbTrace(Reference<GetValueDebugTrace>(new GetValueDebugTrace(req.debugID.get().first(), now(),
+																		 GetValueDebugTrace::STORAGESERVER_GETVALUE_DOREAD)));
+		}
 
 		state Optional<Value> v;
 		state Version version = wait( waitForVersion( data, req.version ) );
-		if( req.debugID.present() )
+		if( req.debugID.present() ) {
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
+			//FIXME
+			fbTrace(Reference<GetValueDebugTrace>(new GetValueDebugTrace(req.debugID.get().first(), now(),
+																		 GetValueDebugTrace::STORAGESERVER_GETVALUE_AFTERVERSION)));
+		}
 
 		state uint64_t changeCounter = data->shardChangeCounter;
 
@@ -897,8 +906,12 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 			data->metrics.notifyBytesReadPerKSecond(req.key, bytesReadPerKSecond);
 		}
 
-		if( req.debugID.present() )
+		if( req.debugID.present() ) {
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
+			//FIXME
+			fbTrace(Reference<GetValueDebugTrace>(new GetValueDebugTrace(req.debugID.get().first(), now(),
+																		 GetValueDebugTrace::STORAGESERVER_GETVALUE_AFTERREAD)));
+		}
 
 		GetValueReply reply(v);
 		reply.penalty = data->getPenalty();
@@ -923,12 +936,20 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 	try {
 		++data->counters.watchQueries;
 
-		if( req.debugID.present() )
+		if( req.debugID.present() ) {
 			g_traceBatch.addEvent("WatchValueDebug", req.debugID.get().first(), "watchValueQ.Before"); //.detail("TaskID", g_network->getCurrentTask());
+			//FIXME
+			fbTrace(Reference<WatchValueDebugTrace>(new WatchValueDebugTrace(req.debugID.get().first(), now(),
+																		 WatchValueDebugTrace::STORAGESERVER_WATCHVALUE_BEFORE)));
+		}
 
 		wait(success(waitForVersionNoTooOld(data, req.version)));
-		if( req.debugID.present() )
+		if( req.debugID.present() ) {
 			g_traceBatch.addEvent("WatchValueDebug", req.debugID.get().first(), "watchValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
+			//FIXME
+			fbTrace(Reference<WatchValueDebugTrace>(new WatchValueDebugTrace(req.debugID.get().first(), now(),
+																		 WatchValueDebugTrace::STORAGESERVER_WATCHVALUE_AFTERVERSION)));
+		}
 
 		loop {
 			try {
@@ -945,8 +966,12 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 
 				debugMutation("ShardWatchValue", latest, MutationRef(MutationRef::DebugKey, req.key, reply.value.present() ? StringRef( reply.value.get() ) : LiteralStringRef("<null>") ) );
 
-				if( req.debugID.present() )
+				if( req.debugID.present() ) {
 					g_traceBatch.addEvent("WatchValueDebug", req.debugID.get().first(), "watchValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
+					//FIXME
+					fbTrace(Reference<WatchValueDebugTrace>(new WatchValueDebugTrace(req.debugID.get().first(), now(),
+																					 WatchValueDebugTrace::STORAGESERVER_WATCHVALUE_AFTERREAD)));
+				}
 
 				if( reply.value != req.value ) {
 					req.reply.send(WatchValueReply{ latest });
@@ -1351,16 +1376,24 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 	wait( delay(0, taskType) );
 
 	try {
-		if( req.debugID.present() )
+		if( req.debugID.present() ) {
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
+			//FIXME
+			fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(req.debugID.get().first(), now(),
+																			   TransactionDebugTrace::STORAGESERVER_GETKEYVALUES_BEFORE)));
+		}
 		state Version version = wait( waitForVersion( data, req.version ) );
 
 		state uint64_t changeCounter = data->shardChangeCounter;
 //		try {
 		state KeyRange shard = getShardKeyRange( data, req.begin );
 
-		if( req.debugID.present() )
+		if( req.debugID.present() ) {
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterVersion");
+			//FIXME
+			fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(req.debugID.get().first(), now(),
+																			   TransactionDebugTrace::STORAGESERVER_GETKEYVALUES_AFTERVERSION)));
+		}
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard", "None").detail("In", "getKeyValues>getShardKeyRange"); throw e; }
 
@@ -1375,8 +1408,12 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual() ? Future<Key>(req.end.getKey()) : findKey( data, req.end, version, shard, &offset2 );
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
-		if( req.debugID.present() )
+		if( req.debugID.present() ) {
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterKeys");
+			//FIXME
+			fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(req.debugID.get().first(), now(),
+																			   TransactionDebugTrace::STORAGESERVER_GETKEYVALUES_AFTERKEYS)));
+		}
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
 		// Offsets of zero indicate begin/end keys in this shard, which obviously means we can answer the query
@@ -1392,8 +1429,12 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 		}
 
 		if (begin >= end) {
-			if( req.debugID.present() )
+			if( req.debugID.present() ) {
 				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Send");
+				//FIXME
+				fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(req.debugID.get().first(), now(),
+																				   TransactionDebugTrace::STORAGESERVER_GETKEYVALUES_SEND)));
+			}
 			//.detail("Begin",begin).detail("End",end);
 
 			GetKeyValuesReply none;
@@ -1409,8 +1450,12 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 			GetKeyValuesReply _r = wait( readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes) );
 			GetKeyValuesReply r = _r;
 
-			if( req.debugID.present() )
+			if( req.debugID.present() ) {
 				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterReadRange");
+				//FIXME
+				fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(req.debugID.get().first(), now(),
+																				   TransactionDebugTrace::STORAGESERVER_GETKEYVALUES_AFTERREADRANGE)));
+			}
 			//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 			data->checkChangeCounter( changeCounter, KeyRangeRef( std::min<KeyRef>(begin, std::min<KeyRef>(req.begin.getKey(), req.end.getKey())), std::max<KeyRef>(end, std::max<KeyRef>(req.begin.getKey(), req.end.getKey())) ) );
 			if (EXPENSIVE_VALIDATION) {
@@ -3602,8 +3647,12 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 			}
 			when( GetValueRequest req = waitNext(ssi.getValue.getFuture()) ) {
 				// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
-				if( req.debugID.present() )
+				if( req.debugID.present() ) {
 					g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "storageServer.received"); //.detail("TaskID", g_network->getCurrentTask());
+					//FIXME
+					fbTrace(Reference<GetValueDebugTrace>(new GetValueDebugTrace(req.debugID.get().first(), now(),
+																				 GetValueDebugTrace::STORAGESERVER_GETVALUE_RECEIVED)));
+				}
 
 				if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
 					req.reply.send(GetValueReply());
