@@ -2348,13 +2348,23 @@ struct RedwoodRecordRef {
 		return compare(rhs) >= 0;
 	}
 
-	int deltaSize(const RedwoodRecordRef &base, bool worstCase = true, int skipLen = 0) const {
+	// Worst case overhead means to assu
+	int deltaSize(const RedwoodRecordRef &base, int skipLen, bool worstCaseOverhead) const {
 		int prefixLen = getCommonPrefixLen(base, skipLen);
 		int keySuffixLen = key.size() - prefixLen;
 		int valueLen = value.present() ? value.get().size() : 0;
 
-		int formatType = Delta::determineLengthFormat(prefixLen, keySuffixLen, valueLen);
-		int versionBytes = version == 0 ? 0 : Delta::getVersionDeltaSizeBytes(version - base.version);
+		int formatType;
+		int versionBytes;
+		if(worstCaseOverhead) {
+			formatType = Delta::determineLengthFormat(key.size(), key.size(), valueLen);
+			versionBytes = version == 0 ? 0 : Delta::getVersionDeltaSizeBytes(version << 1);
+		}
+		else {
+			formatType = Delta::determineLengthFormat(prefixLen, keySuffixLen, valueLen);
+			versionBytes = version == 0 ? 0 : Delta::getVersionDeltaSizeBytes(version - base.version);
+		}
+
 		return 1 + Delta::LengthFormatSizes[formatType] + keySuffixLen + valueLen + versionBytes;
 	}
 
@@ -3386,6 +3396,8 @@ private:
 
 		state int start = 0;
 		state int i = 0;
+		// The common prefix length between the first and last records are common to all records
+		state int skipLen = entries.front().getCommonPrefixLen(entries.back());
 
 		// Leaves can have just one record if it's large, but internal pages should have at least 4
 		state int minimumEntries = (height == 1 ? 1 : 4);
@@ -3408,15 +3420,24 @@ private:
 					continue;
 				}
 
-				// Get delta from previous record
-				int deltaSize = entry.deltaSize((i == start) ? pageLowerBound : entries[i - 1]);
+				// Get delta from previous record or page lower boundary if this is the first item in a page
+				const RedwoodRecordRef &base = (i == start) ? pageLowerBound : entries[i - 1];
+
+				// All record pairs in entries have skipLen bytes in common with each other, but for i == 0 the base is lowerBound
+				int skip = i == 0 ? 0 : skipLen;
+
+				// In a delta tree, all common prefix bytes that can be borrowed, will be, but not necessarily
+				// by the same records during the linear estimate of the built page size.  Since the key suffix bytes
+				// and therefore the key prefix lengths can be distributed differently in the balanced tree, worst case
+				// overhead for the delta size must be assumed.
+				int deltaSize = entry.deltaSize(base, skip, true);
+
 				int keySize = entry.key.size();
 				int valueSize = entry.value.present() ? entry.value.get().size() : 0;
 
 				int nodeSize = BTreePage::BinaryTree::Node::headerSize(largeTree) + deltaSize;
-
-				debug_printf("Adding %3d of %3lu (i=%3d) klen %4d  vlen %3d  nodeSize %4d  page usage: %d/%d (%.2f%%)  record=%s\n",
-					i + 1, entries.size(), i, keySize, valueSize, nodeSize, compressedBytes, pageSize, (float)compressedBytes / pageSize * 100, entry.toString(height == 1).c_str());
+				debug_printf("Adding %3d of %3lu (i=%3d) klen %4d  vlen %5d  nodeSize %5d  deltaSize %5d  page usage: %d/%d (%.2f%%)  record=%s\n",
+					i + 1, entries.size(), i, keySize, valueSize, nodeSize, deltaSize, compressedBytes, pageSize, (float)compressedBytes / pageSize * 100, entry.toString(height == 1).c_str());
 
 				// While the node doesn't fit, expand the page.
 				// This is a loop because if the page size moves into "large" range for DeltaTree
@@ -3486,8 +3507,12 @@ private:
 			btPage->height = height;
 			btPage->kvBytes = kvBytes;
 
+			debug_printf("Building tree.  start=%d  i=%d  count=%d  page usage: %d/%d (%.2f%%) bytes\nlower: %s\nupper: %s\n", start, i, i - start, 
+				compressedBytes, pageSize, (float)compressedBytes / pageSize * 100, pageLowerBound.toString(false).c_str(), pageUpperBound.toString(false).c_str());
+
 			int written = btPage->tree().build(pageSize, &entries[start], &entries[i], &pageLowerBound, &pageUpperBound);
 			if(written > pageSize) {
+				debug_printf("ERROR:  Wrote %d bytes to %d byte page (%d blocks). recs %d  kvBytes %d  compressed %d\n", written, pageSize, blockCount, i - start, kvBytes, compressedBytes);
 				fprintf(stderr, "ERROR:  Wrote %d bytes to %d byte page (%d blocks). recs %d  kvBytes %d  compressed %d\n", written, pageSize, blockCount, i - start, kvBytes, compressedBytes);
 				ASSERT(false);
 			}
@@ -5422,7 +5447,7 @@ struct IntIntPair {
 		return compare(rhs) < 0;
 	}
 
-	int deltaSize(const IntIntPair &base, bool worstcase = false, int skipLen = 0) const {
+	int deltaSize(const IntIntPair &base, int skipLen, bool worstcase) const {
 		return sizeof(Delta);
 	}
 
@@ -5447,7 +5472,7 @@ int deltaTest(RedwoodRecordRef rec, RedwoodRecordRef base) {
 	RedwoodRecordRef::Delta &d = *(RedwoodRecordRef::Delta *)&buf.front();
 
 	Arena mem;
-	int expectedSize = rec.deltaSize(base, false);
+	int expectedSize = rec.deltaSize(base, 0, false);
 	int deltaSize = rec.writeDelta(d, base);
 	RedwoodRecordRef decoded = d.apply(base, mem);
 

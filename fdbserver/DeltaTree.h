@@ -484,7 +484,7 @@ public:
 			int commonPrefix = basePrev ? commonWithPrev : commonWithNext;
 			const T *base = basePrev ? prev : next;
 
-			int deltaSize = k.deltaSize(*base, false, commonPrefix);
+			int deltaSize = k.deltaSize(*base, commonPrefix, false);
 			int nodeSpace = deltaSize + Node::headerSize(tree->largeNodes);
 			if(nodeSpace > tree->nodeBytesFree) {
 				return false;
