@@ -633,8 +633,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 		std::cout << "Restore to version: " << request.targetVersion << "\nBackupDesc: \n" << desc.toString() << "\n\n";
 	}
 
-	Optional<RestorableFileSet> restorable = wait(desc.partitioned ? bc->getPartitionedRestoreSet(request.targetVersion)
-	                                                               : bc->getRestoreSet(request.targetVersion));
+	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(request.targetVersion));
 
 	if (!restorable.present()) {
 		TraceEvent(SevWarn, "FastRestoreMasterPhaseCollectBackupFiles").detail("NotRestorable", request.targetVersion);

@@ -115,6 +115,7 @@ std::string BackupDescription::toString() const {
 
 	info.append(format("URL: %s\n", url.c_str()));
 	info.append(format("Restorable: %s\n", maxRestorableVersion.present() ? "true" : "false"));
+	info.append(format("Partitioned logs: %s\n", partitioned ? "true" : "false"));
 
 	auto formatVersion = [&](Version v) {
 		std::string s;
@@ -169,6 +170,7 @@ std::string BackupDescription::toJSON() const {
 	doc.setKey("SchemaVersion", "1.0.0");
 	doc.setKey("URL", url.c_str());
 	doc.setKey("Restorable", maxRestorableVersion.present());
+	doc.setKey("Partitioned", partitioned);
 
 	auto formatVersion = [&](Version v) {
 		JsonBuilderObject doc;
@@ -1281,7 +1283,7 @@ public:
 		return end;
 	}
 
-	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion, bool partitioned) {
+	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion) {
 		// Find the most recent keyrange snapshot to end at or before targetVersion
 		state Optional<KeyspaceSnapshotFile> snapshot;
 		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
@@ -1305,9 +1307,13 @@ public:
 			}
 
 			// FIXME: check if there are tagged logs. for each tag, there is no version gap.
-			state std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion, partitioned));
+			state std::vector<LogFile> logs;
+			state std::vector<LogFile> plogs;
+			wait(store(logs, bc->listLogFiles(snapshot.get().beginVersion, targetVersion, false)) &&
+			     store(plogs, bc->listLogFiles(snapshot.get().beginVersion, targetVersion, true)));
 
-			if (partitioned) {
+			if (plogs.size() > 0) {
+				logs.swap(plogs);
 				// sort by tag ID so that filterDuplicates works.
 				std::sort(logs.begin(), logs.end(), [](const LogFile& a, const LogFile& b) {
 					return std::tie(a.tagId, a.beginVersion, a.endVersion) <
@@ -1343,11 +1349,7 @@ public:
 	}
 
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) final {
-		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, false);
-	}
-
-	Future<Optional<RestorableFileSet>> getPartitionedRestoreSet(Version targetVersion) final {
-		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, true);
+		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion);
 	}
 
 private:
