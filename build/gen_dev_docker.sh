@@ -30,7 +30,7 @@ num_groups=${#gids[@]}
 additional_groups="-G sudo"
 for ((i=0;i<num_groups;i++))
 do
-        echo "RUN groupadd -g ${gids[$i]} ${groups[$i]}" >> Dockerfile
+        echo "RUN groupadd -g ${gids[$i]} ${groups[$i]} || true" >> Dockerfile
         if [ ${gids[i]} -ne ${gid} ]
         then
                 additional_groups="${additional_groups},${gids[$i]}"
