@@ -1957,24 +1957,6 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, ClusterControllerData* 
 	}
 }
 
-struct HealthMonitorServerState {
-	std::map<NetworkAddress, std::map<NetworkAddress, bool>> failureState;
-};
-
-ACTOR Future<Void> healthMonitoringServer(UID uniqueID, ClusterControllerData* self,
-                                          FutureStream<HealthMonitoringRequest> requests) {
-	state Version currentVersion = 0;
-
-	loop choose {
-		when(HealthMonitoringRequest req = waitNext(requests)) {
-			NetworkAddress reporteeAddress = req.reply.getEndpoint().getPrimaryAddress();
-			TraceEvent("HealthMonitorRequestReceived")
-			    .detail("Size", req.closedPeers.size())
-			    .detail("EndpointAddress", reporteeAddress);
-		}
-	}
-}
-
 ACTOR Future<vector<TLogInterface>> requireAll( vector<Future<Optional<vector<TLogInterface>>>> in ) {
 	state vector<TLogInterface> out;
 	state int i;
@@ -3070,7 +3052,6 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	state Future<ErrorOr<Void>> error = errorOr( actorCollection( self.addActor.getFuture() ) );
 
 	self.addActor.send( failureDetectionServer( self.id, &self, interf.clientInterface.failureMonitoring.getFuture() ) );
-	self.addActor.send( healthMonitoringServer( self.id, &self, interf.clientInterface.healthMonitoring.getFuture() ) );
 	self.addActor.send( clusterWatchDatabase( &self, &self.db ) );  // Start the master database
 	self.addActor.send( self.updateWorkerList.init( self.db.db ) );
 	self.addActor.send( statusServer( interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));

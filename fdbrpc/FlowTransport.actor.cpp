@@ -399,38 +399,32 @@ ACTOR Future<Void> connectionWriter( Reference<Peer> self, Reference<IConnection
 }
 
 ACTOR Future<Void> delayedHealthUpdate(NetworkAddress address) {
-	try {
-		state double start = now();
-		state int count = 0;
-		loop {
-			if (FLOW_KNOBS->HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS &&
-			    FlowTransport::transport().healthMonitor()->tooManyConnectionsClosed(address) && address.isPublic()) {
-				if (count == 0) {
-					TraceEvent("TooManyConnectionsClosedMarkFailed")
-					    .detail("Dest", address)
-					    .detail("StartTime", start)
-					    .detail("ClosedCount",
-					            FlowTransport::transport().healthMonitor()->closedConnectionsCount(address));
-					IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(true));
-				}
-				wait(delayJittered(FLOW_KNOBS->MAX_RECONNECTION_TIME * 2.0));
-			} else {
-				if (count > 1)
-					TraceEvent("TooManyConnectionsClosedMarkAvailable")
-					    .detail("Dest", address)
-					    .detail("StartTime", start)
-					    .detail("TimeElapsed", now() - start)
-					    .detail("ClosedCount",
-					            FlowTransport::transport().healthMonitor()->closedConnectionsCount(address));
-				IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(false));
-				break;
+	state double start = now();
+	state int count = 0;
+	loop {
+		if (FLOW_KNOBS->HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS &&
+		    FlowTransport::transport().healthMonitor()->tooManyConnectionsClosed(address) && address.isPublic()) {
+			if (count == 0) {
+				TraceEvent("TooManyConnectionsClosedMarkFailed")
+				    .detail("Dest", address)
+				    .detail("StartTime", start)
+				    .detail("ClosedCount", FlowTransport::transport().healthMonitor()->closedConnectionsCount(address));
+				IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(true));
 			}
-			++count;
+			wait(delayJittered(FLOW_KNOBS->MAX_RECONNECTION_TIME * 2.0));
+		} else {
+			if (count > 1)
+				TraceEvent("TooManyConnectionsClosedMarkAvailable")
+				    .detail("Dest", address)
+				    .detail("StartTime", start)
+				    .detail("TimeElapsed", now() - start)
+				    .detail("ClosedCount", FlowTransport::transport().healthMonitor()->closedConnectionsCount(address));
+			IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(false));
+			break;
 		}
-		return Void();
-	} catch (Error& e) {
-		throw e;
+		++count;
 	}
+	return Void();
 }
 
 ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
