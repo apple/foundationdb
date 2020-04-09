@@ -297,7 +297,7 @@ func (o DatabaseOptions) SetTransactionTimeout(param int64) error {
 	return o.setOpt(500, int64ToBytes(param))
 }
 
-// Set a timeout in milliseconds which, when elapsed, will cause a transaction automatically to be cancelled. This sets the ``retry_limit`` option of each transaction created by this database. See the transaction option description for more information.
+// Set a maximum number of retries after which additional calls to ``onError`` will throw the most recently seen error code. This sets the ``retry_limit`` option of each transaction created by this database. See the transaction option description for more information.
 //
 // Parameter: number of times to retry
 func (o DatabaseOptions) SetTransactionRetryLimit(param int64) error {
@@ -323,7 +323,7 @@ func (o DatabaseOptions) SetTransactionCausalReadRisky() error {
 	return o.setOpt(504, nil)
 }
 
-// Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated.
+// Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 630, and this option will be deprecated.
 func (o DatabaseOptions) SetTransactionIncludePortInAddress() error {
 	return o.setOpt(505, nil)
 }
@@ -343,7 +343,7 @@ func (o TransactionOptions) SetCausalReadDisable() error {
 	return o.setOpt(21, nil)
 }
 
-// Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated.
+// Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 630, and this option will be deprecated.
 func (o TransactionOptions) SetIncludePortInAddress() error {
 	return o.setOpt(23, nil)
 }
@@ -422,7 +422,7 @@ func (o TransactionOptions) SetDebugTransactionIdentifier(param string) error {
 	return o.setOpt(403, []byte(param))
 }
 
-// Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled and to get log output.
+// Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled to get log output.
 func (o TransactionOptions) SetLogTransaction() error {
 	return o.setOpt(404, nil)
 }
@@ -472,7 +472,7 @@ func (o TransactionOptions) SetSnapshotRywDisable() error {
 	return o.setOpt(601, nil)
 }
 
-// The transaction can read and write to locked databases, and is resposible for checking that it took the lock.
+// The transaction can read and write to locked databases, and is responsible for checking that it took the lock.
 func (o TransactionOptions) SetLockAware() error {
 	return o.setOpt(700, nil)
 }
@@ -505,7 +505,8 @@ const (
 	// small portion of data is transferred to the client initially (in order to
 	// minimize costs if the client doesn't read the entire range), and as the
 	// caller iterates over more items in the range larger batches will be
-	// transferred in order to minimize latency.
+	// transferred in order to minimize latency. After enough iterations, the
+	// iterator mode will eventually reach the same byte limit as “WANT_ALL“
 	StreamingModeIterator StreamingMode = 0
 
 	// Infrequently used. The client has passed a specific row limit and wants
