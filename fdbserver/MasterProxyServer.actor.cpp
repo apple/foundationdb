@@ -1312,21 +1312,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 		reply.tagThrottleInfo.clear();
 
 		for(auto tag : request.tags) {
-			TagThrottleInfo::Priority priority;
-			if(request.priority() == GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
-				priority = TagThrottleInfo::Priority::IMMEDIATE;
-			}
-			else if(request.priority() == GetReadVersionRequest::PRIORITY_DEFAULT) {
-				priority = TagThrottleInfo::Priority::DEFAULT;
-			}
-			else if(request.priority() == GetReadVersionRequest::PRIORITY_BATCH) {
-				priority = TagThrottleInfo::Priority::BATCH;
-			}
-			else {
-				ASSERT(false);
-			}
-
-			auto itr = throttledTags.find(priority);
+			auto itr = throttledTags.find(TagThrottleInfo::priorityFromReadVersionFlags(request.flags));
 			ASSERT(itr != throttledTags.end());
 
 			auto tagItr = itr->second.find(tag);

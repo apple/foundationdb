@@ -446,7 +446,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					req.limit = SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT;
 					req.limitBytes = SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES;
 					req.version = version;
-					req.tags = VectorRef<StringRef>();
+					req.tags = TagSet();
 
 					//Try getting the shard locations from the key servers
 					state vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
@@ -778,7 +778,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 						req.limit = 1e4;
 						req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 						req.version = version;
-						req.tags = VectorRef<StringRef>();
+						req.tags = TagSet();
 
 						//Try getting the entries in the specified range
 						state vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;

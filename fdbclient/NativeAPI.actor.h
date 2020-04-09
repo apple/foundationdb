@@ -131,7 +131,8 @@ struct TransactionOptions {
 	bool includePort : 1;
 	bool reportConflictingKeys : 1;
 
-	Standalone<VectorRef<StringRef>> tags;
+	TagSet tags; // All tags set on transaction
+	TagSet readTags; // Tags that can be sent with read requests
 
 	TransactionOptions(Database const& cx);
 	TransactionOptions();

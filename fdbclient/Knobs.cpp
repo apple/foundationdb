@@ -215,5 +215,11 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	// trace
 	init( TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH,      50 );
+
+	// transaction tags
+	init( MAX_TAGS_PER_TRANSACTION,                 100 );
+	init( MAX_TRANSACTION_TAG_LENGTH,               100 );
+	init( READ_TAG_SAMPLE_RATE,                     1.0 ); // Communicated to clients from cluster
+
 	// clang-format on
 }

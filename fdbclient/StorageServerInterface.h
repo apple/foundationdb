@@ -29,6 +29,7 @@
 #include "fdbrpc/LoadBalance.actor.h"
 #include "flow/Stats.h"
 #include "fdbrpc/TimedRequest.h"
+#include "fdbclient/TagThrottle.h"
 
 // Dead code, removed in the next protocol version
 struct VersionReply {
@@ -142,12 +143,12 @@ struct GetValueRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 8454530;
 	Key key;
 	Version version;
-	Standalone<VectorRef<StringRef>> tags;
+	TagSet tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetValueReply> reply;
 
 	GetValueRequest(){}
-	GetValueRequest(const Key& key, Version ver, Standalone<VectorRef<StringRef>> tags, Optional<UID> debugID) : key(key), version(ver), tags(tags), debugID(debugID) {}
+	GetValueRequest(const Key& key, Version ver, TagSet tags, Optional<UID> debugID) : key(key), version(ver), tags(tags), debugID(debugID) {}
 	
 	template <class Ar> 
 	void serialize( Ar& ar ) {
@@ -173,12 +174,12 @@ struct WatchValueRequest {
 	Key key;
 	Optional<Value> value;
 	Version version;
-	Standalone<VectorRef<StringRef>> tags;
+	TagSet tags;
 	Optional<UID> debugID;
 	ReplyPromise<WatchValueReply> reply;
 
 	WatchValueRequest(){}
-	WatchValueRequest(const Key& key, Optional<Value> value, Version ver, Standalone<VectorRef<StringRef>> tags, Optional<UID> debugID) : key(key), value(value), version(ver), tags(tags), debugID(debugID) {}
+	WatchValueRequest(const Key& key, Optional<Value> value, Version ver, TagSet tags, Optional<UID> debugID) : key(key), value(value), version(ver), tags(tags), debugID(debugID) {}
 	
 	template <class Ar> 
 	void serialize( Ar& ar ) {
@@ -209,7 +210,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	Version version;		// or latestVersion
 	int limit, limitBytes;
 	bool isFetchKeys;
-	VectorRef<StringRef> tags;
+	TagSet tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetKeyValuesReply> reply;
 
@@ -239,12 +240,12 @@ struct GetKeyRequest : TimedRequest {
 	Arena arena;
 	KeySelectorRef sel;
 	Version version;		// or latestVersion
-	VectorRef<StringRef> tags;
+	TagSet tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetKeyReply> reply;
 
 	GetKeyRequest() {}
-	GetKeyRequest(KeySelectorRef const& sel, Version version, VectorRef<StringRef> tags, Optional<UID> debugID) : sel(sel), version(version), debugID(debugID) {}
+	GetKeyRequest(KeySelectorRef const& sel, Version version, TagSet tags, Optional<UID> debugID) : sel(sel), version(version), debugID(debugID) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {

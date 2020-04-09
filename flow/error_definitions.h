@@ -149,6 +149,8 @@ ERROR( address_in_use, 2105, "Local address in use" )
 ERROR( invalid_local_address, 2106, "Invalid local address" )
 ERROR( tls_error, 2107, "TLS error" )
 ERROR( unsupported_operation, 2108, "Operation is not supported" )
+ERROR( too_many_tags, 2109, "Too many tags set on transaction" )
+ERROR( tag_too_long, 2110, "Tag set on transaction is too long" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

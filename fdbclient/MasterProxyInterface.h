@@ -29,6 +29,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/TagThrottle.h"
 
 #include "flow/Stats.h"
 #include "fdbrpc/TimedRequest.h"
@@ -86,7 +87,9 @@ struct ClientDBInfo {
 	double clientTxnInfoSampleRate;
 	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;
-	ClientDBInfo() : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1) {}
+	double transactionTagSampleRate;
+
+	ClientDBInfo() : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1), transactionTagSampleRate(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE) {}
 
 	bool operator == (ClientDBInfo const& r) const { return id == r.id; }
 	bool operator != (ClientDBInfo const& r) const { return id != r.id; }
@@ -96,7 +99,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward);
+		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate);
 	}
 };
 
@@ -188,12 +191,12 @@ struct GetReadVersionRequest : TimedRequest {
 
 	uint32_t transactionCount;
 	uint32_t flags;
-	Standalone<VectorRef<StringRef>> tags;
+	TagSet tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
 	GetReadVersionRequest() : transactionCount( 1 ), flags( PRIORITY_DEFAULT ) {}
-	GetReadVersionRequest( uint32_t transactionCount, uint32_t flags, Standalone<VectorRef<StringRef>> tags = Standalone<VectorRef<StringRef>>(), Optional<UID> debugID = Optional<UID>() ) 
+	GetReadVersionRequest( uint32_t transactionCount, uint32_t flags, TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>() ) 
 	    : transactionCount( transactionCount ), flags( flags ), tags(tags), debugID( debugID ) {}
 	
 	int priority() const { return flags & FLAG_PRIORITY_MASK; }

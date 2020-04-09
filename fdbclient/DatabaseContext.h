@@ -67,6 +67,8 @@ public:
 	void invalidateCache( const KeyRef&, bool isBackward = false );
 	void invalidateCache( const KeyRangeRef& );
 
+	bool sampleReadTags();
+
 	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
 	Future<Void> onMasterProxiesChanged();
@@ -127,10 +129,10 @@ public:
 
 	struct VersionRequest {
 		Promise<GetReadVersionReply> reply;
-		Standalone<VectorRef<StringRef>> tags;
+		TagSet tags;
 		Optional<UID> debugID;
 
-		VersionRequest(Standalone<VectorRef<StringRef>> tags = Standalone<VectorRef<StringRef>>(), Optional<UID> debugID = Optional<UID>()) : tags(tags), debugID(debugID) {}
+		VersionRequest(TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>()) : tags(tags), debugID(debugID) {}
 	};
 
 	// Transaction start request batching

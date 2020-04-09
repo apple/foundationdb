@@ -425,13 +425,13 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 
 				for(auto entry : throttledTags.get()) {
 					StringRef tag = entry.key.substr(tagThrottleKeysPrefix.size());
-					TagThrottleInfo throttleInfo = decodeTagThrottleValue(entry.value);
+					TagThrottleInfo throttleInfo = ThrottleApi::decodeTagThrottleValue(entry.value);
 					TraceEvent("RatekeeperReadThrottleRead").detail("Tag", tag).detail("Expiration", throttleInfo.expiration);
 					if((!self->autoThrottlingEnabled && throttleInfo.autoThrottled) || throttleInfo.expiration <= now()) { // TODO: keep or delete auto throttles when disabling auto-throttling
 						tr.clear(entry.key);
 					}
 					else {
-						// Convert serialized version to absolute time
+						// Convert serialized version to absolute time (TODO: version?)
 						if(throttleInfo.serializeExpirationAsDuration) {
 							throttleInfo.serializeExpirationAsDuration = false;
 							BinaryWriter wr(IncludeVersion());

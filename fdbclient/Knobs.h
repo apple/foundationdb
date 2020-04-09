@@ -205,6 +205,11 @@ public:
 	// trace
 	int TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH;
 
+	// transaction tags
+	int MAX_TRANSACTION_TAG_LENGTH;
+	int MAX_TAGS_PER_TRANSACTION;
+	double READ_TAG_SAMPLE_RATE; // Communicated to clients from cluster
+
 	ClientKnobs(bool randomize = false);
 };
 

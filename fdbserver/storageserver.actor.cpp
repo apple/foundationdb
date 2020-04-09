@@ -468,21 +468,17 @@ public:
 
 		Optional<TagInfo> previousBusiestTag;
 
-		void increment(Standalone<VectorRef<StringRef>> tags, int64_t delta) {
-			// TODO: sampling could be done on the client, but it would probably need to be controlled
-			// via a message from the cluster
-			if(deterministicRandom()->random01() <= SERVER_KNOBS->READ_TAG_SAMPLE_RATE) {
-				for(auto& tag : tags) {
-					int64_t &count = intervalCounts[Standalone<StringRef>(tag, tags.arena())];
-					count += delta;
-					if(count > busiestTagCount) {
-						busiestTagCount = count;
-						busiestTag = tag;
-					}
+		void increment(TagSet const& tags, int64_t delta) {
+			for(auto& tag : tags) {
+				int64_t &count = intervalCounts[Standalone<StringRef>(tag, tags.arena)];
+				count += delta;
+				if(count > busiestTagCount) {
+					busiestTagCount = count;
+					busiestTag = tag;
 				}
-
-				intervalTotalCount += delta;
 			}
+
+			intervalTotalCount += delta;
 		}
 
 		void startNewInterval(UID id) {
