@@ -105,7 +105,7 @@ void SimpleFailureMonitor::endpointNotFound( Endpoint const& endpoint ) {
 		TraceEvent("WellKnownEndpointNotFound").suppressFor(1.0).detail("Address", endpoint.getPrimaryAddress()).detail("TokenFirst", endpoint.token.first()).detail("TokenSecond", endpoint.token.second());
 		return;
 	}
-	TraceEvent("EndpointNotFound").detail("Addresses", endpoint.addresses.toString()).detail("Token", endpoint.token).detail("IsFailed", endpointKnownFailed.get(endpoint)).detail("ShouldSwap", endpoint.addresses.secondaryAddress.present() && !g_network->getLocalAddresses().secondaryAddress.present() && (endpoint.addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS()));
+	TraceEvent("EndpointNotFound").suppressFor(1.0).detail("Addresses", endpoint.addresses.toString()).detail("Token", endpoint.token).detail("IsFailed", endpointKnownFailed.get(endpoint)).detail("ShouldSwap", endpoint.addresses.secondaryAddress.present() && !g_network->getLocalAddresses().secondaryAddress.present() && (endpoint.addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS()));
 	endpointKnownFailed.set( endpoint, true );
 }
 
