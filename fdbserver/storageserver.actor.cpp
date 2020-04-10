@@ -460,7 +460,7 @@ public:
 			  : tag(tag), count(count), fractionalBusyness((double)count/totalCount), elapsed(elapsed) {}
 		};
 
-		std::map<Standalone<StringRef>, int64_t> intervalCounts; // TODO: use a hash for performance
+		std::unordered_map<Standalone<StringRef>, int64_t, std::hash<StringRef>> intervalCounts;
 		int64_t intervalTotalCount = 0;
 		Standalone<StringRef> busiestTag;
 		int64_t busiestTagCount = 0;

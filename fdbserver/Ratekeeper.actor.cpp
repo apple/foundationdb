@@ -187,8 +187,7 @@ struct RatekeeperData {
 	double lastWarning;
 	double lastSSListFetchedTimestamp;
 
-	typedef std::map<Standalone<StringRef>, TagThrottleInfo> ThrottleMap;
-	std::map<TagThrottleInfo::Priority, ThrottleMap> tagThrottles;
+	PrioritizedTagThrottleMap tagThrottles;
 
 	RatekeeperLimits normalLimits;
 	RatekeeperLimits batchLimits;
@@ -417,8 +416,8 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 				}
 
 				TraceEvent("RatekeeperReadThrottles").detail("NumThrottledTags", throttledTags.get().size());
-				std::map<TagThrottleInfo::Priority, RatekeeperData::ThrottleMap> newThrottles;
-				std::map<TagThrottleInfo::Priority, std::pair<RatekeeperData::ThrottleMap::iterator, RatekeeperData::ThrottleMap::iterator>> oldThrottleIterators;
+				PrioritizedTagThrottleMap newThrottles;
+				std::map<TagThrottleInfo::Priority, std::pair<TagThrottleMap::iterator, TagThrottleMap::iterator>> oldThrottleIterators;
 				for(auto t : self->tagThrottles) {
 					oldThrottleIterators[t.first] = std::make_pair(t.second.begin(), t.second.end());
 				}
@@ -473,7 +472,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 	}
 }
 
-void updateRate(RatekeeperData* self, RatekeeperLimits* limits, RatekeeperData::ThrottleMap& throttledTags) {
+void updateRate(RatekeeperData* self, RatekeeperLimits* limits, TagThrottleMap& throttledTags) {
 	//double controlFactor = ;  // dt / eFoldingTime
 
 	double actualTps = self->smoothReleasedTransactions.smoothRate();

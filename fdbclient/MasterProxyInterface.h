@@ -165,7 +165,7 @@ struct GetReadVersionReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 
-	std::map<Standalone<StringRef>, TagThrottleInfo> tagThrottleInfo;
+	TagThrottleMap tagThrottleInfo;
 
 	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 

@@ -86,6 +86,8 @@ struct TagThrottleInfo {
 	}
 };
 
+BINARY_SERIALIZABLE(TagThrottleInfo::Priority);
+
 class TagSet {
 public:
 	typedef std::set<StringRef>::const_iterator const_iterator;
@@ -148,7 +150,8 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 	}
 };
 
-BINARY_SERIALIZABLE(TagThrottleInfo::Priority);
+typedef std::unordered_map<Standalone<StringRef>, TagThrottleInfo, std::hash<StringRef>> TagThrottleMap;
+typedef std::map<TagThrottleInfo::Priority, TagThrottleMap> PrioritizedTagThrottleMap;
 
 namespace ThrottleApi {
 	// Currently, only 1 tag in a key is supported

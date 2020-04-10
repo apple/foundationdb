@@ -59,7 +59,7 @@ struct GetRateInfoReply {
 	double leaseDuration;
 	HealthMetrics healthMetrics;
 
-	std::map<TagThrottleInfo::Priority, std::map<Standalone<StringRef>, TagThrottleInfo>> throttledTags;
+	PrioritizedTagThrottleMap throttledTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
