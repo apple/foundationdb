@@ -389,9 +389,9 @@ public:
 	}
 
 	void annotateEvent(TraceEventFields& fields) {
+		MutexHolder holder(mutex);
 		if (!opened || fields.isAnnotated())
 			return;
-		MutexHolder holder(mutex);
 		if(localAddress.present()) {
 			fields.addField("Machine", formatIpPort(localAddress.get().ip, localAddress.get().port));
 		}
