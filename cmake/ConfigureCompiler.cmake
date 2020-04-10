@@ -21,6 +21,10 @@ set(RELATIVE_DEBUG_PATHS OFF CACHE BOOL "Use relative file paths in debug info")
 set(STATIC_LINK_LIBCXX ON CACHE BOOL "Statically link libstdcpp/libc++")
 set(USE_WERROR OFF CACHE BOOL "Compile with -Werror. Recommended for local development and CI.")
 
+if(USE_LIBCXX AND STATIC_LINK_LIBCXX AND NOT USE_LD STREQUAL "LLD")
+  message(FATAL_ERROR "Unsupported configuration: STATIC_LINK_LIBCXX with libc+++ only works if USE_LD=LLD")
+endif()
+
 set(rel_debug_paths OFF)
 if(RELATIVE_DEBUG_PATHS)
   set(rel_debug_paths ON)
@@ -218,7 +222,7 @@ else()
     if (USE_CCACHE)
       add_compile_options(
         -Wno-register
-        -Wno-error=unused-command-line-argument)
+        -Wno-unused-command-line-argument)
     endif()
   endif()
   if (USE_WERROR)
