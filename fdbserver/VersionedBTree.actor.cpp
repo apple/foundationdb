@@ -2067,8 +2067,8 @@ struct RedwoodRecordRef {
 		//    1 bits - has nonzero version
 		//    2 bits - version delta integer size code, maps to 0, 2, 4, 8
 		//    2 bits - length fields format
-        //
-		// Length fields using 3 to 7 bytes total depending on length fields format
+		//
+		// Length fields using 3 to 8 bytes total depending on length fields format
 		//
 		// Byte strings 
 		//    Key suffix bytes
