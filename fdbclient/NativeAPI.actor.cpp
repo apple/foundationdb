@@ -3275,8 +3275,6 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Re
 	if(rep.locked && !lockAware)
 		throw database_locked();
 
-	TagThrottleInfo::Priority priority;
-
 	++cx->transactionReadVersionsCompleted;
 
 	auto &priorityThrottledTags = cx->throttledTags[TagThrottleInfo::priorityFromReadVersionFlags(flags)];

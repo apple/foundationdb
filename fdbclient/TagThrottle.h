@@ -151,7 +151,11 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 BINARY_SERIALIZABLE(TagThrottleInfo::Priority);
 
 namespace ThrottleApi {
-	Future<std::map<Standalone<StringRef>, TagThrottleInfo>> getTags(Database const& db, int const& limit, KeyRef const& prefix);
+	// Currently, only 1 tag in a key is supported
+	Standalone<StringRef> throttleKeyForTags(std::set<StringRef> const& tags);
+	StringRef tagFromThrottleKey(KeyRef key);
+
+	Future<std::map<Standalone<StringRef>, TagThrottleInfo>> getTags(Database const& db, int const& limit);
 
 	Future<Void> throttleTag(Database const& db, Standalone<StringRef> const& tag, double const& rate, double const& expiration, 
 	                         bool const& serializeExpirationAsDuration, bool const& autoThrottled); // TODO: priorities

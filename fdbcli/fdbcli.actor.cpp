@@ -3788,17 +3788,16 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						continue;
 					}
 					else if(tokencmp(tokens[1], "list")) {
-						if(tokens.size() > 4) {
-							printf("Usage: throttle list [LIMIT] [PREFIX]\n");
+						if(tokens.size() > 3) {
+							printf("Usage: throttle list [LIMIT]\n");
 							printf("\n");
-							printf("Lists tags that are currently throttled, optionally limited to a certain tag PREFIX.\n");
-							printf("The default LIMIT is 100 tags, and by default all tags will be searched.\n");
+							printf("Lists tags that are currently throttled.\n");
+							printf("The default LIMIT is 100 tags.\n");
 							is_error = true;
 							continue;
 						}
 
 						state int throttleListLimit = 100;
-						state StringRef prefix;
 						if(tokens.size() >= 3) {
 							char *end;
 							throttleListLimit = std::strtol((const char*)tokens[2].begin(), &end, 10);
@@ -3808,19 +3807,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								continue;
 							}
 						}
-						if(tokens.size() >= 4) {
-							prefix = tokens[3];
-						}
 
-						std::map<Standalone<StringRef>, TagThrottleInfo> tags = wait(ThrottleApi::getTags(db, throttleListLimit, prefix));
-
-						std::string prefixString = "";
-						if(prefix.size() > 0) {
-							prefixString = format(" with prefix `%s'", prefix.toString().c_str());
-						}
+						std::map<Standalone<StringRef>, TagThrottleInfo> tags = wait(ThrottleApi::getTags(db, throttleListLimit));
 
 						if(tags.size() > 0) {
-							printf("Throttled tags%s:\n\n", prefixString.c_str());
+							printf("Throttled tags:\n\n");
 							printf("  Rate | Expiration (s) | Priority  | Type   | Tag\n");
 							printf(" ------+----------------+-----------+--------+------------------\n");
 							for(auto itr = tags.begin(); itr != tags.end(); ++itr) {
@@ -3829,16 +3820,16 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 									   (int)(itr->second.expiration-now()), 
 									   TagThrottleInfo::priorityToString(itr->second.priority), 
 									   itr->second.autoThrottled ? "auto" : "manual", 
-									   itr->first.substr(tagThrottleKeysPrefix.size()).toString().c_str());
+									   itr->first.toString().c_str());
 							}
 
 							if(tags.size() == throttleListLimit) {
-								printf("\nThe tag limit `%d' was reached. Use the [LIMIT] or [PREFIX] arguments to view additional tags.\n", throttleListLimit);
-								printf("Usage: throttle list [LIMIT] [PREFIX]\n");
+								printf("\nThe tag limit `%d' was reached. Use the [LIMIT] argument to view additional tags.\n", throttleListLimit);
+								printf("Usage: throttle list [LIMIT]\n");
 							}
 						}
 						else {
-							printf("There are no throttled tags%s\n", prefixString.c_str());
+							printf("There are no throttled tags\n");
 						}
 					}
 					else if(tokencmp(tokens[1], "on") && tokens.size() <=6) {	
