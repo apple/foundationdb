@@ -72,9 +72,21 @@ sudo docker run --rm `# delete (temporary) image after return` \\
                 --security-opt seccomp=unconfined \\
                 -v "${HOME}:${HOME}" `# Mount home directory` \\
                 \${ccache_args} \\
-                ${image}
+                ${image} "\$@"
 EOF
 
+cat <<EOF $HOME/bin/clangd
+#!/usr/bin/bash
+
+fdb-dev scl enable devtoolset-8 rh-python36 rh-ruby24 -- clangd
+EOF
+
+if [[ ":$PATH:" != *":$HOME/bin:"* ]]
+then
+        echo "WARNING: $HOME/bin is not in your PATH!"
+        echo -e "\tThis can cause problems with some scripts (like fdb-clangd)"
+fi
 chmod +x $HOME/bin/fdb-dev
 echo "To start the dev docker image run $HOME/bin/fdb-dev"
-echo "You can edit this file but be aware that this script will overwrite your changes if you rerun it"
+echo "$HOME/bin/clangd can be used for IDE integration"
+echo "You can edit these files but be aware that this script will overwrite your changes if you rerun it"
