@@ -1038,7 +1038,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					TraceEvent(SevWarnAlways, "MissingLocality")
 					    .detail("Server", i->first.uniqueID)
 					    .detail("Locality", i->first.locality.toString());
-					auto addr = i->first.address();
+					auto addr = i->first.stableAddress();
 					self->invalidLocalityAddr.insert(AddressExclusion(addr.ip, addr.port));
 					if (self->checkInvalidLocalities.isReady()) {
 						self->checkInvalidLocalities = checkAndRemoveInvalidLocalityAddr(self);
@@ -2856,6 +2856,14 @@ bool teamContainsFailedServer(DDTeamCollection* self, Reference<TCTeamInfo> team
 		    self->excludedServers.get(ipaddr) == DDTeamCollection::Status::FAILED) {
 			return true;
 		}
+		if(ssi.secondaryAddress().present()) {
+			AddressExclusion saddr(ssi.secondaryAddress().get().ip, ssi.secondaryAddress().get().port);
+			AddressExclusion sipaddr(ssi.secondaryAddress().get().ip);
+			if (self->excludedServers.get(saddr) == DDTeamCollection::Status::FAILED ||
+				self->excludedServers.get(sipaddr) == DDTeamCollection::Status::FAILED) {
+				return true;
+			}
+		}
 	}
 	return false;
 }
@@ -3567,29 +3575,41 @@ ACTOR Future<Void> storageServerTracker(
 
 			// If the storage server is in the excluded servers list, it is undesired
 			NetworkAddress a = server->lastKnownInterface.address();
-			state AddressExclusion addr( a.ip, a.port );
-			state AddressExclusion ipaddr( a.ip );
-			state DDTeamCollection::Status addrStatus = self->excludedServers.get(addr);
-			state DDTeamCollection::Status ipaddrStatus = self->excludedServers.get(ipaddr);
-			if (addrStatus != DDTeamCollection::Status::NONE || ipaddrStatus != DDTeamCollection::Status::NONE) {
+			AddressExclusion worstAddr( a.ip, a.port );
+			DDTeamCollection::Status worstStatus = self->excludedServers.get( worstAddr );
+			otherChanges.push_back( self->excludedServers.onChange( worstAddr ) );
+
+			for(int i = 0; i < 3; i++) {
+				if(i > 0 && !server->lastKnownInterface.secondaryAddress().present()) {
+					break;
+				}
+				AddressExclusion testAddr;
+				if(i == 0) testAddr = AddressExclusion(a.ip);
+				else if(i == 1) testAddr = AddressExclusion(server->lastKnownInterface.secondaryAddress().get().ip, server->lastKnownInterface.secondaryAddress().get().port);
+				else if(i == 2) testAddr = AddressExclusion(server->lastKnownInterface.secondaryAddress().get().ip);
+				DDTeamCollection::Status testStatus = self->excludedServers.get(testAddr);
+				if(testStatus > worstStatus) {
+					worstStatus = testStatus;
+					worstAddr = testAddr;
+				}
+				otherChanges.push_back( self->excludedServers.onChange( testAddr ) );
+			}
+
+			if (worstStatus != DDTeamCollection::Status::NONE) {
 				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 				    .detail("Server", server->id)
-				    .detail("Excluded",
-				            ipaddrStatus == DDTeamCollection::Status::NONE ? addr.toString() : ipaddr.toString());
+				    .detail("Excluded", worstAddr.toString());
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
-				if (addrStatus == DDTeamCollection::Status::FAILED ||
-				    ipaddrStatus == DDTeamCollection::Status::FAILED) {
+				if (worstStatus == DDTeamCollection::Status::FAILED) {
 					TraceEvent(SevWarn, "FailedServerRemoveKeys", self->distributorId)
-					    .detail("Address", addr.toString())
-					    .detail("ServerID", server->id);
+						.detail("Server", server->id)
+				    	.detail("Excluded", worstAddr.toString());
 					wait(removeKeysFromFailedServer(cx, server->id, self->lock));
 					if (BUGGIFY) wait(delay(5.0));
 					self->shardsAffectedByTeamFailure->eraseServer(server->id);
 				}
 			}
-			otherChanges.push_back( self->excludedServers.onChange( addr ) );
-			otherChanges.push_back( self->excludedServers.onChange( ipaddr ) );
 
 			failureTracker = storageServerFailureTracker(self, server, cx, &status, addedVersion);
 			//We need to recruit new storage servers if the key value store type has changed
@@ -3859,7 +3879,7 @@ ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 int numExistingSSOnAddr(DDTeamCollection* self, const AddressExclusion& addr) {
 	int numExistingSS = 0;
 	for (auto& server : self->server_info) {
-		const NetworkAddress& netAddr = server.second->lastKnownInterface.address();
+		const NetworkAddress& netAddr = server.second->lastKnownInterface.stableAddress();
 		AddressExclusion usedAddr(netAddr.ip, netAddr.port);
 		if (usedAddr == addr) {
 			++numExistingSS;
@@ -3873,10 +3893,10 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self, RecruitStorageReply
 	// SOMEDAY: Cluster controller waits for availability, retry quickly if a server's Locality changes
 	self->recruitingStream.set(self->recruitingStream.get() + 1);
 
-	const NetworkAddress& netAddr = candidateWorker.worker.address();
+	const NetworkAddress& netAddr = candidateWorker.worker.stableAddress();
 	AddressExclusion workerAddr(netAddr.ip, netAddr.port);
 	if (numExistingSSOnAddr(self, workerAddr) <= 2 &&
-	    self->recruitingLocalities.find(candidateWorker.worker.address()) == self->recruitingLocalities.end()) {
+	    self->recruitingLocalities.find(candidateWorker.worker.stableAddress()) == self->recruitingLocalities.end()) {
 		// Only allow at most 2 storage servers on an address, because
 		// too many storage server on the same address (i.e., process) can cause OOM.
 		// Ask the candidateWorker to initialize a SS only if the worker does not have a pending request
@@ -3897,7 +3917,7 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self, RecruitStorageReply
 		    .detail("RecruitingStream", self->recruitingStream.get());
 
 		self->recruitingIds.insert(interfaceId);
-		self->recruitingLocalities.insert(candidateWorker.worker.address());
+		self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
 		state ErrorOr<InitializeStorageReply> newServer =
 		    wait(candidateWorker.worker.storage.tryGetReply(isr, TaskPriority::DataDistribution));
 		if (newServer.isError()) {
@@ -3908,7 +3928,7 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self, RecruitStorageReply
 			wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution));
 		}
 		self->recruitingIds.erase(interfaceId);
-		self->recruitingLocalities.erase(candidateWorker.worker.address());
+		self->recruitingLocalities.erase(candidateWorker.worker.stableAddress());
 
 		TraceEvent("DDRecruiting")
 		    .detail("Primary", self->primary)
@@ -3954,7 +3974,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 					TraceEvent(SevDebug, "DDRecruitExcl1")
 					    .detail("Primary", self->primary)
 					    .detail("Excluding", s->second->lastKnownInterface.address());
-					auto addr = s->second->lastKnownInterface.address();
+					auto addr = s->second->lastKnownInterface.stableAddress();
 					AddressExclusion addrExcl(addr.ip, addr.port);
 					exclusions.insert(addrExcl);
 					numSSPerAddr[addrExcl]++; // increase from 0
@@ -4005,8 +4025,8 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection* self, Reference<AsyncVar<
 
 			choose {
 				when( RecruitStorageReply candidateWorker = wait( fCandidateWorker ) ) {
-					AddressExclusion candidateSSAddr(candidateWorker.worker.address().ip,
-					                                 candidateWorker.worker.address().port);
+					AddressExclusion candidateSSAddr(candidateWorker.worker.stableAddress().ip,
+					                                 candidateWorker.worker.stableAddress().port);
 					int numExistingSS = numSSPerAddr[candidateSSAddr];
 					if (numExistingSS >= 2) {
 						TraceEvent(SevWarnAlways, "StorageRecruiterTooManySSOnSameAddr", self->distributorId)
@@ -4740,7 +4760,7 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 	// Go through storage server interfaces and translate Address -> server ID (UID)
 	for (const AddressExclusion& excl : req.exclusions) {
 		for (const auto& ssi : ssis) {
-			if (excl.excludes(ssi.address())) {
+			if (excl.excludes(ssi.address()) || (ssi.secondaryAddress().present() && excl.excludes(ssi.secondaryAddress().get()))) {
 				excludeServerIDs.push_back(ssi.id());
 			}
 		}

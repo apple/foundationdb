@@ -1139,12 +1139,12 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::set<Optional<Key>> missingStorage;
 
 		for( int i = 0; i < workers.size(); i++ ) {
-			NetworkAddress addr = workers[i].interf.tLog.getEndpoint().addresses.getTLSAddress();
-			if( !configuration.isExcludedServer(addr) &&
+			NetworkAddress addr = workers[i].interf.stableAddress();
+			if( !configuration.isExcludedServer(workers[i].interf.addresses()) &&
 				( workers[i].processClass == ProcessClass::StorageClass || workers[i].processClass == ProcessClass::UnsetClass ) ) {
 				bool found = false;
 				for( int j = 0; j < storageServers.size(); j++ ) {
-					if( storageServers[j].getValue.getEndpoint().addresses.getTLSAddress() == addr ) {
+					if( storageServers[j].stableAddress() == addr ) {
 						found = true;
 						break;
 					}

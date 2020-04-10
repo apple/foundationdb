@@ -53,11 +53,12 @@ ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool
 	resetReply( req );
 	std::vector<Future<Void>> replies;
 	int currentStream = 0;
-	for(int i = 0; i < sendAmount && currentStream < req.broadcastInfo.size(); i++) {
+	std::vector<Endpoint> broadcastEndpoints = req.broadcastInfo;
+	for(int i = 0; i < sendAmount && currentStream < broadcastEndpoints.size(); i++) {
 		std::vector<Endpoint> endpoints;
-		RequestStream<TxnStateRequest> cur(req.broadcastInfo[currentStream++]);
-		while(currentStream < req.broadcastInfo.size()*(i+1)/sendAmount) {
-			endpoints.push_back(req.broadcastInfo[currentStream++]);
+		RequestStream<TxnStateRequest> cur(broadcastEndpoints[currentStream++]);
+		while(currentStream < broadcastEndpoints.size()*(i+1)/sendAmount) {
+			endpoints.push_back(broadcastEndpoints[currentStream++]);
 		}
 		req.broadcastInfo = endpoints;
 		replies.push_back(brokenPromiseToNever( cur.getReply( req ) ));

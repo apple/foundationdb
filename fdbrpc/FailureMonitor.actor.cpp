@@ -24,8 +24,10 @@
 ACTOR Future<Void> waitForStateEqual( IFailureMonitor* monitor, Endpoint endpoint, FailureStatus status ) {
 	loop {
 		Future<Void> change = monitor->onStateChanged(endpoint);
-		if (monitor->getState(endpoint) == status)
+	
+		if (monitor->getState(endpoint) == status) {
 			return Void();
+		}
 		wait( change );
 	}
 }
@@ -34,8 +36,9 @@ ACTOR Future<Void> waitForContinuousFailure( IFailureMonitor* monitor, Endpoint 
 	state double startT = now();
 	loop {
 		wait( monitor->onFailed( endpoint ) );
-		if(monitor->permanentlyFailed(endpoint))
+		if(monitor->permanentlyFailed(endpoint)) {
 			return Void();
+		}
 
 		// X == sustainedFailureDuration + slope * (now()-startT+X)
 		double waitDelay = (sustainedFailureDuration + slope * (now()-startT)) / (1-slope);
@@ -102,7 +105,7 @@ void SimpleFailureMonitor::endpointNotFound( Endpoint const& endpoint ) {
 		TraceEvent("WellKnownEndpointNotFound").suppressFor(1.0).detail("Address", endpoint.getPrimaryAddress()).detail("TokenFirst", endpoint.token.first()).detail("TokenSecond", endpoint.token.second());
 		return;
 	}
-	TraceEvent("EndpointNotFound").suppressFor(1.0).detail("Address", endpoint.getPrimaryAddress()).detail("Token", endpoint.token);
+	TraceEvent("EndpointNotFound").detail("Addresses", endpoint.addresses.toString()).detail("Token", endpoint.token).detail("IsFailed", endpointKnownFailed.get(endpoint)).detail("ShouldSwap", endpoint.addresses.secondaryAddress.present() && !g_network->getLocalAddresses().secondaryAddress.present() && (endpoint.addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS()));
 	endpointKnownFailed.set( endpoint, true );
 }
 

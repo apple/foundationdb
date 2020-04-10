@@ -342,7 +342,10 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics, vector<Work
 				machineJsonMap[machineId] = statusObj;
 			}
 
-			if (configuration.present() && !configuration.get().isExcludedServer(it->first))
+			//FIXME: this will not catch if the secondary address of the process was excluded
+			NetworkAddressList tempList;
+			tempList.address = it->first;
+			if (configuration.present() && !configuration.get().isExcludedServer(tempList))
 				notExcludedMap[machineId] = false;
 			workerContribMap[machineId] ++;
 		}
@@ -828,7 +831,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			statusObj["roles"] = roles.getStatusForAddress(address);
 
 			if (configuration.present()){
-				statusObj["excluded"] = configuration.get().isExcludedServer(address);
+				statusObj["excluded"] = configuration.get().isExcludedServer(workerItr->interf.addresses());
 			}
 
 			statusObj["class_type"] = workerItr->processClass.toString();
@@ -1549,7 +1552,7 @@ static int getExtraTLogEligibleZones(const vector<WorkerDetails>& workers, const
 	std::map<Key,std::set<StringRef>> dcId_zone;
 	for(auto const& worker : workers) {
 		if(worker.processClass.machineClassFitness(ProcessClass::TLog) < ProcessClass::NeverAssign
-			&& !configuration.isExcludedServer(worker.interf.address()))
+			&& !configuration.isExcludedServer(worker.interf.addresses()))
 		{
 			allZones.insert(worker.interf.locality.zoneId().get());
 			if(worker.interf.locality.dcId().present()) {

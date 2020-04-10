@@ -69,12 +69,20 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #endif
 
 ACTOR Future<std::vector<Endpoint>> tryDBInfoBroadcast(RequestStream<UpdateServerDBInfoRequest> stream, UpdateServerDBInfoRequest req) {
-	ErrorOr<std::vector<Endpoint>> rep = wait( stream.getReplyUnlessFailedFor(req, 1.0, 0) );
-	if(rep.present()) {
-		return rep.get();
+	state UID dbgid = nondeterministicRandom()->randomUniqueID();
+	TraceEvent("BroadcastDBInfo", dbgid).detail("Addr", stream.getEndpoint().getPrimaryAddress()).detail("Token", stream.getEndpoint().token);
+	try {
+		ErrorOr<std::vector<Endpoint>> rep = wait( stream.getReplyUnlessFailedFor(req, 1.0, 0) );
+		TraceEvent("BroadcastDBInfoReply", dbgid).detail("Addr", stream.getEndpoint().getPrimaryAddress()).detail("Present", rep.present());
+		if(rep.present()) {
+			return rep.get();
+		}
+		req.broadcastInfo.push_back(stream.getEndpoint());
+		return req.broadcastInfo;
+	} catch( Error &e ) {
+		TraceEvent("BroadcastDBInfoError", dbgid).error(e,true).detail("Addr", stream.getEndpoint().getPrimaryAddress());
+		throw;
 	}
-	req.broadcastInfo.push_back(stream.getEndpoint());
-	return req.broadcastInfo;
 }
 
 ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req, int sendAmount, Optional<Endpoint> sender, bool sendReply) {
@@ -82,13 +90,17 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 	state ReplyPromise<std::vector<Endpoint>> reply = req.reply;
 	resetReply( req );
 	int currentStream = 0;
-	for(int i = 0; i < sendAmount && currentStream < req.broadcastInfo.size(); i++) {
+	std::vector<Endpoint> broadcastEndpoints = req.broadcastInfo;
+	for(int i = 0; i < sendAmount && currentStream < broadcastEndpoints.size(); i++) {
 		std::vector<Endpoint> endpoints;
-		RequestStream<UpdateServerDBInfoRequest> cur(req.broadcastInfo[currentStream++]);
-		while(currentStream < req.broadcastInfo.size()*(i+1)/sendAmount) {
-			endpoints.push_back(req.broadcastInfo[currentStream++]);
+		RequestStream<UpdateServerDBInfoRequest> cur(broadcastEndpoints[currentStream++]);
+		while(currentStream < broadcastEndpoints.size()*(i+1)/sendAmount) {
+			endpoints.push_back(broadcastEndpoints[currentStream++]);
 		}
 		req.broadcastInfo = endpoints;
+		for(auto &it : req.broadcastInfo) {
+			TraceEvent("BroadcastDBForward").detail("Addr", it.getPrimaryAddress());
+		}
 		replies.push_back( tryDBInfoBroadcast( cur, req ) );
 		resetReply( req );
 	}
@@ -102,6 +114,9 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 	}
 	if(sendReply) {
 		reply.send(notUpdated);
+	}
+	for(auto &it : notUpdated) {
+		TraceEvent("BroadcastDBNotUpdated").detail("Addr", it.getPrimaryAddress());
 	}
 	return notUpdated;
 }
@@ -961,6 +976,7 @@ ACTOR Future<Void> workerServer(
 		DUMPTOKEN(recruited.setMetricsRate);
 		DUMPTOKEN(recruited.eventLogRequest);
 		DUMPTOKEN(recruited.traceBatchDumpRequest);
+		DUMPTOKEN(recruited.updateServerDBInfo);
 	}
 
 	state std::vector<Future<Void>> recoveries;
@@ -1060,11 +1076,16 @@ ACTOR Future<Void> workerServer(
 
 		loop choose {
 			when( UpdateServerDBInfoRequest req = waitNext( interf.updateServerDBInfo.getFuture() ) ) {
+				TraceEvent("GotServerDBInfoMsg").detail("NotUpdated", !ccInterface->get().present() || req.dbInfo.clusterInterface != ccInterface->get().get() || (req.dbInfo.infoGeneration < dbInfo->get().infoGeneration && dbInfo->get().clusterInterface == ccInterface->get().get()))
+					.detail("ReqInterface", ccInterface->get().present())
+					.detail("InfoGeneration", req.dbInfo.infoGeneration)
+					.detail("Token", interf.updateServerDBInfo.getEndpoint().token);
+
 				Optional<Endpoint> notUpdated;
-				if(req.dbInfo.clusterInterface != ccInterface->get().get() || (req.dbInfo.infoGeneration < dbInfo->get().infoGeneration && dbInfo->get().clusterInterface == ccInterface->get().get())) {
+				if(!ccInterface->get().present() || req.dbInfo.clusterInterface != ccInterface->get().get() || (req.dbInfo.infoGeneration < dbInfo->get().infoGeneration && dbInfo->get().clusterInterface == ccInterface->get().get())) {
 					notUpdated = interf.updateServerDBInfo.getEndpoint();
 				}
-				if(req.dbInfo.clusterInterface == ccInterface->get().get() && (req.dbInfo.infoGeneration > dbInfo->get().infoGeneration || dbInfo->get().clusterInterface != ccInterface->get().get())) {
+				if(ccInterface->get().present() && req.dbInfo.clusterInterface == ccInterface->get().get() && (req.dbInfo.infoGeneration > dbInfo->get().infoGeneration || dbInfo->get().clusterInterface != ccInterface->get().get())) {
 					ServerDBInfo localInfo = req.dbInfo;
 					TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
 					.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())

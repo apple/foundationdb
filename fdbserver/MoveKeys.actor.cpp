@@ -768,6 +768,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 		try {
 			state Future<Standalone<RangeResultRef>> fTagLocalities = tr.getRange( tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY );
 			state Future<Optional<Value>> fv = tr.get( serverListKeyFor(server.id()) );
+			
 			state Future<Optional<Value>> fExclProc = tr.get(
 				StringRef(encodeExcludedServersKey( AddressExclusion( server.address().ip, server.address().port ))) );
 			state Future<Optional<Value>> fExclIP = tr.get(
@@ -776,14 +777,28 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 				StringRef(encodeFailedServersKey( AddressExclusion( server.address().ip, server.address().port ))) );
 			state Future<Optional<Value>> fFailIP = tr.get(
 				StringRef(encodeFailedServersKey( AddressExclusion( server.address().ip ))) );
+
+			state Future<Optional<Value>> fExclProc2 = server.secondaryAddress().present() ? tr.get(
+				StringRef(encodeExcludedServersKey( AddressExclusion( server.secondaryAddress().get().ip, server.secondaryAddress().get().port ))) ) : Future<Optional<Value>>( Optional<Value>() );
+			state Future<Optional<Value>> fExclIP2 = server.secondaryAddress().present() ? tr.get(
+				StringRef(encodeExcludedServersKey( AddressExclusion( server.secondaryAddress().get().ip ))) ) : Future<Optional<Value>>( Optional<Value>() );
+			state Future<Optional<Value>> fFailProc2 = server.secondaryAddress().present() ? tr.get(
+				StringRef(encodeFailedServersKey( AddressExclusion( server.secondaryAddress().get().ip, server.secondaryAddress().get().port ))) ) : Future<Optional<Value>>( Optional<Value>() );
+			state Future<Optional<Value>> fFailIP2 = server.secondaryAddress().present() ? tr.get(
+				StringRef(encodeFailedServersKey( AddressExclusion( server.secondaryAddress().get().ip ))) ) : Future<Optional<Value>>( Optional<Value>() );
+
 			state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
 			state Future<Standalone<RangeResultRef>> fHistoryTags = tr.getRange( serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, true);
 
-			wait( success(fTagLocalities) && success(fv) && success(fExclProc) && success(fExclIP) && success(fFailProc) && success(fFailIP) && success(fTags) && success(fHistoryTags) );
+			wait( success(fTagLocalities) && success(fv) && success(fTags) && success(fHistoryTags) &&
+				  success(fExclProc) && success(fExclIP) && success(fFailProc) && success(fFailIP) &&
+				  success(fExclProc2) && success(fExclIP2) && success(fFailProc2) && success(fFailIP2) );
 
 			// If we have been added to the excluded/failed state servers list, we have to fail
-			if (fExclProc.get().present() || fExclIP.get().present() || fFailProc.get().present() || fFailIP.get().present() )
+			if (fExclProc.get().present() || fExclIP.get().present() || fFailProc.get().present() || fFailIP.get().present() ||
+				fExclProc2.get().present() || fExclIP2.get().present() || fFailProc2.get().present() || fFailIP2.get().present() ) {
 				throw recruitment_failed();
+			}
 
 			if(fTagLocalities.get().more || fTags.get().more || fHistoryTags.get().more)
 				ASSERT(false);

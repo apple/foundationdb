@@ -44,7 +44,9 @@ public:
 	}
 
 	void choosePrimaryAddress() {
-		if(addresses.secondaryAddress.present() && !g_network->getLocalAddresses().secondaryAddress.present() && (addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS())) {
+		if(addresses.secondaryAddress.present() && 
+		((!g_network->getLocalAddresses().secondaryAddress.present() && (addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS())) ||
+		(g_network->getLocalAddresses().secondaryAddress.present() && !addresses.address.isTLS()))) {
 			std::swap(addresses.address, addresses.secondaryAddress.get());
 		}
 	}
@@ -56,6 +58,10 @@ public:
 	// all addresses this endpoint listens to.
 	const NetworkAddress& getPrimaryAddress() const {
 		return addresses.address;
+	}
+
+	NetworkAddress getStableAddress() const {
+		return addresses.getTLSAddress();
 	}
 
 	bool operator == (Endpoint const& r) const {

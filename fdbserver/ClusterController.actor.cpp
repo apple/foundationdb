@@ -269,6 +269,7 @@ public:
 					!excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
 					( includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId()) ) &&
 					!addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
+					( !it.second.details.interf.secondaryAddress().present() || !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get()) ) &&
 					it.second.details.processClass.machineClassFitness( ProcessClass::Storage ) <= ProcessClass::UnsetFit ) {
 				return it.second.details;
 			}
@@ -305,7 +306,7 @@ public:
 
 		for( auto& it : id_worker ) {
 			auto fitness = it.second.details.processClass.machineClassFitness( ProcessClass::Storage );
-			if( workerAvailable(it.second, false) && !conf.isExcludedServer(it.second.details.interf.address()) && fitness != ProcessClass::NeverAssign && ( !dcId.present() || it.second.details.interf.locality.dcId()==dcId.get() ) ) {
+			if( workerAvailable(it.second, false) && !conf.isExcludedServer(it.second.details.interf.addresses()) && fitness != ProcessClass::NeverAssign && ( !dcId.present() || it.second.details.interf.locality.dcId()==dcId.get() ) ) {
 				fitness_workers[ fitness ].push_back(it.second.details);
 			}
 		}
@@ -350,7 +351,7 @@ public:
 		for( auto& it : id_worker ) {
 			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), it.second.details.interf.id()) == exclusionWorkerIds.end()) {
 				auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::TLog);
-				if (workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.details.interf.address()) && fitness != ProcessClass::NeverAssign && (!dcIds.size() || dcIds.count(it.second.details.interf.locality.dcId()))) {
+				if (workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.details.interf.addresses()) && fitness != ProcessClass::NeverAssign && (!dcIds.size() || dcIds.count(it.second.details.interf.locality.dcId()))) {
 					fitness_workers[std::make_pair(fitness, it.second.details.degraded)].push_back(it.second.details);
 				}
 				else {
@@ -506,7 +507,7 @@ public:
 
 		for( auto& it : id_worker ) {
 			auto fitness = it.second.details.processClass.machineClassFitness( role );
-			if(conf.isExcludedServer(it.second.details.interf.address())) {
+			if(conf.isExcludedServer(it.second.details.interf.addresses())) {
 				fitness = std::max(fitness, ProcessClass::ExcludeFit);
 			}
 			if( workerAvailable(it.second, checkStable) && fitness < unacceptableFitness && it.second.details.interf.locality.dcId()==dcId ) {
@@ -544,7 +545,7 @@ public:
 
 		for( auto& it : id_worker ) {
 			auto fitness = it.second.details.processClass.machineClassFitness( role );
-			if( workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.details.interf.address()) && it.second.details.interf.locality.dcId() == dcId &&
+			if( workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.details.interf.addresses()) && it.second.details.interf.locality.dcId() == dcId &&
 			  ( !minWorker.present() || ( it.second.details.interf.id() != minWorker.get().worker.interf.id() && ( fitness < minWorker.get().fitness || (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used ) ) ) ) ) {
 				if (isLongLivedStateless(it.first)) {
 					fitness_workers[ std::make_pair(fitness, id_used[it.first]) ].second.push_back(it.second.details);
@@ -663,7 +664,7 @@ public:
 	std::set<Optional<Standalone<StringRef>>> getDatacenters( DatabaseConfiguration const& conf, bool checkStable = false ) {
 		std::set<Optional<Standalone<StringRef>>> result;
 		for( auto& it : id_worker )
-			if( workerAvailable( it.second, checkStable ) && !conf.isExcludedServer( it.second.details.interf.address() ) )
+			if( workerAvailable( it.second, checkStable ) && !conf.isExcludedServer( it.second.details.interf.addresses() ) )
 				result.insert(it.second.details.interf.locality.dcId());
 		return result;
 	}
@@ -1093,7 +1094,7 @@ public:
 
 		// Check master fitness. Don't return false if master is excluded in case all the processes are excluded, we still need master for recovery.
 		ProcessClass::Fitness oldMasterFit = masterWorker->second.details.processClass.machineClassFitness( ProcessClass::Master );
-		if(db.config.isExcludedServer(dbi.master.address())) {
+		if(db.config.isExcludedServer(dbi.master.addresses())) {
 			oldMasterFit = std::max(oldMasterFit, ProcessClass::ExcludeFit);
 		}
 
@@ -1101,7 +1102,7 @@ public:
 		id_used[clusterControllerProcessId]++;
 		WorkerFitnessInfo mworker = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db.config, id_used, true);
 		auto newMasterFit = mworker.worker.processClass.machineClassFitness( ProcessClass::Master );
-		if(db.config.isExcludedServer(mworker.worker.interf.address())) {
+		if(db.config.isExcludedServer(mworker.worker.interf.addresses())) {
 			newMasterFit = std::max(newMasterFit, ProcessClass::ExcludeFit);
 		}
 
@@ -1604,11 +1605,11 @@ void checkBetterDDOrRK(ClusterControllerData* self) {
 		newDDWorker = self->id_worker[self->masterProcessId.get()].details;
 	}
 	auto bestFitnessForRK = newRKWorker.processClass.machineClassFitness(ProcessClass::Ratekeeper);
-	if(self->db.config.isExcludedServer(newRKWorker.interf.address())) {
+	if(self->db.config.isExcludedServer(newRKWorker.interf.addresses())) {
 		bestFitnessForRK = std::max(bestFitnessForRK, ProcessClass::ExcludeFit);
 	}
 	auto bestFitnessForDD = newDDWorker.processClass.machineClassFitness(ProcessClass::DataDistributor);
-	if(self->db.config.isExcludedServer(newDDWorker.interf.address())) {
+	if(self->db.config.isExcludedServer(newDDWorker.interf.addresses())) {
 		bestFitnessForDD = std::max(bestFitnessForDD, ProcessClass::ExcludeFit);
 	}
 	//TraceEvent("CheckBetterDDorRKNewRecruits", self->id).detail("MasterProcessId", self->masterProcessId)
@@ -1738,7 +1739,7 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 	    (worker.address() == g_network->getLocalAddress() || startingClass.classType() == ProcessClass::TesterClass)
 	        ? Never()
 	        : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
-	cluster->updateWorkerList.set( worker.locality.processId(), ProcessData(worker.locality, startingClass, worker.address()) );
+	cluster->updateWorkerList.set( worker.locality.processId(), ProcessData(worker.locality, startingClass, worker.stableAddress()) );
 	cluster->updateDBInfoEndpoints.push_back(worker.updateServerDBInfo.getEndpoint());
 	cluster->updateDBInfo.trigger();
 	// This switching avoids a race where the worker can be added to id_worker map after the workerAvailabilityWatch fails for the worker.
@@ -2058,7 +2059,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 			self->gotFullyRecoveredConfig = true;
 			db->fullyRecoveredConfig = req.configuration.get();
 			for ( auto& it : self->id_worker ) {
-				bool isExcludedFromConfig = db->fullyRecoveredConfig.isExcludedServer(it.second.details.interf.address());
+				bool isExcludedFromConfig = db->fullyRecoveredConfig.isExcludedServer(it.second.details.interf.addresses());
 				if ( it.second.priorityInfo.isExcluded != isExcludedFromConfig ) {
 					it.second.priorityInfo.isExcluded = isExcludedFromConfig;
 					if( !it.second.reply.isSet() ) {
@@ -2129,6 +2130,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	for(auto it : req.incompatiblePeers) {
 		self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	}
+	self->removedDBInfoEndpoints.erase(w.updateServerDBInfo.getEndpoint());
 
 	if(info == self->id_worker.end()) {
 		TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerId",w.id()).detail("ProcessId", w.locality.processId()).detail("ZoneId", w.locality.zoneId()).detail("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size());
@@ -2169,7 +2171,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		}
 
 		if ( self->gotFullyRecoveredConfig ) {
-			newPriorityInfo.isExcluded = self->db.fullyRecoveredConfig.isExcludedServer(w.address());
+			newPriorityInfo.isExcluded = self->db.fullyRecoveredConfig.isExcludedServer(w.addresses());
 		}
 	}
 
@@ -3063,14 +3065,25 @@ ACTOR Future<Void> dbInfoUpdater( ClusterControllerData* self ) {
 		req.dbInfo = self->db.serverInfo->get().read();
 		req.broadcastInfo = self->updateDBInfoEndpoints;
 
+		for(auto &it : self->updateDBInfoEndpoints) {
+			TraceEvent("DBInfoAttemptUpdate", self->id).detail("Addr", it.getPrimaryAddress()).detail("Token", it.token);
+		}
+		self->updateDBInfoEndpoints.clear();
+		TraceEvent("DBInfoStartBroadcast", self->id);
 		choose {
 			when(std::vector<Endpoint> notUpdated = wait( broadcastDBInfoRequest(req, 2, Optional<Endpoint>(), false) )) {
+				TraceEvent("DBInfoFinishBroadcast", self->id);
+				for(auto &it : notUpdated) {
+					TraceEvent("DBInfoNotUpdated", self->id).detail("Addr", it.getPrimaryAddress());
+				}
 				self->updateDBInfoEndpoints.insert(self->updateDBInfoEndpoints.end(), notUpdated.begin(), notUpdated.end());
 				if(notUpdated.size()) {
 					self->updateDBInfo.trigger();
 				}
 			}
-			when(wait(dbInfoChange)) {}
+			when(wait(dbInfoChange)) {
+				TraceEvent("DBInfoChangeBroadcast", self->id);
+			}
 		}
 	}
 }
@@ -3134,7 +3147,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			vector<WorkerDetails> workers;
 
 			for(auto& it : self.id_worker) {
-				if ( (req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) && self.db.config.isExcludedServer(it.second.details.interf.address()) ) {
+				if ( (req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) && self.db.config.isExcludedServer(it.second.details.interf.addresses()) ) {
 					continue;
 				}
 

@@ -69,7 +69,9 @@ struct WorkerInterface {
 
 	UID id() const { return tLog.getEndpoint().token; }
 	NetworkAddress address() const { return tLog.getEndpoint().getPrimaryAddress(); }
+	NetworkAddress stableAddress() const { return tLog.getEndpoint().getStableAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return tLog.getEndpoint().addresses.secondaryAddress; }
+	NetworkAddressList addresses() const { return tLog.getEndpoint().addresses; }
 
 	WorkerInterface() {}
 	WorkerInterface( const LocalityData& locality ) : locality( locality ) {}
