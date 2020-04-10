@@ -2056,7 +2056,14 @@ struct RedwoodRecordRef {
 			} LengthFormat3;
 		};
 
+		struct int48_t {
+			static constexpr int64_t MASK = 0xFFFFFFFFFFFFLL;
+			int32_t high;
+			int16_t low;
+		};
+
 		static constexpr int LengthFormatSizes[] = {sizeof(LengthFormat0), sizeof(LengthFormat1), sizeof(LengthFormat2), sizeof(LengthFormat3)};
+		static constexpr int VersionDeltaSizes[] = {0, sizeof(int32_t), sizeof(int48_t), sizeof(int64_t)};
 
 		// Serialized Format
 		//
@@ -2065,7 +2072,7 @@ struct RedwoodRecordRef {
 		//    1 bit - item is deleted
 		//    1 bit - has value (different from zero-length value, if 0 value len will be 0)
 		//    1 bits - has nonzero version
-		//    2 bits - version delta integer size code, maps to 0, 2, 4, 8
+		//    2 bits - version delta integer size code, maps to 0, 4, 6, 8
 		//    2 bits - length fields format
 		//
 		// Length fields using 3 to 8 bytes total depending on length fields format
@@ -2156,21 +2163,18 @@ struct RedwoodRecordRef {
 
 		int getVersionDeltaSizeBytes() const {
 			int code = (flags & VERSION_DELTA_SIZE) >> 2;
-			if(code != 0) {
-				return 1 << code;
-			}
-			return 0;
+			return VersionDeltaSizes[code];
 		}
 
 		static int getVersionDeltaSizeBytes(Version d) {
 			if(d == 0) {
 				return 0;
 			}
-			else if(d == (int16_t)d) {
-				return sizeof(uint16_t);
-			}
 			else if(d == (int32_t)d) {
 				return sizeof(int32_t);
+			}
+			else if(d == (d & int48_t::MASK)) {
+				return sizeof(int48_t);
 			}
 			return sizeof(int64_t);
 		}
@@ -2179,8 +2183,8 @@ struct RedwoodRecordRef {
 			int code = (flags & VERSION_DELTA_SIZE) >> 2;
 			switch(code) {
 				case 0:  return 0;
-				case 1:  return *(int16_t *)r;
-				case 2:  return *(int32_t *)r;
+				case 1:  return *(int32_t *)r;
+				case 2:  return (((int64_t)((int48_t *)r)->high) << 16) | (((int48_t *)r)->low & 0xFFFF);
 				case 3:
 				default: return *(int64_t *)r;
 			}
@@ -2192,15 +2196,16 @@ struct RedwoodRecordRef {
 			if(d == 0) {
 				return 0;
 			}
-			else if(d == (int16_t)d) {
-				flags |= 1 << 2;
-				*(uint16_t *)w = d;
-				return sizeof(uint16_t);
-			}
 			else if(d == (int32_t)d) {
+				flags |= 1 << 2;
+				*(uint32_t *)w = d;
+				return sizeof(uint32_t);
+			}
+			else if(d == (d & int48_t::MASK)) {
 				flags |= 2 << 2;
-				*(int32_t *)w = d;
-				return sizeof(int32_t);
+				((int48_t *)w)->high = d >> 16;
+				((int48_t *)w)->low = d;
+				return sizeof(int48_t);
 			}
 			else {
 				flags |= 3 << 2;
@@ -5514,6 +5519,11 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[1] == 4);
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[2] == 6);
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[3] == 8);
+
+	ASSERT(RedwoodRecordRef::Delta::VersionDeltaSizes[0] == 0);
+	ASSERT(RedwoodRecordRef::Delta::VersionDeltaSizes[1] == 4);
+	ASSERT(RedwoodRecordRef::Delta::VersionDeltaSizes[2] == 6);
+	ASSERT(RedwoodRecordRef::Delta::VersionDeltaSizes[3] == 8);
 
 	// Test pageID stuff.
 	{
