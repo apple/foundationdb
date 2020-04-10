@@ -51,16 +51,6 @@ RUN cd /tmp && curl -L https://www.openssl.org/source/openssl-1.1.1d.tar.gz -o o
 		ln -sv /usr/local/lib64/lib*.so.1.1 /usr/lib64/ &&\
     cd /tmp/ && rm -rf /tmp/openssl-1.1.1d /tmp/openssl.tar.gz
 
-# install llvm
-WORKDIR /tmp
-RUN cd /tmp && curl -L https://github.com/llvm/llvm-project/releases/download/llvmorg-10.0.0/llvm-project-10.0.0.tar.xz -o llvm.tar.xz &&\
-    echo "6287a85f4a6aeb07dbffe27847117fe311ada48005f2b00241b523fe7b60716e llvm.tar.xz" > llvm-sha.txt &&\
-    sha256sum -c llvm-sha.txt && tar xf llvm.tar.xz --no-same-owner &&\
-    mkdir /tmp/llvm-project-10.0.0/build && cd /tmp/llvm-project-10.0.0/build &&\
-    scl enable devtoolset-8 rh-python36 -- cmake -G Ninja -DLLVM_ENABLE_PROJECTS='clang;clang-tools-extra;libcxx;libcxxabi;libunwind;lldb;compiler-rt;lld' -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_BUILD_TYPE=Release ../llvm &&\
-    scl enable devtoolset-8 rh-python36 -- ninja install &&\
-    cd / && rm -rf /tmp/llvm-project-10.0.0
-
 LABEL version=0.1.12
 ENV DOCKER_IMAGEVER=0.1.12
 ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0
