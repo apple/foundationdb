@@ -39,14 +39,14 @@ struct TagThrottleInfo {
 		IMMEDIATE
 	};
 
-	static const char* priorityToString(Priority priority) {
+	static const char* priorityToString(Priority priority, bool capitalize=true) {
 		switch(priority) {
 			case Priority::BATCH:
-				return "batch";
+				return capitalize ? "Batch" : "batch";
 			case Priority::DEFAULT:
-				return "default";
+				return capitalize ? "Default" : "default";
 			case Priority::IMMEDIATE:
-				return "immediate";
+				return capitalize ? "Immediate" : "immediate";
 		}
 
 		ASSERT(false);

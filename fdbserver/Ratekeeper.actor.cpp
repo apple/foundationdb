@@ -373,14 +373,6 @@ ACTOR Future<Void> monitorServerListChange(
 	}
 }
 
-std::string capitalize(std::string str) {
-	if(str[0] >= 'a' and str[0] <= 'z') {
-		str[0] += 'A' - 'a';
-	}
-
-	return str;
-}
-
 ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 	loop {
 		state ReadYourWritesTransaction tr(self->db);
@@ -449,7 +441,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 							TraceEvent("RatekeeperDetectedThrottle")
 								.detail("Tag", tag)
 								.detail("Rate", throttleInfo.rate)
-								.detail("Priority", capitalize(TagThrottleInfo::priorityToString(throttleInfo.priority)))
+								.detail("Priority", TagThrottleInfo::priorityToString(throttleInfo.priority))
 								.detail("SecondsToExpiration", throttleInfo.expiration - now())
 								.detail("AutoThrottled", throttleInfo.autoThrottled);
 						}
