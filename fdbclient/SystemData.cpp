@@ -501,6 +501,7 @@ const KeyRangeRef backupProgressKeys(LiteralStringRef("\xff\x02/backupProgress/"
                                      LiteralStringRef("\xff\x02/backupProgress0"));
 const KeyRef backupProgressPrefix = backupProgressKeys.begin;
 const KeyRef backupStartedKey = LiteralStringRef("\xff\x02/backupStarted");
+extern const KeyRef backupPausedKey = LiteralStringRef("\xff\x02/backupPaused");
 
 const Key backupProgressKeyFor(UID workerID) {
 	BinaryWriter wr(Unversioned());

@@ -518,10 +518,11 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				                                     batchIndex, asset, prevVersion, commitVersion.version, isRangeFile,
 				                                     applierMutationsBuffer[applierID], applierSubsBuffer[applierID]));
 			}
-			TraceEvent(SevDebug, "FastRestore_SendMutationToApplier")
+			TraceEvent(SevDebug, "FastRestoreLoaderSendMutationToApplier")
 			    .detail("PrevVersion", prevVersion)
 			    .detail("CommitVersion", commitVersion.toString())
-			    .detail("RestoreAsset", asset.toString());
+			    .detail("RestoreAsset", asset.toString())
+			    .detail("Requests", requests.size());
 			ASSERT(prevVersion < commitVersion.version);
 			prevVersion = commitVersion.version;
 			wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,

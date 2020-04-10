@@ -125,6 +125,10 @@ struct MutationRef {
 	};
 };
 
+static inline std::string getTypeString(MutationRef::Type type) {
+	return type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "Unset";
+}
+
 // A 'single key mutation' is one which affects exactly the value of the key specified by its param1
 static inline bool isSingleKeyMutation(MutationRef::Type type) {
 	return (MutationRef::SINGLE_KEY_MASK & (1<<type)) != 0;

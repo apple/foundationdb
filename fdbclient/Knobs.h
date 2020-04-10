@@ -205,7 +205,8 @@ public:
 	// trace
 	int TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH;
 
-	ClientKnobs(bool randomize = false);
+	ClientKnobs();
+	void initialize(bool randomize = false);
 };
 
 extern ClientKnobs const* CLIENT_KNOBS;
