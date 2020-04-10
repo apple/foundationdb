@@ -461,30 +461,32 @@ public:
 		};
 
 		std::unordered_map<Standalone<StringRef>, int64_t, std::hash<StringRef>> intervalCounts;
-		int64_t intervalTotalCount = 0;
+		int64_t intervalTotalSampledCount = 0;
 		Standalone<StringRef> busiestTag;
 		int64_t busiestTagCount = 0;
 		double intervalStart = 0;
 
 		Optional<TagInfo> previousBusiestTag;
 
-		void increment(TagSet const& tags, int64_t delta) {
-			for(auto& tag : tags) {
-				int64_t &count = intervalCounts[Standalone<StringRef>(tag, tags.arena)];
-				count += delta;
-				if(count > busiestTagCount) {
-					busiestTagCount = count;
-					busiestTag = tag;
+		void increment(Optional<TagSet> const& tags, int64_t delta) {
+			if(tags.present()) {
+				for(auto& tag : tags.get()) {
+					int64_t &count = intervalCounts[Standalone<StringRef>(tag, tags.get().arena)];
+					count += delta;
+					if(count > busiestTagCount) {
+						busiestTagCount = count;
+						busiestTag = tag;
+					}
 				}
-			}
 
-			intervalTotalCount += delta;
+				intervalTotalSampledCount += delta;
+			}
 		}
 
 		void startNewInterval(UID id) {
 			double elapsed = now() - intervalStart;
 			if(intervalStart > 0 && busiestTagCount >= SERVER_KNOBS->MIN_TAG_PAGES_READ_RATE * elapsed) {
-				previousBusiestTag = TagInfo(busiestTag, busiestTagCount, intervalTotalCount, elapsed);
+				previousBusiestTag = TagInfo(busiestTag, busiestTagCount, intervalTotalSampledCount, elapsed);
 			}
 			else {
 				previousBusiestTag.reset();
@@ -495,11 +497,11 @@ public:
 				.detail("Elapsed", elapsed)
 				.detail("Tag", printable(busiestTag))
 				.detail("TagCount", busiestTagCount)
-				.detail("TotalCount", intervalTotalCount)
+				.detail("TotalSampledCount", intervalTotalSampledCount)
 				.detail("Reported", previousBusiestTag.present());
 
 			intervalCounts.clear();
-			intervalTotalCount = 0;
+			intervalTotalSampledCount = 0;
 			busiestTagCount = 0;
 			intervalStart = now();
 		}

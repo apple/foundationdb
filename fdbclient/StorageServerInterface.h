@@ -143,12 +143,12 @@ struct GetValueRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 8454530;
 	Key key;
 	Version version;
-	TagSet tags;
+	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetValueReply> reply;
 
 	GetValueRequest(){}
-	GetValueRequest(const Key& key, Version ver, TagSet tags, Optional<UID> debugID) : key(key), version(ver), tags(tags), debugID(debugID) {}
+	GetValueRequest(const Key& key, Version ver, Optional<TagSet> tags, Optional<UID> debugID) : key(key), version(ver), tags(tags), debugID(debugID) {}
 	
 	template <class Ar> 
 	void serialize( Ar& ar ) {
@@ -174,12 +174,12 @@ struct WatchValueRequest {
 	Key key;
 	Optional<Value> value;
 	Version version;
-	TagSet tags;
+	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<WatchValueReply> reply;
 
 	WatchValueRequest(){}
-	WatchValueRequest(const Key& key, Optional<Value> value, Version ver, TagSet tags, Optional<UID> debugID) : key(key), value(value), version(ver), tags(tags), debugID(debugID) {}
+	WatchValueRequest(const Key& key, Optional<Value> value, Version ver, Optional<TagSet> tags, Optional<UID> debugID) : key(key), value(value), version(ver), tags(tags), debugID(debugID) {}
 	
 	template <class Ar> 
 	void serialize( Ar& ar ) {
@@ -210,12 +210,11 @@ struct GetKeyValuesRequest : TimedRequest {
 	Version version;		// or latestVersion
 	int limit, limitBytes;
 	bool isFetchKeys;
-	TagSet tags;
+	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetKeyValuesReply> reply;
 
 	GetKeyValuesRequest() : isFetchKeys(false) {}
-//	GetKeyValuesRequest(const KeySelectorRef& begin, const KeySelectorRef& end, Version version, int limit, int limitBytes, Optional<UID> debugID) : begin(begin), end(end), version(version), limit(limit), limitBytes(limitBytes) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, arena);
@@ -240,12 +239,12 @@ struct GetKeyRequest : TimedRequest {
 	Arena arena;
 	KeySelectorRef sel;
 	Version version;		// or latestVersion
-	TagSet tags;
+	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetKeyReply> reply;
 
 	GetKeyRequest() {}
-	GetKeyRequest(KeySelectorRef const& sel, Version version, TagSet tags, Optional<UID> debugID) : sel(sel), version(version), debugID(debugID) {}
+	GetKeyRequest(KeySelectorRef const& sel, Version version, Optional<TagSet> tags, Optional<UID> debugID) : sel(sel), version(version), debugID(debugID) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {

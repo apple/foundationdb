@@ -146,7 +146,7 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 			t.bytes += tag.size();
 		}
 
-		t.arena = context.arena();
+		t.arena = context.arena(); // TODO: this arena could be big
 	}
 };
 

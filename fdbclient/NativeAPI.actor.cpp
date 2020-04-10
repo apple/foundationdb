@@ -1364,7 +1364,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
 					when(GetValueReply _reply =
 							wait(loadBalance(ssi.second, &StorageServerInterface::getValue,
-											GetValueRequest(key, ver, cx->sampleReadTags() ? tags : TagSet(), getValueID), TaskPriority::DefaultPromiseEndpoint, false,
+											GetValueRequest(key, ver, cx->sampleReadTags() ? tags : Optional<TagSet>(), getValueID), TaskPriority::DefaultPromiseEndpoint, false,
 											cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 						reply = _reply;
 					}
@@ -1452,7 +1452,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 				choose {
 					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
 					when(GetKeyReply _reply =
-							wait(loadBalance(ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get(), cx->sampleReadTags() ? tags : TagSet(), info.debugID),
+							wait(loadBalance(ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get(), cx->sampleReadTags() ? tags : Optional<TagSet>(), info.debugID),
 											TaskPriority::DefaultPromiseEndpoint, false,
 											cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 						reply = _reply;
@@ -1543,7 +1543,7 @@ ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> 
 			state WatchValueReply resp;
 			choose {
 				when(WatchValueReply r = wait(loadBalance(ssi.second, &StorageServerInterface::watchValue,
-				                                          WatchValueRequest(key, value, ver, cx->sampleReadTags() ? tags : TagSet(), watchValueID),
+				                                          WatchValueRequest(key, value, ver, cx->sampleReadTags() ? tags : Optional<TagSet>(), watchValueID),
 				                                          TaskPriority::DefaultPromiseEndpoint))) {
 					resp = r;
 				}
@@ -1626,7 +1626,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
 			//FIXME: buggify byte limits on internal functions that use them, instead of globally
-			req.tags = cx->sampleReadTags() ? tags : TagSet();
+			req.tags = cx->sampleReadTags() ? tags : Optional<TagSet>();
 			req.debugID = info.debugID;
 
 			try {
@@ -1915,7 +1915,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
-			req.tags = cx->sampleReadTags() ? tags : TagSet();
+			req.tags = cx->sampleReadTags() ? tags : Optional<TagSet>();
 			req.debugID = info.debugID;
 			try {
 				if( info.debugID.present() ) {
