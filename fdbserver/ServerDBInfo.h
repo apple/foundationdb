@@ -22,7 +22,6 @@
 #define FDBSERVER_SERVERDBINFO_H
 #pragma once
 
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/LogSystemConfig.h"

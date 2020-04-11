@@ -343,6 +343,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( MAX_PROXY_COMPUTE,                                      2.0 );
 	init( PROXY_COMPUTE_BUCKETS,                                20000 );
 	init( PROXY_COMPUTE_GROWTH_RATE,                             0.01 );
+	init( TXN_STATE_SEND_AMOUNT,                                    2 );
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
@@ -410,6 +411,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	init( POLICY_RATING_TESTS,                                   200 ); if( randomize && BUGGIFY ) POLICY_RATING_TESTS = 20;
 	init( POLICY_GENERATIONS,                                    100 ); if( randomize && BUGGIFY ) POLICY_GENERATIONS = 10;
+	init( DBINFO_SEND_AMOUNT,                                      2 );
+	init( DBINFO_BATCH_DELAY,                                    0.1 );
 
 	//Move Keys
 	init( SHARD_READY_DELAY,                                    0.25 );
@@ -521,7 +524,6 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	//Worker
 	init( WORKER_LOGGING_INTERVAL,                               5.0 );
-	init( INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING,                5.0 );
 	init( HEAP_PROFILER_INTERVAL,                               30.0 );
 	init( DEGRADED_RESET_INTERVAL,                          24*60*60 ); if ( randomize && BUGGIFY ) DEGRADED_RESET_INTERVAL = 10;
 	init( DEGRADED_WARNING_LIMIT,                                  1 );

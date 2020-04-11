@@ -33,7 +33,6 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h"  // copy constructors for ServerCoordinators class
@@ -744,7 +743,6 @@ ACTOR Future<Void> sendInitialCommitToResolvers( Reference<MasterData> self ) {
 	state int64_t dataOutstanding = 0;
 
 	state std::vector<Endpoint> endpoints;
-	state int sendAmount = 2;
 	for(auto& it : self->proxies) {
 		endpoints.push_back(it.txnState.getEndpoint());
 	}
@@ -760,8 +758,8 @@ ACTOR Future<Void> sendInitialCommitToResolvers( Reference<MasterData> self ) {
 		req.sequence = txnSequence;
 		req.last = !nextData.size();
 		req.broadcastInfo = endpoints;
-		txnReplies.push_back(broadcastTxnRequest(req, sendAmount, false));
-		dataOutstanding += sendAmount*data.arena().getSize();
+		txnReplies.push_back(broadcastTxnRequest(req, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, false));
+		dataOutstanding += SERVER_KNOBS->TXN_STATE_SEND_AMOUNT*data.arena().getSize();
 		data = nextData;
 		txnSequence++;
 

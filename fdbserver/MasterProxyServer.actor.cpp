@@ -1986,7 +1986,7 @@ ACTOR Future<Void> masterProxyServerCore(
 					commitData.txnStateStore->enableSnapshot();
 				}
 			}
-			addActor.send(broadcastTxnRequest(req, 2, true));
+			addActor.send(broadcastTxnRequest(req, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));
 			wait(yield());
 		}
 	}

@@ -33,7 +33,6 @@
 #include "fdbserver/TesterInterface.actor.h"  // for poisson()
 #include "fdbserver/IDiskQueue.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -69,20 +68,12 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #endif
 
 ACTOR Future<std::vector<Endpoint>> tryDBInfoBroadcast(RequestStream<UpdateServerDBInfoRequest> stream, UpdateServerDBInfoRequest req) {
-	state UID dbgid = nondeterministicRandom()->randomUniqueID();
-	TraceEvent("BroadcastDBInfo", dbgid).detail("Addr", stream.getEndpoint().getPrimaryAddress()).detail("Token", stream.getEndpoint().token);
-	try {
-		ErrorOr<std::vector<Endpoint>> rep = wait( stream.getReplyUnlessFailedFor(req, 1.0, 0) );
-		TraceEvent("BroadcastDBInfoReply", dbgid).detail("Addr", stream.getEndpoint().getPrimaryAddress()).detail("Present", rep.present());
-		if(rep.present()) {
-			return rep.get();
-		}
-		req.broadcastInfo.push_back(stream.getEndpoint());
-		return req.broadcastInfo;
-	} catch( Error &e ) {
-		TraceEvent("BroadcastDBInfoError", dbgid).error(e,true).detail("Addr", stream.getEndpoint().getPrimaryAddress());
-		throw;
+	ErrorOr<std::vector<Endpoint>> rep = wait( stream.getReplyUnlessFailedFor(req, 1.0, 0) );
+	if(rep.present()) {
+		return rep.get();
 	}
+	req.broadcastInfo.push_back(stream.getEndpoint());
+	return req.broadcastInfo;
 }
 
 ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req, int sendAmount, Optional<Endpoint> sender, bool sendReply) {
@@ -98,9 +89,6 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 			endpoints.push_back(broadcastEndpoints[currentStream++]);
 		}
 		req.broadcastInfo = endpoints;
-		for(auto &it : req.broadcastInfo) {
-			TraceEvent("BroadcastDBForward").detail("Addr", it.getPrimaryAddress());
-		}
 		replies.push_back( tryDBInfoBroadcast( cur, req ) );
 		resetReply( req );
 	}
@@ -114,9 +102,6 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 	}
 	if(sendReply) {
 		reply.send(notUpdated);
-	}
-	for(auto &it : notUpdated) {
-		TraceEvent("BroadcastDBNotUpdated").detail("Addr", it.getPrimaryAddress());
 	}
 	return notUpdated;
 }
@@ -503,7 +488,7 @@ ACTOR Future<Void> registrationClient(
 
 		auto peers = FlowTransport::transport().getIncompatiblePeers();
 		for(auto it = peers->begin(); it != peers->end();) {
-			if( now() - it->second.second > SERVER_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING ) {
+			if( now() - it->second.second > FLOW_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING ) {
 				request.incompatiblePeers.push_back(it->first);
 				it = peers->erase(it);
 			} else {
@@ -1076,11 +1061,6 @@ ACTOR Future<Void> workerServer(
 
 		loop choose {
 			when( UpdateServerDBInfoRequest req = waitNext( interf.updateServerDBInfo.getFuture() ) ) {
-				TraceEvent("GotServerDBInfoMsg").detail("NotUpdated", !ccInterface->get().present() || req.dbInfo.clusterInterface != ccInterface->get().get() || (req.dbInfo.infoGeneration < dbInfo->get().infoGeneration && dbInfo->get().clusterInterface == ccInterface->get().get()))
-					.detail("ReqInterface", ccInterface->get().present())
-					.detail("InfoGeneration", req.dbInfo.infoGeneration)
-					.detail("Token", interf.updateServerDBInfo.getEndpoint().token);
-
 				Optional<Endpoint> notUpdated;
 				if(!ccInterface->get().present() || req.dbInfo.clusterInterface != ccInterface->get().get() || (req.dbInfo.infoGeneration < dbInfo->get().infoGeneration && dbInfo->get().clusterInterface == ccInterface->get().get())) {
 					notUpdated = interf.updateServerDBInfo.getEndpoint();
@@ -1094,7 +1074,7 @@ ACTOR Future<Void> workerServer(
 					localInfo.myLocality = locality;
 					dbInfo->set(localInfo);
 				}
-				errorForwarders.add(success(broadcastDBInfoRequest(req, 2, notUpdated, true)));
+				errorForwarders.add(success(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, notUpdated, true)));
 			}
 			when( RebootRequest req = waitNext( interf.clientInterface.reboot.getFuture() ) ) {
 				state RebootRequest rebootReq = req;

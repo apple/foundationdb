@@ -1045,7 +1045,7 @@ ACTOR static Future<Void> multiVersionCleanupWorker( TransportData* self ) {
 			if( self->multiVersionConnections.count(it->second.first) ) {
 				it = self->incompatiblePeers.erase(it);
 			} else {
-				if( now() - it->second.second > 5.0 ) { //INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING
+				if( now() - it->second.second > FLOW_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING ) {
 					foundIncompatible = true;
 				}
 				it++;

@@ -36,7 +36,6 @@
 #include "fdbserver/LeaderElection.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/WaitFailure.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Status.h"
@@ -3037,7 +3036,7 @@ ACTOR Future<Void> dbInfoUpdater( ClusterControllerData* self ) {
 	loop {
 		choose {
 			when(wait(updateDBInfo)) {
-				wait(delay(0.1) || dbInfoChange);
+				wait(delay(SERVER_KNOBS->DBINFO_BATCH_DELAY) || dbInfoChange);
 			}
 			when(wait(dbInfoChange)) {}
 		}
@@ -3065,13 +3064,10 @@ ACTOR Future<Void> dbInfoUpdater( ClusterControllerData* self ) {
 		req.dbInfo = self->db.serverInfo->get().read();
 		req.broadcastInfo = self->updateDBInfoEndpoints;
 
-		for(auto &it : self->updateDBInfoEndpoints) {
-			TraceEvent("DBInfoAttemptUpdate", self->id).detail("Addr", it.getPrimaryAddress()).detail("Token", it.token);
-		}
 		self->updateDBInfoEndpoints.clear();
 		TraceEvent("DBInfoStartBroadcast", self->id);
 		choose {
-			when(std::vector<Endpoint> notUpdated = wait( broadcastDBInfoRequest(req, 2, Optional<Endpoint>(), false) )) {
+			when(std::vector<Endpoint> notUpdated = wait( broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, Optional<Endpoint>(), false) )) {
 				TraceEvent("DBInfoFinishBroadcast", self->id);
 				for(auto &it : notUpdated) {
 					TraceEvent("DBInfoNotUpdated", self->id).detail("Addr", it.getPrimaryAddress());
@@ -3081,9 +3077,7 @@ ACTOR Future<Void> dbInfoUpdater( ClusterControllerData* self ) {
 					self->updateDBInfo.trigger();
 				}
 			}
-			when(wait(dbInfoChange)) {
-				TraceEvent("DBInfoChangeBroadcast", self->id);
-			}
+			when(wait(dbInfoChange)) {}
 		}
 	}
 }
