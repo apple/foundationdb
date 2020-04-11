@@ -192,6 +192,9 @@ function(create_test_package)
               ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
               ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
               ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
+              ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTest.sh
+              ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTimeout.sh
+              ${external_files}
       COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTest.sh
                                        ${CMAKE_BINARY_DIR}/packages/joshua_test
       COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTimeout.sh
@@ -201,7 +204,8 @@ function(create_test_package)
                                           ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
                                           ${CMAKE_BINARY_DIR}/packages/joshua_test
                                           ${CMAKE_BINARY_DIR}/packages/joshua_timeout
-                                          ${out_files} ${external_files}
+                                          ${out_files}
+                                          ${external_files}
       COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/packages/joshua_test ${CMAKE_BINARY_DIR}/packages/joshua_timeout
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/packages
       COMMENT "Package correctness archive"
@@ -213,15 +217,25 @@ function(create_test_package)
     set(tar_file ${CMAKE_BINARY_DIR}/packages/valgrind-${CMAKE_PROJECT_VERSION}.tar.gz)
     add_custom_command(
       OUTPUT ${tar_file}
-      DEPENDS ${out_files} strip_only_fdbserver
-      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/valgrindTest.sh ${CMAKE_BINARY_DIR}/packages/joshua_test
-      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/valgrindTimeout.sh ${CMAKE_BINARY_DIR}/packages/joshua_timeout
-      COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
-      ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
-      ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
-      ${CMAKE_BINARY_DIR}/packages/joshua_test
-      ${CMAKE_BINARY_DIR}/packages/joshua_timeout
-      ${out_files} ${external_files}
+      DEPENDS ${out_files}
+              ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+              ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
+              ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
+              ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/valgrindTest.sh
+              ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/valgrindTimeout.sh
+              ${external_files}
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/valgrindTest.sh
+                                       ${CMAKE_BINARY_DIR}/packages/joshua_test
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/valgrindTimeout.sh
+                                       ${CMAKE_BINARY_DIR}/packages/joshua_timeout
+      COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file}
+                                          ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+                                          ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
+                                          ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
+                                          ${CMAKE_BINARY_DIR}/packages/joshua_test
+                                          ${CMAKE_BINARY_DIR}/packages/joshua_timeout
+                                          ${out_files}
+                                          ${external_files}
       COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/packages/joshua_test ${CMAKE_BINARY_DIR}/packages/joshua_timeout
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/packages
       COMMENT "Package correctness archive"
