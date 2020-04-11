@@ -135,11 +135,11 @@ function(strip_debug_symbols target)
   add_custom_target(strip_only_${target} DEPENDS ${out_file})
   if(is_exec AND NOT APPLE)
     add_custom_command(OUTPUT "${out_file}.debug"
+      DEPENDS strip_only_${target}
       COMMAND objcopy --verbose --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug"
       COMMAND objcopy --verbose --add-gnu-debuglink="${out_file}.debug" "${out_file}"
       COMMENT "Copy debug symbols to ${out_name}.debug")
     add_custom_target(strip_${target} DEPENDS  "${out_file}.debug")
-    add_dependencies(strip_${target} ${target} strip_only_${target})
   else()
     add_custom_target(strip_${target})
     add_dependencies(strip_${target} strip_only_${target})
