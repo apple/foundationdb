@@ -21,6 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
@@ -421,6 +422,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					// wait(attemptDirtyRestore(self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()),
 					// randomID));
 				}
+
+				// We must ensure no backup workers are running, otherwise the clear DB
+				// below can be picked up by backup workers and applied during restore.
+				wait(success(changeConfig(cx, "backup_worker_enabled:=0", true)));
+
 				// Clear DB before restore
 				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 					for (auto& kvrange : self->backupRanges) tr->clear(kvrange);
@@ -436,12 +442,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
 				BackupDescription desc = wait(container->describeBackup());
 				ASSERT(self->usePartitionedLogs == desc.partitioned);
-
-				TraceEvent("BAFRW_Restore", randomID)
-				    .detail("LastBackupContainer", lastBackupContainer->getURL())
-				    .detail("MinRestorableVersion", desc.minRestorableVersion.get())
-				    .detail("MaxRestorableVersion", desc.maxRestorableVersion.get())
-				    .detail("ContiguousLogEnd", desc.contiguousLogEnd.get());
 
 				state Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {
@@ -460,6 +460,13 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						                                                   desc.contiguousLogEnd.get());
 					}
 				}
+
+				TraceEvent("BAFRW_Restore", randomID)
+				    .detail("LastBackupContainer", lastBackupContainer->getURL())
+				    .detail("MinRestorableVersion", desc.minRestorableVersion.get())
+				    .detail("MaxRestorableVersion", desc.maxRestorableVersion.get())
+				    .detail("ContiguousLogEnd", desc.contiguousLogEnd.get())
+				    .detail("TargetVersion", targetVersion);
 
 				state std::vector<Future<Version>> restores;
 				state std::vector<Standalone<StringRef>> restoreTags;

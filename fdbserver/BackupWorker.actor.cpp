@@ -179,7 +179,9 @@ struct BackupData {
 							config.startedBackupWorkers().set(tr, workers.get());
 						}
 						for (auto p : workers.get()) {
-							TraceEvent("BackupWorkerDebug", self->myId).detail("Epoch", p.first).detail("TagID", p.second);
+							TraceEvent("BackupWorkerDebugTag", self->myId)
+							    .detail("Epoch", p.first)
+							    .detail("TagID", p.second);
 						}
 						wait(tr->commit());
 
