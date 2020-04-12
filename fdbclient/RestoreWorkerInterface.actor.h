@@ -460,31 +460,31 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	int batchIndex; // version batch index
 	RestoreAsset asset; // Unique identifier for the current restore asset
 
-	Version prevVersion, version; // version is the commitVersion of the mutation vector.
+	Version msgIndex; // Monitonically increasing index of mutation messages
 	bool isRangeFile;
-	MutationsVec mutations; // All mutations at the same version parsed by one loader
-	SubSequenceVec subs; // Sub-sequence number for mutations
+	MutationsVec mutations; // Mutations that may be at different versions parsed by one loader
+	LogMessageVersionVec mVersions; // (version, subversion) of each mutation in mutations field
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendVersionedMutationsRequest() = default;
-	explicit RestoreSendVersionedMutationsRequest(int batchIndex, const RestoreAsset& asset, Version prevVersion,
-	                                              Version version, bool isRangeFile, MutationsVec mutations,
-	                                              SubSequenceVec subs)
-	  : batchIndex(batchIndex), asset(asset), prevVersion(prevVersion), version(version), isRangeFile(isRangeFile),
-	    mutations(mutations), subs(subs) {}
+	explicit RestoreSendVersionedMutationsRequest(int batchIndex, const RestoreAsset& asset, Version msgIndex,
+	                                              bool isRangeFile, MutationsVec mutations,
+	                                              LogMessageVersionVec mVersions)
+	  : batchIndex(batchIndex), asset(asset), msgIndex(msgIndex), isRangeFile(isRangeFile), mutations(mutations),
+	    mVersions(mVersions) {}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "VersionBatchIndex:" << batchIndex << "RestoreAsset:" << asset.toString()
-		   << " prevVersion:" << prevVersion << " version:" << version << " isRangeFile:" << isRangeFile
-		   << " mutations.size:" << mutations.size() << " subs.size:" << subs.size();
+		ss << "VersionBatchIndex:" << batchIndex << "RestoreAsset:" << asset.toString() << " msgIndex:" << msgIndex
+		   << " isRangeFile:" << isRangeFile << " mutations.size:" << mutations.size()
+		   << " mVersions.size:" << mVersions.size();
 		return ss.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, batchIndex, asset, prevVersion, version, isRangeFile, mutations, subs, reply);
+		serializer(ar, batchIndex, asset, msgIndex, isRangeFile, mutations, mVersions, reply);
 	}
 };
 

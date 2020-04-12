@@ -107,8 +107,9 @@ struct StagingKey {
 				// TODO: Add SevError here
 				TraceEvent("SameVersion")
 				    .detail("Version", version.toString())
-				    .detail("Mutation", m.toString())
-				    .detail("NewVersion", newVersion.toString());
+				    .detail("NewVersion", newVersion.toString())
+				    .detail("OldMutation", it->second.toString())
+				    .detail("NewMutation", m.toString());
 				ASSERT(it->second.type == m.type && it->second.param1 == m.param1 && it->second.param2 == m.param2);
 			}
 		}

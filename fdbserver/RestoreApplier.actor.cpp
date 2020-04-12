@@ -110,35 +110,29 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	state Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
 	// Assume: processedFileState[req.asset] will not be erased while the actor is active.
 	// Note: Insert new items into processedFileState will not invalidate the reference.
-	state NotifiedVersion& curFilePos = batchData->processedFileState[req.asset];
+	state NotifiedVersion& curMsgIndex = batchData->processedFileState[req.asset];
 
 	TraceEvent(SevDebug, "FastRestoreApplierPhaseReceiveMutations", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
-	    .detail("ProcessedFileVersion", curFilePos.get())
+	    .detail("RestoreAssetMesssageIndex", curMsgIndex.get())
 	    .detail("Request", req.toString())
 	    .detail("CurrentMemory", getSystemStatistics().processMemory)
 	    .detail("PreviousVersionBatchState", batchData->vbState.get());
 
 	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 
-	wait(curFilePos.whenAtLeast(req.prevVersion));
+	wait(curMsgIndex.whenAtLeast(req.msgIndex - 1));
 	batchData->vbState = ApplierVersionBatchState::RECEIVE_MUTATIONS;
 
 	state bool isDuplicated = true;
-	if (curFilePos.get() == req.prevVersion) {
+	if (curMsgIndex.get() == req.msgIndex - 1) {
 		isDuplicated = false;
-		const Version commitVersion = req.version;
-		// Sanity check: mutations in range file is in [beginVersion, endVersion);
-		// mutations in log file is in [beginVersion, endVersion], both inclusive.
-		ASSERT(commitVersion >= req.asset.beginVersion);
-		// Loader sends the endVersion to ensure all useful versions are sent
-		ASSERT(commitVersion <= req.asset.endVersion);
-		ASSERT(req.mutations.size() == req.subs.size());
+		ASSERT(req.mutations.size() == req.mVersions.size());
 
 		for (int mIndex = 0; mIndex < req.mutations.size(); mIndex++) {
 			const MutationRef& mutation = req.mutations[mIndex];
-			const LogMessageVersion mutationVersion(commitVersion, req.subs[mIndex]);
+			const LogMessageVersion mutationVersion(req.mVersions[mIndex]);
 			TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 			    .detail("RestoreAsset", req.asset.toString())
 			    .detail("Version", mutationVersion.toString())
@@ -149,6 +143,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			batchData->counters.receivedMutations += 1;
 			batchData->counters.receivedAtomicOps += isAtomicOp((MutationRef::Type)mutation.type) ? 1 : 0;
 			// Sanity check
+			ASSERT_WE_THINK(req.asset.isInVersionRange(mutationVersion.version));
 			ASSERT_WE_THINK(req.asset.isInKeyRange(mutation));
 
 			// Note: Log and range mutations may be delivered out of order. Can we handle it?
@@ -157,14 +152,14 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			ASSERT(mutation.type != MutationRef::SetVersionstampedKey &&
 			       mutation.type != MutationRef::SetVersionstampedValue);
 		}
-		curFilePos.set(req.version);
+		curMsgIndex.set(req.msgIndex);
 	}
 
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 	TraceEvent(SevDebug, "FastRestoreApplierPhaseReceiveMutationsDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
-	    .detail("ProcessedFileVersion", curFilePos.get())
+	    .detail("ProcessedMessageIndex", curMsgIndex.get())
 	    .detail("Request", req.toString());
 	return Void();
 }
