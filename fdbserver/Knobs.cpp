@@ -530,6 +530,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( DEGRADED_WARNING_RESET_DELAY,                   7*24*60*60 );
 	init( TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS,         10 );
 	init( TRACE_LOG_PING_TIMEOUT_SECONDS,                        5.0 );
+	init( DBINFO_FAILED_DELAY,                                   1.0 );
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );

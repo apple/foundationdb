@@ -68,7 +68,7 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #endif
 
 ACTOR Future<std::vector<Endpoint>> tryDBInfoBroadcast(RequestStream<UpdateServerDBInfoRequest> stream, UpdateServerDBInfoRequest req) {
-	ErrorOr<std::vector<Endpoint>> rep = wait( stream.getReplyUnlessFailedFor(req, 1.0, 0) );
+	ErrorOr<std::vector<Endpoint>> rep = wait( stream.getReplyUnlessFailedFor(req, SERVER_KNOBS->DBINFO_FAILED_DELAY, 0) );
 	if(rep.present()) {
 		return rep.get();
 	}
