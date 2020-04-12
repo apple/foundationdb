@@ -64,6 +64,10 @@ public:
 		return addresses.getTLSAddress();
 	}
 
+	Endpoint getAdjustedEndpoint( uint32_t index ) {
+		return Endpoint( addresses, UID(token.first(), (token.second()&0xffffffff00000000LL) | index) );
+	}
+
 	bool operator == (Endpoint const& r) const {
 		return getPrimaryAddress() == r.getPrimaryAddress() && token == r.token;
 	}
@@ -179,7 +183,7 @@ public:
 	void removePeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is no longer being used
 
-	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
+	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID, bool randomizeEndpoint );
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
 
 	void removeEndpoint( const Endpoint&, NetworkMessageReceiver* );

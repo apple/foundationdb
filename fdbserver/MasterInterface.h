@@ -33,6 +33,7 @@ typedef uint64_t DBRecoveryCount;
 struct MasterInterface {
 	constexpr static FileIdentifier file_identifier = 5979145;
 	LocalityData locality;
+	Endpoint base;
 	RequestStream< ReplyPromise<Void> > waitFailure;
 	RequestStream< struct TLogRejoinRequest > tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
@@ -48,12 +49,23 @@ struct MasterInterface {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion, notifyBackupWorkerDone);
+		serializer(ar, locality, base);
+		if( Ar::isDeserializing ) {
+			waitFailure = RequestStream< ReplyPromise<Void> >( base.getAdjustedEndpoint(1) );
+			tlogRejoin = RequestStream< struct TLogRejoinRequest >( base.getAdjustedEndpoint(2) );
+			changeCoordinators = RequestStream< struct ChangeCoordinatorsRequest >( base.getAdjustedEndpoint(3) );
+			getCommitVersion = RequestStream< struct GetCommitVersionRequest >( base.getAdjustedEndpoint(4) );
+			notifyBackupWorkerDone = RequestStream<struct BackupWorkerDoneRequest>( base.getAdjustedEndpoint(5) );
+		}
 	}
 
 	void initEndpoints() {
-		getCommitVersion.getEndpoint( TaskPriority::GetConsistentReadVersion );
-		tlogRejoin.getEndpoint( TaskPriority::MasterTLogRejoin );
+		base = Endpoint( g_network->getLocalAddresses(), deterministicRandom()->randomUniqueID() );
+		waitFailure.initEndpoint( base.getAdjustedEndpoint(1) );
+		tlogRejoin.initEndpoint( base.getAdjustedEndpoint(2), TaskPriority::MasterTLogRejoin );
+		changeCoordinators.initEndpoint( base.getAdjustedEndpoint(3) );
+		getCommitVersion.initEndpoint( base.getAdjustedEndpoint(4), TaskPriority::GetConsistentReadVersion );
+		notifyBackupWorkerDone.initEndpoint( base.getAdjustedEndpoint(5) );
 	}
 };
 

@@ -55,8 +55,16 @@ struct FlowReceiver : private NetworkMessageReceiver {
 	const Endpoint& getEndpoint(TaskPriority taskID) {
 		if (!endpoint.isValid()) {
 			m_isLocalEndpoint = true;
-			FlowTransport::transport().addEndpoint(endpoint, this, taskID);
+			FlowTransport::transport().addEndpoint(endpoint, this, taskID, true);
 		}
+		return endpoint;
+	}
+
+	const Endpoint& initEndpoint(Endpoint base, TaskPriority taskID) {
+		ASSERT(!endpoint.isValid());
+		m_isLocalEndpoint = true;
+		endpoint = base;
+		FlowTransport::transport().addEndpoint(endpoint, this, taskID, false);
 		return endpoint;
 	}
 
@@ -373,6 +381,8 @@ public:
 			queue->delPromiseRef();
 		//queue = (NetNotifiedQueue<T>*)0xdeadbeef;
 	}
+
+	Endpoint initEndpoint(Endpoint base, uint32_t taskID = TaskPriority::DefaultEndpoint) { return queue->initEndpoint(base, taskID); }
 
 	Endpoint getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const { return queue->getEndpoint(taskID); }
 	void makeWellKnownEndpoint(Endpoint::Token token, TaskPriority taskID) {

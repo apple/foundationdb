@@ -1146,8 +1146,10 @@ void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream)
 	}
 }
 
-void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, TaskPriority taskID ) {
-	endpoint.token = deterministicRandom()->randomUniqueID();
+void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, TaskPriority taskID, bool randomizeEndpoint ) {
+	if(randomizeEndpoint) {
+		endpoint.token = deterministicRandom()->randomUniqueID();
+	}
 	if (receiver->isStream()) {
 		endpoint.addresses = self->localAddresses;
 		endpoint.token = UID( endpoint.token.first() | TOKEN_STREAM_FLAG, endpoint.token.second() );
