@@ -117,25 +117,9 @@ ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> d
 	}
 }
 
-ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
-	state std::vector<UID> lastProxyUIDs;
-	state std::vector<MasterProxyInterface> lastProxies;
-	loop {
-		ClientDBInfo ni = db->get().read().client;
-		shrinkProxyList(ni, lastProxyUIDs, lastProxies);
-		info->set( ni );
-		wait( db->onChange() );
-	}
-}
-
 Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, TaskPriority taskID, bool enableLocalityLoadBalance, bool lockAware ) {
 	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
 	return DatabaseContext::create( info, extractClientInfo(db, info), enableLocalityLoadBalance ? db->get().myLocality : LocalityData(), enableLocalityLoadBalance, taskID, lockAware );
-}
-
-Database openDBOnServer( Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> const& db, TaskPriority taskID, bool enableLocalityLoadBalance, bool lockAware ) {
-	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
-	return DatabaseContext::create( info, extractClientInfo(db, info), enableLocalityLoadBalance ? db->get().read().myLocality : LocalityData(), enableLocalityLoadBalance, taskID, lockAware );
 }
 
 struct ErrorInfo {
@@ -1061,17 +1045,18 @@ ACTOR Future<Void> workerServer(
 
 		loop choose {
 			when( UpdateServerDBInfoRequest req = waitNext( interf.updateServerDBInfo.getFuture() ) ) {
+				ServerDBInfo localInfo = BinaryReader::fromStringRef<ServerDBInfo>(req.serializedDbInfo, AssumeVersion(currentProtocolVersion));
+				localInfo.myLocality = locality;
+
 				Optional<Endpoint> notUpdated;
-				if(!ccInterface->get().present() || req.dbInfo.clusterInterface != ccInterface->get().get() || (req.dbInfo.infoGeneration < dbInfo->get().infoGeneration && dbInfo->get().clusterInterface == ccInterface->get().get())) {
+				if(!ccInterface->get().present() || localInfo.clusterInterface != ccInterface->get().get() || (localInfo.infoGeneration < dbInfo->get().infoGeneration && dbInfo->get().clusterInterface == ccInterface->get().get())) {
 					notUpdated = interf.updateServerDBInfo.getEndpoint();
 				}
-				if(ccInterface->get().present() && req.dbInfo.clusterInterface == ccInterface->get().get() && (req.dbInfo.infoGeneration > dbInfo->get().infoGeneration || dbInfo->get().clusterInterface != ccInterface->get().get())) {
-					ServerDBInfo localInfo = req.dbInfo;
+				if(ccInterface->get().present() && localInfo.clusterInterface == ccInterface->get().get() && (localInfo.infoGeneration > dbInfo->get().infoGeneration || dbInfo->get().clusterInterface != ccInterface->get().get())) {
+					
 					TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
 					.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
 					.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
-
-					localInfo.myLocality = locality;
 					dbInfo->set(localInfo);
 				}
 				errorForwarders.add(success(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, notUpdated, true)));

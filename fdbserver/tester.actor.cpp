@@ -1030,8 +1030,8 @@ ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterContro
 		req.knownServerInfoID = dbInfo->get().id;
 
 		choose {
-			when( CachedSerialization<ServerDBInfo> ni = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
-				ServerDBInfo localInfo = ni.read();
+			when( ServerDBInfo _localInfo = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
+				ServerDBInfo localInfo = _localInfo;
 				TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
 				.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
 				.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());

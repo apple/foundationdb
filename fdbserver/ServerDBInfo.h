@@ -66,20 +66,20 @@ struct ServerDBInfo {
 
 struct UpdateServerDBInfoRequest {
 	constexpr static FileIdentifier file_identifier = 9467438;
-	ServerDBInfo dbInfo;
+	Standalone<StringRef> serializedDbInfo;
 	std::vector<Endpoint> broadcastInfo;
 	ReplyPromise<std::vector<Endpoint>> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, dbInfo, broadcastInfo, reply);
+		serializer(ar, serializedDbInfo, broadcastInfo, reply);
 	}
 };
 
 struct GetServerDBInfoRequest {
 	constexpr static FileIdentifier file_identifier = 9467439;
 	UID knownServerInfoID;
-	ReplyPromise< CachedSerialization<struct ServerDBInfo> > reply;
+	ReplyPromise<struct ServerDBInfo> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
