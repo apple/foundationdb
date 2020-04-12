@@ -1048,18 +1048,24 @@ ACTOR Future<Void> workerServer(
 				ServerDBInfo localInfo = BinaryReader::fromStringRef<ServerDBInfo>(req.serializedDbInfo, AssumeVersion(currentProtocolVersion));
 				localInfo.myLocality = locality;
 
-				Optional<Endpoint> notUpdated;
-				if(!ccInterface->get().present() || localInfo.clusterInterface != ccInterface->get().get() || (localInfo.infoGeneration < dbInfo->get().infoGeneration && dbInfo->get().clusterInterface == ccInterface->get().get())) {
-					notUpdated = interf.updateServerDBInfo.getEndpoint();
+				if(ccInterface->get().present() && localInfo.infoGeneration < dbInfo->get().infoGeneration && dbInfo->get().clusterInterface == ccInterface->get().get()) {
+					std::vector<Endpoint> rep = req.broadcastInfo;
+					rep.push_back(interf.updateServerDBInfo.getEndpoint());
+					req.reply.send(rep);
+				} else {
+					Optional<Endpoint> notUpdated;
+					if(!ccInterface->get().present() || localInfo.clusterInterface != ccInterface->get().get()) {
+						notUpdated = interf.updateServerDBInfo.getEndpoint();
+					}
+					if(ccInterface->get().present() && localInfo.clusterInterface == ccInterface->get().get() && (localInfo.infoGeneration > dbInfo->get().infoGeneration || dbInfo->get().clusterInterface != ccInterface->get().get())) {
+						
+						TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
+						.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
+						.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
+						dbInfo->set(localInfo);
+					}
+					errorForwarders.add(success(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, notUpdated, true)));
 				}
-				if(ccInterface->get().present() && localInfo.clusterInterface == ccInterface->get().get() && (localInfo.infoGeneration > dbInfo->get().infoGeneration || dbInfo->get().clusterInterface != ccInterface->get().get())) {
-					
-					TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
-					.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
-					.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
-					dbInfo->set(localInfo);
-				}
-				errorForwarders.add(success(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, notUpdated, true)));
 			}
 			when( RebootRequest req = waitNext( interf.clientInterface.reboot.getFuture() ) ) {
 				state RebootRequest rebootReq = req;
