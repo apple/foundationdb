@@ -3038,6 +3038,7 @@ ACTOR Future<Void> dbInfoUpdater( ClusterControllerData* self ) {
 				self->updateDBInfoEndpoints.push_back(it.second.details.interf.updateServerDBInfo.getEndpoint());
 			}
 		} else {
+			uniquify(self->updateDBInfoEndpoints);
 			for(int i = 0; i < self->updateDBInfoEndpoints.size(); i++) {
 				if(self->removedDBInfoEndpoints.count(self->updateDBInfoEndpoints[i])) {
 					self->updateDBInfoEndpoints[i] = self->updateDBInfoEndpoints.back();
