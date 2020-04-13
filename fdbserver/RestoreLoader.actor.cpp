@@ -442,17 +442,19 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	state std::map<UID, MutationsVec> applierMutationsBuffer;
 	state std::map<UID, LogMessageVersionVec> applierVersionsBuffer;
 	state std::map<UID, double> applierMutationsSize;
+	state int mIndex = 0;
+	state LogMessageVersion commitVersion;
 	for (auto& applierID : applierIDs) {
 		applierMutationsBuffer[applierID] = MutationsVec();
 		applierVersionsBuffer[applierID] = LogMessageVersionVec();
 		applierMutationsSize[applierID] = 0.0;
 	}
 	for (kvOp = kvOps.begin(); kvOp != kvOps.end(); kvOp++) {
-		const LogMessageVersion& commitVersion = kvOp->first;
+		commitVersion = kvOp->first;
 		ASSERT(commitVersion.version >= asset.beginVersion);
 		ASSERT(commitVersion.version <= asset.endVersion); // endVersion is an empty commit to ensure progress
-
-		for (const MutationRef& kvm : kvOp->second) {
+		for (mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
+			MutationRef& kvm = kvOp->second[mIndex];
 			// Send the mutation to applier
 			if (isRangeMutation(kvm)) {
 				MutationsVec mvector;

@@ -521,7 +521,7 @@ Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef:
 	else {
 		TraceEvent(SevError, "ApplyAtomicOpUnhandledType")
 		    .detail("TypeCode", (int)type)
-		    .detail("TypeName", typeString[type]);
+		    .detail("TypeName", getTypeString(type));
 		ASSERT(false);
 	}
 	return Value();
