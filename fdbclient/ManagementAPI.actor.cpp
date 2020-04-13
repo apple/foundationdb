@@ -1909,7 +1909,7 @@ Future<Void> addCachedRange(const Database& cx, KeyRangeRef range) {
 	return changeCachedRange(cx, range, true);
 }
 Future<Void> removeCachedRange(const Database& cx, KeyRangeRef range) {
-	return changeCachedRange(cx, range, true);
+	return changeCachedRange(cx, range, false);
 }
 
 json_spirit::Value_type normJSONType(json_spirit::Value_type type) {
