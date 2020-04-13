@@ -34,6 +34,8 @@ public:
 		auto resultFuture = ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY);
 		// all keys are written to RYW, since GRV is set, the read should happen locally
 		ASSERT(resultFuture.isReady());
+		auto result = resultFuture.getValue();
+		ASSERT(!result.more);
 		return resultFuture.getValue();
 	}
 };
