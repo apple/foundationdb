@@ -4049,6 +4049,28 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> changePause(FileBackupAgent* backupAgent, Database db, bool pause) {
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(db));
+		state Future<Void> change = backupAgent->taskBucket->changePause(db, pause);
+
+		loop {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			try {
+				tr->set(backupPausedKey, pause ? LiteralStringRef("1") : LiteralStringRef("0"));
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+		wait(change);
+		TraceEvent("FileBackupAgentChangePaused").detail("Action", pause ? "Paused" : "Resumed");
+		return Void();
+	}
+
 	struct TimestampedVersion {
 		Optional<Version> version;
 		Optional<int64_t> epochs;
@@ -4651,4 +4673,8 @@ void FileBackupAgent::setLastRestorable(Reference<ReadYourWritesTransaction> tr,
 
 Future<int> FileBackupAgent::waitBackup(Database cx, std::string tagName, bool stopWhenDone, Reference<IBackupContainer> *pContainer, UID *pUID) {
 	return FileBackupAgentImpl::waitBackup(this, cx, tagName, stopWhenDone, pContainer, pUID);
+}
+
+Future<Void> FileBackupAgent::changePause(Database db, bool pause) {
+	return FileBackupAgentImpl::changePause(this, db, pause);
 }

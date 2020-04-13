@@ -78,16 +78,16 @@ public:
 
 		Range range() { return Range(begin(),end()); }
 
-		Val& value() { 
+		Val& value() {
 			//ASSERT( it->key != allKeys.end );
-			return it->value; 
+			return it->value;
 		}
 
 		void operator ++() { ++it; }
 		void operator --() { it.decrementNonEnd(); }
 		bool operator ==(Iterator const& r) const { return it == r.it; }
 		bool operator !=(Iterator const& r) const { return it != r.it; }
-		
+
 		// operator* and -> return this
 		Iterator& operator*() { return *this; }
 		Iterator* operator->() { return this; }
@@ -131,10 +131,10 @@ public:
 		--i;
 		return i;
 	}
-	Iterator lastItem() { 
+	Iterator lastItem() {
 		auto i = map.lastItem();
 		i.decrementNonEnd();
-		return Iterator(i); 
+		return Iterator(i);
 	}
 	int size() const { return map.size() - 1; } // We always have one range bounded by two entries
 	Iterator randomRange() {

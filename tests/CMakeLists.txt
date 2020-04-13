@@ -83,6 +83,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES ThreadSafety.txt IGNORE)
   add_fdb_test(TEST_FILES Throttling.txt IGNORE)
   add_fdb_test(TEST_FILES TraceEventMetrics.txt IGNORE)
+  add_fdb_test(TEST_FILES PopulateTPCC.txt IGNORE)
+  add_fdb_test(TEST_FILES TPCC.txt IGNORE)
   add_fdb_test(TEST_FILES default.txt IGNORE)
   add_fdb_test(TEST_FILES errors.txt IGNORE)
   add_fdb_test(TEST_FILES fail.txt IGNORE)
@@ -162,17 +164,17 @@ if(WITH_PYTHON)
     TEST_FILES restarting/StorefrontTestRestart-1.txt
                restarting/StorefrontTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
-               restarting/from_6.2.0/SnapTestAttrition-2.txt)
+    TEST_FILES SnapTestAttrition-1.txt
+               SnapTestAttrition-2.txt IGNORE)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestSimpleRestart-1.txt
-               restarting/from_6.2.0/SnapTestSimpleRestart-2.txt)
+    TEST_FILES SnapTestSimpleRestart-1.txt
+               SnapTestSimpleRestart-2.txt IGNORE)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestRestart-1.txt
-               restarting/from_6.2.0/SnapTestRestart-2.txt)
+    TEST_FILES SnapTestRestart-1.txt
+               SnapTestRestart-2.txt IGNORE)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapCycleRestart-1.txt
-               restarting/from_6.2.0/SnapCycleRestart-2.txt)
+    TEST_FILES SnapCycleRestart-1.txt
+               SnapCycleRestart-2.txt IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
                restarting/from_5.1.7/DrUpgradeRestart-2.txt)
@@ -210,12 +212,16 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/WriteDuringReadAtomicRestore.txt)
   add_fdb_test(TEST_FILES slow/WriteDuringReadSwitchover.txt)
   add_fdb_test(TEST_FILES slow/ddbalance.txt)
-  add_fdb_test(TEST_FILES slow/ParallelRestoreCorrectnessAtomicOp.txt)
-  add_fdb_test(TEST_FILES slow/ParallelRestoreCorrectnessCycle.txt)
-  add_fdb_test(TEST_FILES slow/ParallelRestoreCorrectnessMultiCycles.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreNewBackupCorrectnessAtomicOp.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreNewBackupCorrectnessCycle.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreNewBackupCorrectnessMultiCycles.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreNewBackupWriteDuringReadAtomicRestore.txt)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessAtomicOp.txt)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessCycle.txt)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessMultiCycles.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupWriteDuringReadAtomicRestore.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupApiCorrectnessAtomicRestore.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreTestSplitMutation.txt)
   # Note that status tests are not deterministic.
   add_fdb_test(TEST_FILES status/invalid_proc_addresses.txt)
   add_fdb_test(TEST_FILES status/local_6_machine_no_replicas_remain.txt)

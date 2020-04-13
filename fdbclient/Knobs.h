@@ -202,7 +202,11 @@ public:
 	int CLI_CONNECT_PARALLELISM;
 	double CLI_CONNECT_TIMEOUT;
 
-	ClientKnobs(bool randomize = false);
+	// trace
+	int TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH;
+
+	ClientKnobs();
+	void initialize(bool randomize = false);
 };
 
 extern ClientKnobs const* CLIENT_KNOBS;

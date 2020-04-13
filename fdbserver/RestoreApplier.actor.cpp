@@ -110,36 +110,29 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	state Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
 	// Assume: processedFileState[req.asset] will not be erased while the actor is active.
 	// Note: Insert new items into processedFileState will not invalidate the reference.
-	state NotifiedVersion& curFilePos = batchData->processedFileState[req.asset];
+	state NotifiedVersion& curMsgIndex = batchData->processedFileState[req.asset];
 
 	TraceEvent(SevDebug, "FastRestoreApplierPhaseReceiveMutations", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
-	    .detail("ProcessedFileVersion", curFilePos.get())
+	    .detail("RestoreAssetMesssageIndex", curMsgIndex.get())
 	    .detail("Request", req.toString())
 	    .detail("CurrentMemory", getSystemStatistics().processMemory)
 	    .detail("PreviousVersionBatchState", batchData->vbState.get());
 
 	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 
-	wait(curFilePos.whenAtLeast(req.prevVersion));
+	wait(curMsgIndex.whenAtLeast(req.msgIndex - 1));
 	batchData->vbState = ApplierVersionBatchState::RECEIVE_MUTATIONS;
 
 	state bool isDuplicated = true;
-	if (curFilePos.get() == req.prevVersion) {
+	if (curMsgIndex.get() == req.msgIndex - 1) {
 		isDuplicated = false;
-		const Version commitVersion = req.version;
-		uint16_t numVersionStampedKV = 0;
-		// Sanity check: mutations in range file is in [beginVersion, endVersion);
-		// mutations in log file is in [beginVersion, endVersion], both inclusive.
-		ASSERT(commitVersion >= req.asset.beginVersion);
-		// Loader sends the endVersion to ensure all useful versions are sent
-		ASSERT(commitVersion <= req.asset.endVersion);
-		ASSERT(req.mutations.size() == req.subs.size());
+		ASSERT(req.mutations.size() == req.mVersions.size());
 
 		for (int mIndex = 0; mIndex < req.mutations.size(); mIndex++) {
 			const MutationRef& mutation = req.mutations[mIndex];
-			const LogMessageVersion mutationVersion(commitVersion, req.subs[mIndex]);
+			const LogMessageVersion mutationVersion(req.mVersions[mIndex]);
 			TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 			    .detail("RestoreAsset", req.asset.toString())
 			    .detail("Version", mutationVersion.toString())
@@ -150,32 +143,23 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			batchData->counters.receivedMutations += 1;
 			batchData->counters.receivedAtomicOps += isAtomicOp((MutationRef::Type)mutation.type) ? 1 : 0;
 			// Sanity check
-			if (g_network->isSimulated()) {
-				if (isRangeMutation(mutation)) {
-					ASSERT(mutation.param1 >= req.asset.range.begin &&
-					       mutation.param2 <= req.asset.range.end); // Range mutation's right side is exclusive
-				} else {
-					ASSERT(mutation.param1 >= req.asset.range.begin && mutation.param1 < req.asset.range.end);
-				}
-			}
+			ASSERT_WE_THINK(req.asset.isInVersionRange(mutationVersion.version));
+			ASSERT_WE_THINK(req.asset.isInKeyRange(mutation));
+
 			// Note: Log and range mutations may be delivered out of order. Can we handle it?
-			if (mutation.type == MutationRef::SetVersionstampedKey ||
-			    mutation.type == MutationRef::SetVersionstampedValue) {
-				ASSERT(false); // No version stamp mutations in backup logs
-				batchData->addVersionStampedKV(mutation, mutationVersion, numVersionStampedKV);
-				numVersionStampedKV++;
-			} else {
-				batchData->addMutation(mutation, mutationVersion);
-			}
+			batchData->addMutation(mutation, mutationVersion);
+
+			ASSERT(mutation.type != MutationRef::SetVersionstampedKey &&
+			       mutation.type != MutationRef::SetVersionstampedValue);
 		}
-		curFilePos.set(req.version);
+		curMsgIndex.set(req.msgIndex);
 	}
 
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 	TraceEvent(SevDebug, "FastRestoreApplierPhaseReceiveMutationsDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
-	    .detail("ProcessedFileVersion", curFilePos.get())
+	    .detail("ProcessedMessageIndex", curMsgIndex.get())
 	    .detail("Request", req.toString());
 	return Void();
 }
@@ -189,6 +173,8 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (auto& range : ranges) {
+				debugFRMutation("FastRestoreApplierApplyClearRangeMutation", 0,
+				                MutationRef(MutationRef::ClearRange, range.begin, range.end));
 				tr->clear(range);
 			}
 			wait(tr->commit());
@@ -220,10 +206,12 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			wait(waitForAll(fValues));
 			break;
 		} catch (Error& e) {
-			retries++;
-			TraceEvent(retries > 10 ? SevError : SevWarn, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
-			    .detail("GetKeys", incompleteStagingKeys.size())
-			    .error(e);
+			if (retries++ > 10) {
+				TraceEvent(SevError, "FastRestoreApplierGetAndComputeStagingKeysGetKeysStuck")
+				    .detail("GetKeys", incompleteStagingKeys.size())
+				    .error(e);
+			}
+
 			wait(tr->onError(e));
 			fValues.clear();
 		}
@@ -233,17 +221,17 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	int i = 0;
 	for (auto& key : incompleteStagingKeys) {
 		if (!fValues[i].get().present()) {
-			TraceEvent(SevWarnAlways, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
+			TraceEvent(SevDebug, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
 			    .detail("Key", key.first)
 			    .detail("Reason", "Not found in DB")
 			    .detail("PendingMutations", key.second->second.pendingMutations.size())
 			    .detail("StagingKeyType", (int)key.second->second.type);
 			for (auto& vm : key.second->second.pendingMutations) {
-				TraceEvent(SevWarnAlways, "FastRestoreApplierGetAndComputeStagingKeysUnhandledError")
+				TraceEvent(SevDebug, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
 				    .detail("PendingMutationVersion", vm.first.toString())
 				    .detail("PendingMutation", vm.second.toString());
 			}
-			key.second->second.precomputeResult();
+			key.second->second.precomputeResult("GetAndComputeStagingKeysNoBaseValueInDB");
 			i++;
 			continue;
 		} else {
@@ -251,7 +239,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			// But as long as it is > 1 and less than the start version of the version batch, it is the same result.
 			MutationRef m(MutationRef::SetValue, key.first, fValues[i].get().get());
 			key.second->second.add(m, LogMessageVersion(1));
-			key.second->second.precomputeResult();
+			key.second->second.precomputeResult("GetAndComputeStagingKeys");
 			i++;
 		}
 	}
@@ -276,6 +264,8 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	double curTxnSize = 0;
 	for (auto& rangeMutation : batchData->stagingKeyRanges) {
 		KeyRangeRef range(rangeMutation.mutation.param1, rangeMutation.mutation.param2);
+		debugFRMutation("FastRestoreApplierPrecomputeMutationsResultClearRange", rangeMutation.version.version,
+		                MutationRef(MutationRef::ClearRange, range.begin, range.end));
 		clearRanges.push_back(clearRanges.arena(), range);
 		curTxnSize += range.expectedSize();
 		if (curTxnSize >= SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES) {
@@ -296,9 +286,18 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	    .detail("ClearRanges", batchData->stagingKeyRanges.size());
 	for (auto& rangeMutation : batchData->stagingKeyRanges) {
 		std::map<Key, StagingKey>::iterator lb = batchData->stagingKeys.lower_bound(rangeMutation.mutation.param1);
-		std::map<Key, StagingKey>::iterator ub = batchData->stagingKeys.upper_bound(rangeMutation.mutation.param2);
+		std::map<Key, StagingKey>::iterator ub = batchData->stagingKeys.lower_bound(rangeMutation.mutation.param2);
 		while (lb != ub) {
-			lb->second.add(rangeMutation.mutation, rangeMutation.version);
+			if (lb->first >= rangeMutation.mutation.param2) {
+				TraceEvent(SevError, "FastRestoreApplerPhasePrecomputeMutationsResult_IncorrectUpperBound")
+				    .detail("Key", lb->first)
+				    .detail("ClearRangeUpperBound", rangeMutation.mutation.param2)
+				    .detail("UsedUpperBound", ub->first);
+			}
+			// We make the beginKey = endKey for the ClearRange on purpose so that
+			// we can sanity check ClearRange mutation when we apply it to DB.
+			MutationRef clearKey(MutationRef::ClearRange, lb->first, lb->first);
+			lb->second.add(clearKey, rangeMutation.version);
 			lb++;
 		}
 	}
@@ -338,7 +337,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	for (stagingKeyIter = batchData->stagingKeys.begin(); stagingKeyIter != batchData->stagingKeys.end();
 	     stagingKeyIter++) {
 		if (stagingKeyIter->second.hasBaseValue()) {
-			stagingKeyIter->second.precomputeResult();
+			stagingKeyIter->second.precomputeResult("HasBaseValue");
 		}
 	}
 
@@ -362,6 +361,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int sets = 0;
 	state int clears = 0;
+	state Key endKey = begin->second.key;
 	TraceEvent("FastRestoreApplierPhaseApplyStagingKeysBatch", applierID).detail("Begin", begin->first);
 	loop {
 		try {
@@ -372,13 +372,25 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 			while (iter != end) {
 				if (iter->second.type == MutationRef::SetValue) {
 					tr->set(iter->second.key, iter->second.val);
+					TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseApplyStagingKeysBatch", applierID)
+					    .detail("SetKey", iter->second.key);
 					sets++;
 				} else if (iter->second.type == MutationRef::ClearRange) {
-					tr->clear(KeyRangeRef(iter->second.key, iter->second.val));
+					if (iter->second.key != iter->second.val) {
+						TraceEvent(SevError, "FastRestoreApplierPhaseApplyStagingKeysBatchClearTooMuchData", applierID)
+						    .detail("KeyBegin", iter->second.key)
+						    .detail("KeyEnd", iter->second.val)
+						    .detail("Version", iter->second.version.version)
+						    .detail("SubVersion", iter->second.version.sub);
+					}
+					tr->clear(singleKeyRange(iter->second.key));
+					TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseApplyStagingKeysBatch", applierID)
+					    .detail("ClearKey", iter->second.key);
 					clears++;
 				} else {
 					ASSERT(false);
 				}
+				endKey = iter != end ? iter->second.key : endKey;
 				iter++;
 				if (sets > 10000000 || clears > 10000000) {
 					TraceEvent(SevError, "FastRestoreApplierPhaseApplyStagingKeysBatchInfiniteLoop", applierID)
@@ -389,6 +401,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 			}
 			TraceEvent("FastRestoreApplierPhaseApplyStagingKeysBatchPrecommit", applierID)
 			    .detail("Begin", begin->first)
+			    .detail("End", endKey)
 			    .detail("Sets", sets)
 			    .detail("Clears", clears);
 			wait(tr->commit());

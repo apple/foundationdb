@@ -33,8 +33,8 @@ CMake-based build system. Both of them should currently work for most users,
 and CMake should be the preferred choice as it will eventually become the only
 build system available.
 
-If compiling for local development, please set -DUSE_WERROR=ON in
-cmake. Our CI compiles with -Werror on, so this way you'll find out about
+If compiling for local development, please set `-DUSE_WERROR=ON` in
+cmake. Our CI compiles with `-Werror` on, so this way you'll find out about
 compiler warnings that break the build earlier.
 
 ## CMake
@@ -51,8 +51,8 @@ Mac OS - for Windows see below):
 1. Create a build directory (you can have the build directory anywhere you
    like): `mkdir build`
 1. `cd build`
-1. `cmake -DBOOST_ROOT=<PATH_TO_BOOST> <PATH_TO_FOUNDATIONDB_DIRECTORY>`
-1. `make`
+1. `cmake -GNinja -DBOOST_ROOT=<PATH_TO_BOOST> <PATH_TO_FOUNDATIONDB_DIRECTORY>`
+1. `ninja`
 
 CMake will try to find its dependencies. However, for LibreSSL this can be often
 problematic (especially if OpenSSL is installed as well). For that we recommend
@@ -61,7 +61,7 @@ LibreSSL is installed under `/usr/local/libressl-2.8.3`, you should call cmake l
 this:
 
 ```
-cmake -DLibreSSL_ROOT=/usr/local/libressl-2.8.3/ ../foundationdb
+cmake -GNinja -DLibreSSL_ROOT=/usr/local/libressl-2.8.3/ ../foundationdb
 ```
 
 FoundationDB will build just fine without LibreSSL, however, the resulting
@@ -133,8 +133,8 @@ If you want to create a package you have to tell cmake what platform it is for.
 And then you can build by simply calling `cpack`. So for debian, call:
 
 ```
-cmake <FDB_SOURCE_DIR>
-make
+cmake -GNinja <FDB_SOURCE_DIR>
+ninja
 cpack -G DEB
 ```
 
@@ -142,21 +142,21 @@ For RPM simply replace `DEB` with `RPM`.
 
 ### MacOS
 
-The build under MacOS will work the same way as on Linux. To get LibreSSL and boost you
-can use [Homebrew](https://brew.sh/). LibreSSL will not be installed in
-`/usr/local` instead it will stay in `/usr/local/Cellar`. So the cmake command
-will look something like this:
+The build under MacOS will work the same way as on Linux. To get LibreSSL,
+boost, and ninja you can use [Homebrew](https://brew.sh/). LibreSSL will not be
+installed in `/usr/local` instead it will stay in `/usr/local/Cellar`. So the
+cmake command will look something like this:
 
 ```sh
-cmake -DLibreSSL_ROOT=/usr/local/Cellar/libressl/2.8.3 <PATH_TO_FOUNDATIONDB_SOURCE>
+cmake -GNinja -DLibreSSL_ROOT=/usr/local/Cellar/libressl/2.8.3 <PATH_TO_FOUNDATIONDB_SOURCE>
 ```
 
 To generate a installable package, you have to call CMake with the corresponding
 arguments and then use cpack to generate the package:
 
 ```sh
-cmake <FDB_SOURCE_DIR>
-make
+cmake -GNinja <FDB_SOURCE_DIR>
+ninja
 cpack -G productbuild
 ```
 
