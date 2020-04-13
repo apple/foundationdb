@@ -1958,7 +1958,7 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, R
 	actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
 	actors.add(traceCounters("CacheMetrics", self.thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self.counters.cc, self.thisServerID.toString() + "/CacheMetrics"));
 
-	// compactCache actor will periodically compact the cache when certain version condityion is met
+	// compactCache actor will periodically compact the cache when certain version condition is met
 	actors.add(compactCache(&self));
 
 	// pullAsyncData actor pulls mutations from the TLog and also applies them.
