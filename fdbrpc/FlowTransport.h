@@ -65,7 +65,9 @@ public:
 	}
 
 	Endpoint getAdjustedEndpoint( uint32_t index ) {
-		return Endpoint( addresses, UID(token.first(), (token.second()&0xffffffff00000000LL) | index) );
+		uint32_t newIndex = token.second();
+		newIndex += index;
+		return Endpoint( addresses, UID(token.first(), (token.second()&0xffffffff00000000LL) | newIndex) );
 	}
 
 	bool operator == (Endpoint const& r) const {
@@ -183,8 +185,10 @@ public:
 	void removePeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is no longer being used
 
-	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID, bool randomizeEndpoint );
+	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
+
+	const Endpoint& addEndpoints( std::vector<std::pair<struct FlowReceiver*, TaskPriority>> const& streams );
 
 	void removeEndpoint( const Endpoint&, NetworkMessageReceiver* );
 	// The given local endpoint no longer delivers messages to the given receiver or uses resources

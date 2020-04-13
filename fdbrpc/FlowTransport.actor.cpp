@@ -51,6 +51,7 @@ class EndpointMap : NonCopyable {
 public:
 	EndpointMap();
 	void insert( NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority );
+	const Endpoint& insert( NetworkAddressList localAddresses, std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams );
 	NetworkMessageReceiver* get( Endpoint::Token const& token );
 	TaskPriority getPriority( Endpoint::Token const& token );
 	void remove( Endpoint::Token const& token, NetworkMessageReceiver* r );
@@ -93,6 +94,19 @@ void EndpointMap::insert( NetworkMessageReceiver* r, Endpoint::Token& token, Tas
 	token = Endpoint::Token( token.first(), (token.second()&0xffffffff00000000LL) | index );
 	data[index].token() = Endpoint::Token( token.first(), (token.second()&0xffffffff00000000LL) | static_cast<uint32_t>(priority) );
 	data[index].receiver = r;
+}
+
+const Endpoint& EndpointMap::insert( NetworkAddressList localAddresses, std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams ) {
+	UID base = deterministicRandom()->randomUniqueID();
+	int oldSize = data.size();
+	data.resize( oldSize+streams.size() );
+	for(int i=0; i<streams.size(); i++) {
+		int index = oldSize+i;
+		streams[i].first->setEndpoint( Endpoint( localAddresses, UID( base.first() | TOKEN_STREAM_FLAG, (base.second()&0xffffffff00000000LL) | index) ) );
+		data[index].token() = Endpoint::Token( base.first() | TOKEN_STREAM_FLAG, (base.second()&0xffffffff00000000LL) | static_cast<uint32_t>(streams[i].second) );
+		data[index].receiver = (NetworkMessageReceiver*) streams[i].first;
+	}
+	return streams[0].first->getEndpoint(TaskPriority::DefaultEndpoint);
 }
 
 NetworkMessageReceiver* EndpointMap::get( Endpoint::Token const& token ) {
@@ -1146,10 +1160,8 @@ void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream)
 	}
 }
 
-void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, TaskPriority taskID, bool randomizeEndpoint ) {
-	if(randomizeEndpoint) {
-		endpoint.token = deterministicRandom()->randomUniqueID();
-	}
+void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, TaskPriority taskID ) {
+	endpoint.token = deterministicRandom()->randomUniqueID();
 	if (receiver->isStream()) {
 		endpoint.addresses = self->localAddresses;
 		endpoint.token = UID( endpoint.token.first() | TOKEN_STREAM_FLAG, endpoint.token.second() );
@@ -1158,6 +1170,10 @@ void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* rec
 		endpoint.token = UID( endpoint.token.first() & ~TOKEN_STREAM_FLAG, endpoint.token.second() );
 	}
 	self->endpoints.insert( receiver, endpoint.token, taskID );
+}
+
+const Endpoint& FlowTransport::addEndpoints( std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams ) {
+	return self->endpoints.insert( self->localAddresses, streams );
 }
 
 void FlowTransport::removeEndpoint( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {

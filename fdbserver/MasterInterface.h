@@ -50,22 +50,23 @@ struct MasterInterface {
 			ASSERT(ar.protocolVersion().isValid());
 		}
 		serializer(ar, locality, base);
-		if( Ar::isDeserializing ) {
-			waitFailure = RequestStream< ReplyPromise<Void> >( base.getAdjustedEndpoint(1) );
-			tlogRejoin = RequestStream< struct TLogRejoinRequest >( base.getAdjustedEndpoint(2) );
-			changeCoordinators = RequestStream< struct ChangeCoordinatorsRequest >( base.getAdjustedEndpoint(3) );
-			getCommitVersion = RequestStream< struct GetCommitVersionRequest >( base.getAdjustedEndpoint(4) );
-			notifyBackupWorkerDone = RequestStream<struct BackupWorkerDoneRequest>( base.getAdjustedEndpoint(5) );
+		if( Archive::isDeserializing ) {
+			waitFailure = RequestStream< ReplyPromise<Void> >( base.getAdjustedEndpoint(0) );
+			tlogRejoin = RequestStream< struct TLogRejoinRequest >( base.getAdjustedEndpoint(1) );
+			changeCoordinators = RequestStream< struct ChangeCoordinatorsRequest >( base.getAdjustedEndpoint(2) );
+			getCommitVersion = RequestStream< struct GetCommitVersionRequest >( base.getAdjustedEndpoint(3) );
+			notifyBackupWorkerDone = RequestStream<struct BackupWorkerDoneRequest>( base.getAdjustedEndpoint(4) );
 		}
 	}
 
 	void initEndpoints() {
-		base = Endpoint( g_network->getLocalAddresses(), deterministicRandom()->randomUniqueID() );
-		waitFailure.initEndpoint( base.getAdjustedEndpoint(1) );
-		tlogRejoin.initEndpoint( base.getAdjustedEndpoint(2), TaskPriority::MasterTLogRejoin );
-		changeCoordinators.initEndpoint( base.getAdjustedEndpoint(3) );
-		getCommitVersion.initEndpoint( base.getAdjustedEndpoint(4), TaskPriority::GetConsistentReadVersion );
-		notifyBackupWorkerDone.initEndpoint( base.getAdjustedEndpoint(5) );
+		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
+		streams.push_back(waitFailure.getReceiver());
+		streams.push_back(tlogRejoin.getReceiver(TaskPriority::MasterTLogRejoin));
+		streams.push_back(changeCoordinators.getReceiver());
+		streams.push_back(getCommitVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
+		streams.push_back(notifyBackupWorkerDone.getReceiver());
+		base = FlowTransport::transport().addEndpoints(streams);
 	}
 };
 
