@@ -609,7 +609,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 	}
 
-	// comparator function to check if a cache server wioth given index exists
+	// comparator function to check if a cache server with given index exists
 class storageCachesComparator {
         uint16_t serverIndex;
 
