@@ -2604,7 +2604,7 @@ private:
 				for(auto shard = cachedRanges.begin(); shard != cachedRanges.end(); ++shard) {
 					KeyRangeRef intersectingRange = shard.range() & keys;
 					TraceEvent(SevDebug, "SSPrivateCacheMutationInsertUnexpected", data->thisServerID).detail("Begin", intersectingRange.begin).detail("End", intersectingRange.end);
-					data->cachedRangeMap.insert(KeyRangeRef(intersectingRange.begin, intersectingRange.end), true);
+					data->cachedRangeMap.insert(intersectingRange, true);
 				}
 			}
 			processedStartKey = false;
