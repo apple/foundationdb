@@ -83,13 +83,11 @@ void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& v
 	rd >> destLen;
 	rd.rewind();
 
-	if (value.size() == sizeof(ProtocolVersion) + sizeof(int) + srcLen * sizeof(UID) + sizeof(int) + destLen * sizeof(UID)) {
+	if (value.size() != sizeof(ProtocolVersion) + sizeof(int) + srcLen * sizeof(Tag) + sizeof(int) + destLen * sizeof(Tag)) {
 		rd >> src >> dest;
+		rd.assertEnd();
 		return;
 	}
-
-	// If this is not true, then our math was wrong.
-	ASSERT(value.size() == sizeof(ProtocolVersion) + sizeof(int) + srcLen * sizeof(Tag) + sizeof(int) + destLen * sizeof(Tag));
 
 	std::vector<Tag> srcTag, destTag;
 	rd >> srcTag >> destTag;
