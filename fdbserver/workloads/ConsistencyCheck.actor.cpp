@@ -667,7 +667,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			state int bytesReadInRange = 0;
 
-			Standalone<RangeResultRef> UIDtoTagMap = wait( tr.getRange( serverTagKeys, GetRangeLimits() ) );
+			Standalone<RangeResultRef> UIDtoTagMap = wait( tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY ) );
+			ASSERT( !UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY );
 			decodeKeyServersValue(UIDtoTagMap, keyLocations[shard].value, sourceStorageServers, destStorageServers);
 
 			//If the destStorageServers is non-empty, then this shard is being relocated

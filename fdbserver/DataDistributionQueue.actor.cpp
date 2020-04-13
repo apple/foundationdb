@@ -546,7 +546,8 @@ struct DDQueueData {
 			servers.clear();
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			try {
-				state Standalone<RangeResultRef> UIDtoTagMap = wait( tr.getRange( serverTagKeys, GetRangeLimits() ) );
+				state Standalone<RangeResultRef> UIDtoTagMap = wait( tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY ) );
+				ASSERT( !UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY );
 				Standalone<RangeResultRef> keyServersEntries  = wait(
 					tr.getRange( lastLessOrEqual( keyServersKey( input.keys.begin ) ),
 						firstGreaterOrEqual( keyServersKey( input.keys.end ) ), SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS ) );
