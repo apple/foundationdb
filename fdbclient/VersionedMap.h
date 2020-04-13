@@ -625,7 +625,7 @@ void compact(Reference<PTree<T,A>>& p, Version newOldestVersion){
 	compact(right, newOldestVersion);
 }
 
-}
+} // namespace PTreeImpl
 
 class ValueOrClearToRef {
 public:
