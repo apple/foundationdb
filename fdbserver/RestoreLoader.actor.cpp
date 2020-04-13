@@ -505,35 +505,35 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				applierMutationsSize[applierID] += kvm.expectedSize();
 				msgSize += kvm.expectedSize();
 			}
-		} // Mutations at the same LogMessageVersion
 
-		// Batch same Version's mutations in one request. We could batch more by
-		// changing the version comparison below.
-		auto next = std::next(kvOp, 1);
-		if (next == kvOps.end() || msgSize >= SERVER_KNOBS->FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES) {
-			// TODO: Sanity check each asset has been received exactly once!
-			// Send the mutations to appliers for each version
-			for (const UID& applierID : applierIDs) {
-				requests.emplace_back(applierID,
-				                      RestoreSendVersionedMutationsRequest(batchIndex, asset, msgIndex, isRangeFile,
-				                                                           applierMutationsBuffer[applierID],
-				                                                           applierVersionsBuffer[applierID]));
+			// Batch mutations at multiple versions up to FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES size
+			// to improve bandwidth from a loader to appliers
+			auto next = std::next(kvOp, 1);
+			if (next == kvOps.end() || msgSize >= SERVER_KNOBS->FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES) {
+				// TODO: Sanity check each asset has been received exactly once!
+				// Send the mutations to appliers for each version
+				for (const UID& applierID : applierIDs) {
+					requests.emplace_back(applierID,
+					                      RestoreSendVersionedMutationsRequest(batchIndex, asset, msgIndex, isRangeFile,
+					                                                           applierMutationsBuffer[applierID],
+					                                                           applierVersionsBuffer[applierID]));
+				}
+				TraceEvent(SevDebug, "FastRestoreLoaderSendMutationToApplier")
+				    .detail("MessageIndex", msgIndex)
+				    .detail("RestoreAsset", asset.toString())
+				    .detail("Requests", requests.size());
+				wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
+				                       TaskPriority::RestoreLoaderSendMutations));
+				msgIndex++;
+				msgSize = 0;
+				requests.clear();
+				for (auto& applierID : applierIDs) {
+					applierMutationsBuffer[applierID] = MutationsVec();
+					applierVersionsBuffer[applierID] = LogMessageVersionVec();
+					applierMutationsSize[applierID] = 0.0;
+				}
 			}
-			TraceEvent(SevDebug, "FastRestoreLoaderSendMutationToApplier")
-			    .detail("MessageIndex", msgIndex)
-			    .detail("RestoreAsset", asset.toString())
-			    .detail("Requests", requests.size());
-			wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
-			                       TaskPriority::RestoreLoaderSendMutations));
-			msgIndex++;
-			msgSize = 0;
-			requests.clear();
-			for (auto& applierID : applierIDs) {
-				applierMutationsBuffer[applierID] = MutationsVec();
-				applierVersionsBuffer[applierID] = LogMessageVersionVec();
-				applierMutationsSize[applierID] = 0.0;
-			}
-		}
+		} // Mutations at the same LogMessageVersion
 	} // all versions of mutations in the same file
 
 	TraceEvent("FastRestore").detail("LoaderSendMutationOnAppliers", kvCount);
