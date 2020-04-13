@@ -4,7 +4,7 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct CacheWorkload : TestWorkload {
-	Key		keyPrefix;
+	Key keyPrefix;
 
 	CacheWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx)
