@@ -510,8 +510,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 		// Batch same Version's mutations in one request. We could batch more by
 		// changing the version comparison below.
 		auto next = std::next(kvOp, 1);
-		if (next == kvOps.end() || commitVersion.version < next->first.version) {
-			// if (next == kvOps.end() || msgSize >= SERVER_KNOBS->FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES) {
+		if (next == kvOps.end() || msgSize >= SERVER_KNOBS->FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES) {
 			// TODO: Sanity check each asset has been received exactly once!
 			// Send the mutations to appliers for each version
 			for (const UID& applierID : applierIDs) {
