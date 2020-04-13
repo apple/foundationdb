@@ -1554,7 +1554,6 @@ void cacheWarmup( StorageCacheData *data, StorageCacheUpdater* updater, const Ke
 }
 
 // Helper class for updating the storage cache (i.e. applying mutations)
-// Helper class for updating the storage cache (i.e. applying mutations)
 class StorageCacheUpdater {
 public:
 	StorageCacheUpdater() : fromVersion(invalidVersion), currentVersion(invalidVersion), processedCacheStartKey(false) {}
