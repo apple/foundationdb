@@ -568,6 +568,14 @@ void initHelp() {
 		"consistencycheck [on|off]",
 		"permits or prevents consistency checking",
 		"Calling this command with `on' permits consistency check processes to run and `off' will halt their checking. Calling this command with no arguments will display if consistency checking is currently allowed.\n");
+	helpMap["lock"] = CommandHelp(
+		"lock",
+		"lock the database with a randomly generated lockUID",
+		"Randomly generates a lockUID, prints this lockUID, and then uses the lockUID to lock the database.");
+	helpMap["unlock"] =
+	    CommandHelp("unlock <UID>", "unlock the database with the provided lockUID",
+	                "Unlocks the database with the provided lockUID. This is a potentially dangerous operation, so the "
+	                "user will be asked to enter a passphrase to confirm their intent.");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -936,7 +944,11 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 			StatusObjectReader statusObjConfig;
 			StatusArray excludedServersArr;
+			Optional<std::string> activePrimaryDC;
 
+			if (statusObjCluster.has("active_primary_dc")) {
+				activePrimaryDC = statusObjCluster["active_primary_dc"].get_str();
+			}
 			if (statusObjCluster.get("configuration", statusObjConfig)) {
 				if (statusObjConfig.has("excluded_servers"))
 					excludedServersArr = statusObjConfig.last().get_array();
@@ -992,6 +1004,73 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				if (statusObjConfig.get("log_routers", intVal))
 					outputString += format("\n  Desired Log Routers    - %d", intVal);
+
+				outputString += "\n  Usable Regions         - ";
+				if (statusObjConfig.get("usable_regions", intVal)) {
+					outputString += std::to_string(intVal);
+				} else {
+					outputString += "unknown";
+				}
+
+				StatusArray regions;
+				if (statusObjConfig.has("regions")) {
+					outputString += "\n  Regions: ";
+					regions = statusObjConfig["regions"].get_array();
+					bool isPrimary = false;
+					std::vector<std::string> regionSatelliteDCs;
+					std::string regionDC;
+					for (StatusObjectReader region : regions) {
+						for (StatusObjectReader dc : region["datacenters"].get_array()) {
+							if (!dc.has("satellite")) {
+								regionDC = dc["id"].get_str();
+								if (activePrimaryDC.present() && dc["id"].get_str() == activePrimaryDC.get()) {
+									isPrimary = true;
+								}
+							} else if (dc["satellite"].get_int() == 1) {
+								regionSatelliteDCs.push_back(dc["id"].get_str());
+							}
+						}
+						if (activePrimaryDC.present()) {
+							if (isPrimary) {
+								outputString += "\n    Primary -";
+							} else {
+								outputString += "\n    Remote -";
+							}
+						} else {
+							outputString += "\n    Region -";
+						}
+						outputString += format("\n        Datacenter                    - %s", regionDC.c_str());
+						if (regionSatelliteDCs.size() > 0) {
+							outputString += "\n        Satellite datacenters         - ";
+							for (int i = 0; i < regionSatelliteDCs.size(); i++) {
+								if (i != regionSatelliteDCs.size() - 1) {
+									outputString += format("%s, ", regionSatelliteDCs[i].c_str());
+								} else {
+									outputString += format("%s", regionSatelliteDCs[i].c_str());
+								}
+							}
+						}
+						isPrimary = false;
+						if (region.get("satellite_redundancy_mode", strVal)) {
+							outputString += format("\n        Satellite Redundancy Mode     - %s", strVal.c_str());
+						}
+						if (region.get("satellite_anti_quorum", intVal)) {
+							outputString += format("\n        Satellite Anti Quorum         - %d", intVal);
+						}
+						if (region.get("satellite_logs", intVal)) {
+							outputString += format("\n        Satellite Logs                - %d", intVal);
+						}
+						if (region.get("satellite_log_policy", strVal)) {
+							outputString += format("\n        Satellite Log Policy          - %s", strVal.c_str());
+						}
+						if (region.get("satellite_log_replicas", intVal)) {
+							outputString += format("\n        Satellite Log Replicas        - %d", intVal);
+						}
+						if (region.get("satellite_usable_dcs", intVal)) {
+							outputString += format("\n        Satellite Usable DCs          - %d", intVal);
+						}
+					}
+				}
 			}
 			catch (std::runtime_error& ) {
 				outputString = outputStringCache;
@@ -2528,11 +2607,11 @@ struct CLIOptions {
 		}
 
 		delete FLOW_KNOBS;
-		FlowKnobs* flowKnobs = new FlowKnobs(true);
+		FlowKnobs* flowKnobs = new FlowKnobs;
 		FLOW_KNOBS = flowKnobs;
 
 		delete CLIENT_KNOBS;
-		ClientKnobs* clientKnobs = new ClientKnobs(true);
+		ClientKnobs* clientKnobs = new ClientKnobs;
 		CLIENT_KNOBS = clientKnobs;
 
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
@@ -2555,6 +2634,10 @@ struct CLIOptions {
 				}
 			}
 		}
+
+		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
+		flowKnobs->initialize(true);
+		clientKnobs->initialize(true);
 	}
 
 	int processArg(CSimpleOpt& args) {
@@ -2769,7 +2852,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				continue;
 
 			// Don't put dangerous commands in the command history
-			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos)
+			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos &&
+			    line.find("unlock") == std::string::npos)
 				linenoise.historyAdd(line);
 		}
 
@@ -2980,6 +3064,52 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					} else {
 						bool err = wait(createSnapshot(db, tokens));
 						if (err) is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "lock")) {
+					if (tokens.size() != 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						state UID lockUID = deterministicRandom()->randomUniqueID();
+						printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
+						wait(makeInterruptable(lockDatabase(db, lockUID)));
+						printf("Database locked.\n");
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "unlock")) {
+					if ((tokens.size() != 2) || (tokens[1].size() != 32) ||
+					    !std::all_of(tokens[1].begin(), tokens[1].end(), &isxdigit)) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						state std::string passPhrase = deterministicRandom()->randomAlphaNumeric(10);
+						warn.cancel(); // don't warn while waiting on user input
+						printf("Unlocking the database is a potentially dangerous operation.\n");
+						Optional<std::string> input = wait(linenoise.read(
+						    format("Repeat the following passphrase if you would like to proceed (%s) : ",
+						           passPhrase.c_str())));
+						warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db);
+						if (input.present() && input.get() == passPhrase) {
+							UID unlockUID = UID::fromString(tokens[1].toString());
+							try {
+								wait(makeInterruptable(unlockDatabase(db, unlockUID)));
+								printf("Database unlocked.\n");
+							} catch (Error& e) {
+								if (e.code() == error_code_database_locked) {
+									printf(
+									    "Unable to unlock database. Make sure to unlock with the correct lock UID.\n");
+								}
+								throw e;
+							}
+						} else {
+							printf("ERROR: Incorrect passphrase entered.\n");
+							is_error = true;
+						}
 					}
 					continue;
 				}

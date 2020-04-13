@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 
 #include <iterator>
+#include <regex>
 #include <unordered_set>
 
 #include "fdbclient/Atomic.h"
@@ -794,7 +795,9 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 			auto publicIP = determinePublicIPAutomatically( connFile->getConnectionString() );
 			selectTraceFormatter(networkOptions.traceFormat);
 			selectTraceClockSource(networkOptions.traceClockSource);
-			openTraceFile(NetworkAddress(publicIP, ::getpid()), networkOptions.traceRollSize, networkOptions.traceMaxLogsSize, networkOptions.traceDirectory.get(), "trace", networkOptions.traceLogGroup);
+			openTraceFile(NetworkAddress(publicIP, ::getpid()), networkOptions.traceRollSize,
+			              networkOptions.traceMaxLogsSize, networkOptions.traceDirectory.get(), "trace",
+			              networkOptions.traceLogGroup, networkOptions.traceFileIdentifier);
 
 			TraceEvent("ClientStart")
 				.detail("SourceVersion", getSourceVersion())
@@ -843,8 +846,9 @@ const UniqueOrderedOptionList<FDBTransactionOptions>& Database::getTransactionDe
 }
 
 void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
+	std::regex identifierRegex("^[a-zA-Z0-9_]*$");
 	switch(option) {
-		// SOMEDAY: If the network is already started, should these four throw an error?
+		// SOMEDAY: If the network is already started, should these five throw an error?
 		case FDBNetworkOptions::TRACE_ENABLE:
 			networkOptions.traceDirectory = value.present() ? value.get().toString() : "";
 			break;
@@ -861,6 +865,17 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			networkOptions.traceFormat = value.get().toString();
 			if (!validateTraceFormat(networkOptions.traceFormat)) {
 				fprintf(stderr, "Unrecognized trace format: `%s'\n", networkOptions.traceFormat.c_str());
+				throw invalid_option_value();
+			}
+			break;
+		case FDBNetworkOptions::TRACE_FILE_IDENTIFIER:
+			validateOptionValue(value, true);
+			networkOptions.traceFileIdentifier = value.get().toString();
+			if (networkOptions.traceFileIdentifier.length() > CLIENT_KNOBS->TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH) {
+				fprintf(stderr, "Trace file identifier provided is too long.\n");
+				throw invalid_option_value();
+			} else if (!std::regex_match(networkOptions.traceFileIdentifier, identifierRegex)) {
+				fprintf(stderr, "Trace file identifier should only contain alphanumerics and underscores.\n");
 				throw invalid_option_value();
 			}
 			break;
@@ -897,8 +912,17 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 
 			std::string knobName = optionValue.substr(0, eq);
 			std::string knobValue = optionValue.substr(eq+1);
-			if (!const_cast<FlowKnobs*>(FLOW_KNOBS)->setKnob( knobName, knobValue ) &&
-				!const_cast<ClientKnobs*>(CLIENT_KNOBS)->setKnob( knobName, knobValue ))
+			if (const_cast<FlowKnobs*>(FLOW_KNOBS)->setKnob(knobName, knobValue))
+			{
+				// update dependent knobs
+				const_cast<FlowKnobs*>(FLOW_KNOBS)->initialize();
+			}
+			else if (const_cast<ClientKnobs*>(CLIENT_KNOBS)->setKnob(knobName, knobValue))
+			{
+				// update dependent knobs
+				const_cast<ClientKnobs*>(CLIENT_KNOBS)->initialize();
+			}
+			else
 			{
 				TraceEvent(SevWarnAlways, "UnrecognizedKnob").detail("Knob", knobName.c_str());
 				fprintf(stderr, "FoundationDB client ignoring unrecognized knob option '%s'\n", knobName.c_str());
@@ -2489,7 +2513,7 @@ void TransactionOptions::reset(Database const& cx) {
 	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
 	sizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 	lockAware = cx->lockAware;
-	if (cx->apiVersionAtLeast(700)) {
+	if (cx->apiVersionAtLeast(630)) {
 		includePort = true;
 	}
 }
@@ -3029,6 +3053,12 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(value.get().printable(), TransactionLogInfo::DONT_LOG));
 				trLogInfo->maxFieldLength = options.maxTransactionLoggingFieldLength;
 			}
+			if (info.debugID.present()) {
+				TraceEvent(SevInfo, "TransactionBeingTraced")
+					.detail("DebugTransactionID", trLogInfo->identifier)
+					.detail("ServerTraceID", info.debugID.get().toString());
+
+			}
 			break;
 
 		case FDBTransactionOptions::LOG_TRANSACTION:
@@ -3053,6 +3083,16 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			}
 			if(trLogInfo) {
 				trLogInfo->maxFieldLength = options.maxTransactionLoggingFieldLength;
+			}
+			break;
+
+		case FDBTransactionOptions::SERVER_REQUEST_TRACING:
+			validateOptionValue(value, false);
+			debugTransaction(deterministicRandom()->randomUniqueID());
+			if (trLogInfo && !trLogInfo->identifier.empty()) {
+				TraceEvent(SevInfo, "TransactionBeingTraced")
+					.detail("DebugTransactionID", trLogInfo->identifier)
+					.detail("ServerTraceID", info.debugID.get().toString());
 			}
 			break;
 
