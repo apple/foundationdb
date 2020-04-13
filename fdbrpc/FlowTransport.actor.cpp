@@ -97,11 +97,28 @@ void EndpointMap::insert( NetworkMessageReceiver* r, Endpoint::Token& token, Tas
 }
 
 const Endpoint& EndpointMap::insert( NetworkAddressList localAddresses, std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams ) {
+	int adjacentFree = 0;
+	int adjacentStart = -1;
+	firstFree = -1;
+	for(int i = 0; i < data.size(); i++) {
+		if(data[i].receiver) {
+			adjacentFree = 0;
+		} else {
+			data[i].nextFree = firstFree;
+			firstFree = i;
+			if(adjacentStart == -1 && ++adjacentFree == streams.size()) {
+				adjacentStart = i+1-adjacentFree;
+				firstFree = data[adjacentStart].nextFree;
+			}
+		}
+	}
+	if(adjacentStart == -1) {
+		data.resize( data.size()+streams.size()-adjacentFree );
+		adjacentStart = data.size()-streams.size();
+	}
 	UID base = deterministicRandom()->randomUniqueID();
-	int oldSize = data.size();
-	data.resize( oldSize+streams.size() );
 	for(int i=0; i<streams.size(); i++) {
-		int index = oldSize+i;
+		int index = adjacentStart+i;
 		streams[i].first->setEndpoint( Endpoint( localAddresses, UID( base.first() | TOKEN_STREAM_FLAG, (base.second()&0xffffffff00000000LL) | index) ) );
 		data[index].token() = Endpoint::Token( base.first() | TOKEN_STREAM_FLAG, (base.second()&0xffffffff00000000LL) | static_cast<uint32_t>(streams[i].second) );
 		data[index].receiver = (NetworkMessageReceiver*) streams[i].first;
