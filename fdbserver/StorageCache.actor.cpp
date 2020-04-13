@@ -1300,7 +1300,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, StorageCacheUpdater* updat
 
 		//TraceEvent(SevDebug, "SCFKAfterFinalCommit", data->thisServerID).detail("FKID", interval.pairID).detail("SV", data->storageVersion()).detail("DV", data->durableVersion.get());
 
-		// Wait to run during update(), after a new batch of versions is received from the tlog
+		// Wait to run during pullAsyncData, after a new batch of versions is received from the tlog
 		Promise<FetchInjectionInfo*> p;
 		data->readyFetchKeys.push_back( p );
 
