@@ -275,7 +275,7 @@ void upper_bound(const Reference<PTree<T, A>>& p, Version at, const X& x, std::v
 }
 	
 template<class T, class A = FastAlloc<T>, bool forward>
-	void move(Version at, std::vector<const PTree<T, A>*>& f){
+void move(Version at, std::vector<const PTree<T, A>*>& f){
 	ASSERT(f.size());
 	const PTree<T, A> *n;
 	n = f.back();
