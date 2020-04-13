@@ -1048,7 +1048,7 @@ ACTOR Future<Void> workerServer(
 				ServerDBInfo localInfo = BinaryReader::fromStringRef<ServerDBInfo>(req.serializedDbInfo, AssumeVersion(currentProtocolVersion));
 				localInfo.myLocality = locality;
 
-				if(ccInterface->get().present() && localInfo.infoGeneration < dbInfo->get().infoGeneration && dbInfo->get().clusterInterface == ccInterface->get().get()) {
+				if(localInfo.infoGeneration < dbInfo->get().infoGeneration && localInfo.clusterInterface == dbInfo->get().clusterInterface) {
 					std::vector<Endpoint> rep = req.broadcastInfo;
 					rep.push_back(interf.updateServerDBInfo.getEndpoint());
 					req.reply.send(rep);
