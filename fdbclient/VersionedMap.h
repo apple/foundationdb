@@ -589,7 +589,7 @@ public:
 
 		UNSTOPPABLE_ASSERT(r->first == newOldestVersion);
 
-		vector<Tree> toFree;
+		std::vector<Tree> toFree;
 		toFree.reserve(10000);
 		auto newBegin = r;
 		Tree *lastRoot = nullptr;
@@ -679,7 +679,7 @@ public:
 		friend class VersionedMap<K,T>;
 		Tree root;
 		Version at;
-		vector< PTreeT const* > finger;
+		std::vector< PTreeT const* > finger;
 	};
 
 	class ViewAtVersion {

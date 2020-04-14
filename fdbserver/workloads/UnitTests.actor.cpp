@@ -25,6 +25,7 @@
 void forceLinkIndexedSetTests();
 void forceLinkDequeTests();
 void forceLinkFlowTests();
+void forceLinkVersionedMapTests();
 
 struct UnitTestWorkload : TestWorkload {
 	bool enabled;
@@ -43,6 +44,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkIndexedSetTests();
 		forceLinkDequeTests();
 		forceLinkFlowTests();
+		forceLinkVersionedMapTests();
 	}
 
 	virtual std::string description() { return "UnitTests"; }
