@@ -30,10 +30,7 @@
 
 // SerializedMutationListMap:
 // Key is the signature/version of the mutation list, Value is the mutation list (or part of the mutation list)
-typedef std::map<Standalone<StringRef>, Standalone<StringRef>> SerializedMutationListMap;
-// SerializedMutationPartMap:
-// Key has the same semantics as SerializedMutationListMap; Value is the part number of the splitted mutation list
-typedef std::map<Standalone<StringRef>, uint32_t> SerializedMutationPartMap;
+typedef std::map<Standalone<StringRef>, std::pair<Standalone<StringRef>, uint32_t>> SerializedMutationListMap;
 
 std::vector<UID> getApplierIDs(std::map<Key, UID>& rangeToApplier);
 void splitMutation(std::map<Key, UID>* pRangeToApplier, MutationRef m, Arena& mvector_arena,
@@ -52,7 +49,6 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
                                           std::map<UID, RestoreApplierInterface>* pApplierInterfaces);
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
                                                            SerializedMutationListMap* mutationMap,
-                                                           SerializedMutationPartMap* mutationPartMap,
                                                            Reference<IBackupContainer> bc, RestoreAsset asset);
 ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
@@ -234,7 +230,6 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<LoaderBatc
 	// Must use StandAlone to save mutations, otherwise, the mutationref memory will be corrupted
 	// mutationMap: Key is the unique identifier for a batch of mutation logs at the same version
 	state SerializedMutationListMap mutationMap;
-	state std::map<Standalone<StringRef>, uint32_t> mutationPartMap; // Sanity check the data parsing is correct
 	state NotifiedVersion processedFileOffset(0);
 	state std::vector<Future<Void>> fileParserFutures;
 	state std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsPerLPIter = batchData->kvOpsPerLP.end();
@@ -266,8 +261,8 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<LoaderBatc
 				fileParserFutures.push_back(_parsePartitionedLogFileOnLoader(&processedFileOffset, kvOpsPerLPIter,
 				                                                             samplesIter, bc, subAsset));
 			} else {
-				fileParserFutures.push_back(_parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap,
-				                                                             &mutationPartMap, bc, subAsset));
+				fileParserFutures.push_back(
+				    _parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap, bc, subAsset));
 			}
 		}
 	}
@@ -614,12 +609,9 @@ void splitMutation(std::map<Key, UID>* pRangeToApplier, MutationRef m, Arena& mv
 // key_input format:
 // [logRangeMutation.first][hash_value_of_commit_version:1B][bigEndian64(commitVersion)][bigEndian32(part)]
 // value_input: serialized binary of mutations at the same version
-bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standalone<StringRef>>* pMutationMap,
-                                         std::map<Standalone<StringRef>, uint32_t>* pMutationPartMap,
-                                         Standalone<StringRef> key_input, Standalone<StringRef> val_input,
-                                         const RestoreAsset& asset) {
+bool concatenateBackupMutationForLogFile(SerializedMutationListMap* pMutationMap, Standalone<StringRef> key_input,
+                                         Standalone<StringRef> val_input, const RestoreAsset& asset) {
 	SerializedMutationListMap& mutationMap = *pMutationMap;
-	std::map<Standalone<StringRef>, uint32_t>& mutationPartMap = *pMutationPartMap;
 	const int key_prefix_len = sizeof(uint8_t) + sizeof(Version) + sizeof(uint32_t);
 
 	StringRefReader readerKey(key_input, restore_corrupted_data()); // read key_input!
@@ -646,16 +638,16 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 
 	auto it = mutationMap.find(id);
 	if (it == mutationMap.end()) {
-		mutationMap.insert(std::make_pair(id, val_input));
+		mutationMap.emplace(id, std::make_pair(val_input, 0));
 		if (part != 0) {
 			TraceEvent(SevError, "FastRestore")
 			    .detail("FirstPartNotZero", part)
 			    .detail("KeyInput", getHexString(key_input));
 		}
-		mutationPartMap.insert(std::make_pair(id, part));
 	} else { // Concatenate the val string with the same commitVersion
-		it->second = it->second.contents().withSuffix(val_input.contents()); // Assign the new Areana to the map's value
-		auto& currentPart = mutationPartMap[id];
+		it->second.first =
+		    it->second.first.contents().withSuffix(val_input.contents()); // Assign the new Areana to the map's value
+		auto& currentPart = it->second.second;
 		if (part != (currentPart + 1)) {
 			// Check if the same range or log file has been processed more than once!
 			TraceEvent(SevError, "FastRestore")
@@ -693,7 +685,7 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 
 	for (auto& m : mutationMap) {
 		StringRef k = m.first.contents();
-		StringRef val = m.second.contents();
+		StringRef val = m.second.first.contents();
 
 		StringRefReader kReader(k, restore_corrupted_data());
 		uint64_t commitVersion = kReader.consume<uint64_t>(); // Consume little Endian data
@@ -848,7 +840,6 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 // pMutationMap: concatenated mutation list string at the mutation's commit version
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
                                                            SerializedMutationListMap* pMutationMap,
-                                                           SerializedMutationPartMap* pMutationPartMap,
                                                            Reference<IBackupContainer> bc, RestoreAsset asset) {
 	Reference<IAsyncFile> inFile = wait(bc->readFile(asset.filename));
 	// decodeLogFileBlock() must read block by block!
@@ -866,7 +857,7 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pPro
 	if (pProcessedFileOffset->get() == asset.offset) {
 		for (const KeyValueRef& kv : data) {
 			// Concatenate the backuped param1 and param2 (KV) at the same version.
-			concatenateBackupMutationForLogFile(pMutationMap, pMutationPartMap, kv.key, kv.value, asset);
+			concatenateBackupMutationForLogFile(pMutationMap, kv.key, kv.value, asset);
 		}
 		pProcessedFileOffset->set(asset.offset + asset.len);
 	}
