@@ -126,7 +126,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("Yields", netData.countYields - statState->networkState.countYields)
 				.detail("YieldCalls", netData.countYieldCalls - statState->networkState.countYieldCalls)
 				.detail("YieldCallsTrue", netData.countYieldCallsTrue - statState->networkState.countYieldCallsTrue)
-				.detail("SlowTaskSignals", netData.countSlowTaskSignals - statState->networkState.countSlowTaskSignals)
+				.detail("RunLoopProfilingSignals", netData.countRunLoopProfilingSignals - statState->networkState.countRunLoopProfilingSignals)
 				.detail("YieldBigStack", netData.countYieldBigStack - statState->networkState.countYieldBigStack)
 				.detail("RunLoopIterations", netData.countRunLoop - statState->networkState.countRunLoop)
 				.detail("TimersExecuted", netData.countTimers - statState->networkState.countTimers)

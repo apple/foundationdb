@@ -75,7 +75,7 @@ TLSConfig tlsConfig(TLSEndpointType::CLIENT);
 NetworkOptions::NetworkOptions()
 	: localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
 	  traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	  traceFormat("xml"), traceClockSource("now"), slowTaskProfilingEnabled(false) {
+	  traceFormat("xml"), traceClockSource("now"), runLoopProfilingEnabled(false) {
 
 	Standalone<VectorRef<ClientVersionRef>> defaultSupportedVersions;
 
@@ -1010,9 +1010,9 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 
 			break;
 		}
-		case FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING:
+		case FDBNetworkOptions::ENABLE_RUN_LOOP_PROFILING: // Same as ENABLE_SLOW_TASK_PROFILING
 			validateOptionValue(value, false);
-			networkOptions.slowTaskProfilingEnabled = true;
+			networkOptions.runLoopProfilingEnabled = true;
 			break;
 		default:
 			break;
@@ -1035,8 +1035,8 @@ void runNetwork() {
 	if(!g_network)
 		throw network_not_setup();
 
-	if(networkOptions.traceDirectory.present() && networkOptions.slowTaskProfilingEnabled) {
-		setupSlowTaskProfiler();
+	if(networkOptions.traceDirectory.present() && networkOptions.runLoopProfilingEnabled) {
+		setupRunLoopProfiler();
 	}
 
 	g_network->run();
