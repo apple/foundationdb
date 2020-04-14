@@ -25,7 +25,6 @@
 #elif !defined(FDBCLIENT_NATIVEAPI_ACTOR_H)
 	#define FDBCLIENT_NATIVEAPI_ACTOR_H
 
-
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/FDBTypes.h"
@@ -59,15 +58,12 @@ struct NetworkOptions {
 	std::string traceLogGroup;
 	std::string traceFormat;
 	std::string traceClockSource;
+	std::string traceFileIdentifier;
 	Optional<bool> logClientInfo;
-	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
+	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool slowTaskProfilingEnabled;
 
-	// The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
-	NetworkOptions()
-	  : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
-	    traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	    traceFormat("xml"), traceClockSource("now"), slowTaskProfilingEnabled(false) {}
+	NetworkOptions();
 };
 
 class Database {
@@ -133,6 +129,7 @@ struct TransactionOptions {
 	bool readOnly : 1;
 	bool firstInBatch : 1;
 	bool includePort : 1;
+	bool reportConflictingKeys : 1;
 
 	TransactionOptions(Database const& cx);
 	TransactionOptions();
@@ -140,10 +137,14 @@ struct TransactionOptions {
 	void reset(Database const& cx);
 };
 
+class ReadYourWritesTransaction; // workaround cyclic dependency
 struct TransactionInfo {
 	Optional<UID> debugID;
 	TaskPriority taskID;
 	bool useProvisionalProxies;
+	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
+	// shared_ptr used here since TransactionInfo is sometimes copied as function parameters.
+	std::shared_ptr<ReadYourWritesTransaction> conflictingKeysRYW;
 
 	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
 };

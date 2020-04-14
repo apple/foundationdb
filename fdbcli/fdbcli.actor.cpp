@@ -32,8 +32,9 @@
 #include "fdbclient/FDBOptions.g.h"
 
 #include "flow/DeterministicRandom.h"
-#include "fdbrpc/Platform.h"
+#include "flow/Platform.h"
 
+#include "flow/TLSConfig.actor.h"
 #include "flow/SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"
@@ -66,9 +67,12 @@ enum {
 	OPT_TIMEOUT,
 	OPT_EXEC,
 	OPT_NO_STATUS,
+	OPT_NO_HINTS,
 	OPT_STATUS_FROM_JSON,
 	OPT_VERSION,
-	OPT_TRACE_FORMAT
+	OPT_TRACE_FORMAT,
+	OPT_KNOB,
+	OPT_DEBUG_TLS
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -79,6 +83,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_TIMEOUT, "--timeout", SO_REQ_SEP },
 	                                  { OPT_EXEC, "--exec", SO_REQ_SEP },
 	                                  { OPT_NO_STATUS, "--no-status", SO_NONE },
+	                                  { OPT_NO_HINTS, "--no-hints", SO_NONE },
 	                                  { OPT_HELP, "-?", SO_NONE },
 	                                  { OPT_HELP, "-h", SO_NONE },
 	                                  { OPT_HELP, "--help", SO_NONE },
@@ -86,12 +91,14 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_VERSION, "--version", SO_NONE },
 	                                  { OPT_VERSION, "-v", SO_NONE },
 	                                  { OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	                                  { OPT_KNOB, "--knob_", SO_REQ_SEP },
+	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
 
 #ifndef TLS_DISABLED
 	                                  TLS_OPTION_FLAGS
 #endif
 
-	                                      SO_END_OF_OPTIONS };
+	                                  SO_END_OF_OPTIONS };
 
 void printAtCol(const char* text, int col) {
 	const char* iter = text;
@@ -422,6 +429,10 @@ static void printProgramUsage(const char* name) {
 #ifndef TLS_DISABLED
 	       TLS_HELP
 #endif
+	       "  --knob_KNOBNAME KNOBVALUE\n"
+	       "                 Changes a knob option. KNOBNAME should be lowercase.\n"
+				 "  --debug-tls    Prints the TLS configuration and certificate chain, then exits.\n"
+				 "                 Useful in reporting and diagnosing TLS issues.\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
@@ -488,7 +499,7 @@ void initHelp() {
 		"change the class of a process",
 		"If no address and class are specified, lists the classes of all servers.\n\nSetting the class to `default' resets the process class to the class specified on the command line.");
 	helpMap["status"] = CommandHelp(
-		"status [minimal] [details] [json]",
+		"status [minimal|details|json]",
 		"get the status of a FoundationDB cluster",
 		"If the cluster is down, this command will print a diagnostic which may be useful in figuring out what is wrong. If the cluster is running, this command will print cluster statistics.\n\nSpecifying 'minimal' will provide a minimal description of the status of your database.\n\nSpecifying 'details' will provide load information for individual workers.\n\nSpecifying 'json' will provide status information in a machine readable JSON format.");
 	helpMap["exit"] = CommandHelp("exit", "exit the CLI", "");
@@ -511,6 +522,9 @@ void initHelp() {
 		"getrangekeys <BEGINKEY> [ENDKEY] [LIMIT]",
 		"fetch keys in a range of keys",
 		"Displays up to LIMIT keys for keys between BEGINKEY (inclusive) and ENDKEY (exclusive). If ENDKEY is omitted, then the range will include all keys starting with BEGINKEY. LIMIT defaults to 25 if omitted." ESCAPINGK);
+	helpMap["getversion"] =
+	    CommandHelp("getversion", "Fetch the current read version",
+	                "Displays the current read version of the database or currently running transaction.");
 	helpMap["reset"] = CommandHelp(
 		"reset",
 		"reset the current transaction",
@@ -539,7 +553,7 @@ void initHelp() {
 		"attempts to kill one or more processes in the cluster",
 		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS>*, attempt to kill the specified process.");
 	helpMap["profile"] = CommandHelp(
-		"<type> <action> <ARGS>",
+		"profile <client|list|flow|heap> <action> <ARGS>",
 		"namespace for all the profiling-related commands.",
 		"Different types support different actions.  Run `profile` to get a list of types, and iteratively explore the help.\n");
 	helpMap["force_recovery_with_data_loss"] = CommandHelp(
@@ -554,6 +568,14 @@ void initHelp() {
 		"consistencycheck [on|off]",
 		"permits or prevents consistency checking",
 		"Calling this command with `on' permits consistency check processes to run and `off' will halt their checking. Calling this command with no arguments will display if consistency checking is currently allowed.\n");
+	helpMap["lock"] = CommandHelp(
+		"lock",
+		"lock the database with a randomly generated lockUID",
+		"Randomly generates a lockUID, prints this lockUID, and then uses the lockUID to lock the database.");
+	helpMap["unlock"] =
+	    CommandHelp("unlock <UID>", "unlock the database with the provided lockUID",
+	                "Unlocks the database with the provided lockUID. This is a potentially dangerous operation, so the "
+	                "user will be asked to enter a passphrase to confirm their intent.");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -922,7 +944,11 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 			StatusObjectReader statusObjConfig;
 			StatusArray excludedServersArr;
+			Optional<std::string> activePrimaryDC;
 
+			if (statusObjCluster.has("active_primary_dc")) {
+				activePrimaryDC = statusObjCluster["active_primary_dc"].get_str();
+			}
 			if (statusObjCluster.get("configuration", statusObjConfig)) {
 				if (statusObjConfig.has("excluded_servers"))
 					excludedServersArr = statusObjConfig.last().get_array();
@@ -978,6 +1004,73 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				if (statusObjConfig.get("log_routers", intVal))
 					outputString += format("\n  Desired Log Routers    - %d", intVal);
+
+				outputString += "\n  Usable Regions         - ";
+				if (statusObjConfig.get("usable_regions", intVal)) {
+					outputString += std::to_string(intVal);
+				} else {
+					outputString += "unknown";
+				}
+
+				StatusArray regions;
+				if (statusObjConfig.has("regions")) {
+					outputString += "\n  Regions: ";
+					regions = statusObjConfig["regions"].get_array();
+					bool isPrimary = false;
+					std::vector<std::string> regionSatelliteDCs;
+					std::string regionDC;
+					for (StatusObjectReader region : regions) {
+						for (StatusObjectReader dc : region["datacenters"].get_array()) {
+							if (!dc.has("satellite")) {
+								regionDC = dc["id"].get_str();
+								if (activePrimaryDC.present() && dc["id"].get_str() == activePrimaryDC.get()) {
+									isPrimary = true;
+								}
+							} else if (dc["satellite"].get_int() == 1) {
+								regionSatelliteDCs.push_back(dc["id"].get_str());
+							}
+						}
+						if (activePrimaryDC.present()) {
+							if (isPrimary) {
+								outputString += "\n    Primary -";
+							} else {
+								outputString += "\n    Remote -";
+							}
+						} else {
+							outputString += "\n    Region -";
+						}
+						outputString += format("\n        Datacenter                    - %s", regionDC.c_str());
+						if (regionSatelliteDCs.size() > 0) {
+							outputString += "\n        Satellite datacenters         - ";
+							for (int i = 0; i < regionSatelliteDCs.size(); i++) {
+								if (i != regionSatelliteDCs.size() - 1) {
+									outputString += format("%s, ", regionSatelliteDCs[i].c_str());
+								} else {
+									outputString += format("%s", regionSatelliteDCs[i].c_str());
+								}
+							}
+						}
+						isPrimary = false;
+						if (region.get("satellite_redundancy_mode", strVal)) {
+							outputString += format("\n        Satellite Redundancy Mode     - %s", strVal.c_str());
+						}
+						if (region.get("satellite_anti_quorum", intVal)) {
+							outputString += format("\n        Satellite Anti Quorum         - %d", intVal);
+						}
+						if (region.get("satellite_logs", intVal)) {
+							outputString += format("\n        Satellite Logs                - %d", intVal);
+						}
+						if (region.get("satellite_log_policy", strVal)) {
+							outputString += format("\n        Satellite Log Policy          - %s", strVal.c_str());
+						}
+						if (region.get("satellite_log_replicas", intVal)) {
+							outputString += format("\n        Satellite Log Replicas        - %d", intVal);
+						}
+						if (region.get("satellite_usable_dcs", intVal)) {
+							outputString += format("\n        Satellite Usable DCs          - %d", intVal);
+						}
+					}
+				}
 			}
 			catch (std::runtime_error& ) {
 				outputString = outputStringCache;
@@ -2197,36 +2290,44 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			workerPorts[addr.address.ip].insert(addr.address.port);
 
 		// Print a list of all excluded addresses that don't have a corresponding worker
-		std::vector<AddressExclusion> absentExclusions;
+		std::set<AddressExclusion> absentExclusions;
 		for(auto addr : addresses) {
 			auto worker = workerPorts.find(addr.ip);
 			if(worker == workerPorts.end())
-				absentExclusions.push_back(addr);
+				absentExclusions.insert(addr);
 			else if(addr.port > 0 && worker->second.count(addr.port) == 0)
-				absentExclusions.push_back(addr);
+				absentExclusions.insert(addr);
 		}
 
-		if(!absentExclusions.empty()) {
-			printf("\nWARNING: the following servers were not present in the cluster. Be sure that you\n"
-					"excluded the correct machines or processes before removing them from the cluster:\n");
-			for(auto addr : absentExclusions) {
+		for (auto addr : addresses) {
+			NetworkAddress _addr(addr.ip, addr.port);
+			if (absentExclusions.find(addr) != absentExclusions.end()) {
 				if(addr.port == 0)
-					printf("  %s\n", addr.ip.toString().c_str());
+					printf("  %s(Whole machine)  ---- WARNING: Missing from cluster!Be sure that you excluded the "
+					       "correct machines before removing them from the cluster!\n",
+					       addr.ip.toString().c_str());
 				else
-					printf("  %s\n", addr.toString().c_str());
-			}
-
-			printf("\n");
-		} else if (notExcludedServers.empty()) {
-			printf("\nIt is now safe to remove these machines or processes from the cluster.\n");
-		} else {
-			printf("\nWARNING: Exclusion in progress. It is not safe to remove the following machines\n"
-			       "or processes from the cluster:\n");
-			for (auto addr : notExcludedServers) {
+					printf("  %s  ---- WARNING: Missing from cluster! Be sure that you excluded the correct processes "
+					       "before removing them from the cluster!\n",
+					       addr.toString().c_str());
+			} else if (notExcludedServers.find(_addr) != notExcludedServers.end()) {
 				if (addr.port == 0)
-					printf("  %s\n", addr.ip.toString().c_str());
+					printf("  %s(Whole machine)  ---- WARNING: Exclusion in progress! It is not safe to remove this "
+					       "machine from the cluster\n",
+					       addr.ip.toString().c_str());
 				else
-					printf("  %s\n", addr.toString().c_str());
+					printf("  %s  ---- WARNING: Exclusion in progress! It is not safe to remove this process from the "
+					       "cluster\n",
+					       addr.toString().c_str());
+			} else {
+				if (addr.port == 0)
+					printf("  %s(Whole machine)  ---- Successfully excluded. It is now safe to remove this machine "
+					       "from the cluster.\n",
+					       addr.ip.toString().c_str());
+				else
+					printf(
+					    "  %s  ---- Successfully excluded. It is now safe to remove this process from the cluster.\n",
+					    addr.toString().c_str());
 			}
 		}
 
@@ -2461,28 +2562,28 @@ void LogCommand(std::string line, UID randomID, std::string errMsg) {
 
 struct CLIOptions {
 	std::string program_name;
-	int exit_code;
+	int exit_code = -1;
 
 	std::string commandLine;
 
 	std::string clusterFile;
-	bool trace;
+	bool trace = false;
 	std::string traceDir;
 	std::string traceFormat;
-	int exit_timeout;
+	int exit_timeout = 0;
 	Optional<std::string> exec;
-	bool initialStatusCheck;
+	bool initialStatusCheck = true;
+	bool cliHints = true;
+	bool debugTLS = false;
 	std::string tlsCertPath;
 	std::string tlsKeyPath;
 	std::string tlsVerifyPeers;
 	std::string tlsCAPath;
 	std::string tlsPassword;
 
+	std::vector<std::pair<std::string, std::string>> knobs;
+
 	CLIOptions( int argc, char* argv[] )
-		: trace(false),
-		 exit_timeout(0),
-		 initialStatusCheck(true),
-		 exit_code(-1)
 	{
 		program_name = argv[0];
 		for (int a = 0; a<argc; a++) {
@@ -2501,9 +2602,42 @@ struct CLIOptions {
 		}
 		if (exit_timeout && !exec.present()) {
 			fprintf(stderr, "ERROR: --timeout may only be specified with --exec\n");
-			exit_code = 1;
+			exit_code = FDB_EXIT_ERROR;
 			return;
 		}
+
+		delete FLOW_KNOBS;
+		FlowKnobs* flowKnobs = new FlowKnobs;
+		FLOW_KNOBS = flowKnobs;
+
+		delete CLIENT_KNOBS;
+		ClientKnobs* clientKnobs = new ClientKnobs;
+		CLIENT_KNOBS = clientKnobs;
+
+		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
+			try {
+				if (!flowKnobs->setKnob( k->first, k->second ) &&
+					!clientKnobs->setKnob( k->first, k->second ))
+				{
+					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
+					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_invalid_option_value) {
+					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", k->second.c_str(), k->first.c_str());
+					TraceEvent(SevWarnAlways, "InvalidKnobValue").detail("Knob", printable(k->first)).detail("Value", printable(k->second));
+				}
+				else {
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
+					TraceEvent(SevError, "FailedToSetKnob").detail("Knob", printable(k->first)).detail("Value", printable(k->second)).error(e);
+					exit_code = FDB_EXIT_ERROR;
+				}
+			}
+		}
+
+		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
+		flowKnobs->initialize(true);
+		clientKnobs->initialize(true);
 	}
 
 	int processArg(CSimpleOpt& args) {
@@ -2537,44 +2671,59 @@ struct CLIOptions {
 			case OPT_NO_STATUS:
 				initialStatusCheck = false;
 				break;
+			case OPT_NO_HINTS:
+				cliHints = false;
 
 #ifndef TLS_DISABLED
 			// TLS Options
-		    case TLSParams::OPT_TLS_PLUGIN:
-			    args.OptionArg();
-			    break;
-		    case TLSParams::OPT_TLS_CERTIFICATES:
-			    tlsCertPath = args.OptionArg();
-			    break;
-		    case TLSParams::OPT_TLS_CA_FILE:
-			    tlsCAPath = args.OptionArg();
-			    break;
-		    case TLSParams::OPT_TLS_KEY:
-			    tlsKeyPath = args.OptionArg();
-			    break;
-		    case TLSParams::OPT_TLS_PASSWORD:
-			    tlsPassword = args.OptionArg();
-			    break;
-		    case TLSParams::OPT_TLS_VERIFY_PEERS:
-			    tlsVerifyPeers = args.OptionArg();
-			    break;
+			case TLSConfig::OPT_TLS_PLUGIN:
+				args.OptionArg();
+				break;
+			case TLSConfig::OPT_TLS_CERTIFICATES:
+				tlsCertPath = args.OptionArg();
+				break;
+			case TLSConfig::OPT_TLS_CA_FILE:
+				tlsCAPath = args.OptionArg();
+				break;
+			case TLSConfig::OPT_TLS_KEY:
+				tlsKeyPath = args.OptionArg();
+				break;
+			case TLSConfig::OPT_TLS_PASSWORD:
+				tlsPassword = args.OptionArg();
+				break;
+			case TLSConfig::OPT_TLS_VERIFY_PEERS:
+				tlsVerifyPeers = args.OptionArg();
+				break;
 #endif
-		    case OPT_HELP:
-			    printProgramUsage(program_name.c_str());
-			    return 0;
-		    case OPT_STATUS_FROM_JSON:
-			    return printStatusFromJSON(args.OptionArg());
-		    case OPT_TRACE_FORMAT:
-			    if (!validateTraceFormat(args.OptionArg())) {
-				    fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
-			    }
-			    traceFormat = args.OptionArg();
-			    break;
-		    case OPT_VERSION:
-			    printVersion();
-			    return FDB_EXIT_SUCCESS;
-		    }
-		    return -1;
+			case OPT_HELP:
+				printProgramUsage(program_name.c_str());
+				return 0;
+			case OPT_STATUS_FROM_JSON:
+				return printStatusFromJSON(args.OptionArg());
+			case OPT_TRACE_FORMAT:
+				if (!validateTraceFormat(args.OptionArg())) {
+					fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+				}
+				traceFormat = args.OptionArg();
+				break;
+			case OPT_KNOB: {
+				std::string syn = args.OptionSyntax();
+				if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
+					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
+					return FDB_EXIT_ERROR;
+				}
+				syn = syn.substr(7);
+				knobs.push_back( std::make_pair( syn, args.OptionArg() ) );
+				break;
+			}
+			case OPT_DEBUG_TLS:
+				debugTLS = true;
+				break;
+			case OPT_VERSION:
+				printVersion();
+				return FDB_EXIT_SUCCESS;
+		}
+		return -1;
 	}
 };
 
@@ -2703,7 +2852,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				continue;
 
 			// Don't put dangerous commands in the command history
-			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos)
+			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos &&
+			    line.find("unlock") == std::string::npos)
 				linenoise.historyAdd(line);
 		}
 
@@ -2918,6 +3068,52 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "lock")) {
+					if (tokens.size() != 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						state UID lockUID = deterministicRandom()->randomUniqueID();
+						printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
+						wait(makeInterruptable(lockDatabase(db, lockUID)));
+						printf("Database locked.\n");
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "unlock")) {
+					if ((tokens.size() != 2) || (tokens[1].size() != 32) ||
+					    !std::all_of(tokens[1].begin(), tokens[1].end(), &isxdigit)) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						state std::string passPhrase = deterministicRandom()->randomAlphaNumeric(10);
+						warn.cancel(); // don't warn while waiting on user input
+						printf("Unlocking the database is a potentially dangerous operation.\n");
+						Optional<std::string> input = wait(linenoise.read(
+						    format("Repeat the following passphrase if you would like to proceed (%s) : ",
+						           passPhrase.c_str())));
+						warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db);
+						if (input.present() && input.get() == passPhrase) {
+							UID unlockUID = UID::fromString(tokens[1].toString());
+							try {
+								wait(makeInterruptable(unlockDatabase(db, unlockUID)));
+								printf("Database unlocked.\n");
+							} catch (Error& e) {
+								if (e.code() == error_code_database_locked) {
+									printf(
+									    "Unable to unlock database. Make sure to unlock with the correct lock UID.\n");
+								}
+								throw e;
+							}
+						} else {
+							printf("ERROR: Incorrect passphrase entered.\n");
+							is_error = true;
+						}
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "setclass")) {
 					if (tokens.size() != 3 && tokens.size() != 1) {
 						printUsage(tokens[0]);
@@ -3006,6 +3202,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								   printable(v.get()).c_str());
 						else
 							printf("`%s': not found\n", printable(tokens[1]).c_str());
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "getversion")) {
+					if (tokens.size() != 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						Version v = wait(makeInterruptable(getTransaction(db, tr, options, intrans)->getReadVersion()));
+						printf("%ld\n", v);
 					}
 					continue;
 				}
@@ -3656,8 +3863,37 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 		[](std::string const& line, std::vector<std::string>& completions) {
 			fdbcli_comp_cmd(line, completions);
 		},
-		[](std::string const& line)->LineNoise::Hint {
-			return LineNoise::Hint();
+		[enabled=opt.cliHints](std::string const& line)->LineNoise::Hint {
+			if (!enabled) {
+				return LineNoise::Hint();
+			}
+
+			bool error = false;
+			bool partial = false;
+			std::string linecopy = line;
+			std::vector<std::vector<StringRef>> parsed = parseLine(linecopy, error, partial);
+			if (parsed.size() == 0 || parsed.back().size() == 0) return LineNoise::Hint();
+			StringRef command = parsed.back().front();
+			int finishedParameters = parsed.back().size() + error;
+
+			// As a user is typing an escaped character, e.g. \", after the \ and before the " is typed 
+			// the string will be a parse error.  Ignore this parse error to avoid flipping the hint to
+			// {malformed escape sequence} and back to the original hint for the span of one character                                     
+			// being entered.
+			if (error && line.back() != '\\') return LineNoise::Hint(std::string(" {malformed escape sequence}"), 90, false);
+
+			auto iter = helpMap.find(command.toString());
+			if (iter != helpMap.end()) {
+				std::string helpLine = iter->second.usage;
+				std::vector<std::vector<StringRef>> parsedHelp = parseLine(helpLine, error, partial);
+				std::string hintLine = (*(line.end() - 1) == ' ' ? "" : " ");
+				for (int i = finishedParameters; i < parsedHelp.back().size(); i++) {
+					hintLine = hintLine + parsedHelp.back()[i].toString() + " ";
+				}
+				return LineNoise::Hint(hintLine, 90, false);
+			} else {
+				return LineNoise::Hint();
+			}
 		},
 		1000,
 		false);
@@ -3774,6 +4010,30 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
+	if (opt.debugTLS) {
+#ifndef TLS_DISABLED
+		// Backdoor into NativeAPI's tlsConfig, which is where the above network option settings ended up.
+		extern TLSConfig tlsConfig;
+		printf("TLS Configuration:\n");
+		printf("\tCertificate Path: %s\n", tlsConfig.getCertificatePathSync().c_str());
+		printf("\tKey Path: %s\n", tlsConfig.getKeyPathSync().c_str());
+		printf("\tCA Path: %s\n", tlsConfig.getCAPathSync().c_str());
+		try {
+			LoadedTLSConfig loaded = tlsConfig.loadSync();
+			printf("\tPassword: %s\n", loaded.getPassword().empty() ? "Not configured" : "Exists, but redacted");
+			printf("\n");
+			loaded.print(stdout);
+		} catch (Error& e) {
+			printf("ERROR: %s (%d)\n", e.what(), e.code());
+			printf("Use --log and look at the trace logs for more detailed information on the failure.\n");
+			return 1;
+		}
+#else
+		printf("This fdbcli was built with TLS disabled.\n");
+#endif
+		return 0;
+	}
+
 	try {
 		setupNetwork();
 		Future<int> cliFuture = runCli(opt);
@@ -3789,9 +4049,6 @@ int main(int argc, char **argv) {
 		}
 	} catch (Error& e) {
 		printf("ERROR: %s (%d)\n", e.what(), e.code());
-		return 1;
-	} catch (boost::system::system_error& e) {
-		printf("ERROR: %s (%d)\n", e.what(), e.code().value());
 		return 1;
 	}
 }

@@ -141,9 +141,10 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	std::map<int, Reference<MasterBatchData>> batch;
 	std::map<int, Reference<MasterBatchStatus>> batchStatus;
-	NotifiedVersion finishedBatch; // The highest batch index all appliers have applied mutations
 
 	AsyncVar<int> runningVersionBatches; // Currently running version batches
+
+	std::map<UID, double> rolesHeartBeatTime; // Key: role id; Value: most recent time master receives heart beat
 
 	void addref() { return ReferenceCounted<RestoreMasterData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreMasterData>::delref(); }
@@ -155,6 +156,9 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	}
 
 	~RestoreMasterData() = default;
+
+	int getVersionBatchState(int batchIndex) final { return RoleVersionBatchState::INVALID; }
+	void setVersionBatchState(int batchIndex, int vbState) final {}
 
 	void initVersionBatch(int batchIndex) {
 		TraceEvent("FastRestoreMasterInitVersionBatch", id()).detail("VersionBatchIndex", batchIndex);
@@ -227,19 +231,17 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			}
 			++rangeIdx;
 		}
-		int logIdx = 0;
 		std::vector<RestoreFileFR> retLogs;
 		// Scan all logFiles every time to avoid assumption on log files' version ranges.
 		// For example, we do not assume each version range only exists in one log file
-		while (logIdx < logFiles.size()) {
-			Version begin = std::max(prevVersion, logFiles[logIdx].beginVersion);
-			Version end = std::min(nextVersion, logFiles[logIdx].endVersion);
+		for (const auto& file : logFiles) {
+			Version begin = std::max(prevVersion, file.beginVersion);
+			Version end = std::min(nextVersion, file.endVersion);
 			if (begin < end) { // logIdx file overlap in [prevVersion, nextVersion)
-				double ratio = (end - begin) * 1.0 / (logFiles[logIdx].endVersion - logFiles[logIdx].beginVersion);
-				size += logFiles[logIdx].fileSize * ratio;
-				retLogs.push_back(logFiles[logIdx]);
+				double ratio = (end - begin) * 1.0 / (file.endVersion - file.beginVersion);
+				size += file.fileSize * ratio;
+				retLogs.push_back(file);
 			}
-			++logIdx;
 		}
 		return std::make_tuple(size, rangeIdx, retLogs);
 	}
@@ -247,19 +249,21 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	// Split backup files into version batches, each of which has similar data size
 	// Input: sorted range files, sorted log files;
 	// Output: a set of version batches whose size is less than SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES
-	//    	   and each mutation in backup files is included in the version batches exactly once.
+	//         and each mutation in backup files is included in the version batches exactly once.
 	// Assumption 1: input files has no empty files;
 	// Assumption 2: range files at one version <= FASTRESTORE_VERSIONBATCH_MAX_BYTES.
 	// Note: We do not allow a versionBatch size larger than the FASTRESTORE_VERSIONBATCH_MAX_BYTES because the range
 	// file size at a version depends on the number of backupAgents and its upper bound is hard to get.
 	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles, const std::vector<RestoreFileFR>& logFiles,
-	                         std::map<Version, VersionBatch>* versionBatches) {
+	                         std::map<Version, VersionBatch>* versionBatches, Version targetVersion) {
 		bool rewriteNextVersion = false;
 		int rangeIdx = 0;
 		int logIdx = 0; // Ensure each log file is included in version batch
 		Version prevEndVersion = 0;
 		Version nextVersion = 0; // Used to calculate the batch's endVersion
 		VersionBatch vb;
+		Version maxVBVersion = 0;
+		bool lastLogFile = false;
 		vb.beginVersion = 0; // Version batch range [beginVersion, endVersion)
 		vb.batchIndex = 1;
 
@@ -277,7 +281,16 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					if (logIdx < logFiles.size()) {
 						nextVersion = logFiles[logIdx].endVersion;
 					} else {
-						break; // Finished all log files
+						TraceEvent("FastRestoreBuildVersionBatch")
+						    .detail("FinishAllLogFiles", logIdx)
+						    .detail("CurBatchIndex", vb.batchIndex)
+						    .detail("CurBatchSize", vb.size);
+						if (prevEndVersion < nextVersion) {
+							// Ensure the last log file is included in version batch
+							lastLogFile = true;
+						} else {
+							break; // Finished all log files
+						}
 					}
 				} else {
 					TraceEvent(SevError, "FastRestoreBuildVersionBatch")
@@ -297,9 +310,11 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			    getVersionSize(prevEndVersion, nextVersion, rangeFiles, rangeIdx, logFiles);
 
 			TraceEvent("FastRestoreBuildVersionBatch")
+			    .detail("BatchIndex", vb.batchIndex)
 			    .detail("VersionBatchBeginVersion", vb.beginVersion)
 			    .detail("PreviousEndVersion", prevEndVersion)
 			    .detail("NextVersion", nextVersion)
+			    .detail("TargetVersion", targetVersion)
 			    .detail("RangeIndex", rangeIdx)
 			    .detail("RangeFiles", rangeFiles.size())
 			    .detail("LogIndex", logIdx)
@@ -308,11 +323,14 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			    .detail("CurrentBatchSize", vb.size)
 			    .detail("NextVersionIntervalSize", nextVersionSize)
 			    .detail("NextRangeIndex", nextRangeIdx)
-			    .detail("UsedLogFiles", curLogFiles.size());
+			    .detail("UsedLogFiles", curLogFiles.size())
+			    .detail("VersionBatchCurRangeFiles", vb.rangeFiles.size())
+			    .detail("VersionBatchCurLogFiles", vb.logFiles.size())
+			    .detail("LastLogFile", lastLogFile);
 
 			ASSERT(prevEndVersion < nextVersion); // Ensure progress
 			if (vb.size + nextVersionSize <= SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES ||
-			    (vb.size < 1 && prevEndVersion + 1 == nextVersion)) {
+			    (vb.size < 1 && prevEndVersion + 1 == nextVersion) || lastLogFile) {
 				// In case the batch size at a single version > FASTRESTORE_VERSIONBATCH_MAX_BYTES,
 				// the version batch should include the single version to avoid false positive in simulation.
 				if (vb.size + nextVersionSize > SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES) {
@@ -338,7 +356,8 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					vb.logFiles.insert(log);
 				}
 
-				vb.endVersion = nextVersion;
+				vb.endVersion = std::min(nextVersion, targetVersion + 1);
+				maxVBVersion = std::max(maxVBVersion, vb.endVersion);
 				prevEndVersion = vb.endVersion;
 			} else {
 				if (vb.size < 1) {
@@ -365,6 +384,18 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 				}
 				// Finalize the current version batch
 				versionBatches->emplace(vb.beginVersion, vb); // copy vb to versionBatch
+				TraceEvent("FastRestoreBuildVersionBatch")
+				    .detail("FinishBatchIndex", vb.batchIndex)
+				    .detail("VersionBatchBeginVersion", vb.beginVersion)
+				    .detail("VersionBatchEndVersion", vb.endVersion)
+				    .detail("VersionBatchLogFiles", vb.logFiles.size())
+				    .detail("VersionBatchRangeFiles", vb.rangeFiles.size())
+				    .detail("VersionBatchSize", vb.size)
+				    .detail("RangeIndex", rangeIdx)
+				    .detail("LogIndex", logIdx)
+				    .detail("NewVersionBatchBeginVersion", prevEndVersion)
+				    .detail("RewriteNextVersion", rewriteNextVersion);
+
 				// start finding the next version batch
 				vb.reset();
 				vb.size = 0;
@@ -374,8 +405,17 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 		}
 		// The last wip version batch has some files
 		if (vb.size > 0) {
-			vb.endVersion = nextVersion;
+			vb.endVersion = std::min(nextVersion, targetVersion + 1);
+			maxVBVersion = std::max(maxVBVersion, vb.endVersion);
 			versionBatches->emplace(vb.beginVersion, vb);
+		}
+		// Invariant: The last vb endverion should be no smaller than targetVersion
+		if (maxVBVersion < targetVersion) {
+			// Q: Is the restorable version always less than the maximum version from all backup filenames?
+			// A: This is true for the raw backup files returned by backup container before we remove the empty files.
+			TraceEvent(SevWarnAlways, "FastRestoreBuildVersionBatch")
+			    .detail("TargetVersion", targetVersion)
+			    .detail("MaxVersionBatchVersion", maxVBVersion);
 		}
 	}
 

@@ -579,13 +579,14 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 
 	bool isReady() const { return !queue.empty() || error.isValid(); }
 	bool isError() const { return queue.empty() && error.isValid(); }  // the *next* thing queued is an error
+	uint32_t size() const { return queue.size(); }
 
 	T pop() {
 		if (queue.empty()) {
 			if (error.isValid()) throw error;
 			throw internal_error();
 		}
-		auto copy = queue.front();
+		auto copy = std::move(queue.front());
 		queue.pop();
 		return copy;
 	}
@@ -906,6 +907,9 @@ public:
 
 	void send(const T& value) const {
 		queue->send(value);
+	}
+	void send(T&& value) const {
+		queue->send(std::move(value));
 	}
 	void sendError(const Error& error) const {
 		queue->sendError(error);

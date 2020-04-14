@@ -56,6 +56,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES KVStoreTestWrite.txt UNIT IGNORE)
   add_fdb_test(TEST_FILES KVStoreValueSize.txt UNIT IGNORE)
   add_fdb_test(TEST_FILES LayerStatusMerge.txt IGNORE)
+  add_fdb_test(TEST_FILES ParallelRestoreApiCorrectnessAtomicRestore.txt IGNORE)
   add_fdb_test(TEST_FILES PureNetwork.txt IGNORE)
   add_fdb_test(TEST_FILES RRW2500.txt IGNORE)
   add_fdb_test(TEST_FILES RandomRead.txt IGNORE)
@@ -82,6 +83,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES ThreadSafety.txt IGNORE)
   add_fdb_test(TEST_FILES Throttling.txt IGNORE)
   add_fdb_test(TEST_FILES TraceEventMetrics.txt IGNORE)
+  add_fdb_test(TEST_FILES PopulateTPCC.txt IGNORE)
+  add_fdb_test(TEST_FILES TPCC.txt IGNORE)
   add_fdb_test(TEST_FILES default.txt IGNORE)
   add_fdb_test(TEST_FILES errors.txt IGNORE)
   add_fdb_test(TEST_FILES fail.txt IGNORE)
@@ -120,6 +123,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.txt)
   add_fdb_test(TEST_FILES fast/RandomSelector.txt)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.txt)
+  add_fdb_test(TEST_FILES fast/ReportConflictingKeys.txt)
   add_fdb_test(TEST_FILES fast/SelectorCorrectness.txt)
   add_fdb_test(TEST_FILES fast/Sideband.txt)
   add_fdb_test(TEST_FILES fast/SidebandWithStatus.txt)
@@ -159,17 +163,17 @@ if(WITH_PYTHON)
     TEST_FILES restarting/StorefrontTestRestart-1.txt
                restarting/StorefrontTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
-               restarting/from_6.2.0/SnapTestAttrition-2.txt)
+    TEST_FILES SnapTestAttrition-1.txt
+               SnapTestAttrition-2.txt IGNORE)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestSimpleRestart-1.txt
-               restarting/from_6.2.0/SnapTestSimpleRestart-2.txt)
+    TEST_FILES SnapTestSimpleRestart-1.txt
+               SnapTestSimpleRestart-2.txt IGNORE)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestRestart-1.txt
-               restarting/from_6.2.0/SnapTestRestart-2.txt)
+    TEST_FILES SnapTestRestart-1.txt
+               SnapTestRestart-2.txt IGNORE)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapCycleRestart-1.txt
-               restarting/from_6.2.0/SnapCycleRestart-2.txt)
+    TEST_FILES SnapCycleRestart-1.txt
+               SnapCycleRestart-2.txt IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
                restarting/from_5.1.7/DrUpgradeRestart-2.txt)
@@ -207,8 +211,16 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/WriteDuringReadAtomicRestore.txt)
   add_fdb_test(TEST_FILES slow/WriteDuringReadSwitchover.txt)
   add_fdb_test(TEST_FILES slow/ddbalance.txt)
-  add_fdb_test(TEST_FILES slow/ParallelRestoreCorrectnessAtomicOpTinyData.txt)
-  add_fdb_test(TEST_FILES slow/ParallelRestoreCorrectnessCycle.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreNewBackupCorrectnessAtomicOp.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreNewBackupCorrectnessCycle.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreNewBackupCorrectnessMultiCycles.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreNewBackupWriteDuringReadAtomicRestore.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessAtomicOp.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessCycle.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessMultiCycles.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupWriteDuringReadAtomicRestore.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupApiCorrectnessAtomicRestore.txt)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreTestSplitMutation.txt)
   # Note that status tests are not deterministic.
   add_fdb_test(TEST_FILES status/invalid_proc_addresses.txt)
   add_fdb_test(TEST_FILES status/local_6_machine_no_replicas_remain.txt)
@@ -225,7 +237,7 @@ if(WITH_PYTHON)
 
 
   verify_testing()
-  if (NOT OPEN_FOR_IDE)
+  if (NOT OPEN_FOR_IDE AND NOT WIN32)
     create_test_package()
   endif()
 endif()

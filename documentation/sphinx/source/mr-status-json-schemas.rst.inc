@@ -190,6 +190,9 @@
                },
                "megabits_received":{
                   "hz":0.0
+               },
+               "tls_policy_failures":{
+                  "hz":0.0
                }
             },
             "run_loop_busy":0.2 // fraction of time the run loop was busy
@@ -364,7 +367,9 @@
                   "layer_status_incomplete",
                   "database_availability_timeout",
                   "consistencycheck_suspendkey_fetch_timeout",
-                  "consistencycheck_disabled"
+                  "consistencycheck_disabled",
+                  "primary_dc_missing",
+                  "fetch_primary_dc_timeout"
                ]
             },
             "issues":[
@@ -404,6 +409,7 @@
          },
          "required_logs":3,
          "missing_logs":"7f8d623d0cb9966e",
+         "active_generations":1,
          "description":"Recovery complete."
       },
       "workload":{
@@ -419,6 +425,16 @@
                "roughness":0.0
             },
             "read_requests":{ // measures number of incoming read requests
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "location_requests":{ // measures number of outgoing key server location responses
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "memory_errors":{ // measures number of proxy_memory_limit_exceeded errors
                "hz":0.0,
                "counter":0,
                "roughness":0.0
@@ -572,6 +588,7 @@
                   "missing_data",
                   "healing",
                   "optimizing_team_collections",
+                  "healthy_populating_region",
                   "healthy_repartitioning",
                   "healthy_removing_server",
                   "healthy_rebalancing",
@@ -606,6 +623,7 @@
                           "missing_data",
                           "healing",
                           "optimizing_team_collections",
+                          "healthy_populating_region",
                           "healthy_repartitioning",
                           "healthy_removing_server",
                           "healthy_rebalancing",

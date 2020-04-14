@@ -25,6 +25,7 @@
 #include "flow/Platform.h"
 
 #include <map>
+#include <set>
 #include <string>
 #include <stdint.h>
 
@@ -45,6 +46,7 @@ protected:
 	std::map<std::string, int*> int_knobs;
 	std::map<std::string, std::string*> string_knobs;
 	std::map<std::string, bool*> bool_knobs;
+	std::set<std::string> explicitlySetKnobs;
 };
 
 class FlowKnobs : public Knobs {
@@ -87,7 +89,7 @@ public:
 	double MAX_RECONNECTION_TIME;
 	double RECONNECTION_TIME_GROWTH_RATE;
 	double RECONNECTION_RESET_TIME;
-	double CONNECTION_ACCEPT_DELAY;
+	int ACCEPT_BATCH_SIZE;
 
 	int TLS_CERT_REFRESH_DELAY_SECONDS;
 	double TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT;
@@ -183,6 +185,7 @@ public:
 	int TRACE_EVENT_THROTTLER_MSG_LIMIT;
 	int MAX_TRACE_FIELD_LENGTH;
 	int MAX_TRACE_EVENT_LENGTH;
+	bool ALLOCATION_TRACING_ENABLED;
 
 	//TDMetrics
 	int64_t MAX_METRIC_SIZE;
@@ -218,7 +221,8 @@ public:
 	int LOAD_BALANCE_MAX_BAD_OPTIONS;
 	bool LOAD_BALANCE_PENALTY_IS_BAD;
 
-	FlowKnobs(bool randomize = false, bool isSimulated = false);
+	FlowKnobs();
+	void initialize(bool randomize = false, bool isSimulated = false);
 };
 
 extern FlowKnobs const* FLOW_KNOBS;

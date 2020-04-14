@@ -21,12 +21,18 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
+#include "flow/UnitTest.h"
 
 ClientKnobs const* CLIENT_KNOBS = new ClientKnobs();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
-ClientKnobs::ClientKnobs(bool randomize) {
+ClientKnobs::ClientKnobs() {
+	initialize();
+}
+
+void ClientKnobs::initialize(bool randomize) {
+	// clang-format off
 	// FIXME: These are not knobs, get them out of ClientKnobs!
 	BYTE_LIMIT_UNLIMITED = GetRangeLimits::BYTE_LIMIT_UNLIMITED;
 	ROW_LIMIT_UNLIMITED = GetRangeLimits::ROW_LIMIT_UNLIMITED;
@@ -41,6 +47,10 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
 	init( FAILURE_EMERGENCY_DELAY,                30.0 );
 	init( FAILURE_MAX_GENERATIONS,                  10 );
+	init( RECOVERY_DELAY_START_GENERATION,          70 );
+	init( RECOVERY_DELAY_SECONDS_PER_GENERATION,  60.0 );
+	init( MAX_GENERATIONS,                         100 );
+	init( MAX_GENERATIONS_OVERRIDE,                  0 );
 
 	init( COORDINATOR_RECONNECTION_DELAY,          1.0 );
 	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
@@ -134,6 +144,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_COPY_TASKS,                        90 );
 	init( BACKUP_BLOCK_SIZE,   LOG_RANGE_BLOCK_SIZE/10 );
 	init( BACKUP_TASKS_PER_AGENT,                   10 );
+	init( BACKUP_POLL_PROGRESS_SECONDS,             10 );
+	init( VERSIONS_PER_SECOND,                     1e6 ); // Must be the same as SERVER_KNOBS->VERSIONS_PER_SECOND
 	init( SIM_BACKUP_TASKS_PER_AGENT,               10 );
 	init( BACKUP_RANGEFILE_BLOCK_SIZE,      1024 * 1024);
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);
@@ -205,4 +217,22 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	//fdbcli		
 	init( CLI_CONNECT_PARALLELISM,                  400 );
 	init( CLI_CONNECT_TIMEOUT,                     10.0 );
+
+	// trace
+	init( TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH,      50 );
+	// clang-format on
+}
+
+TEST_CASE("/fdbclient/knobs/initialize") {
+	// This test depends on TASKBUCKET_TIMEOUT_VERSIONS being defined as a constant multiple of CORE_VERSIONSPERSECOND
+	ClientKnobs clientKnobs;
+	int initialCoreVersionsPerSecond = clientKnobs.CORE_VERSIONSPERSECOND;
+	int initialTaskBucketTimeoutVersions = clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS;
+	clientKnobs.setKnob("core_versionspersecond", format("%ld", initialCoreVersionsPerSecond * 2));
+	ASSERT(clientKnobs.CORE_VERSIONSPERSECOND == initialCoreVersionsPerSecond * 2);
+	ASSERT(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS == initialTaskBucketTimeoutVersions);
+	clientKnobs.initialize();
+	ASSERT(clientKnobs.CORE_VERSIONSPERSECOND == initialCoreVersionsPerSecond * 2);
+	ASSERT(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS == initialTaskBucketTimeoutVersions * 2);
+	return Void();
 }

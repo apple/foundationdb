@@ -366,6 +366,10 @@ class Tester:
                         inst.push(b'RESULT_NOT_PRESENT')
                     else:
                         inst.push(f)
+                elif inst.op == six.u("GET_ESTIMATED_RANGE_SIZE"):
+                    begin, end = inst.pop(2)
+                    estimatedSize = obj.get_estimated_range_size_bytes(begin, end).wait()
+                    inst.push(b"GOT_ESTIMATED_RANGE_SIZE")
                 elif inst.op == six.u("GET_KEY"):
                     key, or_equal, offset, prefix = inst.pop(4)
                     result = obj.get_key(fdb.KeySelector(key, or_equal, offset))

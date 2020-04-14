@@ -813,7 +813,7 @@ namespace actorcompiler
                     returnType = "void",
                     formalParameters = new string[] { 
                         ch.CallbackTypeInStateClass + "*",
-                        ch.Stmt.wait.result.type + " value"
+                        ch.Stmt.wait.result.type + " const& value"
                     },
                     endIsUnreachable = true
                 };

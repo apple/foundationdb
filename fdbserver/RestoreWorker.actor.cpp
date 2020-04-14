@@ -32,6 +32,7 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbrpc/IAsyncFile.h"
+#include "fdbrpc/simulator.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
@@ -253,10 +254,10 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 	wait(delay(SERVER_KNOBS->FASTRESTORE_MONITOR_LEADER_DELAY));
 	TraceEvent("FastRestoreWorker", myWorkerInterf.id()).detail("MonitorLeader", "StartLeaderElection");
 	state int count = 0;
+	state RestoreWorkerInterface leaderInterf;
+	state ReadYourWritesTransaction tr(cx); // MX: Somewhere here program gets stuck
 	loop {
 		try {
-			state RestoreWorkerInterface leaderInterf;
-			state ReadYourWritesTransaction tr(cx); // MX: Somewhere here program gets stuck
 			count++;
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -297,11 +298,30 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 	state Future<Void> myWork = Never();
 	state Reference<AsyncVar<RestoreWorkerInterface>> leader =
 	    Reference<AsyncVar<RestoreWorkerInterface>>(new AsyncVar<RestoreWorkerInterface>());
-
 	state RestoreWorkerInterface myWorkerInterf;
-	myWorkerInterf.initEndpoints();
 	state Reference<RestoreWorkerData> self = Reference<RestoreWorkerData>(new RestoreWorkerData());
+
+	myWorkerInterf.initEndpoints();
 	self->workerID = myWorkerInterf.id();
+
+	// Protect restore worker from being killed in simulation;
+	// Future: Remove the protection once restore can tolerate failure
+	if (g_network->isSimulated()) {
+		auto addresses = g_simulator.getProcessByAddress(myWorkerInterf.address())->addresses;
+
+		g_simulator.protectedAddresses.insert(addresses.address);
+		if (addresses.secondaryAddress.present()) {
+			g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
+		}
+		ISimulator::ProcessInfo* p = g_simulator.getProcessByAddress(myWorkerInterf.address());
+		TraceEvent("ProtectRestoreWorker")
+		    .detail("Address", addresses.toString())
+		    .detail("IsReliable", p->isReliable())
+		    .detail("ReliableInfo", p->getReliableInfo())
+		    .backtrace();
+		ASSERT(p->isReliable());
+	}
+
 	TraceEvent("FastRestoreWorkerKnobs", myWorkerInterf.id())
 	    .detail("FailureTimeout", SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT)
 	    .detail("HeartBeat", SERVER_KNOBS->FASTRESTORE_HEARTBEAT_INTERVAL)

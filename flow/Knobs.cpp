@@ -27,8 +27,12 @@ FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
+FlowKnobs::FlowKnobs() {
+	initialize();
+}
+
 // clang-format off
-FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
+void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( AUTOMATIC_TRACE_DUMP,                                  1 );
 	init( PREVENT_FAST_SPIN_DELAY,                             .01 );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
@@ -68,7 +72,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_RECONNECTION_TIME,                               0.5 );
 	init( RECONNECTION_TIME_GROWTH_RATE,                       1.2 );
 	init( RECONNECTION_RESET_TIME,                             5.0 );
-	init( CONNECTION_ACCEPT_DELAY,                             0.5 );
+	init( ACCEPT_BATCH_SIZE,                                    10 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
 	init( PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT,           3600.0 );
@@ -162,6 +166,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TRACE_EVENT_THROTTLER_MSG_LIMIT,                   20000 );
 	init( MAX_TRACE_FIELD_LENGTH,                              495 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
+	init( ALLOCATION_TRACING_ENABLED,                         true );
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
@@ -210,6 +215,7 @@ static std::string toLower( std::string const& name ) {
 }
 
 bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
+	explicitlySetKnobs.insert(toLower(knob));
 	if (double_knobs.count(knob)) {
 		double v;
 		int n=0;
@@ -260,32 +266,43 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 		*string_knobs[knob] = value;
 		return true;
 	}
+	explicitlySetKnobs.erase(toLower(knob)); // don't store knobs that don't exist
 	return false;
 }
 
 void Knobs::initKnob( double& knob, double value, std::string const& name ) {
-	knob = value;
-	double_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		double_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( int64_t& knob, int64_t value, std::string const& name ) {
-	knob = value;
-	int64_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		int64_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( int& knob, int value, std::string const& name ) {
-	knob = value;
-	int_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		int_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( std::string& knob, const std::string& value, const std::string& name ) {
-	knob = value;
-	string_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		string_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( bool& knob, bool value, std::string const& name ) {
-	knob = value;
-	bool_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		bool_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::trace() {

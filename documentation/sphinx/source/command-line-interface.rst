@@ -162,6 +162,11 @@ The ``getrangekeys`` command fetches keys in a range. Its syntax is ``getrangeke
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
+getversion
+----------
+
+The ``getversion`` command fetches the current read version of the cluster or currently running transaction.
+
 help
 ----
 
@@ -211,7 +216,6 @@ The following options are available for use with the ``option`` command:
 
 ``TIMEOUT`` - Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Like all transaction options, a timeout must be reset after a call to ``onError``. This behavior allows the user to make the timeouts dynamic.
 
-
 include
 -------
 
@@ -226,6 +230,11 @@ If ``failed all`` or ``all failed`` is specified, the failed servers list is cle
 For each IP address or IP:port pair in ``<ADDRESS...>``, the command removes any matching exclusions from the excluded servers list. (A specified IP will match all ``IP:*`` exclusion entries).
 
 For information on adding machines to a cluster, see :ref:`adding-machines-to-a-cluster`.
+
+lock
+----
+
+The ``lock`` command locks the database with a randomly generated lockUID.
 
 option
 ------
@@ -285,3 +294,8 @@ status json
 ^^^^^^^^^^^
 
 ``status json`` will provide the cluster status in its JSON format. For a detailed description of this format, see :doc:`mr-status`.
+
+unlock
+------
+
+The ``unlock`` command unlocks the database with the specified lock UID. Because this is a potentially dangerous operation, users must copy a passphrase before the unlock command is executed.

@@ -450,15 +450,15 @@ class TransactionRead(_FDBBase):
             return self.get_range(key.start, key.stop, reverse=(key.step == -1))
         return self.get(key)
     
-    def get_estimated_range_size_bytes(self, beginKey, endKey):
-        if beginKey is None:
-            beginKey = b''
-        if endKey is None:
-            endKey = b'\xff'
+    def get_estimated_range_size_bytes(self, begin_key, end_key):
+        if begin_key is None:
+            begin_key = b''
+        if end_key is None:
+            end_key = b'\xff'
         return FutureInt64(self.capi.fdb_transaction_get_estimated_range_size_bytes(
             self.tpointer,
-            beginKey, len(beginKey), 
-            endKey, len(endKey)
+            begin_key, len(begin_key),
+            end_key, len(end_key)
             ))
 
 

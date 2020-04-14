@@ -91,14 +91,28 @@ public:
 
 	Value getIntervalDelta() const { return interval_delta; }
 	Value getValue() const { return interval_start_value + interval_delta; }
-	double getRate() const;				// dValue / dt
-	double getRoughness() const;			// value deltas come in "clumps" of this many ( 1 = periodic, 2 = poisson, 10 = periodic clumps of 10 (nearly) simultaneous delta )
+
+	// dValue / dt
+	double getRate() const;
+
+	// Measures the clumpiness or dispersion of the counter.
+	// Computed as a normalized variance of the time between each incrementation of the value.
+	// A delta of N is treated as N distinct increments, with N-1 increments having time span 0.
+	// Normalization is performed by dividing each time sample by the mean time before taking variance.
+	//
+	// roughness = Variance(t/mean(T)) for time interval samples t in T
+	//
+	// A uniformly periodic counter will have roughness of 0
+	// A uniformly periodic counter that increases in clumps of N will have roughness of N-1
+	// A counter with exponentially distributed incrementations will have roughness of 1
+	double getRoughness() const;
+
 	bool hasRate() const { return true; }
 	bool hasRoughness() const { return true; }
 
 private:
 	std::string name;
-	double interval_start, last_event, interval_sq_time;
+	double interval_start, last_event, interval_sq_time, roughness_interval_start;
 	Value interval_delta, interval_start_value;
 	Int64MetricHandle metric;
 };

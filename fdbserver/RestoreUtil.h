@@ -35,10 +35,11 @@
 #include <cstdint>
 #include <cstdarg>
 
-#define SevFRMutationInfo SevVerbose
-//#define SevFRMutationInfo SevInfo
+//#define SevFRMutationInfo SevVerbose
+#define SevFRMutationInfo SevInfo
 
 using MutationsVec = Standalone<VectorRef<MutationRef>>;
+using LogMessageVersionVec = Standalone<VectorRef<LogMessageVersion>>;
 
 enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);
@@ -47,6 +48,8 @@ extern const std::vector<std::string> RestoreRoleStr;
 extern int numRoles;
 
 std::string getHexString(StringRef input);
+
+bool debugFRMutation(const char* context, Version version, MutationRef const& mutation);
 
 struct RestoreCommonReply {
 	constexpr static FileIdentifier file_identifier = 56140435;
