@@ -23,8 +23,8 @@
 package directory
 
 import (
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
+	"github.com/segmentio/foundationdb/bindings/go/src/fdb"
+	"github.com/segmentio/foundationdb/bindings/go/src/fdb/subspace"
 )
 
 // DirectorySubspace represents a Directory that may also be used as a Subspace

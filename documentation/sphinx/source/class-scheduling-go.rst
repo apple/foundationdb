@@ -20,7 +20,7 @@ We'll start by importing the basic FoundationDB package, as well as the ``log`` 
 .. code-block:: go
 
   import (
-    "github.com/apple/foundationdb/bindings/go/src/fdb"
+    "github.com/segmentio/foundationdb/bindings/go/src/fdb"
     "log"
     "fmt"
   )
@@ -71,7 +71,7 @@ If this is all working, it looks like we are ready to start building a real appl
   package main
 
   import (
-      "github.com/apple/foundationdb/bindings/go/src/fdb"
+      "github.com/segmentio/foundationdb/bindings/go/src/fdb"
       "log"
       "fmt"
   )
@@ -140,10 +140,10 @@ Directories and Subspaces
 FoundationDB includes a few modules that make it easy to model data using this approach::
 
   import (
-    "github.com/apple/foundationdb/bindings/go/src/fdb"
-    "github.com/apple/foundationdb/bindings/go/src/fdb/directory"
-    "github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
-    "github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
+    "github.com/segmentio/foundationdb/bindings/go/src/fdb"
+    "github.com/segmentio/foundationdb/bindings/go/src/fdb/directory"
+    "github.com/segmentio/foundationdb/bindings/go/src/fdb/subspace"
+    "github.com/segmentio/foundationdb/bindings/go/src/fdb/tuple"
   )
 
 The :mod:`directory` module lets us open a :ref:`directory <developer-guide-directories>` in the database::
@@ -555,10 +555,10 @@ Here's the code for the scheduling tutorial:
   package main
 
   import (
-    "github.com/apple/foundationdb/bindings/go/src/fdb"
-    "github.com/apple/foundationdb/bindings/go/src/fdb/directory"
-    "github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
-    "github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
+    "github.com/segmentio/foundationdb/bindings/go/src/fdb"
+    "github.com/segmentio/foundationdb/bindings/go/src/fdb/directory"
+    "github.com/segmentio/foundationdb/bindings/go/src/fdb/subspace"
+    "github.com/segmentio/foundationdb/bindings/go/src/fdb/tuple"
 
     "fmt"
     "log"

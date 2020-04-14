@@ -44,7 +44,7 @@ import (
 	"math"
 	"math/big"
 
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/segmentio/foundationdb/bindings/go/src/fdb"
 )
 
 // A TupleElement is one of the types that may be encoded in FoundationDB

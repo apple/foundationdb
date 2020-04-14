@@ -24,10 +24,10 @@ import (
 	"fmt"
 	//"log"
 	//"time"
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
+	"github.com/segmentio/foundationdb/bindings/go/src/fdb"
+	"github.com/segmentio/foundationdb/bindings/go/src/fdb/directory"
+	"github.com/segmentio/foundationdb/bindings/go/src/fdb/subspace"
+	"github.com/segmentio/foundationdb/bindings/go/src/fdb/tuple"
 )
 
 func clear_subspace(db fdb.Transactor, ss subspace.Subspace) {

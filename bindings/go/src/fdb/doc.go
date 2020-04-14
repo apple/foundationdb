@@ -39,7 +39,7 @@ A basic interaction with the FoundationDB API is demonstrated below:
     package main
 
     import (
-        "github.com/apple/foundationdb/bindings/go/src/fdb"
+        "github.com/segmentio/foundationdb/bindings/go/src/fdb"
         "log"
         "fmt"
     )

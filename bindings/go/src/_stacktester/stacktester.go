@@ -36,8 +36,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
+	"github.com/segmentio/foundationdb/bindings/go/src/fdb"
+	"github.com/segmentio/foundationdb/bindings/go/src/fdb/tuple"
 )
 
 const verbose bool = false
