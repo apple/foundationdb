@@ -1912,6 +1912,7 @@ ACTOR Future<Void> masterProxyServerCore(
 					state KeyRange txnKeys = allKeys;
 					loop {
 						wait(yield());
+						Standalone<RangeResultRef> UIDtoTagMap = commitData.txnStateStore->readRange( serverTagKeys ).get();
 						Standalone<RangeResultRef> data = commitData.txnStateStore->readRange(txnKeys, SERVER_KNOBS->BUGGIFIED_ROW_LIMIT, SERVER_KNOBS->APPLY_MUTATION_BYTES).get();
 						if(!data.size()) break;
 						((KeyRangeRef&)txnKeys) = KeyRangeRef( keyAfter(data.back().key, txnKeys.arena()), txnKeys.end );
@@ -1924,7 +1925,7 @@ ACTOR Future<Void> masterProxyServerCore(
 							if( kv.key.startsWith(keyServersPrefix) ) {
 								KeyRef k = kv.key.removePrefix(keyServersPrefix);
 								if(k != allKeys.end) {
-									decodeKeyServersValue(kv.value, src, dest);
+									decodeKeyServersValue(UIDtoTagMap, kv.value, src, dest);
 									info.tags.clear();
 									info.src_info.clear();
 									info.dest_info.clear();
