@@ -115,6 +115,7 @@ std::string BackupDescription::toString() const {
 
 	info.append(format("URL: %s\n", url.c_str()));
 	info.append(format("Restorable: %s\n", maxRestorableVersion.present() ? "true" : "false"));
+	info.append(format("Partitioned logs: %s\n", partitioned ? "true" : "false"));
 
 	auto formatVersion = [&](Version v) {
 		std::string s;
@@ -169,6 +170,7 @@ std::string BackupDescription::toJSON() const {
 	doc.setKey("SchemaVersion", "1.0.0");
 	doc.setKey("URL", url.c_str());
 	doc.setKey("Restorable", maxRestorableVersion.present());
+	doc.setKey("Partitioned", partitioned);
 
 	auto formatVersion = [&](Version v) {
 		JsonBuilderObject doc;
@@ -243,10 +245,10 @@ std::string BackupDescription::toJSON() const {
  *       /plogs/...log,startVersion,endVersion,UID,tagID-of-N,blocksize
  *       /logs/.../log,startVersion,endVersion,UID,blockSize
  *     where ... is a multi level path which sorts lexically into version order and results in approximately 1
- *     unique folder per day containing about 5,000 files. Logs after 7.0 are stored in "plogs"
- *     directory and are partitioned according to tagIDs (0, 1, 2, ...) and the total number
- *     partitions is N. Logs before 7.0 are
- *     stored in "logs" directory and are not partitioned.
+ *     unique folder per day containing about 5,000 files. Logs after FDB 6.3 are stored in "plogs"
+ *     directory and are partitioned according to tagIDs (0, 1, 2, ...) and the total number partitions is N.
+ *     Old backup logs FDB 6.2 and earlier are stored in "logs" directory and are not partitioned.
+ *     After FDB 6.3, users can choose to use the new partitioned logs or old logs.
  *
  *
  *   BACKWARD COMPATIBILITY
@@ -657,18 +659,6 @@ public:
 		return dumpFileList_impl(Reference<BackupContainerFileSystem>::addRef(this), begin, end);
 	}
 
-	ACTOR static Future<bool> isPartitionedBackup_impl(Reference<BackupContainerFileSystem> bc) {
-		BackupFileList list = wait(bc->dumpFileList(0, std::numeric_limits<Version>::max()));
-		for (const auto& file : list.logs) {
-			if (file.isPartitionedLog()) return true;
-		}
-		return false;
-	}
-
-	Future<bool> isPartitionedBackup() final {
-		return isPartitionedBackup_impl(Reference<BackupContainerFileSystem>::addRef(this));
-	}
-
 	static Version resolveRelativeVersion(Optional<Version> max, Version v, const char *name, Error e) {
 		if(v == invalidVersion) {
 			TraceEvent(SevError, "BackupExpireInvalidVersion").detail(name, v);
@@ -704,7 +694,8 @@ public:
 		}
 	}
 
-	ACTOR static Future<BackupDescription> describeBackup_impl(Reference<BackupContainerFileSystem> bc, bool deepScan, Version logStartVersionOverride, bool partitioned) {
+	ACTOR static Future<BackupDescription> describeBackup_impl(Reference<BackupContainerFileSystem> bc, bool deepScan,
+	                                                           Version logStartVersionOverride) {
 		state BackupDescription desc;
 		desc.url = bc->getURL();
 
@@ -722,8 +713,7 @@ public:
 		// from which to resolve the relative version.
 		// This could be handled more efficiently without recursion but it's tricky, this will do for now.
 		if(logStartVersionOverride != invalidVersion && logStartVersionOverride < 0) {
-			BackupDescription tmp = wait(partitioned ? bc->describePartitionedBackup(false, invalidVersion)
-			                                         : bc->describeBackup(false, invalidVersion));
+			BackupDescription tmp = wait(bc->describeBackup(false, invalidVersion));
 			logStartVersionOverride = resolveRelativeVersion(tmp.maxLogEnd, logStartVersionOverride,
 			                                                 "LogStartVersionOverride", invalid_option_value());
 		}
@@ -733,10 +723,12 @@ public:
 		state Optional<Version> metaLogEnd;
 		state Optional<Version> metaExpiredEnd;
 		state Optional<Version> metaUnreliableEnd;
+		state Optional<Version> metaLogType;
 
 		std::vector<Future<Void>> metaReads;
 		metaReads.push_back(store(metaExpiredEnd, bc->expiredEndVersion().get()));
 		metaReads.push_back(store(metaUnreliableEnd, bc->unreliableEndVersion().get()));
+		metaReads.push_back(store(metaLogType, bc->logType().get()));
 
 		// Only read log begin/end versions if not doing a deep scan, otherwise scan files and recalculate them.
 		if(!deepScan) {
@@ -747,12 +739,13 @@ public:
 		wait(waitForAll(metaReads));
 
 		TraceEvent("BackupContainerDescribe2")
-			.detail("URL", bc->getURL())
-			.detail("LogStartVersionOverride", logStartVersionOverride)
-			.detail("ExpiredEndVersion", metaExpiredEnd.orDefault(invalidVersion))
-			.detail("UnreliableEndVersion", metaUnreliableEnd.orDefault(invalidVersion))
-			.detail("LogBeginVersion", metaLogBegin.orDefault(invalidVersion))
-			.detail("LogEndVersion", metaLogEnd.orDefault(invalidVersion));
+		    .detail("URL", bc->getURL())
+		    .detail("LogStartVersionOverride", logStartVersionOverride)
+		    .detail("ExpiredEndVersion", metaExpiredEnd.orDefault(invalidVersion))
+		    .detail("UnreliableEndVersion", metaUnreliableEnd.orDefault(invalidVersion))
+		    .detail("LogBeginVersion", metaLogBegin.orDefault(invalidVersion))
+		    .detail("LogEndVersion", metaLogEnd.orDefault(invalidVersion))
+		    .detail("LogType", metaLogType.orDefault(-1));
 
 		// If the logStartVersionOverride is positive (not relative) then ensure that unreliableEndVersion is equal or greater
 		if(logStartVersionOverride != invalidVersion && metaUnreliableEnd.orDefault(invalidVersion) < logStartVersionOverride) {
@@ -811,8 +804,17 @@ public:
 		}
 
 		state std::vector<LogFile> logs;
-		wait(store(logs, bc->listLogFiles(scanBegin, scanEnd, partitioned)) &&
+		state std::vector<LogFile> plogs;
+		wait(store(logs, bc->listLogFiles(scanBegin, scanEnd, false)) &&
+		     store(plogs, bc->listLogFiles(scanBegin, scanEnd, true)) &&
 		     store(desc.snapshots, bc->listKeyspaceSnapshots()));
+
+		if (plogs.size() > 0) {
+			desc.partitioned = true;
+			logs.swap(plogs);
+		} else {
+			desc.partitioned = metaLogType.present() && metaLogType.get() == PARTITIONED_MUTATION_LOG;
+		}
 
 		// List logs in version order so log continuity can be analyzed
 		std::sort(logs.begin(), logs.end());
@@ -823,7 +825,7 @@ public:
 			// If we didn't get log versions above then seed them using the first log file
 			if (!desc.contiguousLogEnd.present()) {
 				desc.minLogBegin = logs.begin()->beginVersion;
-				if (partitioned) {
+				if (desc.partitioned) {
 					// Cannot use the first file's end version, which may not be contiguous
 					// for other partitions. Set to its beginVersion to be safe.
 					desc.contiguousLogEnd = logs.begin()->beginVersion;
@@ -832,7 +834,7 @@ public:
 				}
 			}
 
-			if (partitioned) {
+			if (desc.partitioned) {
 				updatePartitionedLogsContinuousEnd(&desc, logs, scanBegin, scanEnd);
 			} else {
 				Version& end = desc.contiguousLogEnd.get();
@@ -856,6 +858,11 @@ public:
 
 				if(desc.contiguousLogEnd.present() && metaLogEnd != desc.contiguousLogEnd) {
 					updates = updates && bc->logEndVersion().set(desc.contiguousLogEnd.get());
+				}
+
+				if (!metaLogType.present()) {
+					updates = updates && bc->logType().set(desc.partitioned ? PARTITIONED_MUTATION_LOG
+					                                                        : NON_PARTITIONED_MUTATION_LOG);
 				}
 
 				wait(updates);
@@ -906,11 +913,8 @@ public:
 
 	// Uses the virtual methods to describe the backup contents
 	Future<BackupDescription> describeBackup(bool deepScan, Version logStartVersionOverride) final {
-		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this), deepScan, logStartVersionOverride, false);
-	}
-
-	Future<BackupDescription> describePartitionedBackup(bool deepScan, Version logStartVersionOverride) final {
-		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this), deepScan, logStartVersionOverride, true);
+		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this), deepScan,
+		                           logStartVersionOverride);
 	}
 
 	ACTOR static Future<Void> expireData_impl(Reference<BackupContainerFileSystem> bc, Version expireEndVersion, bool force, ExpireProgress *progress, Version restorableBeginVersion) {
@@ -1287,7 +1291,7 @@ public:
 		return end;
 	}
 
-	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion, bool partitioned) {
+	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion) {
 		// Find the most recent keyrange snapshot to end at or before targetVersion
 		state Optional<KeyspaceSnapshotFile> snapshot;
 		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
@@ -1311,9 +1315,13 @@ public:
 			}
 
 			// FIXME: check if there are tagged logs. for each tag, there is no version gap.
-			state std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion, partitioned));
+			state std::vector<LogFile> logs;
+			state std::vector<LogFile> plogs;
+			wait(store(logs, bc->listLogFiles(snapshot.get().beginVersion, targetVersion, false)) &&
+			     store(plogs, bc->listLogFiles(snapshot.get().beginVersion, targetVersion, true)));
 
-			if (partitioned) {
+			if (plogs.size() > 0) {
+				logs.swap(plogs);
 				// sort by tag ID so that filterDuplicates works.
 				std::sort(logs.begin(), logs.end(), [](const LogFile& a, const LogFile& b) {
 					return std::tie(a.tagId, a.beginVersion, a.endVersion) <
@@ -1349,11 +1357,7 @@ public:
 	}
 
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) final {
-		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, false);
-	}
-
-	Future<Optional<RestorableFileSet>> getPartitionedRestoreSet(Version targetVersion) final {
-		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, true);
+		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion);
 	}
 
 private:
@@ -1387,6 +1391,11 @@ public:
 	VersionProperty logEndVersion() {   return {Reference<BackupContainerFileSystem>::addRef(this), "log_end_version"}; }
 	VersionProperty expiredEndVersion() {   return {Reference<BackupContainerFileSystem>::addRef(this), "expired_end_version"}; }
 	VersionProperty unreliableEndVersion() {   return {Reference<BackupContainerFileSystem>::addRef(this), "unreliable_end_version"}; }
+
+	// Backup log types
+	const static Version NON_PARTITIONED_MUTATION_LOG = 0;
+	const static Version PARTITIONED_MUTATION_LOG = 1;
+	VersionProperty logType() { return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" }; }
 
 	ACTOR static Future<Void> writeVersionProperty(Reference<BackupContainerFileSystem> bc, std::string path, Version v) {
 		try {
