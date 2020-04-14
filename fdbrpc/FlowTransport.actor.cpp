@@ -400,20 +400,21 @@ ACTOR Future<Void> connectionWriter( Reference<Peer> self, Reference<IConnection
 
 ACTOR Future<Void> delayedHealthUpdate(NetworkAddress address) {
 	state double start = now();
-	state int count = 0;
+	state bool delayed = false;
 	loop {
 		if (FLOW_KNOBS->HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS &&
 		    FlowTransport::transport().healthMonitor()->tooManyConnectionsClosed(address) && address.isPublic()) {
-			if (count == 0) {
+			if (!delayed) {
 				TraceEvent("TooManyConnectionsClosedMarkFailed")
 				    .detail("Dest", address)
 				    .detail("StartTime", start)
 				    .detail("ClosedCount", FlowTransport::transport().healthMonitor()->closedConnectionsCount(address));
 				IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(true));
 			}
+			delayed = true;
 			wait(delayJittered(FLOW_KNOBS->MAX_RECONNECTION_TIME * 2.0));
 		} else {
-			if (count > 1)
+			if (delayed)
 				TraceEvent("TooManyConnectionsClosedMarkAvailable")
 				    .detail("Dest", address)
 				    .detail("StartTime", start)
@@ -422,7 +423,6 @@ ACTOR Future<Void> delayedHealthUpdate(NetworkAddress address) {
 			IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(false));
 			break;
 		}
-		++count;
 	}
 	return Void();
 }
@@ -465,6 +465,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				    .detail("PeerAddr", self->destination)
 				    .detail("PeerReferences", self->peerReferences);
 
+				state Future<Void> delayedHealthUpdateF = Future<Void>();
 				try {
 					choose {
 						when(Reference<IConnection> _conn =
@@ -472,9 +473,9 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 							conn = _conn;
 							wait(conn->connectHandshake());
 							if (self->unsent.empty()) {
-								state Future<Void> statusUpdate = delayedHealthUpdate(self->destination);
+								delayedHealthUpdateF = delayedHealthUpdate(self->destination);
 								choose {
-									when(wait(statusUpdate)) {
+									when(wait(delayedHealthUpdateF)) {
 										conn->close();
 										conn = Reference<IConnection>();
 										continue;
@@ -511,7 +512,8 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 			firstConnFailedTime.reset();
 			try {
 				self->transport->countConnEstablished++;
-				state Future<Void> delayedHealthUpdateF = delayedHealthUpdate(self->destination);
+				if (!delayedHealthUpdateF.isValid())
+					delayedHealthUpdateF = delayedHealthUpdate(self->destination);
 				wait(connectionWriter(self, conn) || reader || connectionMonitor(self));
 			} catch (Error& e) {
 				if (e.code() == error_code_connection_failed)
