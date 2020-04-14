@@ -129,10 +129,10 @@ struct Hostname {
 
 	Hostname(std::string host, std::string service, bool useTLS) : host(host), service(service), useTLS(useTLS) {}
 
-	// Only allow hostnames in following forms:
+	// Allow hostnames in forms like following:
 	//    host.name:1234
 	//    host-name:1234
-	//    host-name_part1.host-name_part2:1234
+	//    host-name_part1.host-name_part2:1234:tls
 	static bool isHostname(std::string& s) {
 		std::regex validation("^([\\w\\-]+\\.?)+:([\\d]+){1,}(:tls)?$");
 		std::regex ipv4Validation("^([\\d]{1,3}\\.?){4,}:([\\d]+){1,}(:tls)?$");
