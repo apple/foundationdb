@@ -50,7 +50,7 @@ public class TupleTest {
 	public static void main(String[] args) throws NoSuchFieldException {
 		final int reps = 1000;
 		try {
-			FDB fdb = FDB.selectAPIVersion(620);
+			FDB fdb = FDB.selectAPIVersion(630);
 			addMethods();
 			comparisons();
 			emptyTuple();

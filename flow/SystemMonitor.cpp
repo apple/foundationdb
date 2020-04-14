@@ -101,7 +101,8 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("ConnectionsEstablished", (double) (netData.countConnEstablished - statState->networkState.countConnEstablished) / currentStats.elapsed)
 				.detail("ConnectionsClosed", ((netData.countConnClosedWithError - statState->networkState.countConnClosedWithError) + (netData.countConnClosedWithoutError - statState->networkState.countConnClosedWithoutError)) / currentStats.elapsed)
 				.detail("ConnectionErrors", (netData.countConnClosedWithError - statState->networkState.countConnClosedWithError) / currentStats.elapsed)
-				.trackLatest(eventName.c_str());
+				.detail("TLSPolicyFailures", (netData.countTLSPolicyFailures - statState->networkState.countTLSPolicyFailures) / currentStats.elapsed)
+				.trackLatest(eventName);
 
 			TraceEvent("MemoryMetrics")
 				.DETAILALLOCATORMEMUSAGE(16)

@@ -82,20 +82,21 @@ inline typename Archive::READER& operator >> (Archive& ar, Item& item ) {
 	return ar;
 }
 
-template <class Archive>
-void serializer(Archive& ar) {}
-
 template <class Archive, class Item, class... Items>
 typename Archive::WRITER& serializer(Archive& ar, const Item& item, const Items&... items) {
 	save(ar, item);
-	serializer(ar, items...);
+	if constexpr (sizeof...(Items) > 0) {
+		serializer(ar, items...);
+	}
 	return ar;
 }
 
 template <class Archive, class Item, class... Items>
 typename Archive::READER& serializer(Archive& ar, Item& item, Items&... items) {
 	load(ar, item);
-	serializer(ar, items...);
+	if constexpr (sizeof...(Items) > 0) {
+		serializer(ar, items...);
+	}
 	return ar;
 }
 
@@ -282,7 +283,7 @@ struct _IncludeVersion {
 		ar >> v;
 		if (!v.isValid()) {
 			auto err = incompatible_protocol_version();
-			TraceEvent(SevError, "InvalidSerializationVersion").error(err).detailf("Version", "%llx", v);
+			TraceEvent(SevWarnAlways, "InvalidSerializationVersion").error(err).detailf("Version", "%llx", v.versionWithFlags());
 			throw err;
 		}
 		if (v > currentProtocolVersion) {
@@ -290,7 +291,7 @@ struct _IncludeVersion {
 			// particular data structures (e.g. to support mismatches between client and server versions when the client
 			// must deserialize zookeeper and database structures)
 			auto err = incompatible_protocol_version();
-			TraceEvent(SevError, "FutureProtocolVersion").error(err).detailf("Version", "%llx", v);
+			TraceEvent(SevError, "FutureProtocolVersion").error(err).detailf("Version", "%llx", v.versionWithFlags());
 			throw err;
 		}
 		ar.setProtocolVersion(v);
@@ -773,23 +774,17 @@ private:
 };
 
 struct ISerializeSource {
-	virtual void serializePacketWriter(PacketWriter&, bool useObjectSerializer) const = 0;
-	virtual void serializeBinaryWriter(BinaryWriter&) const = 0;
+	virtual void serializePacketWriter(PacketWriter&) const = 0;
 	virtual void serializeObjectWriter(ObjectWriter&) const = 0;
 };
 
 template <class T, class V>
 struct MakeSerializeSource : ISerializeSource {
 	using value_type = V;
-	virtual void serializePacketWriter(PacketWriter& w, bool useObjectSerializer) const {
-		if (useObjectSerializer) {
-			ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));
-			writer.serialize(get()); // Writes directly into buffer supplied by |w|
-		} else {
-			static_cast<T const*>(this)->serialize(w);
-		}
+	virtual void serializePacketWriter(PacketWriter& w) const {
+		ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));
+		writer.serialize(get()); // Writes directly into buffer supplied by |w|
 	}
-	virtual void serializeBinaryWriter(BinaryWriter& w) const { static_cast<T const*>(this)->serialize(w); }
 	virtual value_type const& get() const = 0;
 };
 
@@ -801,27 +796,7 @@ struct SerializeSource : MakeSerializeSource<SerializeSource<T>, T> {
 	virtual void serializeObjectWriter(ObjectWriter& w) const {
 		w.serialize(value);
 	}
-	template <class Ar> void serialize(Ar& ar) const {
-		ar << value;
-	}
 	virtual T const& get() const { return value; }
-};
-
-template <class T>
-struct SerializeBoolAnd : MakeSerializeSource<SerializeBoolAnd<T>, T> {
-	using value_type = T;
-	bool b;
-	T const& value;
-	SerializeBoolAnd( bool b, T const& value ) : b(b), value(value) {}
-	template <class Ar> void serialize(Ar& ar) const { ar << b << value; }
-	virtual void serializeObjectWriter(ObjectWriter& w) const {
-		ASSERT(false);
-	}
-	virtual T const& get() const {
-		// This is only used for the streaming serializer
-		ASSERT(false);
-		return value;
-	}
 };
 
 #endif

@@ -180,10 +180,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 	ACTOR static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
 		loop {
-			wait( backupAgent->taskBucket->changePause(cx, true) );
-			wait( delay(30*deterministicRandom()->random01()) );
-			wait( backupAgent->taskBucket->changePause(cx, false) );
-			wait( delay(120*deterministicRandom()->random01()) );
+			wait(backupAgent->changePause(cx, true));
+			wait(delay(30 * deterministicRandom()->random01()));
+			wait(backupAgent->changePause(cx, false));
+			wait(delay(120 * deterministicRandom()->random01()));
 		}
 	}
 
@@ -250,6 +250,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					state Reference<IBackupContainer> lastBackupContainer;
 					state UID lastBackupUID;
 					state int resultWait = wait(backupAgent->waitBackup(cx, backupTag.tagName, false, &lastBackupContainer, &lastBackupUID));
+
+					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName).detail("Result", resultWait);
 
 					state bool restorable = false;
 					if(lastBackupContainer) {

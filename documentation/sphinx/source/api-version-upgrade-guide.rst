@@ -9,10 +9,15 @@ This document provides an overview of changes that an application developer may 
 
 For more details about API versions, see :ref:`api-versions`.
 
-.. _api-version-upgrade-guide-700:
+.. _api-version-upgrade-guide-630:
 
-API version 700
+API version 630
 ===============
+
+C bindings
+----------
+
+* The ``FDBKeyValue`` struct's ``key`` and ``value`` members have changed type from ``void*`` to ``uint8_t*``.
 
 .. _api-version-upgrade-guide-620:
 

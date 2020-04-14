@@ -47,7 +47,9 @@ Future<Void> tryBecomeLeader( ServerCoordinators const& coordinators,
 Future<Void> changeLeaderCoordinators( ServerCoordinators const& coordinators, Value const& forwardingInfo );
 // Inform all the coordinators that they have been replaced with a new connection string
 
+#ifndef __INTEL_COMPILER
 #pragma region Implementation
+#endif // __INTEL_COMPILER
 
 Future<Void> tryBecomeLeaderInternal( ServerCoordinators const& coordinators, Value const& proposedSerializedInterface, Reference<AsyncVar<Value>> const& outSerializedLeader, bool const& hasConnected, Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo );
 
@@ -59,13 +61,13 @@ Future<Void> tryBecomeLeader( ServerCoordinators const& coordinators,
 							  Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo)
 {
 	Reference<AsyncVar<Value>> serializedInfo(new AsyncVar<Value>);
-	Future<Void> m = tryBecomeLeaderInternal(
-		coordinators,
-		FLOW_KNOBS->USE_OBJECT_SERIALIZER ? ObjectWriter::toValue(proposedInterface, IncludeVersion()) : BinaryWriter::toValue(proposedInterface, IncludeVersion()),
-		serializedInfo, hasConnected, asyncPriorityInfo);
-	return m || asyncDeserialize(serializedInfo, outKnownLeader, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
+	Future<Void> m = tryBecomeLeaderInternal(coordinators, ObjectWriter::toValue(proposedInterface, IncludeVersion()),
+	                                         serializedInfo, hasConnected, asyncPriorityInfo);
+	return m || asyncDeserialize(serializedInfo, outKnownLeader);
 }
 
+#ifndef __INTEL_COMPILER
 #pragma endregion
+#endif // __INTEL_COMPILER
 
 #endif

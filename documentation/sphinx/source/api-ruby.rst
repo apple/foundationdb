@@ -24,7 +24,6 @@
 .. |max-retry-delay-database-option| replace:: :meth:`Database.options.set_transaction_max_retry_delay`
 .. |transaction-size-limit-database-option| replace:: :func:`Database.options.set_transaction_size_limit`
 .. |causal-read-risky-database-option| replace:: :meth:`Database.options.set_transaction_causal_read_risky`
-.. |include-port-in-address-database-option| replace:: :meth:`Database.options.set_transaction_include_port_in_address`
 .. |snapshot-ryw-enable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_disable`
 .. |transaction-logging-max-field-length-database-option| replace:: :meth:`Database.options.set_transaction_logging_max_field_length`
@@ -37,7 +36,6 @@
 .. |snapshot-ryw-enable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_disable`
 .. |causal-read-risky-transaction-option| replace:: :meth:`Transaction.options.set_causal_read_risky`
-.. |include-port-in-address-transaction-option| replace:: :meth:`Transaction.options.set_include_port_in_address`
 .. |transaction-logging-max-field-length-transaction-option| replace:: :meth:`Transaction.options.set_transaction_logging_max_field_length`
 .. |lazy-iterator-object| replace:: :class:`Enumerator`
 .. |key-meth| replace:: :meth:`Subspace.key`
@@ -95,7 +93,7 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 620
+    FDB.api_version 630
     db = FDB.open
 
 .. function:: open( cluster_file=nil ) -> Database
@@ -127,6 +125,10 @@ After requiring the ``FDB`` gem and selecting an API version, you probably want 
     .. method:: FDB.options.set_trace_format(format) -> nil
 
        |option-trace-format-blurb|
+
+    .. method:: FDB.options.set_trace_clock_source(source) -> nil
+
+       |option-trace-clock-source-blurb|
 
     .. method:: FDB.options.set_disable_multi_version_client_api() -> nil
 
@@ -211,21 +213,21 @@ Key selectors
 
     Creates a key selector with the given reference key, equality flag, and offset. It is usually more convenient to obtain a key selector with one of the following methods:
 
-        .. classmethod:: last_less_than(key) -> KeySelector
+    .. classmethod:: last_less_than(key) -> KeySelector
 
-            Returns a key selector referencing the last (greatest) key in the database less than the specified key.
+        Returns a key selector referencing the last (greatest) key in the database less than the specified key.
 
-        .. classmethod:: KeySelector.last_less_or_equal(key) -> KeySelector
+    .. classmethod:: KeySelector.last_less_or_equal(key) -> KeySelector
 
-            Returns a key selector referencing the last (greatest) key less than, or equal to, the specified key.
+        Returns a key selector referencing the last (greatest) key less than, or equal to, the specified key.
 
-        .. classmethod:: KeySelector.first_greater_than(key) -> KeySelector
+    .. classmethod:: KeySelector.first_greater_than(key) -> KeySelector
 
-            Returns a key selector referencing the first (least) key greater than the specified key.
+        Returns a key selector referencing the first (least) key greater than the specified key.
 
-        .. classmethod:: KeySelector.first_greater_or_equal(key) -> KeySelector
+    .. classmethod:: KeySelector.first_greater_or_equal(key) -> KeySelector
 
-            Returns a key selector referencing the first key greater than, or equal to, the specified key.
+        Returns a key selector referencing the first key greater than, or equal to, the specified key.
 
 .. method:: KeySelector.+(offset) -> KeySelector
 
@@ -281,16 +283,16 @@ A |database-blurb1| |database-blurb2|
 
     The ``options`` hash accepts the following optional parameters:
 
-        ``:limit``
-            Only the first ``limit`` keys (and their values) in the range will be returned.
+    ``:limit``
+        Only the first ``limit`` keys (and their values) in the range will be returned.
 
-        ``:reverse``
-            If ``true``, then the keys in the range will be returned in reverse order.
+    ``:reverse``
+        If ``true``, then the keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
-            If ``:limit`` is also specified, the *last* ``limit`` keys in the range will be returned in reverse order.
+        If ``:limit`` is also specified, the *last* ``limit`` keys in the range will be returned in reverse order.
 
-        ``:streaming_mode``
-            A valid |streaming-mode|, which provides a hint to FoundationDB about how to retrieve the specified range. This option should generally not be specified, allowing FoundationDB to retrieve the full range very efficiently.
+    ``:streaming_mode``
+        A valid |streaming-mode|, which provides a hint to FoundationDB about how to retrieve the specified range. This option should generally not be specified, allowing FoundationDB to retrieve the full range very efficiently.
 
 .. method:: Database.get_range(begin, end, options={}) {|kv| block } -> nil
 
@@ -392,10 +394,6 @@ Database options
 
     |option-db-causal-read-risky-blurb|
 
-.. method:: Database.options.set_transaction_include_port_in_address() -> nil
-
-    |option-db-include-port-in-address-blurb|
-
 .. method:: Database.options.set_transaction_logging_max_field_length(size_limit) -> nil
 
     |option-db-tr-transaction-logging-max-field-length-blurb|
@@ -459,16 +457,16 @@ Reading data
 
     The ``options`` hash accepts the following optional parameters:
 
-        ``:limit``
-            Only the first ``limit`` keys (and their values) in the range will be returned.
+    ``:limit``
+        Only the first ``limit`` keys (and their values) in the range will be returned.
 
-        ``:reverse``
-            If true, then the keys in the range will be returned in reverse order.
+    ``:reverse``
+        If ``true``, then the keys in the range will be returned in reverse order. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
-            If ``:limit`` is also specified, the *last* ``limit`` keys in the range will be returned in reverse order.
+        If ``:limit`` is also specified, the *last* ``limit`` keys in the range will be returned in reverse order.
 
-        ``:streaming_mode``
-            A valid |streaming-mode|, which provides a hint to FoundationDB about how the returned enumerable is likely to be used.  The default is ``:iterator``.
+    ``:streaming_mode``
+        A valid |streaming-mode|, which provides a hint to FoundationDB about how the returned enumerable is likely to be used.  The default is ``:iterator``.
 
 .. method:: Transaction.get_range(begin, end, options={}) {|kv| block } -> nil
 
@@ -521,7 +519,7 @@ Snapshot reads
 
     Like :meth:`Transaction.get_range_start_with`, but as a snapshot read.
 
-.. method:: Transaction.snapshot.get_read_version() -> Version
+.. method:: Transaction.snapshot.get_read_version() -> Int64Future
 
     Identical to :meth:`Transaction.get_read_version` (since snapshot and strictly serializable reads use the same read version).
 
@@ -730,7 +728,7 @@ Most applications should use the read version that FoundationDB determines autom
 
     |infrequent| Sets the database version that the transaction will read from the database.  The database cannot guarantee causal consistency if this method is used (the transaction's reads will be causally consistent only if the provided read version has that property).
 
-.. method:: Transaction.get_read_version() -> Version
+.. method:: Transaction.get_read_version() -> Int64Future
 
     |infrequent| Returns the transaction's read version.
 
@@ -741,6 +739,13 @@ Most applications should use the read version that FoundationDB determines autom
 .. method:: Transaction.get_verionstamp() -> String
 
     |infrequent| |transaction-get-versionstamp-blurb|
+
+Transaction misc functions
+--------------------------
+
+.. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
+
+    Get the estimated byte size of the given key range. Returns a :class:`Int64Future`.
 
 Transaction options
 -------------------
@@ -770,10 +775,6 @@ Transaction options
 .. method:: Transaction.options.set_causal_read_risky() -> nil
 
     |option-causal-read-risky-blurb|
-
-.. method:: Transaction.options.set_include_port_in_address() -> nil
-
-    |option-include-port-in-address-blurb|
 
 .. method:: Transaction.options.set_causal_write_risky() -> nil
 
@@ -952,7 +953,7 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
 
     An implementation quirk of :class:`Value` is that it will never evaluate to ``false``, even if its value is ``nil``. It is important to use ``if value.nil?`` rather than ``if ~value`` when checking to see if a key was not present in the database.
 
-.. class:: Version
+.. class:: Int64Future
 
     This type is a future :class:`Integer` object. Objects of this type respond to the same methods as objects of type :class:`Integer`, and may be passed to any method that expects a :class:`Integer`.
 
@@ -967,6 +968,7 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
     .. method:: FutureNil.wait() -> nil
 
         For a :class:`FutureNil` object returned by :meth:`Transaction.commit` or :meth:`Transaction.on_error`, you must call :meth:`FutureNil.wait`, which will return ``nil`` if the operation succeeds or raise an :exc:`FDB::Error` if an error occurred. Failure to call :meth:`FutureNil.wait` on a returned :class:`FutureNil` object means that any potential errors raised by the asynchronous operation that returned the object *will not be seen*, and represents a significant error in your code.
+
 
 .. _ruby streaming mode:
 
