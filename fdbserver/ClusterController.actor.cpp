@@ -3230,6 +3230,9 @@ ACTOR Future<Void> clusterController( Reference<ClusterConnectionFile> connFile,
 	state bool hasConnected = false;
 	loop {
 		try {
+			if (connFile->hasUnresolvedHostnames()) {
+				wait(connFile->resolveHostnames());
+			}
 			ServerCoordinators coordinators( connFile );
 			wait( clusterController( coordinators, currentCC, hasConnected, asyncPriorityInfo, locality ) );
 		} catch( Error &e ) {

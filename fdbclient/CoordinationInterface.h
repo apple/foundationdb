@@ -45,13 +45,18 @@ public:
 	ClusterConnectionString( std::string const& connectionString );
 	ClusterConnectionString( vector<NetworkAddress>, Key );
 	vector<NetworkAddress> const& coordinators() const { return coord; }
+	vector<NetworkAddress>& mutateCoordinators() { return coord; }
+	std::vector<Hostname> const& hostnames() const { return hosts; }
+	std::vector<Hostname>& mutableHostnames() { return hosts; }
 	Key clusterKey() const { return key; }
 	Key clusterKeyName() const { return keyDesc; }  // Returns the "name" or "description" part of the clusterKey (the part before the ':')
 	std::string toString() const;
 	static std::string getErrorString(std::string const& source, Error const& e);
+	Future<Void> resolveHostnames();
+
 private:
 	void parseKey( std::string const& key );
-
+	std::vector<Hostname> hosts;
 	vector<NetworkAddress> coord;
 	Key key, keyDesc;
 };
@@ -87,6 +92,9 @@ public:
 	bool fileContentsUpToDate() const;
 	bool fileContentsUpToDate(ClusterConnectionString &fileConnectionString) const;
 	void notifyConnected();
+	Future<Void> resolveHostnames();
+	bool hasUnresolvedHostnames();
+
 private:
 	ClusterConnectionString cs;
 	std::string filename;
@@ -175,7 +183,7 @@ class ClientCoordinators {
 public:
 	vector< ClientLeaderRegInterface > clientLeaderServers;
 	Key clusterKey;
-	Reference<ClusterConnectionFile> ccf; 
+	Reference<ClusterConnectionFile> ccf;
 
 	explicit ClientCoordinators( Reference<ClusterConnectionFile> ccf );
 	explicit ClientCoordinators( Key clusterKey, std::vector<NetworkAddress> coordinators );

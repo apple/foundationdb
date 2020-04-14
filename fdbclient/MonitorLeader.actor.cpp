@@ -133,12 +133,48 @@ void ClusterConnectionFile::setConnectionString( ClusterConnectionString const& 
 	writeFile();
 }
 
+bool ClusterConnectionFile::hasUnresolvedHostnames() {
+	return cs.hostnames().size() > 0;
+}
+
+Future<Void> ClusterConnectionFile::resolveHostnames() {
+	return cs.resolveHostnames();
+}
+
 std::string ClusterConnectionString::getErrorString( std::string const& source, Error const& e ) {
 	if( e.code() == error_code_connection_string_invalid ) {
 		return format("Invalid connection string `%s: %d %s", source.c_str(), e.code(), e.what());
 	}
 	else {
 		return format("Unexpected error parsing connection string `%s: %d %s", source.c_str(), e.code(), e.what());
+	}
+}
+
+ACTOR Future<Void> _resolveHostnames(ClusterConnectionString* self) {
+	std::vector<Future<Void>> fs;
+	for (auto const& hostName : self->mutableHostnames()) {
+		fs.push_back(map(INetworkConnections::net()->resolveTCPEndpoint(hostName.host, hostName.service),
+		                 [=](std::vector<NetworkAddress> const& addresses) -> Void {
+			                 NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
+			                 if (hostName.useTLS) addr.flags = NetworkAddress::FLAG_TLS;
+			                 self->mutateCoordinators().push_back(addr);
+			                 return Void();
+		                 }));
+	}
+	wait(waitForAll(fs));
+	self->mutableHostnames().clear();
+	std::sort(self->mutateCoordinators().begin(), self->mutateCoordinators().end());
+	if (std::unique(self->mutateCoordinators().begin(), self->mutateCoordinators().end()) !=
+	    self->mutateCoordinators().end())
+		throw connection_string_invalid();
+	return Void();
+}
+
+Future<Void> ClusterConnectionString::resolveHostnames() {
+	if (hosts.size() == 0) {
+		return Void();
+	} else {
+		return _resolveHostnames(this);
 	}
 }
 
@@ -173,8 +209,20 @@ ClusterConnectionString::ClusterConnectionString( std::string const& connectionS
 
 	parseKey(key);
 
-	coord = NetworkAddress::parseList(addrs);
-	ASSERT( coord.size() > 0 );  // parseList() always returns at least one address if it doesn't throw
+	std::string curAddr;
+	for (int p = 0; p <= addrs.size();) {
+		int pComma = addrs.find_first_of(',', p);
+		if (pComma == addrs.npos) pComma = addrs.size();
+		curAddr = addrs.substr(p, pComma - p);
+		if (Hostname::isHostname(curAddr)) {
+			hosts.push_back(Hostname::parse(curAddr));
+		} else {
+			coord.push_back(NetworkAddress::parse(curAddr));
+		}
+		p = pComma + 1;
+	}
+	ASSERT((coord.size() + hosts.size()) >
+	       0); // each address needs to be either an NetworkAddress or a Hostname that needs to be resolved later.
 
 	std::sort( coord.begin(), coord.end() );
 	// Check that there are no duplicate addresses
@@ -354,9 +402,8 @@ std::string ClusterConnectionString::toString() const {
 	return s;
 }
 
-ClientCoordinators::ClientCoordinators( Reference<ClusterConnectionFile> ccf )
-	: ccf(ccf)
-{
+ClientCoordinators::ClientCoordinators(Reference<ClusterConnectionFile> ccf) : ccf(ccf) {
+	ASSERT(!ccf->hasUnresolvedHostnames());
 	ClusterConnectionString cs = ccf->getConnectionString();
 	for(auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s)
 		clientLeaderServers.push_back( ClientLeaderRegInterface( *s ) );
@@ -513,6 +560,9 @@ Future<Void> monitorLeaderRemotely(Reference<ClusterConnectionFile> const& connF
 ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo ) {
 	state MonitorLeaderInfo info(connFile);
 	loop {
+		if (info.intermediateConnFile->hasUnresolvedHostnames()) {
+			wait(info.intermediateConnFile->resolveHostnames());
+		}
 		MonitorLeaderInfo _info = wait( monitorLeaderOneGeneration( connFile, outSerializedLeaderInfo, info ) );
 		info = _info;
 	}
