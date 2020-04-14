@@ -31,8 +31,8 @@
 #include <cstring>
 #include <deque>
 #include <random>
+#include "flow/TreeBenchmark.h"
 #include "flow/UnitTest.h"
-
 template <class Node>
 int ISGetHeight(Node* n){
 	if (!n) return 0;
@@ -137,7 +137,121 @@ TEST_CASE("/flow/IndexedSet/erase 400k of 1M") {
 	return Void();
 }
 
-/*TEST_CASE("/flow/IndexedSet/performance") {
+TEST_CASE("/flow/IndexedSet/random ops") {
+	for (int t = 0; t < 100; t++) {
+		IndexedSet<int, int> is;
+		int rr = deterministicRandom()->randomInt(0, 600) * deterministicRandom()->randomInt(0, 600);
+		for (int n = 0; n < rr; n++) {
+			if (deterministicRandom()->random01() < (double)is.sumTo(is.end()) / rr * 2)
+				is.erase(is.lower_bound(deterministicRandom()->randomInt(0, 10000000)));
+			else
+				is.insert(deterministicRandom()->randomInt(0, 10000000), 3);
+		}
+
+		int b = deterministicRandom()->randomInt(0, 10000000);
+		// int e = b + deterministicRandom()->randomInt(0, 10);
+		int e = deterministicRandom()->randomInt(0, 10000000);
+		if (e < b) std::swap(b, e);
+		auto ib = is.lower_bound(b);
+		auto ie = is.lower_bound(e);
+
+		int original_count = is.sumTo(is.end()) / 3;
+		int original_incount = is.sumRange(ib, ie) / 3;
+
+		// printf("\n#%d Erasing %d of %d items\n", t, original_incount, original_count);
+
+		is.erase(ib, ie);
+		is.testonly_assertBalanced();
+
+		int count = 0, incount = 0;
+		for (auto i : is) {
+			++count;
+			if (i >= b && i < e) {
+				// printf("Remaining item: %d (%d - %d)\n", i, b, e);
+				incount++;
+			}
+		}
+
+		// printf("%d items remain, totalling %d\n", count, is.sumTo(is.end()));
+		// printf("%d items remain in erased range\n", incount);
+
+		ASSERT(incount == 0);
+		ASSERT(count == original_count - original_incount);
+		ASSERT(is.sumTo(is.end()) == count * 3);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/IndexedSet/strings") {
+	Map<std::string, int> myMap;
+	std::map<std::string, int> aMap;
+	myMap["Hello"] = 1;
+	myMap["Planet"] = 5;
+	for (auto i = myMap.begin(); i != myMap.end(); ++i) aMap[i->key] = i->value;
+
+	ASSERT(myMap.find(std::string("Hello"))->value == 1);
+	ASSERT(myMap.find(std::string("World")) == myMap.end());
+	ASSERT(myMap["Hello"] == 1);
+
+	auto a = myMap.upper_bound("A")->key;
+	auto x = myMap.lower_bound("M")->key;
+
+	ASSERT((a + x) == (std::string) "HelloPlanet");
+
+	return Void();
+}
+
+template <typename K>
+struct IndexedSetHarness {
+	using map = IndexedSet<K, int>;
+	using result = typename map::iterator;
+	using key_type = K;
+
+	map s;
+
+	void insert(K const& k) { s.insert(K(k), 1); }
+	result find(K const& k) const { return s.find(k); }
+	result not_found() const { return s.end(); }
+	result begin() const { return s.begin(); }
+	result end() const { return s.end(); }
+	result lower_bound(K const& k) const { return s.lower_bound(k); }
+	result upper_bound(K const& k) const { return s.upper_bound(k); }
+	void erase(K const& k) { s.erase(k); }
+};
+
+TEST_CASE("performance/map/StringRef/IndexedSet") {
+	Arena arena;
+
+	IndexedSetHarness<StringRef> is;
+	treeBenchmark(is, [&arena]() { return randomStr(arena); });
+
+	return Void();
+}
+
+TEST_CASE("performance/map/StringRef/StdMap") {
+	Arena arena;
+
+	MapHarness<StringRef> is;
+	treeBenchmark(is, [&arena]() { return randomStr(arena); });
+
+	return Void();
+}
+
+TEST_CASE("performance/map/int/IndexedSet") {
+	IndexedSetHarness<int> is;
+	treeBenchmark(is, &randomInt);
+
+	return Void();
+}
+
+TEST_CASE("performance/map/int/StdMap") {
+	MapHarness<int> is;
+	treeBenchmark(is, &randomInt);
+
+	return Void();
+}
+
+TEST_CASE("performance/flow/IndexedSet/integers") {
 	std::vector<int> x;
 	for (int i = 0; i<1000000; i++)
 		x.push_back(deterministicRandom()->randomInt(0, 10000000));
@@ -151,7 +265,6 @@ TEST_CASE("/flow/IndexedSet/erase 400k of 1M") {
 	double end = timer();
 	double kps = x.size() / 1000.0 / (end - start);
 	printf("%0.1f Kinsert/sec\n", kps);
-	ASSERT(kps >= 500);                                           //< Or something?
 
 	start = timer();
 	for (int i = 0; i<x.size(); i++)
@@ -159,7 +272,6 @@ TEST_CASE("/flow/IndexedSet/erase 400k of 1M") {
 	end = timer();
 	kps = x.size() / 1000.0 / (end - start);
 	printf("%0.1f Kfind/sec\n", kps);
-	ASSERT(kps >= 500);
 
 	{
 		//std::set<int> ss;
@@ -204,87 +316,41 @@ TEST_CASE("/flow/IndexedSet/erase 400k of 1M") {
 
 	printf("%0.1f Kerase/sec\n", x.size() / 1000.0 / (end - start));
 	is.testonly_assertBalanced();
-	for (int i = 0; i<x.size() / 2; i++)
+	for (int i = 0; i < x.size() / 2; i++) {
 		ASSERT(is.find(x[i]) == is.end());
-}*/
-
-TEST_CASE("/flow/IndexedSet/random ops") {
-	for (int t = 0; t<100; t++) {
-		IndexedSet<int, int> is;
-		int rr = deterministicRandom()->randomInt(0, 600) * deterministicRandom()->randomInt(0, 600);
-		for (int n = 0; n<rr; n++) {
-			if (deterministicRandom()->random01() < (double)is.sumTo(is.end()) / rr * 2)
-				is.erase(is.lower_bound(deterministicRandom()->randomInt(0, 10000000)));
-			else
-				is.insert(deterministicRandom()->randomInt(0, 10000000), 3);
-		}
-
-		int b = deterministicRandom()->randomInt(0, 10000000);
-		//int e = b + deterministicRandom()->randomInt(0, 10);
-		int e = deterministicRandom()->randomInt(0, 10000000);
-		if (e<b) std::swap(b, e);
-		auto ib = is.lower_bound(b);
-		auto ie = is.lower_bound(e);
-
-		int original_count = is.sumTo(is.end())/3;
-		int original_incount = is.sumRange(ib, ie)/3;
-
-		//printf("\n#%d Erasing %d of %d items\n", t, original_incount, original_count);
-
-		is.erase(ib, ie);
-		is.testonly_assertBalanced();
-
-		int count = 0, incount = 0;
-		for (auto i : is) {
-			++count;
-			if (i >= b && i < e) { 
-				//printf("Remaining item: %d (%d - %d)\n", i, b, e); 
-				incount++; 
-			}
-		}
-
-		//printf("%d items remain, totalling %d\n", count, is.sumTo(is.end()));
-		//printf("%d items remain in erased range\n", incount);
-
-		ASSERT(incount == 0);
-		ASSERT(count == original_count - original_incount);
-		ASSERT(is.sumTo(is.end()) == count*3);
 	}
+
 	return Void();
 }
 
-TEST_CASE("/flow/IndexedSet/strings") {
+TEST_CASE("performance/flow/IndexedSet/strings") {
+	constexpr size_t count = 1000000;
 	Map< std::string, int > myMap;
 	std::map< std::string, int > aMap;
-	myMap["Hello"] = 1;
-	myMap["Planet"] = 5;
-	for (auto i = myMap.begin(); i != myMap.end(); ++i)
-		aMap[i->key] = i->value;
+	double start, end;
+	int tt = 0;
 
-	ASSERT(myMap.find("Hello")->value == 1);
-	ASSERT(myMap.find("World") == myMap.end());
-	ASSERT(myMap["Hello"] == 1);
+	std::string const hello{ "Hello" };
+	myMap[hello] = 1;
+	aMap["Hello"] = 1;
 
-	auto a = myMap.upper_bound("A")->key;
-	auto x = myMap.lower_bound("M")->key;
+	start = timer();
 
-	ASSERT((a + x) == (std::string)"HelloPlanet");
+	for (size_t i = 0; i < count; i++) {
+		tt += myMap.find(hello)->value;
+	}
+	end = timer();
 
-	/* This was a performance test:
+	ASSERT(tt == count);
 
-		double start = timer();
-		volatile int tt=0;
-		for(int i=0; i<1000000; i++)
-		tt += myMap.find( "Hello" )->value;
-		double end = timer();
-		printf("%0.1f Map.KfindStr/sec\n", 1000000/1000.0/(end-start));
+	printf("%0.1f Map.KfindStr/sec\n", count / 1000.0 / (end - start));
 
-		start = timer();
-		for(int i=0; i<1000000; i++)
-		aMap.find( "Hello" );
-		end = timer();
-		printf("%0.1f std::map.KfindStr/sec\n", 1000000/1000.0/(end-start));
-	*/
+	start = timer();
+	for (size_t i = 0; i < count; i++) {
+		aMap.find(hello);
+	}
+	end = timer();
+	printf("%0.1f std::map.KfindStr/sec\n", count / 1000.0 / (end - start));
 
 	return Void();
 }
