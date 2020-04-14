@@ -1488,8 +1488,8 @@ ACTOR static Future<Void> transactionStarter(
 		transactionCount += transactionsStarted[0] + transactionsStarted[1];
 		batchTransactionCount += batchTotalStarted;
 
-		normalRateInfo.updateBudget(systemTotalStarted + normalTotalStarted, transactionQueue.empty() || transactionQueue.top().first.priority() < GetReadVersionRequest::PRIORITY_DEFAULT, elapsed);
-		batchRateInfo.updateBudget(systemTotalStarted + normalTotalStarted + batchTotalStarted, transactionQueue.empty(), elapsed);
+		normalRateInfo.updateBudget(systemTotalStarted + normalTotalStarted, systemQueue.empty() && defaultQueue.empty(), elapsed);
+		batchRateInfo.updateBudget(systemTotalStarted + normalTotalStarted + batchTotalStarted, systemQueue.empty() && defaultQueue.empty() && batchQueue.empty(), elapsed);
 
 		if (debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.masterProxyServerCore.Broadcast");
