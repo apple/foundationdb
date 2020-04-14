@@ -39,9 +39,7 @@ public:
 	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
 	                                                    KeyRangeRef kr) const = 0;
 
-	explicit SpecialKeyRangeBaseImpl(KeyRef start, KeyRef end) {
-		range = KeyRangeRef(range.arena(), KeyRangeRef(start, end));
-	}
+	explicit SpecialKeyRangeBaseImpl(KeyRangeRef kr) : range(kr) {}
 	KeyRangeRef getKeyRange() const { return range; }
 	ACTOR Future<Void> normalizeKeySelectorActor(const SpecialKeyRangeBaseImpl* pkrImpl,
 	                                             Reference<ReadYourWritesTransaction> ryw, KeySelector* ks);
@@ -92,7 +90,7 @@ private:
 // Currently, the conflicting keyranges returned are original read_conflict_ranges or union of them.
 class ConflictingKeysImpl : public SpecialKeyRangeBaseImpl {
 public:
-	explicit ConflictingKeysImpl(KeyRef start, KeyRef end);
+	explicit ConflictingKeysImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
 	                                            KeyRangeRef kr) const override;
 };

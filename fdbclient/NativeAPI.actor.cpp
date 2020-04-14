@@ -539,7 +539,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
     specialKeySpace(std::make_shared<SpecialKeySpace>(normalKeys.begin, specialKeys.end)),
-    cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeysRange.begin, conflictingKeysRange.end)) {
+    cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeysRange)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
 

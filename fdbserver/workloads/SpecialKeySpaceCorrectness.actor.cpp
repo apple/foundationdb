@@ -27,7 +27,7 @@
 
 class SKSCTestImpl : public SpecialKeyRangeBaseImpl {
 public:
-	explicit SKSCTestImpl(KeyRef start, KeyRef end) : SpecialKeyRangeBaseImpl(start, end) {}
+	explicit SKSCTestImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
 	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
 	                                                    KeyRangeRef kr) const {
 		ASSERT(range.contains(kr));
@@ -82,7 +82,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				Key startKey(baseKey + "/");
 				Key endKey(baseKey + "/\xff");
 				self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
-				self->impls.push_back(std::make_shared<SKSCTestImpl>(startKey, endKey));
+				self->impls.push_back(std::make_shared<SKSCTestImpl>(KeyRangeRef(startKey, endKey)));
 				// Although there are already ranges registered, the testing range will replace them
 				cx->specialKeySpace->registerKeyRange(self->keys.back(), self->impls.back().get());
 				// generate keys in each key range

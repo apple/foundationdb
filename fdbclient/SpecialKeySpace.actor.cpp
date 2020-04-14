@@ -243,7 +243,7 @@ Future<Optional<Value>> SpecialKeySpace::get(Reference<ReadYourWritesTransaction
 	return getActor(this, ryw, key);
 }
 
-ConflictingKeysImpl::ConflictingKeysImpl(KeyRef start, KeyRef end) : SpecialKeyRangeBaseImpl(start, end) {}
+ConflictingKeysImpl::ConflictingKeysImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
 
 Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(Reference<ReadYourWritesTransaction> ryw,
                                                                  KeyRangeRef kr) const {
@@ -267,8 +267,8 @@ Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(Reference<ReadY
 
 class SpecialKeyRangeTestImpl : public SpecialKeyRangeBaseImpl {
 public:
-	explicit SpecialKeyRangeTestImpl(KeyRef start, KeyRef end, const std::string& prefix, int size)
-	  : SpecialKeyRangeBaseImpl(start, end), prefix(prefix), size(size) {
+	explicit SpecialKeyRangeTestImpl(KeyRangeRef kr, const std::string& prefix, int size)
+	  : SpecialKeyRangeBaseImpl(kr), prefix(prefix), size(size) {
 		ASSERT(size > 0);
 		for (int i = 0; i < size; ++i) {
 			kvs.push_back_deep(kvs.arena(),
@@ -299,9 +299,9 @@ private:
 
 TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	SpecialKeySpace pks(normalKeys.begin, normalKeys.end);
-	SpecialKeyRangeTestImpl pkr1(LiteralStringRef("/cat/"), LiteralStringRef("/cat/\xff"), "small", 10);
-	SpecialKeyRangeTestImpl pkr2(LiteralStringRef("/dog/"), LiteralStringRef("/dog/\xff"), "medium", 100);
-	SpecialKeyRangeTestImpl pkr3(LiteralStringRef("/pig/"), LiteralStringRef("/pig/\xff"), "large", 1000);
+	SpecialKeyRangeTestImpl pkr1(KeyRangeRef(LiteralStringRef("/cat/"), LiteralStringRef("/cat/\xff")), "small", 10);
+	SpecialKeyRangeTestImpl pkr2(KeyRangeRef(LiteralStringRef("/dog/"), LiteralStringRef("/dog/\xff")), "medium", 100);
+	SpecialKeyRangeTestImpl pkr3(KeyRangeRef(LiteralStringRef("/pig/"), LiteralStringRef("/pig/\xff")), "large", 1000);
 	pks.registerKeyRange(pkr1.getKeyRange(), &pkr1);
 	pks.registerKeyRange(pkr2.getKeyRange(), &pkr2);
 	pks.registerKeyRange(pkr3.getKeyRange(), &pkr3);
