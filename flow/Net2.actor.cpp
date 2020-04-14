@@ -171,7 +171,7 @@ public:
 
 	INetworkConnections *network;  // initially this, but can be changed
 
-	int64_t tsc_begin, tsc_end;
+	int64_t tscBegin, tscEnd;
 	double taskBegin;
 	TaskPriority currentTaskID;
 	uint64_t tasksIssued;
@@ -195,7 +195,7 @@ public:
 	std::priority_queue<DelayedTask, std::vector<DelayedTask>> timers;
 
 	void checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, TaskPriority priority);
-	bool check_yield(TaskPriority taskId, bool isRunLoop);
+	bool check_yield(TaskPriority taskId, int64_t tscNow);
 	void processThreadReady();
 	void trackMinPriority( TaskPriority minTaskID, double now );
 	void stopImmediately() {
@@ -863,7 +863,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	  stopped(false),
 	  tasksIssued(0),
 	  // Until run() is called, yield() will always yield
-	  tsc_begin(0), tsc_end(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield),
+	  tscBegin(0), tscEnd(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield),
 	  lastMinTaskID(TaskPriority::Zero),
 	  numYields(0),
 	  tlsInitialized(false),
@@ -1047,13 +1047,14 @@ void Net2::run() {
 		++countRunLoop;
 
 		if (runFunc) {
-			tsc_begin = __rdtsc();
+			tscBegin = __rdtsc();
 			taskBegin = nnow;
 			trackMinPriority(TaskPriority::RunCycleFunction, taskBegin);
 			runFunc();
 			double taskEnd = timer_monotonic();
+			trackMinPriority(TaskPriority::RunLoop, taskEnd);
 			countLaunchTime += taskEnd - taskBegin;
-			checkForSlowTask(tsc_begin, __rdtsc(), taskEnd - taskBegin, TaskPriority::RunCycleFunction);
+			checkForSlowTask(tscBegin, __rdtsc(), taskEnd - taskBegin, TaskPriority::RunCycleFunction);
 		}
 
 		double sleepTime = 0;
@@ -1078,16 +1079,17 @@ void Net2::run() {
 			}
 		}
 
-		tsc_begin = __rdtsc();
+		tscBegin = __rdtsc();
 		taskBegin = timer_monotonic();
 		trackMinPriority(TaskPriority::ASIOReactor, taskBegin);
 		reactor.react();
 		
 		updateNow();
 		double now = this->currentTime;
+		trackMinPriority(TaskPriority::RunLoop, now);
 
 		countReactTime += now - taskBegin;
-		checkForSlowTask(tsc_begin, __rdtsc(), now - taskBegin, TaskPriority::ASIOReactor);
+		checkForSlowTask(tscBegin, __rdtsc(), now - taskBegin, TaskPriority::ASIOReactor);
 
 		if ((now-nnow) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && nondeterministicRandom()->random01() < (now-nnow)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopTop").detail("Elapsed", now - nnow);
@@ -1104,8 +1106,8 @@ void Net2::run() {
 
 		processThreadReady();
 
-		tsc_begin = __rdtsc();
-		tsc_end = tsc_begin + FLOW_KNOBS->TSC_YIELD_TIME;
+		tscBegin = __rdtsc();
+		tscEnd = tscBegin + FLOW_KNOBS->TSC_YIELD_TIME;
 		taskBegin = timer_monotonic();
 		numYields = 0;
 		TaskPriority minTaskID = TaskPriority::Max;
@@ -1115,8 +1117,11 @@ void Net2::run() {
 		while (!ready.empty()) {
 			++countTasks;
 			currentTaskID = ready.top().taskID;
+			if(currentTaskID < minTaskID) {
+				trackMinPriority(currentTaskID, taskBegin);
+				minTaskID = currentTaskID;
+			}
 			priorityMetric = static_cast<int64_t>(currentTaskID);
-			minTaskID = std::min(minTaskID, currentTaskID);
 			Task* task = ready.top().task;
 			ready.pop();
 
@@ -1128,16 +1133,23 @@ void Net2::run() {
 				TraceEvent(SevError, "TaskError").error(unknown_error());
 			}
 
-			if (check_yield(TaskPriority::Max, true)) {
+			double tscNow = __rdtsc();
+			double newTaskBegin = timer_monotonic();
+			if (check_yield(TaskPriority::Max, tscNow)) {
+				checkForSlowTask(tscBegin, tscNow, newTaskBegin - taskBegin, currentTaskID);
 				FDB_TRACE_PROBE(run_loop_yield);
 				++countYields;
-                break;
+				break;
 			}
+
+			taskBegin = newTaskBegin;
+			tscBegin = tscNow;
 		}
+
+		trackMinPriority(TaskPriority::RunLoop, taskBegin);
+
 		queueSize = ready.size();
 		FDB_TRACE_PROBE(run_loop_done, queueSize);
-
-		trackMinPriority(minTaskID, now);
 
 #if defined(__linux__)
 		if(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0) {
@@ -1250,12 +1262,8 @@ void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, T
 	}
 }
 
-bool Net2::check_yield( TaskPriority taskID, bool isRunLoop ) {
-	if(!isRunLoop && numYields > 0) {
-		++numYields;
-		return true;
-	}
-
+bool Net2::check_yield( TaskPriority taskID, int64_t tscNow ) {
+	// SOMEDAY: Yield if there are lots of higher priority tasks queued?
 	if ((g_stackYieldLimit) && ( (intptr_t)&taskID < g_stackYieldLimit )) {
 		++countYieldBigStack;
 		return true;
@@ -1268,35 +1276,31 @@ bool Net2::check_yield( TaskPriority taskID, bool isRunLoop ) {
 		return true;
 	}
 
-	// SOMEDAY: Yield if there are lots of higher priority tasks queued?
-	int64_t tsc_now = __rdtsc();
-	double newTaskBegin = timer_monotonic();
-	if (tsc_now < tsc_begin) {
+	if (tscNow < tscBegin) {
 		return true;
 	}
 
-	if(isRunLoop) {
-		checkForSlowTask(tsc_begin, tsc_now, newTaskBegin-taskBegin, currentTaskID);
-	}
-
-	if (tsc_now > tsc_end) {
+	if (tscNow > tscEnd) {
 		++numYields;
 		return true;
 	}
 
-	taskBegin = newTaskBegin;
-	tsc_begin = tsc_now;
 	return false;
 }
 
 bool Net2::check_yield( TaskPriority taskID ) {
-	return check_yield(taskID, false);
+	if(numYields > 0) {
+		++numYields;
+		return true;
+	}
+
+	return check_yield(taskID, __rdtsc());
 }
 
 Future<class Void> Net2::yield( TaskPriority taskID ) {
 	++countYieldCalls;
 	if (taskID == TaskPriority::DefaultYield) taskID = currentTaskID;
-	if (check_yield(taskID, false)) {
+	if (check_yield(taskID)) {
 		++countYieldCallsTrue;
 		return delay(0, taskID);
 	}
