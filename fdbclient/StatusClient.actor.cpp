@@ -285,6 +285,9 @@ void JSONDoc::mergeValueInto(json_spirit::mValue &dst, const json_spirit::mValue
 // Will not throw, will just return non-present Optional if error
 ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<ClusterConnectionFile> f, bool *quorum_reachable, int *coordinatorsFaultTolerance) {
 	try {
+		if (f->hasUnresolvedHostnames()) {
+			wait(f->resolveHostnames());
+		}
 		state ClientCoordinators coord(f);
 		state StatusObject statusObj;
 
@@ -328,6 +331,9 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 ACTOR Future<StatusObject> clientStatusFetcher(Reference<ClusterConnectionFile> f, StatusArray *messages, bool *quorum_reachable, int *coordinatorsFaultTolerance) {
 	state StatusObject statusObj;
 
+	if (f->hasUnresolvedHostnames()) {
+		wait(f->resolveHostnames());
+	}
 	Optional<StatusObject> coordsStatusObj = wait(clientCoordinatorsStatusFetcher(f, quorum_reachable, coordinatorsFaultTolerance));
 	if (coordsStatusObj.present())
 	{

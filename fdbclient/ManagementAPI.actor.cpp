@@ -999,8 +999,13 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 			TEST(old.clusterKeyName() != conn.clusterKeyName());  // Quorum change with new name
 			TEST(old.clusterKeyName() == conn.clusterKeyName()); // Quorum change with unchanged name
 
+			state Reference<ClusterConnectionFile> connFile =
+			    Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn));
+			if (connFile->hasUnresolvedHostnames()) {
+				wait(connFile->resolveHostnames());
+			}
+			ClientCoordinators coord(connFile);
 			vector<Future<Optional<LeaderInfo>>> leaderServers;
-			ClientCoordinators coord( Reference<ClusterConnectionFile>( new ClusterConnectionFile( conn ) ) );
 			for( int i = 0; i < coord.clientLeaderServers.size(); i++ )
 				leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskPriority::CoordinationReply ) );
 
@@ -1079,6 +1084,9 @@ struct AutoQuorumChange : IQuorumChange {
 		if (oldCoordinators.size() % 2 != 1) return false;
 
 		// Check availability
+		if (ccf->hasUnresolvedHostnames()) {
+			wait(ccf->resolveHostnames());
+		}
 		ClientCoordinators coord(ccf);
 		vector<Future<Optional<LeaderInfo>>> leaderServers;
 		for( int i = 0; i < coord.clientLeaderServers.size(); i++ )

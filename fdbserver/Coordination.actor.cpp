@@ -84,6 +84,7 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local)
 ServerCoordinators::ServerCoordinators( Reference<ClusterConnectionFile> cf )
 	: ClientCoordinators(cf)
 {
+	ASSERT(!ccf->hasUnresolvedHostnames());
 	ClusterConnectionString cs = ccf->getConnectionString();
 	for(auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s) {
 		leaderElectionServers.push_back( LeaderElectionRegInterface( *s ) );

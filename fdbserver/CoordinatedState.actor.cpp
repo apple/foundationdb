@@ -321,4 +321,13 @@ MovableCoordinatedState::~MovableCoordinatedState() {
 Future<Value> MovableCoordinatedState::read() { return MovableCoordinatedStateImpl::read(impl); }
 Future<Void> MovableCoordinatedState::onConflict() { return impl->onConflict(); }
 Future<Void> MovableCoordinatedState::setExclusive(Value v) { return impl->setExclusive(v); }
-Future<Void> MovableCoordinatedState::move( ClusterConnectionString const& nc ) { return MovableCoordinatedStateImpl::move(impl, nc); }
+Future<Void> MovableCoordinatedState::move(ClusterConnectionString const& nc) {
+	if (nc.hostnames().size() == 0) {
+		return MovableCoordinatedStateImpl::move(impl, nc);
+	} else {
+		// Explicit template needed for some reason.
+		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
+		    (const_cast<ClusterConnectionString&>(nc)).resolveHostnames(),
+		    [=](Void _) -> Future<Void> { return MovableCoordinatedStateImpl::move(impl, nc); });
+	}
+}

@@ -24,6 +24,7 @@
 
 #include <array>
 #include <string>
+#include <regex>
 #include <stdint.h>
 #include <variant>
 #include "boost/asio.hpp"
@@ -120,6 +121,28 @@ inline TaskPriority incrementPriorityIfEven(TaskPriority p) {
 class Void;
 
 template<class T> class Optional;
+
+struct Hostname {
+	std::string host;
+	std::string service; // decimal port number
+	bool useTLS;
+
+	Hostname(std::string host, std::string service, bool useTLS) : host(host), service(service), useTLS(useTLS) {}
+
+	// Only allow hostnames in following forms:
+	//    host.name:1234
+	//    host-name:1234
+	//    host-name_part1.host-name_part2:1234
+	static bool isHostname(std::string& s) {
+		std::regex validation("^([\\w\\-]+\\.?)+:([\\d]+){1,}(:tls)?$");
+		std::regex ipv4Validation("^([\\d]{1,3}\\.?){4,}:([\\d]+){1,}(:tls)?$");
+		return !std::regex_match(s, ipv4Validation) && std::regex_match(s, validation);
+	}
+
+	static Hostname parse(std::string const& str);
+
+	std::string toString() { return format("%s:%s", host, service); }
+};
 
 struct IPAddress {
 	typedef boost::asio::ip::address_v6::bytes_type IPAddressStore;

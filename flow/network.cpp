@@ -63,6 +63,24 @@ bool IPAddress::isValid() const {
 	return boost::get<uint32_t>(addr) != 0;
 }
 
+Hostname Hostname::parse(std::string const& str) {
+	if (str.empty()) {
+		throw connection_string_invalid();
+	}
+
+	bool isTLS = false;
+	std::string f;
+	if (str.size() > 4 && strcmp(str.c_str() + str.size() - 4, ":tls") == 0) {
+		isTLS = true;
+		f = str.substr(0, str.size() - 4);
+	} else {
+		f = str;
+	}
+	auto colonPos = str.find_first_of(":");
+	return Hostname(str.substr(0, colonPos), str.substr(colonPos + 1), isTLS);
+}
+
+// Change this function to handle `s` being a hostname, see Net2::resolveTCPEndpoint
 NetworkAddress NetworkAddress::parse( std::string const& s ) {
 	if (s.empty()) {
 		throw connection_string_invalid();
