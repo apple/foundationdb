@@ -13,4 +13,3 @@ add_custom_command(OUTPUT ${out_file}
   DEPENDS ${SRCS} TraceLogHelper
   COMMENT "Compile TestHarness" VERBATIM)
 add_custom_target(TestHarness DEPENDS ${out_file})
-set(TestHarnesExe "${out_file}" PARENT_SCOPE)
