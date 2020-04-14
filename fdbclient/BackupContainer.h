@@ -62,6 +62,12 @@ protected:
 
 // Structures for various backup components
 
+// Mutation log version written by old FileBackupAgent
+static const uint32_t BACKUP_AGENT_MLOG_VERSION = 2001;
+
+// Mutation log version written by BackupWorker
+static const uint32_t PARTITIONED_MLOG_VERSION = 4110;
+
 struct LogFile {
 	Version beginVersion;
 	Version endVersion;
@@ -69,15 +75,21 @@ struct LogFile {
 	std::string fileName;
 	int64_t fileSize;
 	int tagId = -1; // Log router tag. Non-negative for new backup format.
+	int totalTags = -1; // Total number of log router tags.
 
 	// Order by beginVersion, break ties with endVersion
 	bool operator< (const LogFile &rhs) const {
 		return beginVersion == rhs.beginVersion ? endVersion < rhs.endVersion : beginVersion < rhs.beginVersion;
 	}
 
-	// Returns if two log files have the same content by comparing version range and tag ID.
-	bool sameContent(const LogFile& rhs) const {
-		return beginVersion == rhs.beginVersion && endVersion == rhs.endVersion && tagId == rhs.tagId;
+	// Returns if this log file contains a subset of content of the given file
+	// by comparing version range and tag ID.
+	bool isSubset(const LogFile& rhs) const {
+		return beginVersion >= rhs.beginVersion && endVersion <= rhs.endVersion && tagId == rhs.tagId;
+	}
+
+	bool isPartitionedLog() const {
+		return tagId >= 0 && tagId < totalTags;
 	}
 
 	std::string toString() const {
@@ -166,6 +178,7 @@ struct BackupDescription {
 	// The minimum version which this backup can be used to restore to
 	Optional<Version> minRestorableVersion;
 	std::string extendedDetail;  // Freeform container-specific info.
+	bool partitioned; // If this backup contains partitioned mutation logs.
 
 	// Resolves the versions above to timestamps using a given database's TimeKeeper data.
 	// toString will use this information if present.
@@ -214,7 +227,7 @@ public:
 
 	// Open a tagged log file for writing, where tagId is the log router tag's id.
 	virtual Future<Reference<IBackupFile>> writeTaggedLogFile(Version beginVersion, Version endVersion, int blockSize,
-	                                                          uint16_t tagId) = 0;
+	                                                          uint16_t tagId, int totalTags) = 0;
 
 	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
 	// snapshot of the key ranges this backup is targeting.

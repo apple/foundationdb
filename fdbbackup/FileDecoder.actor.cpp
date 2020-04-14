@@ -28,6 +28,11 @@
 #include "fdbclient/MutationList.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
+#include "flow/actorcompiler.h" // has to be last include
+
+#define SevDecodeInfo SevVerbose
+
+extern bool g_crashOnError;
 
 namespace file_converter {
 
@@ -35,6 +40,7 @@ void printDecodeUsage() {
 	std::cout << "\n"
 	             "  -r, --container   Container URL.\n"
 	             "  -i, --input FILE  Log file to be decoded.\n"
+	             "  --crash           Crash on serious error.\n"
 	             "\n";
 	return;
 }
@@ -86,6 +92,10 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 
 		case OPT_CONTAINER:
 			param->container_url = args->OptionArg();
+			break;
+
+		case OPT_CRASHONERROR:
+			g_crashOnError = true;
 			break;
 
 		case OPT_INPUT_FILE:
@@ -160,7 +170,12 @@ std::vector<MutationRef> decode_value(const StringRef& value) {
 
 	reader.consume<uint64_t>(); // Consume the includeVersion
 	uint32_t val_length = reader.consume<uint32_t>();
-	ASSERT(val_length == value.size() - sizeof(uint64_t) - sizeof(uint32_t));
+	if (val_length != value.size() - sizeof(uint64_t) - sizeof(uint32_t)) {
+		TraceEvent(SevError, "ValueError")
+		    .detail("ValueLen", val_length)
+		    .detail("ValueSize", value.size())
+		    .detail("Value", printable(value));
+	}
 
 	std::vector<MutationRef> mutations;
 	while (1) {
@@ -204,10 +219,16 @@ struct VersionedMutations {
  */
 struct DecodeProgress {
 	DecodeProgress() = default;
-	DecodeProgress(const LogFile& file) : file(file) {}
+	DecodeProgress(const LogFile& file, std::vector<std::tuple<Arena, Version, int32_t, StringRef>> values)
+	  : file(file), keyValues(values) {}
 
-	// If there are no more mutations to pull.
-	bool finished() { return eof && keyValues.empty(); }
+	// If there are no more mutations to pull from the file.
+	// However, we could have unfinished version in the buffer when EOF is true,
+	// which means we should look for data in the next file. The caller
+	// should call getUnfinishedBuffer() to get these left data.
+	bool finished() { return (eof && keyValues.empty()) || (leftover && !keyValues.empty()); }
+
+	std::vector<std::tuple<Arena, Version, int32_t, StringRef>>&& getUnfinishedBuffer() { return std::move(keyValues); }
 
 	// Returns all mutations of the next version in a batch.
 	Future<VersionedMutations> getNextBatch() { return getNextBatchImpl(this); }
@@ -216,54 +237,75 @@ struct DecodeProgress {
 
 	// The following are private APIs:
 
+	// Returns true if value contains complete data.
+	bool isValueComplete(StringRef value) {
+		StringRefReader reader(value, restore_corrupted_data());
+
+		reader.consume<uint64_t>(); // Consume the includeVersion
+		uint32_t val_length = reader.consume<uint32_t>();
+		return val_length == value.size() - sizeof(uint64_t) - sizeof(uint32_t);
+	}
+
 	// PRECONDITION: finished() must return false before calling this function.
 	// Returns the next batch of mutations along with the arena backing it.
+	// Note the returned batch can be empty when the file has unfinished
+	// version batch data that are in the next file.
 	ACTOR static Future<VersionedMutations> getNextBatchImpl(DecodeProgress* self) {
 		ASSERT(!self->finished());
 
-		state std::pair<Arena, KeyValueRef> arena_kv = self->keyValues[0];
-
-		// decode this batch's version
-		state std::pair<Version, int32_t> version_part = decode_key(arena_kv.second.key);
-		ASSERT(version_part.second == 0); // first part number must be 0.
-
-		// decode next versions, check if they are continuous parts
-		state int idx = 1; // next kv pair in "keyValues"
-		state int bufSize = arena_kv.second.value.size();
-		state int lastPart = 0;
 		loop {
-			// Try to decode another block if needed
-			if (idx == self->keyValues.size()) {
+			if (self->keyValues.size() <= 1) {
+				// Try to decode another block when less than one left
 				wait(readAndDecodeFile(self));
 			}
-			if (idx == self->keyValues.size()) break;
 
-			std::pair<Version, int32_t> next_version_part = decode_key(self->keyValues[idx].second.key);
-			if (version_part.first != next_version_part.first) break;
+			auto& tuple = self->keyValues[0];
+			ASSERT(std::get<2>(tuple) == 0); // first part number must be 0.
 
-			if (lastPart + 1 != next_version_part.second) {
-				TraceEvent("DecodeError").detail("Part1", lastPart).detail("Part2", next_version_part.second);
-				throw restore_corrupted_data();
+			// decode next versions, check if they are continuous parts
+			int idx = 1; // next kv pair in "keyValues"
+			int bufSize = std::get<3>(tuple).size();
+			for (int lastPart = 0; idx < self->keyValues.size(); idx++, lastPart++) {
+				if (idx == self->keyValues.size()) break;
+
+				auto next_tuple = self->keyValues[idx];
+				if (std::get<1>(tuple) != std::get<1>(next_tuple)) {
+					break;
+				}
+
+				if (lastPart + 1 != std::get<2>(next_tuple)) {
+					TraceEvent("DecodeError").detail("Part1", lastPart).detail("Part2", std::get<2>(next_tuple));
+					throw restore_corrupted_data();
+				}
+				bufSize += std::get<3>(next_tuple).size();
 			}
-			bufSize += self->keyValues[idx].second.value.size();
-			idx++;
-			lastPart++;
-		}
 
-		VersionedMutations m;
-		m.version = version_part.first;
-		if (idx > 1) {
-			// Stitch parts into one and then decode one by one
-			Standalone<StringRef> buf = self->combineValues(idx, bufSize);
-			m.mutations = decode_value(buf);
-			m.arena = buf.arena();
-		} else {
-			m.mutations = decode_value(arena_kv.second.value);
-			m.arena = arena_kv.first;
+			VersionedMutations m;
+			m.version = std::get<1>(tuple);
+			TraceEvent("Decode").detail("Version", m.version).detail("Idx", idx).detail("Q", self->keyValues.size());
+			StringRef value = std::get<3>(tuple);
+			if (idx > 1) {
+				// Stitch parts into one and then decode one by one
+				Standalone<StringRef> buf = self->combineValues(idx, bufSize);
+				value = buf;
+				m.arena = buf.arena();
+			}
+			if (self->isValueComplete(value)) {
+				m.mutations = decode_value(value);
+				if (m.arena.getSize() == 0) {
+					m.arena = std::get<0>(tuple);
+				}
+				self->keyValues.erase(self->keyValues.begin(), self->keyValues.begin() + idx);
+				return m;
+			} else if (!self->eof) {
+				// Read one more block, hopefully the missing part of the value can be found.
+				wait(readAndDecodeFile(self));
+			} else {
+				TraceEvent(SevWarn, "MissingValue").detail("Version", m.version);
+				self->leftover = true;
+				return m; // Empty mutations
+			}
 		}
-		self->keyValues.erase(self->keyValues.begin(), self->keyValues.begin() + idx);
-
-		return m;
 	}
 
 	// Returns a buffer which stitches first "idx" values into one.
@@ -274,7 +316,7 @@ struct DecodeProgress {
 		Standalone<StringRef> buf = makeString(len);
 		int n = 0;
 		for (int i = 0; i < idx; i++) {
-			const auto& value = keyValues[i].second.value;
+			const auto& value = std::get<3>(keyValues[i]);
 			memcpy(mutateString(buf) + n, value.begin(), value.size());
 			n += value.size();
 		}
@@ -289,7 +331,7 @@ struct DecodeProgress {
 		StringRefReader reader(block, restore_corrupted_data());
 
 		try {
-			// Read header, currently only decoding version 2001
+			// Read header, currently only decoding version BACKUP_AGENT_MLOG_VERSION
 			if (reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION) throw restore_unsupported_file_version();
 
 			// Read k/v pairs. Block ends either at end of last value exactly or with 0xFF as first key len byte.
@@ -300,9 +342,16 @@ struct DecodeProgress {
 				// Read key and value.  If anything throws then there is a problem.
 				uint32_t kLen = reader.consumeNetworkUInt32();
 				const uint8_t* k = reader.consume(kLen);
+				std::pair<Version, int32_t> version_part = decode_key(StringRef(k, kLen));
 				uint32_t vLen = reader.consumeNetworkUInt32();
 				const uint8_t* v = reader.consume(vLen);
-				keyValues.emplace_back(buf.arena(), KeyValueRef(StringRef(k, kLen), StringRef(v, vLen)));
+				TraceEvent(SevDecodeInfo, "Block")
+				    .detail("KeySize", kLen)
+				    .detail("valueSize", vLen)
+				    .detail("Offset", reader.rptr - buf.begin())
+				    .detail("Version", version_part.first)
+				    .detail("Part", version_part.second);
+				keyValues.emplace_back(buf.arena(), version_part.first, version_part.second, StringRef(v, vLen));
 			}
 
 			// Make sure any remaining bytes in the block are 0xFF
@@ -310,6 +359,15 @@ struct DecodeProgress {
 				if (b != 0xFF) throw restore_corrupted_data_padding();
 			}
 
+			// The (version, part) in a block can be out of order, i.e., (3, 0)
+			// can be followed by (4, 0), and then (3, 1). So we need to sort them
+			// first by version, and then by part number.
+			std::sort(keyValues.begin(), keyValues.end(),
+			          [](const std::tuple<Arena, Version, int32_t, StringRef>& a,
+			             const std::tuple<Arena, Version, int32_t, StringRef>& b) {
+				          return std::get<1>(a) == std::get<1>(b) ? std::get<2>(a) < std::get<2>(b)
+				                                                  : std::get<1>(a) < std::get<1>(b);
+			          });
 			return;
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "CorruptBlock").error(e).detail("Offset", reader.rptr - buf.begin());
@@ -359,14 +417,22 @@ struct DecodeProgress {
 	Reference<IAsyncFile> fd;
 	int64_t offset = 0;
 	bool eof = false;
-	// Key value pairs and their memory arenas.
-	std::vector<std::pair<Arena, KeyValueRef>> keyValues;
+	bool leftover = false; // Done but has unfinished version batch data left
+	// A (version, part_number)'s mutations and memory arena.
+	std::vector<std::tuple<Arena, Version, int32_t, StringRef>> keyValues;
 };
 
 ACTOR Future<Void> decode_logs(DecodeParams params) {
 	state Reference<IBackupContainer> container = IBackupContainer::openContainer(params.container_url);
 
 	state BackupFileList listing = wait(container->dumpFileList());
+	// remove partitioned logs
+	listing.logs.erase(std::remove_if(listing.logs.begin(), listing.logs.end(),
+	                                  [](const LogFile& file) {
+		                                  std::string prefix("plogs/");
+		                                  return file.fileName.substr(0, prefix.size()) == prefix;
+	                                  }),
+	                   listing.logs.end());
 	std::sort(listing.logs.begin(), listing.logs.end());
 	TraceEvent("Container").detail("URL", params.container_url).detail("Logs", listing.logs.size());
 
@@ -377,14 +443,22 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 	printLogFiles("Relevant files are: ", logs);
 
 	state int i = 0;
+	// Previous file's unfinished version data
+	state std::vector<std::tuple<Arena, Version, int32_t, StringRef>> left;
 	for (; i < logs.size(); i++) {
-		state DecodeProgress progress(logs[i]);
+		if (logs[i].fileSize == 0) continue;
+
+		state DecodeProgress progress(logs[i], left);
 		wait(progress.openFile(container));
 		while (!progress.finished()) {
 			VersionedMutations vms = wait(progress.getNextBatch());
 			for (const auto& m : vms.mutations) {
 				std::cout << vms.version << " " << m.toString() << "\n";
 			}
+		}
+		left = progress.getUnfinishedBuffer();
+		if (!left.empty()) {
+			TraceEvent("UnfinishedFile").detail("File", logs[i].fileName).detail("Q", left.size());
 		}
 	}
 	return Void();

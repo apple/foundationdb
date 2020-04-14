@@ -51,8 +51,6 @@
 .. |timeout-database-option| replace:: FIXME
 .. |causal-read-risky-transaction-option| replace:: FIXME
 .. |causal-read-risky-database-option| replace:: FIXME
-.. |include-port-in-address-database-option| replace:: FIXME
-.. |include-port-in-address-transaction-option| replace:: FIXME
 .. |transaction-logging-max-field-length-database-option| replace:: FIXME
 .. |transaction-logging-max-field-length-transaction-option| replace:: FIXME
 
@@ -135,7 +133,7 @@ API versioning
 
 Prior to including ``fdb_c.h``, you must define the ``FDB_API_VERSION`` macro. This, together with the :func:`fdb_select_api_version()` function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is |api-version|. ::
 
-  #define FDB_API_VERSION 620
+  #define FDB_API_VERSION 630
   #include <foundationdb/fdb_c.h>
 
 .. function:: fdb_error_t fdb_select_api_version(int version)
@@ -476,6 +474,11 @@ Applications must provide error handling and an appropriate retry loop around th
    ``snapshot``
       |snapshot|
 
+.. function:: FDBFuture* fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length)
+   Returns an estimated byte size of the key range.
+
+   |future-return0| the estimated size of the key range given. |future-return1| call :func:`fdb_future_get_int64()` to extract the size, |future-return2|
+
 .. function:: FDBFuture* fdb_transaction_get_key(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, fdb_bool_t or_equal, int offset, fdb_bool_t snapshot)
 
    Resolves a :ref:`key selector <key-selectors>` against the keys in the database snapshot represented by ``transaction``.
@@ -530,8 +533,7 @@ Applications must provide error handling and an appropriate retry loop around th
       |snapshot|
 
    ``reverse``
-
-      If non-zero, key-value pairs will be returned in reverse lexicographical order beginning at the end of the range.
+      If non-zero, key-value pairs will be returned in reverse lexicographical order beginning at the end of the range. Reading ranges in reverse is supported natively by the database and should have minimal extra cost.
 
 .. type:: FDBStreamingMode
 
@@ -539,31 +541,31 @@ Applications must provide error handling and an appropriate retry loop around th
 
    ``FDB_STREAMING_MODE_ITERATOR``
 
-      The caller is implementing an iterator (most likely in a binding to a higher level language). The amount of data returned depends on the value of the ``iteration`` parameter to :func:`fdb_transaction_get_range()`.
+   The caller is implementing an iterator (most likely in a binding to a higher level language). The amount of data returned depends on the value of the ``iteration`` parameter to :func:`fdb_transaction_get_range()`.
 
    ``FDB_STREAMING_MODE_SMALL``
 
-      Data is returned in small batches (not much more expensive than reading individual key-value pairs).
+   Data is returned in small batches (not much more expensive than reading individual key-value pairs).
 
    ``FDB_STREAMING_MODE_MEDIUM``
 
-      Data is returned in batches between _SMALL and _LARGE.
+   Data is returned in batches between _SMALL and _LARGE.
 
    ``FDB_STREAMING_MODE_LARGE``
 
-      Data is returned in batches large enough to be, in a high-concurrency environment, nearly as efficient as possible. If the caller does not need the entire range, some disk and network bandwidth may be wasted. The batch size may be still be too small to allow a single client to get high throughput from the database.
+   Data is returned in batches large enough to be, in a high-concurrency environment, nearly as efficient as possible. If the caller does not need the entire range, some disk and network bandwidth may be wasted. The batch size may be still be too small to allow a single client to get high throughput from the database.
 
    ``FDB_STREAMING_MODE_SERIAL``
 
-      Data is returned in batches large enough that an individual client can get reasonable read bandwidth from the database. If the caller does not need the entire range, considerable disk and network bandwidth may be wasted.
+   Data is returned in batches large enough that an individual client can get reasonable read bandwidth from the database. If the caller does not need the entire range, considerable disk and network bandwidth may be wasted.
 
    ``FDB_STREAMING_MODE_WANT_ALL``
 
-      The caller intends to consume the entire range and would like it all transferred as early as possible.
+   The caller intends to consume the entire range and would like it all transferred as early as possible.
 
    ``FDB_STREAMING_MODE_EXACT``
 
-      The caller has passed a specific row limit and wants that many rows delivered in a single batch.
+   The caller has passed a specific row limit and wants that many rows delivered in a single batch.
 
 .. function:: void fdb_transaction_set(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, uint8_t const* value, int value_length)
 

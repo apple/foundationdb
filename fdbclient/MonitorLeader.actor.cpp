@@ -23,7 +23,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.actor.h"
-#include "fdbrpc/Platform.h"
+#include "flow/Platform.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 std::pair< std::string, bool > ClusterConnectionFile::lookupClusterFileName( std::string const& filename ) {
@@ -511,7 +511,7 @@ ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> s
 													Reference<AsyncVar<Optional<ClusterInterface>>> outKnownLeader) {
 	state Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader(
 		new AsyncVar<Optional<ClusterControllerClientInterface>>{});
-	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader, FLOW_KNOBS->USE_OBJECT_SERIALIZER);
+	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader);
 	loop {
 		choose {
 			when(wait(deserializer)) { UNSTOPPABLE_ASSERT(false); }
@@ -655,15 +655,10 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 			}
 
 			if (leader.get().first.serializedInfo.size()) {
-				if (FLOW_KNOBS->USE_OBJECT_SERIALIZER) {
-					ObjectReader reader(leader.get().first.serializedInfo.begin(), IncludeVersion());
-					ClusterControllerClientInterface res;
-					reader.deserialize(res);
-					knownLeader->set(res);
-				} else {
-					ClusterControllerClientInterface res =  BinaryReader::fromStringRef<ClusterControllerClientInterface>( leader.get().first.serializedInfo, IncludeVersion() );
-					knownLeader->set(res);
-				}
+				ObjectReader reader(leader.get().first.serializedInfo.begin(), IncludeVersion());
+				ClusterControllerClientInterface res;
+				reader.deserialize(res);
+				knownLeader->set(res);
 			}
 		}
 		wait( nomineeChange.onTrigger() || allActors );
@@ -685,12 +680,13 @@ void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::ve
 				TraceEvent("ConnectedProxy").detail("Proxy", lastProxies[i].id());
 			}
 		}
+		ni.firstProxy = ni.proxies[0];
 		ni.proxies = lastProxies;
 	}
 }
 
 // Leader is the process that will be elected by coordinators as the cluster controller
-ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, MonitorLeaderInfo info, Standalone<VectorRef<ClientVersionRef>> supportedVersions, Key traceLogGroup) {
+ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, MonitorLeaderInfo info, Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions, Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnFile->getConnectionString();
 	state vector<NetworkAddress> addrs = cs.coordinators();
 	state int idx = 0;
@@ -706,7 +702,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 		req.clusterKey = cs.clusterKey();
 		req.coordinators = cs.coordinators();
 		req.knownClientInfoID = clientInfo->get().id;
-		req.supportedVersions = supportedVersions;
+		req.supportedVersions = supportedVersions->get();
 		req.traceLogGroup = traceLogGroup;
 
 		ClusterConnectionString fileConnectionString;
@@ -759,7 +755,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 	}
 }
 
-ACTOR Future<Void> monitorProxies( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, Standalone<VectorRef<ClientVersionRef>> supportedVersions, Key traceLogGroup ) {
+ACTOR Future<Void> monitorProxies( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions, Key traceLogGroup ) {
 	state MonitorLeaderInfo info(connFile->get());
 	loop {
 		choose {

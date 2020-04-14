@@ -27,8 +27,12 @@ FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
+FlowKnobs::FlowKnobs() {
+	initialize();
+}
+
 // clang-format off
-FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
+void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( AUTOMATIC_TRACE_DUMP,                                  1 );
 	init( PREVENT_FAST_SPIN_DELAY,                             .01 );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
@@ -72,10 +76,10 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_RECONNECTION_TIME,                               0.5 );
 	init( RECONNECTION_TIME_GROWTH_RATE,                       1.2 );
 	init( RECONNECTION_RESET_TIME,                             5.0 );
-	init( CONNECTION_ACCEPT_DELAY,                             0.5 );
-	init( USE_OBJECT_SERIALIZER,                                 1 );
+	init( ACCEPT_BATCH_SIZE,                                    10 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
+	init( PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT,           3600.0 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );
@@ -83,7 +87,11 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
 	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               0 );
 
+	init( NETWORK_TEST_CLIENT_COUNT,                            30 );
 	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
+	init( NETWORK_TEST_REQUEST_COUNT,                            0 ); // 0 -> run forever
+	init( NETWORK_TEST_REQUEST_SIZE,                             1 );
+	init( NETWORK_TEST_SCRIPT_MODE,                          false );
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );
@@ -112,6 +120,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 
 	//GenericActors
 	init( BUGGIFY_FLOW_LOCK_RELEASE_DELAY,                     1.0 );
+	init( LOW_PRIORITY_DELAY_COUNT,                              5 );
 
 	//IAsyncFile
 	init( INCREMENTAL_DELETE_TRUNCATE_AMOUNT,                  5e8 ); //500MB
@@ -123,6 +132,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( SLOW_LOOP_CUTOFF,                          15.0 / 1000.0 );
 	init( SLOW_LOOP_SAMPLING_RATE,                             0.1 );
 	init( TSC_YIELD_TIME,                                  1000000 );
+	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
@@ -133,6 +143,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MIN_PACKET_BUFFER_FREE_BYTES,                        256 );
 	init( FLOW_TCP_NODELAY,                                      1 );
 	init( FLOW_TCP_QUICKACK,                                     0 );
+	init( UNRESTRICTED_HANDSHAKE_LIMIT,                         15 );
+	init( BOUNDED_HANDSHAKE_LIMIT,                             400 );
 
 	//Sim2
 	init( MIN_OPEN_TIME,                                    0.0002 );
@@ -158,6 +170,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TRACE_EVENT_THROTTLER_MSG_LIMIT,                   20000 );
 	init( MAX_TRACE_FIELD_LENGTH,                              495 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
+	init( ALLOCATION_TRACING_ENABLED,                         true );
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
@@ -206,6 +219,7 @@ static std::string toLower( std::string const& name ) {
 }
 
 bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
+	explicitlySetKnobs.insert(toLower(knob));
 	if (double_knobs.count(knob)) {
 		double v;
 		int n=0;
@@ -256,32 +270,43 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 		*string_knobs[knob] = value;
 		return true;
 	}
+	explicitlySetKnobs.erase(toLower(knob)); // don't store knobs that don't exist
 	return false;
 }
 
 void Knobs::initKnob( double& knob, double value, std::string const& name ) {
-	knob = value;
-	double_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		double_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( int64_t& knob, int64_t value, std::string const& name ) {
-	knob = value;
-	int64_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		int64_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( int& knob, int value, std::string const& name ) {
-	knob = value;
-	int_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		int_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( std::string& knob, const std::string& value, const std::string& name ) {
-	knob = value;
-	string_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		string_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( bool& knob, bool value, std::string const& name ) {
-	knob = value;
-	bool_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		bool_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::trace() {

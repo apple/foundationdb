@@ -317,6 +317,9 @@ class Tester
           else
             inst.push(res)
           end
+        when "GET_ESTIMATED_RANGE_SIZE"
+          inst.tr.get_estimated_range_size_bytes(inst.wait_and_pop, inst.wait_and_pop).to_i
+          inst.push("GOT_ESTIMATED_RANGE_SIZE")
         when "GET_KEY"
           selector = FDB::KeySelector.new(inst.wait_and_pop, inst.wait_and_pop, inst.wait_and_pop)
           prefix = inst.wait_and_pop

@@ -11,6 +11,8 @@ Versioning
 
 FoundationDB supports a robust versioning system for both its API and binaries. This system allows clusters to be upgraded with minimal changes to both application code and FoundationDB binaries. The API and the FoundationDB binaries are each released in numbered versions. Each version of the binaries has a corresponding API version.
 
+.. _api-versions:
+
 API versions
 ------------
 

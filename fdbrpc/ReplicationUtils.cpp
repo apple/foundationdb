@@ -82,14 +82,63 @@ double ratePolicy(
 	return rating;
 }
 
-bool findBestPolicySet(
-	std::vector<LocalityEntry>&	bestResults,
-	Reference<LocalitySet> &						localitySet,
-	Reference<IReplicationPolicy>	const&				policy,
-	unsigned int								nMinItems,
-	unsigned int								nSelectTests,
-	unsigned int								nPolicyTests)
-{
+int mostUsedZoneCount(Reference<LocalitySet>& logServerSet, std::vector<LocalityEntry>& bestSet) {
+	AttribKey indexKey = logServerSet->keyIndex("zoneid");
+	std::map<AttribValue, int> entries;
+	for(int i = 0; i < bestSet.size(); i++) {
+		Optional<AttribValue> value = logServerSet->getRecordViaEntry(bestSet[i])->getValue(indexKey);
+		entries[value.get()]++;
+	}
+	int maxEntries = 0;
+	for(auto it : entries) {
+		maxEntries = std::max(maxEntries, it.second);
+	}
+	return maxEntries;
+}
+
+bool findBestPolicySetSimple(int targetUniqueValueCount, Reference<LocalitySet>& logServerSet, std::vector<LocalityEntry>& bestSet,
+                             int desired) {
+	auto& mutableEntries = logServerSet->getMutableEntries();
+	deterministicRandom()->randomShuffle(mutableEntries);
+	// First make sure the current localitySet is able to fulfuill the policy
+	AttribKey indexKey = logServerSet->keyIndex("zoneid");
+	int uniqueValueCount = logServerSet->getKeyValueArray()[indexKey._id].size();
+
+	if (uniqueValueCount < targetUniqueValueCount) {
+		// logServerSet won't be able to fulfill the policy
+		return false;
+	}
+
+	std::map<AttribValue, std::vector<int>> entries;
+	for(int i = 0; i < mutableEntries.size(); i++) {
+		Optional<AttribValue> value = logServerSet->getRecord(mutableEntries[i]._id)->getValue(indexKey);
+		if (value.present()) {
+			entries[value.get()].push_back(i);
+		}
+	}
+
+	ASSERT_WE_THINK(uniqueValueCount == entries.size());
+
+	desired = std::max(desired, targetUniqueValueCount);
+	auto it = entries.begin();
+	while (bestSet.size() < desired) {
+		if(it->second.size()) {
+			bestSet.push_back(mutableEntries[it->second.back()]);
+			it->second.pop_back();
+		}
+		
+		++it;
+		if(it == entries.end()) {
+			it = entries.begin();
+		}
+	}
+
+	return true;
+}
+
+bool findBestPolicySetExpensive(std::vector<LocalityEntry>& bestResults, Reference<LocalitySet>& localitySet,
+                                Reference<IReplicationPolicy> const& policy, unsigned int nMinItems,
+                                unsigned int nSelectTests, unsigned int nPolicyTests) {
 	bool													bSucceeded = true;
 	Reference<LocalitySet>								bestLocalitySet, testLocalitySet;
 	std::vector<LocalityEntry>		results;
@@ -113,9 +162,7 @@ bool findBestPolicySet(
 		}
 
 		// Get some additional random items, if needed
-		if ((nMinItems > results.size())																			&&
-				(!localitySet->random(results, results, nMinItems-results.size())))
-		{
+		if ((nMinItems > results.size()) && (!localitySet->random(results, results, nMinItems - results.size()))) {
 			bSucceeded = false;
 			break;
 		}
@@ -156,6 +203,53 @@ bool findBestPolicySet(
 	}
 
 	return bSucceeded;
+}
+
+bool findBestPolicySet(std::vector<LocalityEntry>& bestResults, Reference<LocalitySet>& localitySet,
+                       Reference<IReplicationPolicy> const& policy, unsigned int nMinItems, unsigned int nSelectTests,
+                       unsigned int nPolicyTests) {
+
+	bool bestFound = false;
+
+	// Specialization for policies of shape:
+	//    - PolicyOne()
+	//    - PolicyAcross(,"zoneId",PolicyOne())
+	//    - TODO: More specializations for common policies
+	if (policy->name() == "One") {
+		bestFound = true;
+		int count = 0;
+		auto& mutableEntries = localitySet->getMutableEntries();
+		deterministicRandom()->randomShuffle(mutableEntries);
+		for (auto const& entry : mutableEntries) {
+			bestResults.push_back(entry);
+			if (++count == nMinItems) break;
+		}
+	} else if (policy->name() == "Across") {
+		PolicyAcross* pa = (PolicyAcross*)policy.getPtr();
+		std::set<std::string> attributeKeys;
+		pa->attributeKeys(&attributeKeys);
+		if (pa->embeddedPolicyName() == "One" && attributeKeys.size() == 1 &&
+		    *attributeKeys.begin() == "zoneid" // This algorithm can actually apply to any field
+		) {
+			bestFound = findBestPolicySetSimple(pa->getCount(), localitySet, bestResults, nMinItems);
+			if (bestFound && g_network->isSimulated()) {
+				std::vector<LocalityEntry> oldBest;
+				auto oldBestFound =
+				    findBestPolicySetExpensive(oldBest, localitySet, policy, nMinItems, nSelectTests, nPolicyTests);
+				if (!oldBestFound) {
+					TraceEvent(SevError, "FBPSMissmatch").detail("Policy", policy->info());
+				} else {
+					ASSERT(mostUsedZoneCount(localitySet, bestResults) <= mostUsedZoneCount(localitySet, oldBest));
+				}
+			}
+		} else {
+			bestFound =
+			    findBestPolicySetExpensive(bestResults, localitySet, policy, nMinItems, nSelectTests, nPolicyTests);
+		}
+	} else {
+		bestFound = findBestPolicySetExpensive(bestResults, localitySet, policy, nMinItems, nSelectTests, nPolicyTests);
+	}
+	return bestFound;
 }
 
 bool findBestUniquePolicySet(

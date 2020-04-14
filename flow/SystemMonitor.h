@@ -80,6 +80,7 @@ struct NetworkData {
 	int64_t countConnEstablished;
 	int64_t countConnClosedWithError;
 	int64_t countConnClosedWithoutError;
+	int64_t countTLSPolicyFailures;
 	double countLaunchTime;
 	double countReactTime;
 
@@ -107,6 +108,7 @@ struct NetworkData {
 		countConnEstablished = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountConnEstablished"));
 		countConnClosedWithError = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountConnClosedWithError"));
 		countConnClosedWithoutError = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountConnClosedWithoutError"));
+		countTLSPolicyFailures = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountTLSPolicyFailures"));
 		countLaunchTime = DoubleMetric::getValueOrDefault(LiteralStringRef("Net2.CountLaunchTime"));
 		countReactTime = DoubleMetric::getValueOrDefault(LiteralStringRef("Net2.CountReactTime"));
 		countFileLogicalWrites = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountLogicalWrites"));

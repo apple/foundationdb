@@ -149,7 +149,7 @@ private:
 
 	FastAllocator();  // not implemented
 	static void initThread();
-	static void getMagazine();   
+	static void getMagazine();
 	static void releaseMagazine(void*);
 };
 
@@ -204,7 +204,7 @@ public:
 	static void operator delete( void*, void* ) { }
 };
 
-[[nodiscard]] static void* allocateFast(int size) {
+[[nodiscard]] inline void* allocateFast(int size) {
 	if (size <= 16) return FastAllocator<16>::allocate();
 	if (size <= 32) return FastAllocator<32>::allocate();
 	if (size <= 64) return FastAllocator<64>::allocate();
@@ -219,7 +219,7 @@ public:
 	return new uint8_t[size];
 }
 
-static void freeFast(int size, void* ptr) {
+inline void freeFast(int size, void* ptr) {
 	if (size <= 16) return FastAllocator<16>::release(ptr);
 	if (size <= 32) return FastAllocator<32>::release(ptr);
 	if (size <= 64) return FastAllocator<64>::release(ptr);

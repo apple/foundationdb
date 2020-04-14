@@ -82,10 +82,10 @@ public:
 	int64_t DISK_QUEUE_FILE_EXTENSION_BYTES; // When we grow the disk queue, by how many bytes should it grow?
 	int64_t DISK_QUEUE_FILE_SHRINK_BYTES; // When we shrink the disk queue, by how many bytes should it shrink?
 	int DISK_QUEUE_MAX_TRUNCATE_BYTES;  // A truncate larger than this will cause the file to be replaced instead.
-	int TLOG_DEGRADED_DELAY_COUNT;
 	double TLOG_DEGRADED_DURATION;
 	int64_t MAX_CACHE_VERSIONS;
 	double TXS_POPPED_MAX_DELAY;
+	double TLOG_MAX_CREATE_DURATION;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -106,7 +106,8 @@ public:
 	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
 	double INFLIGHT_PENALTY_ONE_LEFT;
-	
+	bool USE_OLD_NEEDED_SERVERS;
+
 	// Higher priorities are executed first
 	// Priority/100 is the "priority group"/"superpriority".  Priority inversion
 	//   is possible within but not between priority groups; fewer priority groups
@@ -119,6 +120,7 @@ public:
 	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
 	int PRIORITY_TEAM_REDUNDANT;
 	int PRIORITY_MERGE_SHARD;
+	int PRIORITY_POPULATE_REGION;
 	int PRIORITY_TEAM_UNHEALTHY;
 	int PRIORITY_TEAM_2_LEFT;
 	int PRIORITY_TEAM_1_LEFT;
@@ -154,8 +156,7 @@ public:
 	double DD_MERGE_COALESCE_DELAY;
 	double STORAGE_METRICS_POLLING_DELAY;
 	double STORAGE_METRICS_RANDOM_DELAY;
-	double FREE_SPACE_RATIO_CUTOFF;
-	double FREE_SPACE_RATIO_DD_CUTOFF;
+	double AVAILABLE_SPACE_RATIO_CUTOFF;
 	int DESIRED_TEAMS_PER_SERVER;
 	int MAX_TEAMS_PER_SERVER;
 	int64_t DD_SHARD_SIZE_GRANULARITY;
@@ -171,6 +172,7 @@ public:
 	int DD_EXCLUDE_MIN_REPLICAS;
 	bool DD_VALIDATE_LOCALITY;
 	int DD_CHECK_INVALID_LOCALITY_DELAY;
+	bool DD_ENABLE_VERBOSE_TRACING;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -246,6 +248,8 @@ public:
 	double START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL;
 	double START_TRANSACTION_MAX_TRANSACTIONS_TO_START;
 	int START_TRANSACTION_MAX_REQUESTS_TO_START;
+	int START_TRANSACTION_MAX_QUEUE_SIZE;
+	int KEY_LOCATION_MAX_QUEUE_SIZE;
 
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE;
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_MIN;
@@ -272,6 +276,10 @@ public:
 	double REQUIRED_MIN_RECOVERY_DURATION;
 	bool ALWAYS_CAUSAL_READ_RISKY;
 	int MAX_COMMIT_UPDATES;
+	double MIN_PROXY_COMPUTE;
+	double MAX_PROXY_COMPUTE;
+	int PROXY_COMPUTE_BUCKETS;
+	double PROXY_COMPUTE_GROWTH_RATE;
 
 	// Master Server
 	double COMMIT_SLEEP_TIME;
@@ -284,6 +292,7 @@ public:
 	double PROVISIONAL_START_DELAY;
 	double PROVISIONAL_DELAY_GROWTH;
 	double PROVISIONAL_MAX_DELAY;
+	double SECONDS_BEFORE_RECRUIT_BACKUP_WORKER;
 
 	// Resolver
 	int64_t KEY_BYTES_PER_SAMPLE;
@@ -296,6 +305,7 @@ public:
 	double BACKUP_TIMEOUT;  // master's reaction time for backup failure
 	double BACKUP_NOOP_POP_DELAY;
 	int BACKUP_FILE_BLOCK_BYTES;
+	double BACKUP_UPLOAD_DELAY;
 
 	//Cluster Controller
 	double CLUSTER_CONTROLLER_LOGGING_DELAY;
@@ -378,8 +388,10 @@ public:
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
-	int64_t MIN_FREE_SPACE;
-	double MIN_FREE_SPACE_RATIO;
+	int64_t MIN_AVAILABLE_SPACE;
+	double MIN_AVAILABLE_SPACE_RATIO;
+	double TARGET_AVAILABLE_SPACE_RATIO;
+	double AVAILABLE_SPACE_UPDATE_DELAY;
 
 	double MAX_TL_SS_VERSION_DIFFERENCE; // spring starts at half this value
 	double MAX_TL_SS_VERSION_DIFFERENCE_BATCH;
@@ -449,6 +461,8 @@ public:
 	double DEGRADED_RESET_INTERVAL;
 	double DEGRADED_WARNING_LIMIT;
 	double DEGRADED_WARNING_RESET_DELAY;
+	int64_t TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS;
+	double TRACE_LOG_PING_TIMEOUT_SECONDS;
 
 	// Test harness
 	double WORKER_POLL_DELAY;
@@ -482,8 +496,33 @@ public:
 	int64_t FASTRESTORE_FAILURE_TIMEOUT;
 	int64_t FASTRESTORE_HEARTBEAT_INTERVAL;
 	double FASTRESTORE_SAMPLING_PERCENT;
+	int64_t FASTRESTORE_NUM_LOADERS;
+	int64_t FASTRESTORE_NUM_APPLIERS;
+	// FASTRESTORE_TXN_BATCH_MAX_BYTES is target txn size used by appliers to apply mutations
+	double FASTRESTORE_TXN_BATCH_MAX_BYTES;
+	// FASTRESTORE_VERSIONBATCH_MAX_BYTES is the maximum data size in each version batch
+	double FASTRESTORE_VERSIONBATCH_MAX_BYTES;
+	// FASTRESTORE_VB_PARALLELISM is the number of concurrently running version batches
+	int64_t FASTRESTORE_VB_PARALLELISM;
+	int64_t FASTRESTORE_VB_MONITOR_DELAY; // How quickly monitor finished version batch
+	int64_t FASTRESTORE_VB_LAUNCH_DELAY;
+	int64_t FASTRESTORE_ROLE_LOGGING_DELAY;
+	int64_t FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL; // How quickly to update process metrics for restore
+	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
+	int64_t FASTRESTORE_APPLYING_PARALLELISM; // number of outstanding txns writing to dest. DB
+	int64_t FASTRESTORE_MONITOR_LEADER_DELAY;
+	int64_t FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS;
+	bool FASTRESTORE_TRACK_REQUEST_LATENCY; // true to track reply latency of each request in a request batch
+	bool FASTRESTORE_TRACK_LOADER_SEND_REQUESTS; // track requests of load send mutations to appliers?
+	int64_t FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT; // threshold when pipelined actors should be delayed
+	int64_t FASTRESTORE_WAIT_FOR_MEMORY_LATENCY;
+	int64_t FASTRESTORE_HEARTBEAT_DELAY; // interval for master to ping loaders and appliers
+	int64_t FASTRESTORE_HEARTBEAT_MAX_DELAY; // master claim a node is down if no heart beat from the node for this delay
+	int64_t FASTRESTORE_APPLIER_FETCH_KEYS_SIZE; // number of keys to fetch in a txn on applier
+	int64_t FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES; // desired size of mutation message sent from loader to appliers
 
-	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
+	ServerKnobs();
+	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
 
 extern ServerKnobs const* SERVER_KNOBS;

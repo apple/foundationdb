@@ -10,7 +10,7 @@ set(pip_command ${venv_dir}/bin/pip${EXE_SUFFIX})
 set(python_command ${venv_dir}/bin/python${EXE_SUFFIX})
 
 add_custom_command(OUTPUT ${venv_dir}/venv_setup
-  COMMAND ${VIRTUALENV_EXE} venv &&
+  COMMAND ${Python3_EXECUTABLE} -m venv venv &&
           ${CMAKE_COMMAND} -E copy ${sphinx_dir}/.pip.conf ${venv_dir}/pip.conf &&
           . ${venv_dir}/bin/activate &&
           ${pip_command} install --upgrade pip &&
@@ -86,7 +86,7 @@ else()
 endif()
 
 add_custom_target(docpreview
-  COMMAND ${python_command} -m SimpleHTTPServer ${port}
+  COMMAND ${python_command} -m http.server ${port}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/html
   USES_TERMINAL)
 add_dependencies(docpreview html)

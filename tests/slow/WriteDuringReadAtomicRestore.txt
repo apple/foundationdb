@@ -11,7 +11,8 @@ testTitle=WriteDuringReadTest
     restoreAfter=50.0
     clearAfterTest=false
     simBackupAgents=BackupToFile
-    
+    usePartitionedLogs=false
+
     testName=RandomClogging
     testDuration=60.0
 

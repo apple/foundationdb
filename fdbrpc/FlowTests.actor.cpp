@@ -25,6 +25,7 @@
 #include "flow/IThreadPool.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
+#include "flow/TLSConfig.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 void forceLinkFlowTests() {}
@@ -233,6 +234,7 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	virtual TaskPriority getCurrentTask() { return baseNetwork->getCurrentTask(); }
 	virtual void setCurrentTask(TaskPriority taskID) { baseNetwork->setCurrentTask(taskID); }
 	virtual double now() { return baseNetwork->now(); }
+	virtual double timer() { return baseNetwork->timer(); }
 	virtual void stop() { return baseNetwork->stop(); }
 	virtual bool isSimulated() const { return baseNetwork->isSimulated(); }
 	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) { return baseNetwork->onMainThread(std::move(signal), taskID); }
@@ -243,6 +245,10 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	virtual void run() { return baseNetwork->run(); }
 	virtual void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total)  { return baseNetwork->getDiskBytes(directory,free,total); }
 	virtual bool isAddressOnThisHost(NetworkAddress const& addr) { return baseNetwork->isAddressOnThisHost(addr); }
+	virtual const TLSConfig& getTLSConfig() {
+		static TLSConfig emptyConfig;
+		return emptyConfig;
+	}
 };
 
 struct NonserializableThing {};
@@ -1250,6 +1256,89 @@ TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel")
 	return Void();
 }
 
+// Tests for https://github.com/apple/foundationdb/issues/1226
+
+template <class>
+struct ShouldNotGoIntoClassContextStack;
+
+ACTOR static Future<Void> shouldNotHaveFriends();
+
+class Foo1 {
+public:
+	explicit Foo1(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo1* self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo1::fooActor(Foo1* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+class [[nodiscard]] Foo2 {
+public:
+	explicit Foo2(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo2 * self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo2::fooActor(Foo2* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+class alignas(4) Foo3 {
+public:
+	explicit Foo3(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo3* self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo3::fooActor(Foo3* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+struct Super {};
+
+class Foo4 : Super {
+public:
+	explicit Foo4(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo4* self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo4::fooActor(Foo4* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+struct Outer {
+	class Foo5 : Super {
+	public:
+		explicit Foo5(int x) : x(x) {}
+		Future<int> foo() { return fooActor(this); }
+		ACTOR static Future<int> fooActor(Foo5* self);
+
+	private:
+		int x;
+	};
+};
+ACTOR Future<int> Outer::Foo5::fooActor(Outer::Foo5* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+ACTOR static Future<Void> shouldNotHaveFriends2();
+
 // Meant to be run with -fsanitize=undefined
 TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 	deterministicRandom()->randomInt(std::numeric_limits<int>::min(), 0);
@@ -1269,5 +1358,96 @@ TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 	ASSERT(deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::max() - 1,
 	                                          std::numeric_limits<int64_t>::max()) ==
 	       std::numeric_limits<int64_t>::max() - 1);
+	return Void();
+}
+
+struct Tracker {
+	int copied;
+	bool moved;
+	Tracker(int copied = 0) : moved(false), copied(copied) {}
+	Tracker(Tracker&& other) : Tracker(other.copied) {
+		ASSERT(!other.moved);
+		other.moved = true;
+	}
+	Tracker& operator=(Tracker&& other) {
+		ASSERT(!other.moved);
+		other.moved = true;
+		this->moved = false;
+		this->copied = other.copied;
+		return *this;
+	}
+	Tracker(const Tracker& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
+	Tracker& operator=(const Tracker& other) {
+		ASSERT(!other.moved);
+		this->moved = false;
+		this->copied = other.copied + 1;
+		return *this;
+	}
+
+	ACTOR static Future<Void> listen(FutureStream<Tracker> stream) {
+		Tracker t = waitNext(stream);
+		ASSERT(!t.moved);
+		ASSERT(t.copied == 0);
+		return Void();
+	}
+};
+
+TEST_CASE("/flow/flow/PromiseStream/move") {
+	state PromiseStream<Tracker> stream;
+	{
+		// This tests the case when a callback is added before
+		// a movable value is sent
+		state Future<Void> listener = Tracker::listen(stream.getFuture());
+		stream.send(Tracker{});
+		wait(listener);
+	}
+
+	{
+		// This tests the case when a callback is added before
+		// a unmovable value is sent
+		listener = Tracker::listen(stream.getFuture());
+		Tracker namedTracker;
+		stream.send(namedTracker);
+		wait(listener);
+	}
+	{
+		// This tests the case when no callback is added until
+		// after a movable value is sent
+		stream.send(Tracker{});
+		stream.send(Tracker{});
+		{
+			Tracker t = waitNext(stream.getFuture());
+			ASSERT(!t.moved);
+			ASSERT(t.copied == 0);
+		}
+		choose {
+			when(Tracker t = waitNext(stream.getFuture())) {
+				ASSERT(!t.moved);
+				ASSERT(t.copied == 0);
+			}
+		}
+	}
+	{
+		// This tests the case when no callback is added until
+		// after an unmovable value is sent
+		Tracker namedTracker1;
+		Tracker namedTracker2;
+		stream.send(namedTracker1);
+		stream.send(namedTracker2);
+		{
+			Tracker t = waitNext(stream.getFuture());
+			ASSERT(!t.moved);
+			// must copy onto queue
+			ASSERT(t.copied == 1);
+		}
+		choose {
+			when(Tracker t = waitNext(stream.getFuture())) {
+				ASSERT(!t.moved);
+				// must copy onto queue
+				ASSERT(t.copied == 1);
+			}
+		}
+	}
+
 	return Void();
 }

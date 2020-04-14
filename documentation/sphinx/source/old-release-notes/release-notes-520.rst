@@ -85,7 +85,7 @@ Status
 Bindings
 --------
 
-* API version updated to 520.
+* API version updated to 520. See the :ref:`API version upgrade guide <api-version-upgrade-guide-520>` for upgrade details.
 * Java and Python: Versionstamp packing methods within tuple class now add four bytes for the offset instead of two if the API version is set to 520 or higher. `(Issue #148) <https://github.com/apple/foundationdb/issues/148>`_
 * Added convenience methods to determine if an API version has been set. `(PR #72) <https://github.com/apple/foundationdb/pull/72>`_
 * Go: Reduce memory allocations when packing tuples. `(PR #278) <https://github.com/apple/foundationdb/pull/278>`_

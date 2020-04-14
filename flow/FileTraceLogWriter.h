@@ -38,11 +38,13 @@ private:
 	uint64_t maxLogsSize;
 	int traceFileFD;
 	uint32_t index;
+	Reference<ITraceLogIssuesReporter> issues;
 
 	std::function<void()> onError;
 
 public:
-	FileTraceLogWriter(std::string directory, std::string processName, std::string basename, std::string extension, uint64_t maxLogsSize, std::function<void()> onError);
+	FileTraceLogWriter(std::string directory, std::string processName, std::string basename, std::string extension,
+	                   uint64_t maxLogsSize, std::function<void()> onError, Reference<ITraceLogIssuesReporter> issues);
 
 	void addref();
 	void delref();

@@ -150,7 +150,7 @@
 .. |atomic-versionstamps-tuple-warning-value| replace::
     At this time, versionstamped values are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped values may not be used with the Subspace and Directory layers except in those languages.
 
-.. |api-version| replace:: 620
+.. |api-version| replace:: 630
 
 .. |streaming-mode-blurb1| replace::
     When using |get-range-func| and similar interfaces, API clients can request large ranges of the database to iterate over.  Making such a request doesn't necessarily mean that the client will consume all of the data in the range - sometimes the client doesn't know how far it intends to iterate in advance.  FoundationDB tries to balance latency and bandwidth by requesting data for iteration in batches.
@@ -242,6 +242,9 @@
 .. |option-trace-format-blurb| replace::
     Select the format of the trace files for this FoundationDB client. xml (the default) and json are supported.
 
+.. |option-trace-clock-source-blurb| replace::
+    Select clock source for trace files. now (the default) or realtime are supported.
+
 .. |network-options-warning| replace::
 
     It is an error to set these options after the first call to |open-func| anywhere in your application.
@@ -329,10 +332,6 @@
 
     Transactions do not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock. Enabling this option is equivalent to calling |causal-read-risky-transaction-option| on each transaction created by this database.
 
-.. |option-db-include-port-in-address-blurb| replace::
-
-    Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated. Enabling this option is equivalent to calling |include-port-in-address-transaction-option| on each transaction created by this database.
-
 .. |option-db-snapshot-ryw-enable-blurb| replace::
 
     If this option has been set an equal or more times with this database than the disable option, snapshot reads *will* see the effects of prior writes in the same transaction. Enabling this option is equivalent to calling |snapshot-ryw-enable-transaction-option| on each transaction created by this database.
@@ -371,10 +370,6 @@
 .. |option-causal-read-risky-blurb| replace::
 
     This transaction does not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock. One can set this for all transactions by calling |causal-read-risky-database-option|.
-
-.. |option-include-port-in-address-blurb| replace::
-
-    Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated. One can set this for all transactions by calling |include-port-in-address-database-option|.
 
 .. |option-causal-write-risky-blurb| replace::
 
