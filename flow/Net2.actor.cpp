@@ -183,7 +183,7 @@ public:
 
 	uint64_t numYields;
 
-	TaskPriority lastMinTaskID;
+	NetworkMetrics::PriorityStats* lastPriorityStats;
 
 	std::priority_queue<OrderedTask, std::vector<OrderedTask>> ready;
 	ThreadSafeQueue<OrderedTask> threadReady;
@@ -198,7 +198,7 @@ public:
 	void checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, TaskPriority priority);
 	bool check_yield(TaskPriority taskId, int64_t tscNow);
 	void processThreadReady();
-	void trackMinPriority( TaskPriority minTaskID, double now );
+	void trackAtPriority( TaskPriority priority, double now );
 	void stopImmediately() {
 		stopped=true; decltype(ready) _1; ready.swap(_1); decltype(timers) _2; timers.swap(_2);
 	}
@@ -865,8 +865,8 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	  tasksIssued(0),
 	  // Until run() is called, yield() will always yield
 	  tscBegin(0), tscEnd(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield),
-	  lastMinTaskID(TaskPriority::Zero),
 	  numYields(0),
+	  lastPriorityStats(nullptr),
 	  tlsInitialized(false),
 	  tlsConfig(tlsConfig)
 #ifndef TLS_DISABLED
@@ -888,13 +888,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	setGlobal(INetwork::enEventFD, (flowGlobalType) N2::ASIOReactor::newEventFD(reactor));
 #endif
 
-
-	int priBins[] = { 1, 2050, 3050, 4050, 4950, 5050, 7050, 8050, 10050 };
-	static_assert( sizeof(priBins) == sizeof(int)*NetworkMetrics::PRIORITY_BINS, "Fix priority bins");
-	for(int i=0; i<NetworkMetrics::PRIORITY_BINS; i++)
-		networkInfo.metrics.priorityBins[i] = static_cast<TaskPriority>(priBins[i]);
 	updateNow();
-
 }
 
 #ifndef TLS_DISABLED
@@ -1050,10 +1044,10 @@ void Net2::run() {
 		if (runFunc) {
 			tscBegin = __rdtsc();
 			taskBegin = nnow;
-			trackMinPriority(TaskPriority::RunCycleFunction, taskBegin);
+			trackAtPriority(TaskPriority::RunCycleFunction, taskBegin);
 			runFunc();
 			double taskEnd = timer_monotonic();
-			trackMinPriority(TaskPriority::RunLoop, taskEnd);
+			trackAtPriority(TaskPriority::RunLoop, taskEnd);
 			countLaunchTime += taskEnd - taskBegin;
 			checkForSlowTask(tscBegin, __rdtsc(), taskEnd - taskBegin, TaskPriority::RunCycleFunction);
 		}
@@ -1077,7 +1071,7 @@ void Net2::run() {
 				net2RunLoopSleeps.fetch_add(1);
 #endif
 
-				trackMinPriority(TaskPriority::Zero, sleepStart);
+				trackAtPriority(TaskPriority::Zero, sleepStart);
 				awakeMetric = false;
 				priorityMetric = 0;
 				reactor.sleep(sleepTime);
@@ -1087,12 +1081,12 @@ void Net2::run() {
 
 		tscBegin = __rdtsc();
 		taskBegin = timer_monotonic();
-		trackMinPriority(TaskPriority::ASIOReactor, taskBegin);
+		trackAtPriority(TaskPriority::ASIOReactor, taskBegin);
 		reactor.react();
 		
 		updateNow();
 		double now = this->currentTime;
-		trackMinPriority(TaskPriority::RunLoop, now);
+		trackAtPriority(TaskPriority::RunLoop, now);
 
 		countReactTime += now - taskBegin;
 		checkForSlowTask(tscBegin, __rdtsc(), now - taskBegin, TaskPriority::ASIOReactor);
@@ -1124,7 +1118,7 @@ void Net2::run() {
 			++countTasks;
 			currentTaskID = ready.top().taskID;
 			if(currentTaskID < minTaskID) {
-				trackMinPriority(currentTaskID, taskBegin);
+				trackAtPriority(currentTaskID, taskBegin);
 				minTaskID = currentTaskID;
 			}
 			priorityMetric = static_cast<int64_t>(currentTaskID);
@@ -1152,7 +1146,7 @@ void Net2::run() {
 			tscBegin = tscNow;
 		}
 
-		trackMinPriority(TaskPriority::RunLoop, taskBegin);
+		trackAtPriority(TaskPriority::RunLoop, taskBegin);
 
 		queueSize = ready.size();
 		FDB_TRACE_PROBE(run_loop_done, queueSize);
@@ -1210,24 +1204,43 @@ void Net2::run() {
 	#endif
 }
 
-void Net2::trackMinPriority( TaskPriority minTaskID, double now ) {
-	if (minTaskID != lastMinTaskID) {
-		for(int c=0; c<NetworkMetrics::PRIORITY_BINS; c++) {
-			TaskPriority pri = networkInfo.metrics.priorityBins[c];
-			if (pri > minTaskID && pri <= lastMinTaskID) {  // busy -> idle
-				networkInfo.metrics.priorityBlocked[c] = false;
-				networkInfo.metrics.priorityBlockedDuration[c] += now - networkInfo.metrics.windowedPriorityTimer[c];
-				networkInfo.metrics.priorityMaxBlockedDuration[c] = std::max(networkInfo.metrics.priorityMaxBlockedDuration[c], now - networkInfo.metrics.priorityTimer[c]);
+void Net2::trackAtPriority( TaskPriority priority, double now ) {
+	if (lastPriorityStats == nullptr || priority != lastPriorityStats->priority) {
+		// Start tracking current priority
+		auto activeStatsItr = networkInfo.metrics.activeTrackers.try_emplace(priority, priority);
+		activeStatsItr.first->second.active = true;
+		activeStatsItr.first->second.windowedTimer = now;
+
+		if(lastPriorityStats != nullptr) {
+			// Stop tracking previous priority
+			lastPriorityStats->active = false;
+			lastPriorityStats->duration += now - lastPriorityStats->windowedTimer;
+		}
+
+		// Update starvation trackers
+		TaskPriority lastPriority = (lastPriorityStats == nullptr) ? TaskPriority::Zero : lastPriorityStats->priority;
+		for(auto& binStats : networkInfo.metrics.starvationTrackers) {
+			if(binStats.priority > lastPriority && binStats.priority > priority) {
+				break;
 			}
-			if (pri <= minTaskID && pri > lastMinTaskID) {  // idle -> busy
-				networkInfo.metrics.priorityBlocked[c] = true;
-				networkInfo.metrics.priorityTimer[c] = now;
-				networkInfo.metrics.windowedPriorityTimer[c] = now;
+
+			// Busy -> idle at binStats.priority
+			if(binStats.priority > priority && binStats.priority <= lastPriority) { 
+				binStats.active = false;
+				binStats.duration += now - binStats.windowedTimer;
+				binStats.maxDuration = std::max(binStats.maxDuration, now - binStats.timer);
+			}
+
+			// Idle -> busy at binStats.priority
+			else if(binStats.priority <= priority && binStats.priority > lastPriority) {
+				binStats.active = true;
+				binStats.timer = now;
+				binStats.windowedTimer = now;
 			}
 		}
-	}
 
-	lastMinTaskID = minTaskID;
+		lastPriorityStats = &activeStatsItr.first->second;
+	}
 }
 
 void Net2::processThreadReady() {

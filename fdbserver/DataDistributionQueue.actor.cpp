@@ -537,7 +537,7 @@ struct DDQueueData {
 
 		// FIXME: is the merge case needed
 		if( input.priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD ) {
-			wait( delay( 0.5, decrementPriority(decrementPriority(TaskPriority::DataDistribution )) ) );
+			wait( delay( 0.5, TaskPriority::DataDistributionVeryLow ) );
 		} else {
 			wait( delay( 0.0001, TaskPriority::DataDistributionLaunch ) );
 		}
