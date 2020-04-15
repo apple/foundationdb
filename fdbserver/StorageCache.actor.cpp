@@ -524,8 +524,10 @@ GetKeyValuesReply readRange(StorageCacheData* data, Version version, KeyRangeRef
 	StorageCacheData::VersionedData::ViewAtVersion view = data->data().at(version);
 	StorageCacheData::VersionedData::iterator vCurrent = view.end();
 	KeyRef readBegin;
+	KeyRef readEnd;
 	KeyRef rangeBegin = range.begin;
 	KeyRef rangeEnd = range.end;
+	int accumulatedBytes = 0;
 	//printf("\nSCReadRange\n");
 
 	// if (limit >= 0) we are reading forward, else backward
@@ -544,7 +546,7 @@ GetKeyValuesReply readRange(StorageCacheData* data, Version version, KeyRangeRef
 			--b;
 			ASSERT(!b || b.key() < readBegin);
 		}
-		int accumulatedBytes = 0;
+		accumulatedBytes = 0;
 		while (vCurrent && vCurrent.key() < rangeEnd && limit > 0 && accumulatedBytes < *pLimitBytes) {
 			if (!vCurrent->isClearTo()) {
 				result.data.push_back_deep(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
@@ -569,7 +571,7 @@ GetKeyValuesReply readRange(StorageCacheData* data, Version version, KeyRangeRef
 			--b;
 			ASSERT(!b || b.key() >= readEnd);
 		}
-		int accumulatedBytes = 0;
+		accumulatedBytes = 0;
 		while (vCurrent && vCurrent.key() >= rangeEnd && limit > 0 && accumulatedBytes < *pLimitBytes) {
 			if (!vCurrent->isClearTo()) {
 				result.data.push_back_deep(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
