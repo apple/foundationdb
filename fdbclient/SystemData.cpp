@@ -462,36 +462,6 @@ StorageServerInterface decodeServerListValue( ValueRef const& value ) {
 }
 
 
-const KeyRangeRef cacheListKeys(
-	LiteralStringRef("\xff/cacheList/"),
-	LiteralStringRef("\xff/cacheList0") );
-//const KeyRef cacheListPrefix = cacheListKeys.begin;
-
-const Key cacheListKeyFor( UID serverID ) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes( cacheListKeys.begin );
-	wr << serverID;
-	return wr.toValue();
-}
-
-const Value cacheListValue( StorageServerInterface const& server ) {
-	BinaryWriter wr(IncludeVersion());
-	wr << server;
-	return wr.toValue();
-}
-UID decodeCacheListKey( KeyRef const& key ) {
-	UID serverID;
-	BinaryReader rd( key.removePrefix(cacheListKeys.begin), Unversioned() );
-	rd >> serverID;
-	return serverID;
-}
-StorageServerInterface decodeCacheListValue( ValueRef const& value ) {
-	StorageServerInterface s;
-	BinaryReader reader( value, IncludeVersion() );
-	reader >> s;
-	return s;
-}
-
 // processClassKeys.contains(k) iff k.startsWith( processClassKeys.begin ) because '/'+1 == '0'
 const KeyRangeRef processClassKeys(
 	LiteralStringRef("\xff/processClass/"),

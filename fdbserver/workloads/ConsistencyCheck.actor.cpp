@@ -609,18 +609,19 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 	}
 
-	// comparator function to check if a cache server with given index exists
-class storageCachesComparator {
-        uint16_t serverIndex;
+	// comparator function to check if a cache server wioth given index exists
+	class storageCachesComparator {
+		uint16_t serverIndex;
 
-public:
-        storageCachesComparator(uint16_t index): serverIndex(index) {}
+	public:
+		storageCachesComparator(uint16_t index): serverIndex(index) {}
 
-        bool operator()(const std::pair<uint16_t, StorageServerInterface>& value)
-        {
-                return (value.first == serverIndex);
-        }
-};
+		bool operator()(const std::pair<uint16_t, StorageServerInterface>& value)
+		{
+			return (value.first == serverIndex);
+		}
+	};
+
 	//Checks that the data in each shard is the same on each storage server that it resides on.  Also performs some sanity checks on the sizes of shards and storage servers.
 	//Returns false if there is a failure
 	ACTOR Future<bool> checkDataConsistency(Database cx, VectorRef<KeyValueRef> keyLocations, DatabaseConfiguration configuration, ConsistencyCheckWorkload *self)

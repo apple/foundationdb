@@ -70,7 +70,7 @@ struct StorageServerInterface {
 
 	RequestStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType;
 	RequestStream<struct WatchValueRequest> watchValue;
-    bool isCacheServer;
+	bool isCacheServer;
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ), isCacheServer(false) {}
 	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ), isCacheServer(false) {}
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }

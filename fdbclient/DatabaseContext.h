@@ -173,7 +173,6 @@ public:
 
 	// Cache of location information
 	int locationCacheSize;
-	// bool indicates whether the range has caches
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 
 	std::map< UID, StorageServerInfo* > server_interf;

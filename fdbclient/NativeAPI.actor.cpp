@@ -28,12 +28,9 @@
 #include <utility>
 #include <vector>
 
-#include "flow/Arena.h"
-#include "flow/Error.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
-#include "flow/Trace.h"
 
 #include "fdbclient/Atomic.h"
 #include "fdbclient/ClusterInterface.h"
@@ -51,15 +48,18 @@
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
-#include "flow/flow.h"
+#include "flow/Arena.h"
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/Error.h"
+#include "flow/flow.h"
+#include "flow/genericactors.actor.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
-#include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 
 #if defined(CMAKE_BUILD) || !defined(WIN32)
@@ -507,7 +507,7 @@ ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDB
 }
 
 void updateLocationCacheWithCaches(DatabaseContext* self, const std::map<UID, StorageServerInterface>& removed,
-                                   const std::map<UID, StorageServerInterface>& added) {
+								   const std::map<UID, StorageServerInterface>& added) {
 	// TODO: this needs to be more clever in the future
 	auto ranges = self->locationCache.ranges();
 	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
@@ -1429,9 +1429,9 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( 
 
 template <class F>
 Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& cx, Key const& key,
-                                                                                F StorageServerInterface::*member,
-                                                                                TransactionInfo const& info,
-                                                                                bool isBackward = false) {
+															   F StorageServerInterface::*member,
+															   TransactionInfo const& info,
+															   bool isBackward = false) {
 	// we first check whether this range is cached
 	auto ssi = cx->getCachedLocation( key, isBackward );
 	if (!ssi.second) {

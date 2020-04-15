@@ -2592,7 +2592,7 @@ private:
 			ASSERT((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix));
 			KeyRangeRef keys( cacheStartKey.removePrefix(systemKeys.begin).removePrefix( storageCachePrefix ),
 							  m.param1.removePrefix(systemKeys.begin).removePrefix( storageCachePrefix ));
-		    TraceEvent(SevDebug, "SSPrivateCacheMutationInsert", data->thisServerID).detail("Begin", keys.begin).detail("End", keys.end);
+			TraceEvent(SevDebug, "SSPrivateCacheMutationInsert", data->thisServerID).detail("Begin", keys.begin).detail("End", keys.end);
 			data->cachedRangeMap.insert(keys, true);
 			//TraceEvent(SevDebug, "SSPrivateCacheMutation", data->thisServerID).detail("Begin", keys.begin).detail("End", keys.end);
 			//fprintf(stderr, "applyPrivateCacheData : begin: %s, end: %s\n", printable(keys.begin).c_str(), printable(keys.end).c_str());

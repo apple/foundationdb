@@ -519,7 +519,6 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 	return Void();
 };
 
-//TODO Implement the reverse readRange
 GetKeyValuesReply readRange(StorageCacheData* data, Version version, KeyRangeRef range, int limit, int* pLimitBytes) {
 	GetKeyValuesReply result;
 	StorageCacheData::VersionedData::ViewAtVersion view = data->data().at(version);
@@ -527,30 +526,58 @@ GetKeyValuesReply readRange(StorageCacheData* data, Version version, KeyRangeRef
 	KeyRef readBegin;
 	KeyRef rangeBegin = range.begin;
 	KeyRef rangeEnd = range.end;
-
 	//printf("\nSCReadRange\n");
-	//We might care about a clear beginning before start that runs into range
-	vCurrent = view.lastLessOrEqual(rangeBegin);
-	if (vCurrent && vCurrent->isClearTo() && vCurrent->getEndKey() > rangeBegin)
-		readBegin = vCurrent->getEndKey();
-	else
-		readBegin = rangeBegin;
 
-	vCurrent = view.lower_bound(readBegin);
-	ASSERT(!vCurrent || vCurrent.key() >= readBegin);
-	if (vCurrent) {
-		auto b = vCurrent;
-		--b;
-		ASSERT(!b || b.key() < readBegin);
-	}
-	int accumulatedBytes = 0;
-	while (vCurrent && vCurrent.key() < rangeEnd && limit > 0 && accumulatedBytes < *pLimitBytes) {
-		if (!vCurrent->isClearTo()) {
-			result.data.push_back_deep(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
-			accumulatedBytes += sizeof(KeyValueRef) + result.data.end()[-1].expectedSize();
-			--limit;
+	// if (limit >= 0) we are reading forward, else backward
+	if (limit >= 0) {
+		//We might care about a clear beginning before start that runs into range
+		vCurrent = view.lastLessOrEqual(rangeBegin);
+		if (vCurrent && vCurrent->isClearTo() && vCurrent->getEndKey() > rangeBegin)
+			readBegin = vCurrent->getEndKey();
+		else
+			readBegin = rangeBegin;
+
+		vCurrent = view.lower_bound(readBegin);
+		ASSERT(!vCurrent || vCurrent.key() >= readBegin);
+		if (vCurrent) {
+			auto b = vCurrent;
+			--b;
+			ASSERT(!b || b.key() < readBegin);
 		}
-		++vCurrent;
+		int accumulatedBytes = 0;
+		while (vCurrent && vCurrent.key() < rangeEnd && limit > 0 && accumulatedBytes < *pLimitBytes) {
+			if (!vCurrent->isClearTo()) {
+				result.data.push_back_deep(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+				accumulatedBytes += sizeof(KeyValueRef) + result.data.end()[-1].expectedSize();
+				--limit;
+			}
+			++vCurrent;
+		}
+	} else { // reverse readRange
+		vCurrent = view.lastLess(rangeEnd);
+
+		// A clear might extend all the way to range.end
+		if (vCurrent && vCurrent->isClearTo() && vCurrent->getEndKey() >= rangeEnd) {
+			readEnd = vCurrent.key();
+			--vCurrent;
+		} else {
+			readEnd = rangeEnd;
+		}
+		ASSERT(!vCurrent || vCurrent.key() < readEnd);
+		if (vCurrent) {
+			auto b = vCurrent;
+			--b;
+			ASSERT(!b || b.key() >= readEnd);
+		}
+		int accumulatedBytes = 0;
+		while (vCurrent && vCurrent.key() >= rangeEnd && limit > 0 && accumulatedBytes < *pLimitBytes) {
+			if (!vCurrent->isClearTo()) {
+				result.data.push_back_deep(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+				accumulatedBytes += sizeof(KeyValueRef) + result.data.end()[-1].expectedSize();
+				--limit;
+			}
+			--vCurrent;
+		}
 	}
 
 	*pLimitBytes -= accumulatedBytes;
@@ -1927,24 +1954,28 @@ ACTOR Future<Void> watchInterface(StorageCacheData* self, StorageServerInterface
 	state Transaction tr(self->cx);
 	state Key storageKey = storageCacheServerKey(ssi.id());
 	loop {
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		try {
-			Optional<Value> val = wait(tr.get(storageKey));
-			// This could race with the data distributor trying to remove
-			// the interface - but this is ok, as we don't need to kill
-			// ourselves if FailureMonitor marks us as down (this might save
-			// from unnecessary cache refreshes).
-			if (!val.present()) {
-				tr.set(storageKey, storageCacheServerValue(ssi));
-				wait(tr.commit());
+		loop {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			try {
+				Optional<Value> val = wait(tr.get(storageKey));
+				// This could race with the data distributor trying to remove
+				// the interface - but this is ok, as we don't need to kill
+				// ourselves if FailureMonitor marks us as down (this might save
+				// from unnecessary cache refreshes).
+				if (!val.present()) {
+					tr.set(storageKey, storageCacheServerValue(ssi));
+					wait(tr.commit());
+				}
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
 			}
-		} catch (Error& e) {
-			wait(tr.onError(e));
 		}
 		wait(delay(5.0));
 	}
 }
+
 ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db) {
 	state StorageCacheData self(ssi.id(), id, db);
 	state ActorCollection actors(false);
