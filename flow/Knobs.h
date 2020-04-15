@@ -25,6 +25,7 @@
 #include "flow/Platform.h"
 
 #include <map>
+#include <set>
 #include <string>
 #include <stdint.h>
 
@@ -45,6 +46,7 @@ protected:
 	std::map<std::string, int*> int_knobs;
 	std::map<std::string, std::string*> string_knobs;
 	std::map<std::string, bool*> bool_knobs;
+	std::set<std::string> explicitlySetKnobs;
 };
 
 class FlowKnobs : public Knobs {
@@ -67,10 +69,14 @@ public:
 	double HUGE_ARENA_LOGGING_BYTES;
 	double HUGE_ARENA_LOGGING_INTERVAL;
 
-	//slow task profiling
-	double SLOWTASK_PROFILING_INTERVAL;
+	//run loop profiling
+	double RUN_LOOP_PROFILING_INTERVAL;
+	double SLOWTASK_PROFILING_LOG_INTERVAL;
 	double SLOWTASK_PROFILING_MAX_LOG_INTERVAL;
 	double SLOWTASK_PROFILING_LOG_BACKOFF;
+	double SATURATION_PROFILING_LOG_INTERVAL;
+	double SATURATION_PROFILING_MAX_LOG_INTERVAL;
+	double SATURATION_PROFILING_LOG_BACKOFF;
 
 	//connectionMonitor
 	double CONNECTION_MONITOR_LOOP_TIME;
@@ -219,7 +225,8 @@ public:
 	int LOAD_BALANCE_MAX_BAD_OPTIONS;
 	bool LOAD_BALANCE_PENALTY_IS_BAD;
 
-	FlowKnobs(bool randomize = false, bool isSimulated = false);
+	FlowKnobs();
+	void initialize(bool randomize = false, bool isSimulated = false);
 };
 
 extern FlowKnobs const* FLOW_KNOBS;

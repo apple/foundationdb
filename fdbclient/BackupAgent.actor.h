@@ -362,6 +362,9 @@ public:
 
 	Future<bool> checkActive(Database cx) { return taskBucket->checkActive(cx); }
 
+	// If "pause" is true, pause all backups; otherwise, resume all.
+	Future<Void> changePause(Database db, bool pause);
+
 	friend class FileBackupAgentImpl;
 	static const int dataFooterSize;
 

@@ -2867,7 +2867,8 @@ extern volatile size_t net2backtraces_offset;
 extern volatile size_t net2backtraces_max;
 extern volatile bool net2backtraces_overflow;
 extern volatile int64_t net2backtraces_count;
-extern std::atomic<int64_t> net2liveness;
+extern std::atomic<int64_t> net2RunLoopIterations;
+extern std::atomic<int64_t> net2RunLoopSleeps;
 extern void initProfiling();
 
 std::atomic<double> checkThreadTime;
@@ -2953,28 +2954,64 @@ void* checkThread(void *arg) {
 	pthread_t mainThread = *(pthread_t*)arg;
 	free(arg);
 
-	int64_t lastValue = net2liveness.load();
-	double lastSignal = 0;
-	double logInterval = FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL;
+	int64_t lastRunLoopIterations = net2RunLoopIterations.load();
+	int64_t lastRunLoopSleeps = net2RunLoopSleeps.load();
+
+	double lastSlowTaskSignal = 0;
+	double lastSaturatedSignal = 0;
+
+	const double minSlowTaskLogInterval = std::max(FLOW_KNOBS->SLOWTASK_PROFILING_LOG_INTERVAL, FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
+	const double minSaturationLogInterval = std::max(FLOW_KNOBS->SATURATION_PROFILING_LOG_INTERVAL, FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
+
+	double slowTaskLogInterval = minSlowTaskLogInterval;
+	double saturatedLogInterval = minSaturationLogInterval;
+
 	while(true) {
-		threadSleep(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL);
-		int64_t currentLiveness = net2liveness.load();
-		if(lastValue == currentLiveness) {
+		threadSleep(FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
+
+		int64_t currentRunLoopIterations = net2RunLoopIterations.load();
+		int64_t currentRunLoopSleeps = net2RunLoopSleeps.load();
+
+		bool slowTask = lastRunLoopIterations == currentRunLoopIterations;
+		bool saturated = lastRunLoopSleeps == currentRunLoopSleeps;
+
+		if(slowTask) {
 			double t = timer();
-			if(lastSignal == 0 || t - lastSignal >= logInterval) {
-				if(lastSignal > 0) {
-					logInterval = std::min(FLOW_KNOBS->SLOWTASK_PROFILING_MAX_LOG_INTERVAL, FLOW_KNOBS->SLOWTASK_PROFILING_LOG_BACKOFF * logInterval);
+			if(lastSlowTaskSignal == 0 || t - lastSlowTaskSignal >= slowTaskLogInterval) {
+				if(lastSlowTaskSignal > 0) {
+					slowTaskLogInterval = std::min(FLOW_KNOBS->SLOWTASK_PROFILING_MAX_LOG_INTERVAL, FLOW_KNOBS->SLOWTASK_PROFILING_LOG_BACKOFF * slowTaskLogInterval);
 				}
 
-				lastSignal = t;
-				checkThreadTime.store(lastSignal);
+				lastSlowTaskSignal = t;
+				checkThreadTime.store(lastSlowTaskSignal);
 				pthread_kill(mainThread, SIGPROF);
 			}
 		}
 		else {
-			lastValue = currentLiveness;
-			lastSignal = 0;
-			logInterval = FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL;
+			lastSlowTaskSignal = 0;
+			lastRunLoopIterations = currentRunLoopIterations;
+			slowTaskLogInterval = minSlowTaskLogInterval;
+		}
+
+		if(saturated) {
+			double t = timer();
+			if(lastSaturatedSignal == 0 || t - lastSaturatedSignal >= saturatedLogInterval) {
+				if(lastSaturatedSignal > 0) {
+					saturatedLogInterval = std::min(FLOW_KNOBS->SATURATION_PROFILING_MAX_LOG_INTERVAL, FLOW_KNOBS->SATURATION_PROFILING_LOG_BACKOFF * saturatedLogInterval);
+				}
+
+				lastSaturatedSignal = t;
+
+				if(!slowTask) {
+					checkThreadTime.store(lastSaturatedSignal);
+					pthread_kill(mainThread, SIGPROF);
+				}
+			}
+		}
+		else {
+			lastSaturatedSignal = 0;
+			lastRunLoopSleeps = currentRunLoopSleeps;
+			saturatedLogInterval = minSaturationLogInterval;
 		}
 	}
 	return NULL;
@@ -3000,10 +3037,10 @@ void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {
 #endif
 
 
-void setupSlowTaskProfiler() {
+void setupRunLoopProfiler() {
 #ifdef __linux__
-	if (!profileThread && FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0) {
-		TraceEvent("StartingSlowTaskProfilingThread").detail("Interval", FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL);
+	if (!profileThread && FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
+		TraceEvent("StartingRunLoopProfilingThread").detail("Interval", FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
 		initProfiling();
 		profileThread = true;
 

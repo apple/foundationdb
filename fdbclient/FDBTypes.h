@@ -820,6 +820,11 @@ struct LogMessageVersion {
 	explicit LogMessageVersion(Version version) : version(version), sub(0) {}
 	LogMessageVersion() : version(0), sub(0) {}
 	bool empty() const { return (version == 0) && (sub == 0); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, sub);
+	}
 };
 
 struct AddressExclusion {

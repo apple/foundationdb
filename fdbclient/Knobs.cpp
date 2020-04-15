@@ -21,12 +21,18 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
+#include "flow/UnitTest.h"
 
 ClientKnobs const* CLIENT_KNOBS = new ClientKnobs();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
-ClientKnobs::ClientKnobs(bool randomize) {
+ClientKnobs::ClientKnobs() {
+	initialize();
+}
+
+void ClientKnobs::initialize(bool randomize) {
+	// clang-format off
 	// FIXME: These are not knobs, get them out of ClientKnobs!
 	BYTE_LIMIT_UNLIMITED = GetRangeLimits::BYTE_LIMIT_UNLIMITED;
 	ROW_LIMIT_UNLIMITED = GetRangeLimits::ROW_LIMIT_UNLIMITED;
@@ -211,4 +217,22 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	//fdbcli		
 	init( CLI_CONNECT_PARALLELISM,                  400 );
 	init( CLI_CONNECT_TIMEOUT,                     10.0 );
+
+	// trace
+	init( TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH,      50 );
+	// clang-format on
+}
+
+TEST_CASE("/fdbclient/knobs/initialize") {
+	// This test depends on TASKBUCKET_TIMEOUT_VERSIONS being defined as a constant multiple of CORE_VERSIONSPERSECOND
+	ClientKnobs clientKnobs;
+	int initialCoreVersionsPerSecond = clientKnobs.CORE_VERSIONSPERSECOND;
+	int initialTaskBucketTimeoutVersions = clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS;
+	clientKnobs.setKnob("core_versionspersecond", format("%ld", initialCoreVersionsPerSecond * 2));
+	ASSERT(clientKnobs.CORE_VERSIONSPERSECOND == initialCoreVersionsPerSecond * 2);
+	ASSERT(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS == initialTaskBucketTimeoutVersions);
+	clientKnobs.initialize();
+	ASSERT(clientKnobs.CORE_VERSIONSPERSECOND == initialCoreVersionsPerSecond * 2);
+	ASSERT(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS == initialTaskBucketTimeoutVersions * 2);
+	return Void();
 }

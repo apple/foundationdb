@@ -35,6 +35,7 @@
 
 enum class TaskPriority {
 	Max = 1000000,
+	RunLoop = 30000,
 	ASIOReactor = 20001,
 	RunCycleFunction = 20000,
 	FlushTrace = 10500,
