@@ -38,6 +38,8 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+#define MAX_VERSION (std::numeric_limits<int64_t>::max())
+
 // RestoreConfig copied from FileBackupAgent.actor.cpp
 // We copy RestoreConfig instead of using (and potentially changing) it in place 
 // to avoid conflict with the existing code.

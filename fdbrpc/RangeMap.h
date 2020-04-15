@@ -112,6 +112,7 @@ public:
 	Val const& operator[]( const Key& k ) { return rangeContaining(k).value(); }
 
 	Ranges ranges() { return Ranges( Iterator(map.begin()), Iterator(map.lastItem()) ); }
+	// intersectingRanges returns [begin, end] where begin <= r.begin and end >= r.end
 	Ranges intersectingRanges( const Range& r ) { return Ranges(rangeContaining(r.begin), Iterator(map.lower_bound(r.end))); }
 	// containedRanges() will return all ranges that are fully contained by the passed range (note that a range fully contains itself)
 	Ranges containedRanges( const Range& r ) { 

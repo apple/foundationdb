@@ -20,6 +20,7 @@
 
 // This file implements the functions for RestoreMaster role
 
+#include "fdbrpc/RangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BackupAgent.actor.h"
@@ -39,6 +40,8 @@ ACTOR static Future<Void> clearDB(Database cx);
 ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* rangeFiles,
                                                 std::vector<RestoreFileFR>* logFiles, Database cx,
                                                 RestoreRequest request);
+ACTOR static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersions,
+                                             std::vector<RestoreFileFR>* pRangeFiles, Key url);
 
 ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> self, Database cx, RestoreRequest request);
 ACTOR static Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self, Database cx);
@@ -48,8 +51,8 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 
 ACTOR static Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> masterWorker,
                                               Reference<RestoreMasterData> masterData);
-ACTOR static Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> masterWorker,
-                                                   Reference<RestoreMasterData> masterData);
+ACTOR static Future<Void> distributeRestoreSysInfo(Reference<RestoreMasterData> masterData,
+                                                   KeyRangeMap<Version>* pRangeVersions);
 
 ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx);
 ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInterface> appliersInterf,
@@ -79,7 +82,7 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker,
 		actors.add(updateHeartbeatTime(self));
 		actors.add(checkRolesLiveness(self));
 
-		wait(distributeRestoreSysInfo(masterWorker, self));
+		//		wait(distributeRestoreSysInfo(masterWorker, self));
 
 		wait(startProcessRestoreRequests(self, cx));
 	} catch (Error& e) {
@@ -148,14 +151,27 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> masterWorker
 	return Void();
 }
 
-ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreWorkerData> masterWorker,
-                                            Reference<RestoreMasterData> masterData) {
+ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreMasterData> masterData,
+                                            KeyRangeMap<Version>* pRangeVersions) {
 	ASSERT(masterData.isValid());
 	ASSERT(!masterData->loadersInterf.empty());
 	RestoreSysInfo sysInfo(masterData->appliersInterf);
+	// Construct serializable KeyRange versions
+	Standalone<VectorRef<std::pair<KeyRangeRef, Version>>> rangeVersionsVec;
+	auto ranges = pRangeVersions->ranges();
+	int i = 0;
+	for (auto r = ranges.begin(); r != ranges.end(); ++r) {
+		rangeVersionsVec.push_back(rangeVersionsVec.arena(),
+		                           std::make_pair(KeyRangeRef(r->begin(), r->end()), r->value()));
+		TraceEvent(SevDebug, "DistributeRangeVersions")
+		    .detail("RangeIndex", i++)
+		    .detail("RangeBegin", r->begin())
+		    .detail("RangeEnd", r->end())
+		    .detail("RangeVersion", r->value());
+	}
 	std::vector<std::pair<UID, RestoreSysInfoRequest>> requests;
 	for (auto& loader : masterData->loadersInterf) {
-		requests.emplace_back(loader.first, RestoreSysInfoRequest(sysInfo));
+		requests.emplace_back(loader.first, RestoreSysInfoRequest(sysInfo, rangeVersionsVec));
 	}
 
 	TraceEvent("FastRestoreDistributeRestoreSysInfoToLoaders", masterData->id())
@@ -233,12 +249,13 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	state std::vector<RestoreFileFR> rangeFiles;
 	state std::vector<RestoreFileFR> logFiles;
 	state std::vector<RestoreFileFR> allFiles;
+	state KeyRangeMap<Version> rangeVersions(MAX_VERSION, allKeys.end);
 	state ActorCollection actors(false);
 
 	self->initBackupContainer(request.url);
 
 	// Get all backup files' description and save them to files
-	Version targetVersion = wait(collectBackupFiles(self->bc, &rangeFiles, &logFiles, cx, request));
+	state Version targetVersion = wait(collectBackupFiles(self->bc, &rangeFiles, &logFiles, cx, request));
 	ASSERT(targetVersion > 0);
 
 	std::sort(rangeFiles.begin(), rangeFiles.end());
@@ -246,6 +263,11 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 		return std::tie(f1.endVersion, f1.beginVersion, f1.fileIndex, f1.fileName) <
 		       std::tie(f2.endVersion, f2.beginVersion, f2.fileIndex, f2.fileName);
 	});
+
+	// Build range versions: version of key ranges in range file
+	wait(buildRangeVersions(&rangeVersions, &rangeFiles, request.url));
+
+	wait(distributeRestoreSysInfo(self, &rangeVersions));
 
 	// Divide files into version batches.
 	self->buildVersionBatches(rangeFiles, logFiles, &self->versionBatches, targetVersion);
@@ -673,6 +695,69 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 	    .detail("RangeFiles", rangeFiles->size())
 	    .detail("LogFiles", logFiles->size());
 	return request.targetVersion;
+}
+
+ACTOR static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersions, RestoreFileFR* file,
+                                             Reference<IBackupContainer> bc) {
+	TraceEvent("FastRestoreMasterDecodeRangeVersion").detail("File", file->toString());
+	Reference<IAsyncFile> inFile = wait(bc->readFile(file->fileName));
+	state bool beginKeySet = false;
+	Key beginKey;
+	Key endKey;
+	for (int64_t j = 0; j < file->fileSize; j += file->blockSize) {
+		int64_t len = std::min<int64_t>(file->blockSize, file->fileSize - j);
+		Standalone<VectorRef<KeyValueRef>> blockData = wait(parallelFileRestore::decodeRangeFileBlock(inFile, j, len));
+		if (!beginKeySet) {
+			beginKey = blockData.front().key;
+		}
+		endKey = blockData.back().key;
+	}
+
+	// First and last key are the range for this file: endKey is exclusive
+	KeyRange fileRange = KeyRangeRef(beginKey.contents(), endKey.contents());
+	TraceEvent("FastRestoreMasterInsertRangeVersion")
+	    .detail("DecodedRangeFile", file->fileName)
+	    .detail("KeyRange", fileRange)
+	    .detail("Version", file->version)
+	    .detail("DataSize", blockData.contents().size());
+	// Update version for pRangeVersions's ranges in fileRange
+	auto ranges = pRangeVersions->modify(fileRange);
+	for (auto r = ranges.begin(); r != ranges.end(); ++r) {
+		r->value() = r->value() == MAX_VERSION ? file->version : std::max(r->value(), file->version);
+	}
+
+	// Dump the new key ranges
+	ranges = pRangeVersions->ranges();
+	int i = 0;
+	for (auto r = ranges.begin(); r != ranges.end(); ++r) {
+		TraceEvent(SevDebug, "RangeVersionsAfterUpdate")
+		    .detail("File", file->toString())
+		    .detail("FileRange", fileRange.toString())
+		    .detail("FileVersion", file->version)
+		    .detail("RangeIndex", i++)
+		    .detail("RangeBegin", r->begin())
+		    .detail("RangeEnd", r->end())
+		    .detail("RangeVersion", r->value());
+	}
+
+	return Void();
+}
+
+ACTOR static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersions,
+                                             std::vector<RestoreFileFR>* pRangeFiles, Key url) {
+	Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
+
+	// Key ranges not in range files are empty;
+	// Assign highest version to avoid applying any mutation in these ranges
+	state int fileIndex = 0;
+	state std::vector<Future<Void>> fInsertRangeVersions;
+	for (; fileIndex < pRangeFiles->size(); ++fileIndex) {
+		fInsertRangeVersions.push_back(insertRangeVersion(pRangeVersions, &pRangeFiles->at(fileIndex), bc));
+	}
+
+	wait(waitForAll(fInsertRangeVersions));
+
+	return Void();
 }
 
 ACTOR static Future<Void> clearDB(Database cx) {
