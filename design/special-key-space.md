@@ -11,7 +11,7 @@ Currently, there are several client functions implemented as FDB calls by passin
 
 At present, implementions are hard-coded and the pain points are obvious:
 - **Maintainability**: As more features added, the hard-coded snippets are hard to maintain 
-- **Granularity**: It is impossible to scale up and down. For example, you want a cheap call like `get("\xff\xff/status/json/<certain_field>")` instead of calling `status/json` and parsing the results. In the constrast, sometime you want to aggregate results from several similiar features like `getRange("\xff\xff/transaction/, \xff\xff/transaction/\xff")` to get all transaction related info. Both of them are not achievable at present.
+- **Granularity**: It is impossible to scale up and down. For example, you want a cheap call like `get("\xff\xff/status/json/<certain_field>")` instead of calling `status/json` and parsing the results. On the contrary, sometime you want to aggregate results from several similiar features like `getRange("\xff\xff/transaction/, \xff\xff/transaction/\xff")` to get all transaction related info. Both of them are not achievable at present.
 - **Consistency**: While using FDB calls like `get` or `getRange`, the behavior that the result of `get("\xff\xff/B")` is not included in `getRange("\xff\xff/A", "\xff\xff/C")` is inconsistent with general FDB calls.
 
 Consequently, the special-key-space framework wants to integrate all client functions using special keys(`prefixed with \xff`) and solve the pain points listed above.
