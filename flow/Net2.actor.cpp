@@ -57,7 +57,8 @@ using namespace boost::asio::ip;
 #if defined(__linux__)
 #include <execinfo.h>
 
-std::atomic<int64_t> net2liveness(0);
+std::atomic<int64_t> net2RunLoopIterations(0);
+std::atomic<int64_t> net2RunLoopSleeps(0);
 
 volatile size_t net2backtraces_max = 10000;
 volatile void** volatile net2backtraces = NULL;
@@ -221,7 +222,7 @@ public:
 	Int64MetricHandle countYieldCalls;
 	Int64MetricHandle countYieldCallsTrue;
 	Int64MetricHandle countASIOEvents;
-	Int64MetricHandle countSlowTaskSignals;
+	Int64MetricHandle countRunLoopProfilingSignals;
 	Int64MetricHandle countTLSPolicyFailures;
 	Int64MetricHandle priorityMetric;
 	DoubleMetricHandle countLaunchTime;
@@ -1003,7 +1004,7 @@ void Net2::initMetrics() {
 	countYieldCalls.init(LiteralStringRef("Net2.CountYieldCalls"));
 	countASIOEvents.init(LiteralStringRef("Net2.CountASIOEvents"));
 	countYieldCallsTrue.init(LiteralStringRef("Net2.CountYieldCallsTrue"));
-	countSlowTaskSignals.init(LiteralStringRef("Net2.CountSlowTaskSignals"));
+	countRunLoopProfilingSignals.init(LiteralStringRef("Net2.CountRunLoopProfilingSignals"));
 	countTLSPolicyFailures.init(LiteralStringRef("Net2.CountTLSPolicyFailures"));
 	priorityMetric.init(LiteralStringRef("Net2.Priority"));
 	awakeMetric.init(LiteralStringRef("Net2.Awake"));
@@ -1065,6 +1066,11 @@ void Net2::run() {
 				sleepTime = timers.top().at - sleepStart;  // + 500e-6?
 			}
 			if (sleepTime > 0) {
+#if defined(__linux__)
+				// notify the run loop monitoring thread that we have gone idle
+				net2RunLoopSleeps.fetch_add(1);
+#endif
+
 				trackAtPriority(TaskPriority::Zero, sleepStart);
 				awakeMetric = false;
 				priorityMetric = 0;
@@ -1146,7 +1152,7 @@ void Net2::run() {
 		FDB_TRACE_PROBE(run_loop_done, queueSize);
 
 #if defined(__linux__)
-		if(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0) {
+		if(FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
 			sigset_t orig_set;
 			pthread_sigmask(SIG_BLOCK, &sigprof_set, &orig_set);
 
@@ -1154,7 +1160,7 @@ void Net2::run() {
 			bool was_overflow = net2backtraces_overflow;
 			int signal_count = net2backtraces_count;
 
-			countSlowTaskSignals += signal_count;
+			countRunLoopProfilingSignals += signal_count;
 
 			if (other_offset) {
 				volatile void** _traces = net2backtraces;
@@ -1170,7 +1176,7 @@ void Net2::run() {
 			pthread_sigmask(SIG_SETMASK, &orig_set, NULL);
 
 			if (was_overflow) {
-				TraceEvent("Net2SlowTaskOverflow")
+				TraceEvent("Net2RunLoopProfilerOverflow")
 					.detail("SignalsReceived", signal_count)
 					.detail("BackTraceHarvested", other_offset != 0);
 			}
@@ -1178,13 +1184,13 @@ void Net2::run() {
 				size_t iter_offset = 0;
 				while (iter_offset < other_offset) {
 					ProfilingSample *ps = (ProfilingSample *)(other_backtraces + iter_offset);
-					TraceEvent(SevWarn, "Net2SlowTaskTrace").detailf("TraceTime", "%.6f", ps->timestamp).detail("Trace", platform::format_backtrace(ps->frames, ps->length));
+					TraceEvent(SevWarn, "Net2RunLoopTrace").detailf("TraceTime", "%.6f", ps->timestamp).detail("Trace", platform::format_backtrace(ps->frames, ps->length));
 					iter_offset += ps->length + 2;
 				}
 			}
 
-			// to keep the thread liveness check happy
-			net2liveness.fetch_add(1);
+			// notify the run loop monitoring thread that we are making progress 
+			net2RunLoopIterations.fetch_add(1);
 		}
 #endif
 		nnow = timer_monotonic();
@@ -1266,7 +1272,8 @@ void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, T
 		slowTaskMetric->log();
 
 		double sampleRate = std::min(1.0, (elapsed > warnThreshold) ? 1.0 : elapsed / 10e9);
-		if(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0 && duration > FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL) {
+		double slowTaskProfilingLogInterval = std::max(FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL, FLOW_KNOBS->SLOWTASK_PROFILING_LOG_INTERVAL);
+		if(slowTaskProfilingLogInterval > 0 && duration > slowTaskProfilingLogInterval) {
 			sampleRate = 1; // Always include slow task events that could show up in our slow task profiling.
 		}
 

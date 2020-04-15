@@ -48,9 +48,13 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( DISABLE_ASSERTS,                                       0 );
 	init( QUEUE_MODEL_SMOOTHING_AMOUNT,                        2.0 );
 
-	init( SLOWTASK_PROFILING_INTERVAL,                       0.125 ); // A value of 0 disables SlowTask profiling
+	init( RUN_LOOP_PROFILING_INTERVAL,                       0.125 ); // A value of 0 disables run loop profiling
+	init( SLOWTASK_PROFILING_LOG_INTERVAL,                       0 ); // A value of 0 means use RUN_LOOP_PROFILING_INTERVAL
 	init( SLOWTASK_PROFILING_MAX_LOG_INTERVAL,                 1.0 );
 	init( SLOWTASK_PROFILING_LOG_BACKOFF,                      2.0 );
+	init( SATURATION_PROFILING_LOG_INTERVAL,                   0.5 ); // A value of 0 means use RUN_LOOP_PROFILING_INTERVAL
+	init( SATURATION_PROFILING_MAX_LOG_INTERVAL,               5.0 );
+	init( SATURATION_PROFILING_LOG_BACKOFF,                    2.0 );
 
 	init( RANDOMSEED_RETRY_LIMIT,                                4 );
 	init( FAST_ALLOC_LOGGING_BYTES,                           10e6 );
