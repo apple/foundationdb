@@ -91,6 +91,22 @@ namespace PTreeImpl {
 	public:
 	    PTreeFinger() {}
 
+	    // Explicit copy constructors ensure we copy the live values in entries_.
+	    PTreeFinger(PTreeFinger const& f) { *this = f; }
+	    PTreeFinger(PTreeFinger&& f) { *this = f; }
+
+	    PTreeFinger& operator=(PTreeFinger const& f) {
+		    size_ = f.size_;
+		    std::copy(f.entries_, f.entries_ + size_, entries_);
+		    return *this;
+	    }
+
+	    PTreeFinger& operator=(PTreeFinger&& f) {
+		    size_ = std::exchange(f.size_, 0);
+		    std::copy(f.entries_, f.entries_ + size_, entries_);
+		    return *this;
+	    }
+
 	    size_t size() const { return size_; }
 	    void push_back(PTree<T> const* node) { this->push_back(node, false); }
 	    PTree<T> const* back() const { return entries_[size_ - 1].node; }
