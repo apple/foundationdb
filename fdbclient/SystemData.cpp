@@ -21,6 +21,8 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/TDMetric.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
+
 
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
@@ -43,20 +45,67 @@ const Key keyServersKey( const KeyRef& k ) {
 const KeyRef keyServersKey( const KeyRef& k, Arena& arena ) {
 	return k.withPrefix( keyServersPrefix, arena );
 }
-const Value keyServersValue( const vector<UID>& src, const vector<UID>& dest ) {
+const Value keyServersValue( Standalone<RangeResultRef> result, const std::vector<UID>& src, const std::vector<UID>& dest ) {
+	std::vector<Tag> srcTag;
+	std::vector<Tag> destTag;
+
+	for (const KeyValueRef kv : result) {
+		UID uid = decodeServerTagKey(kv.key);
+		if (std::find(src.begin(), src.end(), uid) != src.end()) {
+			srcTag.push_back( decodeServerTagValue(kv.value) );
+		}
+		if (std::find(dest.begin(), dest.end(), uid) != dest.end()) {
+			destTag.push_back( decodeServerTagValue(kv.value) );
+		}
+	}
+
+	return keyServersValue(srcTag, destTag);
+}
+const Value keyServersValue( const std::vector<Tag>& srcTag, const std::vector<Tag>& destTag ) {
 	// src and dest are expected to be sorted
-	ASSERT( std::is_sorted(src.begin(), src.end()) && std::is_sorted(dest.begin(), dest.end()) );
-	BinaryWriter wr((IncludeVersion())); wr << src << dest;
+	BinaryWriter wr(IncludeVersion()); wr << srcTag << destTag;
 	return wr.toValue();
 }
-void decodeKeyServersValue( const ValueRef& value, vector<UID>& src, vector<UID>& dest ) {
-	if (value.size()) {
-		BinaryReader rd(value, IncludeVersion());
-		rd >> src >> dest;
-	} else {
+
+void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& value,
+                            std::vector<UID>& src, std::vector<UID>& dest  ) {
+	if (value.size() == 0) {
 		src.clear();
 		dest.clear();
+		return;
 	}
+
+	BinaryReader rd(value, IncludeVersion());
+	rd.checkpoint();
+	int srcLen, destLen;
+	rd >> srcLen;
+	rd.readBytes(srcLen * sizeof(Tag));
+	rd >> destLen;
+	rd.rewind();
+
+	if (value.size() != sizeof(ProtocolVersion) + sizeof(int) + srcLen * sizeof(Tag) + sizeof(int) + destLen * sizeof(Tag)) {
+		rd >> src >> dest;
+		rd.assertEnd();
+		return;
+	}
+
+	std::vector<Tag> srcTag, destTag;
+	rd >> srcTag >> destTag;
+
+	src.clear();
+	dest.clear();
+
+	for (const KeyValueRef kv : result) {
+		Tag tag = decodeServerTagValue(kv.value);
+		if (std::find(srcTag.begin(), srcTag.end(), tag) != srcTag.end()) {
+			src.push_back( decodeServerTagKey(kv.key) );
+		}
+		if (std::find(destTag.begin(), destTag.end(), tag) != destTag.end()) {
+			dest.push_back( decodeServerTagKey(kv.key) );
+		}
+	}
+	std::sort(src.begin(), src.end());
+	std::sort(dest.begin(), dest.end());
 }
 
 const KeyRangeRef conflictingKeysRange = KeyRangeRef(LiteralStringRef("\xff\xff/transaction/conflicting_keys/"),

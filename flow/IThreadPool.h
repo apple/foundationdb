@@ -60,7 +60,7 @@ public:
 	virtual Future<Void> getError() = 0;  // asynchronously throws an error if there is an internal error
 	virtual void addThread( IThreadPoolReceiver* userData ) = 0;
 	virtual void post( PThreadAction action ) = 0;
-	virtual Future<Void> stop() = 0;
+	virtual Future<Void> stop(Error const& e = success()) = 0;
 	virtual bool isCoro() const { return false; }
 	virtual void addref() = 0;
 	virtual void delref() = 0;

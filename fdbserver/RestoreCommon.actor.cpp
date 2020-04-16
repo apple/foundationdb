@@ -343,7 +343,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		return results;
 
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "FileRestoreCorruptRangeFileBlock")
+		TraceEvent(SevError, "FileRestoreCorruptRangeFileBlock")
 		    .error(e)
 		    .detail("Filename", file->getFilename())
 		    .detail("BlockOffset", offset)
@@ -388,7 +388,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 		return results;
 
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "FileRestoreCorruptLogFileBlock")
+		TraceEvent(SevError, "FileRestoreCorruptLogFileBlock")
 		    .error(e)
 		    .detail("Filename", file->getFilename())
 		    .detail("BlockOffset", offset)

@@ -307,6 +307,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL,        0.001 );
 	init( START_TRANSACTION_MAX_TRANSACTIONS_TO_START,        100000 );
 	init( START_TRANSACTION_MAX_REQUESTS_TO_START,             10000 );
+	init( START_TRANSACTION_RATE_WINDOW,                         2.0 );
+	init( START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,             10.0 );
 	init( START_TRANSACTION_MAX_QUEUE_SIZE,                      1e6 );
 	init( KEY_LOCATION_MAX_QUEUE_SIZE,                           1e6 );
 
@@ -326,7 +328,6 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE,           100000 );
 	init( COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER,             0.0 );
 
-	init( TRANSACTION_BUDGET_TIME,							   0.050 ); if( randomize && BUGGIFY ) TRANSACTION_BUDGET_TIME = 0.0;
 	init( RESOLVER_COALESCE_TIME,                                1.0 );
 	init( BUGGIFIED_ROW_LIMIT,                  APPLY_MUTATION_BYTES ); if( randomize && BUGGIFY ) BUGGIFIED_ROW_LIMIT = deterministicRandom()->randomInt(3, 30);
 	init( PROXY_SPIN_DELAY,                                     0.01 );
@@ -359,7 +360,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PROVISIONAL_START_DELAY,                               1.0 );
 	init( PROVISIONAL_MAX_DELAY,                                60.0 );
 	init( PROVISIONAL_DELAY_GROWTH,                              1.5 );
-	init( SECONDS_BEFORE_RECRUIT_BACKUP_WORKER,                  4.0 );
+	init( SECONDS_BEFORE_RECRUIT_BACKUP_WORKER,                  4.0 );  if( randomize && BUGGIFY ) SECONDS_BEFORE_RECRUIT_BACKUP_WORKER = deterministicRandom()->random01() * 8;
 
 	// Resolver
 	init( SAMPLE_OFFSET_PER_KEY,                                 100 );

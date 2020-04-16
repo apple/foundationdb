@@ -36,7 +36,7 @@ struct SlowTaskWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		setupSlowTaskProfiler();
+		setupRunLoopProfiler();
 		return go();
 	}
 
