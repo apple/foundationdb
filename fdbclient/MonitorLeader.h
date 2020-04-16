@@ -42,11 +42,11 @@ struct ClientStatusInfo {
 
 struct ClientData {
 	std::map<NetworkAddress, ClientStatusInfo> clientStatusInfoMap;
-	Reference<AsyncVar<ClientDBInfo>> clientInfo;
+	Reference<AsyncVar<CachedSerialization<ClientDBInfo>>> clientInfo;
 
 	OpenDatabaseRequest getRequest();
 
-	ClientData() : clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ) {}
+	ClientData() : clientInfo( new AsyncVar<CachedSerialization<ClientDBInfo>>( CachedSerialization<ClientDBInfo>() ) ) {}
 };
 
 template <class LeaderInterface>
@@ -57,9 +57,13 @@ Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Re
 
 Future<Void> monitorLeaderForProxies( Value const& key, vector<NetworkAddress> const& coordinators, ClientData* const& clientData );
 
-Future<Void> monitorProxies( Reference<AsyncVar<Reference<ClusterConnectionFile>>> const& connFile, Reference<AsyncVar<ClientDBInfo>> const& clientInfo, Standalone<VectorRef<ClientVersionRef>> const& supportedVersions, Key const& traceLogGroup );
+Future<Void> monitorProxies( Reference<AsyncVar<Reference<ClusterConnectionFile>>> const& connFile, Reference<AsyncVar<ClientDBInfo>> const& clientInfo, Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> const& supportedVersions, Key const& traceLogGroup );
 
+void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::vector<MasterProxyInterface>& lastProxies );
+
+#ifndef __INTEL_COMPILER
 #pragma region Implementation
+#endif
 
 Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Value>> const& outSerializedLeaderInfo );
 
@@ -67,7 +71,7 @@ template <class LeaderInterface>
 struct LeaderDeserializer {
 	Future<Void> operator()(const Reference<AsyncVar<Value>>& serializedInfo,
 							const Reference<AsyncVar<Optional<LeaderInterface>>>& outKnownLeader) {
-		return asyncDeserialize(serializedInfo, outKnownLeader, g_network->useObjectSerializer());
+		return asyncDeserialize(serializedInfo, outKnownLeader);
 	}
 };
 
@@ -91,6 +95,8 @@ Future<Void> monitorLeader(Reference<ClusterConnectionFile> const& connFile,
 	return m || deserializer( serializedInfo, outKnownLeader );
 }
 
+#ifndef __INTEL_COMPILER
 #pragma endregion
+#endif
 
 #endif

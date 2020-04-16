@@ -31,10 +31,9 @@
 #include "flow/SystemMonitor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/FailureMonitorClient.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/RestoreInterface.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/MoveKeys.actor.h"
@@ -52,12 +51,10 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include <time.h>
 #include "fdbserver/Status.h"
-#include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Net2FileSystem.h"
-#include "fdbrpc/Platform.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
-#include "flow/SignalSafeUnwind.h"
+#include "flow/TLSConfig.actor.h"
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
 #endif
@@ -81,13 +78,14 @@
 #include "flow/SimpleOpt.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+// clang-format off
 enum {
-	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, 
-	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID, 
-	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, 
-	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, 
-	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE, 
-	OPT_TRACE_FORMAT, OPT_USE_OBJECT_SERIALIZER, OPT_WHITELIST_BINPATH 
+	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE,
+	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
+	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK,
+	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
+	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -165,9 +163,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_IO_TRUST_SECONDS,      "--io_trust_seconds",          SO_REQ_SEP },
 	{ OPT_IO_TRUST_WARN_ONLY,    "--io_trust_warn_only",        SO_NONE },
 	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "-S",                          SO_REQ_SEP },
-	{ OPT_USE_OBJECT_SERIALIZER, "--object-serializer",         SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob_credential_file",      SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -176,7 +173,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	SO_END_OF_OPTIONS
 };
 
-GlobalCounters g_counters;
+// clang-format on
 
 extern void dsltest();
 extern void pingtest();
@@ -186,7 +183,7 @@ extern void createTemplateDatabase();
 // FIXME: this really belongs in a header somewhere since it is actually used.
 extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
 
-extern const char* getHGVersion();
+extern const char* getSourceVersion();
 
 extern void flushTraceFileVoid();
 
@@ -201,18 +198,12 @@ bool enableFailures = true;
 
 #define test_assert(x) if (!(x)) { cout << "Test failed: " #x << endl; return false; }
 
-template <class X> vector<X> vec( X x ) { vector<X> v; v.push_back(x); return v; }
-template <class X> vector<X> vec( X x, X y ) { vector<X> v; v.push_back(x); v.push_back(y); return v; }
-template <class X> vector<X> vec( X x, X y, X z ) { vector<X> v; v.push_back(x); v.push_back(y); v.push_back(z); return v; }
-
-//KeyRange keyRange( const Key& a, const Key& b ) { return std::make_pair(a,b); }
-
 vector< Standalone<VectorRef<DebugEntryRef>> > debugEntries;
 int64_t totalDebugEntriesSize = 0;
 
 #if CENABLED(0, NOT_IN_CLEAN)
-StringRef debugKey = LiteralStringRef( "" );
-StringRef debugKey2 = LiteralStringRef( "\xff\xff\xff\xff" );
+StringRef debugKey = LiteralStringRef("");
+StringRef debugKey2 = LiteralStringRef("\xff\xff\xff\xff");
 
 bool debugMutation( const char* context, Version version, MutationRef const& mutation ) {
 	if ((mutation.type == mutation.SetValue || mutation.type == mutation.AddValue || mutation.type==mutation.DebugKey) && (mutation.param1 == debugKey || mutation.param1 == debugKey2))
@@ -527,8 +518,8 @@ void* parentWatcher(void *arg) {
 
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("source version %s\n", getHGVersion());
-	printf("protocol %" PRIx64 "\n", currentProtocolVersion);
+	printf("source version %s\n", getSourceVersion());
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
 }
 
 static void printHelpTeaser( const char *name ) {
@@ -576,22 +567,36 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 Delete the oldest log file when the total size of all log\n"
 		   "                 files exceeds SIZE bytes. If set to 0, old log files will not\n"
 		   "                 be deleted. The default value is 100MiB.\n");
+	printf("  --loggroup LOG_GROUP\n"
+	       "                 Sets the LogGroup field with the specified value for all\n"
+	       "                 events in the trace output (defaults to `default').\n");
 	printf("  --trace_format FORMAT\n"
-		   "                 Select the format of the log files. xml (the default) and json are supported.\n");
+	       "                 Select the format of the log files. xml (the default) and json\n"
+	       "                 are supported.\n");
 	printf("  -i ID, --machine_id ID\n"
-		   "                 Machine identifier key (up to 16 hex characters). Defaults\n"
-		   "                 to a random value shared by all fdbserver processes on this\n"
-		   "                 machine.\n");
+	       "                 Machine and zone identifier key (up to 16 hex characters).\n"
+	       "                 Defaults to a random value shared by all fdbserver processes\n"
+	       "                 on this machine.\n");
 	printf("  -a ID, --datacenter_id ID\n"
 		   "                 Data center identifier key (up to 16 hex characters).\n");
+	printf("  --locality_LOCALITYKEY LOCALITYVALUE\n"
+	       "                 Define a locality key. LOCALITYKEY is case-insensitive though\n"
+	       "                 LOCALITYVALUE is not.\n");
+	printf("  -m SIZE, --memory SIZE\n"
+	       "                 Memory limit. The default value is 8GiB. When specified\n"
+	       "                 without a unit, MiB is assumed.\n");
+	printf("  -M SIZE, --storage_memory SIZE\n"
+	       "                 Maximum amount of memory used for storage. The default\n"
+	       "                 value is 1GiB. When specified without a unit, MB is\n"
+	       "                 assumed.\n");
+	printf("  --cache_memory SIZE\n"
+	       "                 The amount of memory to use for caching disk pages.\n"
+	       "                 The default value is 2GiB. When specified without a unit,\n"
+	       "                 MiB is assumed.\n");
 	printf("  -c CLASS, --class CLASS\n"
 		   "                 Machine class (valid options are storage, transaction,\n"
 		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
 		   "                 and cluster_controller).\n");
-	printf("  -S ON|OFF, --object-serializer ON|OFF\n"
-		   "                 Use object serializer for sending messages. The object serializer\n"
-		   "                 is currently a beta feature and it allows fdb processes to talk to\n"
-		   "                 each other even if they don't have the same version\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -617,18 +622,7 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("  -s SEED, --seed SEED\n"
 			   "                 Random seed.\n");
 		printf("  -k KEY, --key KEY  Target key for search role.\n");
-		printf("  -m SIZE, --memory SIZE\n"
-			   "                 Memory limit. The default value is 8GiB. When specified\n"
-			   "                 without a unit, MiB is assumed.\n");
 		printf("  --kvfile FILE  Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.\n");
-		printf("  -M SIZE, --storage_memory SIZE\n"
-			   "                 Maximum amount of memory used for storage. The default\n"
-			   "                 value is 1GiB. When specified without a unit, MB is\n"
-			   "                 assumed.\n");
-		printf("  --cache_memory SIZE\n"
-		       "                 The amount of memory to use for caching disk pages.\n"
-		       "                 The default value is 2GiB. When specified without a unit,\n"
-		       "                 MiB is assumed.\n");
 		printf("  -b [on,off], --buggify [on,off]\n"
 			   "                 Sets Buggify system state, defaults to `off'.\n");
 		printf("  --crash        Crash on serious errors instead of continuing.\n");
@@ -665,8 +659,6 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("                 Must be specified if using a different database for metrics.\n");
 		printf("  --knob_KNOBNAME KNOBVALUE\n");
 		printf("                 Changes a database knob. KNOBNAME should be lowercase.\n");
-		printf("  --locality_LOCALITYKEY LOCALITYVALUE\n");
-		printf("                 Define a locality key. LOCALITYKEY is case-insensitive though LOCALITYVALUE is not.\n");
 		printf("  --io_trust_seconds SECONDS\n");
 		printf("                 Sets the time in seconds that a read or write operation is allowed to take\n"
 		       "                 before timing out with an error. If an operation times out, all future\n"
@@ -687,7 +679,7 @@ static void printUsage( const char *name, bool devhelp ) {
 extern bool g_crashOnError;
 
 #if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
-	void* operator new (std::size_t size) throw(std::bad_alloc) {
+	void* operator new (std::size_t size)  {
 		void* p = malloc(size);
 		if(!p)
 			throw std::bad_alloc();
@@ -711,7 +703,7 @@ extern bool g_crashOnError;
 	}
 
 	//array throwing new and matching delete[]
-	void* operator new  [](std::size_t size) throw(std::bad_alloc) {
+	void* operator new  [](std::size_t size) {
 		void* p = malloc(size);
 		if(!p)
 			throw std::bad_alloc();
@@ -891,94 +883,93 @@ void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::stri
 	}
 }
 
-int main(int argc, char* argv[]) {
-	try {
-		platformInit();
-		initSignalSafeUnwind();
+namespace {
+enum Role {
+	ConsistencyCheck,
+	CreateTemplateDatabase,
+	DSLTest,
+	FDBD,
+	KVFileGenerateIOLogChecksums,
+	KVFileIntegrityCheck,
+	MultiTester,
+	NetworkTestClient,
+	NetworkTestServer,
+	Restore,
+	SearchMutations,
+	Simulation,
+	SkipListTest,
+	Test,
+	VersionedMapTest,
+};
+struct CLIOptions {
+	std::string commandLine;
+	std::string fileSystemPath, dataFolder, connFile, seedConnFile, seedConnString, logFolder = ".", metricsConnFile,
+	                                                                                metricsPrefix;
+	std::string logGroup = "default";
+	uint64_t rollsize = TRACE_DEFAULT_ROLL_SIZE;
+	uint64_t maxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
+	bool maxLogsSizeSet = false;
+	int maxLogs = 0;
+	bool maxLogsSet = false;
 
-#ifdef ALLOC_INSTRUMENTATION
-		g_extra_memory = new uint8_t[1000000];
-#endif
-		registerCrashHandler();
+	Role role = FDBD;
+	uint32_t randomSeed = platform::getRandomSeed();
 
-		// Set default of line buffering standard out and error
-		setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
-		setvbuf(stderr, NULL, _IOLBF, BUFSIZ);
+	const char* testFile = "tests/default.txt";
+	std::string kvFile;
+	std::string testServersStr;
+	std::string whitelistBinPaths;
 
-		//Enables profiling on this thread (but does not start it)
-		registerThreadForProfiling();
+	std::vector<std::string> publicAddressStrs, listenAddressStrs;
+	NetworkAddressList publicAddresses, listenAddresses;
 
-		std::string commandLine;
-		for (int a = 0; a<argc; a++) {
+	const char* targetKey = NULL;
+	uint64_t memLimit =
+	    8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and
+	               // SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
+	uint64_t storageMemLimit = 1LL << 30;
+	bool buggifyEnabled = false, restarting = false;
+	Optional<Standalone<StringRef>> zoneId;
+	Optional<Standalone<StringRef>> dcId;
+	ProcessClass processClass = ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource);
+	bool useNet2 = true;
+	bool useThreadPool = false;
+	std::vector<std::pair<std::string, std::string>> knobs;
+	LocalityData localities;
+	int minTesterCount = 1;
+	bool testOnServers = false;
+
+	TLSConfig tlsConfig = TLSConfig(TLSEndpointType::SERVER);
+	double fileIoTimeout = 0.0;
+	bool fileIoWarnOnly = false;
+	uint64_t rsssize = -1;
+	std::vector<std::string> blobCredentials; // used for fast restore workers
+	const char* blobCredsFromENV = nullptr;
+
+	Reference<ClusterConnectionFile> connectionFile;
+	Standalone<StringRef> machineId;
+
+	static CLIOptions parseArgs(int argc, char* argv[]) {
+		CLIOptions opts;
+		opts.parseArgsInternal(argc, argv);
+		return opts;
+	}
+
+private:
+	CLIOptions() = default;
+
+	void parseArgsInternal(int argc, char* argv[]) {
+		for (int a = 0; a < argc; a++) {
 			if (a) commandLine += ' ';
 			commandLine += argv[a];
 		}
 
 		CSimpleOpt args(argc, argv, g_rgOptions, SO_O_EXACT);
 
-		enum Role {
-			Simulation,
-			FDBD,
-			Test,
-			MultiTester,
-			SkipListTest,
-			SearchMutations,
-			DSLTest,
-			VersionedMapTest,
-			CreateTemplateDatabase,
-			NetworkTestClient,
-			NetworkTestServer,
-			Restore,
-			KVFileIntegrityCheck,
-			KVFileGenerateIOLogChecksums,
-			ConsistencyCheck
-		};
-		std::string fileSystemPath = "", dataFolder, connFile = "", seedConnFile = "", seedConnString = "", logFolder = ".", metricsConnFile = "", metricsPrefix = "";
-		std::string logGroup = "default";
-		Role role = FDBD;
-		uint32_t randomSeed = platform::getRandomSeed();
-
-		const char *testFile = "tests/default.txt";
-		std::string kvFile;
-		std::string testServersStr;
-		std::string whitelistBinPaths;
-		std::vector<std::string> publicAddressStrs, listenAddressStrs;
-		const char *targetKey = NULL;
-		uint64_t memLimit = 8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
-		uint64_t storageMemLimit = 1LL << 30;
-		bool buggifyEnabled = false, restarting = false;
-		Optional<Standalone<StringRef>> zoneId;
-		Optional<Standalone<StringRef>> dcId;
-		ProcessClass processClass = ProcessClass( ProcessClass::UnsetClass, ProcessClass::CommandLineSource );
-		bool useNet2 = true;
-		bool useThreadPool = false;
-		uint64_t rollsize = TRACE_DEFAULT_ROLL_SIZE;
-		uint64_t maxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
-		bool maxLogsSizeSet = false;
-		int maxLogs = 0;
-		bool maxLogsSet = false;
-		std::vector<std::pair<std::string, std::string>> knobs;
-		LocalityData localities;
-		int minTesterCount = 1;
-		bool testOnServers = false;
-
-		Reference<TLSOptions> tlsOptions = Reference<TLSOptions>( new TLSOptions );
-		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
-		std::vector<std::string> tlsVerifyPeers;
-		double fileIoTimeout = 0.0;
-		bool fileIoWarnOnly = false;
-		uint64_t rsssize = -1;
-		bool useObjectSerializer = true;
-
-		if( argc == 1 ) {
+		if (argc == 1) {
 			printUsage(argv[0], false);
 			flushAndExit(FDB_EXIT_ERROR);
 		}
-
-	#ifdef _WIN32
-		// Windows needs a gentle nudge to format floats correctly
-		//_set_output_format(_TWO_DIGIT_EXPONENT);
-	#endif
 
 		while (args.Next()) {
 			if (args.LastError() == SO_ARG_INVALID_DATA) {
@@ -1006,445 +997,472 @@ int main(int argc, char* argv[]) {
 				printHelpTeaser(argv[0]);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
-			const char *sRole;
+			const char* sRole;
 			Optional<uint64_t> ti;
 			std::string argStr;
 			std::vector<std::string> tmpStrings;
 
 			switch (args.OptionId()) {
-				case OPT_HELP:
-					printUsage(argv[0], false);
-					flushAndExit(FDB_EXIT_SUCCESS);
-					break;
-				case OPT_DEVHELP:
-					printUsage(argv[0], true);
-					flushAndExit(FDB_EXIT_SUCCESS);
-					break;
-				case OPT_KNOB: {
-					std::string syn = args.OptionSyntax();
-					if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
-						fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					syn = syn.substr(7);
-					knobs.push_back( std::make_pair( syn, args.OptionArg() ) );
-					break;
-					}
-				case OPT_LOCALITY: {
-					std::string syn = args.OptionSyntax();
-					if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
-						fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					syn = syn.substr(11);
-					std::transform(syn.begin(), syn.end(), syn.begin(), ::tolower);
-					localities.set(Standalone<StringRef>(syn), Standalone<StringRef>(std::string(args.OptionArg())));
-					break;
-					}
-				case OPT_VERSION:
-					printVersion();
-					flushAndExit(FDB_EXIT_SUCCESS);
-					break;
-				case OPT_NOBUFSTDOUT:
-					setvbuf(stdout, NULL, _IONBF, 0);
-					setvbuf(stderr, NULL, _IONBF, 0);
-					break;
-				case OPT_BUFSTDOUTERR:
-					setvbuf(stdout, NULL, _IOFBF, BUFSIZ);
-					setvbuf(stderr, NULL, _IOFBF, BUFSIZ);
-					break;
-				case OPT_ROLE:
-					sRole = args.OptionArg();
-					if (!strcmp(sRole, "fdbd")) role = FDBD;
-					else if (!strcmp(sRole, "simulation")) role = Simulation;
-					else if (!strcmp(sRole, "test")) role = Test;
-					else if (!strcmp(sRole, "multitest")) role = MultiTester;
-					else if (!strcmp(sRole, "skiplisttest")) role = SkipListTest;
-					else if (!strcmp(sRole, "search")) role = SearchMutations;
-					else if (!strcmp(sRole, "dsltest")) role = DSLTest;
-					else if (!strcmp(sRole, "versionedmaptest")) role = VersionedMapTest;
-					else if (!strcmp(sRole, "createtemplatedb")) role = CreateTemplateDatabase;
-					else if (!strcmp(sRole, "networktestclient")) role = NetworkTestClient;
-					else if (!strcmp(sRole, "networktestserver")) role = NetworkTestServer;
-					else if (!strcmp(sRole, "restore")) role = Restore;
-					else if (!strcmp(sRole, "kvfileintegritycheck")) role = KVFileIntegrityCheck;
-					else if (!strcmp(sRole, "kvfilegeneratesums")) role = KVFileGenerateIOLogChecksums;
-					else if (!strcmp(sRole, "consistencycheck")) role = ConsistencyCheck;
-					else {
-						fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
-				case OPT_PUBLICADDR:
-					argStr = args.OptionArg();
-					boost::split(tmpStrings, argStr, [](char c){return c == ',';});
-					publicAddressStrs.insert(publicAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
-					break;
-				case OPT_LISTEN:
-					argStr = args.OptionArg();
-					boost::split(tmpStrings, argStr, [](char c){return c == ',';});
-					listenAddressStrs.insert(listenAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
-					break;
-				case OPT_CONNFILE:
-					connFile = args.OptionArg();
-					break;
-				case OPT_LOGGROUP:
-					logGroup = args.OptionArg();
-					break;
-				case OPT_SEEDCONNFILE:
-					seedConnFile = args.OptionArg();
-					break;
-				case OPT_SEEDCONNSTRING:
-					seedConnString = args.OptionArg();
-					break;
-	#ifdef __linux__
-				case OPT_FILESYSTEM: {
-					fileSystemPath = args.OptionArg();
-					break;
+			case OPT_HELP:
+				printUsage(argv[0], false);
+				flushAndExit(FDB_EXIT_SUCCESS);
+				break;
+			case OPT_DEVHELP:
+				printUsage(argv[0], true);
+				flushAndExit(FDB_EXIT_SUCCESS);
+				break;
+			case OPT_KNOB: {
+				std::string syn = args.OptionSyntax();
+				if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
+					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_PROFILER_RSS_SIZE:{
-					const char *a = args.OptionArg();
-					char *end;
-					rsssize = strtoull(a, &end, 10);
-					if(*end) {
-						fprintf(stderr, "ERROR: Unrecognized memory size `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
+				syn = syn.substr(7);
+				knobs.push_back(std::make_pair(syn, args.OptionArg()));
+				break;
+			}
+			case OPT_LOCALITY: {
+				std::string syn = args.OptionSyntax();
+				if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
+					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-	#endif
-				case OPT_DATAFOLDER:
-					dataFolder = args.OptionArg();
-					break;
-				case OPT_LOGFOLDER:
-					logFolder = args.OptionArg();
-					break;
-				case OPT_NETWORKIMPL: {
-					const char* a = args.OptionArg();
-					if (!strcmp(a, "net2")) useNet2 = true;
-					else if (!strcmp(a, "net2-threadpool")) { useNet2 = true; useThreadPool = true; }
-					else {
-						fprintf(stderr, "ERROR: Unknown network implementation `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
+				syn = syn.substr(11);
+				std::transform(syn.begin(), syn.end(), syn.begin(), ::tolower);
+				localities.set(Standalone<StringRef>(syn), Standalone<StringRef>(std::string(args.OptionArg())));
+				break;
+			}
+			case OPT_VERSION:
+				printVersion();
+				flushAndExit(FDB_EXIT_SUCCESS);
+				break;
+			case OPT_NOBUFSTDOUT:
+				setvbuf(stdout, NULL, _IONBF, 0);
+				setvbuf(stderr, NULL, _IONBF, 0);
+				break;
+			case OPT_BUFSTDOUTERR:
+				setvbuf(stdout, NULL, _IOFBF, BUFSIZ);
+				setvbuf(stderr, NULL, _IOFBF, BUFSIZ);
+				break;
+			case OPT_ROLE:
+				sRole = args.OptionArg();
+				if (!strcmp(sRole, "fdbd"))
+					role = FDBD;
+				else if (!strcmp(sRole, "simulation"))
+					role = Simulation;
+				else if (!strcmp(sRole, "test"))
+					role = Test;
+				else if (!strcmp(sRole, "multitest"))
+					role = MultiTester;
+				else if (!strcmp(sRole, "skiplisttest"))
+					role = SkipListTest;
+				else if (!strcmp(sRole, "search"))
+					role = SearchMutations;
+				else if (!strcmp(sRole, "dsltest"))
+					role = DSLTest;
+				else if (!strcmp(sRole, "versionedmaptest"))
+					role = VersionedMapTest;
+				else if (!strcmp(sRole, "createtemplatedb"))
+					role = CreateTemplateDatabase;
+				else if (!strcmp(sRole, "networktestclient"))
+					role = NetworkTestClient;
+				else if (!strcmp(sRole, "networktestserver"))
+					role = NetworkTestServer;
+				else if (!strcmp(sRole, "restore"))
+					role = Restore;
+				else if (!strcmp(sRole, "kvfileintegritycheck"))
+					role = KVFileIntegrityCheck;
+				else if (!strcmp(sRole, "kvfilegeneratesums"))
+					role = KVFileGenerateIOLogChecksums;
+				else if (!strcmp(sRole, "consistencycheck"))
+					role = ConsistencyCheck;
+				else {
+					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_TRACECLOCK: {
-					const char* a = args.OptionArg();
-					if (!strcmp(a, "realtime")) g_trace_clock = TRACE_CLOCK_REALTIME;
-					else if (!strcmp(a, "now")) g_trace_clock = TRACE_CLOCK_NOW;
-					else {
-						fprintf(stderr, "ERROR: Unknown clock source `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
+				break;
+			case OPT_PUBLICADDR:
+				argStr = args.OptionArg();
+				boost::split(tmpStrings, argStr, [](char c) { return c == ','; });
+				publicAddressStrs.insert(publicAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
+				break;
+			case OPT_LISTEN:
+				argStr = args.OptionArg();
+				boost::split(tmpStrings, argStr, [](char c) { return c == ','; });
+				listenAddressStrs.insert(listenAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
+				break;
+			case OPT_CONNFILE:
+				connFile = args.OptionArg();
+				break;
+			case OPT_LOGGROUP:
+				logGroup = args.OptionArg();
+				break;
+			case OPT_SEEDCONNFILE:
+				seedConnFile = args.OptionArg();
+				break;
+			case OPT_SEEDCONNSTRING:
+				seedConnString = args.OptionArg();
+				break;
+#ifdef __linux__
+			case OPT_FILESYSTEM: {
+				fileSystemPath = args.OptionArg();
+				break;
+			}
+			case OPT_PROFILER_RSS_SIZE: {
+				const char* a = args.OptionArg();
+				char* end;
+				rsssize = strtoull(a, &end, 10);
+				if (*end) {
+					fprintf(stderr, "ERROR: Unrecognized memory size `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_NUMTESTERS: {
-					const char* a = args.OptionArg();
-					if( !sscanf(a, "%d", &minTesterCount) ) {
-						fprintf(stderr, "ERROR: Could not parse numtesters `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
+				break;
+			}
+#endif
+			case OPT_DATAFOLDER:
+				dataFolder = args.OptionArg();
+				break;
+			case OPT_LOGFOLDER:
+				logFolder = args.OptionArg();
+				break;
+			case OPT_NETWORKIMPL: {
+				const char* a = args.OptionArg();
+				if (!strcmp(a, "net2"))
+					useNet2 = true;
+				else if (!strcmp(a, "net2-threadpool")) {
+					useNet2 = true;
+					useThreadPool = true;
+				} else {
+					fprintf(stderr, "ERROR: Unknown network implementation `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_ROLLSIZE: {
-					const char* a = args.OptionArg();
-					ti = parse_with_suffix(a);
-					if (!ti.present()) {
-						fprintf(stderr, "ERROR: Could not parse logsize `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					rollsize = ti.get();
-					break;
+				break;
+			}
+			case OPT_TRACECLOCK: {
+				const char* a = args.OptionArg();
+				if (!strcmp(a, "realtime")) g_trace_clock.store(TRACE_CLOCK_REALTIME);
+				else if (!strcmp(a, "now")) g_trace_clock.store(TRACE_CLOCK_NOW);
+				else {
+					fprintf(stderr, "ERROR: Unknown clock source `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_MAXLOGSSIZE: {
-					const char *a = args.OptionArg();
-					ti = parse_with_suffix(a);
-					if (!ti.present()) {
-						fprintf(stderr, "ERROR: Could not parse maxlogssize `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					maxLogsSize = ti.get();
-					maxLogsSizeSet = true;
-					break;
+				break;
+			}
+			case OPT_NUMTESTERS: {
+				const char* a = args.OptionArg();
+				if (!sscanf(a, "%d", &minTesterCount)) {
+					fprintf(stderr, "ERROR: Could not parse numtesters `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_MAXLOGS: {
-					const char *a = args.OptionArg();
-					char *end;
-					maxLogs = strtoull(a, &end, 10);
-					if(*end) {
-						fprintf(stderr, "ERROR: Unrecognized maximum number of logs `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					maxLogsSet = true;
-					break;
+				break;
+			}
+			case OPT_ROLLSIZE: {
+				const char* a = args.OptionArg();
+				ti = parse_with_suffix(a);
+				if (!ti.present()) {
+					fprintf(stderr, "ERROR: Could not parse logsize `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-	#ifdef _WIN32
-				case OPT_PARENTPID: {
-					auto pid_str = args.OptionArg();
-					int parent_pid = atoi(pid_str);
-					auto pHandle = OpenProcess( SYNCHRONIZE, FALSE, parent_pid );
-					if( !pHandle ) {
-						TraceEvent("ParentProcessOpenError").GetLastError();
-						fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
-						throw platform_error();
-					}
-					startThread(&parentWatcher, pHandle);
-					break;
+				rollsize = ti.get();
+				break;
+			}
+			case OPT_MAXLOGSSIZE: {
+				const char* a = args.OptionArg();
+				ti = parse_with_suffix(a);
+				if (!ti.present()) {
+					fprintf(stderr, "ERROR: Could not parse maxlogssize `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_NEWCONSOLE:
-					FreeConsole();
-					AllocConsole();
-					freopen("CONIN$","rb",stdin);
-					freopen("CONOUT$","wb",stdout);
-					freopen("CONOUT$","wb",stderr);
-					break;
-				case OPT_NOBOX:
-					SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
-					break;
-	#else
-				case OPT_PARENTPID: {
-					auto pid_str = args.OptionArg();
-					int *parent_pid = new(int);
-					*parent_pid = atoi(pid_str);
-					startThread(&parentWatcher, parent_pid);
-					break;
+				maxLogsSize = ti.get();
+				maxLogsSizeSet = true;
+				break;
+			}
+			case OPT_MAXLOGS: {
+				const char* a = args.OptionArg();
+				char* end;
+				maxLogs = strtoull(a, &end, 10);
+				if (*end) {
+					fprintf(stderr, "ERROR: Unrecognized maximum number of logs `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-	#endif
-				case OPT_TESTFILE:
-					testFile = args.OptionArg();
-					break;
-				case OPT_KVFILE:
-					kvFile = args.OptionArg();
-					break;
-				case OPT_RESTARTING:
-					restarting = true;
-					break;
-			    case OPT_RANDOMSEED: {
-					char* end;
-					randomSeed = (uint32_t)strtoul( args.OptionArg(), &end, 0 );
-					if( *end ) {
-						fprintf(stderr, "ERROR: Could not parse random seed `%s'\n", args.OptionArg());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
+				maxLogsSet = true;
+				break;
+			}
+#ifdef _WIN32
+			case OPT_PARENTPID: {
+				auto pid_str = args.OptionArg();
+				int parent_pid = atoi(pid_str);
+				auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
+				if (!pHandle) {
+					TraceEvent("ParentProcessOpenError").GetLastError();
+					fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
+					throw platform_error();
 				}
-				case OPT_MACHINEID: {
-					zoneId = std::string(args.OptionArg());
-					break;
+				startThread(&parentWatcher, pHandle);
+				break;
+			}
+			case OPT_NEWCONSOLE:
+				FreeConsole();
+				AllocConsole();
+				freopen("CONIN$", "rb", stdin);
+				freopen("CONOUT$", "wb", stdout);
+				freopen("CONOUT$", "wb", stderr);
+				break;
+			case OPT_NOBOX:
+				SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
+				break;
+#else
+			case OPT_PARENTPID: {
+				auto pid_str = args.OptionArg();
+				int* parent_pid = new (int);
+				*parent_pid = atoi(pid_str);
+				startThread(&parentWatcher, parent_pid);
+				break;
+			}
+#endif
+			case OPT_TESTFILE:
+				testFile = args.OptionArg();
+				break;
+			case OPT_KVFILE:
+				kvFile = args.OptionArg();
+				break;
+			case OPT_RESTARTING:
+				restarting = true;
+				break;
+			case OPT_RANDOMSEED: {
+				char* end;
+				randomSeed = (uint32_t)strtoul(args.OptionArg(), &end, 0);
+				if (*end) {
+					fprintf(stderr, "ERROR: Could not parse random seed `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_DCID: {
-					dcId = std::string(args.OptionArg());
-					break;
+				break;
+			}
+			case OPT_MACHINEID: {
+				zoneId = std::string(args.OptionArg());
+				break;
+			}
+			case OPT_DCID: {
+				dcId = std::string(args.OptionArg());
+				break;
+			}
+			case OPT_MACHINE_CLASS:
+				sRole = args.OptionArg();
+				processClass = ProcessClass(sRole, ProcessClass::CommandLineSource);
+				if (processClass == ProcessClass::InvalidClass) {
+					fprintf(stderr, "ERROR: Unknown machine class `%s'\n", sRole);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_MACHINE_CLASS:
-					sRole = args.OptionArg();
-					processClass = ProcessClass( sRole, ProcessClass::CommandLineSource );
-					if (processClass == ProcessClass::InvalidClass) {
-						fprintf(stderr, "ERROR: Unknown machine class `%s'\n", sRole);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
-				case OPT_KEY:
-					targetKey = args.OptionArg();
-					break;
-				case OPT_MEMLIMIT:
-					ti = parse_with_suffix(args.OptionArg(), "MiB");
-					if (!ti.present()) {
-						fprintf(stderr, "ERROR: Could not parse memory limit from `%s'\n", args.OptionArg());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					memLimit = ti.get();
-					break;
-				case OPT_STORAGEMEMLIMIT:
-					ti = parse_with_suffix(args.OptionArg(), "MB");
-					if (!ti.present()) {
-						fprintf(stderr, "ERROR: Could not parse storage memory limit from `%s'\n", args.OptionArg());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					storageMemLimit = ti.get();
-					break;
-				case OPT_CACHEMEMLIMIT:
-					ti = parse_with_suffix(args.OptionArg(), "MiB");
-					if (!ti.present()) {
-						fprintf(stderr, "ERROR: Could not parse cache memory limit from `%s'\n", args.OptionArg());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					// SOMEDAY: ideally we'd have some better way to express that a knob should be elevated to formal parameter
-					knobs.push_back(std::make_pair("page_cache_4k", format("%ld", ti.get() / 4096 * 4096))); // The cache holds 4K pages, so we can truncate this to the next smaller multiple of 4K.
-					break;
-				case OPT_BUGGIFY:
-					if( !strcmp( args.OptionArg(), "on" ) )
-						buggifyEnabled = true;
-					else if( !strcmp( args.OptionArg(), "off" ) )
-						buggifyEnabled = false;
-					else {
-						fprintf(stderr, "ERROR: Unknown buggify state `%s'\n", args.OptionArg());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
-				case OPT_CRASHONERROR:
-					g_crashOnError = true;
-					break;
-				case OPT_TESTSERVERS:
-					testServersStr = args.OptionArg();
-					break;
-				case OPT_TEST_ON_SERVERS:
-					testOnServers = true;
-					break;
-				case OPT_METRICSCONNFILE:
-					metricsConnFile = args.OptionArg();
-					break;
-				case OPT_METRICSPREFIX:
-					metricsPrefix = args.OptionArg();
-					break;
-				case OPT_IO_TRUST_SECONDS: {
-					const char* a = args.OptionArg();
-					if( !sscanf(a, "%lf", &fileIoTimeout) ) {
-						fprintf(stderr, "ERROR: Could not parse io_trust_seconds `%s'\n", a);
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
+				break;
+			case OPT_KEY:
+				targetKey = args.OptionArg();
+				break;
+			case OPT_MEMLIMIT:
+				ti = parse_with_suffix(args.OptionArg(), "MiB");
+				if (!ti.present()) {
+					fprintf(stderr, "ERROR: Could not parse memory limit from `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_IO_TRUST_WARN_ONLY:
-					fileIoWarnOnly = true;
-					break;
-				case OPT_TRACE_FORMAT:
-					if (!selectTraceFormatter(args.OptionArg())) {
-						fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
-					}
-					break;
-				case OPT_USE_OBJECT_SERIALIZER:
-				{
-					std::string s = args.OptionArg();
-					std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-					if (s == "on" || s == "true" || s == "1") {
-						useObjectSerializer = true;
-					} else if (s == "off" || s == "false" || s == "0") {
-						useObjectSerializer = false;
-					}  else {
-						fprintf(stderr, "ERROR: Could not parse object serializer option: `%s'\n", s.c_str());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
-					break;
+				memLimit = ti.get();
+				break;
+			case OPT_STORAGEMEMLIMIT:
+				ti = parse_with_suffix(args.OptionArg(), "MB");
+				if (!ti.present()) {
+					fprintf(stderr, "ERROR: Could not parse storage memory limit from `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
 				}
-				case OPT_WHITELIST_BINPATH:
-					whitelistBinPaths = args.OptionArg();
-					break;
+				storageMemLimit = ti.get();
+				break;
+			case OPT_CACHEMEMLIMIT:
+				ti = parse_with_suffix(args.OptionArg(), "MiB");
+				if (!ti.present()) {
+					fprintf(stderr, "ERROR: Could not parse cache memory limit from `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				// SOMEDAY: ideally we'd have some better way to express that a knob should be elevated to formal
+				// parameter
+				knobs.push_back(std::make_pair(
+				    "page_cache_4k",
+				    format("%ld", ti.get() / 4096 * 4096))); // The cache holds 4K pages, so we can truncate this to the
+				                                             // next smaller multiple of 4K.
+				break;
+			case OPT_BUGGIFY:
+				if (!strcmp(args.OptionArg(), "on"))
+					buggifyEnabled = true;
+				else if (!strcmp(args.OptionArg(), "off"))
+					buggifyEnabled = false;
+				else {
+					fprintf(stderr, "ERROR: Unknown buggify state `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+			case OPT_CRASHONERROR:
+				g_crashOnError = true;
+				break;
+			case OPT_TESTSERVERS:
+				testServersStr = args.OptionArg();
+				break;
+			case OPT_TEST_ON_SERVERS:
+				testOnServers = true;
+				break;
+			case OPT_METRICSCONNFILE:
+				metricsConnFile = args.OptionArg();
+				break;
+			case OPT_METRICSPREFIX:
+				metricsPrefix = args.OptionArg();
+				break;
+			case OPT_IO_TRUST_SECONDS: {
+				const char* a = args.OptionArg();
+				if (!sscanf(a, "%lf", &fileIoTimeout)) {
+					fprintf(stderr, "ERROR: Could not parse io_trust_seconds `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+			}
+			case OPT_IO_TRUST_WARN_ONLY:
+				fileIoWarnOnly = true;
+				break;
+			case OPT_TRACE_FORMAT:
+				if (!selectTraceFormatter(args.OptionArg())) {
+					fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+				}
+				break;
+			case OPT_WHITELIST_BINPATH:
+				whitelistBinPaths = args.OptionArg();
+				break;
+			case OPT_BLOB_CREDENTIAL_FILE:
+				// Add blob credential following backup agent example
+				blobCredentials.push_back(args.OptionArg());
+				printf("blob credential file:%s\n", blobCredentials.back().c_str());
+
+				blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
+				if (blobCredsFromENV != nullptr) {
+					fprintf(stderr, "[WARNING] Set blob credetial via env variable is not tested yet\n");
+					TraceEvent(SevError, "FastRestoreGetBlobCredentialFile")
+					    .detail("Reason", "Set blob credetial via env variable is not tested yet");
+					StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
+					do {
+						StringRef file = t.eat(":");
+						if (file.size() != 0) {
+							blobCredentials.push_back(file.toString());
+						}
+					} while (t.size() != 0);
+				}
+				break;
+
 #ifndef TLS_DISABLED
-				case TLSOptions::OPT_TLS_PLUGIN:
-					args.OptionArg();
-					break;
-				case TLSOptions::OPT_TLS_CERTIFICATES:
-					tlsCertPath = args.OptionArg();
-					break;
-				case TLSOptions::OPT_TLS_PASSWORD:
-					tlsPassword = args.OptionArg();
-					break;
-				case TLSOptions::OPT_TLS_CA_FILE:
-					tlsCAPath = args.OptionArg();
-					break;
-				case TLSOptions::OPT_TLS_KEY:
-					tlsKeyPath = args.OptionArg();
-					break;
-				case TLSOptions::OPT_TLS_VERIFY_PEERS:
-					tlsVerifyPeers.push_back(args.OptionArg());
-					break;
+			case TLSConfig::OPT_TLS_PLUGIN:
+				args.OptionArg();
+				break;
+			case TLSConfig::OPT_TLS_CERTIFICATES:
+				tlsConfig.setCertificatePath(args.OptionArg());
+				break;
+			case TLSConfig::OPT_TLS_PASSWORD:
+				tlsConfig.setPassword(args.OptionArg());
+				break;
+			case TLSConfig::OPT_TLS_CA_FILE:
+				tlsConfig.setCAPath(args.OptionArg());
+				break;
+			case TLSConfig::OPT_TLS_KEY:
+				tlsConfig.setKeyPath(args.OptionArg());
+				break;
+			case TLSConfig::OPT_TLS_VERIFY_PEERS:
+				tlsConfig.addVerifyPeers(args.OptionArg());
+				break;
 #endif
 			}
 		}
 
 		if (seedConnString.length() && seedConnFile.length()) {
-			fprintf(stderr, "%s\n", "--seed_cluster_file and --seed_connection_string may not both be specified at once.");
-			return FDB_EXIT_ERROR;
+			fprintf(stderr, "%s\n",
+			        "--seed_cluster_file and --seed_connection_string may not both be specified at once.");
+			flushAndExit(FDB_EXIT_ERROR);
 		}
 
 		bool seedSpecified = seedConnFile.length() || seedConnString.length();
 
-		if (seedSpecified && !connFile.length()){
-			fprintf(stderr, "%s\n", "If -seed_cluster_file or --seed_connection_string is specified, -C must be specified as well.");
-			return FDB_EXIT_ERROR;
+		if (seedSpecified && !connFile.length()) {
+			fprintf(stderr, "%s\n",
+			        "If -seed_cluster_file or --seed_connection_string is specified, -C must be specified as well.");
+			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if( metricsConnFile == connFile )
-			metricsConnFile = "";
+		if (metricsConnFile == connFile) metricsConnFile = "";
 
-		if( metricsConnFile != "" &&  metricsPrefix == "" ) {
+		if (metricsConnFile != "" && metricsPrefix == "") {
 			fprintf(stderr, "If a metrics cluster file is specified, a metrics prefix is required.\n");
-			return FDB_EXIT_ERROR;
+			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		bool autoPublicAddress = std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(),
-											 [](const std::string& addr) {
-												 return StringRef(addr).startsWith(LiteralStringRef("auto:"));
-											 });
-		Reference<ClusterConnectionFile> connectionFile;
-		if ( (role != Simulation && role != CreateTemplateDatabase && role != KVFileIntegrityCheck && role != KVFileGenerateIOLogChecksums) || autoPublicAddress ) {
+		bool autoPublicAddress =
+		    std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(),
+		                [](const std::string& addr) { return StringRef(addr).startsWith(LiteralStringRef("auto:")); });
+		if ((role != Simulation && role != CreateTemplateDatabase && role != KVFileIntegrityCheck &&
+		     role != KVFileGenerateIOLogChecksums) ||
+		    autoPublicAddress) {
 
-				if (seedSpecified && !fileExists(connFile)){
-					std::string connectionString = seedConnString.length() ? seedConnString : "";
-					ClusterConnectionString ccs;
-					if(seedConnFile.length()) {
-						try {
-							connectionString = readFileBytes(seedConnFile, MAX_CLUSTER_FILE_BYTES);
-						}
-						catch (Error& e) {
-							fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(std::make_pair(seedConnFile, false), e).c_str());
-							throw;
-						}
-					}
-
+			if (seedSpecified && !fileExists(connFile)) {
+				std::string connectionString = seedConnString.length() ? seedConnString : "";
+				ClusterConnectionString ccs;
+				if (seedConnFile.length()) {
 					try {
-						ccs = ClusterConnectionString(connectionString);
-					}
-					catch (Error& e) {
-						fprintf(stderr, "%s\n", ClusterConnectionString::getErrorString(connectionString, e).c_str());
-						throw;
-					}
-					connectionFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile, ccs));
-				}
-				else {
-					std::pair<std::string, bool> resolvedClusterFile;
-					try {
-						resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(connFile);
-						connectionFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedClusterFile.first));
+						connectionString = readFileBytes(seedConnFile, MAX_CLUSTER_FILE_BYTES);
 					} catch (Error& e) {
-						fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
+						fprintf(stderr, "%s\n",
+						        ClusterConnectionFile::getErrorString(std::make_pair(seedConnFile, false), e).c_str());
 						throw;
 					}
 				}
+
+				try {
+					ccs = ClusterConnectionString(connectionString);
+				} catch (Error& e) {
+					fprintf(stderr, "%s\n", ClusterConnectionString::getErrorString(connectionString, e).c_str());
+					throw;
+				}
+				connectionFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile, ccs));
+			} else {
+				std::pair<std::string, bool> resolvedClusterFile;
+				try {
+					resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(connFile);
+					connectionFile =
+					    Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedClusterFile.first));
+				} catch (Error& e) {
+					fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
+					throw;
+				}
+			}
 
 			// failmon?
 		}
 
-		NetworkAddressList publicAddresses, listenAddresses;
 		try {
 			if (!publicAddressStrs.empty()) {
-				std::tie(publicAddresses, listenAddresses) = buildNetworkAddresses(*connectionFile, publicAddressStrs, listenAddressStrs);
+				std::tie(publicAddresses, listenAddresses) =
+				    buildNetworkAddresses(*connectionFile, publicAddressStrs, listenAddressStrs);
 			}
 		} catch (Error&) {
 			printHelpTeaser(argv[0]);
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if(role == ConsistencyCheck) {
-			if(!publicAddressStrs.empty()) {
+		if (role == ConsistencyCheck) {
+			if (!publicAddressStrs.empty()) {
 				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
 				printHelpTeaser(argv[0]);
 				flushAndExit(FDB_EXIT_ERROR);
@@ -1453,36 +1471,102 @@ int main(int argc, char* argv[]) {
 			publicAddresses.address = NetworkAddress(publicIP, ::getpid());
 		}
 
-		if (role==Simulation)
-			printf("Random seed is %u...\n", randomSeed);
-
-		if( zoneId.present() )
-			printf("ZoneId set to %s, dcId to %s\n", printable(zoneId).c_str(), printable(dcId).c_str());
-
-		setThreadLocalDeterministicRandomSeed(randomSeed);
-
-		if(role==Simulation) {
+		if (role == Simulation) {
 			Optional<bool> buggifyOverride = checkBuggifyOverride(testFile);
-			if(buggifyOverride.present())
-				buggifyEnabled = buggifyOverride.get();
+			if (buggifyOverride.present()) buggifyEnabled = buggifyOverride.get();
 		}
-		enableBuggify(buggifyEnabled, BuggifyType::General);
+
+		if (role == SearchMutations && !targetKey) {
+			fprintf(stderr, "ERROR: please specify a target key\n");
+			printHelpTeaser(argv[0]);
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
+		if (role == NetworkTestClient && !testServersStr.size()) {
+			fprintf(stderr, "ERROR: please specify --testservers\n");
+			printHelpTeaser(argv[0]);
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
+		// Interpret legacy "maxLogs" option in the most sensible and unsurprising way we can while eliminating its code
+		// path
+		if (maxLogsSet) {
+			if (maxLogsSizeSet) {
+				// This is the case where both options are set and we must deconflict.
+				auto maxLogsAsSize = maxLogs * rollsize;
+
+				// If either was unlimited, then the safe option here is to take the larger one.
+				//  This means that is one of the two options specified a limited amount of logging
+				//  then the option that specified "unlimited" will be ignored.
+				if (maxLogsSize == 0 || maxLogs == 0)
+					maxLogsSize = std::max(maxLogsSize, maxLogsAsSize);
+				else
+					maxLogsSize = std::min(maxLogsSize, maxLogs * rollsize);
+			} else {
+				maxLogsSize = maxLogs * rollsize;
+			}
+		}
+		machineId = getSharedMemoryMachineId().toString();
+		if (!localities.isPresent(LocalityData::keyZoneId))
+			localities.set(LocalityData::keyZoneId, zoneId.present() ? zoneId : machineId);
+
+		if (!localities.isPresent(LocalityData::keyMachineId))
+			localities.set(LocalityData::keyMachineId, zoneId.present() ? zoneId : machineId);
+
+		if (!localities.isPresent(LocalityData::keyDcId) && dcId.present()) localities.set(LocalityData::keyDcId, dcId);
+	}
+};
+} // namespace
+
+int main(int argc, char* argv[]) {
+	try {
+		platformInit();
+
+#ifdef ALLOC_INSTRUMENTATION
+		g_extra_memory = new uint8_t[1000000];
+#endif
+		registerCrashHandler();
+
+		// Set default of line buffering standard out and error
+		setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
+		setvbuf(stderr, NULL, _IOLBF, BUFSIZ);
+
+		// Enables profiling on this thread (but does not start it)
+		registerThreadForProfiling();
+
+#ifdef _WIN32
+		// Windows needs a gentle nudge to format floats correctly
+		//_set_output_format(_TWO_DIGIT_EXPONENT);
+#endif
+
+		const auto opts = CLIOptions::parseArgs(argc, argv);
+		const auto role = opts.role;
+
+		if (role == Simulation) printf("Random seed is %u...\n", opts.randomSeed);
+
+		if (opts.zoneId.present())
+			printf("ZoneId set to %s, dcId to %s\n", printable(opts.zoneId).c_str(), printable(opts.dcId).c_str());
+
+		setThreadLocalDeterministicRandomSeed(opts.randomSeed);
+
+		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
 
 		delete FLOW_KNOBS;
 		delete SERVER_KNOBS;
 		delete CLIENT_KNOBS;
-		FlowKnobs* flowKnobs = new FlowKnobs(true, role == Simulation);
-		ClientKnobs* clientKnobs = new ClientKnobs(true);
-		ServerKnobs* serverKnobs = new ServerKnobs(true, clientKnobs);
+		FlowKnobs* flowKnobs = new FlowKnobs;
+		ClientKnobs* clientKnobs = new ClientKnobs;
+		ServerKnobs* serverKnobs = new ServerKnobs;
 		FLOW_KNOBS = flowKnobs;
 		SERVER_KNOBS = serverKnobs;
 		CLIENT_KNOBS = clientKnobs;
 
-		if (!serverKnobs->setKnob( "log_directory", logFolder )) ASSERT(false);
+		if (!serverKnobs->setKnob("log_directory", opts.logFolder)) ASSERT(false);
 		if (role != Simulation) {
-			if (!serverKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(memLimit))) ASSERT(false);
+			if (!serverKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(opts.memLimit)))
+				ASSERT(false);
 		}
-		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
+		for (auto k = opts.knobs.begin(); k != opts.knobs.end(); ++k) {
 			try {
 				if (!flowKnobs->setKnob( k->first, k->second ) &&
 					!clientKnobs->setKnob( k->first, k->second ) &&
@@ -1493,17 +1577,29 @@ int main(int argc, char* argv[]) {
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "WARNING: Invalid value '%s' for option '%s'\n", k->second.c_str(), k->first.c_str());
+					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", k->second.c_str(), k->first.c_str());
 					TraceEvent(SevWarnAlways, "InvalidKnobValue").detail("Knob", printable(k->first)).detail("Value", printable(k->second));
 				} else {
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
+					TraceEvent(SevError, "FailedToSetKnob").detail("Knob", printable(k->first)).detail("Value", printable(k->second)).error(e);
 					throw;
 				}
 			}
 		}
-		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(memLimit))) ASSERT(false);
+		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(opts.memLimit))) ASSERT(false);
+
+		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
+		flowKnobs->initialize(true, role == Simulation);
+		clientKnobs->initialize(true);
+		serverKnobs->initialize(true, clientKnobs, role == Simulation);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);
+
+		if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
+			fprintf(stderr, "ERROR: --memory has to be larger than --cache_memory\n");
+			flushAndExit(FDB_EXIT_ERROR);
+		}
 
 		if (role == SkipListTest) {
 			skipListTest();
@@ -1520,37 +1616,6 @@ int main(int argc, char* argv[]) {
 			flushAndExit(FDB_EXIT_SUCCESS);
 		}
 
-		if (role == SearchMutations && !targetKey) {
-			fprintf(stderr, "ERROR: please specify a target key\n");
-			printHelpTeaser(argv[0]);
-			flushAndExit(FDB_EXIT_ERROR);
-		}
-
-		if (role == NetworkTestClient && !testServersStr.size() ) {
-			fprintf(stderr, "ERROR: please specify --testservers\n");
-			printHelpTeaser(argv[0]);
-			flushAndExit(FDB_EXIT_ERROR);
-		}
-
-		// Interpret legacy "maxLogs" option in the most sensible and unsurprising way we can while eliminating its code path
-		if (maxLogsSet) {
-			if (maxLogsSizeSet) {
-				// This is the case where both options are set and we must deconflict.
-				auto maxLogsAsSize = maxLogs * rollsize;
-
-				// If either was unlimited, then the safe option here is to take the larger one.
-				//  This means that is one of the two options specified a limited amount of logging
-				//  then the option that specified "unlimited" will be ignored.
-				if( maxLogsSize == 0 || maxLogs == 0 )
-					maxLogsSize = std::max(maxLogsSize, maxLogsAsSize);
-				else
-					maxLogsSize = std::min(maxLogsSize, maxLogs * rollsize);
-			}
-			else {
-				maxLogsSize = maxLogs * rollsize;
-			}
-		}
-
 		// Initialize the thread pool
 		CoroThreadPool::init();
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
@@ -1560,14 +1625,14 @@ int main(int argc, char* argv[]) {
 
 		if (role == Simulation || role == CreateTemplateDatabase) {
 			//startOldSimulator();
-			startNewSimulator(useObjectSerializer);
-			openTraceFile(NetworkAddress(), rollsize, maxLogsSize, logFolder, "trace", logGroup);
+			startNewSimulator();
+			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 		} else {
-			g_network = newNet2(useThreadPool, true, useObjectSerializer);
+			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
-			if (publicAddressStrs.empty()) {
+			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
 					fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
 					printHelpTeaser(argv[0]);
@@ -1575,28 +1640,16 @@ int main(int argc, char* argv[]) {
 				}
 			}
 
-			openTraceFile(publicAddresses.address, rollsize, maxLogsSize, logFolder, "trace", logGroup);
+			openTraceFile(opts.publicAddresses.address, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace",
+			              opts.logGroup);
+			g_network->initTLS();
 
-#ifndef TLS_DISABLED
-			if ( tlsCertPath.size() )
-				tlsOptions->set_cert_file( tlsCertPath );
-			if (tlsCAPath.size())
-				tlsOptions->set_ca_file(tlsCAPath);
-			if (tlsKeyPath.size()) {
-				if (tlsPassword.size())
-					tlsOptions->set_key_password(tlsPassword);
-
-				tlsOptions->set_key_file(tlsKeyPath);
-			}
-			if ( tlsVerifyPeers.size() )
-				tlsOptions->set_verify_peers( tlsVerifyPeers );
-
-			tlsOptions->register_network();
-#endif
 			if (expectsPublicAddress) {
-				for (int ii = 0; ii < (publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
-					const NetworkAddress& publicAddress = ii==0 ? publicAddresses.address : publicAddresses.secondaryAddress.get();
-					const NetworkAddress& listenAddress = ii==0 ? listenAddresses.address : listenAddresses.secondaryAddress.get();
+				for (int ii = 0; ii < (opts.publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
+					const NetworkAddress& publicAddress =
+					    ii == 0 ? opts.publicAddresses.address : opts.publicAddresses.secondaryAddress.get();
+					const NetworkAddress& listenAddress =
+					    ii == 0 ? opts.listenAddresses.address : opts.listenAddresses.secondaryAddress.get();
 					try {
 						const Future<Void>& errorF = FlowTransport::transport().bind(publicAddress, listenAddress);
 						listenErrors.push_back(errorF);
@@ -1612,7 +1665,8 @@ int main(int argc, char* argv[]) {
 			}
 
 			// Use a negative ioTimeout to indicate warn-only
-			Net2FileSystem::newFileSystem(fileIoWarnOnly ? -fileIoTimeout : fileIoTimeout, fileSystemPath);
+			Net2FileSystem::newFileSystem(opts.fileIoWarnOnly ? -opts.fileIoTimeout : opts.fileIoTimeout,
+			                              opts.fileSystemPath);
 			g_network->initMetrics();
 			FlowTransport::transport().initMetrics();
 			initTraceEventMetrics();
@@ -1630,23 +1684,24 @@ int main(int argc, char* argv[]) {
 		}
 
 		TraceEvent("ProgramStart")
-			.setMaxEventLength(12000)
-			.detail("RandomSeed", randomSeed)
-			.detail("SourceVersion", getHGVersion())
-			.detail("Version", FDB_VT_VERSION )
-			.detail("PackageName", FDB_VT_PACKAGE_NAME)
-			.detail("FileSystem", fileSystemPath)
-			.detail("DataFolder", dataFolder)
-			.detail("WorkingDirectory", cwd)
-			.detail("ClusterFile", connectionFile ? connectionFile->getFilename().c_str() : "")
-			.detail("ConnectionString", connectionFile ? connectionFile->getConnectionString().toString() : "")
-			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
-			.setMaxFieldLength(10000)
-			.detail("CommandLine", commandLine)
-			.setMaxFieldLength(0)
-			.detail("BuggifyEnabled", buggifyEnabled)
-			.detail("MemoryLimit", memLimit)
-			.trackLatest("ProgramStart");
+		    .setMaxEventLength(12000)
+		    .detail("RandomSeed", opts.randomSeed)
+		    .detail("SourceVersion", getSourceVersion())
+		    .detail("Version", FDB_VT_VERSION)
+		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
+		    .detail("FileSystem", opts.fileSystemPath)
+		    .detail("DataFolder", opts.dataFolder)
+		    .detail("WorkingDirectory", cwd)
+		    .detail("ClusterFile", opts.connectionFile ? opts.connectionFile->getFilename().c_str() : "")
+		    .detail("ConnectionString",
+		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
+		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+		    .setMaxFieldLength(10000)
+		    .detail("CommandLine", opts.commandLine)
+		    .setMaxFieldLength(0)
+		    .detail("BuggifyEnabled", opts.buggifyEnabled)
+		    .detail("MemoryLimit", opts.memLimit)
+		    .trackLatest("ProgramStart");
 
 		// Test for TraceEvent length limits
 		/*std::string foo(4096, 'x');
@@ -1665,53 +1720,41 @@ int main(int argc, char* argv[]) {
 
 		Error::init();
 		std::set_new_handler( &platform::outOfMemory );
-		setMemoryQuota( memLimit );
+		setMemoryQuota(opts.memLimit);
 
 		Future<Optional<Void>> f;
 
-		Standalone<StringRef> machineId(getSharedMemoryMachineId().toString());
-
-		if (!localities.isPresent(LocalityData::keyZoneId))
-			localities.set(LocalityData::keyZoneId, zoneId.present() ? zoneId : machineId);
-
-		if (!localities.isPresent(LocalityData::keyMachineId))
-			localities.set(LocalityData::keyMachineId, machineId);
-
-		if (!localities.isPresent(LocalityData::keyDcId) && dcId.present())
-			localities.set(LocalityData::keyDcId, dcId);
-
 		if (role == Simulation) {
-			TraceEvent("Simulation").detail("TestFile", testFile);
+			TraceEvent("Simulation").detail("TestFile", opts.testFile);
 
 			clientKnobs->trace();
 			flowKnobs->trace();
 			serverKnobs->trace();
 
-			if (!dataFolder.size())
-				dataFolder = "simfdb";
-
+			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories( dataFolder );
 			for(int i = 0; i < directories.size(); i++)
 				if (directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." &&
 				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos) {
-					TraceEvent(SevError, "IncompatibleDirectoryFound").detail("DataFolder", dataFolder).detail("SuspiciousFile", directories[i]);
+					TraceEvent(SevError, "IncompatibleDirectoryFound")
+					    .detail("DataFolder", dataFolder)
+					    .detail("SuspiciousFile", directories[i]);
 					fprintf(stderr, "ERROR: Data folder `%s' had non fdb file `%s'; please use clean, fdb-only folder\n", dataFolder.c_str(), directories[i].c_str());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 			std::vector<std::string> files = platform::listFiles( dataFolder );
-			if( (files.size()>1 || (files.size()==1 && files[0] != "restartInfo.ini" )) && !restarting ) {
+			if ((files.size() > 1 || (files.size() == 1 && files[0] != "restartInfo.ini")) && !opts.restarting) {
 				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder);
 				fprintf(stderr, "ERROR: Data folder `%s' is non-empty; please use clean, fdb-only folder\n", dataFolder.c_str());
 				flushAndExit(FDB_EXIT_ERROR);
-			}
-			else if ( files.empty() && restarting ) {
+			} else if (files.empty() && opts.restarting) {
 				TraceEvent(SevWarnAlways, "FileNotFound").detail("DataFolder", dataFolder);
 				printf("ERROR: Data folder `%s' is empty, but restarting option selected. Run Phase 1 test first\n", dataFolder.c_str());
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 
 			int isRestoring = 0;
-			if (!restarting) {
+			if (!opts.restarting) {
 				platform::eraseDirectoryRecursive( dataFolder );
 				platform::createDirectory( dataFolder );
 			} else {
@@ -1801,53 +1844,85 @@ int main(int argc, char* argv[]) {
 					}
 				}
 			}
-			setupAndRun( dataFolder, testFile, restarting, (isRestoring >= 1), whitelistBinPaths, tlsOptions);
+			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator.run();
 		} else if (role == FDBD) {
-			ASSERT( connectionFile );
+			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
+			if (opts.processClass == ProcessClass::FastRestoreClass) {
+				printf("Run as fast restore worker\n");
+				ASSERT(opts.connectionFile);
+				auto dataFolder = opts.dataFolder;
+				if (!dataFolder.size())
+					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
-			setupSlowTaskProfiler();
+				// Update the global blob credential files list
+				std::vector<std::string>* pFiles =
+				    (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
+				if (pFiles != nullptr) {
+					for (auto& f : opts.blobCredentials) {
+						pFiles->push_back(f);
+					}
+				}
 
-			if (!dataFolder.size())
-				dataFolder = format("fdb/%d/", publicAddresses.address.port);  // SOMEDAY: Better default
+				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+				actors.push_back(restoreWorker(opts.connectionFile, opts.localities, dataFolder));
+				f = stopAfter(waitForAll(actors));
+				printf("Fast restore worker exits\n");
+				g_network->run();
+				printf("g_network->run() done\n");
+			} else { // Call fdbd roles in conventional way
+				ASSERT(opts.connectionFile);
 
-			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix, rsssize, whitelistBinPaths) );
-			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
+				setupRunLoopProfiler();
 
-			f = stopAfter( waitForAll(actors) );
-			g_network->run();
+				auto dataFolder = opts.dataFolder;
+				if (!dataFolder.size())
+					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+
+				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+				actors.push_back(fdbd(opts.connectionFile, opts.localities, opts.processClass, dataFolder, dataFolder,
+				                      opts.storageMemLimit, opts.metricsConnFile, opts.metricsPrefix, opts.rsssize,
+				                      opts.whitelistBinPaths));
+				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
+
+				f = stopAfter(waitForAll(actors));
+				g_network->run();
+			}
 		} else if (role == MultiTester) {
-			f = stopAfter( runTests( connectionFile, TEST_TYPE_FROM_FILE, testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, minTesterCount, testFile, StringRef(), localities ) );
+			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_FROM_FILE,
+			                       opts.testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, opts.minTesterCount,
+			                       opts.testFile, StringRef(), opts.localities));
 			g_network->run();
 		} else if (role == Test) {
-			auto m = startSystemMonitor(dataFolder, zoneId, zoneId);
-			f = stopAfter( runTests( connectionFile, TEST_TYPE_FROM_FILE, TEST_HERE, 1, testFile, StringRef(), localities ) );
+			auto m = startSystemMonitor(opts.dataFolder, opts.zoneId, opts.zoneId);
+			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_FROM_FILE, TEST_HERE, 1, opts.testFile, StringRef(),
+			                       opts.localities));
 			g_network->run();
 		} else if (role == ConsistencyCheck) {
-			setupSlowTaskProfiler();
+			setupRunLoopProfiler();
 
-			auto m = startSystemMonitor(dataFolder, zoneId, zoneId);
-			f = stopAfter( runTests( connectionFile, TEST_TYPE_CONSISTENCY_CHECK, TEST_HERE, 1, testFile, StringRef(), localities ) );
+			auto m = startSystemMonitor(opts.dataFolder, opts.zoneId, opts.zoneId);
+			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_CONSISTENCY_CHECK, TEST_HERE, 1, opts.testFile,
+			                       StringRef(), opts.localities));
 			g_network->run();
 		} else if (role == CreateTemplateDatabase) {
 			createTemplateDatabase();
 		} else if (role == NetworkTestClient) {
-			f = stopAfter( networkTestClient( testServersStr ) );
+			f = stopAfter(networkTestClient(opts.testServersStr));
 			g_network->run();
 		} else if (role == NetworkTestServer) {
 			f = stopAfter( networkTestServer() );
 			g_network->run();
 		} else if (role == Restore) {
-			f = stopAfter( restoreWorker(connectionFile, localities) );
+			f = stopAfter(restoreWorker(opts.connectionFile, opts.localities, opts.dataFolder));
 			g_network->run();
 		} else if (role == KVFileIntegrityCheck) {
-			f = stopAfter( KVFileCheck(kvFile, true) );
+			f = stopAfter(KVFileCheck(opts.kvFile, true));
 			g_network->run();
 		} else if (role == KVFileGenerateIOLogChecksums) {
 			Optional<Void> result;
 			try {
-				GenerateIOLogChecksumFile(kvFile);
+				GenerateIOLogChecksumFile(opts.kvFile);
 				result = Void();
 			}
 			catch(Error &e) {
@@ -1985,6 +2060,12 @@ int main(int argc, char* argv[]) {
 		TraceEvent(SevError, "MainError").error(e);
 		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
+	} catch (boost::system::system_error& e) {
+		ASSERT_WE_THINK(false); // boost errors shouldn't leak
+		fprintf(stderr, "boost::system::system_error: %s (%d)", e.what(), e.code().value());
+		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
+		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
+		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	} catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());

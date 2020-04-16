@@ -25,6 +25,7 @@ import uuid
 import struct
 import math
 import sys
+import functools
 from bisect import bisect_left
 
 from fdb import six
@@ -72,6 +73,7 @@ def _float_adjust(v, encode):
         return six.int2byte(six.indexbytes(v, 0) ^ 0x80) + v[1:]
 
 
+@functools.total_ordering
 class SingleFloat(object):
     def __init__(self, value):
         if isinstance(value, float):
@@ -91,20 +93,8 @@ class SingleFloat(object):
         else:
             return False
 
-    def __ne__(self, other):
-        return not (self == other)
-
     def __lt__(self, other):
         return _compare_floats(self.value, other.value) < 0
-
-    def __le__(self, other):
-        return _compare_floats(self.value, other.value) <= 0
-
-    def __gt__(self, other):
-        return not (self <= other)
-
-    def __ge__(self, other):
-        return not (self < other)
 
     def __str__(self):
         return str(self.value)
@@ -124,6 +114,7 @@ class SingleFloat(object):
         return bool(self.value)
 
 
+@functools.total_ordering
 class Versionstamp(object):
     LENGTH = 12
     _TR_VERSION_LEN = 10
@@ -200,25 +191,22 @@ class Versionstamp(object):
         else:
             return False
 
-    def __ne__(self, other):
-        return not (self == other)
-
-    def __cmp__(self, other):
+    def __lt__(self, other):
         if self.is_complete():
             if other.is_complete():
                 if self.tr_version == other.tr_version:
-                    return cmp(self.user_version, other.user_version)
+                    return self.user_version < other.user_version
                 else:
-                    return cmp(self.tr_version, other.tr_version)
+                    return self.tr_version < other.tr_version
             else:
                 # All complete are less than all incomplete.
-                return -1
+                return True
         else:
             if other.is_complete():
                 # All incomplete are greater than all complete
-                return 1
+                return False
             else:
-                return cmp(self.user_version, other.user_version)
+                return self.user_version < other.user_version
 
     def __hash__(self):
         if self.tr_version is None:

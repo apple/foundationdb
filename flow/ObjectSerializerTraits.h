@@ -96,6 +96,12 @@ struct serializable_traits : std::false_type {
 	static void serialize(Archiver& ar, T& v);
 };
 
+template <class T>
+struct serialize_raw : std::false_type {
+	template <class Context>
+	static uint8_t* save_raw(Context& context, const T& obj);
+};
+
 template <class VectorLike>
 struct vector_like_traits : std::false_type {
 	// Write this at the beginning of the buffer
@@ -127,7 +133,7 @@ struct union_like_traits : std::false_type {
 	static const index_t<i, alternatives>& get(const Member&, Context&);
 
 	template <int i, class Alternative, class Context>
-	static const void assign(Member&, const Alternative&, Context&);
+	static void assign(Member&, const Alternative&, Context&);
 
 	template <class Context>
 	static void done(Member&, Context&);
@@ -144,7 +150,7 @@ struct struct_like_traits : std::false_type {
 	static const index_t<i, types>& get(const Member&, Context&);
 
 	template <int i, class Context>
-	static const void assign(Member&, const index_t<i, types>&, Context&);
+	static void assign(Member&, const index_t<i, types>&, Context&);
 
 	template <class Context>
 	static void done(Member&, Context&);
@@ -169,7 +175,7 @@ struct union_like_traits<boost::variant<Alternatives...>> : std::true_type {
 	}
 
 	template <size_t i, class Alternative, class Context>
-	static const void assign(Member& member, const Alternative& a, Context&) {
+	static void assign(Member& member, const Alternative& a, Context&) {
 		static_assert(std::is_same_v<index_t<i, alternatives>, Alternative>);
 		member = a;
 	}

@@ -57,7 +57,7 @@ struct Operation {
 	Value value;
 
 	int limit;
-	bool reverse;
+	bool reverse = false;
 };
 
 //A workload which executes random sequences of operations on RYOW transactions and confirms the results

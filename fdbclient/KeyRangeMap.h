@@ -103,6 +103,8 @@ void krmSetPreviouslyEmptyRange( struct CommitTransactionRef& tr, Arena& trArena
 Future<Void> krmSetRange( Transaction* const& tr, Key const& mapPrefix, KeyRange const& range, Value const& value );
 Future<Void> krmSetRange( Reference<ReadYourWritesTransaction> const& tr, Key const& mapPrefix, KeyRange const& range, Value const& value );
 Future<Void> krmSetRangeCoalescing( Transaction* const& tr, Key const& mapPrefix, KeyRange const& range, KeyRange const& maxRange, Value const& value );
+Future<Void> krmSetRangeCoalescing(Reference<ReadYourWritesTransaction> const& tr, Key const& mapPrefix,
+                                   KeyRange const& range, KeyRange const& maxRange, Value const& value);
 Standalone<RangeResultRef> krmDecodeRanges( KeyRef mapPrefix, KeyRange keys, Standalone<RangeResultRef> kv );
 
 template <class Val, class Metric, class MetricFunc>

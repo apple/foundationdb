@@ -270,6 +270,7 @@ namespace oldTLog_4_6 {
 		std::map<UID, Reference<struct LogData>> id_data;
 
 		UID dbgid;
+		UID workerID;
 
 		IKeyValueStore* persistentData;
 		IDiskQueue* rawPersistentQueue;
@@ -303,8 +304,8 @@ namespace oldTLog_4_6 {
 		PromiseStream<Future<Void>> sharedActors;
 		bool terminated;
 
-		TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
-				: dbgid(dbgid), instanceID(deterministicRandom()->randomUniqueID().first()),
+		TLogData(UID dbgid, UID workerID, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
+				: dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()),
 				  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
 				  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0), prevVersion(0),
 				  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false),
@@ -412,7 +413,7 @@ namespace oldTLog_4_6 {
 				// These are initialized differently on init() or recovery
 				recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), recovery(Void())
 		{
-			startRole(Role::TRANSACTION_LOG,interf.id(), UID());
+			startRole(Role::TRANSACTION_LOG, interf.id(), tLogData->workerID, {{"SharedTLog", tLogData->dbgid.shortString()}}, "Restored");
 
 			persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
 			persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
@@ -875,16 +876,19 @@ namespace oldTLog_4_6 {
 			try {
 				peekId = req.sequence.get().first;
 				sequence = req.sequence.get().second;
+				if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->peekTracker.find(peekId) == self->peekTracker.end()) {
+					throw operation_obsolete();
+				}
 				if(sequence > 0) {
 					auto& trackerData = self->peekTracker[peekId];
 					trackerData.lastUpdate = now();
 					Version ver = wait(trackerData.sequence_version[sequence].getFuture());
-					req.begin = ver;
+					req.begin = std::max(ver, req.begin);
 					wait(yield());
 				}
 			} catch( Error &e ) {
-				if(e.code() == error_code_timed_out) {
-					req.reply.sendError(timed_out());
+				if(e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
+					req.reply.sendError(e);
 					return Void();
 				} else {
 					throw;
@@ -906,6 +910,41 @@ namespace oldTLog_4_6 {
 
 		state Version endVersion = logData->version.get() + 1;
 
+		Version poppedVer = poppedVersion(logData, oldTag);
+		if(poppedVer > req.begin) {
+			TLogPeekReply rep;
+			rep.maxKnownVersion = logData->version.get();
+			rep.minKnownCommittedVersion = 0;
+			rep.popped = poppedVer;
+			rep.end = poppedVer;
+			rep.onlySpilled = false;
+
+			if(req.sequence.present()) {
+				auto& trackerData = self->peekTracker[peekId];
+				auto& sequenceData = trackerData.sequence_version[sequence+1];
+				trackerData.lastUpdate = now();
+				if(trackerData.sequence_version.size() && sequence+1 < trackerData.sequence_version.begin()->first) {
+					req.reply.sendError(operation_obsolete());
+					if (!sequenceData.isSet())
+						sequenceData.sendError(operation_obsolete());
+					return Void();
+				}
+				if(sequenceData.isSet()) {
+					if(sequenceData.getFuture().get() != rep.end) {
+						TEST(true); //tlog peek second attempt ended at a different version
+						req.reply.sendError(operation_obsolete());
+						return Void();
+					}
+				} else {
+					sequenceData.send(rep.end);
+				}
+				rep.begin = req.begin;
+			}
+
+			req.reply.send( rep );
+			return Void();
+		}
+
 		//grab messages from disk
 		//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", req.tag1).detail("Tag2", req.tag2);
 		if( req.begin <= logData->persistentDataDurableVersion ) {
@@ -916,7 +955,7 @@ namespace oldTLog_4_6 {
 
 			peekMessagesFromMemory( logData, req, messages2, endVersion );
 
-			Standalone<VectorRef<KeyValueRef>> kvs = wait(
+			Standalone<RangeResultRef> kvs = wait(
 				self->persistentData->readRange(KeyRangeRef(
 					persistTagMessagesKey(logData->logId, oldTag, req.begin),
 					persistTagMessagesKey(logData->logId, oldTag, logData->persistentDataDurableVersion + 1)), SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES));
@@ -948,19 +987,13 @@ namespace oldTLog_4_6 {
 			//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
 		}
 
-		Version poppedVer = poppedVersion(logData, oldTag);
-
 		TLogPeekReply reply;
 		reply.maxKnownVersion = logData->version.get();
 		reply.minKnownCommittedVersion = 0;
 		reply.onlySpilled = false;
-		if(poppedVer > req.begin) {
-			reply.popped = poppedVer;
-			reply.end = poppedVer;
-		} else {
-			reply.messages = messages.toValue();
-			reply.end = endVersion;
-		}
+		reply.messages = messages.toValue();
+		reply.end = endVersion;
+
 		//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("EndVer", reply.end).detail("MsgBytes", reply.messages.expectedSize()).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
 
 		if(req.sequence.present()) {
@@ -970,7 +1003,7 @@ namespace oldTLog_4_6 {
 			if(sequenceData.isSet()) {
 				if(sequenceData.getFuture().get() != reply.end) {
 					TEST(true); //tlog peek second attempt ended at a different version
-					req.reply.sendError(timed_out());
+					req.reply.sendError(operation_obsolete());
 					return Void();
 				}
 			} else {
@@ -1055,28 +1088,9 @@ namespace oldTLog_4_6 {
 		loop {
 			auto const& inf = self->dbInfo->get();
 			bool isDisplaced = !std::count( inf.priorCommittedLogServers.begin(), inf.priorCommittedLogServers.end(), tli.id() );
-			isDisplaced = isDisplaced && inf.recoveryCount >= recoveryCount && inf.recoveryState != RecoveryState::UNINITIALIZED;
-
-			if(isDisplaced) {
-				for(auto& log : inf.logSystemConfig.tLogs) {
-					 if( std::count( log.tLogs.begin(), log.tLogs.end(), tli.id() ) ) {
-						isDisplaced = false;
-						break;
-					 }
-				}
-			}
-			if(isDisplaced) {
-				for(auto& old : inf.logSystemConfig.oldTLogs) {
-					for(auto& log : old.tLogs) {
-						 if( std::count( log.tLogs.begin(), log.tLogs.end(), tli.id() ) ) {
-							isDisplaced = false;
-							break;
-						 }
-					}
-				}
-			}
-			if ( isDisplaced )
-			{
+			isDisplaced = isDisplaced && inf.recoveryCount >= recoveryCount &&
+			              inf.recoveryState != RecoveryState::UNINITIALIZED && !inf.logSystemConfig.hasTLog(tli.id());
+			if (isDisplaced) {
 				TraceEvent("TLogDisplaced", tli.id()).detail("Reason", "DBInfoDoesNotContain").detail("RecoveryCount", recoveryCount).detail("InfRecoveryCount", inf.recoveryCount).detail("RecoveryState", (int)inf.recoveryState)
 					.detail("LogSysConf", describe(inf.logSystemConfig.tLogs)).detail("PriorLogs", describe(inf.priorCommittedLogServers)).detail("OldLogGens", inf.logSystemConfig.oldTLogs.size());
 				if (BUGGIFY) wait( delay( SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01() ) );
@@ -1088,13 +1102,13 @@ namespace oldTLog_4_6 {
 					// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our TLogInterface
 					TLogRejoinRequest req;
 					req.myInterface = tli;
-					TraceEvent("TLogRejoining", self->dbgid).detail("Master", self->dbInfo->get().master.id());
+					TraceEvent("TLogRejoining", tli.id()).detail("Master", self->dbInfo->get().master.id());
 					choose {
-						when ( bool success = wait( brokenPromiseToNever( self->dbInfo->get().master.tlogRejoin.getReply( req ) ) ) ) {
-							if (success)
-								lastMasterID = self->dbInfo->get().master.id();
-						}
-						when ( wait( self->dbInfo->onChange() ) ) { }
+					    when(TLogRejoinReply rep =
+					             wait(brokenPromiseToNever(self->dbInfo->get().master.tlogRejoin.getReply(req)))) {
+						    if (rep.masterIsRecovered) lastMasterID = self->dbInfo->get().master.id();
+					    }
+					    when ( wait( self->dbInfo->onChange() ) ) { }
 					}
 				} else {
 					wait( self->dbInfo->onChange() );
@@ -1236,8 +1250,8 @@ namespace oldTLog_4_6 {
 
 		IKeyValueStore *storage = self->persistentData;
 		state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
-		state Future<Standalone<VectorRef<KeyValueRef>>> fVers = storage->readRange(persistCurrentVersionKeys);
-		state Future<Standalone<VectorRef<KeyValueRef>>> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
+		state Future<Standalone<RangeResultRef>> fVers = storage->readRange(persistCurrentVersionKeys);
+		state Future<Standalone<RangeResultRef>> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
 
 		// FIXME: metadata in queue?
 
@@ -1250,7 +1264,7 @@ namespace oldTLog_4_6 {
 		}
 
 		if (!fFormat.get().present()) {
-			Standalone<VectorRef<KeyValueRef>> v = wait( self->persistentData->readRange( KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1 ) );
+			Standalone<RangeResultRef> v = wait( self->persistentData->readRange( KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1 ) );
 			if (!v.size()) {
 				TEST(true); // The DB is completely empty, so it was never initialized.  Delete it.
 				throw worker_removed();
@@ -1303,7 +1317,7 @@ namespace oldTLog_4_6 {
 			tagKeys = prefixRange( rawId.withPrefix(persistTagPoppedKeys.begin) );
 			loop {
 				if(logData->removed.isReady()) break;
-				Standalone<VectorRef<KeyValueRef>> data = wait( self->persistentData->readRange( tagKeys, BUGGIFY ? 3 : 1<<30, 1<<20 ) );
+				Standalone<RangeResultRef> data = wait( self->persistentData->readRange( tagKeys, BUGGIFY ? 3 : 1<<30, 1<<20 ) );
 				if (!data.size()) break;
 				((KeyRangeRef&)tagKeys) = KeyRangeRef( keyAfter(data.back().key, tagKeys.arena()), tagKeys.end );
 
@@ -1389,9 +1403,9 @@ namespace oldTLog_4_6 {
 		return Void();
 	}
 
-	ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, UID tlogId )
+	ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, UID tlogId, UID workerID )
 	{
-		state TLogData self( tlogId, persistentData, persistentQueue, db );
+		state TLogData self( tlogId, workerID, persistentData, persistentQueue, db );
 		state Future<Void> error = actorCollection( self.sharedActors.getFuture() );
 
 		TraceEvent("SharedTlog", tlogId);

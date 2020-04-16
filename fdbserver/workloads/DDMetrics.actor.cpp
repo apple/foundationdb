@@ -44,7 +44,7 @@ struct DDMetricsWorkload : TestWorkload {
 		TraceEventFields md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
 			EventLogRequest( LiteralStringRef( "MovingData" ) ) ), 1.0 ) );
 		int relocations;
-		sscanf(md.getValue("HighPriorityRelocations").c_str(), "%d", &relocations);
+		sscanf(md.getValue("UnhealthyRelocations").c_str(), "%d", &relocations);
 		return relocations;
 	}
 

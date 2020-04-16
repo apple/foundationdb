@@ -19,7 +19,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		numRecoveries = getOption(options, LiteralStringRef("numRecoveries"), deterministicRandom()->randomInt(1, 10));
 		delayBetweenRecoveries = getOption(options, LiteralStringRef("delayBetweenRecoveries"), 0.0);
 		killAllProportion = getOption(options, LiteralStringRef("killAllProportion"), 0.1);
-		ASSERT(numRecoveries > 0 && startTime >= 0 and delayBetweenRecoveries >= 0);
+		ASSERT((numRecoveries > 0) && (startTime >= 0) && (delayBetweenRecoveries >= 0));
 		TraceEvent(SevInfo, "TriggerRecoveryLoopSetup")
 		    .detail("StartTime", startTime)
 		    .detail("NumRecoveries", numRecoveries)

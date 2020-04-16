@@ -46,13 +46,6 @@ func (o NetworkOptions) SetLocalAddress(param string) error {
 	return o.setOpt(10, []byte(param))
 }
 
-// enable the object serializer for network communication
-//
-// Parameter: 0 is false, every other value is true
-func (o NetworkOptions) SetUseObjectSerializer(param int64) error {
-	return o.setOpt(11, int64ToBytes(param))
-}
-
 // Deprecated
 //
 // Parameter: path to cluster file
@@ -93,6 +86,13 @@ func (o NetworkOptions) SetTraceLogGroup(param string) error {
 // Parameter: Format of trace files
 func (o NetworkOptions) SetTraceFormat(param string) error {
 	return o.setOpt(34, []byte(param))
+}
+
+// Select clock source for trace files. now (default) or realtime are supported.
+//
+// Parameter: Trace clock source
+func (o NetworkOptions) SetTraceClockSource(param string) error {
+	return o.setOpt(35, []byte(param))
 }
 
 // Set internal tuning or debugging knobs
@@ -325,12 +325,22 @@ func (o DatabaseOptions) SetTransactionSizeLimit(param int64) error {
 	return o.setOpt(503, int64ToBytes(param))
 }
 
+// The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock.
+func (o DatabaseOptions) SetTransactionCausalReadRisky() error {
+	return o.setOpt(504, nil)
+}
+
+// Addresses returned by get_addresses_for_key include the port when enabled. As of api version 700, this option is enabled by default and setting this has no effect.
+func (o DatabaseOptions) SetTransactionIncludePortInAddress() error {
+	return o.setOpt(505, nil)
+}
+
 // The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault
 func (o TransactionOptions) SetCausalWriteRisky() error {
 	return o.setOpt(10, nil)
 }
 
-// The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a fault or partition
+// The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock.
 func (o TransactionOptions) SetCausalReadRisky() error {
 	return o.setOpt(20, nil)
 }
@@ -338,6 +348,11 @@ func (o TransactionOptions) SetCausalReadRisky() error {
 // Not yet implemented.
 func (o TransactionOptions) SetCausalReadDisable() error {
 	return o.setOpt(21, nil)
+}
+
+// Addresses returned by get_addresses_for_key include the port when enabled. As of api version 700, this option is enabled by default and setting this has no effect.
+func (o TransactionOptions) SetIncludePortInAddress() error {
+	return o.setOpt(23, nil)
 }
 
 // The next write performed on this transaction will not generate a write conflict range. As a result, other transactions which read the key(s) being modified by the next write will not conflict with this transaction. Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on.
@@ -497,7 +512,8 @@ const (
 	// small portion of data is transferred to the client initially (in order to
 	// minimize costs if the client doesn't read the entire range), and as the
 	// caller iterates over more items in the range larger batches will be
-	// transferred in order to minimize latency.
+	// transferred in order to minimize latency. After enough iterations, the
+	// iterator mode will eventually reach the same byte limit as ``WANT_ALL``
 	StreamingModeIterator StreamingMode = 0
 
 	// Infrequently used. The client has passed a specific row limit and wants

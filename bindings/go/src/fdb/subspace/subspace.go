@@ -54,6 +54,15 @@ type Subspace interface {
 	// Subspace prepended.
 	Pack(t tuple.Tuple) fdb.Key
 
+	// PackWithVersionstamp returns the key encoding the specified tuple in
+	// the subspace so that it may be used as the key in fdb.Transaction's
+	// SetVersionstampedKey() method. The passed tuple must contain exactly
+	// one incomplete tuple.Versionstamp instance or the method will return
+	// with an error. The behavior here is the same as if one used the
+	// tuple.PackWithVersionstamp() method to appropriately pack together this
+	// subspace and the passed tuple.
+	PackWithVersionstamp(t tuple.Tuple) (fdb.Key, error)
+
 	// Unpack returns the Tuple encoded by the given key with the prefix of this
 	// Subspace removed. Unpack will return an error if the key is not in this
 	// Subspace or does not encode a well-formed Tuple.
@@ -106,6 +115,10 @@ func (s subspace) Bytes() []byte {
 
 func (s subspace) Pack(t tuple.Tuple) fdb.Key {
 	return fdb.Key(concat(s.b, t.Pack()...))
+}
+
+func (s subspace) PackWithVersionstamp(t tuple.Tuple) (fdb.Key, error) {
+	return t.PackWithVersionstamp(s.b)
 }
 
 func (s subspace) Unpack(k fdb.KeyConvertible) (tuple.Tuple, error) {

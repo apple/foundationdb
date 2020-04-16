@@ -61,6 +61,9 @@ function(add_fdb_test)
   set(this_test_timeout ${ADD_FDB_TEST_TIMEOUT})
   if(NOT this_test_timeout)
     set(this_test_timeout 3600)
+    if(USE_VALGRIND_FOR_CTEST)
+      set(this_test_timeout 36000)
+    endif()
   endif()
   set(test_type "simulation")
   set(fdb_test_files_ "${fdb_test_files}")
@@ -107,7 +110,7 @@ function(add_fdb_test)
     set(BUGGIFY_OPTION "-B")
   endif()
   set(VALGRIND_OPTION "")
-  if (USE_VALGRIND)
+  if (USE_VALGRIND_FOR_CTEST)
     set(VALGRIND_OPTION "--use-valgrind")
   endif()
   list(TRANSFORM ADD_FDB_TEST_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
@@ -127,9 +130,161 @@ function(add_fdb_test)
     ${VALGRIND_OPTION}
     ${ADD_FDB_TEST_TEST_FILES}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-	get_filename_component(test_dir_full ${first_file} DIRECTORY)
-	if(NOT ${test_dir_full} STREQUAL "")
-		get_filename_component(test_dir ${test_dir_full} NAME)
-		set_tests_properties(${test_name} PROPERTIES TIMEOUT ${this_test_timeout} LABELS "${test_dir}")
-	endif()
+  get_filename_component(test_dir_full ${first_file} DIRECTORY)
+  if(NOT ${test_dir_full} STREQUAL "")
+    get_filename_component(test_dir ${test_dir_full} NAME)
+    set_tests_properties(${test_name} PROPERTIES TIMEOUT ${this_test_timeout} LABELS "${test_dir}")
+  endif()
+  # set variables used for generating test packages
+  set(TEST_NAMES ${TEST_NAMES} ${test_name} PARENT_SCOPE)
+  set(TEST_FILES_${test_name} ${ADD_FDB_TEST_TEST_FILES} PARENT_SCOPE)
+  set(TEST_TYPE_${test_name} ${test_type} PARENT_SCOPE)
+endfunction()
+
+if(NOT WIN32)
+  set(TEST_PACKAGE_INCLUDE ".*" CACHE STRING "A regex of all tests that should be included in the test package")
+  set(TEST_PACKAGE_EXCLUDE ".^" CACHE STRING "A regex of all tests that shouldn't be added to the test package")
+  set(TEST_PACKAGE_ADD_DIRECTORIES "" CACHE STRING "A ;-separated list of directories. All files within each directory will be added to the test package")
+endif()
+
+function(create_test_package)
+  if(WIN32)
+    return()
+  endif()
+  string(LENGTH "${CMAKE_SOURCE_DIR}/tests/" base_length)
+  foreach(test IN LISTS TEST_NAMES)
+    if(("${TEST_TYPE_${test}}" STREQUAL "simulation") AND
+        (${test} MATCHES ${TEST_PACKAGE_INCLUDE}) AND
+        (NOT ${test} MATCHES ${TEST_PACKAGE_EXCLUDE}))
+      foreach(file IN LISTS TEST_FILES_${test})
+        string(SUBSTRING ${file} ${base_length} -1 rel_out_file)
+        set(out_file ${CMAKE_BINARY_DIR}/packages/tests/${rel_out_file})
+        list(APPEND out_files ${out_file})
+        get_filename_component(test_dir ${out_file} DIRECTORY)
+        file(MAKE_DIRECTORY packages/tests/${test_dir})
+        add_custom_command(
+          OUTPUT ${out_file}
+          DEPENDS ${file}
+          COMMAND ${CMAKE_COMMAND} -E copy ${file} ${out_file})
+      endforeach()
+    endif()
+  endforeach()
+  foreach(dir IN LISTS TEST_PACKAGE_ADD_DIRECTORIES)
+    file(GLOB_RECURSE files ${dir}/*)
+    string(LENGTH ${dir} dir_len)
+    foreach(file IN LISTS files)
+      get_filename_component(src_dir ${file} DIRECTORY)
+      # We need to make sure that ${src_dir} is at least
+      # as long as ${dir}. Otherwise the later call to
+      # SUBSTRING will fail
+      set(src_dir "${src_dir}/")
+      string(SUBSTRING ${src_dir} ${dir_len} -1 dest_dir)
+      string(SUBSTRING ${file} ${dir_len} -1 out_file)
+      list(APPEND external_files ${CMAKE_BINARY_DIR}/packages/${out_file})
+      file(COPY ${file} DESTINATION ${CMAKE_BINARY_DIR}/packages/${dest_dir})
+    endforeach()
+  endforeach()
+  if(NOT USE_VALGRIND)
+    set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness-${CMAKE_PROJECT_VERSION}.tar.gz)
+    add_custom_command(
+      OUTPUT ${tar_file}
+      DEPENDS ${out_files}
+              ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+              ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
+              ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
+              ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTest.sh
+              ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTimeout.sh
+              ${external_files}
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTest.sh
+                                       ${CMAKE_BINARY_DIR}/packages/joshua_test
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTimeout.sh
+                                       ${CMAKE_BINARY_DIR}/packages/joshua_timeout
+      COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+                                          ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
+                                          ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
+                                          ${CMAKE_BINARY_DIR}/packages/joshua_test
+                                          ${CMAKE_BINARY_DIR}/packages/joshua_timeout
+                                          ${out_files}
+                                          ${external_files}
+      COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/packages/joshua_test ${CMAKE_BINARY_DIR}/packages/joshua_timeout
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/packages
+      COMMENT "Package correctness archive"
+      )
+    add_custom_target(package_tests ALL DEPENDS ${tar_file})
+    # seems make needs this dependency while this does nothing with ninja
+    add_dependencies(package_tests strip_only_fdbserver TestHarness)
+  endif()
+
+  if(USE_VALGRIND)
+    set(tar_file ${CMAKE_BINARY_DIR}/packages/valgrind-${CMAKE_PROJECT_VERSION}.tar.gz)
+    add_custom_command(
+      OUTPUT ${tar_file}
+      DEPENDS ${out_files}
+              ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+              ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
+              ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
+              ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/valgrindTest.sh
+              ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/valgrindTimeout.sh
+              ${external_files}
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/valgrindTest.sh
+                                       ${CMAKE_BINARY_DIR}/packages/joshua_test
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/valgrindTimeout.sh
+                                       ${CMAKE_BINARY_DIR}/packages/joshua_timeout
+      COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file}
+                                          ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+                                          ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
+                                          ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
+                                          ${CMAKE_BINARY_DIR}/packages/joshua_test
+                                          ${CMAKE_BINARY_DIR}/packages/joshua_timeout
+                                          ${out_files}
+                                          ${external_files}
+      COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/packages/joshua_test ${CMAKE_BINARY_DIR}/packages/joshua_timeout
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/packages
+      COMMENT "Package correctness archive"
+      )
+    add_custom_target(package_valgrind_tests ALL DEPENDS ${tar_file})
+    add_dependencies(package_valgrind_tests strip_only_fdbserver TestHarness)
+  endif()
+endfunction()
+
+function(package_bindingtester)
+  if(WIN32 OR OPEN_FOR_IDE)
+    return()
+  elseif(APPLE)
+    set(fdbcName "libfdb_c.dylib")
+  else()
+    set(fdbcName "libfdb_c.so")
+  endif()
+  set(bdir ${CMAKE_BINARY_DIR}/bindingtester)
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/bindingtester)
+  set(outfiles ${bdir}/fdbcli ${bdir}/fdbserver ${bdir}/${fdbcName} ${bdir}/joshua_test ${bdir}/joshua_timeout)
+  add_custom_command(
+    OUTPUT ${outfiles}
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/packages/bin/fdbcli
+            ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+            ${CMAKE_BINARY_DIR}/packages/lib/${fdbcName}
+            ${bdir}
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/bindingTest.sh ${bdir}/joshua_test
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/bindingTimeout.sh ${bdir}/joshua_timeout
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/localClusterStart.sh ${bdir}/localClusterStart.sh
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/bindingTestScript.sh ${bdir}/bindingTestScript.sh
+    COMMENT "Copy executes to bindingtester dir")
+  file(GLOB_RECURSE test_files ${CMAKE_SOURCE_DIR}/bindings/*)
+  add_custom_command(
+    OUTPUT "${CMAKE_BINARY_DIR}/bindingtester.touch"
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/bindingtester/tests
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bindingtester/tests
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bindings ${CMAKE_BINARY_DIR}/bindingtester/tests
+    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/bindingtester.touch"
+    COMMENT "Copy test files for bindingtester")
+  add_custom_target(copy_bindingtester_binaries DEPENDS ${outfiles}  "${CMAKE_BINARY_DIR}/bindingtester.touch")
+  add_dependencies(copy_bindingtester_binaries strip_only_fdbserver strip_only_fdbcli strip_only_fdb_c)
+  set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester-${CMAKE_PROJECT_VERSION}.tar.gz)
+  add_custom_command(
+    OUTPUT ${tar_file}
+    COMMAND ${CMAKE_COMMAND} -E tar czf ${tar_file} *
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/bindingtester
+    COMMENT "Pack bindingtester")
+  add_custom_target(bindingtester ALL DEPENDS ${tar_file})
+  add_dependencies(bindingtester copy_bindingtester_binaries)
 endfunction()

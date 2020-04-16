@@ -78,7 +78,10 @@ public:
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
 		const uint8_t* data = static_cast<ReaderImpl*>(this)->data();
 		LoadContext<ReaderImpl> context(static_cast<ReaderImpl*>(this));
-		ASSERT(read_file_identifier(data) == file_identifier);
+		if(read_file_identifier(data) != file_identifier) {
+			TraceEvent(SevError, "MismatchedFileIdentifier").detail("Expected", file_identifier).detail("Read", read_file_identifier(data));
+			ASSERT(false);
+		}
 		load_members(data, context, items...);
 	}
 
@@ -89,7 +92,7 @@ public:
 };
 
 class ObjectReader : public _ObjectReader<ObjectReader> {
-	friend class _IncludeVersion;
+	friend struct _IncludeVersion;
 	ObjectReader& operator>> (ProtocolVersion& version) {
 		uint64_t result;
 		memcpy(&result, _data, sizeof(result));
@@ -115,7 +118,7 @@ private:
 };
 
 class ArenaObjectReader : public _ObjectReader<ArenaObjectReader> {
-	friend class _IncludeVersion;
+	friend struct _IncludeVersion;
 	ArenaObjectReader& operator>> (ProtocolVersion& version) {
 		uint64_t result;
 		memcpy(&result, _data, sizeof(result));
@@ -142,7 +145,7 @@ private:
 };
 
 class ObjectWriter {
-	friend class _IncludeVersion;
+	friend struct _IncludeVersion;
 	bool writeProtocolVersion = false;
 	ObjectWriter& operator<< (const ProtocolVersion& version) {
 		writeProtocolVersion = true;

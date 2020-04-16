@@ -31,8 +31,8 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template <class Node>
-Future<Void> ISFreeNodes(std::vector<Node*> toFree, bool synchronous) {
-	// Frees the forest of nodes in the 'toFree' vector. 
+[[flow_allow_discard]] Future<Void> ISFreeNodes(std::vector<Node*> toFree, bool synchronous) {
+	// Frees the forest of nodes in the 'toFree' vector.
 	// If 'synchronous' is true, then there can be no waits.
 
 	state int eraseCount = 0;

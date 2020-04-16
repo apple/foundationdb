@@ -49,7 +49,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "resolution",
                   "proxy",
                   "master",
-                  "test"
+                  "test",
+                  "storage_cache"
                ]
             },
             "degraded":true,
@@ -67,6 +68,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "kvstore_available_bytes":12341234,
                   "kvstore_free_bytes":12341234,
                   "kvstore_total_bytes":12341234,
+                  "kvstore_total_size":12341234,
+                  "kvstore_total_nodes":12341234,
+                  "kvstore_inline_keys":12341234,
                   "durable_bytes":{
                      "hz":0.0,
                      "counter":0,
@@ -86,7 +90,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "cluster_controller",
                         "data_distributor",
                         "ratekeeper",
-                        "router"
+                        "storage_cache",
+                        "router",
+                        "coordinator"
                      ]
                   },
                   "data_version":12341234,
@@ -156,6 +162,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "$enum":[
                         "file_open_error",
                         "incorrect_cluster_file_contents",
+                        "trace_log_file_write_error",
+                        "trace_log_could_not_create_file",
+                        "trace_log_writer_thread_unresponsive",
                         "process_error",
                         "io_error",
                         "io_timeout",
@@ -207,6 +216,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                },
                "megabits_received":{
                   "hz":0.0
+               },
+               "tls_policy_failures":{
+                 "hz":0.0
                }
             },
             "run_loop_busy":0.2
@@ -232,8 +244,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          }
       ],
       "fault_tolerance":{
-         "max_machine_failures_without_losing_availability":0,
-         "max_machine_failures_without_losing_data":0
+         "max_zone_failures_without_losing_availability":0,
+         "max_zone_failures_without_losing_data":0
       },
       "qos":{
          "worst_queue_bytes_log_server":460,
@@ -286,7 +298,23 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,
          "limiting_version_lag_storage_server":0,
-         "worst_version_lag_storage_server":0
+         "worst_version_lag_storage_server":0,
+         "limiting_data_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         },
+         "worst_data_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         },
+         "limiting_durability_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         },
+         "worst_durability_lag_storage_server":{
+            "versions":0,
+            "seconds":0.0
+         }
       },
       "incompatible_connections":[
 
@@ -297,7 +325,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       },
       "degraded_processes":0,
       "database_available":true,
-      "database_locked":false,
+      "database_lock_state": {
+         "locked": true,
+         "lock_uid": "00000000000000000000000000000000"
+      },
       "generation":2,
       "latency_probe":{
          "read_seconds":7,
@@ -365,14 +396,21 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "layer_status_incomplete",
                   "database_availability_timeout",
                   "consistencycheck_suspendkey_fetch_timeout",
-                  "consistencycheck_disabled"
+                  "consistencycheck_disabled",
+                  "duplicate_mutation_streams",
+                  "duplicate_mutation_fetch_timeout",
+                  "primary_dc_missing",
+                  "fetch_primary_dc_timeout"
                ]
             },
             "issues":[
                {
                   "name":{
                      "$enum":[
-                        "incorrect_cluster_file_contents"
+                        "incorrect_cluster_file_contents",
+                        "trace_log_file_write_error",
+                        "trace_log_could_not_create_file",
+                        "trace_log_writer_thread_unresponsive"
                      ]
                   },
                   "description":"Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally."
@@ -381,7 +419,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "description":"abc"
          }
       ],
-)statusSchema" R"statusSchema(
+)statusSchema"
+                                                          R"statusSchema(
       "recovery_state":{
          "required_resolvers":1,
          "required_proxies":1,
@@ -406,6 +445,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          },
          "required_logs":3,
          "missing_logs":"7f8d623d0cb9966e",
+         "active_generations":1,
          "description":"Recovery complete."
       },
       "workload":{
@@ -421,6 +461,16 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "roughness":0.0
             },
             "read_requests":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "location_requests":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "memory_errors":{
                "hz":0.0,
                "counter":0,
                "roughness":0.0
@@ -484,6 +534,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "full_replication":true,
       "maintenance_zone":"0ccb4e0fdbdb5583010f6b77d9d10ece",
       "maintenance_seconds_remaining":1.0,
+      "data_distribution_disabled_for_ss_failures":true,
+      "data_distribution_disabled_for_rebalance":true,
+      "data_distribution_disabled":true,
+      "active_primary_dc":"pv",
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,
@@ -502,7 +556,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "datacenters":[{
              "id":"mr",
              "priority":1,
-             "satellite":1
+             "satellite":1,
+             "satellite_logs":2
          }],
          "satellite_redundancy_mode":{
          "$enum":[
@@ -546,7 +601,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd-redwood-experimental",
              "memory",
              "memory-1",
-             "memory-2"
+             "memory-2",
+             "memory-radixtree-beta"
          ]},
          "coordinators_count":1,
          "excluded_servers":[
@@ -557,7 +613,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "auto_proxies":3,
          "auto_resolvers":1,
          "auto_logs":3,
-         "proxies":5
+         "proxies":5,
+         "backup_worker_enabled":1
       },
       "data":{
          "least_operating_space_bytes_log_server":0,
@@ -571,6 +628,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "missing_data",
                   "healing",
                   "optimizing_team_collections",
+                  "healthy_populating_region",
                   "healthy_repartitioning",
                   "healthy_removing_server",
                   "healthy_rebalancing",
@@ -583,6 +641,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "max_machine_failures_without_losing_availability":0,
          "total_disk_used_bytes":0,
          "total_kv_size_bytes":0,
+         "system_kv_size_bytes":0,
          "partitions_count":2,
          "moving_data":{
             "total_written_bytes":0,
@@ -604,6 +663,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                           "missing_data",
                           "healing",
                           "optimizing_team_collections",
+                          "healthy_populating_region",
                           "healthy_repartitioning",
                           "healthy_removing_server",
                           "healthy_rebalancing",
@@ -614,8 +674,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                 }
             }
          ],
-         "least_operating_space_bytes_storage_server":0,
-         "max_machine_failures_without_losing_data":0
+         "least_operating_space_bytes_storage_server":0
       },
       "machines":{
          "$map":{
@@ -712,7 +771,8 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"config
         "datacenters":[{
             "id":"mr",
             "priority":1,
-            "satellite":1
+            "satellite":1,
+            "satellite_logs":2
         }],
         "satellite_redundancy_mode":{
         "$enum":[

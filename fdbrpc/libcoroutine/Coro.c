@@ -75,8 +75,6 @@ typedef struct CallbackBlock
 	CoroStartCallback *func;
 } CallbackBlock;
 
-static CallbackBlock globalCallbackBlock;
-
 Coro *Coro_new(void)
 {
 	Coro *self = (Coro *)io_calloc(1, sizeof(Coro));
@@ -286,6 +284,9 @@ void Coro_Start(void)
 }
 */
 #else
+
+static CallbackBlock globalCallbackBlock;
+
 void Coro_StartWithArg(CallbackBlock *block)
 {
 	setProfilingEnabled(1);
@@ -421,6 +422,8 @@ void Coro_setup(Coro *self, void *arg)
 
 #define buf (self->env)
 
+static CallbackBlock globalCallbackBlock;
+
 void Coro_setup(Coro *self, void *arg)
 {
 	setjmp(buf);
@@ -455,6 +458,8 @@ void Coro_setup(Coro *self, void *arg)
 #define buf (self->env)
 #define setjmp  _setjmp
 #define longjmp _longjmp
+
+static CallbackBlock globalCallbackBlock;
 
 void Coro_setup(Coro *self, void *arg)
 {

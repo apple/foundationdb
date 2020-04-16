@@ -77,12 +77,12 @@ struct KeyValueStoreCompressTestData : IKeyValueStore {
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	virtual Future<Standalone<VectorRef<KeyValueRef>>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 ) {
+	virtual Future<Standalone<RangeResultRef>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 ) {
 		return doReadRange(store, keys, rowLimit, byteLimit);
 	}
-	ACTOR Future<Standalone<VectorRef<KeyValueRef>>> doReadRange( IKeyValueStore* store, KeyRangeRef keys, int rowLimit, int byteLimit ) {
-		Standalone<VectorRef<KeyValueRef>> _vs = wait( store->readRange(keys, rowLimit, byteLimit) );
-		Standalone<VectorRef<KeyValueRef>> vs = _vs; // Get rid of implicit const& from wait statement
+	ACTOR Future<Standalone<RangeResultRef>> doReadRange( IKeyValueStore* store, KeyRangeRef keys, int rowLimit, int byteLimit ) {
+		Standalone<RangeResultRef> _vs = wait( store->readRange(keys, rowLimit, byteLimit) );
+		Standalone<RangeResultRef> vs = _vs; // Get rid of implicit const& from wait statement
 		Arena& a = vs.arena();
 		for(int i=0; i<vs.size(); i++)
 			vs[i].value = ValueRef( a, (ValueRef const&)unpack(vs[i].value) );

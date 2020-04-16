@@ -1,0 +1,56 @@
+testTitle=BackupAndParallelRestoreWithAtomicOp
+    testName=AtomicOps
+    nodeCount=30000
+; Make ops space only 1 key per group
+;    nodeCount=100
+    transactionsPerSecond=2500.0
+;    transactionsPerSecond=500.0
+;    transactionsPerSecond=500.0
+;    nodeCount=4
+;    transactionsPerSecond=250.0
+    testDuration=30.0
+    clearAfterTest=false
+; Specify a type of atomicOp
+;	opType=0
+;	actorsPerClient=1
+
+; Each testName=RunRestoreWorkerWorkload creates a restore worker
+; We need at least 3 restore workers: master, loader, and applier
+    testName=RunRestoreWorkerWorkload
+
+; Test case for parallel restore
+    testName=BackupAndParallelRestoreCorrectness
+    backupAfter=10.0
+    restoreAfter=60.0
+    clearAfterTest=false
+    simBackupAgents=BackupToFile
+    backupRangesCount=-1
+; use new backup
+    usePartitionedLogs=true
+
+    testName=RandomClogging
+    testDuration=90.0
+
+    testName=Rollback
+    meanDelay=90.0
+    testDuration=90.0
+
+; Do NOT kill restore worker process yet
+; Kill other process to ensure restore works when FDB cluster has faults
+    testName=Attrition
+    machinesToKill=10
+    machinesToLeave=3
+    reboot=true
+    testDuration=90.0
+
+    testName=Attrition
+    machinesToKill=10
+    machinesToLeave=3
+    reboot=true
+    testDuration=90.0
+
+; Disable buggify for parallel restore
+;buggify=on
+;testDuration=360000 ;not work
+;timeout is in seconds
+timeout=360000

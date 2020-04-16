@@ -38,14 +38,17 @@ namespace actorcompiler
 
     class ErrorMessagePolicy
     {
-        public bool DisableActorWithoutWaitWarning = false;
+        public bool DisableDiagnostics = false;
         public void HandleActorWithoutWait(String sourceFile, Actor actor)
         {
-            if (!DisableActorWithoutWaitWarning && !actor.isTestCase)
+            if (!DisableDiagnostics && !actor.isTestCase)
             {
                 // TODO(atn34): Once cmake is the only build system we can make this an error instead of a warning.
                 Console.Error.WriteLine("{0}:{1}: warning: ACTOR {2} does not contain a wait() statement", sourceFile, actor.SourceLine, actor.name);
             }
+        }
+        public bool ActorsNoDiscardByDefault() {
+            return !DisableDiagnostics;
         }
     }
 
@@ -79,6 +82,14 @@ namespace actorcompiler
                                     new TokenRange(range.GetAllTokens(), Position, range.End))
                                 .Skip(1)  // skip the "<", which is considered "outside"
                                 .First()  // get the ">", which is likewise "outside"
+                                .Position);
+                case "[": return
+                    new TokenRange(range.GetAllTokens(),
+                        Position+1,
+                        BracketParser.NotInsideBrackets(
+                                    new TokenRange(range.GetAllTokens(), Position, range.End))
+                                .Skip(1)  // skip the "[", which is considered "outside"
+                                .First()  // get the "]", which is likewise "outside"
                                 .Position);
                 default: throw new NotSupportedException("Can't match this token!");
             }
@@ -190,6 +201,22 @@ namespace actorcompiler
         int endPos;
     };
 
+    static class BracketParser
+    {
+        public static IEnumerable<Token> NotInsideBrackets(IEnumerable<Token> tokens)
+        {
+            int BracketDepth = 0;
+            int? BasePD = null;
+            foreach (var tok in tokens)
+            {
+                if (BasePD == null) BasePD = tok.ParenDepth;
+                if (tok.ParenDepth == BasePD && tok.Value == "]") BracketDepth--;
+                if (BracketDepth == 0)
+                    yield return tok;
+                if (tok.ParenDepth == BasePD && tok.Value == "[") BracketDepth++;
+            }
+        }
+    };
     static class AngleBracketParser
     {
         public static IEnumerable<Token> NotInsideAngleBrackets(IEnumerable<Token> tokens)
@@ -214,16 +241,83 @@ namespace actorcompiler
         Token[] tokens;
         string sourceFile;
         ErrorMessagePolicy errorMessagePolicy;
+        public bool generateProbes;
 
-        public ActorParser(string text, string sourceFile, ErrorMessagePolicy errorMessagePolicy)
+        public ActorParser(string text, string sourceFile, ErrorMessagePolicy errorMessagePolicy, bool generateProbes)
         {
             this.sourceFile = sourceFile;
             this.errorMessagePolicy = errorMessagePolicy;
+            this.generateProbes = generateProbes;
             tokens = Tokenize(text).Select(t=>new Token{ Value=t }).ToArray();
             CountParens();
             //if (sourceFile.EndsWith(".h")) LineNumbersEnabled = false;
             //Console.WriteLine("{0} chars -> {1} tokens", text.Length, tokens.Length);
             //showTokens();
+        }
+
+        class ClassContext {
+            public string name;
+            public int inBlocks;
+        }
+
+        private bool ParseClassContext(TokenRange toks, out string name)
+        {
+            name = "";
+            if (toks.Begin == toks.End)
+            {
+                return false;
+            }
+
+            // http://nongnu.org/hcb/#attribute-specifier-seq
+            Token first;
+            while (true)
+            {
+                first = toks.First(NonWhitespace);
+                if (first.Value == "[")
+                {
+                    var contents = first.GetMatchingRangeIn(toks);
+                    toks = range(contents.End + 1, toks.End);
+                }
+                else if (first.Value == "alignas")
+                {
+                    toks = range(first.Position + 1, toks.End);
+                    first = toks.First(NonWhitespace);
+                    first.Assert("Expected ( after alignas", t => t.Value == "(");
+                    var contents = first.GetMatchingRangeIn(toks);
+                    toks = range(contents.End + 1, toks.End);
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            // http://nongnu.org/hcb/#class-head-name
+            first = toks.First(NonWhitespace);
+            if (!identifierPattern.Match(first.Value).Success) {
+                return false;
+            }
+            while (true) {
+                first.Assert("Expected identifier", t=>identifierPattern.Match(t.Value).Success);
+                name += first.Value;
+                toks = range(first.Position + 1, toks.End);
+                if (toks.First(NonWhitespace).Value == "::") {
+                    name += "::";
+                    toks = toks.SkipWhile(Whitespace).Skip(1);
+                } else {
+                    break;
+                }
+                first = toks.First(NonWhitespace);
+            }
+            // http://nongnu.org/hcb/#class-virt-specifier-seq
+            toks = toks.SkipWhile(t => Whitespace(t) || t.Value == "final" || t.Value == "explicit" || t.Value == "sealed");
+
+            first = toks.First(NonWhitespace);
+            if (first.Value == ":" || first.Value == "{") {
+                // At this point we've confirmed that this is a class.
+                return true;
+            }
+            return false;
         }
 
         public void Write(System.IO.TextWriter writer, string destFileName)
@@ -237,6 +331,7 @@ namespace actorcompiler
                 outLine++;
             }
             int inBlocks = 0;
+            Stack<ClassContext> classContextStack = new Stack<ClassContext>();
             for(int i=0; i<tokens.Length; i++)
             {
                 if(tokens[0].SourceLine == 0)
@@ -247,9 +342,13 @@ namespace actorcompiler
                 {
                     int end;
                     var actor = ParseActor(i, out end);
+                    if (classContextStack.Count > 0)
+                    {
+                        actor.enclosingClass = String.Join("::", classContextStack.Reverse().Select(t => t.name));
+                    }
                     var actorWriter = new System.IO.StringWriter();
                     actorWriter.NewLine = "\n";
-                    new ActorCompiler(actor, sourceFile, inBlocks==0, LineNumbersEnabled).Write(actorWriter);
+                    new ActorCompiler(actor, sourceFile, inBlocks == 0, LineNumbersEnabled, generateProbes).Write(actorWriter);
                     string[] actorLines = actorWriter.ToString().Split('\n');
 
                     bool hasLineNumber = false;
@@ -293,10 +392,29 @@ namespace actorcompiler
                         outLine++;
                     }
                 }
+                else if (tokens[i].Value == "class" || tokens[i].Value == "struct" || tokens[i].Value == "union")
+                {
+                    writer.Write(tokens[i].Value);
+                    string name;
+                    if (ParseClassContext(range(i+1, tokens.Length), out name))
+                    {
+                        classContextStack.Push(new ClassContext { name = name, inBlocks = inBlocks});
+                    }
+                }
                 else
                 {
-                    if (tokens[i].Value == "{") inBlocks++;
-                    else if (tokens[i].Value == "}") inBlocks--;
+                    if (tokens[i].Value == "{")
+                    {
+                        inBlocks++;
+                    }
+                    else if (tokens[i].Value == "}")
+                    {
+                        inBlocks--;
+                        if (classContextStack.Count > 0 && classContextStack.Peek().inBlocks == inBlocks)
+                        {
+                            classContextStack.Pop();
+                        }
+                    }
                     writer.Write(tokens[i].Value);
                     outLine += tokens[i].Value.Count(c => c == '\n');
                 }
@@ -437,6 +555,21 @@ namespace actorcompiler
 
                 toks = range(templateParams.End + 1, toks.End);
             }
+            var attribute = toks.First(NonWhitespace);
+            while (attribute.Value == "[")
+            {
+                var attributeContents = attribute.GetMatchingRangeIn(toks);
+
+                var asArray = attributeContents.ToArray();
+                if (asArray.Length < 2 || asArray[0].Value != "[" || asArray[asArray.Length - 1].Value != "]")
+                {
+                    throw new Error(actor.SourceLine, "Invalid attribute: Expected [[...]]");
+                }
+                actor.attributes.Add("[" + str(NormalizeWhitespace(attributeContents)) + "]");
+                toks = range(attributeContents.End + 1, toks.End);
+
+                attribute = toks.First(NonWhitespace);
+            }
 
             var staticKeyword = toks.First(NonWhitespace);
             if (staticKeyword.Value == "static")
@@ -448,7 +581,7 @@ namespace actorcompiler
             var uncancellableKeyword = toks.First(NonWhitespace);
             if (uncancellableKeyword.Value == "UNCANCELLABLE")
             {
-                actor.isUncancellable = true;
+                actor.SetUncancellable();
                 toks = range(uncancellableKeyword.Position + 1, toks.End);
             }
 
@@ -494,6 +627,20 @@ namespace actorcompiler
                     throw new Error(actor.SourceLine, "Unrecognized tokens preceding parameter list in actor declaration");
                 }
             }
+            if (errorMessagePolicy.ActorsNoDiscardByDefault() && !actor.attributes.Contains("[[flow_allow_discard]]")) {
+                if (actor.IsCancellable())
+                {
+                    actor.attributes.Add("[[nodiscard]]");
+                }
+            }
+            HashSet<string> knownFlowAttributes = new HashSet<string>();
+            knownFlowAttributes.Add("[[flow_allow_discard]]");
+            foreach (var flowAttribute in actor.attributes.Where(a => a.StartsWith("[[flow_"))) {
+                if (!knownFlowAttributes.Contains(flowAttribute)) {
+                    throw new Error(actor.SourceLine, "Unknown flow attribute {0}", flowAttribute);
+                }
+            }
+            actor.attributes = actor.attributes.Where(a => !a.StartsWith("[[flow_")).ToList();
         }
 
         LoopStatement ParseLoopStatement(TokenRange toks)
@@ -960,11 +1107,15 @@ namespace actorcompiler
             }
         }
 
+        readonly Regex identifierPattern = new Regex(@"\G[a-zA-Z_][a-zA-Z_0-9]*", RegexOptions.Singleline);
+
         readonly Regex[] tokenExpressions = (new string[] {
             @"\{",
             @"\}",
             @"\(",
             @"\)",
+            @"\[",
+            @"\]",
             @"//[^\n]*",
             @"/[*]([*][^/]|[^*])*[*]/",
             @"'(\\.|[^\'\n])*'",    //< SOMEDAY: Not fully restrictive
@@ -973,6 +1124,7 @@ namespace actorcompiler
             @"\r\n",
             @"\n",
             @"::",
+            @":",
             @"."
         }).Select( x=>new Regex(@"\G"+x, RegexOptions.Singleline) ).ToArray();
 

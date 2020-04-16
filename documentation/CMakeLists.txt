@@ -1,3 +1,4 @@
+add_subdirectory(tutorial)
 # build a virtualenv
 set(sphinx_dir ${CMAKE_CURRENT_SOURCE_DIR}/sphinx)
 set(venv_dir ${CMAKE_CURRENT_BINARY_DIR}/venv)
@@ -9,7 +10,7 @@ set(pip_command ${venv_dir}/bin/pip${EXE_SUFFIX})
 set(python_command ${venv_dir}/bin/python${EXE_SUFFIX})
 
 add_custom_command(OUTPUT ${venv_dir}/venv_setup
-  COMMAND ${VIRTUALENV_EXE} venv &&
+  COMMAND ${Python3_EXECUTABLE} -m venv venv &&
           ${CMAKE_COMMAND} -E copy ${sphinx_dir}/.pip.conf ${venv_dir}/pip.conf &&
           . ${venv_dir}/bin/activate &&
           ${pip_command} install --upgrade pip &&
@@ -57,6 +58,38 @@ endfunction()
 
 message(STATUS "Add html target")
 add_documentation_target(GENERATOR html)
+
+set(DOCSERVER_PORT "-1" CACHE STRING "Port to which the documentation server should bind (negative means cmake will choose one)")
+
+if(DOCSERVER_PORT GREATER_EQUAL 0)
+  set(port ${DOCSERVER_PORT})
+else()
+  if(WIN32)
+    if(DEFINED $ENV{USERNAME})
+      set(username $ENV{USERNAME})
+    else()
+      set(username "dummy_user")
+    endif()
+  else()
+    if(DEFINED $ENV{USER})
+      set(username $ENV{USER})
+    else()
+      set(username "dummy_user")
+    endif()
+  endif()
+  string(MD5 username_hash ${username})
+  # cmake math function can only use 64 bit signed integers - so we just truncate the string
+  string(SUBSTRING "${username_hash}" 0 15 username_hash_small)
+  message(STATUS math(EXPR port "(0x${username_hash_small} % 8000) + 8000" OUTPUT_FORMAT DECIMAL))
+  math(EXPR port "(0x${username_hash_small} % 8000) + 8000" OUTPUT_FORMAT DECIMAL)
+  message(STATUS "Port is ${port}")
+endif()
+
+add_custom_target(docpreview
+  COMMAND ${python_command} -m http.server ${port}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/html
+  USES_TERMINAL)
+add_dependencies(docpreview html)
 
 set(tar_file ${CMAKE_BINARY_DIR}/packages/${CMAKE_PROJECT_NAME}-docs-${FDB_VERSION}.tar.gz)
 add_custom_command(

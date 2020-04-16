@@ -249,7 +249,7 @@ def run_test():
     # Test moving an entry
     assert not entry.state.has_known_prefix
     assert not entry.state.is_subspace
-    assert entry.state.children.keys() == ['1']    
+    assert list(entry.state.children.keys()) == ['1']    
 
     for e in all_entries:
         validate_dir(e, root)

@@ -2,6 +2,22 @@
 Release Notes
 #############
 
+6.1.13
+======
+
+* Loading a 6.1 or newer ``fdb_c`` library as a secondary client using the multi-version client could lead to an infinite recursion when run with API versions older than 610. `(PR #2169) <https://github.com/apple/foundationdb/pull/2169>`_
+* Using C API functions that were removed in 6.1 when using API version 610 or above now results in a compilation error. `(PR #2169) <https://github.com/apple/foundationdb/pull/2169>`_
+* ``fdbrestore`` commands other than ``start`` required a default cluster file to be found but did not actually use it. `(PR #1912) <https://github.com/apple/foundationdb/pull/1912>`_.
+
+6.1.12
+======
+
+Fixes
+-----
+
+* Fixed a thread safety issue while writing large keys or values. `(Issue #1846) <https://github.com/apple/foundationdb/issues/1846>`_
+* An untracked data distributor could prevent a newly recruited data distributor from being started. `(PR #1849) <https://github.com/apple/foundationdb/pull/1849>`_
+
 6.1.11
 ======
 
@@ -118,7 +134,7 @@ Status
 Bindings
 --------
 
-* API version updated to 610.
+* API version updated to 610. See the :ref:`API version upgrade guide <api-version-upgrade-guide-610>` for upgrade details.
 * The API to create a database has been simplified across the bindings. All changes are backward compatible with previous API versions, with one exception in Java noted below. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_
 * C: ``FDBCluster`` objects and related methods (``fdb_create_cluster``, ``fdb_cluster_create_database``, ``fdb_cluster_set_option``, ``fdb_cluster_destroy``, ``fdb_future_get_cluster``) have been removed. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_
 * C: Added ``fdb_create_database`` that creates a new ``FDBDatabase`` object synchronously and removed ``fdb_future_get_database``. `(PR #942) <https://github.com/apple/foundationdb/pull/942>`_

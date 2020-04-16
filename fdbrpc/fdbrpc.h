@@ -84,22 +84,6 @@ struct NetSAV : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 	}
 
 	virtual void destroy() { delete this; }
-	virtual void receive(ArenaReader& reader) {
-		if (!SAV<T>::canBeSet()) return;  // load balancing and retries can result in the same request being answered twice
-		this->addPromiseRef();
-		bool ok;
-		reader >> ok;
-		if (ok) {
-			T message;
-			reader >> message;
-			SAV<T>::sendAndDelPromiseRef(message);
-		}
-		else {
-			Error error;
-			reader >> error;
-			SAV<T>::sendErrorAndDelPromiseRef(error);
-		}
-	}
 	virtual void receive(ArenaObjectReader& reader) {
 		if (!SAV<T>::canBeSet()) return;
 		this->addPromiseRef();
@@ -239,13 +223,6 @@ struct NetNotifiedQueue : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotif
 	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {}
 
 	virtual void destroy() { delete this; }
-	virtual void receive(ArenaReader& reader) {
-		this->addPromiseRef();
-		T message;
-		reader >> message;
-		this->send(std::move(message));
-		this->delPromiseRef();
-	}
 	virtual void receive(ArenaObjectReader& reader) {
 		this->addPromiseRef();
 		T message;
@@ -265,11 +242,20 @@ public:
 
 	void send(const T& value) const {
 		if (queue->isRemoteEndpoint()) {
-			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint());
+			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
 		}
 		else
 			queue->send(value);
 	}
+
+	void send(T&& value) const {
+		if (queue->isRemoteEndpoint()) {
+			FlowTransport::transport().sendUnreliable(SerializeSource<T>(std::move(value)), getEndpoint(), true);
+		}
+		else
+			queue->send(std::move(value));
+	}
+
 	/*void sendError(const Error& error) const {
 	ASSERT( !queue->isRemoteEndpoint() );
 	queue->sendError(error);
@@ -282,6 +268,7 @@ public:
 	//   If cancelled, request was or will be delivered zero or more times.
 	template <class X>
 	Future< REPLY_TYPE(X) > getReply(const X& value) const {
+		ASSERT(!getReplyPromise(value).getFuture().isReady());
 		if (queue->isRemoteEndpoint()) {
 			return sendCanceler(getReplyPromise(value), FlowTransport::transport().sendReliable(SerializeSource<T>(value), getEndpoint()), getEndpoint());
 		}
@@ -317,9 +304,9 @@ public:
 			if (disc.isReady()) {
 				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
 			}
-			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID));
+			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID), true);
 			auto& p = getReplyPromise(value);
-			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(taskID), p);
+			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(taskID), p, peer);
 		}
 		send(value);
 		auto& p = getReplyPromise(value);
@@ -333,9 +320,9 @@ public:
 			if (disc.isReady()) {
 				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
 			}
-			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint());
+			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
 			auto& p = getReplyPromise(value);
-			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(), p);
+			return waitValueOrSignal(p.getFuture(), disc, getEndpoint(), p, peer);
 		}
 		else {
 			send(value);
@@ -403,6 +390,7 @@ public:
 
 	bool operator == (const RequestStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }
+	uint32_t size() const { return queue->size(); }
 
 private:
 	NetNotifiedQueue<T>* queue;

@@ -122,7 +122,7 @@ public: // workload functions
 		// read the key SnapFailedTLog.$UID
 		loop {
 			try {
-				Standalone<StringRef> keyStr = snapTestFailStatus.withSuffix(StringRef(self->snapUID.toString()));
+				Standalone<StringRef> keyStr = LiteralStringRef("\xff/SnapTestFailStatus/").withSuffix(StringRef(self->snapUID.toString()));
 				TraceEvent("TestKeyStr").detail("Value", keyStr);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Optional<Value> val = wait(tr.get(keyStr));
@@ -159,7 +159,6 @@ public: // workload functions
 			keys.push_back(deterministicRandom()->randomInt64(0, INT64_MAX - 2));
 		}
 
-		state int retry = 0;
 		tr.reset();
 		loop {
 			try {
@@ -190,6 +189,7 @@ public: // workload functions
 
 	ACTOR Future<Void> _start(Database cx, SnapTestWorkload* self) {
 		state Transaction tr(cx);
+		state bool snapFailed = false;
 
 		if (self->testID == 0) {
 			// create even keys before the snapshot
@@ -202,7 +202,6 @@ public: // workload functions
 			wait(delay(toDelay));
 
 			state int retry = 0;
-			state bool snapFailed = false;
 			loop {
 				self->snapUID = deterministicRandom()->randomUniqueID();
 				try {
@@ -211,7 +210,7 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_txn_exec_log_anti_quorum) {
+					if (e.code() == error_code_snap_log_anti_quorum_unsupported) {
 						snapFailed = true;
 						break;
 					}
@@ -298,12 +297,12 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_cluster_not_fully_recovered ||
-						e.code() == error_code_txn_exec_log_anti_quorum) {
+					if (e.code() == error_code_snap_not_fully_recovered_unsupported ||
+						e.code() == error_code_snap_log_anti_quorum_unsupported) {
 						snapFailed = true;
 						break;
 					}
-					if (e.code() == error_code_transaction_not_permitted) {
+					if (e.code() == error_code_snap_path_not_whitelisted) {
 						testedFailure = true;
 						break;
 					}

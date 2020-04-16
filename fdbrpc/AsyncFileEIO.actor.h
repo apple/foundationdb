@@ -45,7 +45,8 @@ class AsyncFileEIO : public IAsyncFile, public ReferenceCounted<AsyncFileEIO> {
 
 public:
 	static void init() {
-		if (eio_init( &eio_want_poll, NULL )) { 
+		eio_set_max_parallel(FLOW_KNOBS->EIO_MAX_PARALLELISM);
+		if (eio_init( &eio_want_poll, NULL )) {
 			TraceEvent("EioInitError").detail("ErrorNo", errno);
 			throw platform_error(); 
 		}
@@ -246,6 +247,9 @@ private:
 		if( flags & OPEN_READONLY )  oflags |= O_RDONLY;
 		if( flags & OPEN_READWRITE ) oflags |= O_RDWR;
 		if( flags & OPEN_ATOMIC_WRITE_AND_CREATE ) oflags |= O_TRUNC;
+#if defined(__linux__)
+		if ( flags & OPEN_UNBUFFERED && FLOW_KNOBS->EIO_USE_ODIRECT ) oflags |= O_DIRECT;
+#endif
 		return oflags;
 	}
 

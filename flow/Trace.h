@@ -22,10 +22,12 @@
 #define FLOW_TRACE_H
 #pragma once
 
+#include <atomic>
 #include <stdarg.h>
 #include <stdint.h>
 #include <string>
 #include <map>
+#include <set>
 #include <type_traits>
 #include "flow/IRandom.h"
 #include "flow/Error.h"
@@ -42,17 +44,18 @@ inline int fastrand() {
 //inline static bool TRACE_SAMPLE() { return fastrand()<16; }
 inline static bool TRACE_SAMPLE() { return false; }
 
-extern int g_trace_depth;
+extern thread_local int g_allocation_tracing_disabled;
 
 enum Severity {
-	SevSample=1,
-	SevDebug=5,
-	SevInfo=10,
-	SevWarn=20,
-	SevWarnAlways=30,
-	SevError=40,
-	SevMaxUsed=SevError,
-	SevMax=1000000
+	SevVerbose = 0,
+	SevSample = 1,
+	SevDebug = 5,
+	SevInfo = 10,
+	SevWarn = 20,
+	SevWarnAlways = 30,
+	SevError = 40,
+	SevMaxUsed = SevError,
+	SevMax = 1000000
 };
 
 class TraceEventFields {
@@ -68,6 +71,8 @@ public:
 	size_t sizeBytes() const;
 	FieldIterator begin() const;
 	FieldIterator end() const;
+	bool isAnnotated() const;
+	void setAnnotated();
 
 	void addField(const std::string& key, const std::string& value);
 	void addField(std::string&& key, std::string&& value);
@@ -78,6 +83,8 @@ public:
 	int getInt(std::string key, bool permissive=false) const;
 	int64_t getInt64(std::string key, bool permissive=false) const;
 	double getDouble(std::string key, bool permissive=false) const;
+
+	Field &mutate(int index);
 
 	std::string toString() const;
 	void validateFormat() const;
@@ -90,6 +97,7 @@ public:
 private:
 	FieldContainer fields;
 	size_t bytes;
+	bool annotated;
 };
 
 template <class Archive>
@@ -139,6 +147,7 @@ private:
 	std::vector<EventInfo> eventBatch;
 	std::vector<AttachInfo> attachBatch;
 	std::vector<BuggifyInfo> buggifyBatch;
+	static bool dumpImmediately();
 };
 
 struct DynamicEventMetric;
@@ -372,13 +381,19 @@ struct SpecialTraceMetricType
 TRACE_METRIC_TYPE(double, double);
 
 struct TraceEvent {
+	TraceEvent();
 	TraceEvent( const char* type, UID id = UID() );   // Assumes SevInfo severity
 	TraceEvent( Severity, const char* type, UID id = UID() );
 	TraceEvent( struct TraceInterval&, UID id = UID() );
 	TraceEvent( Severity severity, struct TraceInterval& interval, UID id = UID() );
 
+	TraceEvent( TraceEvent &&ev );
+	TraceEvent& operator=( TraceEvent &&ev );
+
 	static void setNetworkThread();
 	static bool isNetworkThread();
+
+	static double getCurrentTime();
 
 	//Must be called directly after constructing the trace event
 	TraceEvent& error(const class Error& e, bool includeCancelled=false) {
@@ -443,7 +458,7 @@ private:
 	TraceEvent& detailImpl( std::string&& key, std::string&& value, bool writeEventMetricField=true );
 public:
 	TraceEvent& backtrace(const std::string& prefix = "");
-	TraceEvent& trackLatest( const char* trackingKey );
+	TraceEvent& trackLatest(const std::string& trackingKey );
 	TraceEvent& sample( double sampleRate, bool logSampleRate=true );
 
 	// Sets the maximum length a field can be before it gets truncated. A value of 0 uses the default, a negative value
@@ -460,6 +475,12 @@ public:
 
 	TraceEvent& GetLastError();
 
+	bool isEnabled() const {
+		return enabled;
+	}
+
+	void log();
+
 	~TraceEvent();  // Actually logs the event
 
 	// Return the number of invocations of TraceEvent() at the specified logging level.
@@ -470,6 +491,7 @@ public:
 private:
 	bool initialized;
 	bool enabled;
+	bool logged;
 	std::string trackingKey;
 	TraceEventFields fields;
 	Severity severity;
@@ -479,6 +501,7 @@ private:
 
 	int maxFieldLength;
 	int maxEventLength;
+	int timeIndex;
 
 	void setSizeLimits();
 
@@ -505,6 +528,16 @@ struct ITraceLogFormatter {
 	virtual const char* getHeader() = 0; // Called when starting a new file
 	virtual const char* getFooter() = 0; // Called when ending a file
 	virtual std::string formatEvent(const TraceEventFields&) = 0; // Called for each event
+
+	virtual void addref() = 0;
+	virtual void delref() = 0;
+};
+
+struct ITraceLogIssuesReporter {
+	virtual void addIssue(std::string issue) = 0;
+	virtual void resolveIssue(std::string issue) = 0;
+
+	virtual void retrieveIssues(std::set<std::string>& out) = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -542,13 +575,24 @@ private:
 
 extern LatestEventCache latestEventCache;
 
+struct EventCacheHolder : public ReferenceCounted<EventCacheHolder> {
+	std::string trackingKey;
+
+	EventCacheHolder(const std::string& trackingKey) : trackingKey(trackingKey) {}
+
+	~EventCacheHolder() {
+		latestEventCache.clear(trackingKey);
+	}
+};
+
 // Evil but potentially useful for verbose messages:
 #if CENABLED(0, NOT_IN_CLEAN)
 #define TRACE( t, m ) if (TraceEvent::isEnabled(t)) TraceEvent(t,m)
 #endif
 
 struct NetworkAddress;
-void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogsSize, std::string directory = ".", std::string baseOfBase = "trace", std::string logGroup = "default");
+void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogsSize, std::string directory = ".",
+                   std::string baseOfBase = "trace", std::string logGroup = "default", std::string identifier = "");
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();
@@ -560,11 +604,26 @@ bool selectTraceFormatter(std::string format);
 // Returns true iff format is recognized.
 bool validateTraceFormat(std::string format);
 
+// Select the clock source for trace files. Returns false if the format is unrecognized. No longer safe to call after a call
+// to openTraceFile.
+bool selectTraceClockSource(std::string source);
+// Returns true iff source is recognized.
+bool validateTraceClockSource(std::string source);
+
 void addTraceRole(std::string role);
 void removeTraceRole(std::string role);
+void retriveTraceLogIssues(std::set<std::string>& out);
+void setTraceLogGroup(const std::string& role);
+template <class T>
+struct Future;
+struct Void;
+Future<Void> pingTraceLogWriterThread();
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
-extern thread_local trace_clock_t g_trace_clock;
+extern std::atomic<trace_clock_t> g_trace_clock;
 extern TraceBatch g_traceBatch;
+
+#define DUMPTOKEN(name)                                                                                                \
+	TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
 
 #endif

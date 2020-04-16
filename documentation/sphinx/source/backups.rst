@@ -24,14 +24,14 @@ Backup vs DR
 
 FoundationDB can backup a database to local disks, a blob store (such as Amazon S3), or to another FoundationDB database.  
 
-Backing up one database to another is a special form of backup is called DR backup or just DR for short.  DR stands for Disaster Recovery, as it can be used to keep two geographically separated databases in close synchronization to recover from a catastrophic disaster.  Once a DR  operation has reached 'differential' mode, the secondary database (the destination of the DR job) will always contains a *consistent* copy of the primary database (the source of the DR job) but it will be from some past point in time.  If the primary database is lost and applications continue using the secondary database, the "ACI" in ACID is preserved but D (Durability) is lost for some amount of most recent changes.  When DR is operating normally, the secondary database will lag behind the primary database by as little as a few seconds worth of database commits.
+Backing up one database to another is a special form of backup is called DR backup or just DR for short.  DR stands for Disaster Recovery, as it can be used to keep two geographically separated databases in close synchronization to recover from a catastrophic disaster.  Once a DR  operation has reached 'differential' mode, the secondary database (the destination of the DR job) will always contain a *consistent* copy of the primary database (the source of the DR job) but it will be from some past point in time.  If the primary database is lost and applications continue using the secondary database, the "ACI" in ACID is preserved but D (Durability) is lost for some amount of most recent changes.  When DR is operating normally, the secondary database will lag behind the primary database by as little as a few seconds worth of database commits.
 
 While a cluster is being used as the destination for a DR operation it will be locked to prevent accidental use or modification.
 
 Limitations
 ===========
 
-Backup data is not encrypted on disk, in a blob store account, or in transit to a destination blob store account or database.
+Backup data is not encrypted at rest on disk or in a blob store account.
 
 Tools
 ===========
@@ -159,15 +159,14 @@ The Blob Credential File format is JSON with the following schema:
     }
   }
 
-SSL Support
+TLS Support
 ===========
 
-By default, backup will communicate over https. To configure https, the following environment variables are used:
+In-flight traffic for blob store or disaster recovery backups can be encrypted with the following environment variables. They are also offered as command-line flags or can be specified in ``foundationdb.conf`` for backup agents.
 
 ============================ ====================================================
 Environment Variable         Purpose
 ============================ ====================================================
-``FDB_TLS_PLUGIN``           Path to the file to be loaded as the TLS plugin
 ``FDB_TLS_CERTIFICATE_FILE`` Path to the file from which the local certificates
                              can be loaded, used by the plugin
 ``FDB_TLS_KEY_FILE``         Path to the file from which to load the private
@@ -177,8 +176,11 @@ Environment Variable         Purpose
 ``FDB_TLS_CA_FILE``          Path to the file containing the CA certificates
                              to trust. Specify to override the default openssl
                              location.
+``FDB_TLS_VERIFY_PEERS``     The byte-string for the verification of peer
+                             certificates and sessions.
 ============================ ====================================================
 
+Blob store backups can be configured to use HTTPS/TLS by setting the ``secure_connection`` or ``sc`` backup URL option to ``1``, which is the default. Disaster recovery backups are secured by using TLS for both the source and target clusters and setting the TLS options for the ``fdbdr`` and ``dr_agent`` commands.
 
 ``fdbbackup`` command line tool
 ===============================
@@ -380,6 +382,24 @@ The ``list`` subcommand will list the backups at a given 'base' or shortened Bac
   This a shortened Backup URL which looks just like a Backup URL but without the backup <name> so that the list command will discover and list all of the backups in the bucket.
 
 
+.. program:: fdbbackup cleanup
+
+``cleanup``
+------------
+
+The ``cleanup`` subcommand will list orphaned backups and DRs and optionally remove their mutations.
+
+::
+
+   user@host$ fdbbackup cleanup [--delete_data] [--min_cleanup_seconds] [-C <CLUSTER_FILE>] 
+
+``--delete_data``
+  This flag will cause ``cleanup`` to remove mutations for the most stale backup or DR.
+
+``--min_cleanup_seconds``
+  Specifies the amount of time a backup or DR needs to be stale before ``cleanup`` will remove mutations for it. By default this is set to one hour.
+
+
 ``fdbrestore`` command line tool
 ================================
 
@@ -406,10 +426,8 @@ The following options apply to all commands:
 ``--blob_credentials <FILE>``
   Use FILE as a :ref:`Blob Credential File<blob-credential-files>`.  Can be used multiple times.
 
-The following options apply to all commands except ``start``:
-
-``-C <CLUSTER_FILE>``
-  Path to the cluster file that should be used to connect to the FoundationDB cluster you want to use.  If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
+``--dest_cluster_file <CONNFILE>``
+  Required.  Path to the cluster file that should be used to connect to the FoundationDB cluster you are restoring to.
 
 .. _restore-start:
 
@@ -423,10 +441,6 @@ The ``start`` command will start a new restore on the specified (or default) tag
 
 ``-r <BACKUP_URL>``
   Required.  Specifies the Backup URL for the source backup data to restore to the database.  The source data must be accessible by the ``backup_agent`` processes for the cluster.
-
-``--dest_cluster_file <CONNFILE>``
-  Required.  The backup data will be restored into this cluster.
-
 
 ``-w``
   Wait for the restore to reach a final state (such as complete) before exiting.  Prints a progress update every few seconds.  Behavior is identical to that of the wait command.

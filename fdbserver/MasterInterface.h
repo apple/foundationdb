@@ -37,6 +37,7 @@ struct MasterInterface {
 	RequestStream< struct TLogRejoinRequest > tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
 	RequestStream< struct GetCommitVersionRequest > getCommitVersion;
+	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
 
@@ -44,21 +45,36 @@ struct MasterInterface {
 	template <class Archive>
 	void serialize(Archive& ar) {
 		if constexpr (!is_fb_function<Archive>) {
-                ASSERT( ar.protocolVersion().isValid() );
-        }
-		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion);
+			ASSERT(ar.protocolVersion().isValid());
+		}
+		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion, notifyBackupWorkerDone);
 	}
 
 	void initEndpoints() {
-		getCommitVersion.getEndpoint( TaskPriority::ProxyGetConsistentReadVersion );
+		getCommitVersion.getEndpoint( TaskPriority::GetConsistentReadVersion );
 		tlogRejoin.getEndpoint( TaskPriority::MasterTLogRejoin );
+	}
+};
+
+struct TLogRejoinReply {
+	constexpr static FileIdentifier file_identifier = 11;
+
+	// false means someone else registered, so we should re-register.  true means this master is recovered, so don't
+	// send again to the same master.
+	bool masterIsRecovered;
+	TLogRejoinReply() = default;
+	explicit TLogRejoinReply(bool masterIsRecovered) : masterIsRecovered(masterIsRecovered) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, masterIsRecovered);
 	}
 };
 
 struct TLogRejoinRequest {
 	constexpr static FileIdentifier file_identifier = 15692200;
 	TLogInterface myInterface;
-	ReplyPromise<bool> reply;   // false means someone else registered, so we should re-register.  true means this master is recovered, so don't send again to the same master.
+	ReplyPromise<TLogRejoinReply> reply;
 
 	TLogRejoinRequest() { }
 	explicit TLogRejoinRequest(const TLogInterface &interf) : myInterface(interf) { }
@@ -139,6 +155,21 @@ struct GetCommitVersionRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply);
+	}
+};
+
+struct BackupWorkerDoneRequest {
+	constexpr static FileIdentifier file_identifier = 8736351;
+	UID workerUID;
+	LogEpoch backupEpoch;
+	ReplyPromise<Void> reply;
+
+	BackupWorkerDoneRequest() : workerUID(), backupEpoch(-1) {}
+	BackupWorkerDoneRequest(UID id, LogEpoch epoch) : workerUID(id), backupEpoch(epoch) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, workerUID, backupEpoch, reply);
 	}
 };
 

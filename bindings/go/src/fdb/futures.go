@@ -23,7 +23,7 @@
 package fdb
 
 //  #cgo LDFLAGS: -lfdb_c -lm
-//  #define FDB_API_VERSION 620
+//  #define FDB_API_VERSION 630
 //  #include <foundationdb/fdb_c.h>
 //  #include <string.h>
 //
@@ -77,6 +77,7 @@ func newFuture(ptr *C.FDBFuture) *future {
 	return &future{ptr}
 }
 
+// Note: This function guarantees the callback will be executed **at most once**.
 func fdb_future_block_until_ready(f *C.FDBFuture) {
 	if C.fdb_future_is_ready(f) != 0 {
 		return

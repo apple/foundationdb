@@ -25,103 +25,70 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/TDMetric.actor.h"
 
-struct NotifiedVersion {
-	NotifiedVersion( StringRef& name, StringRef const &id, Version version = 0 ) : val(name, id, version) { val = version; }
-	NotifiedVersion( Version version = 0 ) : val(StringRef(), StringRef(), version) {}
+template <class T>
+struct IsMetricHandle : std::false_type {};
+template <class T>
+struct IsMetricHandle<MetricHandle<T>> : std::true_type {};
 
-	void initMetric(const StringRef& name, const StringRef &id) { 
-		Version version = val;
-		val.init(name, id); 
-		val = version;
-	}
+template <class T, class ValueType = T>
+struct Notified {
+	explicit Notified(ValueType v = 0) { val = v; }
 
-	Future<Void> whenAtLeast( Version limit ) {
-		if (val >= limit) 
-			return Void();
+	[[nodiscard]] Future<Void> whenAtLeast(const ValueType& limit) {
+		if (val >= limit) return Void();
 		Promise<Void> p;
-		waiting.push( std::make_pair(limit,p) );
+		waiting.push(std::make_pair(limit, p));
 		return p.getFuture();
 	}
 
-	Version get() const { return val; }
+	[[nodiscard]] ValueType get() const { return val; }
 
-	void set( Version v ) {
-		ASSERT( v >= val );
+	void initMetric(const StringRef& name, const StringRef& id) {
+		if constexpr (IsMetricHandle<T>::value) {
+			ValueType v = val;
+			val.init(name, id);
+			val = v;
+		} else {
+			TraceEvent(SevError, "InvalidNotifiedOperation")
+			    .detail("Reason", "Notified<T> where T is not a metric: Can't use initMetric");
+		}
+	}
+
+	void set(const ValueType& v) {
+		ASSERT(v >= val);
 		if (v != val) {
 			val = v;
 
 			std::vector<Promise<Void>> toSend;
-			while ( waiting.size() && v >= waiting.top().first ) {
+			while (waiting.size() && v >= waiting.top().first) {
 				Promise<Void> p = std::move(waiting.top().second);
 				waiting.pop();
 				toSend.push_back(p);
 			}
-			for(auto& p : toSend) {
+			for (auto& p : toSend) {
 				p.send(Void());
 			}
 		}
 	}
 
-	void operator=( Version v ) {
-		set( v );
+	void operator=(const ValueType& v) { set(v); }
+
+	Notified(Notified&& r) BOOST_NOEXCEPT : waiting(std::move(r.waiting)), val(std::move(r.val)) {}
+	void operator=(Notified&& r) BOOST_NOEXCEPT {
+		waiting = std::move(r.waiting);
+		val = std::move(r.val);
 	}
 
-	NotifiedVersion(NotifiedVersion&& r) BOOST_NOEXCEPT : waiting(std::move(r.waiting)), val(std::move(r.val)) {}
-	void operator=(NotifiedVersion&& r) BOOST_NOEXCEPT { waiting = std::move(r.waiting); val = std::move(r.val); }
-
 private:
-	typedef std::pair<Version,Promise<Void>> Item;
+	using Item = std::pair<ValueType, Promise<Void>>;
 	struct ItemCompare {
 		bool operator()(const Item& a, const Item& b) { return a.first > b.first; }
 	};
 	std::priority_queue<Item, std::vector<Item>, ItemCompare> waiting;
-	VersionMetricHandle val;
+	T val;
 };
 
-struct NotifiedDouble {
-	explicit NotifiedDouble( double val = 0 ) : val(val) {}
-
-	Future<Void> whenAtLeast( double limit ) {
-		if (val >= limit) 
-			return Void();
-		Promise<Void> p;
-		waiting.push( std::make_pair(limit,p) );
-		return p.getFuture();
-	}
-
-	double get() const { return val; }
-
-	void set( double v ) {
-		ASSERT( v >= val );
-		if (v != val) {
-			val = v;
-
-			std::vector<Promise<Void>> toSend;
-			while ( waiting.size() && v >= waiting.top().first ) {
-				Promise<Void> p = std::move(waiting.top().second);
-				waiting.pop();
-				toSend.push_back(p);
-			}
-			for(auto& p : toSend) {
-				p.send(Void());
-			}
-		}
-	}
-
-	void operator=( double v ) {
-		set( v );
-	}
-
-	NotifiedDouble(NotifiedDouble&& r) BOOST_NOEXCEPT : waiting(std::move(r.waiting)), val(r.val) {}
-	void operator=(NotifiedDouble&& r) BOOST_NOEXCEPT { waiting = std::move(r.waiting); val = r.val; }
-
-private:
-	typedef std::pair<double,Promise<Void>> Item;
-	struct ItemCompare {
-		bool operator()(const Item& a, const Item& b) { return a.first > b.first; }
-	};
-	std::priority_queue<Item, std::vector<Item>, ItemCompare> waiting;
-	double val;
-};
+using NotifiedVersion = Notified<VersionMetricHandle, VersionMetricHandle::ValueType>;
+using NotifiedDouble = Notified<double>;
 
 #endif

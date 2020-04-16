@@ -275,6 +275,13 @@ public:
 	enum ERestoreState { UNITIALIZED = 0, QUEUED = 1, STARTING = 2, RUNNING = 3, COMPLETED = 4, ABORTED = 5 };
 	static StringRef restoreStateText(ERestoreState id);
 
+	// parallel restore
+	Future<Void> parallelRestoreFinish(Database cx, UID randomUID);
+	Future<Void> submitParallelRestore(Database cx, Key backupTag, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                                   KeyRef bcUrl, Version targetVersion, bool lockDB, UID randomUID);
+	Future<Void> atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                   Key addPrefix, Key removePrefix);
+
 	// restore() will
 	//   - make sure that url is readable and appears to be a complete backup
 	//   - make sure the requested TargetVersion is valid
@@ -308,9 +315,16 @@ public:
 
 	/** BACKUP METHODS **/
 
-	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true);
-	Future<Void> submitBackup(Database cx, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true) {
-		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr){ return submitBackup(tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone); });
+	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds,
+	                          std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                          bool stopWhenDone = true, bool partitionedLog = false);
+	Future<Void> submitBackup(Database cx, Key outContainer, int snapshotIntervalSeconds, std::string tagName,
+	                          Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true,
+	                          bool partitionedLog = false) {
+		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			return submitBackup(tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone,
+			                    partitionedLog);
+		});
 	}
 
 	Future<Void> discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
@@ -333,7 +347,7 @@ public:
 	Future<std::string> getStatus(Database cx, bool showErrors, std::string tagName);
 	Future<std::string> getStatusJSON(Database cx, std::string tagName);
 
-	Future<Version> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName);
+	Future<Version> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, bool snapshot = false);
 	void setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version);
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
@@ -347,6 +361,9 @@ public:
 	Future<Void> watchTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->watchTaskCount(tr); }
 
 	Future<bool> checkActive(Database cx) { return taskBucket->checkActive(cx); }
+
+	// If "pause" is true, pause all backups; otherwise, resume all.
+	Future<Void> changePause(Database db, bool pause);
 
 	friend class FileBackupAgentImpl;
 	static const int dataFooterSize;
@@ -414,23 +431,23 @@ public:
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 
-	Future<int> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid);
+	Future<int> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
 	Future<int> getStateValue(Database cx, UID logUid) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getStateValue(tr, logUid); });
 	}
 
-	Future<UID> getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid);
+	Future<UID> getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
 	Future<UID> getDestUid(Database cx, UID logUid) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getDestUid(tr, logUid); });
 	}
 
-	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName);
+	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName, bool snapshot = false);
 	Future<UID> getLogUid(Database cx, Key tagName) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getLogUid(tr, tagName); });
 	}
 
-	Future<int64_t> getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid);
-	Future<int64_t> getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid);
+	Future<int64_t> getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
+	Future<int64_t> getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
@@ -485,9 +502,9 @@ bool copyParameter(Reference<Task> source, Reference<Task> dest, Key key);
 Version getVersionFromString(std::string const& value);
 Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version endVersion, Key destUidValue, int blockSize = CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
 Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version endVersion, Key backupUid);
-Future<Void> eraseLogData(Database cx, Key logUidValue, Key destUidValue, Optional<Version> endVersion = Optional<Version>(), bool checkBackupUid = false, Version backupUid = 0);
+Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr, Key logUidValue, Key destUidValue, Optional<Version> endVersion = Optional<Version>(), bool checkBackupUid = false, Version backupUid = 0);
 Key getApplyKey( Version version, Key backupUid );
-std::pair<uint64_t, uint32_t> decodeBKMutationLogKey(Key key);
+std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key);
 Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value);
 void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int64_t& mutationSize, StringRef value, StringRef addPrefix = StringRef(), StringRef removePrefix = StringRef());
 Future<Void> logError(Database cx, Key keyErrors, const std::string& message);
@@ -503,6 +520,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key removePrefix, Version beginVersion,
                                   Version* endVersion, RequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion, Reference<KeyRangeMap<Version>> keyVersion);
+ACTOR Future<Void> cleanupBackup(Database cx, bool deleteData);
 
 typedef BackupAgentBase::enumState EBackupState;
 template<> inline Tuple Codec<EBackupState>::pack(EBackupState const &val) { return Tuple().append(val); }
@@ -542,11 +560,10 @@ class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
 public:
 	TagUidMap(const StringRef & prefix) : TagMap(LiteralStringRef("tag->uid/").withPrefix(prefix)), prefix(prefix) {}
 
-	ACTOR static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap,
-	                                                           Reference<ReadYourWritesTransaction> tr);
+	ACTOR static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap, Reference<ReadYourWritesTransaction> tr, bool snapshot);
 
-	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr) {
-		return getAll_impl(this, tr);
+	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr, bool snapshot = false) {
+		return getAll_impl(this, tr, snapshot);
 	}
 
 	Key prefix;
@@ -560,12 +577,12 @@ static inline KeyBackedTag makeBackupTag(std::string tagName) {
 	return KeyBackedTag(tagName, fileBackupPrefixRange.begin);
 }
 
-static inline Future<std::vector<KeyBackedTag>> getAllRestoreTags(Reference<ReadYourWritesTransaction> tr) {
-	return TagUidMap(fileRestorePrefixRange.begin).getAll(tr);
+static inline Future<std::vector<KeyBackedTag>> getAllRestoreTags(Reference<ReadYourWritesTransaction> tr, bool snapshot = false) {
+	return TagUidMap(fileRestorePrefixRange.begin).getAll(tr, snapshot);
 }
 
-static inline Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTransaction> tr) {
-	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr);
+static inline Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTransaction> tr, bool snapshot = false) {
+	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr, snapshot);
 }
 
 class KeyBackedConfig {
@@ -782,6 +799,31 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	// Set to true when all backup workers for saving mutation logs have been started.
+	KeyBackedProperty<bool> allWorkerStarted() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Each backup worker adds its (epoch, tag.id) to this property.
+	KeyBackedProperty<std::vector<std::pair<int64_t, int64_t>>> startedBackupWorkers() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Set to true if backup worker is enabled.
+	KeyBackedProperty<bool> backupWorkerEnabled() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Set to true if partitioned log is enabled (only useful if backup worker is also enabled).
+	KeyBackedProperty<bool> partitionedLogEnabled() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Latest version for which all prior versions have saved by backup workers.
+	KeyBackedProperty<Version> latestBackupWorkerSavedVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	// Stop differntial logging if already started or don't start after completing KV ranges
 	KeyBackedProperty<bool> stopWhenDone() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
@@ -811,10 +853,17 @@ public:
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		auto lastLog = latestLogEndVersion().get(tr);
 		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
-		return map(success(lastLog) && success(firstSnapshot), [=](Void) -> Optional<Version> {
+		auto workerEnabled = backupWorkerEnabled().get(tr);
+		auto plogEnabled = partitionedLogEnabled().get(tr);
+		auto workerVersion = latestBackupWorkerSavedVersion().get(tr);
+		return map(success(lastLog) && success(firstSnapshot) && success(workerEnabled) && success(plogEnabled) && success(workerVersion), [=](Void) -> Optional<Version> {
 			// The latest log greater than the oldest snapshot is the restorable version
-			if(lastLog.get().present() && firstSnapshot.get().present() && lastLog.get().get() > firstSnapshot.get().get()) {
-				return std::max(lastLog.get().get() - 1, firstSnapshot.get().get());
+			Optional<Version> logVersion = workerEnabled.get().present() && workerEnabled.get().get() &&
+			                                       plogEnabled.get().present() && plogEnabled.get().get()
+			                                   ? workerVersion.get()
+			                                   : lastLog.get();
+			if (logVersion.present() && firstSnapshot.get().present() && logVersion.get() > firstSnapshot.get().get()) {
+				return std::max(logVersion.get() - 1, firstSnapshot.get().get());
 			}
 			return {};
 		});
@@ -842,6 +891,47 @@ public:
 
 		return updateErrorInfo(cx, e, details);
 	}
+};
+
+ACTOR Future<Version> fastRestore(Database cx, Standalone<StringRef> tagName, Standalone<StringRef> url,
+                                  bool waitForComplete, long targetVersion, bool verbose, Standalone<KeyRangeRef> range,
+                                  Standalone<StringRef> addPrefix, Standalone<StringRef> removePrefix);
+
+// Helper class for reading restore data from a buffer and throwing the right errors.
+struct StringRefReader {
+	StringRefReader(StringRef s = StringRef(), Error e = Error()) : rptr(s.begin()), end(s.end()), failure_error(e) {}
+
+	// Return remainder of data as a StringRef
+	StringRef remainder() { return StringRef(rptr, end - rptr); }
+
+	// Return a pointer to len bytes at the current read position and advance read pos
+	const uint8_t* consume(unsigned int len) {
+		if (rptr == end && len != 0) throw end_of_stream();
+		const uint8_t* p = rptr;
+		rptr += len;
+		if (rptr > end) throw failure_error;
+		return p;
+	}
+
+	// Return a T from the current read position and advance read pos
+	template <typename T>
+	const T consume() {
+		return *(const T*)consume(sizeof(T));
+	}
+
+	// Functions for consuming big endian (network byte order) integers.
+	// Consumes a big endian number, swaps it to little endian, and returns it.
+	const int32_t consumeNetworkInt32() { return (int32_t)bigEndian32((uint32_t)consume<int32_t>()); }
+	const uint32_t consumeNetworkUInt32() { return bigEndian32(consume<uint32_t>()); }
+
+	// Convert big Endian value (e.g., encoded in log file) into a littleEndian uint64_t value.
+	int64_t consumeNetworkInt64() { return (int64_t)bigEndian64((uint32_t)consume<int64_t>()); }
+	uint64_t consumeNetworkUInt64() { return bigEndian64(consume<uint64_t>()); }
+
+	bool eof() { return rptr == end; }
+
+	const uint8_t *rptr, *end;
+	Error failure_error;
 };
 
 #include "flow/unactorcompiler.h"

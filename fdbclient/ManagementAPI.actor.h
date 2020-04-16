@@ -61,7 +61,8 @@ public:
 		NOT_ENOUGH_WORKERS,
 		REGION_REPLICATION_MISMATCH,
 		DCID_MISSING,
-		SUCCESS
+		LOCKED_NOT_NEW,
+		SUCCESS,
 	};
 };
 
@@ -142,11 +143,11 @@ Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQu
 
 // Exclude the given set of servers from use as state servers.  Returns as soon as the change is durable, without necessarily waiting for
 // the servers to be evacuated.  A NetworkAddress with a port of 0 means all servers on the given IP.
-ACTOR Future<Void> excludeServers( Database  cx, vector<AddressExclusion>  servers );
+ACTOR Future<Void> excludeServers( Database  cx, vector<AddressExclusion>  servers, bool failed = false );
 
 // Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given IP.  A NetworkAddress() means
 // all servers (don't exclude anything)
-ACTOR Future<Void> includeServers( Database  cx, vector<AddressExclusion>  servers );
+ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed = false);
 
 // Set the process class of processes with the given address.  A NetworkAddress with a port of 0 means all servers on the given IP.
 ACTOR Future<Void> setClass( Database  cx, AddressExclusion  server, ProcessClass  processClass );
@@ -182,8 +183,9 @@ ACTOR Future<int> setDDMode( Database  cx, int  mode );
 ACTOR Future<Void> forceRecovery( Reference<ClusterConnectionFile> clusterFile, Standalone<StringRef> dcId );
 
 ACTOR Future<Void> printHealthyZone( Database cx );
-ACTOR Future<Void> clearHealthyZone( Database cx );
-ACTOR Future<Void> setHealthyZone( Database cx, StringRef zoneId, double seconds );
+ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Database cx, bool ignoreRebalance);
+ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);
+ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning = false);
 
 ACTOR Future<Void> waitForPrimaryDC( Database  cx, StringRef  dcId );
 
@@ -195,7 +197,7 @@ bool schemaMatch( json_spirit::mValue const& schema, json_spirit::mValue const& 
 
 // execute payload in 'snapCmd' on all the coordinators, TLogs and
 // storage nodes
-ACTOR Future<UID> mgmtSnapCreate(Database cx, StringRef snapCmd);
+ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
 #include "flow/unactorcompiler.h"
 #endif
