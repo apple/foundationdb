@@ -87,6 +87,7 @@ namespace PTreeImpl {
 	    static constexpr size_t N = 64;
 	    PTreeFingerEntry entries_[N];
 	    size_t size_ = 0;
+	    size_t bound_sz_ = 0;
 
 	public:
 	    PTreeFinger() {}
@@ -97,12 +98,14 @@ namespace PTreeImpl {
 
 	    PTreeFinger& operator=(PTreeFinger const& f) {
 		    size_ = f.size_;
+		    bound_sz_ = f.bound_sz_;
 		    std::copy(f.entries_, f.entries_ + size_, entries_);
 		    return *this;
 	    }
 
 	    PTreeFinger& operator=(PTreeFinger&& f) {
 		    size_ = std::exchange(f.size_, 0);
+		    bound_sz_ = f.bound_sz_;
 		    std::copy(f.entries_, f.entries_ + size_, entries_);
 		    return *this;
 	    }
@@ -124,6 +127,14 @@ namespace PTreeImpl {
 		    entries_[size_++] = { node, less };
 		    ASSERT(size_ < N);
 	    }
+
+	    void push_for_bound(PTree<T> const* node, bool less) {
+		    push_back(node, less);
+		    bound_sz_ = less ? size_ : bound_sz_;
+	    }
+
+	    // remove the end of the finger so that the last entry is less than the probe
+	    void trim_to_bound() { size_ = bound_sz_; }
     };
 
     template<class T>
@@ -179,14 +190,12 @@ namespace PTreeImpl {
     template <class T, class X>
     void lower_bound(const Reference<PTree<T>>& p, Version at, const X& x, PTreeFinger<T>& f) {
 	    if (!p) {
-		    while (f.size() && !(f.back_less())) {
-			    f.pop_back();
-		    }
+		    f.trim_to_bound();
 		    return;
 		}
 		int cmp = compare(x, p->data);
 		bool less = cmp < 0;
-	    f.push_back(p.getPtr(), less);
+	    f.push_for_bound(p.getPtr(), less);
 	    if (cmp == 0) return;
 	    lower_bound(p->child(!less, at), at, x, f);
     }
@@ -194,13 +203,11 @@ namespace PTreeImpl {
     template <class T, class X>
     void upper_bound(const Reference<PTree<T>>& p, Version at, const X& x, PTreeFinger<T>& f) {
 	    if (!p) {
-		    while (f.size() && !(f.back_less())) {
-			    f.pop_back();
-		    }
+		    f.trim_to_bound();
 		    return;
 		}
 		bool less = x < p->data;
-	    f.push_back(p.getPtr(), less);
+	    f.push_for_bound(p.getPtr(), less);
 	    upper_bound(p->child(!less, at), at, x, f);
     }
 
