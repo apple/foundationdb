@@ -560,7 +560,7 @@ class ReadCounter(object):
         return True
 
     def get_top_k_reads(self, num, filter_addresses, shard_finder=None):
-        count_pairs = sorted([(v, k) for (k, v) in self.read_counts.items()], reverse=True)
+        count_pairs = sorted([(v, k) for (k, v) in self.read_counts.items()], reverse=True, key=lambda item: item[0])
         if not filter_addresses:
             count_pairs = count_pairs[0:num]
 
