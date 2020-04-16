@@ -44,7 +44,7 @@ A data block is encoded as follows: `Header startKey k1v1 k2v2 Padding`.
 
     H = header   P = padding   a...z = keys  v = value | = block boundary
 
-    Encoded file:  H a cv dv ev P | H e ev fv gv hv P | H h hv iv jv z
+    Encoded file:  H a cv dv P | H e ev fv gv hv P | H h hv iv jv z
     Decoded in blocks yields:
                Block 1: range [a, e) with kv pairs cv, dv
                Block 2: range [e, h) with kv pairs ev, fv, gv
