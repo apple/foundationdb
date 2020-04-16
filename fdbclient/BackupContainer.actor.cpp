@@ -527,8 +527,8 @@ public:
 		auto ranges = doc.subDoc("keyRanges");
 		for (int i = 0; i < beginEndKeys.size(); i++) {
 			auto fileDoc = ranges.subDoc(fileNames[i], /*split=*/false);
-			fileDoc.create("beginKey") = printable(beginEndKeys[i].first);
-			fileDoc.create("endKey") = printable(beginEndKeys[i].second);
+			fileDoc.create("beginKey") = beginEndKeys[i].first.toString();
+			fileDoc.create("endKey") = beginEndKeys[i].second.toString();
 		}
 
 		wait(yield());
@@ -1323,7 +1323,7 @@ public:
 			restorable.targetVersion = targetVersion;
 
 			std::vector<RangeFile> ranges = wait(bc->readKeyspaceSnapshot(snapshot.get()));
-			restorable.ranges = ranges;
+			restorable.ranges = std::move(ranges);
 
 			// No logs needed if there is a complete key space snapshot at the target version.
 			if (snapshot.get().beginVersion == snapshot.get().endVersion &&
@@ -2087,6 +2087,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	state std::vector<Future<Void>> writes;
 	state std::map<Version, std::vector<std::string>> snapshots;
 	state std::map<Version, int64_t> snapshotSizes;
+	state std::map<Version, std::vector<std::pair<Key, Key>>> snapshotBeginEndKeys;
 	state int nRangeFiles = 0;
 	state std::map<Version, std::string> logs;
 	state Version v = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max() / 2);
@@ -2098,10 +2099,10 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 		state Version logStart = v;
 		state int kvfiles = deterministicRandom()->randomInt(0, 3);
 
-		state std::vector<std::pair<Key, Key>> beginEndKeys;
 		while(kvfiles > 0) {
 			if(snapshots.empty()) {
 				snapshots[v] = {};
+				snapshotBeginEndKeys[v] = {};
 				snapshotSizes[v] = 0;
 				if(deterministicRandom()->coinflip()) {
 					v = nextVersion(v);
@@ -2111,15 +2112,17 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 			++nRangeFiles;
 			v = nextVersion(v);
 			snapshots.rbegin()->second.push_back(range->getFileName());
-			beginEndKeys.emplace_back(LiteralStringRef(""), LiteralStringRef(""));
+			snapshotBeginEndKeys.rbegin()->second.emplace_back(LiteralStringRef(""), LiteralStringRef(""));
 
 			int size = chooseFileSize(fileSizes);
 			snapshotSizes.rbegin()->second += size;
 			writes.push_back(writeAndVerifyFile(c, range, size));
 
 			if(deterministicRandom()->random01() < .2) {
-				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second, beginEndKeys, snapshotSizes.rbegin()->second));
+				writes.push_back(c->writeKeyspaceSnapshotFile(
+				    snapshots.rbegin()->second, snapshotBeginEndKeys.rbegin()->second, snapshotSizes.rbegin()->second));
 				snapshots[v] = {};
+				snapshotBeginEndKeys[v] = {};
 				snapshotSizes[v] = 0;
 				break;
 			}
