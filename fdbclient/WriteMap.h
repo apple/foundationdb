@@ -134,7 +134,8 @@ inline bool operator<(const ExtStringRef& lhs, const WriteMapEntry& rhs) {
 
 class WriteMap {
 private:
-	typedef PTreeImpl::PTree< WriteMapEntry > PTreeT;
+	typedef PTreeImpl::PTree<WriteMapEntry> PTreeT;
+	typedef PTreeImpl::PTreeFinger<WriteMapEntry> PTreeFingerT;
 	typedef Reference<PTreeT> Tree;
 
 public:
@@ -390,7 +391,7 @@ public:
 		Tree tree;
 		Version at;
 		int beginLen, endLen;
-		vector< PTreeT const* > finger;
+		PTreeFingerT finger;
 		bool offset;  // false-> the operation stack at entry(); true-> the following cleared or unmodified range
 	};
 
