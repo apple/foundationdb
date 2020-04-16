@@ -368,7 +368,7 @@ func (f *futureInt64) Get() (int64, error) {
 		f.BlockUntilReady()
 
 		var ver C.int64_t
-		if err := C.fdb_future_get_version(f.ptr, &ver); err != 0 {
+		if err := C.fdb_future_get_int64(f.ptr, &ver); err != 0 {
 			f.v = 0
 			f.e = Error{int(err)}
 			return
