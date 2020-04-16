@@ -1703,7 +1703,6 @@ ACTOR Future<Void> fdbd(
 		if (connFile->hasUnresolvedHostnames()) {
 			wait(connFile->resolveHostnames());
 		}
-		ServerCoordinators coordinators( connFile );
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
 		}
