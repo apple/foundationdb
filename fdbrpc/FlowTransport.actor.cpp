@@ -414,12 +414,13 @@ ACTOR Future<Void> delayedHealthUpdate(NetworkAddress address) {
 			delayed = true;
 			wait(delayJittered(FLOW_KNOBS->MAX_RECONNECTION_TIME * 2.0));
 		} else {
-			if (delayed)
-				TraceEvent("TooManyConnectionsClosedMarkAvailable")
+			if (delayed) {
+			    TraceEvent("TooManyConnectionsClosedMarkAvailable")
 				    .detail("Dest", address)
 				    .detail("StartTime", start)
 				    .detail("TimeElapsed", now() - start)
 				    .detail("ClosedCount", FlowTransport::transport().healthMonitor()->closedConnectionsCount(address));
+			}
 			IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(false));
 			break;
 		}
@@ -433,10 +434,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 	TraceEvent(SevDebug, "ConnectionKeeper", conn ? conn->getDebugID() : UID())
 		.detail("PeerAddr", self->destination)
 		.detail("ConnSet", (bool)conn);
-
-	if (FlowTransport::transport().getLocalAddress() == self->destination) {
-		return Never();
-	}
+	ASSERT_WE_THINK(FlowTransport::transport().getLocalAddress() != self->destination);
 
 	state Optional<double> firstConnFailedTime = Optional<double>();
 	loop {
@@ -502,7 +500,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 					    .suppressFor(1.0)
 					    .detail("PeerAddr", self->destination);
 
-					IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
 					throw;
 				}
 			} else {
@@ -590,6 +587,8 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 				conn->close();
 				conn = Reference<IConnection>();
+			} else {
+				IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
 			}
 
 			// Clients might send more packets in response, which needs to go out on the next connection
