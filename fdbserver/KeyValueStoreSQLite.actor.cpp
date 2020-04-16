@@ -1879,13 +1879,15 @@ private:
 	ACTOR static Future<Void> stopOnError( KeyValueStoreSQLite* self ) {
 		try {
 			wait( self->readThreads->getError() || self->writeThread->getError() );
+			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
+
+			self->readThreads->stop(e);
+			self->writeThread->stop(e);
 		}
 
-		self->readThreads->stop();
-		self->writeThread->stop();
 		return Void();
 	}
 

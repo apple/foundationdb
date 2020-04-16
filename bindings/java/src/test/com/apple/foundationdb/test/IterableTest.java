@@ -31,7 +31,7 @@ public class IterableTest {
 	public static void main(String[] args) throws InterruptedException {
 		final int reps = 1000;
 		try {
-			FDB fdb = FDB.selectAPIVersion(700);
+			FDB fdb = FDB.selectAPIVersion(630);
 			try(Database db = fdb.open()) {
 				runTests(reps, db);
 			}

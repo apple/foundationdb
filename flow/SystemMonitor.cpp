@@ -126,7 +126,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("Yields", netData.countYields - statState->networkState.countYields)
 				.detail("YieldCalls", netData.countYieldCalls - statState->networkState.countYieldCalls)
 				.detail("YieldCallsTrue", netData.countYieldCallsTrue - statState->networkState.countYieldCallsTrue)
-				.detail("SlowTaskSignals", netData.countSlowTaskSignals - statState->networkState.countSlowTaskSignals)
+				.detail("RunLoopProfilingSignals", netData.countRunLoopProfilingSignals - statState->networkState.countRunLoopProfilingSignals)
 				.detail("YieldBigStack", netData.countYieldBigStack - statState->networkState.countYieldBigStack)
 				.detail("RunLoopIterations", netData.countRunLoop - statState->networkState.countRunLoop)
 				.detail("TimersExecuted", netData.countTimers - statState->networkState.countTimers)
@@ -148,17 +148,36 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				}
 			}
 
-			for (int i = 0; i < NetworkMetrics::PRIORITY_BINS && g_network->networkInfo.metrics.priorityBins[i] != TaskPriority::Zero; i++) {
-				if(g_network->networkInfo.metrics.priorityBlocked[i]) {
-					g_network->networkInfo.metrics.priorityBlockedDuration[i] += now() - g_network->networkInfo.metrics.windowedPriorityTimer[i];
-					g_network->networkInfo.metrics.priorityMaxBlockedDuration[i] = std::max(g_network->networkInfo.metrics.priorityMaxBlockedDuration[i], now() - g_network->networkInfo.metrics.priorityTimer[i]);
-					g_network->networkInfo.metrics.windowedPriorityTimer[i] = now();
+			std::map<TaskPriority, double> loggedDurations;
+			for (auto &itr : g_network->networkInfo.metrics.activeTrackers) {
+				if(itr.second.active) {
+					itr.second.duration += now() - itr.second.windowedTimer;
+					itr.second.windowedTimer = now();
 				}
 
-				n.detail(format("PriorityBusy%d", g_network->networkInfo.metrics.priorityBins[i]).c_str(), std::min(currentStats.elapsed, g_network->networkInfo.metrics.priorityBlockedDuration[i] - statState->networkMetricsState.priorityBlockedDuration[i]));
-				n.detail(format("PriorityMaxBusy%d", g_network->networkInfo.metrics.priorityBins[i]).c_str(), g_network->networkInfo.metrics.priorityMaxBlockedDuration[i]);
+				if(itr.second.duration / currentStats.elapsed >= FLOW_KNOBS->MIN_LOGGED_PRIORITY_BUSY_FRACTION) {
+					loggedDurations[itr.first] = std::min(currentStats.elapsed, itr.second.duration);
+				}
 
-				g_network->networkInfo.metrics.priorityMaxBlockedDuration[i] = 0;
+				itr.second.duration = 0;
+			}
+
+			for (auto const& itr : loggedDurations) {
+				n.detail(format("PriorityBusy%d", itr.first).c_str(), itr.second);
+			}
+
+			for (auto &itr : g_network->networkInfo.metrics.starvationTrackers) {
+				if(itr.active) {
+					itr.duration += now() - itr.windowedTimer;
+					itr.maxDuration = std::max(itr.maxDuration, now() - itr.timer);
+					itr.windowedTimer = now();
+				}
+
+				n.detail(format("PriorityStarvedBelow%d", itr.priority).c_str(), std::min(currentStats.elapsed, itr.duration));
+				n.detail(format("PriorityMaxStarvedBelow%d", itr.priority).c_str(), itr.maxDuration);
+
+				itr.duration = 0;
+				itr.maxDuration = 0;
 			}
 
 			n.trackLatest("NetworkMetrics");

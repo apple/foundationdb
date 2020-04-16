@@ -22,9 +22,10 @@
 
 package fdb
 
-// #define FDB_API_VERSION 700
+// #define FDB_API_VERSION 630
 // #include <foundationdb/fdb_c.h>
 import "C"
+import "sync"
 
 // A ReadTransaction can asynchronously read from a FoundationDB
 // database. Transaction and Snapshot both satisfy the ReadTransaction
@@ -70,6 +71,7 @@ type Transaction struct {
 type transaction struct {
 	ptr *C.FDBTransaction
 	db  Database
+	o   sync.Once
 }
 
 // TransactionOptions is a handle with which to set options that affect a
@@ -85,14 +87,16 @@ func (opt TransactionOptions) setOpt(code int, param []byte) error {
 	}, param)
 }
 
-func (t *transaction) destroy() {
-	C.fdb_transaction_destroy(t.ptr)
-}
-
 // GetDatabase returns a handle to the database with which this transaction is
 // interacting.
 func (t Transaction) GetDatabase() Database {
 	return t.transaction.db
+}
+
+func (t Transaction) Close() {
+	t.o.Do(func() {
+		C.fdb_transaction_destroy(t.ptr)
+	})
 }
 
 // Transact executes the caller-provided function, passing it the Transaction
