@@ -53,12 +53,17 @@ public:
 	std::string toString() const;
 	static std::string getErrorString(std::string const& source, Error const& e);
 	Future<Void> resolveHostnames();
+	void resetToUnresolved();
+
+	bool hasUnresolvedHostnames;
 
 private:
+	void parseConnString();
 	void parseKey( std::string const& key );
 	std::vector<Hostname> hosts;
 	vector<NetworkAddress> coord;
 	Key key, keyDesc;
+	std::string _connectionString;
 };
 
 class ClusterConnectionFile : NonCopyable, public ReferenceCounted<ClusterConnectionFile> {
@@ -85,6 +90,7 @@ public:
 	static std::string getErrorString( std::pair<std::string, bool> const& resolvedFile, Error const& e );
 
 	ClusterConnectionString const& getConnectionString() const;
+	ClusterConnectionString& getMutableConnectionString() const;
 	bool writeFile();
 	void setConnectionString( ClusterConnectionString const& );
 	std::string const& getFilename() const { ASSERT( filename.size() ); return filename; }
@@ -106,7 +112,11 @@ struct LeaderInfo {
 	UID changeID;
 	static const uint64_t mask = ~(127ll << 57);
 	Value serializedInfo;
-	bool forward;  // If true, serializedInfo is a connection string instead!
+
+	// If true, serializedInfo is a connection string instead!
+	// If true, it also means the receipient need to update their local cluster file
+	//     with the latest list of coordinators
+	bool forward;
 
 	LeaderInfo() : forward(false) {}
 	LeaderInfo(UID changeID) : changeID(changeID), forward(false) {}

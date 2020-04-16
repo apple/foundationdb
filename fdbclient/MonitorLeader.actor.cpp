@@ -79,6 +79,10 @@ ClusterConnectionString const& ClusterConnectionFile::getConnectionString() cons
 	return cs;
 }
 
+ClusterConnectionString& ClusterConnectionFile::getMutableConnectionString() const {
+	return *const_cast<ClusterConnectionString*>(&cs);
+}
+
 void ClusterConnectionFile::notifyConnected() {
 	if (setConn){
 		this->writeFile();
@@ -134,7 +138,7 @@ void ClusterConnectionFile::setConnectionString( ClusterConnectionString const& 
 }
 
 bool ClusterConnectionFile::hasUnresolvedHostnames() {
-	return cs.hostnames().size() > 0;
+	return cs.hasUnresolvedHostnames;
 }
 
 Future<Void> ClusterConnectionFile::resolveHostnames() {
@@ -162,16 +166,17 @@ ACTOR Future<Void> _resolveHostnames(ClusterConnectionString* self) {
 		                 }));
 	}
 	wait(waitForAll(fs));
-	self->mutableHostnames().clear();
 	std::sort(self->mutateCoordinators().begin(), self->mutateCoordinators().end());
 	if (std::unique(self->mutateCoordinators().begin(), self->mutateCoordinators().end()) !=
-	    self->mutateCoordinators().end())
+	    self->mutateCoordinators().end()) {
 		throw connection_string_invalid();
+	}
+	self->hasUnresolvedHostnames = false;
 	return Void();
 }
 
 Future<Void> ClusterConnectionString::resolveHostnames() {
-	if (hosts.size() == 0) {
+	if (!hasUnresolvedHostnames) {
 		return Void();
 	} else {
 		return _resolveHostnames(this);
@@ -197,15 +202,21 @@ std::string trim( std::string const& connectionString ) {
 	return trimmed;
 }
 
-ClusterConnectionString::ClusterConnectionString( std::string const& connectionString ) {
-	auto trimmed = trim(connectionString);
+void ClusterConnectionString::resetToUnresolved() {
+	if (hosts.size() > 0) {
+		coord.clear();
+		hosts.clear();
+		hasUnresolvedHostnames = false;
+		parseConnString();
+	}
+}
 
+void ClusterConnectionString::parseConnString() {
 	// Split on '@' into key@addrs
-	int pAt = trimmed.find_first_of('@');
-	if (pAt == trimmed.npos)
-		throw connection_string_invalid();
-	std::string key = trimmed.substr(0, pAt);
-	std::string addrs = trimmed.substr(pAt+1);
+	int pAt = _connectionString.find_first_of('@');
+	if (pAt == _connectionString.npos) throw connection_string_invalid();
+	std::string key = _connectionString.substr(0, pAt);
+	std::string addrs = _connectionString.substr(pAt + 1);
 
 	parseKey(key);
 
@@ -221,6 +232,7 @@ ClusterConnectionString::ClusterConnectionString( std::string const& connectionS
 		}
 		p = pComma + 1;
 	}
+	hasUnresolvedHostnames = hosts.size() > 0;
 	ASSERT((coord.size() + hosts.size()) >
 	       0); // each address needs to be either an NetworkAddress or a Hostname that needs to be resolved later.
 
@@ -228,6 +240,11 @@ ClusterConnectionString::ClusterConnectionString( std::string const& connectionS
 	// Check that there are no duplicate addresses
 	if ( std::unique( coord.begin(), coord.end() ) != coord.end() )
 		throw connection_string_invalid();
+}
+
+ClusterConnectionString::ClusterConnectionString(std::string const& connectionString) : hasUnresolvedHostnames(false) {
+	_connectionString = trim(connectionString);
+	parseConnString();
 }
 
 TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/basic") {
@@ -436,9 +453,26 @@ ClientLeaderRegInterface::ClientLeaderRegInterface( INetwork* local ) {
 // Nominee is the worker among all workers that are considered as leader by a coordinator
 // This function contacts a coordinator coord to ask if the worker is considered as a leader (i.e., if the worker
 // is a nominee)
-ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange, Optional<LeaderInfo> *info ) {
+ACTOR Future<Void> monitorNominee(Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange,
+                                  Optional<LeaderInfo>* info, AsyncTrigger* connFailedTrigger = nullptr) {
+	state Optional<LeaderInfo> li;
 	loop {
-		state Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.getLeader, GetLeaderRequest( key, info->present() ? info->get().changeID : UID() ), TaskPriority::CoordinationReply ) );
+		if (connFailedTrigger != nullptr) {
+			state ErrorOr<Optional<LeaderInfo>> rep =
+			    wait(coord.getLeader.tryGetReply(GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
+			                                     TaskPriority::CoordinationReply));
+			if (rep.isError() && rep.getError().code() == error_code_connection_failed) {
+				// connecting to nominee failed, most likely due to timeout.
+				connFailedTrigger->trigger();
+			} else if (rep.present()) {
+				li = rep.get();
+			}
+		} else {
+			Optional<LeaderInfo> tmp = wait(retryBrokenPromise(
+			    coord.getLeader, GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
+			    TaskPriority::CoordinationReply));
+			li = tmp;
+		}
 		wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
 
 		TraceEvent("GetLeaderReply").suppressFor(1.0).detail("Coordinator", coord.getLeader.getEndpoint().getPrimaryAddress()).detail("Nominee", li.present() ? li.get().changeID : UID()).detail("ClusterKey", key.printable());
@@ -507,6 +541,7 @@ Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInf
 ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo, MonitorLeaderInfo info ) {
 	state ClientCoordinators coordinators( info.intermediateConnFile );
 	state AsyncTrigger nomineeChange;
+	state AsyncTrigger connToCoordinatorFailed;
 	state std::vector<Optional<LeaderInfo>> nominees;
 	state Future<Void> allActors;
 
@@ -515,7 +550,10 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 	std::vector<Future<Void>> actors;
 	// Ask all coordinators if the worker is considered as a leader (leader nominee) by the coordinator.
 	for(int i=0; i<coordinators.clientLeaderServers.size(); i++)
-		actors.push_back( monitorNominee( coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i] ) );
+		actors.push_back(monitorNominee(
+		    coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i],
+		    // Only need to action on connection failure if cluter file contains hostnames
+		    connFile->getConnectionString().hostnames().size() > 0 ? &connToCoordinatorFailed : nullptr));
 	allActors = waitForAll(actors);
 
 	loop {
@@ -542,7 +580,13 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 
 			outSerializedLeaderInfo->set( leader.get().first.serializedInfo );
 		}
-		wait( nomineeChange.onTrigger() || allActors );
+		choose {
+			when(wait(nomineeChange.onTrigger() || allActors)) {}
+			when(wait(connToCoordinatorFailed.onTrigger())) {
+				info.intermediateConnFile->getMutableConnectionString().resetToUnresolved();
+				return info;
+			}
+		}
 	}
 }
 
@@ -681,6 +725,11 @@ ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterC
 	}
 }
 
+// First get and monitor the leader in order to get latest ClientData which contains the lastest list of proxies
+// Once the leader if known, `getClientInfoFromLeader` will keep `ClientData` updated. Whomever calls this actor can
+// then monitor the async var inside `ClientData` and take actions accordingly. For exmaple a cluter controller would
+// use this actor, when recieved an `OpenDatabaseCoordRequest` request, to answer with the latest client info, i.e.
+// the list of proxies.
 ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddress> coordinators, ClientData* clientData, Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo ) {
 	state vector< ClientLeaderRegInterface > clientLeaderServers;
 	state AsyncTrigger nomineeChange;
@@ -823,6 +872,9 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 ACTOR Future<Void> monitorProxies( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions, Key traceLogGroup ) {
 	state MonitorLeaderInfo info(connFile->get());
 	loop {
+		if (info.intermediateConnFile->hasUnresolvedHostnames()) {
+			wait(info.intermediateConnFile->resolveHostnames());
+		}
 		choose {
 			when(MonitorLeaderInfo _info = wait( monitorProxiesOneGeneration( connFile->get(), clientInfo, info, supportedVersions, traceLogGroup ) )) {
 				info = _info;

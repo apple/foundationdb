@@ -141,7 +141,7 @@ struct Hostname {
 
 	static Hostname parse(std::string const& str);
 
-	std::string toString() { return format("%s:%s%s", host.c_str(), service.c_str()), useTLS ? ":tls" : ""; }
+	std::string toString() const { return format("%s:%s%s", host.c_str(), service.c_str()), useTLS ? ":tls" : ""; }
 };
 
 struct IPAddress {

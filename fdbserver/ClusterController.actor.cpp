@@ -3189,14 +3189,19 @@ ACTOR Future<Void> replaceInterface( ClusterControllerFullInterface interf ) {
 	}
 }
 
-ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, bool hasConnected, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, LocalityData locality ) {
+ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
+                                     Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
+                                     bool hasConnected,
+                                     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+                                     LocalityData locality, bool reportCoordConnFailure) {
 	loop {
 		state ClusterControllerFullInterface cci;
 		state bool inRole = false;
 		cci.initEndpoints();
 		try {
 			//Register as a possible leader; wait to be elected
-			state Future<Void> leaderFail = tryBecomeLeader( coordinators, cci, currentCC, hasConnected, asyncPriorityInfo );
+			state Future<Void> leaderFail =
+			    tryBecomeLeader(coordinators, cci, currentCC, hasConnected, asyncPriorityInfo, reportCoordConnFailure);
 			state Future<Void> shouldReplace = replaceInterface( cci );
 
 			while (!currentCC->get().present() || currentCC->get().get() != cci) {
@@ -3233,7 +3238,10 @@ ACTOR Future<Void> clusterController( Reference<ClusterConnectionFile> connFile,
 				wait(connFile->resolveHostnames());
 			}
 			ServerCoordinators coordinators( connFile );
-			wait( clusterController( coordinators, currentCC, hasConnected, asyncPriorityInfo, locality ) );
+			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality,
+			                       // If the cluster string contains host names, we want to capture the connection
+			                       // failure to coordinators and try to re-resolve the hostnames.
+			                       connFile->getConnectionString().hostnames().size() > 0));
 		} catch( Error &e ) {
 			if( e.code() != error_code_coordinators_changed )
 				throw; // Expected to terminate fdbserver
