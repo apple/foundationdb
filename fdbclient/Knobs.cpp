@@ -220,6 +220,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( MAX_TAGS_PER_TRANSACTION,                 100 );
 	init( MAX_TRANSACTION_TAG_LENGTH,               100 );
 	init( READ_TAG_SAMPLE_RATE,                     1.0 ); // Communicated to clients from cluster
+	init( TAG_THROTTLE_SMOOTHING_WINDOW,            5.0 );
 
 	// clang-format on
 }

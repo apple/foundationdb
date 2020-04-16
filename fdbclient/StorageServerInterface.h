@@ -429,7 +429,7 @@ struct StorageQueuingMetricsReply {
 	double cpuUsage;
 	double diskUsage;
 	double localRateLimit;
-	Optional<Standalone<StringRef>> busiestTag;
+	Optional<TransactionTag> busiestTag;
 	double busiestTagFractionalBusyness;
 	double busiestTagRate;
 

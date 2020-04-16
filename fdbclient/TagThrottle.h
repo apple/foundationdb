@@ -32,6 +32,9 @@
 
 class Database;
 
+typedef StringRef TransactionTagRef;
+typedef Standalone<TransactionTagRef> TransactionTag;
+
 struct TagThrottleInfo {
 	enum class Priority {
 		BATCH,
@@ -55,22 +58,22 @@ struct TagThrottleInfo {
 
 	static Priority priorityFromReadVersionFlags(int flags); 
 
-	double rate;
+	double tpsRate;
 	double expiration;
 	bool autoThrottled;
 	Priority priority;
 
 	bool serializeExpirationAsDuration;
 
-	TagThrottleInfo() : rate(0), expiration(0), autoThrottled(false), priority(Priority::DEFAULT), serializeExpirationAsDuration(true) {}
-	TagThrottleInfo(double rate, double expiration, bool autoThrottled, Priority priority, bool serializeExpirationAsDuration) 
-		: rate(rate), expiration(expiration), autoThrottled(autoThrottled), priority(priority), 
+	TagThrottleInfo() : tpsRate(0), expiration(0), autoThrottled(false), priority(Priority::DEFAULT), serializeExpirationAsDuration(true) {}
+	TagThrottleInfo(double tpsRate, double expiration, bool autoThrottled, Priority priority, bool serializeExpirationAsDuration) 
+		: tpsRate(tpsRate), expiration(expiration), autoThrottled(autoThrottled), priority(priority), 
 		  serializeExpirationAsDuration(serializeExpirationAsDuration) {}
 
 	template<class Ar>
 	void serialize(Ar& ar) {
 		if(ar.isDeserializing) {
-			serializer(ar, rate, expiration, autoThrottled, priority, serializeExpirationAsDuration);
+			serializer(ar, tpsRate, expiration, autoThrottled, priority, serializeExpirationAsDuration);
 			if(serializeExpirationAsDuration) {
 				expiration += now();
 			}
@@ -81,7 +84,7 @@ struct TagThrottleInfo {
 				serializedExpiration = std::max(expiration - now(), 0.0);
 			}
 
-			serializer(ar, rate, serializedExpiration, autoThrottled, priority, serializeExpirationAsDuration);
+			serializer(ar, tpsRate, serializedExpiration, autoThrottled, priority, serializeExpirationAsDuration);
 		}
 	}
 };
@@ -90,11 +93,11 @@ BINARY_SERIALIZABLE(TagThrottleInfo::Priority);
 
 class TagSet {
 public:
-	typedef std::set<StringRef>::const_iterator const_iterator;
+	typedef std::set<TransactionTagRef>::const_iterator const_iterator;
 
 	TagSet() : bytes(0) {}
 
-	void addTag(StringRef tag); 
+	void addTag(TransactionTagRef tag); 
 	size_t size();
 
 	const_iterator begin() const {
@@ -107,7 +110,7 @@ public:
 
 //private:
 	Arena arena; // TODO: where to hold this memory?
-	std::set<StringRef> tags;
+	std::set<TransactionTagRef> tags;
 	size_t bytes;
 };
 
@@ -139,7 +142,7 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 		while(data < end) {
 			uint8_t len = *data;
 			++data;
-			StringRef tag(context.tryReadZeroCopy(data, len), len);
+			TransactionTagRef tag(context.tryReadZeroCopy(data, len), len);
 			data += len;
 
 			t.tags.insert(tag);
@@ -150,20 +153,23 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 	}
 };
 
-typedef std::unordered_map<Standalone<StringRef>, TagThrottleInfo, std::hash<StringRef>> TagThrottleMap;
-typedef std::map<TagThrottleInfo::Priority, TagThrottleMap> PrioritizedTagThrottleMap;
+template<class Value>
+using TagThrottleMap = std::unordered_map<TransactionTag, Value, std::hash<TransactionTagRef>>;
+
+template<class Value>
+using PrioritizedTagThrottleMap = std::map<TagThrottleInfo::Priority, TagThrottleMap<Value>>;
 
 namespace ThrottleApi {
 	// Currently, only 1 tag in a key is supported
-	Standalone<StringRef> throttleKeyForTags(std::set<StringRef> const& tags);
-	StringRef tagFromThrottleKey(KeyRef key);
+	Key throttleKeyForTags(std::set<TransactionTagRef> const& tags);
+	TransactionTagRef tagFromThrottleKey(KeyRef key);
 
-	Future<std::map<Standalone<StringRef>, TagThrottleInfo>> getTags(Database const& db, int const& limit);
+	Future<std::map<TransactionTag, TagThrottleInfo>> getTags(Database const& db, int const& limit);
 
-	Future<Void> throttleTag(Database const& db, Standalone<StringRef> const& tag, double const& rate, double const& expiration, 
+	Future<Void> throttleTag(Database const& db, TransactionTagRef const& tag, double const& tpsRate, double const& expiration, 
 	                         bool const& serializeExpirationAsDuration, bool const& autoThrottled); // TODO: priorities
 
-	Future<bool> unthrottleTag(Database const& db, Standalone<StringRef> const& tag);
+	Future<bool> unthrottleTag(Database const& db, TransactionTagRef const& tag);
 
 	Future<uint64_t> unthrottleManual(Database db);
 	Future<uint64_t> unthrottleAuto(Database db);

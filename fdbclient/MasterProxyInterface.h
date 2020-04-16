@@ -165,7 +165,7 @@ struct GetReadVersionReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 
-	TagThrottleMap tagThrottleInfo;
+	TagThrottleMap<TagThrottleInfo> tagThrottleInfo;
 
 	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 
@@ -191,12 +191,14 @@ struct GetReadVersionRequest : TimedRequest {
 
 	uint32_t transactionCount;
 	uint32_t flags;
-	TagSet tags;
+
+	std::map<TransactionTag, uint32_t> tags; // TODO: compact
+
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
 	GetReadVersionRequest() : transactionCount( 1 ), flags( PRIORITY_DEFAULT ) {}
-	GetReadVersionRequest( uint32_t transactionCount, uint32_t flags, TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>() ) 
+	GetReadVersionRequest( uint32_t transactionCount, uint32_t flags, std::map<TransactionTag, uint32_t> tags = std::map<TransactionTag, uint32_t>(), Optional<UID> debugID = Optional<UID>() ) 
 	    : transactionCount( transactionCount ), flags( flags ), tags(tags), debugID( debugID ) {}
 	
 	int priority() const { return flags & FLAG_PRIORITY_MASK; }

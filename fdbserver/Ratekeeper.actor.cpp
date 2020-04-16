@@ -96,7 +96,7 @@ struct StorageQueueInfo {
 	Smoother smoothTotalSpace;
 	limitReason_t limitReason;
 
-	Optional<Standalone<StringRef>> busiestTag;
+	Optional<TransactionTag> busiestTag;
 	double busiestTagFractionalBusyness;
 	double busiestTagRate;
 
@@ -125,6 +125,58 @@ struct TLogQueueInfo {
 		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
 		// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied from storageQueueInfO)
 		lastReply.instanceID = -1;
+	}
+};
+
+class RkTagThrottleData : NonCopyable {
+private:
+	Smoother clientRate;
+	Smoother smoothRate;
+	Smoother smoothRequests;
+
+public:
+	double tpsRate;
+	double expiration;
+	int64_t count;
+
+	RkTagThrottleData(double tpsRate, double expiration)
+	  : tpsRate(tpsRate), expiration(expiration), smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW), 
+	    smoothRequests(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW), clientRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW), count(0)
+	{
+		ASSERT(tpsRate >= 0);
+		smoothRate.reset(tpsRate);
+		clientRate.reset(tpsRate);
+	}
+
+	void updateClientRate() {
+		double startClientRate = clientRate.smoothTotal();
+		if(tpsRate == 0.0) {
+			clientRate.reset(0.0);
+		}
+		else if(smoothRequests.smoothRate() == 0) {
+			clientRate.setTotal(smoothRate.smoothTotal());
+		}
+		else {
+			double targetRate = smoothRate.smoothTotal();
+			clientRate.setTotal(std::min(targetRate, (targetRate / smoothRequests.smoothRate()) * clientRate.smoothTotal()));
+		}
+	}
+
+	void updateRate(double tpsRate) {
+		ASSERT(tpsRate >= 0);
+		this->tpsRate = tpsRate;
+		smoothRate.setTotal(tpsRate);
+
+		updateClientRate();
+	}
+
+	void addRequests(int requests) {
+		smoothRequests.addDelta(requests);
+		updateClientRate();
+	}
+
+	double getClientRate() {
+		return clientRate.smoothTotal();
 	}
 };
 
@@ -187,7 +239,7 @@ struct RatekeeperData {
 	double lastWarning;
 	double lastSSListFetchedTimestamp;
 
-	PrioritizedTagThrottleMap tagThrottles;
+	PrioritizedTagThrottleMap<RkTagThrottleData> throttledTags;
 
 	RatekeeperLimits normalLimits;
 	RatekeeperLimits batchLimits;
@@ -204,9 +256,9 @@ struct RatekeeperData {
 		batchLimits("Batch", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH, SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH, SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH, SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
 		autoThrottlingEnabled(false)
 	{
-		tagThrottles.try_emplace(TagThrottleInfo::Priority::IMMEDIATE);
-		tagThrottles.try_emplace(TagThrottleInfo::Priority::DEFAULT);
-		tagThrottles.try_emplace(TagThrottleInfo::Priority::BATCH);
+		throttledTags.try_emplace(TagThrottleInfo::Priority::IMMEDIATE);
+		throttledTags.try_emplace(TagThrottleInfo::Priority::DEFAULT);
+		throttledTags.try_emplace(TagThrottleInfo::Priority::BATCH);
 	}
 };
 
@@ -407,15 +459,11 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 					self->autoThrottlingEnabled = SERVER_KNOBS->AUTO_TAG_THROTTLING_ENABLED;
 				}
 
-				TraceEvent("RatekeeperReadThrottles").detail("NumThrottledTags", throttledTags.get().size());
-				PrioritizedTagThrottleMap newThrottles;
-				std::map<TagThrottleInfo::Priority, std::pair<TagThrottleMap::iterator, TagThrottleMap::iterator>> oldThrottleIterators;
-				for(auto t : self->tagThrottles) {
-					oldThrottleIterators[t.first] = std::make_pair(t.second.begin(), t.second.end());
-				}
+				PrioritizedTagThrottleMap<RkTagThrottleData> updatedTagThrottles;
 
+				TraceEvent("RatekeeperReadThrottles").detail("NumThrottledTags", throttledTags.get().size());
 				for(auto entry : throttledTags.get()) {
-					StringRef tag = ThrottleApi::tagFromThrottleKey(entry.key);
+					TransactionTagRef tag = ThrottleApi::tagFromThrottleKey(entry.key);
 					TagThrottleInfo throttleInfo = ThrottleApi::decodeTagThrottleValue(entry.value);
 					TraceEvent("RatekeeperReadThrottleRead").detail("Tag", tag).detail("Expiration", throttleInfo.expiration);
 					if((!self->autoThrottlingEnabled && throttleInfo.autoThrottled) || throttleInfo.expiration <= now()) { // TODO: keep or delete auto throttles when disabling auto-throttling
@@ -432,25 +480,38 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 							tr.set(entry.key, value);
 						}
 
-						auto oldItr = oldThrottleIterators[throttleInfo.priority];
-						while(oldItr.first != oldItr.second && oldItr.first->first < tag) {
-							++oldItr.first;
-						}
-
-						if(oldItr.first == oldItr.second || oldItr.first->first != tag || oldItr.first->second.rate < throttleInfo.rate * 0.95) {
-							TraceEvent("RatekeeperDetectedThrottle")
+						auto &priorityThrottledTags = self->throttledTags[throttleInfo.priority];
+						auto itr = priorityThrottledTags.find(tag);
+						if(itr == priorityThrottledTags.end()) {
+							TraceEvent("RatekeeperAddingThrottle")
 								.detail("Tag", tag)
-								.detail("Rate", throttleInfo.rate)
+								.detail("Rate", throttleInfo.tpsRate)
 								.detail("Priority", TagThrottleInfo::priorityToString(throttleInfo.priority))
 								.detail("SecondsToExpiration", throttleInfo.expiration - now())
 								.detail("AutoThrottled", throttleInfo.autoThrottled);
-						}
 
-						newThrottles[throttleInfo.priority][tag] = throttleInfo;
+							updatedTagThrottles[throttleInfo.priority].try_emplace(tag, throttleInfo.tpsRate, throttleInfo.expiration);
+						}
+						else {
+							auto node = priorityThrottledTags.extract(itr);
+							if(node.mapped().tpsRate != throttleInfo.tpsRate || node.mapped().expiration != throttleInfo.expiration) {
+								TraceEvent("RatekeeperUpdatingThrottle")
+									.detail("Tag", tag)
+									.detail("Rate", throttleInfo.tpsRate)
+									.detail("Priority", TagThrottleInfo::priorityToString(throttleInfo.priority))
+									.detail("SecondsToExpiration", throttleInfo.expiration - now())
+									.detail("AutoThrottled", throttleInfo.autoThrottled);
+
+								node.mapped().updateRate(throttleInfo.tpsRate);
+								node.mapped().expiration = throttleInfo.expiration;
+							}
+
+							updatedTagThrottles[throttleInfo.priority].insert(std::move(node));
+						}
 					}
 				}
 
-				self->tagThrottles = newThrottles;
+				self->throttledTags = std::move(updatedTagThrottles);
 
 				state Future<Void> watchFuture = tr.watch(tagThrottleSignalKey);
 				wait(tr.commit());
@@ -464,7 +525,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 	}
 }
 
-void updateRate(RatekeeperData* self, RatekeeperLimits* limits, TagThrottleMap& throttledTags) {
+void updateRate(RatekeeperData* self, RatekeeperLimits* limits, TagThrottleMap<RkTagThrottleData>& throttledTags) {
 	//double controlFactor = ;  // dt / eFoldingTime
 
 	double actualTps = self->smoothReleasedTransactions.smoothRate();
@@ -532,27 +593,27 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits, TagThrottleMap& 
 		double targetRateRatio = std::min(( storageQueue - targetBytes + springBytes ) / (double)springBytes, 2.0);
 
 		// TODO: limit the number of throttles active for a storage server
-		if(storageQueue > targetBytes / 2.0 && ss.busiestTag.present() && ss.busiestTagFractionalBusyness > 0.2
+		/*if(storageQueue > targetBytes / 2.0 && ss.busiestTag.present() && ss.busiestTagFractionalBusyness > 0.2
 		   && ss.busiestTagRate > 1000 && throttledTags.size() < 10) {
 			auto &throttle = throttledTags[ss.busiestTag.get()];
 
 			double throttleRate = (storageQueue - targetBytes / 2.0) / targetBytes / 2.0;
 
-			if(throttle.expiration <= now() || throttle.rate < throttleRate * 0.95) {
+			if(throttle.expiration <= now() || throttle.tpsRate > throttleRate * 0.95) {
 				TraceEvent(format("RatekeeperThrottlingTag%s", limits->context).c_str())
 					.detail("Tag", ss.busiestTag.get())
 					.detail("ThrottleRate", throttleRate);
 			}
 
 			if(throttle.expiration <= now()) {
-				throttle.rate = throttleRate;
+				throttle.tpsRate = throttleRate;
 			}
 			else {
-				throttle.expiration = std::max(throttle.rate, throttleRate);
+				throttle.expiration = std::max(throttle.tpsRate, throttleRate);
 			}
 
 			throttle.expiration = now() + 120.0;
-		}
+		}*/
 
 		double inputRate = ss.smoothInputBytes.smoothRate();
 		//inputRate = std::max( inputRate, actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
@@ -884,8 +945,8 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 		state bool lastLimited = false;
 		loop choose {
 			when (wait( timeout )) {
-				updateRate(&self, &self.normalLimits, self.tagThrottles[TagThrottleInfo::Priority::DEFAULT]);
-				updateRate(&self, &self.batchLimits, self.tagThrottles[TagThrottleInfo::Priority::BATCH]);
+				updateRate(&self, &self.normalLimits, self.throttledTags[TagThrottleInfo::Priority::DEFAULT]);
+				updateRate(&self, &self.batchLimits, self.throttledTags[TagThrottleInfo::Priority::BATCH]);
 
 				lastLimited = self.smoothReleasedTransactions.smoothRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * self.batchLimits.tpsLimit;
 				double tooOld = now() - 1.0;
@@ -917,16 +978,25 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 				reply.batchTransactionRate = self.batchLimits.tpsLimit / self.proxy_transactionCounts.size();
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
 
+				for(auto tag : req.throttledTagCounts) { // TODO: add only if this data is recent?
+					for(auto &priorityItr : self.throttledTags) { // TODO: we don't need this loop
+						auto itr = priorityItr.second.find(tag.first);
+						if(itr != priorityItr.second.end()) {
+							itr->second.addRequests(tag.second);
+						}
+					}
+				}
+
 				// TODO: avoid iteration every time
-				for(auto priorityItr = self.tagThrottles.begin(); priorityItr != self.tagThrottles.end(); ++priorityItr) {
-					auto &priorityTags = reply.throttledTags[priorityItr->first];
-					for(auto tagItr = priorityItr->second.begin(); tagItr != priorityItr->second.end();) {
+				for(auto &priorityItr : self.throttledTags) {
+					auto &priorityTags = reply.throttledTags[priorityItr.first];
+					for(auto tagItr = priorityItr.second.begin(); tagItr != priorityItr.second.end();) {
 						if(tagItr->second.expiration > now()) {
-							priorityTags[tagItr->first] = tagItr->second;
+							auto result = priorityTags.insert_or_assign(tagItr->first, TagThrottleInfo(tagItr->second.getClientRate(), tagItr->second.expiration, false, priorityItr.first, true)); // TODO: Different structure?
 							++tagItr;
 						}
 						else {
-							tagItr = priorityItr->second.erase(tagItr);
+							tagItr = priorityItr.second.erase(tagItr);
 						}
 					}
 				}

@@ -3808,15 +3808,15 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 						}
 
-						std::map<Standalone<StringRef>, TagThrottleInfo> tags = wait(ThrottleApi::getTags(db, throttleListLimit));
+						std::map<TransactionTag, TagThrottleInfo> tags = wait(ThrottleApi::getTags(db, throttleListLimit));
 
 						if(tags.size() > 0) {
 							printf("Throttled tags:\n\n");
-							printf("  Rate | Expiration (s) | Priority  | Type   | Tag\n");
-							printf(" ------+----------------+-----------+--------+------------------\n");
+							printf("  Rate (txn/s) | Expiration (s) | Priority  | Type   | Tag\n");
+							printf(" --------------+----------------+-----------+--------+------------------\n");
 							for(auto itr = tags.begin(); itr != tags.end(); ++itr) {
-								printf("  %3d%% | %13ds | %9s | %6s | %s\n", 
-								       (int)(itr->second.rate*100), 
+								printf("  %12d | %13ds | %9s | %6s | %s\n", 
+								       (int)(itr->second.tpsRate), 
 									   (int)(itr->second.expiration-now()), 
 									   TagThrottleInfo::priorityToString(itr->second.priority, false), 
 									   itr->second.autoThrottled ? "auto" : "manual", 
@@ -3837,25 +3837,25 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("Usage: throttle on tag <TAG> [RATE] [DURATION]\n");
 							printf("\n");
 							printf("Enables throttling for transactions with the specified tag.\n");
-							printf("An optional throttling rate (out of 1.0) can be specified (default 1.0).\n");
+							printf("An optional transactions per second rate can be specified (default 0).\n");
 							printf("An optional duration can be specified, which must include a time suffix (s, m, h, d) (default 1h).\n");
 							is_error = true;
 							continue;
 						}
 
-						double rate = 1.0;
+						double tpsRate = 0.0;
 						uint64_t duration = 3600;
 
 						if(tokens.size() >= 5) {
 							char *end;
-							rate = std::strtod((const char*)tokens[4].begin(), &end);
+							tpsRate = std::strtod((const char*)tokens[4].begin(), &end);
 							if((tokens.size() > 5 && !std::isspace(*end)) || (tokens.size() == 5 && *end != '\0')) {
 								printf("ERROR: failed to parse rate `%s'.\n", printable(tokens[4]).c_str());
 								is_error = true;
 								continue;
 							}
-							if(rate <= 0 || rate > 1) {
-								printf("ERROR: invalid rate `%f'; must satisfy 0 < rate <= 1\n", rate);
+							if(tpsRate < 0) {
+								printf("ERROR: rate cannot be negative `%f'\n", tpsRate);
 								is_error = true;
 								continue;
 							}
@@ -3870,7 +3870,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							duration = parsedDuration.get();
 						}
 
-						wait(ThrottleApi::throttleTag(db, tokens[3], rate, now()+duration, true, false));
+						wait(ThrottleApi::throttleTag(db, tokens[3], tpsRate, now()+duration, true, false));
 						printf("Tag `%s' has been throttled\n", tokens[3].toString().c_str());
 					}
 					else if(tokencmp(tokens[1], "off")) {

@@ -449,20 +449,20 @@ public:
 		return val;
 	}
 
-	struct TagCounters {
+	struct TransactionTagCounter {
 		struct TagInfo {
-			Standalone<StringRef> tag;
+			TransactionTag tag;
 			int64_t count;
 			double fractionalBusyness;
 			double elapsed;
 
-			TagInfo(Standalone<StringRef> const& tag, int64_t count, int64_t totalCount, double elapsed) 
+			TagInfo(TransactionTag const& tag, int64_t count, int64_t totalCount, double elapsed) 
 			  : tag(tag), count(count), fractionalBusyness((double)count/totalCount), elapsed(elapsed) {}
 		};
 
-		std::unordered_map<Standalone<StringRef>, int64_t, std::hash<StringRef>> intervalCounts;
+		TagThrottleMap<int64_t> intervalCounts;
 		int64_t intervalTotalSampledCount = 0;
-		Standalone<StringRef> busiestTag;
+		TransactionTag busiestTag;
 		int64_t busiestTagCount = 0;
 		double intervalStart = 0;
 
@@ -471,7 +471,7 @@ public:
 		void increment(Optional<TagSet> const& tags, int64_t delta) {
 			if(tags.present()) {
 				for(auto& tag : tags.get()) {
-					int64_t &count = intervalCounts[Standalone<StringRef>(tag, tags.get().arena)];
+					int64_t &count = intervalCounts[TransactionTag(tag, tags.get().arena)];
 					count += delta;
 					if(count > busiestTagCount) {
 						busiestTagCount = count;
@@ -511,7 +511,7 @@ public:
 		}
 	};
 
-	TagCounters tagCounters;
+	TransactionTagCounter transactionTagCounter;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
 
@@ -973,7 +973,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	data->tagCounters.increment(req.tags, (resultSize / 4096) + 1);
+	data->transactionTagCounter.increment(req.tags, (resultSize / 4096) + 1);
 
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
@@ -1519,7 +1519,7 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	data->tagCounters.increment(req.tags, (resultSize / 4096) + 1);
+	data->transactionTagCounter.increment(req.tags, (resultSize / 4096) + 1);
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
 
@@ -1579,7 +1579,7 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	data->tagCounters.increment(req.tags, (resultSize/4096) + 1);
+	data->transactionTagCounter.increment(req.tags, (resultSize/4096) + 1);
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
 	if(data->latencyBandConfig.present()) {
@@ -1607,8 +1607,8 @@ void getQueuingMetrics( StorageServer* self, StorageQueuingMetricsRequest const&
 	reply.diskUsage = self->diskUsage;
 	reply.durableVersion = self->durableVersion.get();
 
-	Optional<StorageServer::TagCounters::TagInfo> busiestTag = self->tagCounters.getBusiestTag();
-	reply.busiestTag = busiestTag.map<Standalone<StringRef>>([](StorageServer::TagCounters::TagInfo tagInfo) { return tagInfo.tag; });
+	Optional<StorageServer::TransactionTagCounter::TagInfo> busiestTag = self->transactionTagCounter.getBusiestTag();
+	reply.busiestTag = busiestTag.map<TransactionTag>([](StorageServer::TransactionTagCounter::TagInfo tagInfo) { return tagInfo.tag; });
 	reply.busiestTagFractionalBusyness = busiestTag.present() ? busiestTag.get().fractionalBusyness : 0.0;
 	reply.busiestTagRate = busiestTag.present() ? busiestTag.get().count / busiestTag.get().elapsed : 0.0;
 
@@ -3619,8 +3619,8 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	actors.add(logLongByteSampleRecovery(self->byteSampleRecovery));
 	actors.add(checkBehind(self));
 
-	self->tagCounters.startNewInterval(self->thisServerID);
-	actors.add(recurring([this](){ self->tagCounters.startNewInterval(self->thisServerID); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+	self->transactionTagCounter.startNewInterval(self->thisServerID);
+	actors.add(recurring([this](){ self->transactionTagCounter.startNewInterval(self->thisServerID); }, SERVER_KNOBS->READ_TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send( Void() );
 

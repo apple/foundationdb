@@ -30,6 +30,7 @@
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/EventTypes.actor.h"
 #include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/Smoother.h"
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
@@ -44,6 +45,51 @@ private:
 
 typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
 typedef MultiInterface<MasterProxyInterface> ProxyInfo;
+
+class ClientTagThrottleData {
+private:
+	double tpsRate;
+	Smoother smoothRate;
+	Smoother smoothReleased;
+
+public:
+	double expiration;
+
+	ClientTagThrottleData(double tpsRate, double expiration)
+	  : tpsRate(tpsRate), expiration(expiration), smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW), 
+	    smoothReleased(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) 
+	{
+		ASSERT(tpsRate >= 0);
+		smoothRate.reset(tpsRate);
+	}
+
+	void updateRate(double tpsRate) {
+		ASSERT(tpsRate >= 0);
+		this->tpsRate = tpsRate;
+		smoothRate.setTotal(tpsRate);
+	}
+
+	void addReleased(int released) {
+		smoothReleased.addDelta(released);
+	}
+
+	double throttleDuration() {
+		if(expiration <= now()) {
+			return 0.0;
+		}
+
+		double capacity = (smoothRate.smoothTotal() - smoothReleased.smoothRate()) * CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW;
+		if(capacity >= 1) {
+			return 0.0;
+		}
+
+		if(tpsRate == 0) {
+			return std::max(0.0, expiration - now());
+		}
+
+		return std::min(expiration - now(), capacity / tpsRate);
+	}
+};
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
@@ -167,7 +213,7 @@ public:
 	UID dbId;
 	bool internal; // Only contexts created through the C client and fdbcli are non-internal
 
-	PrioritizedTagThrottleMap throttledTags;
+	PrioritizedTagThrottleMap<ClientTagThrottleData> throttledTags;
 
 	CounterCollection cc;
 

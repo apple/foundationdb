@@ -3169,7 +3169,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 	}
 }
 
-ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx, uint32_t transactionCount, uint32_t flags, TagSet tags, Optional<UID> debugID ) {
+ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx, uint32_t transactionCount, uint32_t flags, std::map<TransactionTag, uint32_t> tags, Optional<UID> debugID ) {
 	try {
 		++cx->transactionReadVersionBatches;
 		if( debugID.present() )
@@ -3180,8 +3180,12 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
 					auto &priorityThrottledTags = cx->throttledTags[TagThrottleInfo::priorityFromReadVersionFlags(flags)];
-					for(auto tag : v.tagThrottleInfo) {
-						priorityThrottledTags[tag.first] = tag.second;
+					for(auto tag : v.tagThrottleInfo) { // TODO: remove any that aren't sent back?
+						auto result = priorityThrottledTags.try_emplace(tag.first, tag.second.tpsRate, tag.second.expiration);
+						if(!result.second) {
+							result.first->second.updateRate(tag.second.tpsRate);
+							result.first->second.expiration = tag.second.expiration;
+						}
 					}
 
 					if( debugID.present() )
@@ -3207,7 +3211,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 	state Optional<UID> debugID;
 	state bool send_batch;
 
-	state TagSet tags;
+	state std::map<TransactionTag, uint32_t> tags;
 
 	// dynamic batching
 	state PromiseStream<double> replyTimes;
@@ -3226,7 +3230,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 				}
 				requests.push_back(req.reply);
 				for(auto tag : req.tags) {
-					tags.addTag(tag);
+					++tags[tag];
 				}
 
 				if (requests.size() == CLIENT_KNOBS->MAX_BATCH_SIZE)
@@ -3254,7 +3258,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 			    getConsistentReadVersion(cx, count, flags, tags, std::move(debugID)),
 			    std::vector<Promise<GetReadVersionReply>>(std::move(requests)), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 
-			tags = TagSet();
+			tags.clear();
 			debugID = Optional<UID>();
 			requests = std::vector< Promise<GetReadVersionReply> >();
 			addActor.send(batch);
@@ -3263,7 +3267,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 	}
 }
 
-ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f, bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion, TagSet tags, double throttledRate) {
+ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f, bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion, TagSet tags) {
 	GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
@@ -3278,23 +3282,24 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Re
 	++cx->transactionReadVersionsCompleted;
 
 	auto &priorityThrottledTags = cx->throttledTags[TagThrottleInfo::priorityFromReadVersionFlags(flags)];
-	double newMaxThrottle = throttledRate;
 	for(auto tag : tags) {
 		auto itr = priorityThrottledTags.find(tag);
 		if(itr != priorityThrottledTags.end()) {
-			if(itr->second.expiration > now()) {
-				newMaxThrottle = std::max(newMaxThrottle, itr->second.rate);
-			}
-			else {
+			if(itr->second.expiration <= now()) {
 				priorityThrottledTags.erase(itr);
+			}
+			else if(itr->second.throttleDuration() > 0) {
+				++cx->transactionReadVersionsThrottled;
+				throw tag_throttled();
 			}
 		}
 	}
 
-	// If the throttle rate is higher now than when we made the request, we may still need to throttle this response
-	if(newMaxThrottle > throttledRate && deterministicRandom()->random01() < 1.0 - (1.0-newMaxThrottle)/(1.0-throttledRate)) {
-		++cx->transactionReadVersionsThrottled;
-		throw tag_throttled();
+	for(auto tag : tags) {
+		auto itr = priorityThrottledTags.find(tag);
+		if(itr != priorityThrottledTags.end()) {
+			itr->second.addReleased(1);
+		}
 	}
 
 	if(rep.version > cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
@@ -3309,32 +3314,28 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Re
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
 		++cx->transactionReadVersions;
-		TagThrottleInfo::Priority priority;
 		flags |= options.getReadVersionFlags;
 		if((flags & GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) == GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
-			priority = TagThrottleInfo::Priority::IMMEDIATE;
 			++cx->transactionImmediateReadVersions;
 		}
 		else if((flags & GetReadVersionRequest::PRIORITY_DEFAULT) == GetReadVersionRequest::PRIORITY_DEFAULT) {
-			priority = TagThrottleInfo::Priority::DEFAULT;
 			++cx->transactionDefaultReadVersions;
 		}
 		else if((flags & GetReadVersionRequest::PRIORITY_BATCH) == GetReadVersionRequest::PRIORITY_BATCH) {
-			priority = TagThrottleInfo::Priority::BATCH;
 			++cx->transactionBatchReadVersions;
 		}
 		else {
 			ASSERT(false);
 		}
 
-		double maxThrottle = 0;
+		double maxThrottleDelay = 0.0;
 		if(options.tags.size() != 0) {
-			auto priorityThrottledTags = cx->throttledTags[priority];
+			auto priorityThrottledTags = cx->throttledTags[TagThrottleInfo::priorityFromReadVersionFlags(flags)];
 			for(auto tag : options.tags) {
 				auto itr = priorityThrottledTags.find(tag);
 				if(itr != priorityThrottledTags.end()) {
 					if(itr->second.expiration > now()) {
-						maxThrottle = std::max(maxThrottle, itr->second.rate);
+						maxThrottleDelay = std::max(maxThrottleDelay, itr->second.throttleDuration());
 					}
 					else {
 						priorityThrottledTags.erase(itr);
@@ -3343,8 +3344,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			}
 		}
 
-		// TODO: can we protect against client spamming this request (e.g. set absolute limits or delay for all transactions starting with throttle tag)
-		if(maxThrottle > 0 && deterministicRandom()->random01() < maxThrottle) {
+		if(maxThrottleDelay > 0.0) { // TODO: allow delaying?
 			++cx->transactionReadVersionsThrottled;
 			return Future<Version>(tag_throttled());
 		}
@@ -3357,7 +3357,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		auto const req = DatabaseContext::VersionRequest(options.tags, info.debugID);
 		batcher.stream.send(req);
 		startTime = now();
-		readVersion = extractReadVersion( cx.getPtr(), flags, trLogInfo, req.reply.getFuture(), options.lockAware, startTime, metadataVersion, options.tags, maxThrottle);
+		readVersion = extractReadVersion( cx.getPtr(), flags, trLogInfo, req.reply.getFuture(), options.lockAware, startTime, metadataVersion, options.tags);
 	}
 	return readVersion;
 }

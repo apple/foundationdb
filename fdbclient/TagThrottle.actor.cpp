@@ -24,7 +24,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-void TagSet::addTag(StringRef tag) {
+void TagSet::addTag(TransactionTagRef tag) {
 	ASSERT(CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH < 256); // Tag length is encoded with a single byte
 
 	if(tag.size() > CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH) {
@@ -34,7 +34,7 @@ void TagSet::addTag(StringRef tag) {
 		throw too_many_tags();
 	}
 
-	tags.insert(StringRef(arena, tag));
+	tags.insert(TransactionTagRef(arena, tag));
 	bytes += tag.size();
 }
 
@@ -70,7 +70,7 @@ namespace ThrottleApi {
 	// The tags are listed in sorted order
 	//
 	// Currently, the throttle API supports only 1 tag per throttle
-	Standalone<StringRef> throttleKeyForTags(std::set<StringRef> const& tags) {
+	Key throttleKeyForTags(std::set<TransactionTagRef> const& tags) {
 		ASSERT(CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH < 256);
 		ASSERT(tags.size() > 0);
 
@@ -101,19 +101,19 @@ namespace ThrottleApi {
 		return result;
 	}
 
-	StringRef tagFromThrottleKey(KeyRef key) {
-		StringRef tag = key.substr(tagThrottleKeysPrefix.size()+1);
+	TransactionTagRef tagFromThrottleKey(KeyRef key) {
+		TransactionTagRef tag = key.substr(tagThrottleKeysPrefix.size()+1);
 		ASSERT(tag.size() == key.begin()[tagThrottleKeysPrefix.size()]); // TODO: support multiple tags per throttle
 		return tag;
 	}
 
-	ACTOR Future<std::map<Standalone<StringRef>, TagThrottleInfo>> getTags(Database db, int limit) {
+	ACTOR Future<std::map<TransactionTag, TagThrottleInfo>> getTags(Database db, int limit) {
 		state Transaction tr(db);
 
 		loop {
 			try {
 				Standalone<RangeResultRef> tags = wait(tr.getRange(tagThrottleKeys, limit));
-				std::map<Standalone<StringRef>, TagThrottleInfo> results;
+				std::map<TransactionTag, TagThrottleInfo> results;
 				for(auto tag : tags) {
 					results[tagFromThrottleKey(tag.key)] = decodeTagThrottleValue(tag.value);
 				}
@@ -125,11 +125,11 @@ namespace ThrottleApi {
 		}
 	}
 
-	ACTOR Future<Void> throttleTag(Database db, Standalone<StringRef> tag, double rate, double expiration, bool serializeExpirationAsDuration, bool autoThrottled) {
+	ACTOR Future<Void> throttleTag(Database db, TransactionTagRef tag, double tpsRate, double expiration, bool serializeExpirationAsDuration, bool autoThrottled) {
 		state Transaction tr(db);
-		state Key key = throttleKeyForTags(std::set<StringRef>{ tag });
+		state Key key = throttleKeyForTags(std::set<TransactionTagRef>{ tag });
 
-		TagThrottleInfo throttle(rate, expiration, autoThrottled, TagThrottleInfo::Priority::DEFAULT, serializeExpirationAsDuration);
+		TagThrottleInfo throttle(tpsRate, expiration, autoThrottled, TagThrottleInfo::Priority::DEFAULT, serializeExpirationAsDuration);
 		BinaryWriter wr(IncludeVersion());
 		wr << throttle;
 		state Value value = wr.toValue();
@@ -151,9 +151,9 @@ namespace ThrottleApi {
 		}
 	}
 
-	ACTOR Future<bool> unthrottleTag(Database db, Standalone<StringRef> tag) {
+	ACTOR Future<bool> unthrottleTag(Database db, TransactionTagRef tag) {
 		state Transaction tr(db);
-		state Key key = throttleKeyForTags(std::set<StringRef>{ tag });
+		state Key key = throttleKeyForTags(std::set<TransactionTagRef>{ tag });
 
 		loop {
 			try {
