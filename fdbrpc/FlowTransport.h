@@ -207,7 +207,6 @@ public:
 	Endpoint loadedEndpoint(const UID& token);
 
 	HealthMonitor* healthMonitor();
-	std::set<NetworkAddress> getPeers() const;
 
 private:
 	class TransportData* self;

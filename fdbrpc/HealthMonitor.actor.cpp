@@ -40,20 +40,6 @@ void HealthMonitor::purgeOutdatedHistory() {
 	}
 }
 
-const std::deque<std::pair<double, NetworkAddress>>& HealthMonitor::getPeerClosedHistory() {
-	purgeOutdatedHistory();
-	return peerClosedHistory;
-}
-
-std::map<NetworkAddress, bool> HealthMonitor::getPeerStatus() {
-	purgeOutdatedHistory();
-	std::map<NetworkAddress, bool> result;
-	for (const auto& peer : FlowTransport::transport().getPeers()) {
-		result[peer] = IFailureMonitor::failureMonitor().getState(peer).isAvailable();
-	}
-	return result;
-}
-
 bool HealthMonitor::tooManyConnectionsClosed(const NetworkAddress& peerAddress) {
 	purgeOutdatedHistory();
 	return peerClosedNum[peerAddress] > FLOW_KNOBS->HEALTH_MONITOR_CONNECTION_MAX_CLOSED;

@@ -29,10 +29,8 @@
 class HealthMonitor {
 public:
 	void reportPeerClosed(const NetworkAddress& peerAddress);
-	const std::deque<std::pair<double, NetworkAddress>>& getPeerClosedHistory();
 	bool tooManyConnectionsClosed(const NetworkAddress& peerAddress);
 	int closedConnectionsCount(const NetworkAddress& peerAddress);
-	std::map<NetworkAddress, bool> getPeerStatus();
 private:
 	void purgeOutdatedHistory();
 

@@ -1372,11 +1372,3 @@ void FlowTransport::createInstance(bool isClient, uint64_t transportId) {
 HealthMonitor* FlowTransport::healthMonitor() {
 	return &self->healthMonitor;
 }
-
-std::set<NetworkAddress> FlowTransport::getPeers() const {
-	std::set<NetworkAddress> result;
-	for (const auto& it : self->peers) {
-		result.insert(it.first);
-	}
-	return result;
-}
