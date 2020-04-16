@@ -1353,6 +1353,7 @@ public:
 			// No logs needed if there is a complete key space snapshot at the target version.
 			if (snapshot.get().beginVersion == snapshot.get().endVersion &&
 			    snapshot.get().endVersion == targetVersion) {
+				restorable.continuousBeginVersion = restorable.continuousEndVersion = invalidVersion;
 				return Optional<RestorableFileSet>(restorable);
 			}
 

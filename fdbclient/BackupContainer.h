@@ -197,7 +197,8 @@ struct RestorableFileSet {
 	// Range file's key ranges. Can be empty for backups generated before 6.3.
 	std::map<std::string, KeyRange> keyRanges;
 
-	// Mutation logs continuous range [begin, end)
+	// Mutation logs continuous range [begin, end). Both can be invalidVersion
+	// when the entire key space snapshot is at the target version.
 	Version continuousBeginVersion, continuousEndVersion;
 
 	KeyspaceSnapshotFile snapshot; // Info. for debug purposes
