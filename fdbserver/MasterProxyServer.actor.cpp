@@ -45,7 +45,6 @@
 #include "flow/ActorCollection.h"
 #include "flow/Knobs.h"
 #include "flow/Stats.h"
-#include "flow/FBTrace.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -247,12 +246,8 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				req.reply.send(rep);
 				TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceeded").suppressFor(60);
 			} else {
-				if (req.debugID.present()) {
+				if (req.debugID.present())
 					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterProxyServer.queueTransactionStartRequests.Before");
-					//FIXME
-					fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(req.debugID.get().first(), now(),
-																					   TransactionDebugTrace::MASTERPROXYSERVER_QUEUETRANSACTIONSTARTREQUESTS_BEFORE)));
-				}
 
 				if (systemQueue->empty() && defaultQueue->empty() && batchQueue->empty()) {
 					forwardPromise(GRVTimer, delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)), TaskPriority::ProxyGRVTimer));
@@ -556,9 +551,6 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 
 					if(req.debugID.present()) {
 						g_traceBatch.addEvent("CommitDebug", req.debugID.get().first(), "MasterProxyServer.batcher");
-						//FIXME
-						fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(req.debugID.get().first(), now(),
-																				 CommitDebugTrace::MASTERPROXYSERVER_BATCHER)));
 					}
 
 					if(!batch.size()) {
@@ -747,12 +739,8 @@ ACTOR Future<Void> commitBatch(
 		TraceEvent("SecondCommitBatch", self->dbgid).detail("DebugID", debugID.get());
 	}
 
-	if (debugID.present()) {
+	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.Before");
-		//FIXME
-		fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(debugID.get().first(), now(),
-																 CommitDebugTrace::MASTERPROXYSERVER_COMMITBATCH_BEFORE)));
-	}
 
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 
@@ -761,12 +749,8 @@ ACTOR Future<Void> commitBatch(
 	wait(self->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber-1));
 	state Future<Void> releaseDelay = delay(std::min(SERVER_KNOBS->MAX_PROXY_COMPUTE, batchOperations*self->commitComputePerOperation[latencyBucket]), TaskPriority::ProxyMasterVersionReply);
 
-	if (debugID.present()) {
+	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.GettingCommitVersion");
-		//FIXME
-		fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(debugID.get().first(), now(),
-																 CommitDebugTrace::MASTERPROXYSERVER_COMMITBATCH_GETTINGCOMMITVERSION)));
-	}
 
 	GetCommitVersionRequest req(self->commitVersionRequestNumber++, self->mostRecentProcessedRequestNumber, self->dbgid);
 	GetCommitVersionReply versionReply = wait( brokenPromiseToNever(self->master.getCommitVersion.getReply(req, TaskPriority::ProxyMasterVersionReply)) );
@@ -786,12 +770,8 @@ ACTOR Future<Void> commitBatch(
 
 	//TraceEvent("ProxyGotVer", self->dbgid).detail("Commit", commitVersion).detail("Prev", prevVersion);
 
-	if (debugID.present()) {
+	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.GotCommitVersion");
-		//FIXME
-		fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(debugID.get().first(), now(),
-																 CommitDebugTrace::MASTERPROXYSERVER_COMMITBATCH_GOTCOMMITVERSION)));
-	}
 
 	ResolutionRequestBuilder requests( self, commitVersion, prevVersion, self->version );
 	int conflictRangeCount = 0;
@@ -823,12 +803,8 @@ ACTOR Future<Void> commitBatch(
 	/////// Phase 2: Resolution (waiting on the network; pipelined)
 	state vector<ResolveTransactionBatchReply> resolution = wait( getAll(replies) );
 
-	if (debugID.present()) {
+	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.AfterResolution");
-		//FIXME
-		fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(debugID.get().first(), now(),
-																 CommitDebugTrace::MASTERPROXYSERVER_COMMITBATCH_AFTERRESOLUTION)));
-	}
 
 	////// Phase 3: Post-resolution processing (CPU bound except for very rare situations; ordered; currently atomic but doesn't need to be)
 	TEST(self->latestLocalCommitBatchLogging.get() < localBatchNumber - 1); // Queuing post-resolution commit processing
@@ -839,12 +815,8 @@ ACTOR Future<Void> commitBatch(
 	state double computeDuration = 0; 
 	self->stats.txnCommitResolved += trs.size();
 
-	if (debugID.present()) {
+	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.ProcessingMutations");
-		//FIXME
-		fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(debugID.get().first(), now(),
-																 CommitDebugTrace::MASTERPROXYSERVER_COMMITBATCH_PROCESSINGMUTATIONS)));
-	}
 
 	state Arena arena;
 	state bool isMyFirstBatch = !self->version;
@@ -1141,12 +1113,8 @@ ACTOR Future<Void> commitBatch(
 
 	state LogSystemDiskQueueAdapter::CommitMessage msg = storeCommits.back().first.get();
 
-	if (debugID.present()) {
+	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.AfterStoreCommits");
-		//FIXME
-		fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(debugID.get().first(), now(),
-																 CommitDebugTrace::MASTERPROXYSERVER_COMMITBATCH_AFTERSTORECOMMITS)));
-	}
 
 	// txnState (transaction subsystem state) tag: message extracted from log adapter
 	bool firstMessage = true;
@@ -1220,12 +1188,8 @@ ACTOR Future<Void> commitBatch(
 		debug_advanceMinCommittedVersion(UID(), commitVersion);
 
 	//TraceEvent("ProxyPushed", self->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion);
-	if (debugID.present()) {
+	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.AfterLogPush");
-		//FIXME
-		fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(debugID.get().first(), now(),
-																 CommitDebugTrace::MASTERPROXYSERVER_COMMITBATCH_AFTERLOGPUSH)));
-	}
 
 	for (auto &p : storeCommits) {
 		ASSERT(!p.second.isReady());
@@ -1352,9 +1316,6 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.getLiveCommittedVersion.confirmEpochLive");
-		//FIXME
-		fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(debugID.get().first(), now(),
-																		   TransactionDebugTrace::MASTERPROXYSERVER_GETLIVECOMMITTEDVERSION_CONFIRMEPOCHLIVE)));
 	}
 
 	vector<GetReadVersionReply> versions = wait(getAll(proxyVersions));
@@ -1371,9 +1332,6 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.getLiveCommittedVersion.After");
-		//FIXME
-		fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(debugID.get().first(), now(),
-																		   TransactionDebugTrace::MASTERPROXYSERVER_GETLIVECOMMITTEDVERSION_AFTER)));
 	}
 
 	commitData->stats.txnStartOut += transactionCount;
@@ -1535,9 +1493,6 @@ ACTOR static Future<Void> transactionStarter(
 
 		if (debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.masterProxyServerCore.Broadcast");
-			//FIXME
-			fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(debugID.get().first(), now(),
-																			   TransactionDebugTrace::MASTERPROXYSERVER_MASTERPROXYSERVERCORE_BROADCAST)));
 		}
 
 		for (int i = 0; i < start.size(); i++) {
@@ -1984,12 +1939,8 @@ ACTOR Future<Void> masterProxyServerCore(
 		}
 		when(GetRawCommittedVersionRequest req = waitNext(proxy.getRawCommittedVersion.getFuture())) {
 			//TraceEvent("ProxyGetRCV", proxy.id());
-			if (req.debugID.present()) {
+			if (req.debugID.present())
 				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterProxyServer.masterProxyServerCore.GetRawCommittedVersion");
-				//FIXME
-				fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(req.debugID.get().first(), now(),
-																				   TransactionDebugTrace::MASTERPROXYSERVER_MASTERPROXYSERVERCORE_GETRAWCOMMITTEDVERSION)));
-			}
 			GetReadVersionReply rep;
 			rep.locked = commitData.locked;
 			rep.metadataVersion = commitData.metadataVersion;

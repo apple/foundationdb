@@ -21,7 +21,6 @@
 #include "flow/Hash3.h"
 #include "flow/Stats.h"
 #include "flow/UnitTest.h"
-#include "flow/FBTrace.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -1767,9 +1766,6 @@ ACTOR Future<Void> tLogCommit(
 		tlogDebugID = nondeterministicRandom()->randomUniqueID();
 		g_traceBatch.addAttach("CommitAttachID", req.debugID.get().first(), tlogDebugID.get().first());
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.BeforeWaitForVersion");
-		//FIXME
-		fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(req.debugID.get().first(), now(),
-																 CommitDebugTrace::TLOG_TLOGCOMMIT_BEFOREWAITFORVERSION)));
 	}
 
 	logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, req.minKnownCommittedVersion);
@@ -1799,12 +1795,8 @@ ACTOR Future<Void> tLogCommit(
 	}
 
 	if (logData->version.get() == req.prevVersion) {  // Not a duplicate (check relies on critical section between here self->version.set() below!)
-		if(req.debugID.present()) {
+		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
-			//FIXME
-			fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(req.debugID.get().first(), now(),
-																	 CommitDebugTrace::TLOG_TLOGCOMMIT_BEFORE)));
-		}
 
 		//TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
 		commitMessages(self, logData, req.version, req.arena, req.messages);
@@ -1827,12 +1819,8 @@ ACTOR Future<Void> tLogCommit(
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		logData->version.set( req.version );
 
-		if(req.debugID.present()) {
+		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.AfterTLogCommit");
-			//FIXME
-			fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(req.debugID.get().first(), now(),
-																	 CommitDebugTrace::TLOG_TLOGCOMMIT_AFTERTLOGCOMMIT)));
-		}
 	}
 	// Send replies only once all prior messages have been received and committed.
 	state Future<Void> stopped = logData->stopCommit.onTrigger();
@@ -1844,12 +1832,8 @@ ACTOR Future<Void> tLogCommit(
 		return Void();
 	}
 
-	if(req.debugID.present()) {
+	if(req.debugID.present())
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.After");
-		//FIXME
-		fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(req.debugID.get().first(), now(),
-																 CommitDebugTrace::TLOG_TLOGCOMMIT_AFTER)));
-	}
 
 	req.reply.send( logData->durableKnownCommittedVersion );
 	return Void();
@@ -2115,9 +2099,6 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 				UID tlogDebugID = nondeterministicRandom()->randomUniqueID();
 				g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), tlogDebugID.first());
 				g_traceBatch.addEvent("TransactionDebug", tlogDebugID.first(), "TLogServer.TLogConfirmRunningRequest");
-				//FIXME
-				fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(req.debugID.get().first(), now(),
-																				   TransactionDebugTrace::TLOGSERVER_TLOGCONFIRMRUNNINGREQUEST)));
 			}
 			if (!logData->stopped)
 				req.reply.send(Void());

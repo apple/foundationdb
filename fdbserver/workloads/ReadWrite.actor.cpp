@@ -31,7 +31,6 @@
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
-#include "flow/FBTrace.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 const int sampleSize = 10000;
@@ -619,9 +618,6 @@ struct ReadWriteWorkload : KVWorkload {
 					debugID = deterministicRandom()->randomUniqueID();
 					tr.debugTransaction(debugID);
 					g_traceBatch.addEvent("TransactionDebug", debugID.first(), "ReadWrite.randomReadWriteClient.Before");
-					//FIXME
-					fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(debugID.first(), now(),
-																					   TransactionDebugTrace::READWRITE_RANDOMREADWRITECLIENT_BEFORE)));
 				}
 				else {
 					debugID = UID();
@@ -694,12 +690,8 @@ struct ReadWriteWorkload : KVWorkload {
 					}
 				}
 
-				if(debugID != UID()) {
+				if(debugID != UID())
 					g_traceBatch.addEvent("TransactionDebug", debugID.first(), "ReadWrite.randomReadWriteClient.After");
-					//FIXME
-					fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(debugID.first(), now(),
-																					   TransactionDebugTrace::READWRITE_RANDOMREADWRITECLIENT_AFTER)));
-				}
 
 				tr = Trans();
 

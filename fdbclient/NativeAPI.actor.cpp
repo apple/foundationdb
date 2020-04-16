@@ -47,7 +47,6 @@
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/UnitTest.h"
-#include "flow/FBTrace.h"
 
 #if defined(CMAKE_BUILD) || !defined(WIN32)
 #include "versions.h"
@@ -1198,12 +1197,8 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( 
 		ASSERT( key < allKeys.end );
 	}
 
-	if( info.debugID.present() ) {
+	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.Before");
-		//FIXME
-		fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(info.debugID.get().first(), now(),
-																		   TransactionDebugTrace::NATIVEAPI_GETKEYLOCATION_BEFORE)));
-	}
 
 	loop {
 		++cx->transactionKeyServerLocationRequests;
@@ -1211,12 +1206,8 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( 
 			when ( wait( cx->onMasterProxiesChanged() ) ) {}
 			when ( GetKeyServerLocationsReply rep = wait( loadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(key, Optional<KeyRef>(), 100, isBackward, key.arena()), TaskPriority::DefaultPromiseEndpoint ) ) ) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
-				if( info.debugID.present() ) {
+				if( info.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.After");
-					//FIXME
-					fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(info.debugID.get().first(), now(),
-																					   TransactionDebugTrace::NATIVEAPI_GETKEYLOCATION_AFTER)));
-				}
 				ASSERT( rep.results.size() == 1 );
 
 				auto locationInfo = cx->setCachedLocation(rep.results[0].first, rep.results[0].second);
@@ -1245,12 +1236,8 @@ Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation( Database const& 
 }
 
 ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations_internal( Database cx, KeyRange keys, int limit, bool reverse, TransactionInfo info ) {
-	if( info.debugID.present() ) {
+	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocations.Before");
-		//FIXME
-		fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(info.debugID.get().first(), now(),
-																		   TransactionDebugTrace::NATIVEAPI_GETKEYLOCATIONS_BEFORE)));
-	}
 
 	loop {
 		++cx->transactionKeyServerLocationRequests;
@@ -1259,12 +1246,8 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 			when ( GetKeyServerLocationsReply _rep = wait( loadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(keys.begin, keys.end, limit, reverse, keys.arena()), TaskPriority::DefaultPromiseEndpoint ) ) ) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
 				state GetKeyServerLocationsReply rep = _rep;
-				if( info.debugID.present() ) {
+				if( info.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocations.After");
-					//FIXME
-					fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(info.debugID.get().first(), now(),
-																					   TransactionDebugTrace::NATIVEAPI_GETKEYLOCATIONS_AFTER)));
-				}
 				ASSERT( rep.results.size() );
 
 				state vector< pair<KeyRange,Reference<LocationInfo>> > results;
@@ -1364,9 +1347,6 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 
 				g_traceBatch.addAttach("GetValueAttachID", info.debugID.get().first(), getValueID.get().first());
 				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
-				//FIXME
-				fbTrace(Reference<GetValueDebugTrace>(new GetValueDebugTrace(getValueID.get().first(), now(),
-																			 GetValueDebugTrace::NATIVEAPI_GETVALUE_BEFORE)));
 				/*TraceEvent("TransactionDebugGetValueInfo", getValueID.get())
 					.detail("Key", key)
 					.detail("ReqVersion", ver)
@@ -1411,9 +1391,6 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 
 			if( info.debugID.present() ) {
 				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.After"); //.detail("TaskID", g_network->getCurrentTask());
-				//FIXME
-				fbTrace(Reference<GetValueDebugTrace>(new GetValueDebugTrace(getValueID.get().first(), now(),
-																			 GetValueDebugTrace::NATIVEAPI_GETVALUE_AFTER)));
 				/*TraceEvent("TransactionDebugGetValueDone", getValueID.get())
 					.detail("Key", key)
 					.detail("ReqVersion", ver)
@@ -1428,9 +1405,6 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			cx->getValueCompleted->log();
 			if( info.debugID.present() ) {
 				g_traceBatch.addEvent("GetValueDebug", getValueID.get().first(), "NativeAPI.getValue.Error"); //.detail("TaskID", g_network->getCurrentTask());
-				//FIXME
-				fbTrace(Reference<GetValueDebugTrace>(new GetValueDebugTrace(getValueID.get().first(), now(),
-																			 GetValueDebugTrace::NATIVEAPI_GETVALUE_ERROR)));
 				/*TraceEvent("TransactionDebugGetValueDone", getValueID.get())
 					.detail("Key", key)
 					.detail("ReqVersion", ver)
@@ -1452,12 +1426,8 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, TransactionInfo info ) {
 	wait(success(version));
 
-	if( info.debugID.present() ) {
+	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.AfterVersion");
-		//FIXME
-		fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(info.debugID.get().first(), now(),
-																		   TransactionDebugTrace::NATIVEAPI_GETKEY_AFTERVERSION)));
-	}
 
 	loop {
 		if (k.getKey() == allKeys.end) {
@@ -1472,12 +1442,8 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 		state pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation(cx, locationKey, &StorageServerInterface::getKey, info, k.isBackward()) );
 
 		try {
-			if( info.debugID.present() ) {
+			if( info.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
-				//FIXME
-				fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(info.debugID.get().first(), now(),
-																				   TransactionDebugTrace::NATIVEAPI_GETKEY_BEFORE)));
-			}
 			++cx->transactionPhysicalReads;
 			state GetKeyReply reply;
 			try {
@@ -1495,12 +1461,8 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 				++cx->transactionPhysicalReadsCompleted;
 				throw;
 			}
-			if( info.debugID.present() ) {
+			if( info.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.After"); //.detail("NextKey",reply.sel.key).detail("Offset", reply.sel.offset).detail("OrEqual", k.orEqual);
-				//FIXME
-				fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(info.debugID.get().first(), now(),
-																				   TransactionDebugTrace::NATIVEAPI_GETKEY_AFTER)));
-			}
 			k = reply.sel;
 			if (!k.offset && k.orEqual) {
 				return k.getKey();
@@ -1573,9 +1535,6 @@ ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> 
 
 				g_traceBatch.addAttach("WatchValueAttachID", info.debugID.get().first(), watchValueID.get().first());
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
-				//FIXME
-				fbTrace(Reference<WatchValueDebugTrace>(new WatchValueDebugTrace(watchValueID.get().first(), now(),
-																			 WatchValueDebugTrace::NATIVEAPI_WATCHVALUE_BEFORE)));
 			}
 			state WatchValueReply resp;
 			choose {
@@ -1588,9 +1547,6 @@ ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> 
 			}
 			if( info.debugID.present() ) {
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.After"); //.detail("TaskID", g_network->getCurrentTask());
-				//FIXME
-				fbTrace(Reference<WatchValueDebugTrace>(new WatchValueDebugTrace(watchValueID.get().first(), now(),
-																			 WatchValueDebugTrace::NATIVEAPI_WATCHVALUE_AFTER)));
 			}
 
 			//FIXME: wait for known committed version on the storage server before replying,
@@ -1671,9 +1627,6 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 			try {
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.Before");
-					//FIXME
-					fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(info.debugID.get().first(), now(),
-																					   TransactionDebugTrace::NATIVEAPI_GETEXACTRANGE_BEFORE)));
 					/*TraceEvent("TransactionDebugGetExactRangeInfo", info.debugID.get())
 						.detail("ReqBeginKey", req.begin.getKey())
 						.detail("ReqEndKey", req.end.getKey())
@@ -1700,12 +1653,8 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 					++cx->transactionPhysicalReadsCompleted;
 					throw;
 				}
-				if( info.debugID.present() ) {
+				if( info.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
-					//FIXME
-					fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(info.debugID.get().first(), now(),
-																					   TransactionDebugTrace::NATIVEAPI_GETEXACTRANGE_AFTER)));
-				}
 				output.arena().dependsOn( rep.arena );
 				output.append( output.arena(), rep.data.begin(), rep.data.size() );
 
@@ -1964,9 +1913,6 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 			try {
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.Before");
-					//FIXME
-					fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(info.debugID.get().first(), now(),
-																					   TransactionDebugTrace::NATIVEAPI_GETRANGE_BEFORE)));
 					/*TraceEvent("TransactionDebugGetRangeInfo", info.debugID.get())
 						.detail("ReqBeginKey", req.begin.getKey())
 						.detail("ReqEndKey", req.end.getKey())
@@ -2002,9 +1948,6 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.After");//.detail("SizeOf", rep.data.size());
-					//FIXME
-					fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(info.debugID.get().first(), now(),
-																					   TransactionDebugTrace::NATIVEAPI_GETEXACTRANGE_AFTER)));
 					/*TraceEvent("TransactionDebugGetRangeDone", info.debugID.get())
 						.detail("ReqBeginKey", req.begin.getKey())
 						.detail("ReqEndKey", req.end.getKey())
@@ -2092,9 +2035,6 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 			} catch ( Error& e ) {
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.Error");
-					//FIXME
-					fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(info.debugID.get().first(), now(),
-																					   TransactionDebugTrace::NATIVEAPI_GETRANGE_ERROR)));
 					TraceEvent("TransactionDebugError", info.debugID.get()).error(e);
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
@@ -2783,9 +2723,6 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			commitID = nondeterministicRandom()->randomUniqueID();
 			g_traceBatch.addAttach("CommitAttachID", info.debugID.get().first(), commitID.get().first());
 			g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.Before");
-			//FIXME
-			fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(commitID.get().first(), now(),
-																	 CommitDebugTrace::NATIVEAPI_COMMIT_BEFORE)));
 		}
 
 		req.debugID = commitID;
@@ -2829,12 +2766,9 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->transactionCommittedMutations += req.transaction.mutations.size();
 					cx->transactionCommittedMutationBytes += req.transaction.mutations.expectedSize();
 
-					if(info.debugID.present()) {
+					if(info.debugID.present())
 						g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.After");
-						//FIXME
-						fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(commitID.get().first(), now(),
-																				 CommitDebugTrace::NATIVEAPI_COMMIT_AFTER)));
-					}
+
 					double latency = now() - startTime;
 					cx->commitLatencies.addSample(latency);
 					cx->latencies.addSample(now() - tr->startTime);
@@ -2884,12 +2818,9 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					if (info.debugID.present())
 						TraceEvent(interval.end()).detail("Conflict", 1);
 
-					if(info.debugID.present()) {
+					if(info.debugID.present())
 						g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.After");
-						//FIXME
-						fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(commitID.get().first(), now(),
-																				 CommitDebugTrace::NATIVEAPI_COMMIT_AFTER)));
-					}
+
 					throw not_committed();
 				}
 			}
@@ -3219,23 +3150,15 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx, uint32_t transactionCount, uint32_t flags, Optional<UID> debugID ) {
 	try {
 		++cx->transactionReadVersionBatches;
-		if( debugID.present() ) {
+		if( debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
-			//FIXME
-			fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(debugID.get().first(), now(),
-																			   TransactionDebugTrace::NATIVEAPI_GETCONSISTENTREADVERSION_BEFORE)));
-		}
 		loop {
 			state GetReadVersionRequest req( transactionCount, flags, debugID );
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
-					if( debugID.present() ) {
+					if( debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.After");
-						//FIXME
-						fbTrace(Reference<TransactionDebugTrace>(new TransactionDebugTrace(debugID.get().first(), now(),
-																						   TransactionDebugTrace::NATIVEAPI_GETCONSISTENTREADVERSION_AFTER)));
-					}
 					ASSERT( v.version > 0 );
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 					return v;

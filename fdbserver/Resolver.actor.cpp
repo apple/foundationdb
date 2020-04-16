@@ -30,7 +30,6 @@
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/StorageMetrics.h"
 #include "fdbclient/SystemData.h"
-#include "flow/FBTrace.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 namespace {
@@ -116,9 +115,6 @@ ACTOR Future<Void> resolveBatch(
 		debugID = nondeterministicRandom()->randomUniqueID();
 		g_traceBatch.addAttach("CommitAttachID", req.debugID.get().first(), debugID.get().first());
 		g_traceBatch.addEvent("CommitDebug",debugID.get().first(),"Resolver.resolveBatch.Before");
-		//FIXME
-		fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(req.debugID.get().first(), now(),
-																 CommitDebugTrace::RESOLVER_RESOLVEBATCH_BEFORE)));
 	}
 
 	/*TraceEvent("ResolveBatchStart", self->dbgid).detail("From", proxyAddress).detail("Version", req.version).detail("PrevVersion", req.prevVersion).detail("StateTransactions", req.txnStateTransactions.size())
@@ -136,9 +132,6 @@ ACTOR Future<Void> resolveBatch(
 
 	if(debugID.present()) {
 		g_traceBatch.addEvent("CommitDebug",debugID.get().first(),"Resolver.resolveBatch.AfterQueueSizeCheck");
-		//FIXME
-		fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(req.debugID.get().first(), now(),
-																 CommitDebugTrace::RESOLVER_RESOLVEBATCH_AFTERQUEUESIZECHECK)));
 	}
 
 	loop {
@@ -171,12 +164,8 @@ ACTOR Future<Void> resolveBatch(
 		Version firstUnseenVersion = proxyInfo.lastVersion + 1;
 		proxyInfo.lastVersion = req.version;
 
-		if(req.debugID.present()) {
+		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterOrderer");
-			//FIXME
-			fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(req.debugID.get().first(), now(),
-																	 CommitDebugTrace::RESOLVER_RESOLVEBATCH_AFTERORDERER)));
-		}
 
 		ResolveTransactionBatchReply& reply = proxyInfo.outstandingBatches[req.version];
 
@@ -287,12 +276,8 @@ ACTOR Future<Void> resolveBatch(
 			self->checkNeededVersion.trigger();
 		}
 
-		if(req.debugID.present()) {
+		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.After");
-			//FIXME
-			fbTrace(Reference<CommitDebugTrace>(new CommitDebugTrace(req.debugID.get().first(), now(),
-																	 CommitDebugTrace::RESOLVER_RESOLVEBATCH_AFTER)));
-		}
 	}
 	else {
 		TEST(true); // Duplicate resolve batch request
