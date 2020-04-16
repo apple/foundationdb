@@ -231,7 +231,9 @@ public:
 
 	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
 	// snapshot of the key ranges this backup is targeting.
-	virtual Future<Void> writeKeyspaceSnapshotFile(std::vector<std::string> fileNames, int64_t totalBytes) = 0;
+	virtual Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
+	                                               const std::vector<std::pair<Key, Key>>& beginEndKeys,
+	                                               int64_t totalBytes) = 0;
 
 	// Open a file for read by name
 	virtual Future<Reference<IAsyncFile>> readFile(std::string name) = 0;

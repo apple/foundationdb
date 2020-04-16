@@ -489,8 +489,11 @@ public:
 		return readKeyspaceSnapshot_impl(Reference<BackupContainerFileSystem>::addRef(this), snapshot);
 	}
 
-	ACTOR static Future<Void> writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem> bc, std::vector<std::string> fileNames, int64_t totalBytes) {
-		ASSERT(!fileNames.empty());
+	ACTOR static Future<Void> writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem> bc,
+	                                                         std::vector<std::string> fileNames,
+	                                                         std::vector<std::pair<Key, Key>> beginEndKeys,
+	                                                         int64_t totalBytes) {
+		ASSERT(!fileNames.empty() && fileNames.size() == beginEndKeys.size());
 
 		state Version minVer = std::numeric_limits<Version>::max();
 		state Version maxVer = 0;
@@ -521,6 +524,13 @@ public:
 		doc.create("beginVersion") = minVer;
 		doc.create("endVersion") = maxVer;
 
+		auto ranges = doc.subDoc("keyRanges");
+		for (int i = 0; i < beginEndKeys.size(); i++) {
+			auto fileDoc = ranges.subDoc(fileNames[i], /*split=*/false);
+			fileDoc.create("beginKey") = printable(beginEndKeys[i].first);
+			fileDoc.create("endKey") = printable(beginEndKeys[i].second);
+		}
+
 		wait(yield());
 		state std::string docString = json_spirit::write_string(json);
 
@@ -531,8 +541,11 @@ public:
 		return Void();
 	}
 
-	Future<Void> writeKeyspaceSnapshotFile(std::vector<std::string> fileNames, int64_t totalBytes) final {
-		return writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem>::addRef(this), fileNames, totalBytes);
+	Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
+	                                       const std::vector<std::pair<Key, Key>>& beginEndKeys,
+	                                       int64_t totalBytes) final {
+		return writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem>::addRef(this), fileNames,
+		                                      beginEndKeys, totalBytes);
 	};
 
 	// List log files, unsorted, which contain data at any version >= beginVersion and <= targetVersion.
@@ -2085,6 +2098,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 		state Version logStart = v;
 		state int kvfiles = deterministicRandom()->randomInt(0, 3);
 
+		state std::vector<std::pair<Key, Key>> beginEndKeys;
 		while(kvfiles > 0) {
 			if(snapshots.empty()) {
 				snapshots[v] = {};
@@ -2097,13 +2111,14 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 			++nRangeFiles;
 			v = nextVersion(v);
 			snapshots.rbegin()->second.push_back(range->getFileName());
+			beginEndKeys.emplace_back(LiteralStringRef(""), LiteralStringRef(""));
 
 			int size = chooseFileSize(fileSizes);
 			snapshotSizes.rbegin()->second += size;
 			writes.push_back(writeAndVerifyFile(c, range, size));
 
 			if(deterministicRandom()->random01() < .2) {
-				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second, snapshotSizes.rbegin()->second));
+				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second, beginEndKeys, snapshotSizes.rbegin()->second));
 				snapshots[v] = {};
 				snapshotSizes[v] = 0;
 				break;
