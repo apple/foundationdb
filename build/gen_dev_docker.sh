@@ -75,7 +75,7 @@ sudo docker run --rm `# delete (temporary) image after return` \\
                 ${image} "\$@"
 EOF
 
-cat <<EOF $HOME/bin/clangd
+cat <<EOF > $HOME/bin/clangd
 #!/usr/bin/bash
 
 fdb-dev scl enable devtoolset-8 rh-python36 rh-ruby24 -- clangd
