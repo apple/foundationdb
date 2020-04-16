@@ -451,7 +451,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 					wait (self->dataToSend.onTrigger());
 				}
 
-				ASSERT( self->destination.isPublic() );
+				ASSERT(self->destination.isPublic());
 				self->outgoingConnectionIdle = false;
 				wait(delayJittered(
 						std::max(0.0, self->lastConnectTime + self->reconnectionDelay -
@@ -1074,7 +1074,7 @@ Reference<Peer> TransportData::getOrOpenPeer( NetworkAddress const& address, boo
 	auto peer = getPeer(address);
 	if(!peer) {
 		peer = Reference<Peer>( new Peer(this, address) );
-		if(startConnectionKeeper) {
+		if(startConnectionKeeper && !isLocalAddress(address)) {
 			peer->connect = connectionKeeper(peer);
 		}
 		peers[address] = peer;
@@ -1367,6 +1367,13 @@ void FlowTransport::createInstance(bool isClient, uint64_t transportId) {
 	g_network->setGlobal(INetwork::enFlowTransport, (flowGlobalType) new FlowTransport(transportId));
 	g_network->setGlobal(INetwork::enNetworkAddressFunc, (flowGlobalType) &FlowTransport::getGlobalLocalAddress);
 	g_network->setGlobal(INetwork::enNetworkAddressesFunc, (flowGlobalType) &FlowTransport::getGlobalLocalAddresses);
+
+	// Mark ourselves as avaiable in FailureMonitor
+	const auto& localAddresses = FlowTransport::transport().getLocalAddresses();
+	IFailureMonitor::failureMonitor().setStatus(localAddresses.address, FailureStatus(false));
+	if (localAddresses.secondaryAddress.present()) {
+		IFailureMonitor::failureMonitor().setStatus(localAddresses.secondaryAddress.get(), FailureStatus(false));
+	}
 }
 
 HealthMonitor* FlowTransport::healthMonitor() {
