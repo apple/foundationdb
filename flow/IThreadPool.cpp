@@ -78,7 +78,7 @@ class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
 public:
 	ThreadPool() : dontstop(ios), mode(Run) {}
 	~ThreadPool() {}
-	Future<Void> stop() {
+	Future<Void> stop(Error const& e = success()) {
 		if (mode == Shutdown) return Void();
 		ReferenceCounted<ThreadPool>::addref();
 		ios.stop(); // doesn't work?

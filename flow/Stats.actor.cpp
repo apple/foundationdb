@@ -22,7 +22,7 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 Counter::Counter(std::string const& name, CounterCollection& collection)
-: name(name), interval_start(0), last_event(0), interval_sq_time(0), interval_start_value(0), interval_delta(0)
+: name(name), interval_start(0), last_event(0), interval_sq_time(0), interval_start_value(0), interval_delta(0), roughness_interval_start(0)
 {
 	metric.init(collection.name + "." + (char)toupper(name.at(0)) + name.substr(1), collection.id);
 	collection.counters.push_back(this);
@@ -45,13 +45,21 @@ double Counter::getRate() const {
 }
 
 double Counter::getRoughness() const {
-	double elapsed = now() - interval_start;
+	double elapsed = now() - roughness_interval_start;
 	if(elapsed == 0) {
-		return 0;
+		return -1;
 	}
 
+	// If we have time interval samples t in T, and let:
+	// n = size(T) = interval_delta
+	// m = mean(T) = elapsed / interval_delta
+	// v = sum(t^2) for t in T = interval_sq_time
+	// 
+	// The formula below is: (v/(m*n)) / m - 1
+	// This is equivalent to (v/n - m^2) / m^2 = Variance(T)/m^2
+	// Variance(T)/m^2 is equal to Variance(t/m) for t in T
 	double delay = interval_sq_time / elapsed;
-	return delay * getRate() * 2;
+	return delay * interval_delta / elapsed - 1;
 }
 
 void Counter::resetInterval() {
@@ -59,7 +67,10 @@ void Counter::resetInterval() {
 	interval_delta = 0;
 	interval_sq_time = 0;
 	interval_start = now();
-	last_event = interval_start;  // <FIXME: Is this right?
+	if(last_event == 0) {
+		last_event = interval_start;
+	}
+	roughness_interval_start = last_event;
 }
 
 void Counter::clear() {
@@ -91,10 +102,10 @@ ACTOR Future<Void> traceCounters(std::string traceEventName, UID traceEventID, d
 		counters->logToTraceEvent(te);
 
 		if (!trackLatestName.empty()) {
-			te.trackLatest(trackLatestName.c_str());
+			te.trackLatest(trackLatestName);
 		}
 
 		last_interval = now();
-		wait(delay(interval));
+		wait(delay(interval, TaskPriority::FlushTrace));
 	}
 }

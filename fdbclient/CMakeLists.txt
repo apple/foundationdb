@@ -18,8 +18,6 @@ set(FDBCLIENT_SRCS
   DatabaseConfiguration.h
   DatabaseContext.h
   EventTypes.actor.h
-  FailureMonitorClient.actor.cpp
-  FailureMonitorClient.h
   FDBOptions.h
   FDBTypes.h
   FileBackupAgent.actor.cpp

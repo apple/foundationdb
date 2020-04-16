@@ -37,7 +37,7 @@
 #include "flow/Knobs.h"
 #include "flow/UnitTest.h"
 #include <stdio.h>
-#include "flow/Hash3.h"
+#include "flow/crc32c.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -97,6 +97,7 @@ public:
 #endif
 
 	static Future<Reference<IAsyncFile>> open( std::string filename, int flags, int mode, void* ignore ) {
+		ASSERT( !FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO );
 		ASSERT( flags & OPEN_UNBUFFERED );
 
 		if (flags & OPEN_LOCK)
@@ -153,6 +154,7 @@ public:
 	}
 
 	static void init( Reference<IEventFD> ev, double ioTimeout ) {
+		ASSERT( !FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO );
 		if( !g_network->isSimulated() ) {
 			ctx.countAIOSubmit.init(LiteralStringRef("AsyncFile.CountAIOSubmit"));
 			ctx.countAIOCollect.init(LiteralStringRef("AsyncFile.CountAIOCollect"));
@@ -578,7 +580,7 @@ private:
 	static Context ctx;
 
 	explicit AsyncFileKAIO(int fd, int flags, std::string const& filename) : fd(fd), flags(flags), filename(filename), failed(false) {
-
+		ASSERT( !FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO );
 		if( !g_network->isSimulated() ) {
 			countFileLogicalWrites.init(LiteralStringRef("AsyncFile.CountFileLogicalWrites"), filename);
 			countFileLogicalReads.init( LiteralStringRef("AsyncFile.CountFileLogicalReads"), filename);
@@ -733,7 +735,7 @@ void AsyncFileKAIO::KAIOLogBlockEvent(FILE *logFile, IOBlock *ioblock, OpLogEntr
 
 		// Log a checksum for Writes up to the Complete stage or Reads starting from the Complete stage
 		if( (op == OpLogEntry::WRITE && stage <= OpLogEntry::COMPLETE) || (op == OpLogEntry::READ && stage >= OpLogEntry::COMPLETE) )
-			e.checksum = hashlittle(ioblock->buf, ioblock->nbytes, 0xab12fd93);
+			e.checksum = crc32c_append(0xab12fd93, ioblock->buf, ioblock->nbytes);
 		else
 			e.checksum = 0;
 

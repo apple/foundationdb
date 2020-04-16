@@ -33,7 +33,6 @@
 #include "fdbserver/Status.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbclient/MonitorLeader.h"
-#include "fdbclient/FailureMonitorClient.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -527,7 +526,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 		}
 
 		wait(test);
-		
+
 		endRole(Role::TESTER, workIface.id(), "Complete");
 	} catch (Error& e) {
 		if (!replied) {
@@ -974,6 +973,8 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			TraceEvent("TestParserTest").detail("ParsedSimDrAgents", spec.simDrAgents);
 		} else if( attrib == "extraDB" ) {
 			TraceEvent("TestParserTest").detail("ParsedExtraDB", "");
+		} else if ( attrib == "configureLocked" ) {
+			TraceEvent("TestParserTest").detail("ParsedConfigureLocked", "");
 		} else if( attrib == "minimumReplication" ) {
 			TraceEvent("TestParserTest").detail("ParsedMinimumReplication", "");
 		} else if( attrib == "minimumRegions" ) {
@@ -1019,7 +1020,8 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc, Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector< TesterInterface > testers, vector<TestSpec> tests, StringRef startingConfiguration, LocalityData locality ) {
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo> );
-	state Future<Void> ccMonitor = monitorServerDBInfo( cc, Reference<ClusterConnectionFile>(), LocalityData(), dbInfo );  // FIXME: locality
+	state Future<Void> ccMonitor =
+	    monitorServerDBInfo(cc, Reference<ClusterConnectionFile>(), LocalityData(), dbInfo); // FIXME: locality
 
 	state bool useDB = false;
 	state bool waitForQuiescenceBegin = false;
@@ -1154,7 +1156,6 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 	vector<Future<Void>> actors;
 	actors.push_back( reportErrors(monitorLeader( connFile, cc ), "MonitorLeader") );
 	actors.push_back( reportErrors(extractClusterInterface( cc,ci ),"ExtractClusterInterface") );
-	actors.push_back( reportErrors(failureMonitorClient( ci, false ),"FailureMonitorClient") );
 
 	if(whatToRun == TEST_TYPE_CONSISTENCY_CHECK) {
 		TestSpec spec;

@@ -75,10 +75,11 @@ struct StorageServerInterface {
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
 	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
+	Optional<NetworkAddress> secondaryAddress() const { return getValue.getEndpoint().addresses.secondaryAddress; }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
-	template <class Ar> 
-	void serialize( Ar& ar ) {
+	template <class Ar>
+	void serialize(Ar& ar) {
 		// StorageServerInterface is persisted in the database and in the tLog's data structures, so changes here have to be
 		// versioned carefully!
 
@@ -268,7 +269,7 @@ struct GetShardStateRequest {
 		FETCHING = 1,
 		READABLE = 2
 	};
-	
+
 	KeyRange keys;
 	int32_t mode;
 	ReplyPromise<GetShardStateReply> reply;
@@ -415,7 +416,7 @@ struct ReadHotSubRangeRequest {
 struct GetStorageMetricsReply {
 	constexpr static FileIdentifier file_identifier = 15491478;
 	StorageMetrics load;
-	StorageMetrics free;
+	StorageMetrics available;
 	StorageMetrics capacity;
 	double bytesInputRate;
 
@@ -423,7 +424,7 @@ struct GetStorageMetricsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, load, free, capacity, bytesInputRate);
+		serializer(ar, load, available, capacity, bytesInputRate);
 	}
 };
 

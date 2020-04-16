@@ -400,14 +400,14 @@ ACTOR Future<Void> changeSizes( DataDistributionTracker* self, KeyRange keys, in
 struct HasBeenTrueFor : ReferenceCounted<HasBeenTrueFor> {
 	explicit HasBeenTrueFor( Optional<ShardMetrics> value ) {
 		if(value.present()) {
-			trigger = delayJittered(std::max(0.0, SERVER_KNOBS->DD_MERGE_COALESCE_DELAY + value.get().lastLowBandwidthStartTime - now()), decrementPriority(TaskPriority::DataDistribution) ) || cleared.getFuture();
+			trigger = delayJittered(std::max(0.0, SERVER_KNOBS->DD_MERGE_COALESCE_DELAY + value.get().lastLowBandwidthStartTime - now()), TaskPriority::DataDistributionLow ) || cleared.getFuture();
 		}
 	}
 
 	Future<Void> set() {
 		if( !trigger.isValid() ) {
 			cleared = Promise<Void>();
-			trigger = delayJittered( SERVER_KNOBS->DD_MERGE_COALESCE_DELAY, decrementPriority(TaskPriority::DataDistribution) ) || cleared.getFuture();
+			trigger = delayJittered( SERVER_KNOBS->DD_MERGE_COALESCE_DELAY, TaskPriority::DataDistributionLow ) || cleared.getFuture();
 		}
 		return trigger;
 	}
@@ -847,7 +847,7 @@ ACTOR Future<Void> dataDistributionTracker(
 					.detail("SystemSizeBytes", self.systemSizeEstimate)
 					.trackLatest( "DDTrackerStats" );
 
-				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL);
+				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 			}
 			when( GetMetricsRequest req = waitNext( getShardMetrics.getFuture() ) ) {
 				self.sizeChanges.add( fetchShardMetrics( &self, req ) );
@@ -865,6 +865,11 @@ vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor( Team team ) {
 	for(auto it = team_shards.lower_bound( std::pair<Team,KeyRange>( team, KeyRangeRef() ) ); it != team_shards.end() && it->first == team; ++it)
 		r.push_back( it->second );
 	return r;
+}
+
+bool ShardsAffectedByTeamFailure::hasShards(Team team) {
+	auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));
+	return it != team_shards.end() && it->first == team;
 }
 
 int ShardsAffectedByTeamFailure::getNumberOfShards( UID ssID ) {

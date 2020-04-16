@@ -34,6 +34,9 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+//#define SevCCheckInfo SevVerbose
+#define SevCCheckInfo SevInfo
+
 struct ConsistencyCheckWorkload : TestWorkload
 {
 	//Whether or not we should perform checks that will only pass if the database is in a quiescent state
@@ -121,7 +124,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 
 			try {
-				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0), self->quiescentWaitTimeout));  // FIXME: should be zero?
+				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0),
+				                  self->quiescentWaitTimeout)); // FIXME: should be zero?
 			}
 			catch (Error& e) {
 				TraceEvent("ConsistencyCheck_QuietDatabaseError").error(e);
@@ -272,14 +276,12 @@ struct ConsistencyCheckWorkload : TestWorkload
 					try
 					{
 						int64_t maxStorageServerQueueSize = wait(getMaxStorageServerQueueSize(cx, self->dbInfo));
-						if(maxStorageServerQueueSize > 0)
-						{
-							TraceEvent("ConsistencyCheck_NonZeroStorageServerQueue").detail("MaxQueueSize", maxStorageServerQueueSize);
-							self->testFailure("Non-zero storage server queue size");
+						if (maxStorageServerQueueSize > 0) {
+							TraceEvent("ConsistencyCheck_ExceedStorageServerQueueLimit")
+							    .detail("MaxQueueSize", maxStorageServerQueueSize);
+							self->testFailure("Storage server queue size exceeds limit");
 						}
-					}
-					catch(Error& e)
-					{
+					} catch (Error& e) {
 						if(e.code() == error_code_attribute_not_found)
 						{
 							TraceEvent("ConsistencyCheck_StorageQueueSizeError").error(e).detail("Reason", "Could not read queue size");
@@ -665,7 +667,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			state int bytesReadInRange = 0;
 
-			decodeKeyServersValue(keyLocations[shard].value, sourceStorageServers, destStorageServers);
+			Standalone<RangeResultRef> UIDtoTagMap = wait( tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY ) );
+			ASSERT( !UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY );
+			decodeKeyServersValue(UIDtoTagMap, keyLocations[shard].value, sourceStorageServers, destStorageServers);
 
 			//If the destStorageServers is non-empty, then this shard is being relocated
 			state bool isRelocating = destStorageServers.size() > 0;
@@ -1137,18 +1141,19 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::set<Optional<Key>> missingStorage;
 
 		for( int i = 0; i < workers.size(); i++ ) {
-			if( !configuration.isExcludedServer(workers[i].interf.address()) &&
+			NetworkAddress addr = workers[i].interf.tLog.getEndpoint().addresses.getTLSAddress();
+			if( !configuration.isExcludedServer(addr) &&
 				( workers[i].processClass == ProcessClass::StorageClass || workers[i].processClass == ProcessClass::UnsetClass ) ) {
 				bool found = false;
 				for( int j = 0; j < storageServers.size(); j++ ) {
-					if( storageServers[j].address() == workers[i].interf.address() ) {
+					if( storageServers[j].getValue.getEndpoint().addresses.getTLSAddress() == addr ) {
 						found = true;
 						break;
 					}
 				}
 				if( !found ) {
 					TraceEvent("ConsistencyCheck_NoStorage")
-					    .detail("Address", workers[i].interf.address())
+					    .detail("Address", addr)
 					    .detail("ProcessClassEqualToStorageClass",
 					            (int)(workers[i].processClass == ProcessClass::StorageClass));
 					missingStorage.insert(workers[i].interf.locality.dcId());
@@ -1168,20 +1173,51 @@ struct ConsistencyCheckWorkload : TestWorkload
 	}
 
 	ACTOR Future<bool> checkForExtraDataStores(Database cx, ConsistencyCheckWorkload *self) {
-		state vector<WorkerDetails> workers = wait( getWorkers( self->dbInfo ) );
-		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
+		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+		state std::vector<WorkerInterface> coordWorkers = wait(getCoordWorkers(cx, self->dbInfo));
 		auto& db = self->dbInfo->get();
 		state std::vector<TLogInterface> logs = db.logSystemConfig.allPresentLogs();
 
 		state std::vector<WorkerDetails>::iterator itr;
 		state bool foundExtraDataStore = false;
+		state std::vector<struct ProcessInfo*> protectedProcessesToKill;
 
 		state std::map<NetworkAddress, std::set<UID>> statefulProcesses;
 		for (const auto& ss : storageServers) {
 			statefulProcesses[ss.address()].insert(ss.id());
+			// A process may have two addresses (same ip, different ports)
+			if (ss.secondaryAddress().present()) {
+				statefulProcesses[ss.secondaryAddress().get()].insert(ss.id());
+			}
+			TraceEvent(SevCCheckInfo, "StatefulProcess")
+			    .detail("StorageServer", ss.id())
+			    .detail("PrimaryAddress", ss.address().toString())
+			    .detail("SecondaryAddress",
+			            ss.secondaryAddress().present() ? ss.secondaryAddress().get().toString() : "Unset");
 		}
 		for (const auto& log : logs) {
 			statefulProcesses[log.address()].insert(log.id());
+			if (log.secondaryAddress().present()) {
+				statefulProcesses[log.secondaryAddress().get()].insert(log.id());
+			}
+			TraceEvent(SevCCheckInfo, "StatefulProcess")
+			    .detail("Log", log.id())
+			    .detail("PrimaryAddress", log.address().toString())
+			    .detail("SecondaryAddress",
+			            log.secondaryAddress().present() ? log.secondaryAddress().get().toString() : "Unset");
+		}
+		// Coordinators are also stateful processes
+		for (const auto& cWorker : coordWorkers) {
+			statefulProcesses[cWorker.address()].insert(cWorker.id());
+			if (cWorker.secondaryAddress().present()) {
+				statefulProcesses[cWorker.secondaryAddress().get()].insert(cWorker.id());
+			}
+			TraceEvent(SevCCheckInfo, "StatefulProcess")
+			    .detail("Coordinator", cWorker.id())
+			    .detail("PrimaryAddress", cWorker.address().toString())
+			    .detail("SecondaryAddress",
+			            cWorker.secondaryAddress().present() ? cWorker.secondaryAddress().get().toString() : "Unset");
 		}
 
 		for(itr = workers.begin(); itr != workers.end(); ++itr) {
@@ -1192,16 +1228,45 @@ struct ConsistencyCheckWorkload : TestWorkload
 				return false;
 			}
 
+			TraceEvent(SevCCheckInfo, "ConsistencyCheck_ExtraDataStore")
+			    .detail("Worker", itr->interf.id().toString())
+			    .detail("PrimaryAddress", itr->interf.address().toString())
+			    .detail("SecondaryAddress", itr->interf.secondaryAddress().present()
+			                                    ? itr->interf.secondaryAddress().get().toString()
+			                                    : "Unset");
 			for (const auto& id : stores.get()) {
-				if(!statefulProcesses[itr->interf.address()].count(id)) {
-					TraceEvent("ConsistencyCheck_ExtraDataStore").detail("Address", itr->interf.address()).detail("DataStoreID", id);
-					if(g_network->isSimulated()) {
-						TraceEvent("ConsistencyCheck_RebootProcess").detail("Address", itr->interf.address()).detail("DataStoreID", id);
-						g_simulator.rebootProcess(g_simulator.getProcessByAddress(itr->interf.address()), ISimulator::RebootProcess);
-					}
-
-					foundExtraDataStore = true;
+				if (statefulProcesses[itr->interf.address()].count(id)) {
+					continue;
 				}
+				// For extra data store
+				TraceEvent("ConsistencyCheck_ExtraDataStore")
+				    .detail("Address", itr->interf.address())
+				    .detail("DataStoreID", id);
+				if (g_network->isSimulated()) {
+					// FIXME: this is hiding the fact that we can recruit a new storage server on a location the has
+					// files left behind by a previous failure
+					// this means that the process is wasting disk space until the process is rebooting
+					ISimulator::ProcessInfo* p = g_simulator.getProcessByAddress(itr->interf.address());
+					// Note: itr->interf.address() may not equal to p->address() because role's endpoint's primary
+					// addr can be swapped by choosePrimaryAddress() based on its peer's tls config.
+					TraceEvent("ConsistencyCheck_RebootProcess")
+					    .detail("Address",
+					            itr->interf.address()) // worker's primary address (i.e., the first address)
+					    .detail("ProcessPrimaryAddress", p->address)
+					    .detail("ProcessAddresses", p->addresses.toString())
+					    .detail("DataStoreID", id)
+					    .detail("Protected", g_simulator.protectedAddresses.count(itr->interf.address()))
+					    .detail("Reliable", p->isReliable())
+					    .detail("ReliableInfo", p->getReliableInfo())
+					    .detail("KillOrRebootProcess", p->address);
+					if (p->isReliable()) {
+						g_simulator.rebootProcess(p, ISimulator::RebootProcess);
+					} else {
+						g_simulator.killProcess(p, ISimulator::KillInstantly);
+					}
+				}
+
+				foundExtraDataStore = true;
 			}
 		}
 
@@ -1221,12 +1286,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::set<NetworkAddress> workerAddresses;
 
 		for (const auto& it : workers) {
-			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(it.interf.address());
+			NetworkAddress addr = it.interf.tLog.getEndpoint().addresses.getTLSAddress();
+			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(addr);
 			if(!info || info->failed) {
 				TraceEvent("ConsistencyCheck_FailedWorkerInList").detail("Addr", it.interf.address());
 				return false;
 			}
-			workerAddresses.insert( NetworkAddress(it.interf.address().ip, it.interf.address().port, true, false) );
+			workerAddresses.insert( NetworkAddress(addr.ip, addr.port, true, addr.isTLS()) );
 		}
 
 		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();

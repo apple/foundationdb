@@ -62,7 +62,7 @@ struct NetworkData {
 	int64_t countYieldCalls;
 	int64_t countASIOEvents;
 	int64_t countYieldCallsTrue;
-	int64_t countSlowTaskSignals;
+	int64_t countRunLoopProfilingSignals;
 	int64_t countFileLogicalWrites;
 	int64_t countFileLogicalReads;
 	int64_t countAIOSubmit;
@@ -80,6 +80,7 @@ struct NetworkData {
 	int64_t countConnEstablished;
 	int64_t countConnClosedWithError;
 	int64_t countConnClosedWithoutError;
+	int64_t countTLSPolicyFailures;
 	double countLaunchTime;
 	double countReactTime;
 
@@ -103,10 +104,11 @@ struct NetworkData {
 		countYieldCalls = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountYieldCalls"));
 		countASIOEvents = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountASIOEvents"));
 		countYieldCallsTrue = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountYieldCallsTrue"));
-		countSlowTaskSignals = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountSlowTaskSignals"));
+		countRunLoopProfilingSignals = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountRunLoopProfilingSignals"));
 		countConnEstablished = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountConnEstablished"));
 		countConnClosedWithError = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountConnClosedWithError"));
 		countConnClosedWithoutError = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountConnClosedWithoutError"));
+		countTLSPolicyFailures = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountTLSPolicyFailures"));
 		countLaunchTime = DoubleMetric::getValueOrDefault(LiteralStringRef("Net2.CountLaunchTime"));
 		countReactTime = DoubleMetric::getValueOrDefault(LiteralStringRef("Net2.CountReactTime"));
 		countFileLogicalWrites = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountLogicalWrites"));
