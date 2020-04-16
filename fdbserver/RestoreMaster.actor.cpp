@@ -617,8 +617,7 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* rangeFiles,
                                                 std::vector<RestoreFileFR>* logFiles, Database cx,
                                                 RestoreRequest request) {
-	state bool partitioned = wait(bc->isPartitionedBackup());
-	state BackupDescription desc = wait(partitioned ? bc->describePartitionedBackup() : bc->describeBackup());
+	state BackupDescription desc = wait(bc->describeBackup());
 
 	// Convert version to real time for operators to read the BackupDescription desc.
 	wait(desc.resolveVersionTimes(cx));
@@ -634,8 +633,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 		std::cout << "Restore to version: " << request.targetVersion << "\nBackupDesc: \n" << desc.toString() << "\n\n";
 	}
 
-	Optional<RestorableFileSet> restorable = wait(partitioned ? bc->getPartitionedRestoreSet(request.targetVersion)
-	                                                          : bc->getRestoreSet(request.targetVersion));
+	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(request.targetVersion));
 
 	if (!restorable.present()) {
 		TraceEvent(SevWarn, "FastRestoreMasterPhaseCollectBackupFiles").detail("NotRestorable", request.targetVersion);
