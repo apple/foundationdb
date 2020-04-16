@@ -20,6 +20,7 @@
 
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
@@ -424,9 +425,11 @@ public:
 	}
 
 	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of megabytes.
-	ACTOR static Future<std::vector<RangeFile>> readKeyspaceSnapshot_impl(Reference<BackupContainerFileSystem> bc, KeyspaceSnapshotFile snapshot) {
+	ACTOR static Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot_impl(
+	    Reference<BackupContainerFileSystem> bc, KeyspaceSnapshotFile snapshot) {
 		// Read the range file list for the specified version range, and then index them by fileName.
-		// This is so we can verify that each of the files listed in the manifest file are also in the container at this time.
+		// This is so we can verify that each of the files listed in the manifest file are also in the container at this
+		// time.
 		std::vector<RangeFile> files = wait(bc->listRangeFiles(snapshot.beginVersion, snapshot.endVersion));
 		state std::map<std::string, RangeFile> rangeIndex;
 		for(auto &f : files)
@@ -482,10 +485,30 @@ public:
 			throw restore_missing_data();
 		}
 
-		return results;
+		// Check key ranges for files
+		std::map<std::string, KeyRange> fileKeyRanges;
+		JSONDoc ranges = doc.subDoc("keyRanges"); // Create an empty doc if not existed
+		for (auto i : ranges.obj()) {
+			const std::string& filename = i.first;
+			JSONDoc fields(i.second);
+			std::string begin, end;
+			if (fields.tryGet("beginKey", begin) && fields.tryGet("endKey", end)) {
+				TraceEvent("ManifestFields")
+				    .detail("File", filename)
+				    .detail("Begin", printable(StringRef(begin)))
+				    .detail("End", printable(StringRef(end)));
+				fileKeyRanges.emplace(filename, KeyRange(KeyRangeRef(StringRef(begin), StringRef(end))));
+			} else {
+				TraceEvent("MalFormattedManifest").detail("Key", filename);
+				throw restore_corrupted_data();
+			}
+		}
+
+		return std::make_pair(results, fileKeyRanges);
 	}
 
-	Future<std::vector<RangeFile>> readKeyspaceSnapshot(KeyspaceSnapshotFile snapshot) {
+	Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
+	    KeyspaceSnapshotFile snapshot) {
 		return readKeyspaceSnapshot_impl(Reference<BackupContainerFileSystem>::addRef(this), snapshot);
 	}
 
@@ -1322,8 +1345,10 @@ public:
 			restorable.snapshot = snapshot.get();
 			restorable.targetVersion = targetVersion;
 
-			std::vector<RangeFile> ranges = wait(bc->readKeyspaceSnapshot(snapshot.get()));
-			restorable.ranges = std::move(ranges);
+			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
+			    wait(bc->readKeyspaceSnapshot(snapshot.get()));
+			restorable.ranges = std::move(results.first);
+			restorable.keyRanges = std::move(results.second);
 
 			// No logs needed if there is a complete key space snapshot at the target version.
 			if (snapshot.get().beginVersion == snapshot.get().endVersion &&
@@ -1352,6 +1377,8 @@ public:
 				// sort by version order again for continuous analysis
 				std::sort(restorable.logs.begin(), restorable.logs.end());
 				if (isPartitionedLogsContinuous(restorable.logs, snapshot.get().beginVersion, targetVersion)) {
+					restorable.continuousBeginVersion = snapshot.get().beginVersion;
+					restorable.continuousEndVersion = targetVersion + 1; // not inclusive
 					return Optional<RestorableFileSet>(restorable);
 				}
 				return Optional<RestorableFileSet>();
@@ -1365,6 +1392,8 @@ public:
 				Version end = logs.begin()->endVersion;
 				computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
 				if (end >= targetVersion) {
+					restorable.continuousBeginVersion = logs.begin()->beginVersion;
+					restorable.continuousEndVersion = end;
 					return Optional<RestorableFileSet>(restorable);
 				}
 			}
