@@ -477,7 +477,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( DURABILITY_LAG_INCREASE_RATE,                        1.001 );
 	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,                    20.0 );
 
-	init( MAX_THROTTLED_TAGS,                                     10 ); if(randomize && BUGGIFY) MAX_THROTTLED_TAGS = 1;
+	init( MAX_AUTO_THROTTLED_TRANSACTION_TAGS,                     5 ); if(randomize && BUGGIFY) MAX_AUTO_THROTTLED_TRANSACTION_TAGS = 1;
+	init( MAX_MANUAL_THROTTLED_TRANSACTION_TAGS,                 100 ); if(randomize && BUGGIFY) MAX_MANUAL_THROTTLED_TRANSACTION_TAGS = 1;
 	init( MIN_TAG_BUSYNESS,                                      0.1 ); if(randomize && BUGGIFY) MIN_TAG_BUSYNESS = 0.0;
 	init( TAG_THROTTLE_DURATION,                               120.0 ); if(randomize && BUGGIFY) TAG_THROTTLE_DURATION = 5.0;
 	init( AUTO_TAG_THROTTLING_ENABLED,                          true ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLING_ENABLED = false;

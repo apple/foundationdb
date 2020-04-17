@@ -625,6 +625,8 @@ const KeyRangeRef tagThrottleKeys = KeyRangeRef(
 const KeyRef tagThrottleKeysPrefix = tagThrottleKeys.begin;
 const KeyRef tagThrottleSignalKey = LiteralStringRef("\xff\x02/throttledTags/signal");
 const KeyRef tagThrottleAutoEnabledKey = LiteralStringRef("\xff\x02/throttledTags/autoThrottlingEnabled");
+const KeyRef tagThrottleLimitKey = LiteralStringRef("\xff\x02/throttledTags/manualThrottleLimit");
+const KeyRef tagThrottleCountKey = LiteralStringRef("\xff\x02/throttledTags/manualThrottleCount");
 
 // Client status info prefix
 const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"), LiteralStringRef("\xff\x02/fdbClientInfo0"));

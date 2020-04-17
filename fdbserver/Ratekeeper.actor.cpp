@@ -436,8 +436,11 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 				state Future<Standalone<RangeResultRef>> throttledTags = tr.getRange(tagThrottleKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<Optional<Value>> autoThrottlingEnabled = tr.get(tagThrottleAutoEnabledKey);
 
+				BinaryWriter limitWriter(Unversioned());
+				limitWriter << SERVER_KNOBS->MAX_MANUAL_THROTTLED_TRANSACTION_TAGS;
+				tr.set(tagThrottleLimitKey, limitWriter.toValue());
+
 				wait(success(throttledTags) && success(autoThrottlingEnabled));
-				ASSERT(!throttledTags.get().more && throttledTags.get().size() < CLIENT_KNOBS->TOO_MANY); // TODO: impose throttled tag limit
 
 				if(autoThrottlingEnabled.get().present() && autoThrottlingEnabled.get().get() == LiteralStringRef("0")) {
 					if(self->autoThrottlingEnabled) {
@@ -964,6 +967,15 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 				//TraceEvent("RKMPU", req.requesterID).detail("TRT", req.totalReleasedTransactions).detail("Last", p.first).detail("Delta", req.totalReleasedTransactions - p.first);
 				if (p.total > 0) {
 					self.smoothReleasedTransactions.addDelta( req.totalReleasedTransactions - p.total );
+
+					for(auto tag : req.throttledTagCounts) {
+						for(auto &priorityItr : self.throttledTags) { // TODO: we don't need this loop
+							auto itr = priorityItr.second.find(tag.first);
+							if(itr != priorityItr.second.end()) {
+								itr->second.addRequests(tag.second);
+							}
+						}
+					}
 				}
 				if(p.batch > 0) {
 					self.smoothBatchReleasedTransactions.addDelta( req.batchReleasedTransactions - p.batch );
@@ -976,15 +988,6 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 				reply.transactionRate = self.normalLimits.tpsLimit / self.proxy_transactionCounts.size();
 				reply.batchTransactionRate = self.batchLimits.tpsLimit / self.proxy_transactionCounts.size();
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
-
-				for(auto tag : req.throttledTagCounts) { // TODO: add only if this data is recent?
-					for(auto &priorityItr : self.throttledTags) { // TODO: we don't need this loop
-						auto itr = priorityItr.second.find(tag.first);
-						if(itr != priorityItr.second.end()) {
-							itr->second.addRequests(tag.second);
-						}
-					}
-				}
 
 				// TODO: avoid iteration every time
 				for(auto &priorityItr : self.throttledTags) {

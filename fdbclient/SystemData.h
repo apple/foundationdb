@@ -237,6 +237,8 @@ extern const KeyRangeRef tagThrottleKeys;
 extern const KeyRef tagThrottleKeysPrefix;
 extern const KeyRef tagThrottleSignalKey;
 extern const KeyRef tagThrottleAutoEnabledKey;
+extern const KeyRef tagThrottleLimitKey;
+extern const KeyRef tagThrottleCountKey;
 
 // Log Range constant variables
 // \xff/logRanges/[16-byte UID][begin key] := serialize( make_pair([end key], [destination key prefix]), IncludeVersion() )

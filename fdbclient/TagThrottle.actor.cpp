@@ -88,7 +88,7 @@ namespace ThrottleApi {
 		ASSERT(CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH < 256);
 		ASSERT(tags.size() > 0);
 
-		ASSERT(tags.size() == 1); // TODO: support multiple tags per throttle
+		ASSERT(tags.size() == 1); // SOMEDAY: support multiple tags per throttle
 
 		int size = tagThrottleKeysPrefix.size() + tags.size();
 		for(auto tag : tags) {
@@ -117,8 +117,40 @@ namespace ThrottleApi {
 
 	TransactionTagRef tagFromThrottleKey(KeyRef key) {
 		TransactionTagRef tag = key.substr(tagThrottleKeysPrefix.size()+1);
-		ASSERT(tag.size() == key.begin()[tagThrottleKeysPrefix.size()]); // TODO: support multiple tags per throttle
+		ASSERT(tag.size() == key.begin()[tagThrottleKeysPrefix.size()]); // SOMEDAY: support multiple tags per throttle
 		return tag;
+	}
+
+	ACTOR Future<Void> updateThrottleCount(Transaction *tr, int64_t delta) {
+		state Future<Optional<Value>> countVal = tr->get(tagThrottleCountKey);
+		state Future<Optional<Value>> limitVal = tr->get(tagThrottleLimitKey);
+
+		wait(success(countVal) && success(limitVal));
+
+		int64_t count = 0;
+		int64_t limit = 0;
+
+		if(countVal.get().present()) {
+			BinaryReader reader(countVal.get().get(), Unversioned());
+			reader >> count;
+		}
+
+		if(limitVal.get().present()) {
+			BinaryReader reader(limitVal.get().get(), Unversioned());
+			reader >> limit;
+		}
+
+		count += delta;
+
+		if(count > limit) {
+			throw too_many_tag_throttles();
+		}
+
+		BinaryWriter writer(Unversioned());
+		writer << count;
+
+		tr->set(tagThrottleCountKey, writer.toValue());
+		return Void();
 	}
 
 	ACTOR Future<std::map<TransactionTag, TagThrottleInfo>> getTags(Database db, int limit) {
@@ -150,6 +182,13 @@ namespace ThrottleApi {
 
 		loop {
 			try {
+				if(!autoThrottled) {
+					Optional<Value> oldThrottle = wait(tr.get(key));
+					if(!oldThrottle.present()) {
+						wait(updateThrottleCount(&tr, 1));
+					}
+				}
+
 				tr.set(key, value);
 
 				if(!autoThrottled) {
@@ -173,6 +212,10 @@ namespace ThrottleApi {
 			try {
 				state Optional<Value> value = wait(tr.get(key));
 				if(value.present()) {
+					if(!decodeTagThrottleValue(value.get()).autoThrottled) {
+						wait(updateThrottleCount(&tr, -1));
+					}
+
 					tr.clear(key);
 					signalThrottleChange(tr);
 
@@ -187,7 +230,7 @@ namespace ThrottleApi {
 		}
 	}
 
-	ACTOR Future<uint64_t> unthrottleTags(Database db, bool disableAuto, bool disableManual) {
+	ACTOR Future<uint64_t> unthrottleTags(Database db, bool unthrottleAuto, bool unthrottleManual) {
 		state Transaction tr(db);
 
 		state KeySelector begin = firstGreaterOrEqual(tagThrottleKeys.begin);
@@ -199,16 +242,22 @@ namespace ThrottleApi {
 			try {
 				state Standalone<RangeResultRef> tags = wait(tr.getRange(begin, end, 1000));
 				state uint64_t localUnthrottledTags = 0;
+				uint64_t manualUnthrottledTags = 0;
 				for(auto tag : tags) {
 					bool autoThrottled = decodeTagThrottleValue(tag.value).autoThrottled;
-					if(autoThrottled && disableAuto) {
+					if(autoThrottled && unthrottleAuto) {
 						tr.clear(tag.key);
 						++localUnthrottledTags;
 					}
-					else if(!autoThrottled && disableManual) {
+					else if(!autoThrottled && unthrottleManual) {
 						tr.clear(tag.key);
 						++localUnthrottledTags;
+						++manualUnthrottledTags;
 					}
+				}
+
+				if(manualUnthrottledTags > 0) {
+					wait(updateThrottleCount(&tr, -manualUnthrottledTags));
 				}
 
 				if(localUnthrottledTags > 0) {
