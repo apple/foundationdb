@@ -120,7 +120,7 @@ struct ClusterControllerFullInterface {
 	RequestStream< struct RegisterWorkerRequest > registerWorker;
 	RequestStream< struct GetWorkersRequest > getWorkers;
 	RequestStream< struct RegisterMasterRequest > registerMaster;
-	RequestStream< struct GetServerDBInfoRequest > getServerDBInfo;
+	RequestStream< struct GetServerDBInfoRequest > getServerDBInfo; //only used by testers; the cluster controller will send the serverDBInfo to workers
 
 	UID id() const { return clientInterface.id(); }
 	bool operator == (ClusterControllerFullInterface const& r) const { return id() == r.id(); }

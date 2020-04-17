@@ -3597,14 +3597,14 @@ ACTOR Future<Void> storageServerTracker(
 
 			if (worstStatus != DDTeamCollection::Status::NONE) {
 				TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
-				    .detail("Server", server->id)
-				    .detail("Excluded", worstAddr.toString());
+					.detail("Server", server->id)
+					.detail("Excluded", worstAddr.toString());
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
 				if (worstStatus == DDTeamCollection::Status::FAILED) {
 					TraceEvent(SevWarn, "FailedServerRemoveKeys", self->distributorId)
 						.detail("Server", server->id)
-				    	.detail("Excluded", worstAddr.toString());
+						.detail("Excluded", worstAddr.toString());
 					wait(removeKeysFromFailedServer(cx, server->id, self->lock));
 					if (BUGGIFY) wait(delay(5.0));
 					self->shardsAffectedByTeamFailure->eraseServer(server->id);

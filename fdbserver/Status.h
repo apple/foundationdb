@@ -27,7 +27,14 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"
 
-Future<StatusReply> clusterGetStatus( Reference<AsyncVar<struct ServerDBInfo>> const& db, Database const& cx, vector<WorkerDetails> const& workers, std::vector<std::pair<NetworkAddress, Standalone<VectorRef<StringRef>>>> const& workerIssues,
+struct ProcessIssues {
+    NetworkAddress address;
+    Standalone<VectorRef<StringRef>> issues;
+
+	ProcessIssues(NetworkAddress address, Standalone<VectorRef<StringRef>> issues) : address(address), issues(issues) {}
+};
+
+Future<StatusReply> clusterGetStatus( Reference<AsyncVar<struct ServerDBInfo>> const& db, Database const& cx, vector<WorkerDetails> const& workers, std::vector<ProcessIssues> const& workerIssues,
 	std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* const& clientStatus, ServerCoordinators const& coordinators, std::vector<NetworkAddress> const& incompatibleConnections, Version const& datacenterVersionDifference );
 
 #endif

@@ -1326,7 +1326,7 @@ public:
 	Future<Void> outstandingRequestChecker;
 	Future<Void> outstandingRemoteRequestChecker;
 	AsyncTrigger updateDBInfo;
-	std::vector<Endpoint> updateDBInfoEndpoints;
+	std::set<Endpoint> updateDBInfoEndpoints;
 	std::set<Endpoint> removedDBInfoEndpoints;
 
 	DBInfo db;
@@ -1732,7 +1732,7 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 	        ? Never()
 	        : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
 	cluster->updateWorkerList.set( worker.locality.processId(), ProcessData(worker.locality, startingClass, worker.stableAddress()) );
-	cluster->updateDBInfoEndpoints.push_back(worker.updateServerDBInfo.getEndpoint());
+	cluster->updateDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
 	cluster->updateDBInfo.trigger();
 	// This switching avoids a race where the worker can be added to id_worker map after the workerAvailabilityWatch fails for the worker.
 	wait(delay(0));
@@ -2395,12 +2395,12 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 
 			// Get status but trap errors to send back to client.
 			vector<WorkerDetails> workers;
-			std::vector<std::pair<NetworkAddress, Standalone<VectorRef<StringRef>>>> workerIssues;
+			std::vector<ProcessIssues> workerIssues;
 
 			for(auto& it : self->id_worker) {
 				workers.push_back(it.second.details);
 				if(it.second.issues.size()) {
-					workerIssues.push_back(std::make_pair(it.second.details.interf.address(), it.second.issues));
+					workerIssues.push_back(ProcessIssues(it.second.details.interf.address(), it.second.issues));
 				}
 			}
 
@@ -3032,30 +3032,24 @@ ACTOR Future<Void> dbInfoUpdater( ClusterControllerData* self ) {
 			when(wait(dbInfoChange)) {}
 		}
 		
+		UpdateServerDBInfoRequest req;
 		if(dbInfoChange.isReady()) {
-			self->updateDBInfoEndpoints.clear();
 			for(auto &it : self->id_worker) {
-				self->updateDBInfoEndpoints.push_back(it.second.details.interf.updateServerDBInfo.getEndpoint());
+				req.broadcastInfo.push_back(it.second.details.interf.updateServerDBInfo.getEndpoint());
 			}
 		} else {
-			uniquify(self->updateDBInfoEndpoints);
-			for(int i = 0; i < self->updateDBInfoEndpoints.size(); i++) {
-				if(self->removedDBInfoEndpoints.count(self->updateDBInfoEndpoints[i])) {
-					self->updateDBInfoEndpoints[i--] = self->updateDBInfoEndpoints.back();
-					self->updateDBInfoEndpoints.pop_back();
-				}
-			}
+			self->updateDBInfoEndpoints.erase(self->removedDBInfoEndpoints.begin(), self->removedDBInfoEndpoints.end());
+			req.broadcastInfo = std::vector<Endpoint>(self->updateDBInfoEndpoints.begin(), self->updateDBInfoEndpoints.end());
 		}
 
+		self->updateDBInfoEndpoints.clear();
 		self->removedDBInfoEndpoints.clear();
+		
 		dbInfoChange = self->db.serverInfo->onChange();
 		updateDBInfo = self->updateDBInfo.onTrigger();
 
-		UpdateServerDBInfoRequest req;
 		req.serializedDbInfo = BinaryWriter::toValue(self->db.serverInfo->get(), AssumeVersion(currentProtocolVersion));
-		req.broadcastInfo = self->updateDBInfoEndpoints;
 
-		self->updateDBInfoEndpoints.clear();
 		TraceEvent("DBInfoStartBroadcast", self->id);
 		choose {
 			when(std::vector<Endpoint> notUpdated = wait( broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, Optional<Endpoint>(), false) )) {
@@ -3063,7 +3057,7 @@ ACTOR Future<Void> dbInfoUpdater( ClusterControllerData* self ) {
 				for(auto &it : notUpdated) {
 					TraceEvent("DBInfoNotUpdated", self->id).detail("Addr", it.getPrimaryAddress());
 				}
-				self->updateDBInfoEndpoints.insert(self->updateDBInfoEndpoints.end(), notUpdated.begin(), notUpdated.end());
+				self->updateDBInfoEndpoints.insert(notUpdated.begin(), notUpdated.end());
 				if(notUpdated.size()) {
 					self->updateDBInfo.trigger();
 				}
