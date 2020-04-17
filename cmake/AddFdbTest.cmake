@@ -211,7 +211,7 @@ function(create_test_package)
       COMMENT "Package correctness archive"
       )
     add_custom_target(package_tests ALL DEPENDS ${tar_file})
-		add_custom_target(correctness_pkg ALL DEPENDS ${tar_file})
+    add_custom_target(correctness_pkg ALL DEPENDS ${tar_file})
     # seems make needs this dependency while this does nothing with ninja
     add_dependencies(package_tests strip_only_fdbserver TestHarness)
   endif()
