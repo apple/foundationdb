@@ -1361,21 +1361,23 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests,
                                   ProxyStats* stats, Version minKnownCommittedVersion, PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags) {
-	GetReadVersionReply _baseReply = wait(replyFuture);
-	GetReadVersionReply baseReply = _baseReply;
+	GetReadVersionReply _reply = wait(replyFuture);
+	GetReadVersionReply reply = _reply;
+	Version replyVersion = reply.version;
+
 	double end = g_network->timer();
 	for(GetReadVersionRequest const& request : requests) {
 		if(request.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
 			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
 		}
 
-		GetReadVersionReply &reply = baseReply;
 		if (request.flags & GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION) {
 			// Only backup worker may infrequently use this flag.
-			GetReadVersionReply minKcvReply = reply;
-			minKcvReply.version = minKnownCommittedVersion;
-			reply = minKcvReply;
+			reply.version = minKnownCommittedVersion;
 		} 
+		else {
+			reply.version = replyVersion;
+		}
 
 		reply.tagThrottleInfo.clear();
 
