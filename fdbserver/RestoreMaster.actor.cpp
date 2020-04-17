@@ -267,7 +267,9 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 
 	// Build range versions: version of key ranges in range file
 	state KeyRangeMap<Version> rangeVersions(minRangeVersion, allKeys.end);
-	wait(buildRangeVersions(&rangeVersions, &rangeFiles, request.url));
+	if (SERVER_KNOBS->FASTRESTORE_GET_RANGE_VERSIONS_EXPENSIVE) {
+		wait(buildRangeVersions(&rangeVersions, &rangeFiles, request.url));
+	}
 
 	wait(distributeRestoreSysInfo(self, &rangeVersions));
 
@@ -701,6 +703,8 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 	return request.targetVersion;
 }
 
+// By the first and last block of *file to get (beginKey, endKey);
+// set (beginKey, endKey) and file->version to pRangeVersions
 ACTOR static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersions, RestoreFileFR* file,
                                              Reference<IBackupContainer> bc) {
 	TraceEvent("FastRestoreMasterDecodeRangeVersion").detail("File", file->toString());
@@ -747,8 +751,15 @@ ACTOR static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersion
 	return Void();
 }
 
+// Build the version skyline of snapshot ranges by parsing range files;
+// Expensive and slow operation that should not run in real prod.
 ACTOR static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersions,
                                              std::vector<RestoreFileFR>* pRangeFiles, Key url) {
+	if (!g_network->isSimulated()) {
+		TraceEvent(SevError, "ExpensiveBuildRangeVersions")
+		    .detail("Reason", "Parsing all range files is slow and memory intensive");
+		return Void();
+	}
 	Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
 	// Key ranges not in range files are empty;
