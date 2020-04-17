@@ -1872,7 +1872,7 @@ int main(int argc, char* argv[]) {
 			} else { // Call fdbd roles in conventional way
 				ASSERT(opts.connectionFile);
 
-				setupSlowTaskProfiler();
+				setupRunLoopProfiler();
 
 				auto dataFolder = opts.dataFolder;
 				if (!dataFolder.size())
@@ -1898,7 +1898,7 @@ int main(int argc, char* argv[]) {
 			                       opts.localities));
 			g_network->run();
 		} else if (role == ConsistencyCheck) {
-			setupSlowTaskProfiler();
+			setupRunLoopProfiler();
 
 			auto m = startSystemMonitor(opts.dataFolder, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_CONSISTENCY_CHECK, TEST_HERE, 1, opts.testFile,

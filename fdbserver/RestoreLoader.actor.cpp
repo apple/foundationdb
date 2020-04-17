@@ -413,8 +413,9 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	state int kvCount = 0;
 	state int splitMutationIndex = 0;
 	state std::vector<std::pair<UID, RestoreSendVersionedMutationsRequest>> requests;
-	state Version prevVersion = 0; // startVersion
+	state Version msgIndex = 1; // Monotonically increased index for send message, must start at 1
 	state std::vector<UID> applierIDs = getApplierIDs(*pRangeToApplier);
+	state double msgSize = 0; // size of mutations in the message
 
 	TraceEvent("FastRestoreLoaderSendMutationToApplier")
 	    .detail("IsRangeFile", isRangeFile)
@@ -439,11 +440,11 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	// applierMutationsBuffer is the mutation vector to be sent to each applier
 	// applierMutationsSize is buffered mutation vector size for each applier
 	state std::map<UID, MutationsVec> applierMutationsBuffer;
-	state std::map<UID, SubSequenceVec> applierSubsBuffer;
+	state std::map<UID, LogMessageVersionVec> applierVersionsBuffer;
 	state std::map<UID, double> applierMutationsSize;
 	for (auto& applierID : applierIDs) {
 		applierMutationsBuffer[applierID] = MutationsVec();
-		applierSubsBuffer[applierID] = SubSequenceVec();
+		applierVersionsBuffer[applierID] = LogMessageVersionVec();
 		applierMutationsSize[applierID] = 0.0;
 	}
 	for (kvOp = kvOps.begin(); kvOp != kvOps.end(); kvOp++) {
@@ -458,7 +459,6 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				Standalone<VectorRef<UID>> nodeIDs;
 				// Because using a vector of mutations causes overhead, and the range mutation should happen rarely;
 				// We handle the range mutation and key mutation differently for the benefit of avoiding memory copy
-				// WARNING: The splitMutation() may have bugs
 				splitMutation(pRangeToApplier, kvm, mvector.arena(), mvector.contents(), nodeIDs.arena(),
 				              nodeIDs.contents());
 				ASSERT(mvector.size() == nodeIDs.size());
@@ -475,16 +475,15 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				for (splitMutationIndex = 0; splitMutationIndex < mvector.size(); splitMutationIndex++) {
 					MutationRef mutation = mvector[splitMutationIndex];
 					UID applierID = nodeIDs[splitMutationIndex];
-					// printf("SPLITTED MUTATION: %d: mutation:%s applierID:%s\n", splitMutationIndex,
-					// mutation.toString().c_str(), applierID.toString().c_str());
 					if (debugMutation("RestoreLoader", commitVersion.version, mutation)) {
 						TraceEvent("SplittedMutation")
 						    .detail("Version", commitVersion.toString())
 						    .detail("Mutation", mutation.toString());
 					}
 					applierMutationsBuffer[applierID].push_back_deep(applierMutationsBuffer[applierID].arena(), mutation);
-					applierSubsBuffer[applierID].push_back(applierSubsBuffer[applierID].arena(), commitVersion.sub);
+					applierVersionsBuffer[applierID].push_back(applierVersionsBuffer[applierID].arena(), commitVersion);
 					applierMutationsSize[applierID] += mutation.expectedSize();
+					msgSize += mutation.expectedSize();
 
 					kvCount++;
 				}
@@ -502,8 +501,9 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 					    .detail("Mutation", kvm.toString());
 				}
 				applierMutationsBuffer[applierID].push_back_deep(applierMutationsBuffer[applierID].arena(), kvm);
-				applierSubsBuffer[applierID].push_back(applierSubsBuffer[applierID].arena(), commitVersion.sub);
+				applierVersionsBuffer[applierID].push_back(applierVersionsBuffer[applierID].arena(), commitVersion);
 				applierMutationsSize[applierID] += kvm.expectedSize();
+				msgSize += kvm.expectedSize();
 			}
 		} // Mutations at the same LogMessageVersion
 
@@ -511,26 +511,27 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 		// changing the version comparison below.
 		auto next = std::next(kvOp, 1);
 		if (next == kvOps.end() || commitVersion.version < next->first.version) {
+			// if (next == kvOps.end() || msgSize >= SERVER_KNOBS->FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES) {
 			// TODO: Sanity check each asset has been received exactly once!
 			// Send the mutations to appliers for each version
 			for (const UID& applierID : applierIDs) {
-				requests.emplace_back(applierID, RestoreSendVersionedMutationsRequest(
-				                                     batchIndex, asset, prevVersion, commitVersion.version, isRangeFile,
-				                                     applierMutationsBuffer[applierID], applierSubsBuffer[applierID]));
+				requests.emplace_back(applierID,
+				                      RestoreSendVersionedMutationsRequest(batchIndex, asset, msgIndex, isRangeFile,
+				                                                           applierMutationsBuffer[applierID],
+				                                                           applierVersionsBuffer[applierID]));
 			}
 			TraceEvent(SevDebug, "FastRestoreLoaderSendMutationToApplier")
-			    .detail("PrevVersion", prevVersion)
-			    .detail("CommitVersion", commitVersion.toString())
+			    .detail("MessageIndex", msgIndex)
 			    .detail("RestoreAsset", asset.toString())
 			    .detail("Requests", requests.size());
-			ASSERT(prevVersion < commitVersion.version);
-			prevVersion = commitVersion.version;
 			wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
 			                       TaskPriority::RestoreLoaderSendMutations));
+			msgIndex++;
+			msgSize = 0;
 			requests.clear();
 			for (auto& applierID : applierIDs) {
 				applierMutationsBuffer[applierID] = MutationsVec();
-				applierSubsBuffer[applierID] = SubSequenceVec();
+				applierVersionsBuffer[applierID] = LogMessageVersionVec();
 				applierMutationsSize[applierID] = 0.0;
 			}
 		}
@@ -540,7 +541,6 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	return Void();
 }
 
-// TODO: Add a unit test for this function
 void splitMutation(std::map<Key, UID>* pRangeToApplier, MutationRef m, Arena& mvector_arena,
                    VectorRef<MutationRef>& mvector, Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs) {
 	TraceEvent(SevWarn, "FastRestoreSplitMutation").detail("Mutation", m.toString());
