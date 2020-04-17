@@ -61,7 +61,7 @@ struct NetworkOptions {
 	std::string traceFileIdentifier;
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
-	bool slowTaskProfilingEnabled;
+	bool runLoopProfilingEnabled;
 
 	NetworkOptions();
 };

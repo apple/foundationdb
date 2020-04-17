@@ -211,7 +211,8 @@ public:
 	double READ_TAG_SAMPLE_RATE; // Communicated to clients from cluster
 	double TAG_THROTTLE_SMOOTHING_WINDOW;
 
-	ClientKnobs(bool randomize = false);
+	ClientKnobs();
+	void initialize(bool randomize = false);
 };
 
 extern ClientKnobs const* CLIENT_KNOBS;

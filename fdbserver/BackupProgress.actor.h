@@ -81,7 +81,8 @@ private:
 	// For each tag in progress, the saved version is smaller than endVersion - 1,
 	// add {tag, savedVersion+1} to tagVersions and remove the tag from "tags".
 	void updateTagVersions(std::map<Tag, Version>* tagVersions, std::set<Tag>* tags,
-	                       const std::map<Tag, Version>& progress, Version endVersion, LogEpoch epoch);
+	                       const std::map<Tag, Version>& progress, Version endVersion, Version adjustedBeginVersion,
+	                       LogEpoch epoch);
 
 	const UID dbgid;
 

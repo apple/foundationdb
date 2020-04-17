@@ -257,7 +257,10 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 		versionBatches.push_back(vb.second);
 	}
 
-	if (g_network->isSimulated() && deterministicRandom()->random01() < 0.5) {
+	// releaseVBOutOfOrder can only be true in simulation
+	state bool releaseVBOutOfOrder = g_network->isSimulated() ? deterministicRandom()->random01() < 0.5 : false;
+	ASSERT(g_network->isSimulated() || !releaseVBOutOfOrder);
+	if (releaseVBOutOfOrder) {
 		// Randomize invoking order of version batches
 		int permTimes = deterministicRandom()->randomInt(0, 100);
 		while (permTimes-- > 0) {
@@ -268,7 +271,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	actors.add(monitorFinishedVersion(self, request));
 	state std::vector<VersionBatch>::iterator versionBatch = versionBatches.begin();
 	for (; versionBatch != versionBatches.end(); versionBatch++) {
-		while (self->runningVersionBatches.get() >= SERVER_KNOBS->FASTRESTORE_VB_PARALLELISM) {
+		while (self->runningVersionBatches.get() >= SERVER_KNOBS->FASTRESTORE_VB_PARALLELISM && !releaseVBOutOfOrder) {
 			// Control how many batches can be processed in parallel. Avoid dead lock due to OOM on loaders
 			TraceEvent("FastRestoreMasterDispatchVersionBatches")
 			    .detail("WaitOnRunningVersionBatches", self->runningVersionBatches.get());
@@ -319,6 +322,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 
 	int paramIdx = 0;
 	for (auto& file : *files) {
+		// TODO: Allow empty files in version batch; Filter out them here.
 		if (loader == loadersInterf.end()) {
 			loader = loadersInterf.begin();
 		}
@@ -512,13 +516,19 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 	ASSERT(batchData->samplesSize >= 0);
 	int numAppliers = appliersInterf.size();
 	double slotSize = std::max(batchData->samplesSize / numAppliers, 1.0);
-	std::set<Key> keyrangeSplitter; // unique key to split key range for appliers
-	keyrangeSplitter.insert(normalKeys.begin); // First slot
 	double cumulativeSize = slotSize;
 	TraceEvent("FastRestoreMasterPhaseCalculateApplierKeyRangesStart")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("SamplingSize", batchData->samplesSize)
 	    .detail("SlotSize", slotSize);
+
+	std::set<Key> keyrangeSplitter; // unique key to split key range for appliers
+	keyrangeSplitter.insert(normalKeys.begin); // First slot
+	TraceEvent("FastRestoreMasterPhaseCalculateApplierKeyRanges")
+	    .detail("BatchIndex", batchIndex)
+	    .detail("CumulativeSize", cumulativeSize)
+	    .detail("Slot", 0)
+	    .detail("LowerBoundKey", normalKeys.begin);
 	int slotIdx = 1;
 	while (cumulativeSize < batchData->samplesSize) {
 		IndexedSet<Key, int64_t>::iterator lowerBound = batchData->samples.index(cumulativeSize);
@@ -607,8 +617,7 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* rangeFiles,
                                                 std::vector<RestoreFileFR>* logFiles, Database cx,
                                                 RestoreRequest request) {
-	state bool partitioned = wait(bc->isPartitionedBackup());
-	state BackupDescription desc = wait(partitioned ? bc->describePartitionedBackup() : bc->describeBackup());
+	state BackupDescription desc = wait(bc->describeBackup());
 
 	// Convert version to real time for operators to read the BackupDescription desc.
 	wait(desc.resolveVersionTimes(cx));
@@ -624,8 +633,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 		std::cout << "Restore to version: " << request.targetVersion << "\nBackupDesc: \n" << desc.toString() << "\n\n";
 	}
 
-	Optional<RestorableFileSet> restorable = wait(partitioned ? bc->getPartitionedRestoreSet(request.targetVersion)
-	                                                          : bc->getRestoreSet(request.targetVersion));
+	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(request.targetVersion));
 
 	if (!restorable.present()) {
 		TraceEvent(SevWarn, "FastRestoreMasterPhaseCollectBackupFiles").detail("NotRestorable", request.targetVersion);
@@ -774,11 +782,13 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 // Notify loaders that all data in the version batch has been applied to DB.
 ACTOR static Future<Void> notifyLoadersVersionBatchFinished(std::map<UID, RestoreLoaderInterface> loadersInterf,
                                                             int batchIndex) {
+	TraceEvent("FastRestoreMasterPhaseNotifyLoadersVersionBatchFinishedStart").detail("BatchIndex", batchIndex);
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requestsToLoaders;
 	for (auto& loader : loadersInterf) {
 		requestsToLoaders.emplace_back(loader.first, RestoreVersionBatchRequest(batchIndex));
 	}
 	wait(sendBatchRequests(&RestoreLoaderInterface::finishVersionBatch, loadersInterf, requestsToLoaders));
+	TraceEvent("FastRestoreMasterPhaseNotifyLoadersVersionBatchFinishedDone").detail("BatchIndex", batchIndex);
 
 	return Void();
 }
