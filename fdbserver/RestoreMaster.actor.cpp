@@ -269,6 +269,17 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	state KeyRangeMap<Version> rangeVersions(minRangeVersion, allKeys.end);
 	if (SERVER_KNOBS->FASTRESTORE_GET_RANGE_VERSIONS_EXPENSIVE) {
 		wait(buildRangeVersions(&rangeVersions, &rangeFiles, request.url));
+	} else {
+		// Debug purpose, dump range versions
+		auto ranges = rangeVersions.ranges();
+		int i = 0;
+		for (auto r = ranges.begin(); r != ranges.end(); ++r) {
+			TraceEvent(SevDebug, "SingleRangeVersion")
+			    .detail("RangeIndex", i++)
+			    .detail("RangeBegin", r->begin())
+			    .detail("RangeEnd", r->end())
+			    .detail("RangeVersion", r->value());
+		}
 	}
 
 	wait(distributeRestoreSysInfo(self, &rangeVersions));

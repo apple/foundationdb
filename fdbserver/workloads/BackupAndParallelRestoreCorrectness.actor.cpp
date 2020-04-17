@@ -463,9 +463,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				TraceEvent("BAFRW_Restore", randomID)
 				    .detail("LastBackupContainer", lastBackupContainer->getURL())
-				    .detail("MinRestorableVersion", desc.minRestorableVersion.get())
-				    .detail("MaxRestorableVersion", desc.maxRestorableVersion.get())
-				    .detail("ContiguousLogEnd", desc.contiguousLogEnd.get())
+				    .detail("MinRestorableVersion",
+				            desc.minRestorableVersion.present() ? desc.minRestorableVersion.get() : -1)
+				    .detail("MaxRestorableVersion",
+				            desc.maxRestorableVersion.present() ? desc.maxRestorableVersion.get() : -1)
+				    .detail("ContiguousLogEnd", desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : -1)
 				    .detail("TargetVersion", targetVersion);
 
 				state std::vector<Future<Version>> restores;
