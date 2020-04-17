@@ -3038,7 +3038,9 @@ ACTOR Future<Void> dbInfoUpdater( ClusterControllerData* self ) {
 				req.broadcastInfo.push_back(it.second.details.interf.updateServerDBInfo.getEndpoint());
 			}
 		} else {
-			self->updateDBInfoEndpoints.erase(self->removedDBInfoEndpoints.begin(), self->removedDBInfoEndpoints.end());
+			for(auto it : self->removedDBInfoEndpoints) {
+				self->updateDBInfoEndpoints.erase(it);
+			}
 			req.broadcastInfo = std::vector<Endpoint>(self->updateDBInfoEndpoints.begin(), self->updateDBInfoEndpoints.end());
 		}
 
@@ -3057,8 +3059,8 @@ ACTOR Future<Void> dbInfoUpdater( ClusterControllerData* self ) {
 				for(auto &it : notUpdated) {
 					TraceEvent("DBInfoNotUpdated", self->id).detail("Addr", it.getPrimaryAddress());
 				}
-				self->updateDBInfoEndpoints.insert(notUpdated.begin(), notUpdated.end());
 				if(notUpdated.size()) {
+					self->updateDBInfoEndpoints.insert(notUpdated.begin(), notUpdated.end());
 					self->updateDBInfo.trigger();
 				}
 			}
