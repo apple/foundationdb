@@ -38,8 +38,8 @@
 
 ACTOR static Future<Void> clearDB(Database cx);
 ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* rangeFiles,
-                                                std::vector<RestoreFileFR>* logFiles, Database cx,
-                                                RestoreRequest request);
+                                                std::vector<RestoreFileFR>* logFiles, Version* minRangeVersion,
+                                                Database cx, RestoreRequest request);
 ACTOR static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersions,
                                              std::vector<RestoreFileFR>* pRangeFiles, Key url);
 
@@ -249,13 +249,14 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	state std::vector<RestoreFileFR> rangeFiles;
 	state std::vector<RestoreFileFR> logFiles;
 	state std::vector<RestoreFileFR> allFiles;
-	state KeyRangeMap<Version> rangeVersions(MAX_VERSION, allKeys.end);
+	state Version minRangeVersion = MAX_VERSION;
 	state ActorCollection actors(false);
 
 	self->initBackupContainer(request.url);
 
 	// Get all backup files' description and save them to files
-	state Version targetVersion = wait(collectBackupFiles(self->bc, &rangeFiles, &logFiles, cx, request));
+	state Version targetVersion =
+	    wait(collectBackupFiles(self->bc, &rangeFiles, &logFiles, &minRangeVersion, cx, request));
 	ASSERT(targetVersion > 0);
 
 	std::sort(rangeFiles.begin(), rangeFiles.end());
@@ -265,6 +266,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	});
 
 	// Build range versions: version of key ranges in range file
+	state KeyRangeMap<Version> rangeVersions(minRangeVersion, allKeys.end);
 	wait(buildRangeVersions(&rangeVersions, &rangeFiles, request.url));
 
 	wait(distributeRestoreSysInfo(self, &rangeVersions));
@@ -637,8 +639,8 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 // Collect the backup files' description into output_files by reading the backupContainer bc.
 // Returns the restore target version.
 ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, std::vector<RestoreFileFR>* rangeFiles,
-                                                std::vector<RestoreFileFR>* logFiles, Database cx,
-                                                RestoreRequest request) {
+                                                std::vector<RestoreFileFR>* logFiles, Version* minRangeVersion,
+                                                Database cx, RestoreRequest request) {
 	state BackupDescription desc = wait(bc->describeBackup());
 
 	// Convert version to real time for operators to read the BackupDescription desc.
@@ -667,6 +669,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 
 	std::set<RestoreFileFR> uniqueRangeFiles;
 	std::set<RestoreFileFR> uniqueLogFiles;
+	*minRangeVersion = MAX_VERSION;
 	for (const RangeFile& f : restorable.get().ranges) {
 		TraceEvent("FastRestoreMasterPhaseCollectBackupFiles").detail("RangeFile", f.toString());
 		if (f.fileSize <= 0) {
@@ -675,6 +678,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 		RestoreFileFR file(f);
 		TraceEvent("FastRestoreMasterPhaseCollectBackupFiles").detail("RangeFileFR", file.toString());
 		uniqueRangeFiles.insert(file);
+		*minRangeVersion = std::min(*minRangeVersion, file.version);
 	}
 	for (const LogFile& f : restorable.get().logs) {
 		TraceEvent("FastRestoreMasterPhaseCollectBackupFiles").detail("LogFile", f.toString());
@@ -700,11 +704,12 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 ACTOR static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersions, RestoreFileFR* file,
                                              Reference<IBackupContainer> bc) {
 	TraceEvent("FastRestoreMasterDecodeRangeVersion").detail("File", file->toString());
-	Reference<IAsyncFile> inFile = wait(bc->readFile(file->fileName));
+	state Reference<IAsyncFile> inFile = wait(bc->readFile(file->fileName));
 	state bool beginKeySet = false;
-	Key beginKey;
-	Key endKey;
-	for (int64_t j = 0; j < file->fileSize; j += file->blockSize) {
+	state Key beginKey;
+	state Key endKey;
+	state int64_t j = 0;
+	for (; j < file->fileSize; j += file->blockSize) {
 		int64_t len = std::min<int64_t>(file->blockSize, file->fileSize - j);
 		Standalone<VectorRef<KeyValueRef>> blockData = wait(parallelFileRestore::decodeRangeFileBlock(inFile, j, len));
 		if (!beginKeySet) {
@@ -718,8 +723,7 @@ ACTOR static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersion
 	TraceEvent("FastRestoreMasterInsertRangeVersion")
 	    .detail("DecodedRangeFile", file->fileName)
 	    .detail("KeyRange", fileRange)
-	    .detail("Version", file->version)
-	    .detail("DataSize", blockData.contents().size());
+	    .detail("Version", file->version);
 	// Update version for pRangeVersions's ranges in fileRange
 	auto ranges = pRangeVersions->modify(fileRange);
 	for (auto r = ranges.begin(); r != ranges.end(); ++r) {
