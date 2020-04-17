@@ -178,7 +178,7 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 // into "kvOpsIter" and samples into "samplesIter".
 ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
     KeyRangeMap<Version>* pRangeVersions, NotifiedVersion* processedFileOffset,
-    std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
+    std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter, LoaderCounters* cc,
     std::map<LoadingParam, MutationsVec>::iterator samplesIter, Reference<IBackupContainer> bc, RestoreAsset asset) {
 	state Standalone<StringRef> buf = makeString(asset.len);
 	state Reference<IAsyncFile> file = wait(bc->readFile(asset.filename));
@@ -225,6 +225,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 
 			// Skip mutation whose commitVesion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, msgVersion.version)) {
+				cc->oldLogMutations++;
 				continue;
 			}
 
@@ -302,8 +303,9 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions, Lo
 		} else {
 			// TODO: Sanity check the log file's range is overlapped with the restored version range
 			if (param.isPartitionedLog()) {
-				fileParserFutures.push_back(_parsePartitionedLogFileOnLoader(
-				    pRangeVersions, &processedFileOffset, kvOpsPerLPIter, samplesIter, bc, subAsset));
+				fileParserFutures.push_back(_parsePartitionedLogFileOnLoader(pRangeVersions, &processedFileOffset,
+				                                                             kvOpsPerLPIter, samplesIter,
+				                                                             &batchData->counters, bc, subAsset));
 			} else {
 				fileParserFutures.push_back(_parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap,
 				                                                             &mutationPartMap, bc, subAsset));
@@ -753,6 +755,7 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 			// Should this mutation be skipped?
 			// Skip mutation whose commitVesion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, commitVersion)) {
+				cc->oldLogMutations++;
 				continue;
 			}
 

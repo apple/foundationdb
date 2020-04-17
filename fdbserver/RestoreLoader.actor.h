@@ -82,11 +82,13 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 		CounterCollection cc;
 		Counter loadedRangeBytes, loadedLogBytes, sentBytes;
 		Counter sampledRangeBytes, sampledLogBytes;
+		Counter oldLogMutations;
 
 		Counters(LoaderBatchData* self, UID loaderInterfID, int batchIndex)
 		  : cc("LoaderBatch", loaderInterfID.toString() + ":" + std::to_string(batchIndex)),
 		    loadedRangeBytes("LoadedRangeBytes", cc), loadedLogBytes("LoadedLogBytes", cc), sentBytes("SentBytes", cc),
-		    sampledRangeBytes("SampledRangeBytes", cc), sampledLogBytes("SampledLogBytes", cc) {}
+		    sampledRangeBytes("SampledRangeBytes", cc), sampledLogBytes("SampledLogBytes", cc),
+		    oldLogMutations("OldLogMutations", cc) {}
 	} counters;
 
 	explicit LoaderBatchData(UID nodeID, int batchIndex) : counters(this, nodeID, batchIndex), vbState(LoaderVersionBatchState::NOT_INIT) {
