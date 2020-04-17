@@ -421,26 +421,11 @@ struct StorageServerMetrics {
 		int64_t shardReadBandwidth = bytesReadSample.getEstimate(shard);
 		if (shardReadBandwidth * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS <=
 		    minShardReadBandwidthPerKSeconds) {
-			// TraceEvent("RHDLogSmallShardReturned")
-			//     .detail("ShardStart", shard.begin.printable().c_str())
-			//     .detail("ShardEnd", shard.end.printable().c_str())
-			//     .detail("ShardSize", shardSize)
-			//     .detail("RawReadBandwidth", shardReadBandwidth)
-			//     .detail("ReadBandWith",
-			//             shardReadBandwidth * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS)
-			//     .detail("ReadBandwithThreshold", minShardReadBandwidthPerKSeconds);
 			return toReturn;
 		}
 		if (shardSize <= chunkSize) {
 			// Shard is small, use it as is
 			if (bytesReadSample.getEstimate(shard) / shardSize > readDensityRatio) {
-				// TraceEvent("RHDLogSmallShardReturned")
-				//     .detail("ShardStart", shard.begin.printable().c_str())
-				//     .detail("ShardEnd", shard.end.printable().c_str())
-				//     .detail("ShardSize", shardSize)
-				//     .detail("ReadBandWith", bytesReadSample.getEstimate(shard))
-				//     .detail("Ratio", bytesReadSample.getEstimate(shard) / shardSize)
-				//     .detail("RatioThrethold", readDensityRatio);
 				toReturn.push_back(shard);
 			}
 			return toReturn;
@@ -448,11 +433,7 @@ struct StorageServerMetrics {
 		KeyRef beginKey = shard.begin;
 		IndexedSet<Key, int64_t>::iterator endKey =
 		    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
-		// printf("++++++++++++ Processing shard (%s, %s)\n", shard.begin.printable().c_str(),
-		// shard.end.printable().c_str());
 		while (endKey != byteSample.sample.end()) {
-			// printf("+++++++++++++ Looking at range (%s, %s)\n",beginKey.printable().c_str(),
-			// (*endKey).printable().c_str());
 			if (*endKey > shard.end) endKey = byteSample.sample.lower_bound(shard.end);
 			if (*endKey == beginKey) {
 				chunkSize += baseChunkSize;
@@ -460,9 +441,6 @@ struct StorageServerMetrics {
 				                                 chunkSize);
 				continue;
 			}
-			// printf("+++++++++++++ This range has size %d and read sample size %d\n",
-			// byteSample.getEstimate(KeyRangeRef(beginKey, *endKey)), bytesReadSample.getEstimate(KeyRangeRef(beginKey,
-			// *endKey)));
 			if (bytesReadSample.getEstimate(KeyRangeRef(beginKey, *endKey)) / chunkSize > readDensityRatio) {
 				auto range = KeyRangeRef(beginKey, *endKey);
 				if (!toReturn.empty() && toReturn.back().end == range.begin) {
@@ -471,19 +449,7 @@ struct StorageServerMetrics {
 					                *endKey); // in case two consecutive chunks both are over the ratio, merge them.
 					toReturn.pop_back();
 					toReturn.push_back(updatedTail);
-					// TraceEvent("RHDLogRangeReturned")
-					//     .detail("ShardStart", range.begin.printable().c_str())
-					//     .detail("ShardEnd", range.end.printable().c_str())
-					//     .detail("ReadBandWith", bytesReadSample.getEstimate(range))
-					//     .detail("Ratio", bytesReadSample.getEstimate(range) / chunkSize)
-					//     .detail("RatioThrethold", readDensityRatio);
 				} else {
-					// TraceEvent("RHDLogRangeReturned")
-					//     .detail("ShardStart", range.begin.printable().c_str())
-					//     .detail("ShardEnd", range.end.printable().c_str())
-					//     .detail("ReadBandWith", bytesReadSample.getEstimate(range))
-					//     .detail("Ratio", bytesReadSample.getEstimate(range) / chunkSize)
-					//     .detail("RatioThrethold", readDensityRatio);
 					toReturn.push_back(range);
 				}
 			}
@@ -492,10 +458,6 @@ struct StorageServerMetrics {
 			endKey =
 			    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
 		}
-		// printf("Hot range vector contains [%d] ranges.\n", toReturn.size());
-		// for (auto i = toReturn.begin(); i < toReturn.end(); i++) {
-		// printf("Range [%s, %s) is a read dense range.\n", i->begin.printable().c_str(), i->end.printable().c_str());
-		// }
 		return toReturn;
 	}
 
