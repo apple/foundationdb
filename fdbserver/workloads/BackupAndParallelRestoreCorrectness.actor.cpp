@@ -442,6 +442,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
 				BackupDescription desc = wait(container->describeBackup());
 				ASSERT(self->usePartitionedLogs == desc.partitioned);
+				ASSERT(desc.minRestorableVersion.present()); // We must have a valid backup now.
 
 				state Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {
