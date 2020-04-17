@@ -22,6 +22,8 @@
 #define FLOW_THREADPRIMITIVES_H
 #pragma once
 
+#include <atomic>
+
 #include "flow/Error.h"
 #include "flow/Trace.h"
 
@@ -45,7 +47,7 @@
 class ThreadSpinLock {
 public:
 // #ifdef _WIN32
-	ThreadSpinLock(bool initiallyLocked=false) : isLocked(initiallyLocked) {
+	ThreadSpinLock() {
 #if VALGRIND
 		ANNOTATE_RWLOCK_CREATE(this);
 #endif
@@ -56,31 +58,21 @@ public:
 #endif
 	}
 	void enter() {
-		while (interlockedCompareExchange(&isLocked, 1, 0) == 1)
-			_mm_pause();
+		while (isLocked.test_and_set(std::memory_order_acquire)) _mm_pause();
 #if VALGRIND
 		ANNOTATE_RWLOCK_ACQUIRED(this, true);
 #endif
 	}
 	void leave() {
-#if defined(__linux__)
-	__sync_synchronize();
-#endif
-		isLocked = 0;
-#if defined(__linux__)
-	__sync_synchronize();
-#endif
+		isLocked.clear(std::memory_order_release);
 #if VALGRIND
 		ANNOTATE_RWLOCK_RELEASED(this, true);
 #endif
 	}
-	void assertNotEntered() {
-		ASSERT( !isLocked );
-	}
 private:
 	ThreadSpinLock(const ThreadSpinLock&);
 	void operator=(const ThreadSpinLock&);
-	volatile int32_t isLocked;
+	std::atomic_flag isLocked = ATOMIC_FLAG_INIT;
 };
 
 class ThreadSpinLockHolder {

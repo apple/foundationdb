@@ -208,8 +208,6 @@ public:
 
 	ThreadSingleAssignmentVarBase() : status(Unset), callback(NULL), valueReferenceCount(0) {} //, referenceCount(1) {}
 	~ThreadSingleAssignmentVarBase() { 
-		this->mutex.assertNotEntered(); 
-
 		if(callback)
 			callback->destroy();
 	}
