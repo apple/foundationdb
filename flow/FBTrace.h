@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,18 +22,27 @@
 
 #include "flow/FastRef.h"
 #include "flow/ObjectSerializer.h"
+#include <cstddef>
 #include <type_traits>
+
+namespace ChunkAllocator {
+	constexpr size_t MAX_CHUNK_SIZE = 1 << 20;
+	void* allocate(size_t sz);
+	void free(void* ptr);
+};
 
 class FBTraceImpl : public ReferenceCounted<FBTraceImpl> {
 protected:
 	virtual void write(ObjectWriter& writer) = 0;
 public:
 	virtual ~FBTraceImpl();
+	static void* operator new(std::size_t sz);
+	static void operator delete(void* ptr);
 };
 
 template <class T>
 class FDBTrace : public FBTraceImpl {
-	protected:
+protected:
 	void write(ObjectWriter& writer) override {
 		writer.serialize(*static_cast<T*>(this));
 	}

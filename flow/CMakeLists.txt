@@ -21,6 +21,7 @@ set(FLOW_SRCS
   FaultInjection.cpp
   FaultInjection.h
   FBTrace.h
+  FBTrace.cpp
   FileTraceLogWriter.cpp
   FileTraceLogWriter.h
   Hash3.c
