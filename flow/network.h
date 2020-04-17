@@ -506,6 +506,10 @@ public:
 	virtual void initTLS() {}
 	// TLS must be initialized before using the network
 
+	virtual Future<Void> onShutdown() = 0;
+	// Promise that gets set during shutdown - actors that wait on this are not allowed to wait again
+	// afterwards. This can be used for general cleanup
+
 	virtual const TLSConfig& getTLSConfig() = 0;
 	// Return the TLS Configuration
 

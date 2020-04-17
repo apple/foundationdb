@@ -70,7 +70,7 @@ set(FLOW_SRCS
   crc32c.cpp
   error_definitions.h
   ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h
-  flat_buffers.cpp
+  flat_buffers.actor.cpp
   flat_buffers.h
   flow.cpp
   flow.h

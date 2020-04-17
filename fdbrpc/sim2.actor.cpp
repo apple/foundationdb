@@ -1003,6 +1003,7 @@ public:
 		Future<Void> loopFuture = runLoop(this);
 		net2->run();
 	}
+	virtual Future<Void> onShutdown() { return net2->onShutdown(); }
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
 	                                const char* coordinationFolder) {

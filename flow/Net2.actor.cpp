@@ -158,6 +158,7 @@ public:
 	std::vector<flowGlobalType>		globals;
 
 	virtual const TLSConfig& getTLSConfig() { return tlsConfig; }
+	virtual Future<Void> onShutdown() { return shutdownPromise.getFuture(); }
 
 	bool useThreadPool;
 //private:
@@ -187,6 +188,7 @@ public:
 
 	std::priority_queue<OrderedTask, std::vector<OrderedTask>> ready;
 	ThreadSafeQueue<OrderedTask> threadReady;
+	Promise<Void> shutdownPromise;
 
 	struct DelayedTask : OrderedTask {
 		double at;
@@ -201,6 +203,7 @@ public:
 	void trackAtPriority( TaskPriority priority, double now );
 	void stopImmediately() {
 		stopped=true; decltype(ready) _1; ready.swap(_1); decltype(timers) _2; timers.swap(_2);
+		shutdownPromise.send(Void());
 	}
 
 	Future<Void> timeOffsetLogger;

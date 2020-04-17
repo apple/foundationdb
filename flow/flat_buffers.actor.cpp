@@ -28,17 +28,39 @@
 #include <iomanip>
 #include <variant>
 
+#include "flow/actorcompiler.h" // has to be last insert
+
 namespace detail {
 
-namespace {
-std::vector<int> mWriteToOffsetsMemoy;
+ACTOR template <class T>
+void destroyOnShutdown(T* obj) {
+	wait(g_network->onShutdown());
+	delete obj;
 }
 
-std::vector<int>* writeToOffsetsMemory = &mWriteToOffsetsMemoy;
+std::vector<int>* writeToOffsetsMemory() {
+	static std::vector<int>* result;
+	if (result == nullptr) {
+		result = new std::vector<int>{};
+		destroyOnShutdown(result);
+	}
+	return result;
+}
 
-VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlignments) {
+VTableSet* createVTableSet(std::vector<std::pair<const VTable*, int>>&& offsets, std::vector<uint8_t>&& packed_tables) {
+	auto res = new VTableSet{ std::move(offsets), std::move(packed_tables) };
+	destroyOnShutdown(res);
+	return res;
+}
+
+VTable* generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlignments) {
+	static VTable* noMemberVTable = nullptr;
 	if (numMembers == 0) {
-		return VTable{ 4, 4 };
+		if (noMemberVTable == nullptr) {
+			noMemberVTable = new VTable{ 4, 4 };
+			destroyOnShutdown(noMemberVTable);
+		}
+		return noMemberVTable;
 	}
 	// first is index, second is size
 	std::vector<std::pair<unsigned, unsigned>> indexed;
@@ -52,22 +74,23 @@ VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlig
 	                 [](const std::pair<unsigned, unsigned>& lhs, const std::pair<unsigned, unsigned>& rhs) {
 		                 return lhs.second > rhs.second;
 	                 });
-	VTable result;
-	result.resize(numMembers + 2);
+	VTable* result = new VTable{};
+	destroyOnShutdown(result);
+	result->resize(numMembers + 2);
 	// size of the vtable is
 	// - 2 bytes per member +
 	// - 2 bytes for the size entry +
 	// - 2 bytes for the size of the object
-	result[0] = 2 * numMembers + 4;
+	(*result)[0] = 2 * numMembers + 4;
 	int offset = 0;
 	for (auto p : indexed) {
 		auto align = sizesAlignments[numMembers + p.first];
-		auto& res = result[p.first + 2];
+		auto& res = (*result)[p.first + 2];
 		res = offset % align == 0 ? offset : ((offset / align) + 1) * align;
 		offset = res + p.second;
 		res += 4;
 	}
-	result[1] = offset + 4;
+	(*result)[1] = offset + 4;
 	return result;
 }
 

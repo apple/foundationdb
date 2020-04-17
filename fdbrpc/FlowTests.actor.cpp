@@ -249,6 +249,7 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}
+	virtual Future<Void> onShutdown() { return baseNetwork->onShutdown(); }
 };
 
 struct NonserializableThing {};

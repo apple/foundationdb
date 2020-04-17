@@ -348,15 +348,15 @@ struct _SizeOf {
 	static constexpr unsigned int align = fb_align<T>;
 };
 
-extern std::vector<int>* writeToOffsetsMemory;
+extern std::vector<int>* writeToOffsetsMemory();
 
 template <class Context>
 struct PrecomputeSize : Context {
 	PrecomputeSize(const Context& context) : Context(context) {
-		writeToOffsets.swap(*writeToOffsetsMemory);
+		writeToOffsets.swap(*writeToOffsetsMemory());
 		writeToOffsets.clear();
 	}
-	~PrecomputeSize() { writeToOffsets.swap(*writeToOffsetsMemory); }
+	~PrecomputeSize() { writeToOffsets.swap(*writeToOffsetsMemory()); }
 	// |offset| is measured from the end of the buffer. Precondition: len <=
 	// offset.
 	void write(const void*, int offset, int /*len*/) { current_buffer_size = std::max(current_buffer_size, offset); }
@@ -492,13 +492,13 @@ using Fields = decltype(fields_helper<Member>());
 
 // First |numMembers| elements of sizesAndAlignments are sizes, the second
 // |numMembers| elements are alignments.
-extern VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAndAlignments);
+extern VTable* generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAndAlignments);
 
 template <unsigned... MembersAndAlignments>
 const VTable* gen_vtable3() {
-	static VTable table =
+	static VTable* table =
 	    generate_vtable(sizeof...(MembersAndAlignments) / 2, std::vector<unsigned>{ MembersAndAlignments... });
-	return &table;
+	return table;
 }
 
 template <class... Members>
@@ -596,8 +596,10 @@ int vec_bytes(const T& begin, const T& end) {
 	return sizeof(typename T::value_type) * (end - begin);
 }
 
+VTableSet* createVTableSet(std::vector<std::pair<const VTable*, int>>&& offsets, std::vector<uint8_t>&& packed_tables);
+
 template <class Root, class Context>
-VTableSet get_vtableset_impl(const Root& root, const Context& context) {
+VTableSet* get_vtableset_impl(const Root& root, const Context& context) {
 	std::set<const VTable*> vtables;
 	InsertVTableLambda<Context> vlambda{ context, vtables };
 	if constexpr (serializable_traits<Root>::value) {
@@ -619,13 +621,13 @@ VTableSet get_vtableset_impl(const Root& root, const Context& context) {
 		offsets.push_back({ vtable, i });
 		i += vec_bytes(vtable->begin(), vtable->end());
 	}
-	return VTableSet{ offsets, packed_tables };
+	return createVTableSet(std::move(offsets), std::move(packed_tables));
 }
 
 template <class Root, class Context>
 const VTableSet* get_vtableset(const Root& root, const Context& context) {
-	static VTableSet result = get_vtableset_impl(root, context);
-	return &result;
+	static VTableSet* result = get_vtableset_impl(root, context);
+	return result;
 }
 
 constexpr static std::array<uint8_t, 8> zeros{};
