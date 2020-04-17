@@ -460,7 +460,7 @@ public:
 			  : tag(tag), count(count), fractionalBusyness((double)count/totalCount), elapsed(elapsed) {}
 		};
 
-		TagThrottleMap<int64_t> intervalCounts;
+		TransactionTagMap<int64_t> intervalCounts;
 		int64_t intervalTotalSampledCount = 0;
 		TransactionTag busiestTag;
 		int64_t busiestTagCount = 0;

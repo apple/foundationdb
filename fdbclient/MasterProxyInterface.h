@@ -166,7 +166,7 @@ struct GetReadVersionReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 
-	TagThrottleMap<ClientTagThrottleLimits> tagThrottleInfo;
+	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
 	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 

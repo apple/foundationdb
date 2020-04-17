@@ -238,7 +238,7 @@ struct RatekeeperData {
 	double lastWarning;
 	double lastSSListFetchedTimestamp;
 
-	PrioritizedTagThrottleMap<RkTagThrottleData> throttledTags;
+	PrioritizedTransactionTagMap<RkTagThrottleData> throttledTags;
 
 	RatekeeperLimits normalLimits;
 	RatekeeperLimits batchLimits;
@@ -458,7 +458,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 					self->autoThrottlingEnabled = SERVER_KNOBS->AUTO_TAG_THROTTLING_ENABLED;
 				}
 
-				PrioritizedTagThrottleMap<RkTagThrottleData> updatedTagThrottles;
+				PrioritizedTransactionTagMap<RkTagThrottleData> updatedTagThrottles;
 
 				TraceEvent("RatekeeperReadThrottles").detail("NumThrottledTags", throttledTags.get().size());
 				for(auto entry : throttledTags.get()) {
@@ -524,7 +524,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 	}
 }
 
-void updateRate(RatekeeperData* self, RatekeeperLimits* limits, TagThrottleMap<RkTagThrottleData>& throttledTags) {
+void updateRate(RatekeeperData* self, RatekeeperLimits* limits, TransactionTagMap<RkTagThrottleData>& throttledTags) {
 	//double controlFactor = ;  // dt / eFoldingTime
 
 	double actualTps = self->smoothReleasedTransactions.smoothRate();

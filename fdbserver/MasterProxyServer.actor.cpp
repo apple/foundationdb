@@ -99,7 +99,7 @@ struct ProxyStats {
 
 ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, double* outTransactionRate,
 						   double* outBatchTransactionRate, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply,
-						   TagThrottleMap<uint64_t>* transactionTagCounter, PrioritizedTagThrottleMap<ClientTagThrottleLimits>* throttledTags) {
+						   TransactionTagMap<uint64_t>* transactionTagCounter, PrioritizedTransactionTagMap<ClientTagThrottleLimits>* throttledTags) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -187,8 +187,8 @@ ACTOR Future<Void> queueTransactionStartRequests(
 	PromiseStream<Void> GRVTimer, double *lastGRVTime,
 	double *GRVBatchTime, FutureStream<double> replyTimes,
 	ProxyStats* stats, TransactionRateInfo* batchRateInfo,
-	PrioritizedTagThrottleMap<ClientTagThrottleLimits>* throttledTags,
-	TagThrottleMap<uint64_t>* transactionTagCounter) 
+	PrioritizedTransactionTagMap<ClientTagThrottleLimits>* throttledTags,
+	TransactionTagMap<uint64_t>* transactionTagCounter) 
 {
 	loop choose{
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
@@ -1305,7 +1305,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 }
 
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests,
-                                  ProxyStats* stats, Version minKnownCommittedVersion, PrioritizedTagThrottleMap<ClientTagThrottleLimits> throttledTags) {
+                                  ProxyStats* stats, Version minKnownCommittedVersion, PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags) {
 	GetReadVersionReply _baseReply = wait(replyFuture);
 	GetReadVersionReply baseReply = _baseReply;
 	double end = g_network->timer();
@@ -1366,8 +1366,8 @@ ACTOR static Future<Void> transactionStarter(
 	state Deque<GetReadVersionRequest> batchQueue;
 	state vector<MasterProxyInterface> otherProxies;
 
-	state TagThrottleMap<uint64_t> transactionTagCounter;
-	state PrioritizedTagThrottleMap<ClientTagThrottleLimits> throttledTags;
+	state TransactionTagMap<uint64_t> transactionTagCounter;
+	state PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags;
 
 	state PromiseStream<double> replyTimes;
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate, &batchRateInfo.rate, healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags));

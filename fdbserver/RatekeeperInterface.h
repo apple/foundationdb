@@ -72,7 +72,7 @@ struct GetRateInfoReply {
 	double leaseDuration;
 	HealthMetrics healthMetrics;
 
-	PrioritizedTagThrottleMap<ClientTagThrottleLimits> throttledTags;
+	PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -86,12 +86,12 @@ struct GetRateInfoRequest {
 	int64_t totalReleasedTransactions;
 	int64_t batchReleasedTransactions;
 
-	TagThrottleMap<uint64_t> throttledTagCounts;
+	TransactionTagMap<uint64_t> throttledTagCounts;
 	bool detailed;
 	ReplyPromise<struct GetRateInfoReply> reply;
 
 	GetRateInfoRequest() {}
-	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions, int64_t batchReleasedTransactions, TagThrottleMap<uint64_t> throttledTagCounts, bool detailed)
+	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions, int64_t batchReleasedTransactions, TransactionTagMap<uint64_t> throttledTagCounts, bool detailed)
 		: requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions), batchReleasedTransactions(batchReleasedTransactions), throttledTagCounts(throttledTagCounts), detailed(detailed) {}
 
 	template <class Ar>

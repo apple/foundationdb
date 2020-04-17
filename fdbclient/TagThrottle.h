@@ -164,9 +164,9 @@ namespace ThrottleApi {
 BINARY_SERIALIZABLE(ThrottleApi::Priority);
 
 template<class Value>
-using TagThrottleMap = std::unordered_map<TransactionTag, Value, std::hash<TransactionTagRef>>;
+using TransactionTagMap = std::unordered_map<TransactionTag, Value, std::hash<TransactionTagRef>>;
 
 template<class Value>
-using PrioritizedTagThrottleMap = std::map<ThrottleApi::Priority, TagThrottleMap<Value>>;
+using PrioritizedTransactionTagMap = std::map<ThrottleApi::Priority, TransactionTagMap<Value>>;
 
 #endif

@@ -219,7 +219,7 @@ public:
 	UID dbId;
 	bool internal; // Only contexts created through the C client and fdbcli are non-internal
 
-	PrioritizedTagThrottleMap<ClientTagThrottleData> throttledTags;
+	PrioritizedTransactionTagMap<ClientTagThrottleData> throttledTags;
 
 	CounterCollection cc;
 
