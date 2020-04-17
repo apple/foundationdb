@@ -82,8 +82,6 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker,
 		actors.add(updateHeartbeatTime(self));
 		actors.add(checkRolesLiveness(self));
 
-		//		wait(distributeRestoreSysInfo(masterWorker, self));
-
 		wait(startProcessRestoreRequests(self, cx));
 	} catch (Error& e) {
 		if (e.code() != error_code_operation_cancelled) {
@@ -163,7 +161,7 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreMasterData> masterD
 	for (auto r = ranges.begin(); r != ranges.end(); ++r) {
 		rangeVersionsVec.push_back(rangeVersionsVec.arena(),
 		                           std::make_pair(KeyRangeRef(r->begin(), r->end()), r->value()));
-		TraceEvent(SevDebug, "DistributeRangeVersions")
+		TraceEvent("DistributeRangeVersions")
 		    .detail("RangeIndex", i++)
 		    .detail("RangeBegin", r->begin())
 		    .detail("RangeEnd", r->end())
@@ -742,7 +740,7 @@ ACTOR static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersion
 	// Update version for pRangeVersions's ranges in fileRange
 	auto ranges = pRangeVersions->modify(fileRange);
 	for (auto r = ranges.begin(); r != ranges.end(); ++r) {
-		r->value() = r->value() == MAX_VERSION ? file->version : std::max(r->value(), file->version);
+		r->value() = std::max(r->value(), file->version);
 	}
 
 	// Dump the new key ranges
