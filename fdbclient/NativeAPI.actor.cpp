@@ -3179,12 +3179,11 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
-					auto &priorityThrottledTags = cx->throttledTags[TagThrottleInfo::priorityFromReadVersionFlags(flags)];
+					auto &priorityThrottledTags = cx->throttledTags[ThrottleApi::priorityFromReadVersionFlags(flags)];
 					for(auto tag : v.tagThrottleInfo) { // TODO: remove any that aren't sent back?
-						auto result = priorityThrottledTags.try_emplace(tag.first, tag.second.tpsRate, tag.second.expiration);
+						auto result = priorityThrottledTags.try_emplace(tag.first, tag.second);
 						if(!result.second) {
-							result.first->second.updateRate(tag.second.tpsRate);
-							result.first->second.expiration = tag.second.expiration;
+							result.first->second.update(tag.second);
 						}
 					}
 
@@ -3281,11 +3280,11 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Re
 
 	++cx->transactionReadVersionsCompleted;
 
-	auto &priorityThrottledTags = cx->throttledTags[TagThrottleInfo::priorityFromReadVersionFlags(flags)];
+	auto &priorityThrottledTags = cx->throttledTags[ThrottleApi::priorityFromReadVersionFlags(flags)];
 	for(auto tag : tags) {
 		auto itr = priorityThrottledTags.find(tag);
 		if(itr != priorityThrottledTags.end()) {
-			if(itr->second.expiration <= now()) {
+			if(itr->second.expired()) {
 				priorityThrottledTags.erase(itr);
 			}
 			else if(itr->second.throttleDuration() > 0) {
@@ -3330,11 +3329,11 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 
 		double maxThrottleDelay = 0.0;
 		if(options.tags.size() != 0) {
-			auto priorityThrottledTags = cx->throttledTags[TagThrottleInfo::priorityFromReadVersionFlags(flags)];
+			auto priorityThrottledTags = cx->throttledTags[ThrottleApi::priorityFromReadVersionFlags(flags)];
 			for(auto tag : options.tags) {
 				auto itr = priorityThrottledTags.find(tag);
 				if(itr != priorityThrottledTags.end()) {
-					if(itr->second.expiration > now()) {
+					if(!itr->second.expired()) {
 						maxThrottleDelay = std::max(maxThrottleDelay, itr->second.throttleDuration());
 					}
 					else {

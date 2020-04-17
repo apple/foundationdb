@@ -52,6 +52,19 @@ struct RatekeeperInterface {
 	}
 };
 
+struct ClientTagThrottleLimits {
+	double tpsRate;
+	double expiration;
+
+	ClientTagThrottleLimits() {}
+	ClientTagThrottleLimits(double tpsRate, double expiration) : tpsRate(tpsRate), expiration(expiration) {}
+
+	template <class Archive>
+	void serialize(Archive& ar) {
+		serializer(ar, tpsRate, expiration);
+	}
+};
+
 struct GetRateInfoReply {
 	constexpr static FileIdentifier file_identifier = 7845006;
 	double transactionRate;
@@ -59,7 +72,7 @@ struct GetRateInfoReply {
 	double leaseDuration;
 	HealthMetrics healthMetrics;
 
-	PrioritizedTagThrottleMap<TagThrottleInfo> throttledTags;
+	PrioritizedTagThrottleMap<ClientTagThrottleLimits> throttledTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

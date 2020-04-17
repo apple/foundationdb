@@ -99,7 +99,7 @@ struct ProxyStats {
 
 ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, double* outTransactionRate,
 						   double* outBatchTransactionRate, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply,
-						   TagThrottleMap<uint64_t>* transactionTagCounter, PrioritizedTagThrottleMap<TagThrottleInfo>* throttledTags) {
+						   TagThrottleMap<uint64_t>* transactionTagCounter, PrioritizedTagThrottleMap<ClientTagThrottleLimits>* throttledTags) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -187,7 +187,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 	PromiseStream<Void> GRVTimer, double *lastGRVTime,
 	double *GRVBatchTime, FutureStream<double> replyTimes,
 	ProxyStats* stats, TransactionRateInfo* batchRateInfo,
-	PrioritizedTagThrottleMap<TagThrottleInfo>* throttledTags,
+	PrioritizedTagThrottleMap<ClientTagThrottleLimits>* throttledTags,
 	TagThrottleMap<uint64_t>* transactionTagCounter) 
 {
 	loop choose{
@@ -204,7 +204,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 			} else {
 				// TODO: this probably needs to happen outside the high priority path
 				for(auto tag : req.tags) {
-					transactionTagCounter[tag] += req.transactionCount;
+					(*transactionTagCounter)[tag.first] += tag.second;
 				}
 
 				if (req.debugID.present())
@@ -1305,7 +1305,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 }
 
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests,
-                                  ProxyStats* stats, Version minKnownCommittedVersion, PrioritizedTagThrottleMap<TagThrottleInfo> throttledTags) {
+                                  ProxyStats* stats, Version minKnownCommittedVersion, PrioritizedTagThrottleMap<ClientTagThrottleLimits> throttledTags) {
 	GetReadVersionReply _baseReply = wait(replyFuture);
 	GetReadVersionReply baseReply = _baseReply;
 	double end = g_network->timer();
@@ -1325,7 +1325,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 		reply.tagThrottleInfo.clear();
 
 		for(auto tag : request.tags) {
-			auto itr = throttledTags.find(TagThrottleInfo::priorityFromReadVersionFlags(request.flags));
+			auto itr = throttledTags.find(ThrottleApi::priorityFromReadVersionFlags(request.flags));
 			ASSERT(itr != throttledTags.end());
 
 			auto tagItr = itr->second.find(tag.first);
@@ -1367,7 +1367,7 @@ ACTOR static Future<Void> transactionStarter(
 	state vector<MasterProxyInterface> otherProxies;
 
 	state TagThrottleMap<uint64_t> transactionTagCounter;
-	state PrioritizedTagThrottleMap<TagThrottleInfo> throttledTags;
+	state PrioritizedTagThrottleMap<ClientTagThrottleLimits> throttledTags;
 
 	state PromiseStream<double> replyTimes;
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate, &batchRateInfo.rate, healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags));

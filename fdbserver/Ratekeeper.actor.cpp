@@ -149,7 +149,6 @@ public:
 	}
 
 	void updateClientRate() {
-		double startClientRate = clientRate.smoothTotal();
 		if(tpsRate == 0.0) {
 			clientRate.reset(0.0);
 		}
@@ -256,9 +255,9 @@ struct RatekeeperData {
 		batchLimits("Batch", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH, SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH, SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH, SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
 		autoThrottlingEnabled(false)
 	{
-		throttledTags.try_emplace(TagThrottleInfo::Priority::IMMEDIATE);
-		throttledTags.try_emplace(TagThrottleInfo::Priority::DEFAULT);
-		throttledTags.try_emplace(TagThrottleInfo::Priority::BATCH);
+		throttledTags.try_emplace(ThrottleApi::Priority::IMMEDIATE);
+		throttledTags.try_emplace(ThrottleApi::Priority::DEFAULT);
+		throttledTags.try_emplace(ThrottleApi::Priority::BATCH);
 	}
 };
 
@@ -486,7 +485,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 							TraceEvent("RatekeeperAddingThrottle")
 								.detail("Tag", tag)
 								.detail("Rate", throttleInfo.tpsRate)
-								.detail("Priority", TagThrottleInfo::priorityToString(throttleInfo.priority))
+								.detail("Priority", ThrottleApi::priorityToString(throttleInfo.priority))
 								.detail("SecondsToExpiration", throttleInfo.expiration - now())
 								.detail("AutoThrottled", throttleInfo.autoThrottled);
 
@@ -498,7 +497,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 								TraceEvent("RatekeeperUpdatingThrottle")
 									.detail("Tag", tag)
 									.detail("Rate", throttleInfo.tpsRate)
-									.detail("Priority", TagThrottleInfo::priorityToString(throttleInfo.priority))
+									.detail("Priority", ThrottleApi::priorityToString(throttleInfo.priority))
 									.detail("SecondsToExpiration", throttleInfo.expiration - now())
 									.detail("AutoThrottled", throttleInfo.autoThrottled);
 
@@ -945,8 +944,8 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 		state bool lastLimited = false;
 		loop choose {
 			when (wait( timeout )) {
-				updateRate(&self, &self.normalLimits, self.throttledTags[TagThrottleInfo::Priority::DEFAULT]);
-				updateRate(&self, &self.batchLimits, self.throttledTags[TagThrottleInfo::Priority::BATCH]);
+				updateRate(&self, &self.normalLimits, self.throttledTags[ThrottleApi::Priority::DEFAULT]);
+				updateRate(&self, &self.batchLimits, self.throttledTags[ThrottleApi::Priority::BATCH]);
 
 				lastLimited = self.smoothReleasedTransactions.smoothRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * self.batchLimits.tpsLimit;
 				double tooOld = now() - 1.0;
@@ -992,7 +991,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 					auto &priorityTags = reply.throttledTags[priorityItr.first];
 					for(auto tagItr = priorityItr.second.begin(); tagItr != priorityItr.second.end();) {
 						if(tagItr->second.expiration > now()) {
-							auto result = priorityTags.insert_or_assign(tagItr->first, TagThrottleInfo(tagItr->second.getClientRate(), tagItr->second.expiration, false, priorityItr.first, true)); // TODO: Different structure?
+							auto result = priorityTags.insert_or_assign(tagItr->first, ClientTagThrottleLimits(tagItr->second.getClientRate(), tagItr->second.expiration));
 							++tagItr;
 						}
 						else {

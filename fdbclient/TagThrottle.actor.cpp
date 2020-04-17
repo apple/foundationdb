@@ -42,22 +42,36 @@ size_t TagSet::size() {
 	return tags.size();
 }
 
-TagThrottleInfo::Priority TagThrottleInfo::priorityFromReadVersionFlags(int flags) {
-	if((flags & GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) == GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
-		return Priority::IMMEDIATE;
-	}
-	else if((flags & GetReadVersionRequest::PRIORITY_DEFAULT) == GetReadVersionRequest::PRIORITY_DEFAULT) {
-		return Priority::DEFAULT;
-	}
-	else if((flags & GetReadVersionRequest::PRIORITY_BATCH) == GetReadVersionRequest::PRIORITY_BATCH) {
-		return Priority::BATCH;
-	}
-
-	ASSERT(false);
-	throw internal_error();
-}
-
 namespace ThrottleApi {
+	Priority priorityFromReadVersionFlags(int flags) {
+		if((flags & GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) == GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
+			return Priority::IMMEDIATE;
+		}
+		else if((flags & GetReadVersionRequest::PRIORITY_DEFAULT) == GetReadVersionRequest::PRIORITY_DEFAULT) {
+			return Priority::DEFAULT;
+		}
+		else if((flags & GetReadVersionRequest::PRIORITY_BATCH) == GetReadVersionRequest::PRIORITY_BATCH) {
+			return Priority::BATCH;
+		}
+
+		ASSERT(false);
+		throw internal_error();
+	}
+
+	const char* priorityToString(Priority priority, bool capitalize) {
+		switch(priority) {
+			case Priority::BATCH:
+				return capitalize ? "Batch" : "batch";
+			case Priority::DEFAULT:
+				return capitalize ? "Default" : "default";
+			case Priority::IMMEDIATE:
+				return capitalize ? "Immediate" : "immediate";
+		}
+
+		ASSERT(false);
+		throw internal_error();
+	}
+
 	void signalThrottleChange(Transaction &tr) {
 		tr.atomicOp(tagThrottleSignalKey, LiteralStringRef("XXXXXXXXXX\x00\x00\x00\x00"), MutationRef::SetVersionstampedValue);
 	}
@@ -129,7 +143,7 @@ namespace ThrottleApi {
 		state Transaction tr(db);
 		state Key key = throttleKeyForTags(std::set<TransactionTagRef>{ tag });
 
-		TagThrottleInfo throttle(tpsRate, expiration, autoThrottled, TagThrottleInfo::Priority::DEFAULT, serializeExpirationAsDuration);
+		TagThrottleInfo throttle(tpsRate, expiration, autoThrottled, ThrottleApi::Priority::DEFAULT, serializeExpirationAsDuration);
 		BinaryWriter wr(IncludeVersion());
 		wr << throttle;
 		state Value value = wr.toValue();

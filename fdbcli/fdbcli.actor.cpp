@@ -3818,7 +3818,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								printf("  %12d | %13ds | %9s | %6s | %s\n", 
 								       (int)(itr->second.tpsRate), 
 									   (int)(itr->second.expiration-now()), 
-									   TagThrottleInfo::priorityToString(itr->second.priority, false), 
+									   ThrottleApi::priorityToString(itr->second.priority, false), 
 									   itr->second.autoThrottled ? "auto" : "manual", 
 									   itr->first.toString().c_str());
 							}

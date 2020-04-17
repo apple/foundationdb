@@ -49,28 +49,34 @@ typedef MultiInterface<MasterProxyInterface> ProxyInfo;
 class ClientTagThrottleData {
 private:
 	double tpsRate;
+	double expiration;
+
 	Smoother smoothRate;
 	Smoother smoothReleased;
 
 public:
-	double expiration;
-
-	ClientTagThrottleData(double tpsRate, double expiration)
-	  : tpsRate(tpsRate), expiration(expiration), smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW), 
+	ClientTagThrottleData(ClientTagThrottleLimits const& limits)
+	  : tpsRate(limits.tpsRate), expiration(limits.expiration), smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW), 
 	    smoothReleased(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) 
 	{
 		ASSERT(tpsRate >= 0);
 		smoothRate.reset(tpsRate);
 	}
 
-	void updateRate(double tpsRate) {
-		ASSERT(tpsRate >= 0);
-		this->tpsRate = tpsRate;
-		smoothRate.setTotal(tpsRate);
+	void update(ClientTagThrottleLimits const& limits) {
+		ASSERT(limits.tpsRate >= 0);
+		this->tpsRate = limits.tpsRate;
+		smoothRate.setTotal(limits.tpsRate);
+
+		expiration = limits.expiration;
 	}
 
 	void addReleased(int released) {
 		smoothReleased.addDelta(released);
+	}
+
+	bool expired() {
+		return expiration <= now();
 	}
 
 	double throttleDuration() {

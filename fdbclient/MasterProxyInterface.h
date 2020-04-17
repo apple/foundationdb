@@ -29,6 +29,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbserver/RatekeeperInterface.h"
 #include "fdbclient/TagThrottle.h"
 
 #include "flow/Stats.h"
@@ -165,7 +166,7 @@ struct GetReadVersionReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 
-	TagThrottleMap<TagThrottleInfo> tagThrottleInfo;
+	TagThrottleMap<ClientTagThrottleLimits> tagThrottleInfo;
 
 	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 

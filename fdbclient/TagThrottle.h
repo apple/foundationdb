@@ -32,41 +32,30 @@
 
 class Database;
 
-typedef StringRef TransactionTagRef;
-typedef Standalone<TransactionTagRef> TransactionTag;
-
-struct TagThrottleInfo {
+namespace ThrottleApi {
 	enum class Priority {
 		BATCH,
 		DEFAULT,
 		IMMEDIATE
 	};
 
-	static const char* priorityToString(Priority priority, bool capitalize=true) {
-		switch(priority) {
-			case Priority::BATCH:
-				return capitalize ? "Batch" : "batch";
-			case Priority::DEFAULT:
-				return capitalize ? "Default" : "default";
-			case Priority::IMMEDIATE:
-				return capitalize ? "Immediate" : "immediate";
-		}
+	const char* priorityToString(Priority priority, bool capitalize=true); 
+	Priority priorityFromReadVersionFlags(int flags); 
+}
 
-		ASSERT(false);
-		throw internal_error();
-	}
+typedef StringRef TransactionTagRef;
+typedef Standalone<TransactionTagRef> TransactionTag;
 
-	static Priority priorityFromReadVersionFlags(int flags); 
-
+struct TagThrottleInfo {
 	double tpsRate;
 	double expiration;
 	bool autoThrottled;
-	Priority priority;
+	ThrottleApi::Priority priority;
 
 	bool serializeExpirationAsDuration;
 
-	TagThrottleInfo() : tpsRate(0), expiration(0), autoThrottled(false), priority(Priority::DEFAULT), serializeExpirationAsDuration(true) {}
-	TagThrottleInfo(double tpsRate, double expiration, bool autoThrottled, Priority priority, bool serializeExpirationAsDuration) 
+	TagThrottleInfo() : tpsRate(0), expiration(0), autoThrottled(false), priority(ThrottleApi::Priority::DEFAULT), serializeExpirationAsDuration(true) {}
+	TagThrottleInfo(double tpsRate, double expiration, bool autoThrottled, ThrottleApi::Priority priority, bool serializeExpirationAsDuration) 
 		: tpsRate(tpsRate), expiration(expiration), autoThrottled(autoThrottled), priority(priority), 
 		  serializeExpirationAsDuration(serializeExpirationAsDuration) {}
 
@@ -88,8 +77,6 @@ struct TagThrottleInfo {
 		}
 	}
 };
-
-BINARY_SERIALIZABLE(TagThrottleInfo::Priority);
 
 class TagSet {
 public:
@@ -153,12 +140,6 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 	}
 };
 
-template<class Value>
-using TagThrottleMap = std::unordered_map<TransactionTag, Value, std::hash<TransactionTagRef>>;
-
-template<class Value>
-using PrioritizedTagThrottleMap = std::map<TagThrottleInfo::Priority, TagThrottleMap<Value>>;
-
 namespace ThrottleApi {
 	// Currently, only 1 tag in a key is supported
 	Key throttleKeyForTags(std::set<TransactionTagRef> const& tags);
@@ -179,5 +160,13 @@ namespace ThrottleApi {
 
 	TagThrottleInfo decodeTagThrottleValue(const ValueRef& value);
 };
+
+BINARY_SERIALIZABLE(ThrottleApi::Priority);
+
+template<class Value>
+using TagThrottleMap = std::unordered_map<TransactionTag, Value, std::hash<TransactionTagRef>>;
+
+template<class Value>
+using PrioritizedTagThrottleMap = std::map<ThrottleApi::Priority, TagThrottleMap<Value>>;
 
 #endif
