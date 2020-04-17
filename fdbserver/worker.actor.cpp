@@ -1057,7 +1057,7 @@ ACTOR Future<Void> workerServer(
 					if(!ccInterface->get().present() || localInfo.clusterInterface != ccInterface->get().get()) {
 						notUpdated = interf.updateServerDBInfo.getEndpoint();
 					}
-					if(ccInterface->get().present() && localInfo.clusterInterface == ccInterface->get().get() && (localInfo.infoGeneration > dbInfo->get().infoGeneration || dbInfo->get().clusterInterface != ccInterface->get().get())) {
+					else if(localInfo.infoGeneration > dbInfo->get().infoGeneration || dbInfo->get().clusterInterface != ccInterface->get().get()) {
 						
 						TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
 						.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
