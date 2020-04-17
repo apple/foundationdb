@@ -31,10 +31,12 @@
 namespace detail {
 
 namespace {
-std::vector<int> mWriteToOffsetsMemoy;
+thread_local std::vector<int> gWriteToOffsetsMemory;
 }
 
-std::vector<int>* writeToOffsetsMemory = &mWriteToOffsetsMemoy;
+void swapWithThreadLocalGlobal(std::vector<int>& writeToOffsets) {
+	gWriteToOffsetsMemory.swap(writeToOffsets);
+}
 
 VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlignments) {
 	if (numMembers == 0) {
