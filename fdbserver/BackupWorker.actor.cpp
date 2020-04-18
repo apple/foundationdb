@@ -327,6 +327,7 @@ struct BackupData {
 		}
 
 		bool modified = false;
+		bool minVersionChanged = false;
 		Version minVersion = std::numeric_limits<Version>::max();
 		for (const auto [uid, version] : uidVersions) {
 			auto it = backups.find(uid);
@@ -334,6 +335,7 @@ struct BackupData {
 				modified = true;
 				backups.emplace(uid, BackupData::PerBackupInfo(this, uid, version));
 				minVersion = std::min(minVersion, version);
+				minVersionChanged = true;
 			} else {
 				stopList.erase(uid);
 			}
@@ -345,7 +347,7 @@ struct BackupData {
 			it->second.stop();
 			modified = true;
 		}
-		if (backupEpoch < recruitedEpoch && savedVersion + 1 == startVersion) {
+		if (minVersionChanged && backupEpoch < recruitedEpoch && savedVersion + 1 == startVersion) {
 			// Advance savedVersion to minimize version ranges in case backupEpoch's
 			// progress is not saved. Master may set a very low startVersion that
 			// is already popped. Advance the version is safe because these
