@@ -1667,7 +1667,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		// trackRejoins listens for rejoin requests from the tLogs that we are recovering from, to learn their TLogInterfaces
 		state std::vector<LogLockInfo> lockResults;
-		state std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> allLogServers;
+		state std::vector<std::pair<Reference<AsyncVar<OptionalInterface<TLogInterface>>>,Reference<IReplicationPolicy>>> allLogServers;
 		state std::vector<Reference<LogSet>> logServers;
 		state std::vector<OldLogData> oldLogData;
 		state std::vector<std::vector<Reference<AsyncVar<bool>>>> logFailed;
@@ -1676,8 +1676,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for (const CoreTLogSet& coreSet : prevState.tLogs) {
 			logServers.emplace_back(new LogSet(coreSet));
 			std::vector<Reference<AsyncVar<bool>>> failed;
+
 			for (const auto& logVar : logServers.back()->logServers) {
-				allLogServers.push_back(logVar);
+				allLogServers.push_back(std::make_pair(logVar,coreSet.tLogPolicy));
 				failed.emplace_back(new AsyncVar<bool>());
 				failureTrackers.push_back(monitorLog(logVar, failed.back()));
 			}
@@ -1688,7 +1689,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			oldLogData.emplace_back(oldTlogData);
 
 			for (const auto& logSet : oldLogData.back().tLogs) {
-				allLogServers.insert(allLogServers.end(), logSet->logServers.begin(), logSet->logServers.end());
+				for (const auto& logVar : logServers.back()->logServers) {
+					allLogServers.push_back(std::make_pair(logVar,logSet.tLogPolicy));
+				}
 			}
 		}
 		state Future<Void> rejoins = trackRejoins( dbgid, allLogServers, rejoinRequests );
@@ -2448,7 +2451,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return logSystem;
 	}
 
-	ACTOR static Future<Void> trackRejoins( UID dbgid, std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers, FutureStream< struct TLogRejoinRequest > rejoinRequests ) {
+	ACTOR static Future<Void> trackRejoins( UID dbgid, std::vector<std::pair<Reference<AsyncVar<OptionalInterface<TLogInterface>>>,Reference<IReplicationPolicy>>> logServers, FutureStream< struct TLogRejoinRequest > rejoinRequests ) {
 		state std::map<UID, ReplyPromise<TLogRejoinReply>> lastReply;
 
 		try {
@@ -2456,15 +2459,18 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				TLogRejoinRequest req = waitNext( rejoinRequests );
 				int pos = -1;
 				for( int i = 0; i < logServers.size(); i++ ) {
-					if( logServers[i]->get().id() == req.myInterface.id() ) {
+					if( logServers[i].first->get().id() == req.myInterface.id() ) {
 						pos = i;
 						break;
 					}
 				}
 				if ( pos != -1 ) {
 					TraceEvent("TLogJoinedMe", dbgid).detail("TLog", req.myInterface.id()).detail("Address", req.myInterface.commit.getEndpoint().getPrimaryAddress().toString());
-					if( !logServers[pos]->get().present() || req.myInterface.commit.getEndpoint() != logServers[pos]->get().interf().commit.getEndpoint())
-						logServers[pos]->setUnconditional( OptionalInterface<TLogInterface>(req.myInterface) );
+					if( !logServers[pos].first->get().present() || req.myInterface.commit.getEndpoint() != logServers[pos].first->get().interf().commit.getEndpoint()) {
+						TLogInterface interf = req.myInterface;
+						filterLocalityDataForPolicy(logServers[pos].second, &interf.filteredLocality);
+						logServers[pos]->setUnconditional( OptionalInterface<TLogInterface>(interf) );
+					}
 					lastReply[req.myInterface.id()].send(TLogRejoinReply{ false });
 					lastReply[req.myInterface.id()] = req.reply;
 				}

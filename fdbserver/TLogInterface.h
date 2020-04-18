@@ -33,7 +33,7 @@ struct TLogInterface {
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
-	LocalityData locality;
+	LocalityData filteredLocality;
 	UID uniqueID;
 	UID sharedTLogID;
 	RequestStream< struct TLogPeekRequest > peekMessages;
@@ -50,9 +50,9 @@ struct TLogInterface {
 	RequestStream< struct TLogSnapRequest> snapRequest;
 
 	TLogInterface() {}
-	explicit TLogInterface(const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
-	TLogInterface(UID sharedTLogID, const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
-	TLogInterface(UID uniqueID, UID sharedTLogID, const LocalityData& locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
+	explicit TLogInterface(const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), filteredLocality(locality) { sharedTLogID = uniqueID; }
+	TLogInterface(UID sharedTLogID, const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), sharedTLogID(sharedTLogID), filteredLocality(locality) {}
+	TLogInterface(UID uniqueID, UID sharedTLogID, const LocalityData& locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), filteredLocality(locality) {}
 	UID id() const { return uniqueID; }
 	UID getSharedTLogID() const { return sharedTLogID; }
 	std::string toString() const { return id().shortString(); }
@@ -72,7 +72,7 @@ struct TLogInterface {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.isDeserializing || uniqueID != UID());
 		}
-		serializer(ar, uniqueID, sharedTLogID, locality, peekMessages, popMessages
+		serializer(ar, uniqueID, sharedTLogID, filteredLocality, peekMessages, popMessages
 		  , commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished
 		  , disablePopRequest, enablePopRequest, snapRequest);
 	}
