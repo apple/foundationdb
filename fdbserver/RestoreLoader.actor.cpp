@@ -127,7 +127,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 	return Void();
 }
 
-static __inline__ bool _logMutationTooOld(KeyRangeMap<Version>* pRangeVersions, KeyRangeRef keyRange, Version v) {
+static inline bool _logMutationTooOld(KeyRangeMap<Version>* pRangeVersions, KeyRangeRef keyRange, Version v) {
 	auto ranges = pRangeVersions->intersectingRanges(keyRange);
 	Version minVersion = MAX_VERSION;
 	for (auto r = ranges.begin(); r != ranges.end(); ++r) {
@@ -136,7 +136,7 @@ static __inline__ bool _logMutationTooOld(KeyRangeMap<Version>* pRangeVersions, 
 	return minVersion >= v;
 }
 
-static __inline__ bool logMutationTooOld(KeyRangeMap<Version>* pRangeVersions, MutationRef mutation, Version v) {
+static inline bool logMutationTooOld(KeyRangeMap<Version>* pRangeVersions, MutationRef mutation, Version v) {
 	return isRangeMutation(mutation)
 	           ? _logMutationTooOld(pRangeVersions, KeyRangeRef(mutation.param1, mutation.param2), v)
 	           : _logMutationTooOld(pRangeVersions, KeyRangeRef(singleKeyRange(mutation.param1)), v);
