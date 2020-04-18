@@ -27,7 +27,7 @@ package fdb
 import "C"
 
 import (
-	"runtime"
+	"sync"
 )
 
 // Database is a handle to a FoundationDB database. Database is a lightweight
@@ -74,13 +74,14 @@ func (d Database) CreateTransaction() (Transaction, error) {
 		return Transaction{}, Error{int(err)}
 	}
 
-	t := &transaction{outt, d}
-	runtime.SetFinalizer(t, (*transaction).destroy)
+	t := &transaction{outt, d, sync.Once{}}
 
 	return Transaction{t}, nil
 }
 
-func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNil) (ret interface{}, e error) {
+func retryable(t Transaction, wrapped func() (interface{}, error), onError func(Error) FutureNil) (ret interface{}, e error) {
+	defer t.Close()
+
 	for {
 		ret, e = wrapped()
 
@@ -140,7 +141,7 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 		return
 	}
 
-	return retryable(wrapped, tr.OnError)
+	return retryable(tr, wrapped, tr.OnError)
 }
 
 // ReadTransact runs a caller-provided function inside a retry loop, providing
@@ -180,7 +181,7 @@ func (d Database) ReadTransact(f func(ReadTransaction) (interface{}, error)) (in
 		return
 	}
 
-	return retryable(wrapped, tr.OnError)
+	return retryable(tr, wrapped, tr.OnError)
 }
 
 // Options returns a DatabaseOptions instance suitable for setting options

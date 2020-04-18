@@ -1966,14 +1966,14 @@ static std::string getIssueDescription(std::string name) {
 }
 
 static std::map<std::string, std::vector<JsonBuilderObject>> getProcessIssuesAsMessages(
-    std::vector<std::pair<NetworkAddress, Standalone<VectorRef<StringRef>>>> const& issues) {
+    std::vector<ProcessIssues> const& issues) {
 	std::map<std::string, std::vector<JsonBuilderObject>> issuesMap;
 
 	try {
 		for (auto processIssues : issues) {
-			for (auto issue : processIssues.second) {
+			for (auto issue : processIssues.issues) {
 				std::string issueStr = issue.toString();
-				issuesMap[processIssues.first.toString()].push_back(
+				issuesMap[processIssues.address.toString()].push_back(
 				    JsonString::makeMessage(issueStr.c_str(), getIssueDescription(issueStr).c_str()));
 			}
 		}
@@ -2163,7 +2163,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		Reference<AsyncVar<ServerDBInfo>> db,
 		Database cx,
 		vector<WorkerDetails> workers,
-		std::vector<std::pair<NetworkAddress, Standalone<VectorRef<StringRef>>>> workerIssues,
+		std::vector<ProcessIssues> workerIssues,
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
 		ServerCoordinators coordinators,
 		std::vector<NetworkAddress> incompatibleConnections,

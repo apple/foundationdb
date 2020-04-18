@@ -537,7 +537,7 @@ struct DDQueueData {
 
 		// FIXME: is the merge case needed
 		if( input.priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD ) {
-			wait( delay( 0.5, decrementPriority(decrementPriority(TaskPriority::DataDistribution )) ) );
+			wait( delay( 0.5, TaskPriority::DataDistributionVeryLow ) );
 		} else {
 			wait( delay( 0.0001, TaskPriority::DataDistributionLaunch ) );
 		}
@@ -546,6 +546,8 @@ struct DDQueueData {
 			servers.clear();
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			try {
+				state Standalone<RangeResultRef> UIDtoTagMap = wait( tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY ) );
+				ASSERT( !UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY );
 				Standalone<RangeResultRef> keyServersEntries  = wait(
 					tr.getRange( lastLessOrEqual( keyServersKey( input.keys.begin ) ),
 						firstGreaterOrEqual( keyServersKey( input.keys.end ) ), SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS ) );
@@ -553,7 +555,7 @@ struct DDQueueData {
 				if(keyServersEntries.size() < SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS) {
 					for( int shard = 0; shard < keyServersEntries.size(); shard++ ) {
 						vector<UID> src, dest;
-						decodeKeyServersValue( keyServersEntries[shard].value, src, dest );
+						decodeKeyServersValue( UIDtoTagMap, keyServersEntries[shard].value, src, dest );
 						ASSERT( src.size() );
 						for( int i = 0; i < src.size(); i++ ) {
 							servers.insert( src[i] );

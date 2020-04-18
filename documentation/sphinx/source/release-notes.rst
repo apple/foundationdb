@@ -5,8 +5,15 @@ Release Notes
 7.0.0
 =====
 
+Features
+--------
+* Improved the slow task profiler to also report backtraces for periods when the run loop is saturated. `(PR #2608) <https://github.com/apple/foundationdb/pull/2608>`_
+
 Performance
 -----------
+
+* Improve GRV tail latencies, particularly as the transaction rate gets nearer the ratekeeper limit. `(PR #2735) <https://github.com/apple/foundationdb/pull/2735>`_
+* The proxies are now more responsive to changes in workload when unthrottling lower priority transactions. `(PR #2735) <https://github.com/apple/foundationdb/pull/2735>`_
 
 Fixes
 -----
@@ -20,6 +27,10 @@ Bindings
 * API version updated to 630. See the :ref:`API version upgrade guide <api-version-upgrade-guide-630>` for upgrade details.
 * Java: Introduced ``keyAfter`` utility function that can be used to create the immediate next key for a given byte array. `(PR #2458) <https://github.com/apple/foundationdb/pull/2458>`_
 * C: The ``FDBKeyValue`` struct's ``key`` and ``value`` members have changed type from ``void*`` to ``uint8_t*``. `(PR #2622) <https://github.com/apple/foundationdb/pull/2622>`_
+* Deprecated ``enable_slow_task_profiling`` transaction option and replaced it with ``enable_run_loop_profiling``. `(PR #2608) <https://github.com/apple/foundationdb/pull/2608>`_
+* Go: Added a ``Close`` function to ``RangeIterator`` which **must** be called to free resources returned from ``Transaction.GetRange``. `(PR #1910) <https://github.com/apple/foundationdb/pull/1910>`_.
+* Go: Finalizers are no longer used to clean up native resources. ``Future`` results are now copied from the native heap to the Go heap, and native resources are freed immediately. `(PR #1910) <https://github.com/apple/foundationdb/pull/1910>`_.
+
 
 Other Changes
 -------------

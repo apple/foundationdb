@@ -253,6 +253,15 @@ public:
 		else
 			queue->send(value);
 	}
+
+	void send(T&& value) const {
+		if (queue->isRemoteEndpoint()) {
+			FlowTransport::transport().sendUnreliable(SerializeSource<T>(std::move(value)), getEndpoint(), true);
+		}
+		else
+			queue->send(std::move(value));
+	}
+
 	/*void sendError(const Error& error) const {
 	ASSERT( !queue->isRemoteEndpoint() );
 	queue->sendError(error);
