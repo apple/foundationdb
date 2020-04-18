@@ -2468,7 +2468,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					TraceEvent("TLogJoinedMe", dbgid).detail("TLog", req.myInterface.id()).detail("Address", req.myInterface.commit.getEndpoint().getPrimaryAddress().toString());
 					if( !logServers[pos].first->get().present() || req.myInterface.commit.getEndpoint() != logServers[pos].first->get().interf().commit.getEndpoint()) {
 						TLogInterface interf = req.myInterface;
-						filterLocalityDataForPolicy(logServers[pos].second, &interf.filteredLocality);
+						filterLocalityDataForPolicyAndDC(logServers[pos].second, &interf.filteredLocality);
 						logServers[pos]->setUnconditional( OptionalInterface<TLogInterface>(interf) );
 					}
 					lastReply[req.myInterface.id()].send(TLogRejoinReply{ false });

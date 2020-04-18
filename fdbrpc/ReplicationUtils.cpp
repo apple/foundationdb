@@ -922,6 +922,13 @@ void filterLocalityDataForPolicy(const std::set<std::string>& keys, LocalityData
 }
 }
 
+void filterLocalityDataForPolicyAndDC(Reference<IReplicationPolicy> policy, LocalityData* ld) {
+	if (!policy) return;
+	std::set<std::string> keys = policy->attributeKeys();
+	keys.insert(LocalityData::keyDcId.toString());
+	filterLocalityDataForPolicy(policy->attributeKeys(), ld);
+}
+
 void filterLocalityDataForPolicy(Reference<IReplicationPolicy> policy, LocalityData* ld) {
 	if (!policy) return;
 	filterLocalityDataForPolicy(policy->attributeKeys(), ld);

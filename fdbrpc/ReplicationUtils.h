@@ -85,6 +85,7 @@ extern bool validateAllCombinations(
 	bool															bCheckIfValid = true);
 
 /// Remove all pieces of locality information from the LocalityData that will not be used when validating the policy.
+void filterLocalityDataForPolicyAndDC(Reference<IReplicationPolicy> policy, LocalityData* ld);
 void filterLocalityDataForPolicy(Reference<IReplicationPolicy> policy, LocalityData* ld);
 void filterLocalityDataForPolicy(Reference<IReplicationPolicy> policy, std::vector<LocalityData>* vld);
 
