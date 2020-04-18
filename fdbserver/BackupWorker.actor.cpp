@@ -785,21 +785,15 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		// If transition into NOOP mode, should clear messages
 		if (!self->pulling) {
 			self->messages.clear();
-			// Update popVersion so that save progress below can
-			// indicate ranges not used for future epochs.
-			if (self->popVersion > self->savedVersion && self->backupEpoch == self->recruitedEpoch) {
-				popVersion = std::max(popVersion, self->popVersion);
-			}
 		}
 
-		if (popVersion > self->savedVersion) {
+		if (popVersion > self->savedVersion && popVersion > self->popVersion) {
 			wait(saveProgress(self, popVersion));
 			TraceEvent("BackupWorkerSavedProgress", self->myId)
 			    .detail("Tag", self->tag.toString())
 			    .detail("Version", popVersion)
 			    .detail("MsgQ", self->messages.size());
 			self->savedVersion = std::max(popVersion, self->savedVersion);
-			self->popVersion = std::max(self->savedVersion, self->popVersion);
 			self->pop();
 		}
 
