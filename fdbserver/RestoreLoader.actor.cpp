@@ -178,8 +178,9 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 // into "kvOpsIter" and samples into "samplesIter".
 ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
     KeyRangeMap<Version>* pRangeVersions, NotifiedVersion* processedFileOffset,
-    std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter, LoaderCounters* cc,
-    std::map<LoadingParam, MutationsVec>::iterator samplesIter, Reference<IBackupContainer> bc, RestoreAsset asset) {
+    std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
+    std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc, Reference<IBackupContainer> bc,
+    RestoreAsset asset) {
 	state Standalone<StringRef> buf = makeString(asset.len);
 	state Reference<IAsyncFile> file = wait(bc->readFile(asset.filename));
 	int rLen = wait(file->read(mutateString(buf), asset.len, asset.offset));
@@ -225,7 +226,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 
 			// Skip mutation whose commitVesion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, msgVersion.version)) {
-				cc->oldLogMutations++;
+				cc->oldLogMutations += 1;
 				continue;
 			}
 
@@ -755,7 +756,7 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 			// Should this mutation be skipped?
 			// Skip mutation whose commitVesion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, commitVersion)) {
-				cc->oldLogMutations++;
+				cc->oldLogMutations += 1;
 				continue;
 			}
 
