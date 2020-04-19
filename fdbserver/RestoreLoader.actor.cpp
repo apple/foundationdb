@@ -155,6 +155,7 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 
 	self->appliersInterf = req.sysInfo.appliers;
 	// Update rangeVersions
+	ASSERT(req.rangeVersions.size() > 0); // At least the min version of range files will be used
 	ASSERT(self->rangeVersions.size() == 1); // rangeVersions has not been set
 	for (auto rv = req.rangeVersions.begin(); rv != req.rangeVersions.end(); ++rv) {
 		self->rangeVersions.insert(rv->first, rv->second);
