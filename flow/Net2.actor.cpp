@@ -260,11 +260,19 @@ public:
 		try {
 			if (error) {
 				// Log the error...
-				TraceEvent(SevWarn, errContext, errID).suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message())
+				{
+					TraceEvent evt(SevWarn, errContext, errID);
+					evt.suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
 #ifndef TLS_DISABLED
-				.detail("WhichMeans", TLSPolicy::ErrorString(error))
+					// There is no function in OpenSSL to use to check if an error code is from OpenSSL,
+					// but all OpenSSL errors have a non-zero "library" code set in bits 24-32, and linux
+					// error codes should never go that high.
+					if (error.value() >= (1 << 24L)) {
+						evt.detail("WhichMeans", TLSPolicy::ErrorString(error));
+					}
 #endif
-				;
+				}
+				
 				p.sendError( connection_failed() );
 			} else
 				p.send( Void() );
