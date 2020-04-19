@@ -61,7 +61,10 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 						KeyRef end = keyInfo->rangeContaining(k).end();
 						KeyRangeRef insertRange(k,end);
 						vector<UID> src, dest;
-						decodeKeyServersValue(m.param2, src, dest);
+						// txnStateStore is always an in-memory KVS, and must always be recovered before
+						// applyMetadataMutations is called, so a wait here should never be needed.
+						Future<Standalone<RangeResultRef>> fResult = txnStateStore->readRange(serverTagKeys);
+						decodeKeyServersValue(fResult.get(), m.param2, src, dest);
 
 						ASSERT(storageCache);
 						ServerCacheInfo info;

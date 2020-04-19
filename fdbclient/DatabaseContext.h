@@ -25,6 +25,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
@@ -228,6 +229,8 @@ public:
 	double detailedHealthMetricsLastUpdated;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
+	std::shared_ptr<SpecialKeySpace> specialKeySpace;
+	std::shared_ptr<ConflictingKeysImpl> cKImpl;
 };
 
 #endif
