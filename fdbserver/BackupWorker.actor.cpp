@@ -75,7 +75,7 @@ struct BackupData {
 	LogEpoch oldestBackupEpoch = 0; // oldest epoch that still has data on tLogs for backup to pull
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
-	Version popVersion; // Largest version popped. Can be larger than savedVersion in NOOP mode.
+	Version popVersion; // Largest version popped in NOOP mode, can be larger than savedVersion.
 	AsyncVar<Reference<ILogSystem>> logSystem;
 	Database cx;
 	std::vector<VersionedMessage> messages;
@@ -663,8 +663,13 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		activeUids.push_back(it->first);
 		self->insertRanges(keyRangeMap, it->second.ranges.get(), index);
 		if (it->second.lastSavedVersion == invalidVersion) {
-			it->second.lastSavedVersion =
-			    self->savedVersion > self->startVersion ? self->savedVersion : self->startVersion;
+			if (it->second.startVersion > self->startVersion && !self->messages.empty()) {
+				// True-up first mutation log's begin version
+				it->second.lastSavedVersion = self->messages[0].getVersion();
+			} else {
+				it->second.lastSavedVersion =
+				    std::max(self->popVersion, std::max(self->savedVersion, self->startVersion));
+			}
 		}
 		logFileFutures.push_back(it->second.container.get().get()->writeTaggedLogFile(
 		    it->second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id, self->totalTags));
