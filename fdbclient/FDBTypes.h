@@ -416,7 +416,7 @@ typedef Standalone<KeyRangeRef> KeyRange;
 typedef Standalone<KeyValueRef> KeyValue;
 typedef Standalone<struct KeySelectorRef> KeySelector;
 
-enum { invalidVersion = -1, latestVersion = -2 };
+enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
 inline Key keyAfter( const KeyRef& key ) {
 	if(key == LiteralStringRef("\xff\xff"))

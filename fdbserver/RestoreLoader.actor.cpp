@@ -38,7 +38,8 @@ typedef std::map<Standalone<StringRef>, uint32_t> SerializedMutationPartMap;
 std::vector<UID> getApplierIDs(std::map<Key, UID>& rangeToApplier);
 void splitMutation(std::map<Key, UID>* pRangeToApplier, MutationRef m, Arena& mvector_arena,
                    VectorRef<MutationRef>& mvector, Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs);
-void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
+void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
+                              std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
                               SerializedMutationListMap* mutationMap,
                               std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc,
                               const RestoreAsset& asset);
@@ -126,6 +127,21 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 	return Void();
 }
 
+static inline bool _logMutationTooOld(KeyRangeMap<Version>* pRangeVersions, KeyRangeRef keyRange, Version v) {
+	auto ranges = pRangeVersions->intersectingRanges(keyRange);
+	Version minVersion = MAX_VERSION;
+	for (auto r = ranges.begin(); r != ranges.end(); ++r) {
+		minVersion = std::min(minVersion, r->value());
+	}
+	return minVersion >= v;
+}
+
+static inline bool logMutationTooOld(KeyRangeMap<Version>* pRangeVersions, MutationRef mutation, Version v) {
+	return isRangeMutation(mutation)
+	           ? _logMutationTooOld(pRangeVersions, KeyRangeRef(mutation.param1, mutation.param2), v)
+	           : _logMutationTooOld(pRangeVersions, KeyRangeRef(singleKeyRange(mutation.param1)), v);
+}
+
 // Assume: Only update the local data if it (applierInterf) has not been set
 void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self) {
 	TraceEvent("FastRestoreLoader", self->id()).detail("HandleRestoreSysInfoRequest", self->id());
@@ -138,6 +154,23 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 	}
 
 	self->appliersInterf = req.sysInfo.appliers;
+	// Update rangeVersions
+	ASSERT(req.rangeVersions.size() > 0); // At least the min version of range files will be used
+	ASSERT(self->rangeVersions.size() == 1); // rangeVersions has not been set
+	for (auto rv = req.rangeVersions.begin(); rv != req.rangeVersions.end(); ++rv) {
+		self->rangeVersions.insert(rv->first, rv->second);
+	}
+
+	// Debug message for range version in each loader
+	auto ranges = self->rangeVersions.ranges();
+	int i = 0;
+	for (auto r = ranges.begin(); r != ranges.end(); ++r) {
+		TraceEvent("FastRestoreLoader", self->id())
+		    .detail("RangeIndex", i++)
+		    .detail("RangeBegin", r->begin())
+		    .detail("RangeEnd", r->end())
+		    .detail("Version", r->value());
+	}
 
 	req.reply.send(RestoreCommonReply(self->id()));
 }
@@ -145,8 +178,10 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 // Parse a data block in a partitioned mutation log file and store mutations
 // into "kvOpsIter" and samples into "samplesIter".
 ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
-    NotifiedVersion* processedFileOffset, std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
-    std::map<LoadingParam, MutationsVec>::iterator samplesIter, Reference<IBackupContainer> bc, RestoreAsset asset) {
+    KeyRangeMap<Version>* pRangeVersions, NotifiedVersion* processedFileOffset,
+    std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
+    std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc, Reference<IBackupContainer> bc,
+    RestoreAsset asset) {
 	state Standalone<StringRef> buf = makeString(asset.len);
 	state Reference<IAsyncFile> file = wait(bc->readFile(asset.filename));
 	int rLen = wait(file->read(mutateString(buf), asset.len, asset.offset));
@@ -190,6 +225,12 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			MutationRef mutation;
 			rd >> mutation;
 
+			// Skip mutation whose commitVesion < range kv's version
+			if (logMutationTooOld(pRangeVersions, mutation, msgVersion.version)) {
+				cc->oldLogMutations += 1;
+				continue;
+			}
+
 			// Should this mutation be skipped?
 			if (mutation.param1 >= asset.range.end ||
 			    (isRangeMutation(mutation) && mutation.param2 < asset.range.begin) ||
@@ -228,7 +269,8 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 	return Void();
 }
 
-ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<LoaderBatchData> batchData, UID loaderID,
+ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions, LoadingParam param,
+                                        Reference<LoaderBatchData> batchData, UID loaderID,
                                         Reference<IBackupContainer> bc) {
 	// Temporary data structure for parsing log files into (version, <K, V, mutationType>)
 	// Must use StandAlone to save mutations, otherwise, the mutationref memory will be corrupted
@@ -263,8 +305,9 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<LoaderBatc
 		} else {
 			// TODO: Sanity check the log file's range is overlapped with the restored version range
 			if (param.isPartitionedLog()) {
-				fileParserFutures.push_back(_parsePartitionedLogFileOnLoader(&processedFileOffset, kvOpsPerLPIter,
-				                                                             samplesIter, bc, subAsset));
+				fileParserFutures.push_back(_parsePartitionedLogFileOnLoader(pRangeVersions, &processedFileOffset,
+				                                                             kvOpsPerLPIter, samplesIter,
+				                                                             &batchData->counters, bc, subAsset));
 			} else {
 				fileParserFutures.push_back(_parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap,
 				                                                             &mutationPartMap, bc, subAsset));
@@ -274,7 +317,8 @@ ACTOR Future<Void> _processLoadingParam(LoadingParam param, Reference<LoaderBatc
 	wait(waitForAll(fileParserFutures));
 
 	if (!param.isRangeFile && !param.isPartitionedLog()) {
-		_parseSerializedMutation(kvOpsPerLPIter, &mutationMap, samplesIter, &batchData->counters, param.asset);
+		_parseSerializedMutation(pRangeVersions, kvOpsPerLPIter, &mutationMap, samplesIter, &batchData->counters,
+		                         param.asset);
 	}
 
 	TraceEvent("FastRestoreLoaderProcessLoadingParamDone", loaderID).detail("LoadingParam", param.toString());
@@ -304,7 +348,8 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		    .detail("BatchIndex", req.batchIndex)
 		    .detail("ProcessLoadParam", req.param.toString());
 		ASSERT(batchData->sampleMutations.find(req.param) == batchData->sampleMutations.end());
-		batchData->processedFileParams[req.param] = _processLoadingParam(req.param, batchData, self->id(), self->bc);
+		batchData->processedFileParams[req.param] =
+		    _processLoadingParam(&self->rangeVersions, req.param, batchData, self->id(), self->bc);
 		isDuplicated = false;
 	} else {
 		TraceEvent("FastRestoreLoadFile", self->id())
@@ -669,7 +714,8 @@ bool concatenateBackupMutationForLogFile(std::map<Standalone<StringRef>, Standal
 // we may not get the entire mutation list for the version encoded_list_of_mutations:
 // [mutation1][mutation2]...[mutationk], where
 //	a mutation is encoded as [type:uint32_t][keyLength:uint32_t][valueLength:uint32_t][keyContent][valueContent]
-void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
+void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
+                              std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
                               SerializedMutationListMap* pmutationMap,
                               std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc,
                               const RestoreAsset& asset) {
@@ -709,6 +755,12 @@ void _parseSerializedMutation(std::map<LoadingParam, VersionedMutationsMap>::ite
 
 			MutationRef mutation((MutationRef::Type)type, KeyRef(k, kLen), KeyRef(v, vLen));
 			// Should this mutation be skipped?
+			// Skip mutation whose commitVesion < range kv's version
+			if (logMutationTooOld(pRangeVersions, mutation, commitVersion)) {
+				cc->oldLogMutations += 1;
+				continue;
+			}
+
 			if (mutation.param1 >= asset.range.end ||
 			    (isRangeMutation(mutation) && mutation.param2 < asset.range.begin) ||
 			    (!isRangeMutation(mutation) && mutation.param1 < asset.range.begin)) {
