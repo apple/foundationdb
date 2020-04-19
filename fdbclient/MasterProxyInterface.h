@@ -38,7 +38,6 @@ struct MasterProxyInterface {
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
-	LocalityData locality;
 	bool provisional;
 	RequestStream< struct CommitTransactionRequest > commit;
 	RequestStream< struct GetReadVersionRequest > getConsistentReadVersion;  // Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
@@ -62,7 +61,7 @@ struct MasterProxyInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
+		serializer(ar, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
 				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
 				   txnState, getHealthMetrics, proxySnapReq, exclusionSafetyCheckReq);
 	}

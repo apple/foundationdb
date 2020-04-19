@@ -1025,7 +1025,7 @@ public:
 
 		for( auto& logSet : dbi.logSystemConfig.tLogs ) {
 			for( auto& it : logSet.tLogs ) {
-				auto tlogWorker = id_worker.find(it.interf().locality.processId());
+				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());
 				if ( tlogWorker == id_worker.end() )
 					return false;
 				if ( tlogWorker->second.priorityInfo.isExcluded )
@@ -1042,7 +1042,7 @@ public:
 			}
 
 			for( auto& it : logSet.logRouters ) {
-				auto tlogWorker = id_worker.find(it.interf().locality.processId());
+				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());
 				if ( tlogWorker == id_worker.end() )
 					return false;
 				if ( tlogWorker->second.priorityInfo.isExcluded )
@@ -1260,7 +1260,7 @@ public:
 		auto& dbInfo = db.serverInfo->get();
 		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
 			for (const auto& tlog: tlogset.tLogs) {
-				if (tlog.present() && tlog.interf().locality.processId() == processId) return true;
+				if (tlog.present() && tlog.interf().filteredLocality.processId() == processId) return true;
 			}
 		}
 		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
@@ -1291,7 +1291,7 @@ public:
 		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
 			for (const auto& tlog: tlogset.tLogs) {
 				if (tlog.present()) {
-					idUsed[tlog.interf().locality.processId()]++;
+					idUsed[tlog.interf().filteredLocality.processId()]++;
 				}
 			}
 		}

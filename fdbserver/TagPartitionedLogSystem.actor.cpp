@@ -355,7 +355,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				newState.tLogs.emplace_back(*t);
 				newState.tLogs.back().tLogLocalities.clear();
 				for (const auto& log : t->logServers) {
-					newState.tLogs.back().tLogLocalities.push_back(log->get().interf().locality);
+					newState.tLogs.back().tLogLocalities.push_back(log->get().interf().filteredLocality);
 				}
 			}
 		}
@@ -1689,8 +1689,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			oldLogData.emplace_back(oldTlogData);
 
 			for (const auto& logSet : oldLogData.back().tLogs) {
-				for (const auto& logVar : logServers.back()->logServers) {
-					allLogServers.push_back(std::make_pair(logVar,logSet.tLogPolicy));
+				for (const auto& logVar : logSet->logServers) {
+					allLogServers.push_back(std::make_pair(logVar,logSet->tLogPolicy));
 				}
 			}
 		}
@@ -2468,8 +2468,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					TraceEvent("TLogJoinedMe", dbgid).detail("TLog", req.myInterface.id()).detail("Address", req.myInterface.commit.getEndpoint().getPrimaryAddress().toString());
 					if( !logServers[pos].first->get().present() || req.myInterface.commit.getEndpoint() != logServers[pos].first->get().interf().commit.getEndpoint()) {
 						TLogInterface interf = req.myInterface;
-						filterLocalityDataForPolicyAndDC(logServers[pos].second, &interf.filteredLocality);
-						logServers[pos]->setUnconditional( OptionalInterface<TLogInterface>(interf) );
+						filterLocalityDataForPolicyDcAndProcess(logServers[pos].second, &interf.filteredLocality);
+						logServers[pos].first->setUnconditional( OptionalInterface<TLogInterface>(interf) );
 					}
 					lastReply[req.myInterface.id()].send(TLogRejoinReply{ false });
 					lastReply[req.myInterface.id()] = req.reply;

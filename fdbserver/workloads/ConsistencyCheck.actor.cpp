@@ -1480,8 +1480,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 							TraceEvent("ConsistencyCheck_LogRouterNotInNonExcludedWorkers").detail("Id", logRouter.id());
 							return false;
 						}
-						if (logRouter.interf().locality.dcId() != expectedRemoteDcId) {
-							TraceEvent("ConsistencyCheck_LogRouterNotBestDC").detail("expectedDC", getOptionalString(expectedRemoteDcId)).detail("ActualDC", getOptionalString(logRouter.interf().locality.dcId()));
+						if (logRouter.interf().filteredLocality.dcId() != expectedRemoteDcId) {
+							TraceEvent("ConsistencyCheck_LogRouterNotBestDC").detail("expectedDC", getOptionalString(expectedRemoteDcId)).detail("ActualDC", getOptionalString(logRouter.interf().filteredLocality.dcId()));
 							return false;
 						}
 					}
