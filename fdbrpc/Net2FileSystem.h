@@ -36,6 +36,7 @@ public:
 	virtual Future< std::time_t > lastWriteTime( std::string filename );
 
 	//void init();
+	static void stop();
 
 	Net2FileSystem(double ioTimeout=0.0, std::string fileSystemPath = "");
 

@@ -42,6 +42,7 @@
 
 // See the comment in TLSConfig.actor.h for the explanation of why this module breaking include was done.
 #include "fdbrpc/IAsyncFile.h"
+#include "fdbrpc/Net2FileSystem.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
@@ -200,6 +201,7 @@ public:
 	void trackMinPriority( TaskPriority minTaskID, double now );
 	void stopImmediately() {
 		stopped=true; decltype(ready) _1; ready.swap(_1); decltype(timers) _2; timers.swap(_2);
+		Net2FileSystem::stop();
 	}
 
 	Future<Void> timeOffsetLogger;

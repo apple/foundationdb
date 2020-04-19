@@ -52,6 +52,10 @@ public:
 		}
 	}
 
+	static void stop() {
+		eio_set_max_parallel(0);
+	}
+
 	static bool should_poll() { return want_poll; }
 
 	static bool lock_fd( int fd ) {
