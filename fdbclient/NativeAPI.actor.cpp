@@ -995,6 +995,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 		networkOptions.logClientInfo = true;
 
 	g_network = newNet2(tlsConfig, false, useMetrics || networkOptions.traceDirectory.present());
+	g_network->addStopCallback( Net2FileSystem::stop );
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
 }

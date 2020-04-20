@@ -42,7 +42,6 @@
 
 // See the comment in TLSConfig.actor.h for the explanation of why this module breaking include was done.
 #include "fdbrpc/IAsyncFile.h"
-#include "fdbrpc/Net2FileSystem.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
@@ -145,6 +144,13 @@ public:
 			// SOMEDAY: NULL for deferred error, no analysis of correctness (itp)
 			onMainThreadVoid( [this] { this->stopImmediately(); }, NULL );
 	}
+	virtual void addStopCallback( std::function<void()> fn ) {
+		if ( thread_network == this )
+			stopCallbacks.emplace_back(std::move(fn));
+		else
+			// SOMEDAY: NULL for deferred error, no analysis of correctness (itp)
+			onMainThreadVoid( [this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, NULL );
+	}
 
 	virtual bool isSimulated() const { return false; }
 	virtual THREAD_HANDLE startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg);
@@ -201,7 +207,9 @@ public:
 	void trackMinPriority( TaskPriority minTaskID, double now );
 	void stopImmediately() {
 		stopped=true; decltype(ready) _1; ready.swap(_1); decltype(timers) _2; timers.swap(_2);
-		Net2FileSystem::stop();
+		for ( auto& fn : stopCallbacks ) {
+			fn();
+		}
 	}
 
 	Future<Void> timeOffsetLogger;
@@ -233,6 +241,7 @@ public:
 	EventMetricHandle<SlowTask> slowTaskMetric;
 
 	std::vector<std::string> blobCredentialFiles;
+	std::vector<std::function<void()>> stopCallbacks;
 };
 
 static boost::asio::ip::address tcpAddress(IPAddress const& n) {
