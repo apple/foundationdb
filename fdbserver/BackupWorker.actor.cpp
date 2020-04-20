@@ -68,7 +68,8 @@ struct BackupData {
 	const UID myId;
 	const Tag tag; // LogRouter tag for this worker, i.e., (-2, i)
 	const int totalTags; // Total log router tags
-	const Version startVersion;
+	// Backup request's commit version. Mutations are logged at some version after this.
+	const Version startVersion; // This worker's start version
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
 	const LogEpoch backupEpoch; // the epoch workers should pull mutations
@@ -292,7 +293,7 @@ struct BackupData {
 		}
 		ASSERT_WE_THINK(backupEpoch == oldestBackupEpoch);
 		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
-		logSystem.get()->pop(popVersion, popTag);
+		logSystem.get()->pop(std::max(popVersion, savedVersion), popTag);
 	}
 
 	void stop() {
