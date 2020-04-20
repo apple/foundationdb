@@ -994,6 +994,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
+	TLS::DisableOpenSSLAtExitHandler();
 	g_network = newNet2(tlsConfig, false, useMetrics || networkOptions.traceDirectory.present());
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
@@ -1019,6 +1020,7 @@ void stopNetwork() {
 
 	g_network->stop();
 	closeTraceFile();
+	TLS::DestroyOpenSSLGlobalState();
 }
 
 Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxies) {
