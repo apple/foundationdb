@@ -298,7 +298,8 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 				if (ongoingReplies.empty()) {
 					break;
 				} else {
-					wait(waitForAny(ongoingReplies));
+					wait(quorum(ongoingReplies, std::min((int)SERVER_KNOBS->FASTRESTORE_REQBATCH_PARALLEL,
+					                                     (int)ongoingReplies.size())));
 				}
 				// At least one reply is received; Calculate the reply duration
 				for (int j = 0; j < ongoingReplies.size(); ++j) {
