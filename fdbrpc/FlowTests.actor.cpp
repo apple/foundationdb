@@ -1383,31 +1383,23 @@ struct Tracker {
 		this->copied = other.copied + 1;
 		return *this;
 	}
+	~Tracker() = default;
 
 	ACTOR static Future<Void> listen(FutureStream<Tracker> stream) {
-		Tracker t = waitNext(stream);
-		ASSERT(!t.moved);
-		ASSERT(t.copied == 0);
+		Tracker movedTracker = waitNext(stream);
+		ASSERT(!movedTracker.moved);
+		ASSERT(movedTracker.copied == 0);
 		return Void();
 	}
 };
 
-TEST_CASE("/flow/flow/PromiseStream/move2") {
-	PromiseStream<Tracker> stream;
-	stream.send(Tracker{});
-	Tracker tracker = waitNext(stream.getFuture());
-	Tracker movedTracker = std::move(tracker);
-	ASSERT(!movedTracker.moved);
-	ASSERT(movedTracker.copied == 0);
-	return Void();
-}
-
 TEST_CASE("/flow/flow/PromiseStream/move") {
 	state PromiseStream<Tracker> stream;
+	state Future<Void> listener;
 	{
 		// This tests the case when a callback is added before
 		// a movable value is sent
-		state Future<Void> listener = Tracker::listen(stream.getFuture());
+		listener = Tracker::listen(stream.getFuture());
 		stream.send(Tracker{});
 		wait(listener);
 	}
@@ -1426,15 +1418,14 @@ TEST_CASE("/flow/flow/PromiseStream/move") {
 		stream.send(Tracker{});
 		stream.send(Tracker{});
 		{
-			Tracker t = waitNext(stream.getFuture());
-			ASSERT(!t.moved);
-			ASSERT(t.copied == 0);
+			state Tracker movedTracker = waitNext(stream.getFuture());
+			ASSERT(!movedTracker.moved);
+			ASSERT(movedTracker.copied == 0);
 		}
-		choose {
-			when(Tracker t = waitNext(stream.getFuture())) {
-				ASSERT(!t.moved);
-				ASSERT(t.copied == 0);
-			}
+		{
+			Tracker movedTracker = waitNext(stream.getFuture());
+			ASSERT(!movedTracker.moved);
+			ASSERT(movedTracker.copied == 0);
 		}
 	}
 	{
@@ -1445,19 +1436,28 @@ TEST_CASE("/flow/flow/PromiseStream/move") {
 		stream.send(namedTracker1);
 		stream.send(namedTracker2);
 		{
-			Tracker t = waitNext(stream.getFuture());
-			ASSERT(!t.moved);
+			state Tracker copiedTracker = waitNext(stream.getFuture());
+			ASSERT(!copiedTracker.moved);
 			// must copy onto queue
-			ASSERT(t.copied == 1);
+			ASSERT(copiedTracker.copied == 1);
 		}
-		choose {
-			when(Tracker t = waitNext(stream.getFuture())) {
-				ASSERT(!t.moved);
-				// must copy onto queue
-				ASSERT(t.copied == 1);
-			}
+		{
+			Tracker copiedTracker = waitNext(stream.getFuture());
+			ASSERT(!copiedTracker.moved);
+			// must copy onto queue
+			ASSERT(copiedTracker.copied == 1);
 		}
 	}
 
+	return Void();
+}
+
+TEST_CASE("/flow/flow/PromiseStream/move2") {
+	PromiseStream<Tracker> stream;
+	stream.send(Tracker{});
+	Tracker tracker = waitNext(stream.getFuture());
+	Tracker movedTracker = std::move(tracker);
+	ASSERT(!movedTracker.moved);
+	ASSERT(movedTracker.copied == 0);
 	return Void();
 }
