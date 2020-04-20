@@ -207,9 +207,6 @@ public:
 	void trackMinPriority( TaskPriority minTaskID, double now );
 	void stopImmediately() {
 		stopped=true; decltype(ready) _1; ready.swap(_1); decltype(timers) _2; timers.swap(_2);
-		for ( auto& fn : stopCallbacks ) {
-			fn();
-		}
 	}
 
 	Future<Void> timeOffsetLogger;
@@ -1187,6 +1184,10 @@ void Net2::run() {
 
 		if ((nnow-now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && nondeterministicRandom()->random01() < (nnow-now)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopBottom").detail("Elapsed", nnow - now); // This includes the time spent running tasks
+	}
+
+	for ( auto& fn : stopCallbacks ) {
+		fn();
 	}
 
 	#ifdef WIN32
