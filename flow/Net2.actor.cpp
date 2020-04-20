@@ -141,14 +141,12 @@ public:
 		if ( thread_network == this )
 			stopImmediately();
 		else
-			// SOMEDAY: NULL for deferred error, no analysis of correctness (itp)
 			onMainThreadVoid( [this] { this->stopImmediately(); }, NULL );
 	}
 	virtual void addStopCallback( std::function<void()> fn ) {
 		if ( thread_network == this )
 			stopCallbacks.emplace_back(std::move(fn));
 		else
-			// SOMEDAY: NULL for deferred error, no analysis of correctness (itp)
 			onMainThreadVoid( [this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, NULL );
 	}
 
