@@ -690,7 +690,7 @@ public:
 	Future(T&& presentValue)
 		: sav(new SAV<T>(1, 0))
 	{
-		sav->send(std::forward<T>(presentValue));
+		sav->send(std::move(presentValue));
 	}
 	Future(Never)
 		: sav(new SAV<T>(1, 0))
