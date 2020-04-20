@@ -619,7 +619,7 @@ EXTERNC void flushAndExit(int exitCode);
 void platformInit();
 
 void registerCrashHandler();
-void setupSlowTaskProfiler();
+void setupRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 
 // Use _exit() or criticalError(), not exit()

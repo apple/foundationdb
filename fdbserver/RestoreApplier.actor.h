@@ -107,8 +107,9 @@ struct StagingKey {
 				// TODO: Add SevError here
 				TraceEvent("SameVersion")
 				    .detail("Version", version.toString())
-				    .detail("Mutation", m.toString())
-				    .detail("NewVersion", newVersion.toString());
+				    .detail("NewVersion", newVersion.toString())
+				    .detail("OldMutation", it->second.toString())
+				    .detail("NewMutation", m.toString());
 				ASSERT(it->second.type == m.type && it->second.param1 == m.param1 && it->second.param2 == m.param2);
 			}
 		}
@@ -279,26 +280,6 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 			item.first->second.add(m, ver);
 		} else {
 			stagingKeyRanges.insert(StagingKeyRange(m, ver));
-		}
-	}
-
-	void addVersionStampedKV(MutationRef m, LogMessageVersion ver, uint16_t numVersionStampedKV) {
-		if (m.type == MutationRef::SetVersionstampedKey) {
-			// Assume transactionNumber = 0 does not affect result
-			TraceEvent(SevDebug, "FastRestoreApplierAddMutation")
-			    .detail("MutationType", typeString[m.type])
-			    .detail("FakedTransactionNumber", numVersionStampedKV);
-			transformVersionstampMutation(m, &MutationRef::param1, ver.version, numVersionStampedKV);
-			addMutation(m, ver);
-		} else if (m.type == MutationRef::SetVersionstampedValue) {
-			// Assume transactionNumber = 0 does not affect result
-			TraceEvent(SevDebug, "FastRestoreApplierAddMutation")
-			    .detail("MutationType", typeString[m.type])
-			    .detail("FakedTransactionNumber", numVersionStampedKV);
-			transformVersionstampMutation(m, &MutationRef::param2, ver.version, numVersionStampedKV);
-			addMutation(m, ver);
-		} else {
-			ASSERT(false);
 		}
 	}
 

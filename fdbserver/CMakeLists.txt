@@ -159,6 +159,7 @@ set(FDBSERVER_SRCS
   workloads/MetricLogging.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
+  workloads/PopulateTPCC.actor.cpp
   workloads/PubSubMultiples.actor.cpp
   workloads/QueuePush.actor.cpp
   workloads/RandomClogging.actor.cpp
@@ -177,6 +178,7 @@ set(FDBSERVER_SRCS
   workloads/Sideband.actor.cpp
   workloads/SlowTaskWorkload.actor.cpp
   workloads/SnapTest.actor.cpp
+  workloads/SpecialKeySpaceCorrectness.actor.cpp
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp
@@ -186,6 +188,8 @@ set(FDBSERVER_SRCS
   workloads/Throttling.actor.cpp
   workloads/Throughput.actor.cpp
   workloads/TimeKeeperCorrectness.actor.cpp
+  workloads/TPCC.actor.cpp
+  workloads/TPCCWorkload.h
   workloads/DifferentClustersSameRV.actor.cpp
   workloads/UnitPerf.actor.cpp
   workloads/UnitTests.actor.cpp

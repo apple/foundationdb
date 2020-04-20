@@ -83,6 +83,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES ThreadSafety.txt IGNORE)
   add_fdb_test(TEST_FILES Throttling.txt IGNORE)
   add_fdb_test(TEST_FILES TraceEventMetrics.txt IGNORE)
+  add_fdb_test(TEST_FILES PopulateTPCC.txt IGNORE)
+  add_fdb_test(TEST_FILES TPCC.txt IGNORE)
   add_fdb_test(TEST_FILES default.txt IGNORE)
   add_fdb_test(TEST_FILES errors.txt IGNORE)
   add_fdb_test(TEST_FILES fail.txt IGNORE)
@@ -125,6 +127,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/SelectorCorrectness.txt)
   add_fdb_test(TEST_FILES fast/Sideband.txt)
   add_fdb_test(TEST_FILES fast/SidebandWithStatus.txt)
+  add_fdb_test(TEST_FILES fast/SpecialKeySpaceCorrectness.txt)
   add_fdb_test(TEST_FILES fast/SwizzledRollbackSideband.txt)
   add_fdb_test(TEST_FILES fast/SystemRebootTestCycle.txt)
   add_fdb_test(TEST_FILES fast/TaskBucketCorrectness.txt)
@@ -161,17 +164,17 @@ if(WITH_PYTHON)
     TEST_FILES restarting/StorefrontTestRestart-1.txt
                restarting/StorefrontTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
-               restarting/from_6.2.0/SnapTestAttrition-2.txt)
+    TEST_FILES SnapTestAttrition-1.txt
+               SnapTestAttrition-2.txt IGNORE)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestSimpleRestart-1.txt
-               restarting/from_6.2.0/SnapTestSimpleRestart-2.txt)
+    TEST_FILES SnapTestSimpleRestart-1.txt
+               SnapTestSimpleRestart-2.txt IGNORE)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapTestRestart-1.txt
-               restarting/from_6.2.0/SnapTestRestart-2.txt)
+    TEST_FILES SnapTestRestart-1.txt
+               SnapTestRestart-2.txt IGNORE)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.0/SnapCycleRestart-1.txt
-               restarting/from_6.2.0/SnapCycleRestart-2.txt)
+    TEST_FILES SnapCycleRestart-1.txt
+               SnapCycleRestart-2.txt IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
                restarting/from_5.1.7/DrUpgradeRestart-2.txt)

@@ -83,6 +83,7 @@
     <ClInclude Include="Schemas.h" />
     <ClInclude Include="sha1\SHA1.h" />
     <ClInclude Include="SnapshotCache.h" />
+    <ActorCompiler Include="SpecialKeySpace.actor.h" />
     <ClInclude Include="Status.h" />
     <ClInclude Include="StatusClient.h" />
     <ClInclude Include="StorageServerInterface.h" />
@@ -129,6 +130,7 @@
     <ClCompile Include="Schemas.cpp" />
     <ClCompile Include="SystemData.cpp" />
     <ClCompile Include="sha1\SHA1.cpp" />
+    <ActorCompiler Include="SpecialKeySpace.actor.cpp" />
     <ActorCompiler Include="ThreadSafeTransaction.actor.cpp" />
     <ActorCompiler Include="TaskBucket.actor.cpp" />
     <ClCompile Include="Subspace.cpp" />
@@ -167,11 +169,11 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_72_0</IncludePath>
+    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_67_0</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|X64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_72_0</IncludePath>
+    <IncludePath>$(IncludePath);../;C:\Program Files\boost_1_67_0</IncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
