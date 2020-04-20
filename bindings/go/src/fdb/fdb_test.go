@@ -246,6 +246,7 @@ func ExampleRangeIterator() {
 
 	rr := tr.GetRange(fdb.KeyRange{fdb.Key(""), fdb.Key{0xFF}}, fdb.RangeOptions{})
 	ri := rr.Iterator()
+	defer ri.Close()
 
 	// Advance will return true until the iterator is exhausted
 	for ri.Advance() {
