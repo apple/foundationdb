@@ -953,7 +953,15 @@ namespace actorcompiler
                     // if it has side effects
                     cx.target.WriteLine("if (!{0}->SAV<{1}>::futures) {{ (void)({2}); this->~{3}(); {0}->destroy(); return 0; }}", This, actor.returnType, stmt.expression, stateClassName);
                     // Build the return value directly in SAV<T>::value_storage
-                    cx.target.WriteLine("new (&{0}->SAV< {1} >::value()) {1}({2});", This, actor.returnType, stmt.expression);
+                    // If the expression is exactly the name of a state variable, std::move() it
+                    if (state.Exists(s => s.name == stmt.expression))
+                    {
+                        cx.target.WriteLine("new (&{0}->SAV< {1} >::value()) {1}(std::move({2})); // state_var_RVO", This, actor.returnType, stmt.expression);
+                    }
+                    else
+                    {
+                        cx.target.WriteLine("new (&{0}->SAV< {1} >::value()) {1}({2});", This, actor.returnType, stmt.expression);
+                    }
                     // Destruct state
                     cx.target.WriteLine("this->~{0}();", stateClassName);
                     // Tell SAV<T> to return the value we already constructed in value_storage
