@@ -1392,6 +1392,16 @@ struct Tracker {
 	}
 };
 
+TEST_CASE("/flow/flow/PromiseStream/move2") {
+	PromiseStream<Tracker> stream;
+	stream.send(Tracker{});
+	Tracker tracker = waitNext(stream.getFuture());
+	Tracker movedTracker = std::move(tracker);
+	ASSERT(!movedTracker.moved);
+	ASSERT(movedTracker.copied == 0);
+	return Void();
+}
+
 TEST_CASE("/flow/flow/PromiseStream/move") {
 	state PromiseStream<Tracker> stream;
 	{

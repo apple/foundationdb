@@ -1017,6 +1017,9 @@ struct ActorSingleCallback : SingleCallback<ValueType> {
 	virtual void fire(ValueType const& value) {
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
+	virtual void fire(ValueType && value) {
+		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
+	}
 	virtual void error(Error e) {
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
 	}
