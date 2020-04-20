@@ -23,12 +23,13 @@
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
-#include "boost/asio.hpp"
-#include "boost/bind.hpp"
-#include "boost/date_time/posix_time/posix_time_types.hpp"
+#include <boost/asio.hpp>
+#include <boost/bind.hpp>
+#include <boost/date_time/posix_time/posix_time_types.hpp>
+#include <boost/range.hpp>
+#include <boost/algorithm/string/join.hpp>
 #include "flow/network.h"
 #include "flow/IThreadPool.h"
-#include "boost/range.hpp"
 
 #include "flow/ActorCollection.h"
 #include "flow/ThreadSafeQueue.h"
@@ -971,6 +972,13 @@ void Net2::initTLS() {
 	try {
 		boost::asio::ssl::context newContext(boost::asio::ssl::context::tls);
 		auto onPolicyFailure = [this]() { this->countTLSPolicyFailures++; };
+		const LoadedTLSConfig& loaded = tlsConfig.loadSync();
+		TraceEvent("Net2TLSConfig")
+			.detail("CAPath", tlsConfig.getCAPathSync())
+			.detail("CertificatePath", tlsConfig.getCertificatePathSync())
+			.detail("KeyPath", tlsConfig.getKeyPathSync())
+			.detail("HasPassword", !loaded.getPassword().empty())
+			.detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"));
 		ConfigureSSLContext( tlsConfig.loadSync(), &newContext, onPolicyFailure );
 		sslContextVar.set(ReferencedObject<boost::asio::ssl::context>::from(std::move(newContext)));
 		backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, onPolicyFailure, &sslContextVar );
