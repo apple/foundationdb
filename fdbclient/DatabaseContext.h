@@ -50,13 +50,14 @@ class ClientTagThrottleData {
 private:
 	double tpsRate;
 	double expiration;
+	double lastCheck;
 
 	Smoother smoothRate;
 	Smoother smoothReleased;
 
 public:
 	ClientTagThrottleData(ClientTagThrottleLimits const& limits)
-	  : tpsRate(limits.tpsRate), expiration(limits.expiration), smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW), 
+	  : tpsRate(limits.tpsRate), expiration(limits.expiration), lastCheck(now()), smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW), 
 	    smoothReleased(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) 
 	{
 		ASSERT(tpsRate >= 0);
@@ -69,6 +70,7 @@ public:
 		smoothRate.setTotal(limits.tpsRate);
 
 		expiration = limits.expiration;
+		lastCheck = now();
 	}
 
 	void addReleased(int released) {
@@ -77,6 +79,10 @@ public:
 
 	bool expired() {
 		return expiration <= now();
+	}
+
+	bool canRecheck() {
+		return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL;
 	}
 
 	double throttleDuration() {

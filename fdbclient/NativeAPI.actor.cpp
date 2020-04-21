@@ -3339,6 +3339,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		}
 
 		double maxThrottleDelay = 0.0;
+		bool canRecheck = false;
 		if(options.tags.size() != 0) {
 			auto priorityThrottledTags = cx->throttledTags[ThrottleApi::priorityFromReadVersionFlags(flags)];
 			for(auto tag : options.tags) {
@@ -3346,6 +3347,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 				if(itr != priorityThrottledTags.end()) {
 					if(!itr->second.expired()) {
 						maxThrottleDelay = std::max(maxThrottleDelay, itr->second.throttleDuration());
+						canRecheck = itr->second.canRecheck();
 					}
 					else {
 						priorityThrottledTags.erase(itr);
@@ -3354,7 +3356,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			}
 		}
 
-		if(maxThrottleDelay > 0.0) { // TODO: allow delaying?
+		if(maxThrottleDelay > 0.0 && !canRecheck) { // TODO: allow delaying?
 			++cx->transactionReadVersionsThrottled;
 			return Future<Version>(tag_throttled());
 		}

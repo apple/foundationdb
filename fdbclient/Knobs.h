@@ -210,6 +210,7 @@ public:
 	int MAX_TAGS_PER_TRANSACTION;
 	double READ_TAG_SAMPLE_RATE; // Communicated to clients from cluster
 	double TAG_THROTTLE_SMOOTHING_WINDOW;
+	double TAG_THROTTLE_RECHECK_INTERVAL;
 
 	ClientKnobs();
 	void initialize(bool randomize = false);
