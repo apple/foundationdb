@@ -410,7 +410,7 @@ struct StorageServerMetrics {
 
 	Future<Void> waitMetrics(WaitMetricsRequest req, Future<Void> delay);
 
-	// Given a read hot shard, this function will divid the shard into chunks and find those chunks whose
+	// Given a read hot shard, this function will divide the shard into chunks and find those chunks whose
 	// readBytes/sizeBytes exceeds the `readDensityRatio`. Please make sure to run unit tests
 	// `StorageMetricsSampleTests.txt` after change made.
 	std::vector<KeyRangeRef> getReadHotRanges(KeyRangeRef shard, double readDensityRatio, int64_t baseChunkSize,
@@ -441,12 +441,11 @@ struct StorageServerMetrics {
 				                                 chunkSize);
 				continue;
 			}
-			if (bytesReadSample.getEstimate(KeyRangeRef(beginKey, *endKey)) / chunkSize > readDensityRatio) {
+			if (bytesReadSample.getEstimate(KeyRangeRef(beginKey, *endKey)) > (readDensityRatio * chunkSize)) {
 				auto range = KeyRangeRef(beginKey, *endKey);
 				if (!toReturn.empty() && toReturn.back().end == range.begin) {
-					auto updatedTail =
-					    KeyRangeRef(toReturn.back().begin,
-					                *endKey); // in case two consecutive chunks both are over the ratio, merge them.
+					// in case two consecutive chunks both are over the ratio, merge them.
+					auto updatedTail = KeyRangeRef(toReturn.back().begin, *endKey);
 					toReturn.pop_back();
 					toReturn.push_back(updatedTail);
 				} else {
