@@ -142,8 +142,13 @@ public:
 		if ( thread_network == this )
 			stopImmediately();
 		else
-			// SOMEDAY: NULL for deferred error, no analysis of correctness (itp)
 			onMainThreadVoid( [this] { this->stopImmediately(); }, NULL );
+	}
+	virtual void addStopCallback( std::function<void()> fn ) {
+		if ( thread_network == this )
+			stopCallbacks.emplace_back(std::move(fn));
+		else
+			onMainThreadVoid( [this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, NULL );
 	}
 
 	virtual bool isSimulated() const { return false; }
@@ -232,6 +237,7 @@ public:
 	EventMetricHandle<SlowTask> slowTaskMetric;
 
 	std::vector<std::string> blobCredentialFiles;
+	std::vector<std::function<void()>> stopCallbacks;
 };
 
 static boost::asio::ip::address tcpAddress(IPAddress const& n) {
@@ -1192,6 +1198,10 @@ void Net2::run() {
 
 		if ((nnow-now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && nondeterministicRandom()->random01() < (nnow-now)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopBottom").detail("Elapsed", nnow - now); // This includes the time spent running tasks
+	}
+
+	for ( auto& fn : stopCallbacks ) {
+		fn();
 	}
 
 	#ifdef WIN32
