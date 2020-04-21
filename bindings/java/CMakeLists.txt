@@ -56,6 +56,7 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/testing/Promise.java
   src/main/com/apple/foundationdb/testing/PerfMetric.java
   src/main/com/apple/foundationdb/tuple/ByteArrayUtil.java
+  src/main/com/apple/foundationdb/tuple/FastByteComparisons.java
   src/main/com/apple/foundationdb/tuple/IterableComparator.java
   src/main/com/apple/foundationdb/tuple/package-info.java
   src/main/com/apple/foundationdb/tuple/StringUtil.java
