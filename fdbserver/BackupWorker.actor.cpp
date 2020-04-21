@@ -765,6 +765,10 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 
 		state int numMsg = 0;
 		Version lastPopVersion = popVersion;
+		// index of last version's end position in self->messages
+		int lastVersionIndex = 0;
+		Version lastVersion = invalidVersion;
+
 		if (self->messages.empty()) {
 			// Even though messages is empty, we still want to advance popVersion.
 			if (!self->endVersion.present()) {
@@ -773,18 +777,30 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		} else {
 			for (const auto& message : self->messages) {
 				// message may be prefetched in peek; uncommitted message should not be uploaded.
-				if (message.getVersion() > self->maxPopVersion()) break;
-				popVersion = std::max(popVersion, message.getVersion());
+				const Version version = message.getVersion();
+				if (version > self->maxPopVersion()) break;
+				if (version > popVersion) {
+					lastVersionIndex = numMsg;
+					lastVersion = popVersion;
+					popVersion = version;
+				}
 				numMsg++;
 			}
 		}
 		if (self->pullFinished()) {
 			popVersion = self->endVersion.get();
+		} else {
+			// make sure file is saved on version boundary
+			popVersion = lastVersion;
+			numMsg = lastVersionIndex;
 		}
 		if (((numMsg > 0 || popVersion > lastPopVersion) && self->pulling) || self->pullFinished()) {
 			TraceEvent("BackupWorkerSave", self->myId)
 			    .detail("Version", popVersion)
+			    .detail("LastPopVersion", lastPopVersion)
+			    .detail("Pulling", self->pulling)
 			    .detail("SavedVersion", self->savedVersion)
+			    .detail("NumMsg", numMsg)
 			    .detail("MsgQ", self->messages.size());
 			// save an empty file for old epochs so that log file versions are continuous
 			wait(saveMutationsToFile(self, popVersion, numMsg));
