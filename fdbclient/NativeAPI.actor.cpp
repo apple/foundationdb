@@ -3191,10 +3191,16 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
 					auto &priorityThrottledTags = cx->throttledTags[ThrottleApi::priorityFromReadVersionFlags(flags)];
-					for(auto tag : v.tagThrottleInfo) { // TODO: remove any that aren't sent back?
-						auto result = priorityThrottledTags.try_emplace(tag.first, tag.second);
-						if(!result.second) {
-							result.first->second.update(tag.second);
+					for(auto& tag : tags) {
+						auto itr = v.tagThrottleInfo.find(tag.first);
+						if(itr == v.tagThrottleInfo.end()) {
+							priorityThrottledTags.erase(tag.first);
+						}
+						else {
+							auto result = priorityThrottledTags.try_emplace(tag.first, itr->second);
+							if(!result.second) {
+								result.first->second.update(itr->second);
+							}
 						}
 					}
 
