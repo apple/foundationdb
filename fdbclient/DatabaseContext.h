@@ -70,7 +70,6 @@ public:
 		smoothRate.setTotal(limits.tpsRate);
 
 		expiration = limits.expiration;
-		lastCheck = now();
 	}
 
 	void addReleased(int released) {
@@ -79,6 +78,10 @@ public:
 
 	bool expired() {
 		return expiration <= now();
+	}
+
+	void updateChecked() {
+		lastCheck = now();
 	}
 
 	bool canRecheck() {

@@ -3230,7 +3230,6 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 	loop {
 		send_batch = false;
 		choose {
-			// TODO: we have to rethink how we send batches to the MP to deal with tags
 			when(DatabaseContext::VersionRequest req = waitNext(versionStream)) {
 				if (req.debugID.present()) {
 					if (!debugID.present()) {
@@ -3354,11 +3353,18 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 					}
 				}
 			}
-		}
 
-		if(maxThrottleDelay > 0.0 && !canRecheck) { // TODO: allow delaying?
-			++cx->transactionReadVersionsThrottled;
-			return Future<Version>(tag_throttled());
+			if(maxThrottleDelay > 0.0 && !canRecheck) { // TODO: allow delaying?
+				++cx->transactionReadVersionsThrottled;
+				return Future<Version>(tag_throttled());
+			}
+
+			for(auto tag : options.tags) {
+				auto itr = priorityThrottledTags.find(tag);
+				if(itr != priorityThrottledTags.end()) {
+					itr->second.updateChecked();
+				}
+			}
 		}
 
 		auto& batcher = cx->versionBatcher[ flags ];
