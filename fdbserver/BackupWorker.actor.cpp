@@ -68,7 +68,6 @@ struct BackupData {
 	const UID myId;
 	const Tag tag; // LogRouter tag for this worker, i.e., (-2, i)
 	const int totalTags; // Total log router tags
-	// Backup request's commit version. Mutations are logged at some version after this.
 	const Version startVersion; // This worker's start version
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
@@ -209,8 +208,12 @@ struct BackupData {
 		}
 
 		BackupData* self = nullptr;
+
+		// Backup request's commit version. Mutations are logged at some version after this.
 		Version startVersion = invalidVersion;
+		// The last mutation log's saved version (not inclusive), i.e., next log's begin version.
 		Version lastSavedVersion = invalidVersion;
+
 		Future<Optional<Reference<IBackupContainer>>> container;
 		Future<Optional<std::vector<KeyRange>>> ranges; // Key ranges of this backup
 		Future<Void> updateWorker;
