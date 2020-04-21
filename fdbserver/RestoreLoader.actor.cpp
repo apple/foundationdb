@@ -28,8 +28,10 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// SerializedMutationListMap:
-// Key is the signature/version of the mutation list, Value is the mutation list (or part of the mutation list)
+// SerializedMutationListMap: Buffered mutation lists from data blocks in log files
+// Key is the signature/version of the mutation list; Value.first is the mutation list which may come from multiple
+// data blocks of log file; Value.second is the largest part number of the mutation list, which is used to sanity check
+// the data blocks for the same mutation list are concatenated in increasing order of part number.
 typedef std::map<Standalone<StringRef>, std::pair<Standalone<StringRef>, uint32_t>> SerializedMutationListMap;
 
 std::vector<UID> getApplierIDs(std::map<Key, UID>& rangeToApplier);
@@ -440,6 +442,37 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	return Void();
 }
 
+// TODO: Enable sending mutation batches out of order;
+// TODO: Consolidate the three maps
+ACTOR Future<Void> sendOneMutationBatchToAppliers(std::vector<UID>* applierIDs, int* batchIndex, RestoreAsset* asset,
+                                                  Version* msgIndex, bool isRangeFile,
+                                                  std::map<UID, MutationsVec>* applierMutationsBuffer,
+                                                  std::map<UID, LogMessageVersionVec>* applierVersionsBuffer,
+                                                  std::map<UID, double>* applierMutationsSize,
+                                                  std::map<UID, RestoreApplierInterface>* pApplierInterfaces) {
+	std::vector<std::pair<UID, RestoreSendVersionedMutationsRequest>> requests;
+	for (const UID& applierID : *applierIDs) {
+		requests.emplace_back(applierID,
+		                      RestoreSendVersionedMutationsRequest(*batchIndex, *asset, *msgIndex, isRangeFile,
+		                                                           applierMutationsBuffer->at(applierID),
+		                                                           applierVersionsBuffer->at(applierID)));
+	}
+	TraceEvent(SevDebug, "FastRestoreLoaderSendMutationToApplier")
+	    .detail("MessageIndex", *msgIndex)
+	    .detail("RestoreAsset", asset->toString())
+	    .detail("Requests", requests.size());
+	wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
+	                       TaskPriority::RestoreLoaderSendMutations));
+	++(*msgIndex);
+	for (auto& applierID : *applierIDs) {
+		applierMutationsBuffer->at(applierID) = MutationsVec();
+		applierVersionsBuffer->at(applierID) = LogMessageVersionVec();
+		applierMutationsSize->at(applierID) = 0.0;
+	}
+
+	return Void();
+}
+
 // Assume: kvOps data are from the same RestoreAsset.
 // Input: pkvOps: versioned kv mutation for the asset in the version batch (batchIndex)
 //   isRangeFile: is pkvOps from range file? Let receiver (applier) know if the mutation is log mutation;
@@ -551,26 +584,30 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 			// Batch mutations at multiple versions up to FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES size
 			// to improve bandwidth from a loader to appliers
 			if (msgSize >= SERVER_KNOBS->FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES) {
-				for (const UID& applierID : applierIDs) {
-					requests.emplace_back(applierID,
-					                      RestoreSendVersionedMutationsRequest(batchIndex, asset, msgIndex, isRangeFile,
-					                                                           applierMutationsBuffer[applierID],
-					                                                           applierVersionsBuffer[applierID]));
-				}
-				TraceEvent(SevDebug, "FastRestoreLoaderSendMutationToApplier")
-				    .detail("MessageIndex", msgIndex)
-				    .detail("RestoreAsset", asset.toString())
-				    .detail("Requests", requests.size());
-				wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
-				                       TaskPriority::RestoreLoaderSendMutations));
-				msgIndex++;
-				msgSize = 0;
-				requests.clear();
-				for (auto& applierID : applierIDs) {
-					applierMutationsBuffer[applierID] = MutationsVec();
-					applierVersionsBuffer[applierID] = LogMessageVersionVec();
-					applierMutationsSize[applierID] = 0.0;
-				}
+				wait(sendOneMutationBatchToAppliers(&applierIDs, &batchIndex, &asset, &msgIndex, isRangeFile,
+				                                    &applierMutationsBuffer, &applierVersionsBuffer,
+				                                    &applierMutationsSize, pApplierInterfaces));
+				msgSize = 0; // Reset msgSize for next message
+				// for (const UID& applierID : applierIDs) {
+				// 	requests.emplace_back(applierID,
+				// 	                      RestoreSendVersionedMutationsRequest(batchIndex, asset, msgIndex, isRangeFile,
+				// 	                                                           applierMutationsBuffer[applierID],
+				// 	                                                           applierVersionsBuffer[applierID]));
+				// }
+				// TraceEvent(SevDebug, "FastRestoreLoaderSendMutationToApplier")
+				//     .detail("MessageIndex", msgIndex)
+				//     .detail("RestoreAsset", asset.toString())
+				//     .detail("Requests", requests.size());
+				// wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
+				//                        TaskPriority::RestoreLoaderSendMutations));
+				// msgIndex++;
+				// msgSize = 0;
+				// requests.clear();
+				// for (auto& applierID : applierIDs) {
+				// 	applierMutationsBuffer[applierID] = MutationsVec();
+				// 	applierVersionsBuffer[applierID] = LogMessageVersionVec();
+				// 	applierMutationsSize[applierID] = 0.0;
+				// }
 			}
 		} // Mutations at the same LogMessageVersion
 	} // all versions of mutations in the same file
@@ -578,17 +615,21 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	// Send the remaining mutations in the applierMutationsBuffer
 	if (msgSize > 0) {
 		// TODO: Sanity check each asset has been received exactly once!
-		for (const UID& applierID : applierIDs) {
-			requests.emplace_back(applierID, RestoreSendVersionedMutationsRequest(
-			                                     batchIndex, asset, msgIndex, isRangeFile,
-			                                     applierMutationsBuffer[applierID], applierVersionsBuffer[applierID]));
-		}
-		TraceEvent(SevDebug, "FastRestoreLoaderSendMutationToApplier")
-		    .detail("MessageIndex", msgIndex)
-		    .detail("RestoreAsset", asset.toString())
-		    .detail("Requests", requests.size());
-		wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
-		                       TaskPriority::RestoreLoaderSendMutations));
+		wait(sendOneMutationBatchToAppliers(&applierIDs, &batchIndex, &asset, &msgIndex, isRangeFile,
+		                                    &applierMutationsBuffer, &applierVersionsBuffer, &applierMutationsSize,
+		                                    pApplierInterfaces));
+		msgSize = 0;
+		// for (const UID& applierID : applierIDs) {
+		// 	requests.emplace_back(applierID, RestoreSendVersionedMutationsRequest(
+		// 	                                     batchIndex, asset, msgIndex, isRangeFile,
+		// 	                                     applierMutationsBuffer[applierID], applierVersionsBuffer[applierID]));
+		// }
+		// TraceEvent(SevDebug, "FastRestoreLoaderSendMutationToApplier")
+		//     .detail("MessageIndex", msgIndex)
+		//     .detail("RestoreAsset", asset.toString())
+		//     .detail("Requests", requests.size());
+		// wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
+		//                        TaskPriority::RestoreLoaderSendMutations));
 	}
 
 	TraceEvent("FastRestore").detail("LoaderSendMutationOnAppliers", kvCount);
