@@ -3835,28 +3835,6 @@ private:
 		// iMutationBoundary is greatest boundary <= lowerBound->key
 		// iMutationBoundaryEnd is least boundary >= upperBound->key
 
-		// If the boundary range iterators are the same then this subtree only has one unique key, which is the same key as the boundary
-		// record the iterators are pointing to.  There only two outcomes possible:  Clearing the subtree or leaving it alone.
-		// If there are any changes to the one key then the entire subtree should be deleted as the changes for the key
-		// do not go into this subtree.
-		if(iMutationBoundary == iMutationBoundaryEnd) {
-			if(iMutationBoundary.mutation().boundaryChanged) {
-				debug_printf("%s lower and upper bound key/version match and key is modified so deleting page, returning %s\n", context.c_str(), toString(result).c_str());
-				if(isLeaf) {
-					self->freeBtreePage(rootID, writeVersion);
-				}
-				else {
-					self->m_lazyDeleteQueue.pushBack(LazyDeleteQueueEntry{writeVersion, rootID});
-				}
-				return result;
-			}
-
-			// Otherwise, no changes to this subtree
-			result.contents() = ChildLinksRef(decodeLowerBound, decodeUpperBound);
-			debug_printf("%s page contains a single key '%s' which is not changing, returning %s\n", context.c_str(), lowerBound->key.toString().c_str(), toString(result).c_str());
-			return result;
-		}
-
 		// If one mutation range covers the entire subtree, then check if the entire subtree is modified,
 		// unmodified, or possibly/partially modified.
 		MutationBuffer::const_iterator iMutationBoundaryNext = iMutationBoundary;
@@ -4185,28 +4163,25 @@ private:
 				const RedwoodRecordRef &childLowerBound = first ? *lowerBound : cursor.get();
 				first = false;
 
-				// Skip over any children that do not link to a page.  They exist to preserve the ancestors from
-				// which adjacent children can borrow prefix bytes.
-				// If there are any, then the first valid child page will incur a boundary change to move
-				// its lower bound to the left so we can delete the non-linking entry from this page to free up space.
-				while(!cursor.get().value.present()) {
-					// There should never be an internal page written that has no valid child pages. This loop will find
-					// the first valid child link, and if there are no more then execution will not return to this loop.
-					ASSERT(cursor.moveNext());
-				}
+				// At this point we should never be at a null child page entry because the first entry of a page
+				// can't be null and this loop will skip over null entries that come after non-null entries.
+				ASSERT(cursor.get().value.present());
 
-				ASSERT(cursor.valid());
-
+				// The decode lower bound is always the key of the child link record
 				const RedwoodRecordRef &decodeChildLowerBound = cursor.get();
 
 				BTreePageID pageID = cursor.get().getChildPage();
 				ASSERT(!pageID.empty());
 
+				// The decode upper bound is always the next key after the child link, or the decode upper bound for this page
 				const RedwoodRecordRef &decodeChildUpperBound = cursor.moveNext() ? cursor.get() : *decodeUpperBound;
 
-				// Skip over any next-children which do not actually link to child pages
-				while(cursor.valid() && !cursor.get().value.present()) {
-					cursor.moveNext();
+				// But the decode upper bound might be a placeholder record with a null child link because
+				// the subtree was previously deleted but the key needed to exist to enable decoding of the
+				// previous child page which has not since been rewritten.
+				if(cursor.valid() && !cursor.get().value.present()) {
+					// There should only be one null child link entry, followed by a present link or the end of the page
+					ASSERT(!cursor.moveNext() || cursor.get().value.present());
 				}
 
 				const RedwoodRecordRef &childUpperBound = cursor.valid() ? cursor.get() : *upperBound;

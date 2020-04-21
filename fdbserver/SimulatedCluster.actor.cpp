@@ -737,7 +737,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	if (deterministicRandom()->random01() < 0.25) db.desiredTLogCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.masterProxyCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.resolverCount = deterministicRandom()->randomInt(1,7);
-	int storage_engine_type = deterministicRandom()->randomInt(0, 3);
+	int storage_engine_type = 3; // deterministicRandom()->randomInt(0, 4);
 	switch (storage_engine_type) {
 	case 0: {
 		TEST(true); // Simulated cluster using ssd storage engine
