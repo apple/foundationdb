@@ -439,6 +439,8 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 	state Optional<double> firstConnFailedTime = Optional<double>();
 	loop {
 		try {
+			state Future<Void> delayedHealthUpdateF = Future<Void>();
+
 			if (!conn) {  // Always, except for the first loop with an incoming connection
 				self->outgoingConnectionIdle = true;
 				// Wait until there is something to send.
@@ -461,9 +463,11 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID())
 				    .suppressFor(1.0)
 				    .detail("PeerAddr", self->destination)
-				    .detail("PeerReferences", self->peerReferences);
+				    .detail("PeerReferences", self->peerReferences)
+				    .detail("FailureStatus", IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()
+				                                 ? "OK"
+				                                 : "FAILED");
 
-				state Future<Void> delayedHealthUpdateF = Future<Void>();
 				try {
 					choose {
 						when(Reference<IConnection> _conn =
@@ -513,8 +517,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 					delayedHealthUpdateF = delayedHealthUpdate(self->destination);
 				wait(connectionWriter(self, conn) || reader || connectionMonitor(self));
 			} catch (Error& e) {
-				if (e.code() == error_code_connection_failed)
-					IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
 				if (e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled ||
 						e.code() == error_code_connection_unreferenced ||
 						(g_network->isSimulated() && e.code() == error_code_checksum_failed))
@@ -564,6 +566,10 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 						.detail("PeerAddr", self->destination);
 			}
 
+			if (e.code() == error_code_connection_failed) {
+				IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
+			}
+
 			if(self->destination.isPublic() 
 				&& IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()
 				&& !FlowTransport::transport().isClient()) 
@@ -587,8 +593,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 				conn->close();
 				conn = Reference<IConnection>();
-			} else {
-				IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
 			}
 
 			// Clients might send more packets in response, which needs to go out on the next connection
@@ -601,6 +605,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				TraceEvent("PeerDestroy").error(e).suppressFor(1.0).detail("PeerAddr", self->destination);
 				self->connect.cancel();
 				self->transport->peers.erase(self->destination);
+				IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
 				return Void();
 			}
 		}
