@@ -34,7 +34,7 @@ import com.apple.foundationdb.Transaction;
  *  {@link #printable(byte[])} for debugging non-text keys and values.
  *
  */
-public class ByteArrayUtil extends FastByteComparisons {
+public class ByteArrayUtil {
 
 	/**
 	 * Joins a set of byte arrays into a larger array. The {@code interlude} is placed
@@ -135,7 +135,11 @@ public class ByteArrayUtil extends FastByteComparisons {
 		if(src.length < start + pattern.length)
 			return false;
 
-		return compareTo(src, start, pattern.length, pattern, 0, pattern.length) == 0;
+		for(int i = 0; i < pattern.length; i++)
+			if(pattern[i] != src[start + i])
+				return false;
+
+		return true;
 	}
 
 	/**
@@ -303,7 +307,14 @@ public class ByteArrayUtil extends FastByteComparisons {
 	 *  {@code r}.
 	 */
 	public static int compareUnsigned(byte[] l, byte[] r) {
-		return compareTo(l, 0, l.length, r, 0, r.length);
+		for(int idx = 0; idx < l.length && idx < r.length; ++idx) {
+			if(l[idx] != r[idx]) {
+				return (l[idx] & 0xFF) < (r[idx] & 0xFF) ? -1 : 1;
+			}
+		}
+		if(l.length == r.length)
+			return 0;
+		return l.length < r.length ? -1 : 1;
 	}
 
 	/**
@@ -317,11 +328,15 @@ public class ByteArrayUtil extends FastByteComparisons {
 	 * @return {@code true} if {@code array} starts with {@code prefix}
 	 */
 	public static boolean startsWith(byte[] array, byte[] prefix) {
-		// Short Circuit
 		if(array.length < prefix.length) {
 			return false;
 		}
-		return compareTo(array, 0, prefix.length, prefix, 0, prefix.length) == 0;
+		for(int i = 0; i < prefix.length; ++i) {
+			if(prefix[i] != array[i]) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/**
