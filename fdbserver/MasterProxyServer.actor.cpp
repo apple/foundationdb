@@ -1382,15 +1382,10 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 		reply.tagThrottleInfo.clear();
 
 		for(auto tag : request.tags) {
-			auto itr = throttledTags.find(ThrottleApi::priorityFromReadVersionFlags(request.flags));
-			ASSERT(itr != throttledTags.end());
+			auto& priorityThrottledTags = throttledTags[ThrottleApi::priorityFromReadVersionFlags(request.flags)];
 
-			auto tagItr = itr->second.find(tag.first);
-			while(tagItr == itr->second.end() && itr != throttledTags.begin()) {
-				--itr;
-			}
-
-			if(tagItr != itr->second.end()) {
+			auto tagItr = priorityThrottledTags.find(tag.first);
+			if(tagItr != priorityThrottledTags.end()) {
 				reply.tagThrottleInfo[tag.first] = tagItr->second;
 			}
 		}
