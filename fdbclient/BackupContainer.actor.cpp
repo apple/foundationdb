@@ -1193,7 +1193,10 @@ public:
 		std::vector<LogFile> filtered;
 		int i = 0;
 		for (int j = 1; j < logs.size(); j++) {
-			if (logs[j].isSubset(logs[i])) continue;
+			if (logs[j].isSubset(logs[i])) {
+				ASSERT(logs[j].fileSize <= logs[i].fileSize);
+				continue;
+			}
 
 			if (!logs[i].isSubset(logs[j])) {
 				filtered.push_back(logs[i]);
@@ -1249,6 +1252,7 @@ public:
 			// filter out if indices.back() is subset of files[i] or vice versa
 			if (!indices.empty()) {
 				if (logs[indices.back()].isSubset(logs[i])) {
+					ASSERT(logs[indices.back()].fileSize <= logs[i].fileSize);
 					indices.back() = i;
 				} else if (!logs[i].isSubset(logs[indices.back()])) {
 					indices.push_back(i);
