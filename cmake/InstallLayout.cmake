@@ -320,9 +320,14 @@ set(CPACK_RPM_SERVER-EL7_USER_FILELIST
   "%config(noreplace) /etc/foundationdb/foundationdb.conf"
   "%attr(0700,foundationdb,foundationdb) /var/log/foundationdb"
   "%attr(0700, foundationdb, foundationdb) /var/lib/foundationdb")
+set(CPACK_RPM_CLIENTS-EL6_USER_FILELIST "%dir /etc/foundationdb")
+set(CPACK_RPM_CLIENTS-EL7_USER_FILELIST "%dir /etc/foundationdb")
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/usr/sbin"
   "/usr/share/java"
+  "/usr/lib64/cmake"
+  "/etc/foundationdb"
+  "/usr/lib64/pkgconfig"
   "/usr/lib64/python2.7"
   "/usr/lib64/python2.7/site-packages"
   "/var"
