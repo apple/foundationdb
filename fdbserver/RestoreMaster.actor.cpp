@@ -717,22 +717,10 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 ACTOR static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersions, RestoreFileFR* file,
                                              Reference<IBackupContainer> bc) {
 	TraceEvent("FastRestoreMasterDecodeRangeVersion").detail("File", file->toString());
-	state Reference<IAsyncFile> inFile = wait(bc->readFile(file->fileName));
-	state bool beginKeySet = false;
-	state Key beginKey;
-	state Key endKey;
-	state int64_t j = 0;
-	for (; j < file->fileSize; j += file->blockSize) {
-		int64_t len = std::min<int64_t>(file->blockSize, file->fileSize - j);
-		Standalone<VectorRef<KeyValueRef>> blockData = wait(parallelFileRestore::decodeRangeFileBlock(inFile, j, len));
-		if (!beginKeySet) {
-			beginKey = blockData.front().key;
-		}
-		endKey = blockData.back().key;
-	}
+	RangeFile rangeFile(file->version, file->blockSize, file->fileName, file->fileSize);
 
 	// First and last key are the range for this file: endKey is exclusive
-	KeyRange fileRange = KeyRangeRef(beginKey.contents(), endKey.contents());
+	KeyRange fileRange = wait(bc->getSnapshotFileKeyRange(rangeFile));
 	TraceEvent("FastRestoreMasterInsertRangeVersion")
 	    .detail("DecodedRangeFile", file->fileName)
 	    .detail("KeyRange", fileRange)

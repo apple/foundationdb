@@ -108,6 +108,12 @@ struct RangeFile {
 	std::string fileName;
 	int64_t fileSize;
 
+	RangeFile() {}
+	RangeFile(Version v, uint32_t bSize, std::string name, int64_t size)
+	  : version(v), blockSize(bSize), fileName(name), fileSize(size) {}
+	RangeFile(const RangeFile& f)
+	  : version(f.version), blockSize(f.blockSize), fileName(f.fileName), fileSize(f.fileSize) {}
+
 	// Order by version, break ties with name
 	bool operator< (const RangeFile &rhs) const {
 		return version == rhs.version ? fileName < rhs.fileName : version < rhs.version;
@@ -245,6 +251,10 @@ public:
 
 	// Open a file for read by name
 	virtual Future<Reference<IAsyncFile>> readFile(std::string name) = 0;
+
+	// Returns the key ranges in the snapshot file. This is an expensive function
+	// and should only be used in simulation for sanity check.
+	virtual Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file) = 0;
 
 	struct ExpireProgress {
 		std::string step;

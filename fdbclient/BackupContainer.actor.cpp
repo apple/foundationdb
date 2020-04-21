@@ -1331,6 +1331,29 @@ public:
 		return end;
 	}
 
+	ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc,
+	                                                           RangeFile file) {
+		state Reference<IAsyncFile> inFile = wait(bc->readFile(file.fileName));
+		state bool beginKeySet = false;
+		state Key beginKey;
+		state Key endKey;
+		state int64_t j = 0;
+		for (; j < file.fileSize; j += file.blockSize) {
+			int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - j);
+			Standalone<VectorRef<KeyValueRef>> blockData = wait(fileBackup::decodeRangeFileBlock(inFile, j, len));
+			if (!beginKeySet) {
+				beginKey = blockData.front().key;
+			}
+			endKey = blockData.back().key;
+		}
+		return KeyRange(KeyRangeRef(beginKey, endKey));
+	}
+
+	Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file) final {
+		ASSERT(g_network->isSimulated());
+		return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file);
+	}
+
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion) {
 		// Find the most recent keyrange snapshot to end at or before targetVersion
 		state Optional<KeyspaceSnapshotFile> snapshot;
@@ -1349,6 +1372,17 @@ public:
 			    wait(bc->readKeyspaceSnapshot(snapshot.get()));
 			restorable.ranges = std::move(results.first);
 			restorable.keyRanges = std::move(results.second);
+			if (g_network->isSimulated()) {
+				// Sanity check key ranges
+				state std::map<std::string, KeyRange>::iterator rit;
+				for (rit = restorable.keyRanges.begin(); rit != restorable.keyRanges.end(); rit++) {
+					auto it = std::find_if(restorable.ranges.begin(), restorable.ranges.end(),
+					                       [file = rit->first](const RangeFile f) { return f.fileName == file; });
+					ASSERT(it != restorable.ranges.end());
+					KeyRange result = wait(bc->getSnapshotFileKeyRange(*it));
+					ASSERT(rit->second.begin <= result.begin && rit->second.end >= result.end);
+				}
+			}
 
 			// No logs needed if there is a complete key space snapshot at the target version.
 			if (snapshot.get().beginVersion == snapshot.get().endVersion &&
