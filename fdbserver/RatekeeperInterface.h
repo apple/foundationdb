@@ -72,7 +72,7 @@ struct GetRateInfoReply {
 	double leaseDuration;
 	HealthMetrics healthMetrics;
 
-	PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags;
+	Optional<PrioritizedTransactionTagMap<ClientTagThrottleLimits>> throttledTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

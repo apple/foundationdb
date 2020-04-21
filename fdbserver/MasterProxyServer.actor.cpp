@@ -216,11 +216,8 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 				lastDetailedReply = now();
 			}
 
-			for(auto priorityTags : rep.throttledTags) {
-				auto &localPriorityTags = (*throttledTags)[priorityTags.first];
-				for(auto tag : priorityTags.second) { // TODO: remove missing tags
-					localPriorityTags[tag.first] = tag.second;
-				}
+			if(rep.throttledTags.present()) {
+				*throttledTags = rep.throttledTags;
 			}
 		}
 		when ( wait( leaseTimeout ) ) {
@@ -257,7 +254,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				req.reply.send(rep);
 				TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceeded").suppressFor(60);
 			} else {
-				// TODO: this probably needs to happen outside the high priority path
+				// TODO: check whether this is reasonable to do in the fast path
 				for(auto tag : req.tags) {
 					(*transactionTagCounter)[tag.first] += tag.second;
 				}
@@ -1381,9 +1378,8 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 
 		reply.tagThrottleInfo.clear();
 
+		auto& priorityThrottledTags = throttledTags[ThrottleApi::priorityFromReadVersionFlags(request.flags)];
 		for(auto tag : request.tags) {
-			auto& priorityThrottledTags = throttledTags[ThrottleApi::priorityFromReadVersionFlags(request.flags)];
-
 			auto tagItr = priorityThrottledTags.find(tag.first);
 			if(tagItr != priorityThrottledTags.end()) {
 				reply.tagThrottleInfo[tag.first] = tagItr->second;
