@@ -666,6 +666,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		}
 		logFileFutures.push_back(it->second.container.get().get()->writeTaggedLogFile(
 		    it->second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id, self->totalTags));
+		ASSERT(self->messages.empty() || self->messages[0].getVersion() >= it->second.lastSavedVersion);
 		it++;
 	}
 
