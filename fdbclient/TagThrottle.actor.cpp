@@ -171,11 +171,13 @@ namespace ThrottleApi {
 		}
 	}
 
-	ACTOR Future<Void> throttleTag(Database db, TransactionTagRef tag, double tpsRate, double expiration, bool serializeExpirationAsDuration, bool autoThrottled) {
+	ACTOR Future<Void> throttleTag(Database db, TransactionTagRef tag, double tpsRate, double initialDuration, bool autoThrottled, Optional<double> expirationTime) {
 		state Transaction tr(db);
 		state Key key = throttleKeyForTags(std::set<TransactionTagRef>{ tag });
 
-		TagThrottleInfo throttle(tpsRate, expiration, autoThrottled, ThrottleApi::Priority::DEFAULT, serializeExpirationAsDuration);
+		ASSERT(initialDuration > 0);
+
+		TagThrottleInfo throttle(tpsRate, expirationTime.present() ? expirationTime.get() : 0, initialDuration, autoThrottled, ThrottleApi::Priority::DEFAULT);
 		BinaryWriter wr(IncludeVersion());
 		wr << throttle;
 		state Value value = wr.toValue();

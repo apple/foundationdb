@@ -533,42 +533,40 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 
 				TransactionTagMap<RkTagThrottleData> updatedTagThrottles;
 
-				TraceEvent("RatekeeperReadThrottles").detail("NumThrottledTags", throttledTagKeys.get().size());
+				TraceEvent("RatekeeperReadThrottledTags").detail("NumThrottledTags", throttledTagKeys.get().size());
 				for(auto entry : throttledTagKeys.get()) {
 					TransactionTagRef tag = ThrottleApi::tagFromThrottleKey(entry.key);
 					TagThrottleInfo throttleInfo = ThrottleApi::decodeTagThrottleValue(entry.value);
-					TraceEvent("RatekeeperReadThrottleRead").detail("Tag", tag).detail("Expiration", throttleInfo.expiration);
-					if((!self->autoThrottlingEnabled && throttleInfo.autoThrottled) || throttleInfo.expiration <= now()) { // TODO: keep or delete auto throttles when disabling auto-throttling
+					if(throttleInfo.expirationTime == 0 || throttleInfo.expirationTime > now() + throttleInfo.initialDuration) {
+						throttleInfo.expirationTime = now() + throttleInfo.initialDuration;
+						BinaryWriter wr(IncludeVersion());
+						wr << throttleInfo;
+						state Value value = wr.toValue();
+
+						tr.set(entry.key, value);
+					}
+
+					if(throttleInfo.expirationTime <= now()) {
 						tr.clear(entry.key);
 					}
 					else {
-						// Convert serialized version to absolute time (TODO: version?)
-						if(throttleInfo.serializeExpirationAsDuration) {
-							throttleInfo.serializeExpirationAsDuration = false;
-							BinaryWriter wr(IncludeVersion());
-							wr << throttleInfo;
-							state Value value = wr.toValue();
-
-							tr.set(entry.key, value);
-						}
-
 						auto itr = self->throttledTags.find(tag);
 						auto result = updatedTagThrottles.try_emplace(tag);
-						Optional<ClientTagThrottleLimits> oldThrottle = result.first->second.insertOrUpdateThrottle(throttleInfo.priority, throttleInfo.autoThrottled, throttleInfo.tpsRate, throttleInfo.expiration);
+						Optional<ClientTagThrottleLimits> oldThrottle = result.first->second.insertOrUpdateThrottle(throttleInfo.priority, throttleInfo.autoThrottled, throttleInfo.tpsRate, throttleInfo.expirationTime);
 						if(!oldThrottle.present()) {
 							TraceEvent("RatekeeperAddingThrottle")
 								.detail("Tag", tag)
 								.detail("Rate", throttleInfo.tpsRate)
 								.detail("Priority", ThrottleApi::priorityToString(throttleInfo.priority))
-								.detail("SecondsToExpiration", throttleInfo.expiration - now())
+								.detail("SecondsToExpiration", throttleInfo.expirationTime - now())
 								.detail("AutoThrottled", throttleInfo.autoThrottled);
 						}
-						else if(oldThrottle.get().tpsRate != throttleInfo.tpsRate || oldThrottle.get().expiration != throttleInfo.expiration) {
+						else if(oldThrottle.get().tpsRate != throttleInfo.tpsRate || oldThrottle.get().expiration != throttleInfo.expirationTime) {
 								TraceEvent("RatekeeperUpdatingThrottle")
 									.detail("Tag", tag)
 									.detail("Rate", throttleInfo.tpsRate)
 									.detail("Priority", ThrottleApi::priorityToString(throttleInfo.priority))
-									.detail("SecondsToExpiration", throttleInfo.expiration - now())
+									.detail("SecondsToExpiration", throttleInfo.expirationTime - now())
 									.detail("AutoThrottled", throttleInfo.autoThrottled);
 						}
 					}

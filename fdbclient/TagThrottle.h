@@ -48,33 +48,18 @@ typedef Standalone<TransactionTagRef> TransactionTag;
 
 struct TagThrottleInfo {
 	double tpsRate;
-	double expiration;
+	double expirationTime;
+	double initialDuration;
 	bool autoThrottled;
 	ThrottleApi::Priority priority;
 
-	bool serializeExpirationAsDuration;
-
-	TagThrottleInfo() : tpsRate(0), expiration(0), autoThrottled(false), priority(ThrottleApi::Priority::DEFAULT), serializeExpirationAsDuration(true) {}
-	TagThrottleInfo(double tpsRate, double expiration, bool autoThrottled, ThrottleApi::Priority priority, bool serializeExpirationAsDuration) 
-		: tpsRate(tpsRate), expiration(expiration), autoThrottled(autoThrottled), priority(priority), 
-		  serializeExpirationAsDuration(serializeExpirationAsDuration) {}
+	TagThrottleInfo() : tpsRate(0), expirationTime(0), initialDuration(0), autoThrottled(false), priority(ThrottleApi::Priority::DEFAULT) {}
+	TagThrottleInfo(double tpsRate, double expirationTime, double initialDuration, bool autoThrottled, ThrottleApi::Priority priority) 
+		: tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration), autoThrottled(autoThrottled), priority(priority) {}
 
 	template<class Ar>
 	void serialize(Ar& ar) {
-		if(ar.isDeserializing) {
-			serializer(ar, tpsRate, expiration, autoThrottled, priority, serializeExpirationAsDuration);
-			if(serializeExpirationAsDuration) {
-				expiration += now();
-			}
-		}
-		else {
-			double serializedExpiration = expiration;
-			if(serializeExpirationAsDuration) {
-				serializedExpiration = std::max(expiration - now(), 0.0);
-			}
-
-			serializer(ar, tpsRate, serializedExpiration, autoThrottled, priority, serializeExpirationAsDuration);
-		}
+		serializer(ar, tpsRate, expirationTime, initialDuration, autoThrottled, priority);
 	}
 };
 
@@ -147,8 +132,8 @@ namespace ThrottleApi {
 
 	Future<std::map<TransactionTag, TagThrottleInfo>> getTags(Database const& db, int const& limit);
 
-	Future<Void> throttleTag(Database const& db, TransactionTagRef const& tag, double const& tpsRate, double const& expiration, 
-	                         bool const& serializeExpirationAsDuration, bool const& autoThrottled); // TODO: priorities
+	Future<Void> throttleTag(Database const& db, TransactionTagRef const& tag, double const& tpsRate, double const& initialDuration, 
+	                         bool const& autoThrottled, Optional<double> const& expirationTime = Optional<double>()); // TODO: priorities
 
 	Future<bool> unthrottleTag(Database const& db, TransactionTagRef const& tag);
 
