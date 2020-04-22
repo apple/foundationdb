@@ -114,3 +114,7 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, std::string fileSystemPath)
 	}
 #endif
 }
+
+void Net2FileSystem::stop() {
+	Net2AsyncFile::stop();
+}
