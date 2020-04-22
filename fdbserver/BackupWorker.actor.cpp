@@ -68,13 +68,15 @@ struct BackupData {
 	const UID myId;
 	const Tag tag; // LogRouter tag for this worker, i.e., (-2, i)
 	const int totalTags; // Total log router tags
-	const Version startVersion;
+	// Backup request's commit version. Mutations are logged at some version after this.
+	const Version startVersion; // This worker's start version
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
 	const LogEpoch backupEpoch; // the epoch workers should pull mutations
 	LogEpoch oldestBackupEpoch = 0; // oldest epoch that still has data on tLogs for backup to pull
 	Version minKnownCommittedVersion;
-	Version savedVersion;
+	Version savedVersion; // Largest version saved to blob storage
+	Version popVersion; // Largest version popped in NOOP mode, can be larger than savedVersion.
 	AsyncVar<Reference<ILogSystem>> logSystem;
 	Database cx;
 	std::vector<VersionedMessage> messages;
@@ -225,7 +227,7 @@ struct BackupData {
 	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo>> db, const InitializeBackupRequest& req)
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
-	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1),
+	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), popVersion(req.startVersion - 1),
 	    cc("BackupWorker", myId.toString()), pulledVersion(0), paused(false) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 
@@ -291,7 +293,7 @@ struct BackupData {
 		}
 		ASSERT_WE_THINK(backupEpoch == oldestBackupEpoch);
 		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
-		logSystem.get()->pop(savedVersion, popTag);
+		logSystem.get()->pop(std::max(popVersion, savedVersion), popTag);
 	}
 
 	void stop() {
@@ -326,11 +328,15 @@ struct BackupData {
 		}
 
 		bool modified = false;
+		bool minVersionChanged = false;
+		Version minVersion = std::numeric_limits<Version>::max();
 		for (const auto [uid, version] : uidVersions) {
 			auto it = backups.find(uid);
 			if (it == backups.end()) {
 				modified = true;
 				backups.emplace(uid, BackupData::PerBackupInfo(this, uid, version));
+				minVersion = std::min(minVersion, version);
+				minVersionChanged = true;
 			} else {
 				stopList.erase(uid);
 			}
@@ -341,6 +347,14 @@ struct BackupData {
 			ASSERT(it != backups.end());
 			it->second.stop();
 			modified = true;
+		}
+		if (minVersionChanged && backupEpoch < recruitedEpoch && savedVersion + 1 == startVersion) {
+			// Advance savedVersion to minimize version ranges in case backupEpoch's
+			// progress is not saved. Master may set a very low startVersion that
+			// is already popped. Advance the version is safe because these
+			// versions are not popped -- if they are popped, their progress should
+			// be already recorded and Master would use a higher version than minVersion.
+			savedVersion = std::max(minVersion, savedVersion);
 		}
 		if (modified) changedTrigger.trigger();
 	}
@@ -390,10 +404,10 @@ struct BackupData {
 	Future<Version> getMinKnownCommittedVersion() { return _getMinKnownCommittedVersion(this); }
 };
 
-// Monitors "backupStartedKey". If "started" is true, wait until the key is set;
+// Monitors "backupStartedKey". If "present" is true, wait until the key is set;
 // otherwise, wait until the key is cleared. If "watch" is false, do not perform
 // the wait for key set/clear events. Returns if key present.
-ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool started, bool watch) {
+ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool present, bool watch) {
 	loop {
 		state ReadYourWritesTransaction tr(self->cx);
 
@@ -418,13 +432,13 @@ ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool started
 					}
 					self->exitEarly = shouldExit;
 					self->onBackupChanges(uidVersions);
-					if (started || !watch) return true;
+					if (present || !watch) return true;
 				} else {
 					TraceEvent("BackupWorkerEmptyStartKey", self->myId);
 					self->onBackupChanges(uidVersions);
 
 					self->exitEarly = shouldExit;
-					if (!started || !watch) {
+					if (!present || !watch) {
 						return false;
 					}
 				}
@@ -650,8 +664,13 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		activeUids.push_back(it->first);
 		self->insertRanges(keyRangeMap, it->second.ranges.get(), index);
 		if (it->second.lastSavedVersion == invalidVersion) {
-			it->second.lastSavedVersion =
-			    self->savedVersion > self->startVersion ? self->savedVersion : self->startVersion;
+			if (it->second.startVersion > self->startVersion && !self->messages.empty()) {
+				// True-up first mutation log's begin version
+				it->second.lastSavedVersion = self->messages[0].getVersion();
+			} else {
+				it->second.lastSavedVersion =
+				    std::max(self->popVersion, std::max(self->savedVersion, self->startVersion));
+			}
 		}
 		logFileFutures.push_back(it->second.container.get().get()->writeTaggedLogFile(
 		    it->second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id, self->totalTags));
@@ -762,6 +781,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		if (((numMsg > 0 || popVersion > lastPopVersion) && self->pulling) || self->pullFinished()) {
 			TraceEvent("BackupWorkerSave", self->myId)
 			    .detail("Version", popVersion)
+			    .detail("SavedVersion", self->savedVersion)
 			    .detail("MsgQ", self->messages.size());
 			// save an empty file for old epochs so that log file versions are continuous
 			wait(saveMutationsToFile(self, popVersion, numMsg));
@@ -769,9 +789,11 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		}
 
 		// If transition into NOOP mode, should clear messages
-		if (!self->pulling) self->messages.clear();
+		if (!self->pulling) {
+			self->messages.clear();
+		}
 
-		if (popVersion > self->savedVersion) {
+		if (popVersion > self->savedVersion && popVersion > self->popVersion) {
 			wait(saveProgress(self, popVersion));
 			TraceEvent("BackupWorkerSavedProgress", self->myId)
 			    .detail("Tag", self->tag.toString())
@@ -872,10 +894,13 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 				when(wait(success(present))) { break; }
 				when(wait(success(committedVersion) || delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID))) {
 					if (committedVersion.isReady()) {
-						self->savedVersion = std::max(committedVersion.get(), self->savedVersion);
+						self->popVersion =
+						    std::max(self->popVersion, std::max(committedVersion.get(), self->savedVersion));
 						self->minKnownCommittedVersion =
 						    std::max(committedVersion.get(), self->minKnownCommittedVersion);
-						TraceEvent("BackupWorkerNoopPop", self->myId).detail("SavedVersion", self->savedVersion);
+						TraceEvent("BackupWorkerNoopPop", self->myId)
+						    .detail("SavedVersion", self->savedVersion)
+						    .detail("PopVersion", self->popVersion);
 						self->pop(); // Pop while the worker is in this NOOP state.
 						committedVersion = Never();
 					} else {
@@ -884,6 +909,7 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 				}
 			}
 		}
+		ASSERT(!keyPresent == present.get());
 		keyPresent = !keyPresent;
 	}
 }
