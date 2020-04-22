@@ -872,9 +872,6 @@ public:
 
 	virtual void stop() {
 		isStopped = true;
-		for ( auto& fn : stopCallbacks ) {
-			fn();
-		}
 	}
 	virtual void addStopCallback( std::function<void()> fn ) {
 		stopCallbacks.emplace_back(std::move(fn));
@@ -1002,6 +999,9 @@ public:
 		}
 		self->currentProcess = callingMachine;
 		self->net2->stop();
+		for ( auto& fn : self->stopCallbacks ) {
+			fn();
+		}
 		return Void();
 	}
 
