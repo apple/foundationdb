@@ -35,10 +35,17 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 #define LOG_ALL 0
-#define LOG_INSTRUCTIONS LOG_ALL || 0
-#define LOG_OPS LOG_ALL || 0
-#define LOG_DIRS LOG_ALL || 0
-#define LOG_ERRORS LOG_ALL || 0
+#if LOG_ALL == 1
+#  define LOG_INSTRUCTIONS 1
+#  define LOG_OPS LOG_ALL 1
+#  define LOG_DIRS LOG_ALL 1
+#  define LOG_ERRORS LOG_ALL 1
+#else
+#  define LOG_INSTRUCTIONS 0
+#  define LOG_OPS 0
+#  define LOG_DIRS 0
+#  define LOG_ERRORS 0
+#endif
 
 struct FlowTesterData;
 
