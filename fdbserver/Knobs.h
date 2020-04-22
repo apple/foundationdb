@@ -85,6 +85,8 @@ public:
 	double TLOG_DEGRADED_DURATION;
 	double TXS_POPPED_MAX_DELAY;
 	double TLOG_MAX_CREATE_DURATION;
+	int PEEK_LOGGING_AMOUNT;
+	double PEEK_LOGGING_DELAY;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
