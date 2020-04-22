@@ -35,6 +35,7 @@
 #include <array>
 #include <typeinfo>
 #include <typeindex>
+#include <unordered_map>
 #include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializerTraits.h"
 
