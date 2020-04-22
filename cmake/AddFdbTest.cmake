@@ -160,8 +160,6 @@ function(create_test_package)
         string(SUBSTRING ${file} ${base_length} -1 rel_out_file)
         set(out_file ${CMAKE_BINARY_DIR}/packages/tests/${rel_out_file})
         list(APPEND out_files ${out_file})
-        get_filename_component(test_dir ${out_file} DIRECTORY)
-        file(MAKE_DIRECTORY packages/tests/${test_dir})
         add_custom_command(
           OUTPUT ${out_file}
           DEPENDS ${file}
