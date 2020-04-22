@@ -64,9 +64,14 @@ then
         ccache_args=\$args
 fi
 
+if [ -t 1 ] ; then
+    TERMINAL_ARGS=-it `# Run in interactive mode and simulate a TTY`
+else
+    TERMINAL_ARGS=-i `# Run in interactive mode`
+fi
 
 sudo docker run --rm `# delete (temporary) image after return` \\
-                -it `# Run in interactive mode and simulate a TTY` \\
+                \${TERMINAL_ARGS}  \\
                 --privileged=true `# Run in privileged mode ` \\
                 --cap-add=SYS_PTRACE \\
                 --security-opt seccomp=unconfined \\
@@ -75,7 +80,7 @@ sudo docker run --rm `# delete (temporary) image after return` \\
                 ${image} "\$@"
 EOF
 
-cat <<EOF $HOME/bin/clangd
+cat <<EOF > $HOME/bin/clangd
 #!/usr/bin/bash
 
 fdb-dev scl enable devtoolset-8 rh-python36 rh-ruby24 -- clangd
@@ -87,6 +92,7 @@ then
         echo -e "\tThis can cause problems with some scripts (like fdb-clangd)"
 fi
 chmod +x $HOME/bin/fdb-dev
+chmod +x $HOME/bin/clangd
 echo "To start the dev docker image run $HOME/bin/fdb-dev"
 echo "$HOME/bin/clangd can be used for IDE integration"
 echo "You can edit these files but be aware that this script will overwrite your changes if you rerun it"

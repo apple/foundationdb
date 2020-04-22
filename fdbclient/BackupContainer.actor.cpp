@@ -20,6 +20,7 @@
 
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
@@ -424,9 +425,11 @@ public:
 	}
 
 	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of megabytes.
-	ACTOR static Future<std::vector<RangeFile>> readKeyspaceSnapshot_impl(Reference<BackupContainerFileSystem> bc, KeyspaceSnapshotFile snapshot) {
+	ACTOR static Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot_impl(
+	    Reference<BackupContainerFileSystem> bc, KeyspaceSnapshotFile snapshot) {
 		// Read the range file list for the specified version range, and then index them by fileName.
-		// This is so we can verify that each of the files listed in the manifest file are also in the container at this time.
+		// This is so we can verify that each of the files listed in the manifest file are also in the container at this
+		// time.
 		std::vector<RangeFile> files = wait(bc->listRangeFiles(snapshot.beginVersion, snapshot.endVersion));
 		state std::map<std::string, RangeFile> rangeIndex;
 		for(auto &f : files)
@@ -482,15 +485,38 @@ public:
 			throw restore_missing_data();
 		}
 
-		return results;
+		// Check key ranges for files
+		std::map<std::string, KeyRange> fileKeyRanges;
+		JSONDoc ranges = doc.subDoc("keyRanges"); // Create an empty doc if not existed
+		for (auto i : ranges.obj()) {
+			const std::string& filename = i.first;
+			JSONDoc fields(i.second);
+			std::string begin, end;
+			if (fields.tryGet("beginKey", begin) && fields.tryGet("endKey", end)) {
+				TraceEvent("ManifestFields")
+				    .detail("File", filename)
+				    .detail("Begin", printable(StringRef(begin)))
+				    .detail("End", printable(StringRef(end)));
+				fileKeyRanges.emplace(filename, KeyRange(KeyRangeRef(StringRef(begin), StringRef(end))));
+			} else {
+				TraceEvent("MalFormattedManifest").detail("Key", filename);
+				throw restore_corrupted_data();
+			}
+		}
+
+		return std::make_pair(results, fileKeyRanges);
 	}
 
-	Future<std::vector<RangeFile>> readKeyspaceSnapshot(KeyspaceSnapshotFile snapshot) {
+	Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
+	    KeyspaceSnapshotFile snapshot) {
 		return readKeyspaceSnapshot_impl(Reference<BackupContainerFileSystem>::addRef(this), snapshot);
 	}
 
-	ACTOR static Future<Void> writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem> bc, std::vector<std::string> fileNames, int64_t totalBytes) {
-		ASSERT(!fileNames.empty());
+	ACTOR static Future<Void> writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem> bc,
+	                                                         std::vector<std::string> fileNames,
+	                                                         std::vector<std::pair<Key, Key>> beginEndKeys,
+	                                                         int64_t totalBytes) {
+		ASSERT(!fileNames.empty() && fileNames.size() == beginEndKeys.size());
 
 		state Version minVer = std::numeric_limits<Version>::max();
 		state Version maxVer = 0;
@@ -521,6 +547,13 @@ public:
 		doc.create("beginVersion") = minVer;
 		doc.create("endVersion") = maxVer;
 
+		auto ranges = doc.subDoc("keyRanges");
+		for (int i = 0; i < beginEndKeys.size(); i++) {
+			auto fileDoc = ranges.subDoc(fileNames[i], /*split=*/false);
+			fileDoc.create("beginKey") = beginEndKeys[i].first.toString();
+			fileDoc.create("endKey") = beginEndKeys[i].second.toString();
+		}
+
 		wait(yield());
 		state std::string docString = json_spirit::write_string(json);
 
@@ -531,8 +564,11 @@ public:
 		return Void();
 	}
 
-	Future<Void> writeKeyspaceSnapshotFile(std::vector<std::string> fileNames, int64_t totalBytes) final {
-		return writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem>::addRef(this), fileNames, totalBytes);
+	Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
+	                                       const std::vector<std::pair<Key, Key>>& beginEndKeys,
+	                                       int64_t totalBytes) final {
+		return writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem>::addRef(this), fileNames,
+		                                      beginEndKeys, totalBytes);
 	};
 
 	// List log files, unsorted, which contain data at any version >= beginVersion and <= targetVersion.
@@ -1193,7 +1229,10 @@ public:
 		std::vector<LogFile> filtered;
 		int i = 0;
 		for (int j = 1; j < logs.size(); j++) {
-			if (logs[j].isSubset(logs[i])) continue;
+			if (logs[j].isSubset(logs[i])) {
+				ASSERT(logs[j].fileSize <= logs[i].fileSize);
+				continue;
+			}
 
 			if (!logs[i].isSubset(logs[j])) {
 				filtered.push_back(logs[i]);
@@ -1249,6 +1288,7 @@ public:
 			// filter out if indices.back() is subset of files[i] or vice versa
 			if (!indices.empty()) {
 				if (logs[indices.back()].isSubset(logs[i])) {
+					ASSERT(logs[indices.back()].fileSize <= logs[i].fileSize);
 					indices.back() = i;
 				} else if (!logs[i].isSubset(logs[indices.back()])) {
 					indices.push_back(i);
@@ -1291,6 +1331,29 @@ public:
 		return end;
 	}
 
+	ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc,
+	                                                           RangeFile file) {
+		state Reference<IAsyncFile> inFile = wait(bc->readFile(file.fileName));
+		state bool beginKeySet = false;
+		state Key beginKey;
+		state Key endKey;
+		state int64_t j = 0;
+		for (; j < file.fileSize; j += file.blockSize) {
+			int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - j);
+			Standalone<VectorRef<KeyValueRef>> blockData = wait(fileBackup::decodeRangeFileBlock(inFile, j, len));
+			if (!beginKeySet) {
+				beginKey = blockData.front().key;
+			}
+			endKey = blockData.back().key;
+		}
+		return KeyRange(KeyRangeRef(beginKey, endKey));
+	}
+
+	Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file) final {
+		ASSERT(g_network->isSimulated());
+		return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file);
+	}
+
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion) {
 		// Find the most recent keyrange snapshot to end at or before targetVersion
 		state Optional<KeyspaceSnapshotFile> snapshot;
@@ -1305,12 +1368,26 @@ public:
 			restorable.snapshot = snapshot.get();
 			restorable.targetVersion = targetVersion;
 
-			std::vector<RangeFile> ranges = wait(bc->readKeyspaceSnapshot(snapshot.get()));
-			restorable.ranges = ranges;
+			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
+			    wait(bc->readKeyspaceSnapshot(snapshot.get()));
+			restorable.ranges = std::move(results.first);
+			restorable.keyRanges = std::move(results.second);
+			if (g_network->isSimulated()) {
+				// Sanity check key ranges
+				state std::map<std::string, KeyRange>::iterator rit;
+				for (rit = restorable.keyRanges.begin(); rit != restorable.keyRanges.end(); rit++) {
+					auto it = std::find_if(restorable.ranges.begin(), restorable.ranges.end(),
+					                       [file = rit->first](const RangeFile f) { return f.fileName == file; });
+					ASSERT(it != restorable.ranges.end());
+					KeyRange result = wait(bc->getSnapshotFileKeyRange(*it));
+					ASSERT(rit->second.begin <= result.begin && rit->second.end >= result.end);
+				}
+			}
 
 			// No logs needed if there is a complete key space snapshot at the target version.
 			if (snapshot.get().beginVersion == snapshot.get().endVersion &&
 			    snapshot.get().endVersion == targetVersion) {
+				restorable.continuousBeginVersion = restorable.continuousEndVersion = invalidVersion;
 				return Optional<RestorableFileSet>(restorable);
 			}
 
@@ -1335,6 +1412,8 @@ public:
 				// sort by version order again for continuous analysis
 				std::sort(restorable.logs.begin(), restorable.logs.end());
 				if (isPartitionedLogsContinuous(restorable.logs, snapshot.get().beginVersion, targetVersion)) {
+					restorable.continuousBeginVersion = snapshot.get().beginVersion;
+					restorable.continuousEndVersion = targetVersion + 1; // not inclusive
 					return Optional<RestorableFileSet>(restorable);
 				}
 				return Optional<RestorableFileSet>();
@@ -1348,6 +1427,8 @@ public:
 				Version end = logs.begin()->endVersion;
 				computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
 				if (end >= targetVersion) {
+					restorable.continuousBeginVersion = logs.begin()->beginVersion;
+					restorable.continuousEndVersion = end;
 					return Optional<RestorableFileSet>(restorable);
 				}
 			}
@@ -2070,6 +2151,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	state std::vector<Future<Void>> writes;
 	state std::map<Version, std::vector<std::string>> snapshots;
 	state std::map<Version, int64_t> snapshotSizes;
+	state std::map<Version, std::vector<std::pair<Key, Key>>> snapshotBeginEndKeys;
 	state int nRangeFiles = 0;
 	state std::map<Version, std::string> logs;
 	state Version v = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max() / 2);
@@ -2084,6 +2166,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 		while(kvfiles > 0) {
 			if(snapshots.empty()) {
 				snapshots[v] = {};
+				snapshotBeginEndKeys[v] = {};
 				snapshotSizes[v] = 0;
 				if(deterministicRandom()->coinflip()) {
 					v = nextVersion(v);
@@ -2093,14 +2176,17 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 			++nRangeFiles;
 			v = nextVersion(v);
 			snapshots.rbegin()->second.push_back(range->getFileName());
+			snapshotBeginEndKeys.rbegin()->second.emplace_back(LiteralStringRef(""), LiteralStringRef(""));
 
 			int size = chooseFileSize(fileSizes);
 			snapshotSizes.rbegin()->second += size;
 			writes.push_back(writeAndVerifyFile(c, range, size));
 
 			if(deterministicRandom()->random01() < .2) {
-				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second, snapshotSizes.rbegin()->second));
+				writes.push_back(c->writeKeyspaceSnapshotFile(
+				    snapshots.rbegin()->second, snapshotBeginEndKeys.rbegin()->second, snapshotSizes.rbegin()->second));
 				snapshots[v] = {};
+				snapshotBeginEndKeys[v] = {};
 				snapshotSizes[v] = 0;
 				break;
 			}
