@@ -239,10 +239,9 @@ public:
 	}
 };
 
-void fbTrace(Reference<FBTraceImpl> const& traceLine);
+void fbTraceImpl(Reference<FBTraceImpl> const& traceLine);
 
-template <class T>
-void fbTrace(Reference<T> traceLine) {
-	static_assert(std::is_base_of<FBTraceImpl, T>::value, "fbTrace only accepts FBTraceImpl as argument");
-	fbTrace(traceLine.template castTo<FBTraceImpl>());
+template <class Type, class... Args>
+std::enable_if_t<std::is_base_of_v<FBTraceImpl, Type>> fbTrace(Args&&... args) {
+	fbTraceImpl(Reference<FBTraceImpl>(new Type{std::forward<Args>(args)...}));
 }

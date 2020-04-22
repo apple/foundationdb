@@ -166,7 +166,6 @@ MainThreadRunning _mainThreadRunningHelper;
 
 class FBFactoryState {
 	using Lock = std::unique_lock<std::mutex>;
-	FBFactoryState() {}
 	FBFactoryState(FBFactoryState const&) = delete;
 	FBFactoryState(FBFactoryState&&) = delete;
 	FBFactoryState& operator=(FBFactoryState const&) = delete;
@@ -175,6 +174,8 @@ class FBFactoryState {
 	std::unordered_map<FileIdentifier, FBFactory*> factories;
 
 public:
+	FBFactoryState() {} // has to be public for std::make_shared
+
 	void addFactory(FileIdentifier fId, FBFactory* f) {
 		Lock _{ mutex };
 		ASSERT(factories.emplace(fId, f).second);
@@ -195,13 +196,13 @@ public:
 		if (myInstance) {
 			this_copy = myInstance;
 		} else {
-		Lock _(constructionMutex);
-		if (!myInstance) {
-			// this means we will leak this memory
-			// This prevents problems with multiple
-			// threads shutting down
-			myInstance = std::make_shared<FBFactoryState>();
-		}
+			Lock _(constructionMutex);
+			if (!myInstance) {
+				// this means we will leak this memory
+				// This prevents problems with multiple
+				// threads shutting down
+				myInstance = std::make_shared<FBFactoryState>();
+			}
 		}
 		this_copy = myInstance;
 		return *this_copy;
@@ -248,4 +249,4 @@ void FBTraceImpl::operator delete(void* ptr) {
 
 FBTraceImpl::~FBTraceImpl() {}
 
-void fbTrace(Reference<FBTraceImpl> const& traceLine) {}
+void fbTraceImpl(Reference<FBTraceImpl> const& traceLine) {}
