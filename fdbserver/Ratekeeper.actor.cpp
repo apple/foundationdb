@@ -1054,13 +1054,13 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 
 					reply.throttledTags = PrioritizedTransactionTagMap<ClientTagThrottleLimits>();
 					for(auto itr = self.throttledTags.begin(); itr != self.throttledTags.end();) {
-						for(auto &priorityItr : itr->second.throttleData) {
-							auto &priorityTags = reply.throttledTags.get()[priorityItr.first]; // TODO: report all priorities, not just those at the throttle priority
-							Optional<std::pair<double, double>> clientRate = itr->second.getClientRate(priorityItr.first);
+						for(auto priority : ThrottleApi::allPriorities) {
+							Optional<std::pair<double, double>> clientRate = itr->second.getClientRate(priority);
 							if(clientRate.present()) {
+								auto &priorityTags = reply.throttledTags.get()[priority];
 								priorityTags.try_emplace(itr->first, ClientTagThrottleLimits(clientRate.get().first, clientRate.get().second));
 							}
-							else if(priorityItr.first == ThrottleApi::Priority::BATCH) {
+							else if(priority == ThrottleApi::Priority::MIN) {
 								itr = self.throttledTags.erase(itr);
 								break;
 							}

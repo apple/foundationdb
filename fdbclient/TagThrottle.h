@@ -36,8 +36,12 @@ namespace ThrottleApi {
 	enum class Priority {
 		BATCH,
 		DEFAULT,
-		IMMEDIATE
+		IMMEDIATE,
+		MIN=BATCH,
+		MAX=IMMEDIATE
 	};
+
+	const std::array<Priority, (int)Priority::MAX+1> allPriorities = { Priority::BATCH, Priority::DEFAULT, Priority::IMMEDIATE };
 
 	const char* priorityToString(Priority priority, bool capitalize=true); 
 	Priority priorityFromReadVersionFlags(int flags); 
