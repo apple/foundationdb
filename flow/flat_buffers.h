@@ -343,15 +343,16 @@ struct _SizeOf {
 	static constexpr unsigned int align = fb_align<T>;
 };
 
-extern std::vector<int>* writeToOffsetsMemory;
+// Re-use this intermediate memory to avoid frequent new/delete
+void swapWithThreadLocalGlobal(std::vector<int>& writeToOffsets);
 
 template <class Context>
 struct PrecomputeSize : Context {
 	PrecomputeSize(const Context& context) : Context(context) {
-		writeToOffsets.swap(*writeToOffsetsMemory);
+		swapWithThreadLocalGlobal(writeToOffsets);
 		writeToOffsets.clear();
 	}
-	~PrecomputeSize() { writeToOffsets.swap(*writeToOffsetsMemory); }
+	~PrecomputeSize() { swapWithThreadLocalGlobal(writeToOffsets); }
 	// |offset| is measured from the end of the buffer. Precondition: len <=
 	// offset.
 	void write(const void*, int offset, int /*len*/) { current_buffer_size = std::max(current_buffer_size, offset); }
@@ -491,7 +492,7 @@ extern VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& si
 
 template <unsigned... MembersAndAlignments>
 const VTable* gen_vtable3() {
-	static VTable table =
+	static thread_local VTable table =
 	    generate_vtable(sizeof...(MembersAndAlignments) / 2, std::vector<unsigned>{ MembersAndAlignments... });
 	return &table;
 }
@@ -619,7 +620,7 @@ VTableSet get_vtableset_impl(const Root& root, const Context& context) {
 
 template <class Root, class Context>
 const VTableSet* get_vtableset(const Root& root, const Context& context) {
-	static VTableSet result = get_vtableset_impl(root, context);
+	static thread_local VTableSet result = get_vtableset_impl(root, context);
 	return &result;
 }
 
