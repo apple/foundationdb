@@ -1490,7 +1490,3 @@ std::string traceableStringToString(const char* value, size_t S) {
 
 	return std::string(value, S - 1); // Exclude trailing \0 byte
 }
-
-FBTraceImpl::~FBTraceImpl() {}
-
-void fbTrace(Reference<FBTraceImpl> const& traceLine) {}

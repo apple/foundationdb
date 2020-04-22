@@ -20,35 +20,81 @@
 
 #pragma once
 
+#include "FileIdentifier.h"
 #include "flow/FastRef.h"
 #include "flow/ObjectSerializer.h"
 #include <cstddef>
 #include <type_traits>
 
-namespace ChunkAllocator {
-	constexpr size_t MAX_CHUNK_SIZE = 1 << 20;
-	void* allocate(size_t sz);
-	void free(void* ptr);
+namespace ChunkAllocatorImpl {
+constexpr size_t MAX_CHUNK_SIZE = 1 << 20;
+void* allocate(size_t sz);
+void free(void* ptr);
+}; // namespace ChunkAllocatorImpl
+
+template <class T>
+struct ChunkAllocator {
+	using value_type = T;
+	using pointer = value_type*;
+	using is_always_equal = std::true_type;
+
+	pointer allocate(size_t count) { return ChunkAllocatorImpl::allocate(count * sizeof(value_type)); }
+
+	void deallocate(pointer ptr, size_t) { ChunkAllocatorImpl::free(ptr); }
 };
 
-class FBTraceImpl : public ReferenceCounted<FBTraceImpl> {
+class FBTraceImpl {
+	mutable std::atomic<unsigned> refCount = 1;
+
 protected:
 	virtual void write(ObjectWriter& writer) = 0;
+	virtual void read(ObjectReader& reader) = 0;
+	virtual void read(ArenaObjectReader& reader) = 0;
+
 public:
 	virtual ~FBTraceImpl();
+	virtual FileIdentifier getFileIdentifier() const = 0;
 	static void* operator new(std::size_t sz);
 	static void operator delete(void* ptr);
+	void addref() const;
+	void delref() const;
+
+public:
+	FBTraceImpl() {}
+	FBTraceImpl(const FBTraceImpl& o) : refCount(1) {}
+
+	FBTraceImpl& operator=(FBTraceImpl const& o) { return *this; }
+};
+
+struct FBFactory {
+	FBFactory(FileIdentifier fid);
+	virtual ~FBFactory();
+	virtual Reference<FBTraceImpl> create() const = 0;
+	virtual FileIdentifier fileIdentified() const = 0;
 };
 
 template <class T>
-class FDBTrace : public FBTraceImpl {
+class FBTrace : public FBTraceImpl {
+	struct FBFactoryImpl : FBFactory {
+		FBFactoryImpl() : FBFactory(T::file_identifier) {}
+		Reference<FBTraceImpl> create() const override { return Reference<FBTraceImpl>{ new T{} }; }
+		FileIdentifier fileIdentified() const override { return T::file_identifier; }
+	};
+	static FBFactoryImpl factory;
+
 protected:
-	void write(ObjectWriter& writer) override {
-		writer.serialize(*static_cast<T*>(this));
-	}
+	void write(ObjectWriter& writer) override { writer.serialize(*static_cast<T*>(this)); }
+	void read(ObjectReader& reader) override { reader.deserialize(*static_cast<T*>(this)); }
+	void read(ArenaObjectReader& reader) { reader.deserialize(*static_cast<T*>(this)); }
+
+public:
+	FileIdentifier getFileIdentifier() const override { return T::file_identifier; }
 };
 
-class GetValueDebugTrace : public FDBTrace<GetValueDebugTrace> {
+template <class T>
+typename FBTrace<T>::FBFactoryImpl FBTrace<T>::factory;
+
+class GetValueDebugTrace : public FBTrace<GetValueDebugTrace> {
 public:
 	constexpr static FileIdentifier file_identifier = 617894;
 	enum codeLocation {
@@ -78,7 +124,7 @@ public:
 	}
 };
 
-class WatchValueDebugTrace : public FDBTrace<WatchValueDebugTrace> {
+class WatchValueDebugTrace : public FBTrace<WatchValueDebugTrace> {
 public:
 	constexpr static FileIdentifier file_identifier = 14486715;
 	enum codeLocation {
@@ -101,7 +147,7 @@ public:
 	}
 };
 
-class CommitDebugTrace : public FDBTrace<CommitDebugTrace> {
+class CommitDebugTrace : public FBTrace<CommitDebugTrace> {
 public:
 	constexpr static FileIdentifier file_identifier = 7691518;
 	enum codeLocation {
@@ -140,7 +186,7 @@ public:
 	}
 };
 
-class TransactionDebugTrace : public FDBTrace<TransactionDebugTrace> {
+class TransactionDebugTrace : public FBTrace<TransactionDebugTrace> {
 public:
 	constexpr static FileIdentifier file_identifier = 6868728;
 	enum codeLocation {
