@@ -466,8 +466,7 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 
 	Version msgIndex; // Monitonically increasing index of mutation messages
 	bool isRangeFile;
-	VersionedMutationsVec
-	    versionedMutations; // Versioned mutations that may be at different versions parsed by one loader
+	VersionedMutationsVec versionedMutations; // Versioned mutations may be at different versions parsed by one loader
 
 	ReplyPromise<RestoreCommonReply> reply;
 

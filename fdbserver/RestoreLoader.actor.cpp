@@ -483,6 +483,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	state std::map<UID, VersionedMutationsVec> applierVersionedMutationsBuffer;
 	state int mIndex = 0;
 	state LogMessageVersion commitVersion;
+	state std::vector<Future<Void>> fSends;
 	for (auto& applierID : applierIDs) {
 		applierVersionedMutationsBuffer[applierID] = VersionedMutationsVec();
 	}
@@ -556,8 +557,8 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				    .detail("MessageIndex", msgIndex)
 				    .detail("RestoreAsset", asset.toString())
 				    .detail("Requests", requests.size());
-				wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
-				                       TaskPriority::RestoreLoaderSendMutations));
+				fSends.push_back(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces,
+				                                   requests, TaskPriority::RestoreLoaderSendMutations));
 				msgIndex++;
 				msgSize = 0;
 				for (auto& applierID : applierIDs) {
@@ -580,9 +581,10 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 		    .detail("MessageIndex", msgIndex)
 		    .detail("RestoreAsset", asset.toString())
 		    .detail("Requests", requests.size());
-		wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
-		                       TaskPriority::RestoreLoaderSendMutations));
+		fSends.push_back(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
+		                                   TaskPriority::RestoreLoaderSendMutations));
 	}
+	wait(waitForAll(fSends));
 
 	TraceEvent("FastRestore").detail("LoaderSendMutationOnAppliers", kvCount);
 	return Void();
