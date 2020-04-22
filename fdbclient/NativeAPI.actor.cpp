@@ -3297,7 +3297,7 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Re
 	++cx->transactionReadVersionsCompleted;
 
 	auto &priorityThrottledTags = cx->throttledTags[ThrottleApi::priorityFromReadVersionFlags(flags)];
-	for(auto tag : tags) {
+	for(auto &tag : tags) {
 		auto itr = priorityThrottledTags.find(tag);
 		if(itr != priorityThrottledTags.end()) {
 			if(itr->second.expired()) {
@@ -3310,7 +3310,7 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Re
 		}
 	}
 
-	for(auto tag : tags) {
+	for(auto &tag : tags) {
 		auto itr = priorityThrottledTags.find(tag);
 		if(itr != priorityThrottledTags.end()) {
 			itr->second.addReleased(1);
@@ -3346,8 +3346,8 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		double maxThrottleDelay = 0.0;
 		bool canRecheck = false;
 		if(options.tags.size() != 0) {
-			auto priorityThrottledTags = cx->throttledTags[ThrottleApi::priorityFromReadVersionFlags(flags)];
-			for(auto tag : options.tags) {
+			auto &priorityThrottledTags = cx->throttledTags[ThrottleApi::priorityFromReadVersionFlags(flags)];
+			for(auto &tag : options.tags) {
 				auto itr = priorityThrottledTags.find(tag);
 				if(itr != priorityThrottledTags.end()) {
 					if(!itr->second.expired()) {
@@ -3365,7 +3365,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 				return Future<Version>(tag_throttled());
 			}
 
-			for(auto tag : options.tags) {
+			for(auto &tag : options.tags) {
 				auto itr = priorityThrottledTags.find(tag);
 				if(itr != priorityThrottledTags.end()) {
 					itr->second.updateChecked();

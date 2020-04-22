@@ -46,7 +46,7 @@ private:
 typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
 typedef MultiInterface<MasterProxyInterface> ProxyInfo;
 
-class ClientTagThrottleData {
+class ClientTagThrottleData : NonCopyable {
 private:
 	double tpsRate;
 	double expiration;

@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <variant>
+#include <unordered_map>
 
 namespace detail {
 

@@ -217,7 +217,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			}
 
 			if(rep.throttledTags.present()) {
-				*throttledTags = rep.throttledTags;
+				*throttledTags = std::move(rep.throttledTags.get());
 			}
 		}
 		when ( wait( leaseTimeout ) ) {

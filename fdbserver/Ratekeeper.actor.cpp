@@ -290,8 +290,9 @@ struct ProxyInfo {
 	uint64_t lastThrottledTagChangeId;
 
 	double lastUpdateTime;
+	double lastTagPushTime;
 
-	ProxyInfo() : totalTransactions(0), batchTransactions(0), lastUpdateTime(0), lastThrottledTagChangeId(0) {}
+	ProxyInfo() : totalTransactions(0), batchTransactions(0), lastUpdateTime(0), lastThrottledTagChangeId(0), lastTagPushTime(0) {}
 };
 
 struct RatekeeperData {
@@ -1047,8 +1048,10 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 				reply.batchTransactionRate = self.batchLimits.tpsLimit / self.proxyInfo.size();
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
 
-				if(p.lastThrottledTagChangeId != self.throttledTagChangeId) {
-					p.lastThrottledTagChangeId = self.throttedTagChangeId;
+				if(p.lastThrottledTagChangeId != self.throttledTagChangeId || now() < p.lastTagPushTime + SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL) {
+					p.lastThrottledTagChangeId = self.throttledTagChangeId;
+					p.lastTagPushTime = now();
+
 					reply.throttledTags = PrioritizedTransactionTagMap<ClientTagThrottleLimits>();
 					for(auto itr = self.throttledTags.begin(); itr != self.throttledTags.end();) {
 						for(auto &priorityItr : itr->second.throttleData) {
