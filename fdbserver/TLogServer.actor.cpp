@@ -494,6 +494,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		double queueMax;
 		double blockTime;
 		double blockMax;
+		double workTime;
+		double workMax;
 
 		int64_t unblockedPeeks;
 		double idleTime;
@@ -512,6 +514,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			queueMax = 0;
 			blockTime = 0;
 			blockMax = 0;
+			workTime = 0;
+			workMax = 0;
 			unblockedPeeks = 0;
 			idleTime = 0;
 			idleMax = 0;
@@ -1401,7 +1405,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 				trackerData.unblockedPeeks++;
 				double t = now() - trackerData.lastUpdate;
 				if(t > trackerData.idleMax) trackerData.idleMax = t;
-				trackData.idleTime += t;
+				trackerData.idleTime += t;
 			}
 			trackerData.lastUpdate = now();
 			std::pair<Version, bool> prevPeekData = wait(fPrevPeekData);
