@@ -212,6 +212,12 @@ configure_file("${CMAKE_SOURCE_DIR}/cmake/CPackConfig.cmake" "${CMAKE_BINARY_DIR
 set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_BINARY_DIR}/packaging/CPackConfig.cmake")
 
 ################################################################################
+# User config
+################################################################################
+
+set(GENERATE_DEBUG_PACKAGES "${FDB_RELEASE}" CACHE BOOL "Build debug rpm/deb packages (default: only ON for FDB_RELEASE)")
+
+################################################################################
 # Version information
 ################################################################################
 
@@ -307,10 +313,10 @@ set(CPACK_RPM_CLIENTS-EL7_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.el7-debug
 set(CPACK_RPM_SERVER-EL6_DEBUGINFO_FILE_NAME "${rpm-server-filename}.el6-debuginfo.x86_64.rpm")
 set(CPACK_RPM_SERVER-EL7_DEBUGINFO_FILE_NAME "${rpm-server-filename}.el7-debuginfo.x86_64.rpm")
 
-file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir")
-fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION data COMPONENT server)
-fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION log COMPONENT server)
-fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION etc COMPONENT clients)
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/foundationdb")
+fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/foundationdb/" DESTINATION data COMPONENT server)
+fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/foundationdb/" DESTINATION log COMPONENT server)
+fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/foundationdb/" DESTINATION etc COMPONENT clients)
 
 set(CPACK_RPM_SERVER-EL6_USER_FILELIST
   "%config(noreplace) /etc/foundationdb/foundationdb.conf"
@@ -337,7 +343,7 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/lib/systemd"
   "/lib/systemd/system"
   "/etc/rc.d/init.d")
-set(CPACK_RPM_DEBUGINFO_PACKAGE ON)
+set(CPACK_RPM_DEBUGINFO_PACKAGE ${GENERATE_DEBUG_PACKAGES})
 #set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX /usr/src)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 
@@ -382,7 +388,7 @@ set(CPACK_RPM_SERVER-EL7_PACKAGE_REQUIRES
 set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME "${deb-clients-filename}_amd64.deb")
 set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME "${deb-server-filename}_amd64.deb")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
-set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
+set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ${GENERATE_DEBUG_PACKAGES})
 set(CPACK_DEBIAN_PACKAGE_SECTION "database")
 set(CPACK_DEBIAN_ENABLE_COMPONENT_DEPENDS ON)
 

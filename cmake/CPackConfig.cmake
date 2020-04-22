@@ -21,6 +21,10 @@ elseif(CPACK_GENERATOR MATCHES "DEB")
   set(CPACK_COMPONENTS_ALL clients-deb server-deb)
   set(CPACK_RESOURCE_FILE_README ${CMAKE_SOURCE_DIR}/README.md)
   set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE)
+  # This is a weird variables. It's argument is a list of tuples...
+  #set(CPACK_INSTALLED_DIRECTORIES
+  #  "${CMAKE_BINARY_DIR}/packaging/emptydir/foundationdb" "var/lib/"
+  #  "${CMAKE_BINARY_DIR}/packaging/emptydir/foundationdb" "var/log/")
 elseif(CPACK_GENERATOR MATCHES "productbuild")
   set(CPACK_PACKAGING_INSTALL_PREFIX "/")
   set(CPACK_COMPONENTS_ALL clients-pm server-pm)
