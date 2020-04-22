@@ -2003,11 +2003,11 @@ ACTOR Future<Void> logPeekTrackers( LogData* logData ) {
 			std::vector<int64_t> peekCounts;
 			peekCounts.reserve(logData->peekTracker.size());
 			for( auto& it : logData->peekTracker ) {
-				peekCounts.push_back(it.totalPeeks);
+				peekCounts.push_back(it.second.totalPeeks);
 			}
 			size_t pivot = peekCounts.size()-SERVER_KNOBS->PEEK_LOGGING_AMOUNT;
 			std::nth_element(peekCounts.begin(), peekCounts.begin()+pivot, peekCounts.end());
-			logThreshold = std::max(1,peekCounts[pivot]);
+			logThreshold = std::max<int64_t>(1,peekCounts[pivot]);
 		}
 		int logCount = 0;
 		for( auto& it : logData->peekTracker ) {
@@ -2028,7 +2028,7 @@ ACTOR Future<Void> logPeekTrackers( LogData* logData ) {
 					.detail("BlockSeconds", it.second.blockTime)
 					.detail("BlockMax", it.second.blockMax)
 					.detail("WorkSeconds", it.second.workTime)
-					.detail("WorkMax", it.second.workMax)
+					.detail("WorkMax", it.second.workMax);
 				it.second.resetMetrics();
 			}
 		}
