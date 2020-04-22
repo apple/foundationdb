@@ -455,7 +455,6 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	state VersionedMutationsMap::iterator kvOp = kvOps.begin();
 	state int kvCount = 0;
 	state int splitMutationIndex = 0;
-	state std::vector<std::pair<UID, RestoreSendVersionedMutationsRequest>> requests;
 	state Version msgIndex = 1; // Monotonically increased index for send message, must start at 1
 	state std::vector<UID> applierIDs = getApplierIDs(*pRangeToApplier);
 	state double msgSize = 0; // size of mutations in the message
@@ -547,6 +546,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 			// Batch mutations at multiple versions up to FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES size
 			// to improve bandwidth from a loader to appliers
 			if (msgSize >= SERVER_KNOBS->FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES) {
+				std::vector<std::pair<UID, RestoreSendVersionedMutationsRequest>> requests;
 				for (const UID& applierID : applierIDs) {
 					requests.emplace_back(
 					    applierID, RestoreSendVersionedMutationsRequest(batchIndex, asset, msgIndex, isRangeFile,
@@ -560,7 +560,6 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				                       TaskPriority::RestoreLoaderSendMutations));
 				msgIndex++;
 				msgSize = 0;
-				requests.clear();
 				for (auto& applierID : applierIDs) {
 					applierVersionedMutationsBuffer[applierID] = VersionedMutationsVec();
 				}
@@ -571,6 +570,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	// Send the remaining mutations in the applierMutationsBuffer
 	if (msgSize > 0) {
 		// TODO: Sanity check each asset has been received exactly once!
+		std::vector<std::pair<UID, RestoreSendVersionedMutationsRequest>> requests;
 		for (const UID& applierID : applierIDs) {
 			requests.emplace_back(applierID,
 			                      RestoreSendVersionedMutationsRequest(batchIndex, asset, msgIndex, isRangeFile,
