@@ -61,7 +61,17 @@ struct ClientTagThrottleLimits {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, tpsRate, expiration);
+		// Convert expiration time to a duration to avoid clock differences
+		double duration = 0;
+		if(!ar.isDeserializing) {
+			duration = expiration - now();
+		}
+
+		serializer(ar, tpsRate, duration);
+
+		if(ar.isDeserializing) {
+			expiration = now() + duration;
+		}
 	}
 };
 

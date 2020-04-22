@@ -85,7 +85,7 @@ public:
 	}
 
 //private:
-	Arena arena; // TODO: where to hold this memory?
+	Arena arena;
 	std::set<TransactionTagRef> tags;
 	size_t bytes;
 };
@@ -125,7 +125,10 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 			t.bytes += tag.size();
 		}
 
-		t.arena = context.arena(); // TODO: this arena could be big
+		// Deserialized tag sets share the arena with the request that contained them
+		// For this reason, persisting a TagSet that shares memory with other request
+		// members should be done with caution.
+		t.arena = context.arena();
 	}
 };
 
