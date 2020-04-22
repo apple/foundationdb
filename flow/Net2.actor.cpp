@@ -148,7 +148,7 @@ public:
 		if ( thread_network == this )
 			stopCallbacks.emplace_back(std::move(fn));
 		else
-			onMainThreadVoid( [this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, NULL );
+			onMainThreadVoid( [this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, nullptr );
 	}
 
 	virtual bool isSimulated() const { return false; }
