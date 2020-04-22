@@ -3810,7 +3810,7 @@ ACTOR Future<Void> storageServerTracker(
 				}
 				when(wait(storeTypeTracker)) {}
 				when(wait(server->ssVersionTooFarBehind.onChange())) { }
-				when(wait(self->disableFailingLaggingServers.onChange())) {	}
+				when(wait(self->disableFailingLaggingServers.onChange())) { }
 			}
 
 			if (recordTeamCollectionInfo) {
