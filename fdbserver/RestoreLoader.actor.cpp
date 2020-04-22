@@ -540,8 +540,8 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 					    .detail("Version", commitVersion.toString())
 					    .detail("Mutation", kvm.toString());
 				}
-				applierVersionedMutationsBuffer[applierID].push_back(applierVersionedMutationsBuffer[applierID].arena(),
-				                                                     VersionedMutation(kvm, commitVersion));
+				applierVersionedMutationsBuffer[applierID].push_back_deep(
+				    applierVersionedMutationsBuffer[applierID].arena(), VersionedMutation(kvm, commitVersion));
 				msgSize += kvm.expectedSize();
 			}
 
@@ -558,8 +558,10 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				    .detail("MessageIndex", msgIndex)
 				    .detail("RestoreAsset", asset.toString())
 				    .detail("Requests", requests.size());
-				fSends.push_back(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces,
-				                                   requests, TaskPriority::RestoreLoaderSendMutations));
+				// fSends.push_back(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces,
+				//                                    requests, TaskPriority::RestoreLoaderSendMutations));
+				wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
+				                       TaskPriority::RestoreLoaderSendMutations));
 				msgIndex++;
 				msgSize = 0;
 				for (auto& applierID : applierIDs) {
@@ -582,12 +584,18 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 		    .detail("MessageIndex", msgIndex)
 		    .detail("RestoreAsset", asset.toString())
 		    .detail("Requests", requests.size());
-		fSends.push_back(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
-		                                   TaskPriority::RestoreLoaderSendMutations));
+		// fSends.push_back(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces,
+		// requests,
+		//                                    TaskPriority::RestoreLoaderSendMutations));
+		wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
+		                       TaskPriority::RestoreLoaderSendMutations));
 	}
-	wait(waitForAll(fSends));
+	// wait(waitForAll(fSends));
 
-	TraceEvent("FastRestore").detail("LoaderSendMutationOnAppliers", kvCount);
+	TraceEvent("FastRestoreLoaderSendMutationToAppliers")
+	    .detail("BatchIndex", batchIndex)
+	    .detail("RestoreAsset", asset.toString())
+	    .detail("Mutations", kvCount);
 	return Void();
 }
 

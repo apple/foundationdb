@@ -296,8 +296,9 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 				if (ongoingReplies.empty()) {
 					break;
 				} else {
-					wait(quorum(ongoingReplies, std::min((int)SERVER_KNOBS->FASTRESTORE_REQBATCH_PARALLEL,
-					                                     (int)ongoingReplies.size())));
+					wait(waitForAny(ongoingReplies));
+					// wait(quorum(ongoingReplies, std::min((int)SERVER_KNOBS->FASTRESTORE_REQBATCH_PARALLEL,
+					//                                      (int)ongoingReplies.size())));
 				}
 				// At least one reply is received; Calculate the reply duration
 				for (int j = 0; j < ongoingReplies.size(); ++j) {
@@ -354,6 +355,9 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) break;
 			fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
+			TraceEvent(SevWarn, "FastRestoreSendBatchRequests")
+			    .detail("ErrorCode", e.code())
+			    .detail("ErrorInfo", e.what());
 			for (auto& request : requests) {
 				TraceEvent(SevWarn, "FastRestore")
 				    .detail("SendBatchRequests", requests.size())
