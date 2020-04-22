@@ -143,6 +143,7 @@ def test_db_options(db):
     db.options.set_transaction_retry_limit(10)
     db.options.set_transaction_retry_limit(-1)
     db.options.set_transaction_causal_read_risky()
+    db.options.set_transaction_include_port_in_address()
 
 
 @fdb.transactional
@@ -163,6 +164,7 @@ def test_options(tr):
     tr.options.set_log_transaction()
     tr.options.set_read_lock_aware()
     tr.options.set_lock_aware()
+    tr.options.set_include_port_in_address()
 
     tr.get(b'\xff').wait()
 
@@ -364,6 +366,10 @@ class Tester:
                         inst.push(b'RESULT_NOT_PRESENT')
                     else:
                         inst.push(f)
+                elif inst.op == six.u("GET_ESTIMATED_RANGE_SIZE"):
+                    begin, end = inst.pop(2)
+                    estimatedSize = obj.get_estimated_range_size_bytes(begin, end).wait()
+                    inst.push(b"GOT_ESTIMATED_RANGE_SIZE")
                 elif inst.op == six.u("GET_KEY"):
                     key, or_equal, offset, prefix = inst.pop(4)
                     result = obj.get_key(fdb.KeySelector(key, or_equal, offset))

@@ -177,7 +177,7 @@ You can add new machines to a cluster at any time:
 
 5) If you have previously :ref:`excluded <removing-machines-from-a-cluster>` a machine from the cluster, you will need to take it off the exclusion list using the ``include <ip>`` command of fdbcli before it can be a full participant in the cluster.
 
-    .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
+.. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
 
 .. _removing-machines-from-a-cluster:
 
@@ -192,26 +192,30 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
 
 3) Use the ``exclude`` command in ``fdbcli`` on the machines you plan to remove:
     
-    ::
+::
 
-        user@host1$ fdbcli
-        Using cluster file `/etc/foundationdb/fdb.cluster'.
+    user@host1$ fdbcli
+    Using cluster file `/etc/foundationdb/fdb.cluster'.
 
-        The database is available.
+    The database is available.
 
-        Welcome to the fdbcli. For help, type `help'.
-        fdb> exclude 1.2.3.4 1.2.3.5 1.2.3.6
-        Waiting for state to be removed from all excluded servers.  This may take a while.
-        It is now safe to remove these machines or processes from the cluster.
+    Welcome to the fdbcli. For help, type `help'.
+    fdb> exclude 1.2.3.4 1.2.3.5 1.2.3.6
+    Waiting for state to be removed from all excluded servers.  This may take a while.
+    It is now safe to remove these machines or processes from the cluster.
 
-    
-    ``exclude`` can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an ``IP``:``PORT`` pair).
 
-    .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
-    
-    Excluding a server doesn't shut it down immediately; data on the machine is first moved away. When the ``exclude`` command completes successfully (by returning control to the command prompt), the machines that you specified are no longer required to maintain the configured redundancy mode. A large amount of data might need to be transferred first, so be patient. When the process is complete, the excluded machine or process can be shut down without fault tolerance or availability consequences.
-    
-    If you interrupt the exclude command with Ctrl-C after seeing the "waiting for state to be removed" message, the exclusion work will continue in the background. Repeating the command will continue waiting for the exclusion to complete. To reverse the effect of the ``exclude`` command, use the ``include`` command.
+``exclude`` can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an ``IP``:``PORT`` pair).
+
+.. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
+
+Excluding a server doesn't shut it down immediately; data on the machine is first moved away. When the ``exclude`` command completes successfully (by returning control to the command prompt), the machines that you specified are no longer required to maintain the configured redundancy mode. A large amount of data might need to be transferred first, so be patient. When the process is complete, the excluded machine or process can be shut down without fault tolerance or availability consequences.
+
+If you interrupt the exclude command with Ctrl-C after seeing the "waiting for state to be removed" message, the exclusion work will continue in the background. Repeating the command will continue waiting for the exclusion to complete. To reverse the effect of the ``exclude`` command, use the ``include`` command.
+
+    Excluding a server with the ``failed`` flag will shut it down immediately; it will assume that it has already become unrecoverable or unreachable, and will not attempt to move the data on the machine away. This may break the guarantee required to maintain the configured redundancy mode, which will be checked internally, and the command may be denied if the guarantee is violated. This safety check can be ignored by using the command ``exclude FORCE failed``.
+
+    In case you want to include a new machine with the same address as a server previously marked as failed, you can allow it to join by using the ``include failed`` command.
 
 4) On each removed machine, stop the FoundationDB server and prevent it from starting at the next boot. Follow the :ref:`instructions for your platform <administration-running-foundationdb>`. For example, on Ubuntu::
 
@@ -222,7 +226,7 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
 
 6) You can optionally :ref:`uninstall <administration-removing>` the FoundationDB server package entirely and/or delete database files on removed servers.
 
-7) If you ever want to add a removed machine back to the cluster, you will have to take it off the excluded servers list to which it was added in step 3. This can be done using the ``include`` command of ``fdbcli``. Typing ``exclude`` with no parameters will tell you the current list of excluded machines.
+7) If you ever want to add a removed machine back to the cluster, you will have to take it off the excluded servers list to which it was added in step 3. This can be done using the ``include`` command of ``fdbcli``. If attempting to re-include a failed server, this can be done using the ``include failed`` command of ``fdbcli``. Typing ``exclude`` with no parameters will tell you the current list of excluded and failed machines.
 
 Moving a cluster
 ================
@@ -316,9 +320,9 @@ Running backups         Number of backups currently running. Different backups c
 Running DRs             Number of DRs currently running. Different DRs could be streaming different prefixes and/or to different DR clusters.
 ====================== ==========================================================================================================
 
-The "Memory availability" is a conservative estimate of the minimal RAM available to any ``fdbserver`` process across all machines in the cluster. This value is calculated in two steps. Memory available per process is first calculated *for each machine* by taking:
+The "Memory availability" is a conservative estimate of the minimal RAM available to any ``fdbserver`` process across all machines in the cluster. This value is calculated in two steps. Memory available per process is first calculated *for each machine* by taking::
 
-  availability = ((total - committed) + sum(processSize)) / processes
+    availability = ((total - committed) + sum(processSize)) / processes
 
 where:
 
@@ -488,6 +492,19 @@ If a process has had more than 10 TCP segments retransmitted in the last 5 secon
 
       10.0.4.1:4500       ( 3% cpu;  2% machine; 0.004 Gbps;  0% disk; REXMIT! 2.5 GB / 4.1 GB RAM  )
 
+Machine-readable status
+--------------------------------
+
+The status command can provide a complete summary of statistics about the cluster and the database with the ``json`` argument. Full documentation for ``status json`` output can be found :doc:`here <mr-status>`.
+From the output of ``status json``, operators can find useful health metrics to determine whether or not their cluster is hitting performance limits.
+
+====================== ==============================================================================================================
+Ratekeeper limit        ``cluster.qos.transactions_per_second_limit`` contains the number of read versions per second that the cluster can give out. A low ratekeeper limit indicates that the cluster performance is limited in some way. The reason for a low ratekeeper limit can be found at ``cluster.qos.performance_limited_by``. ``cluster.qos.released_transactions_per_second`` describes the number of read versions given out per second, and can be used to tell how close the ratekeeper is to throttling.
+Storage queue size      ``cluster.qos.worst_queue_bytes_storage_server`` contains the maximum size in bytes of a storage queue. Each storage server has mutations that have not yet been made durable, stored in its storage queue. If this value gets too large, it indicates a storage server is falling behind. A large storage queue will cause the ratekeeper to increase throttling. However, depending on the configuration, the ratekeeper can ignore the worst storage queue from one fault domain. Thus, ratekeeper uses ``cluster.qos.limiting_queue_bytes_storage_server`` to determine the throttling level.
+Durable version lag     ``cluster.qos.worst_durability_lag_storage_server`` contains information about the worst storage server durability lag. The ``versions`` subfield contains the maximum number of versions in a storage queue. Ideally, this should be near 5 million. The ``seconds`` subfield contains the maximum number of seconds of non-durable data in a storage queue. Ideally, this should be near 5 seconds. If a storage server is overwhelmed, the durability lag could rise, causing performance issues.
+Transaction log queue   ``cluster.qos.worst_queue_bytes_log_server`` contains the maximum size in bytes of the mutations stored on a transaction log that have not yet been popped by storage servers. A large transaction log queue size can potentially cause the ratekeeper to increase throttling.
+====================== ==============================================================================================================
+
 .. _administration_fdbmonitor:
 
 ``fdbmonitor`` and ``fdbserver``
@@ -501,14 +518,14 @@ To make configuring, starting, stopping, and restarting ``fdbserver`` processes 
 
 During normal operation, ``fdbmonitor`` is transparent, and you interact with it only by modifying the configuration in :ref:`foundationdb.conf <foundationdb-conf>` and perhaps occasionally by :ref:`starting and stopping <administration-running-foundationdb>` it manually. If some problem prevents an ``fdbserver`` or ``backup-agent`` process from starting or causes it to stop unexpectedly, ``fdbmonitor`` will log errors to the system log.
 
-If ``kill_on_configuration_change`` parameter is unset or set to ``true`` in foundationdb.conf then fdbmonitor will restart on changes automatically. If this parameter is set to ``false`` it will not restart on changes.
+If ``kill_on_configuration_change`` parameter is unset or set to ``true`` in foundationdb.conf then fdbmonitor will restart monitored processes on changes automatically. If this parameter is set to ``false`` it will not restart any monitored processes on changes.
 
 .. _administration-managing-trace-files:
 
 Managing trace files
 ====================
 
- By default, trace files are output to:
+By default, trace files are output to:
 
 * ``/var/log/foundationdb/`` on Linux
 * ``/usr/local/foundationdb/logs/`` on macOS
@@ -617,6 +634,8 @@ To upgrade a FoundationDB cluster, you must install the updated version of Found
 
 .. warning:: |development-use-only-warning|
 
+.. note:: For information about upgrading client application code to newer API versions, see the :doc:`api-version-upgrade-guide`.
+
 Install updated client binaries
 -------------------------------
 
@@ -644,7 +663,7 @@ For **RHEL/CentOS**, perform the upgrade using the rpm command:
     user@host$ sudo rpm -Uvh |package-rpm-clients| \\
     |package-rpm-server|
 
-The ``foundationdb-clients`` package also installs the :doc:`Python <api-python>` and :doc:`C <api-c>` APIs. If your clients use :doc:`Ruby <api-ruby>`, `Java <javadoc/index.html>`_, or `Go <https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb>`_, follow the instructions in the corresponding language documentation to install the APIs.
+The ``foundationdb-clients`` package also installs the :doc:`C <api-c>` API. If your clients use :doc:`Ruby <api-ruby>`, :doc:`Python <api-python>`, `Java <javadoc/index.html>`_, or `Go <https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb>`_, follow the instructions in the corresponding language documentation to install the APIs.
 
 Test the database
 -----------------
@@ -661,20 +680,31 @@ You can now remove old client library versions from your clients. This is only t
 Version-specific notes on upgrading
 ===================================
 
+Upgrading from 6.2.x
+--------------------
+
+Upgrades from 6.2.x will keep all your old data and configuration settings.
+
 Upgrading from 6.1.x
 --------------------
 
-Upgrades from 6.1.x will keep all your old data and configuration settings. 
+Upgrades from 6.1.x will keep all your old data and configuration settings. Data distribution will slowly reorganize how data is spread across storage servers.
 
 Upgrading from 6.0.x
 --------------------
 
-Upgrades from 6.0.x will keep all your old data and configuration settings. 
+Upgrades from 6.0.x will keep all your old data and configuration settings.
 
 Upgrading from 5.2.x
 --------------------
 
-Upgrades from 5.2.x will keep all your old data and configuration settings. 
+Upgrades from 5.2.x will keep all your old data and configuration settings. Some affinities that certain roles have for running on processes that haven't set a process class have changed, which may result in these processes running in different locations after upgrading. To avoid this, set process classes as needed. The following changes were made:
+
+* The proxies and master no longer prefer ``resolution`` or ``transaction`` class processes to processes with unset class.
+* The resolver no longer prefers ``transaction`` class processes to processes with unset class.
+* The cluster controller no longer prefers ``master``, ``resolution`` or ``proxy`` class processes to processes with unset class.
+
+See :ref:`guidelines-process-class-config` for recommendations on setting process classes. All of the above roles will prefer ``stateless`` class processes to ones that don't set a class.
 
 Upgrading from 5.0.x - 5.1.x
 ----------------------------

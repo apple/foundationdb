@@ -185,6 +185,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	state Future<Void> secondDelay = Never();
 
 	state Promise<Void> requestFinished;
+	state double startTime = now();
 	
 	setReplyPriority(request, taskID);
 	if (!alternatives)
@@ -202,8 +203,10 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		double nextMetric = 1e9;
 		double bestTime = 1e9;
 		double nextTime = 1e9;
+		int badServers = 0;
+
 		for(int i=0; i<alternatives->size(); i++) {
-			if(bestMetric < 1e8 && i == alternatives->countBest()) {
+			if(badServers < std::min(i, FLOW_KNOBS->LOAD_BALANCE_MAX_BAD_OPTIONS + 1) && i == alternatives->countBest()) {
 				break;
 			}
 			
@@ -213,6 +216,9 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				if(now() > qd.failedUntil) {
 					double thisMetric = qd.smoothOutstanding.smoothTotal();
 					double thisTime = qd.latency;
+					if(FLOW_KNOBS->LOAD_BALANCE_PENALTY_IS_BAD && qd.penalty > 1.001) {
+						++badServers;
+					}
 				
 					if(thisMetric < bestMetric) {
 						if(i != bestAlt) {
@@ -228,7 +234,11 @@ Future< REPLY_TYPE(Request) > loadBalance(
 						nextMetric = thisMetric;
 						nextTime = thisTime;
 					}
+				} else {
+					++badServers;
 				}
+			} else {
+				++badServers;
 			}
 		}
 		if( nextMetric > 1e8 ) {
@@ -269,6 +279,22 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	state double backoff = 0;
 	state bool triedAllOptions = false;
 	loop {
+		if(now() - startTime > (g_network->isSimulated() ? 30.0 : 600.0)) {
+			TraceEvent ev(g_network->isSimulated() ? SevWarn : SevWarnAlways, "LoadBalanceTooLong");
+			ev.suppressFor(1.0);
+			ev.detail("Duration", now() - startTime);
+			ev.detail("NumAttempts", numAttempts);
+			ev.detail("Backoff", backoff);
+			ev.detail("TriedAllOptions", triedAllOptions);
+			if(ev.isEnabled()) {
+				ev.log();
+				for(int alternativeNum=0; alternativeNum<alternatives->size(); alternativeNum++) {
+					RequestStream<Request> const* thisStream = &alternatives->get( alternativeNum, channel );
+					TraceEvent(SevWarn, "LoadBalanceTooLongEndpoint").detail("Addr", thisStream->getEndpoint().getPrimaryAddress()).detail("Token", thisStream->getEndpoint().token).detail("Failed", IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed);
+				}
+			}
+		}
+
 		// Find an alternative, if any, that is not failed, starting with nextAlt
 		state RequestStream<Request> const* stream = NULL;
 		for(int alternativeNum=0; alternativeNum<alternatives->size(); alternativeNum++) {
@@ -295,28 +321,28 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			}
 
 			if(!alternatives->alwaysFresh()) {
-				if(now() - g_network->networkMetrics.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
-					g_network->networkMetrics.oldestAlternativesFailure = now();
+				if(now() - g_network->networkInfo.newestAlternativesFailure > FLOW_KNOBS->ALTERNATIVES_FAILURE_RESET_TIME) {
+					g_network->networkInfo.oldestAlternativesFailure = now();
 				}
 				
 				double delay = FLOW_KNOBS->ALTERNATIVES_FAILURE_MIN_DELAY;
-				if(now() - g_network->networkMetrics.lastAlternativesFailureSkipDelay > FLOW_KNOBS->ALTERNATIVES_FAILURE_SKIP_DELAY) {
-					g_network->networkMetrics.lastAlternativesFailureSkipDelay = now();
+				if(now() - g_network->networkInfo.lastAlternativesFailureSkipDelay > FLOW_KNOBS->ALTERNATIVES_FAILURE_SKIP_DELAY) {
+					g_network->networkInfo.lastAlternativesFailureSkipDelay = now();
 				} else {
-					double elapsed = now()-g_network->networkMetrics.oldestAlternativesFailure;
+					double elapsed = now()-g_network->networkInfo.oldestAlternativesFailure;
 					delay = std::max(delay, std::min(elapsed*FLOW_KNOBS->ALTERNATIVES_FAILURE_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_MAX_DELAY));
 					delay = std::max(delay, std::min(elapsed*FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_DELAY_RATIO, FLOW_KNOBS->ALTERNATIVES_FAILURE_SLOW_MAX_DELAY));
 				}
 
 				// Making this SevWarn means a lot of clutter
-				if(now() - g_network->networkMetrics.newestAlternativesFailure > 1 || deterministicRandom()->random01() < 0.01) {
+				if(now() - g_network->networkInfo.newestAlternativesFailure > 1 || deterministicRandom()->random01() < 0.01) {
 					TraceEvent("AllAlternativesFailed")
 						.detail("Interval", FLOW_KNOBS->CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED)
 						.detail("Alternatives", alternatives->description())
 						.detail("Delay", delay);
 				}
 
-				g_network->networkMetrics.newestAlternativesFailure = now();
+				g_network->networkInfo.newestAlternativesFailure = now();
 
 				choose {
 					when ( wait( quorum( ok, 1 ) ) ) {}

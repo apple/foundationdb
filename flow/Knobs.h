@@ -25,6 +25,7 @@
 #include "flow/Platform.h"
 
 #include <map>
+#include <set>
 #include <string>
 #include <stdint.h>
 
@@ -45,6 +46,7 @@ protected:
 	std::map<std::string, int*> int_knobs;
 	std::map<std::string, std::string*> string_knobs;
 	std::map<std::string, bool*> bool_knobs;
+	std::set<std::string> explicitlySetKnobs;
 };
 
 class FlowKnobs : public Knobs {
@@ -67,10 +69,14 @@ public:
 	double HUGE_ARENA_LOGGING_BYTES;
 	double HUGE_ARENA_LOGGING_INTERVAL;
 
-	//slow task profiling
-	double SLOWTASK_PROFILING_INTERVAL;
+	//run loop profiling
+	double RUN_LOOP_PROFILING_INTERVAL;
+	double SLOWTASK_PROFILING_LOG_INTERVAL;
 	double SLOWTASK_PROFILING_MAX_LOG_INTERVAL;
 	double SLOWTASK_PROFILING_LOG_BACKOFF;
+	double SATURATION_PROFILING_LOG_INTERVAL;
+	double SATURATION_PROFILING_MAX_LOG_INTERVAL;
+	double SATURATION_PROFILING_LOG_BACKOFF;
 
 	//connectionMonitor
 	double CONNECTION_MONITOR_LOOP_TIME;
@@ -87,10 +93,19 @@ public:
 	double MAX_RECONNECTION_TIME;
 	double RECONNECTION_TIME_GROWTH_RATE;
 	double RECONNECTION_RESET_TIME;
-	double CONNECTION_ACCEPT_DELAY;
-	int USE_OBJECT_SERIALIZER;
+	int ACCEPT_BATCH_SIZE;
 
 	int TLS_CERT_REFRESH_DELAY_SECONDS;
+	double TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT;
+	double TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT;
+	int TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS;
+	int TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS;
+
+	int NETWORK_TEST_CLIENT_COUNT;
+	int NETWORK_TEST_REPLY_SIZE;
+	int NETWORK_TEST_REQUEST_COUNT;
+	int NETWORK_TEST_REQUEST_SIZE;
+	bool NETWORK_TEST_SCRIPT_MODE;
 
 	//AsyncFileCached
 	int64_t PAGE_CACHE_4K;
@@ -104,6 +119,11 @@ public:
 	double PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION;
 	double TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY;
 	int TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT;
+	int PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT;
+
+	//AsyncFileEIO
+	int EIO_MAX_PARALLELISM;
+	int EIO_USE_ODIRECT;
 
 	//AsyncFileKAIO
 	int MAX_OUTSTANDING;
@@ -117,6 +137,7 @@ public:
 
 	//GenericActors
 	double BUGGIFY_FLOW_LOCK_RELEASE_DELAY;
+	int LOW_PRIORITY_DELAY_COUNT;
 
 	//IAsyncFile
 	int64_t INCREMENTAL_DELETE_TRUNCATE_AMOUNT;
@@ -129,6 +150,8 @@ public:
 	double SLOW_LOOP_SAMPLING_RATE;
 	int64_t TSC_YIELD_TIME;
 	int64_t REACTOR_FLAGS;
+	double MIN_LOGGED_PRIORITY_BUSY_FRACTION;
+	int CERT_FILE_MAX_SIZE;
 
 	//Network
 	int64_t PACKET_LIMIT;
@@ -137,6 +160,10 @@ public:
 	int MAX_PACKET_SEND_BYTES;
 	int MIN_PACKET_BUFFER_BYTES;
 	int MIN_PACKET_BUFFER_FREE_BYTES;
+	int FLOW_TCP_NODELAY;
+	int FLOW_TCP_QUICKACK;
+	int UNRESTRICTED_HANDSHAKE_LIMIT;
+	int BOUNDED_HANDSHAKE_LIMIT;
 
 	//Sim2
 	//FIMXE: more parameters could be factored out
@@ -149,6 +176,7 @@ public:
 	double SLOW_NETWORK_LATENCY;
 	double MAX_CLOGGING_LATENCY;
 	double MAX_BUGGIFIED_DELAY;
+	int SIM_CONNECT_ERROR_MODE;
 
 	//Tracefiles
 	int ZERO_LENGTH_FILE_PAD;
@@ -162,6 +190,7 @@ public:
 	int TRACE_EVENT_THROTTLER_MSG_LIMIT;
 	int MAX_TRACE_FIELD_LENGTH;
 	int MAX_TRACE_EVENT_LENGTH;
+	bool ALLOCATION_TRACING_ENABLED;
 
 	//TDMetrics
 	int64_t MAX_METRIC_SIZE;
@@ -194,8 +223,11 @@ public:
 	double FUTURE_VERSION_INITIAL_BACKOFF;
 	double FUTURE_VERSION_MAX_BACKOFF;
 	double FUTURE_VERSION_BACKOFF_GROWTH;
+	int LOAD_BALANCE_MAX_BAD_OPTIONS;
+	bool LOAD_BALANCE_PENALTY_IS_BAD;
 
-	FlowKnobs(bool randomize = false, bool isSimulated = false);
+	FlowKnobs();
+	void initialize(bool randomize = false, bool isSimulated = false);
 };
 
 extern FlowKnobs const* FLOW_KNOBS;

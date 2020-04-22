@@ -49,16 +49,16 @@ struct TLogInterface {
 	RequestStream< struct TLogEnablePopRequest> enablePopRequest;
 	RequestStream< struct TLogSnapRequest> snapRequest;
 
-	
 	TLogInterface() {}
-	explicit TLogInterface(LocalityData locality) : uniqueID( deterministicRandom()->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
-	TLogInterface(UID sharedTLogID, LocalityData locality) : uniqueID( deterministicRandom()->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
-	TLogInterface(UID uniqueID, UID sharedTLogID, LocalityData locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
+	explicit TLogInterface(const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
+	TLogInterface(UID sharedTLogID, const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
+	TLogInterface(UID uniqueID, UID sharedTLogID, const LocalityData& locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
 	UID id() const { return uniqueID; }
 	UID getSharedTLogID() const { return sharedTLogID; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == ( TLogInterface const& r ) const { return id() == r.id(); }
 	NetworkAddress address() const { return peekMessages.getEndpoint().getPrimaryAddress(); }
+	Optional<NetworkAddress> secondaryAddress() const { return peekMessages.getEndpoint().addresses.secondaryAddress; }
 	void initEndpoints() {
 		getQueuingMetrics.getEndpoint( TaskPriority::TLogQueuingMetrics );
 		popMessages.getEndpoint( TaskPriority::TLogPop );
@@ -155,7 +155,7 @@ struct TLogPeekReply {
 	Version maxKnownVersion;
 	Version minKnownCommittedVersion;
 	Optional<Version> begin;
-	bool onlySpilled;
+	bool onlySpilled = false;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -216,6 +216,19 @@ struct TagMessagesRef {
 	}
 };
 
+struct TLogCommitReply {
+	constexpr static FileIdentifier file_identifier = 3;
+
+	Version version;
+	TLogCommitReply() = default;
+	explicit TLogCommitReply(Version version) : version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
+	}
+};
+
 struct TLogCommitRequest {
 	constexpr static FileIdentifier file_identifier = 4022206;
 	Arena arena;
@@ -223,7 +236,7 @@ struct TLogCommitRequest {
 
 	StringRef messages;// Each message prefixed by a 4-byte length
 
-	ReplyPromise<Version> reply;
+	ReplyPromise<TLogCommitReply> reply;
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}

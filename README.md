@@ -33,13 +33,17 @@ CMake-based build system. Both of them should currently work for most users,
 and CMake should be the preferred choice as it will eventually become the only
 build system available.
 
+If compiling for local development, please set `-DUSE_WERROR=ON` in
+cmake. Our CI compiles with `-Werror` on, so this way you'll find out about
+compiler warnings that break the build earlier.
+
 ## CMake
 
 To build with CMake, generally the following is required (works on Linux and
 Mac OS - for Windows see below):
 
 1. Check out this repository.
-1. Install cmake Version 3.12 or higher [CMake](https://cmake.org/)
+1. Install cmake Version 3.13 or higher [CMake](https://cmake.org/)
 1. Download version 1.67 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.67.0/). 
 1. Unpack boost (you don't need to compile it)
 1. Install [Mono](http://www.mono-project.com/download/stable/).
@@ -47,17 +51,17 @@ Mac OS - for Windows see below):
 1. Create a build directory (you can have the build directory anywhere you
    like): `mkdir build`
 1. `cd build`
-1. `cmake -DBOOST_ROOT=<PATH_TO_BOOST> <PATH_TO_FOUNDATIONDB_DIRECTORY>`
-1. `make`
+1. `cmake -GNinja -DBOOST_ROOT=<PATH_TO_BOOST> <PATH_TO_FOUNDATIONDB_DIRECTORY>`
+1. `ninja`
 
 CMake will try to find its dependencies. However, for LibreSSL this can be often
 problematic (especially if OpenSSL is installed as well). For that we recommend
 passing the argument `-DLibreSSL_ROOT` to cmake. So, for example, if you
-LibreSSL is installed under /usr/local/libressl-2.8.3, you should call cmake like
+LibreSSL is installed under `/usr/local/libressl-2.8.3`, you should call cmake like
 this:
 
 ```
-cmake -DLibreSSL_ROOT=/usr/local/libressl-2.8.3/ ../foundationdb
+cmake -GNinja -DLibreSSL_ROOT=/usr/local/libressl-2.8.3/ ../foundationdb
 ```
 
 FoundationDB will build just fine without LibreSSL, however, the resulting
@@ -129,31 +133,31 @@ If you want to create a package you have to tell cmake what platform it is for.
 And then you can build by simply calling `cpack`. So for debian, call:
 
 ```
-cmake -DINSTALL_LAYOUT=DEB  <FDB_SOURCE_DIR>
-make
-cpack
+cmake -GNinja <FDB_SOURCE_DIR>
+ninja
+cpack -G DEB
 ```
 
 For RPM simply replace `DEB` with `RPM`.
 
 ### MacOS
 
-The build under MacOS will work the same way as on Linux. To get LibreSSL and boost you
-can use [Homebrew](https://brew.sh/). LibreSSL will not be installed in
-`/usr/local` instead it will stay in `/usr/local/Cellar`. So the cmake command
-will look something like this:
+The build under MacOS will work the same way as on Linux. To get LibreSSL,
+boost, and ninja you can use [Homebrew](https://brew.sh/). LibreSSL will not be
+installed in `/usr/local` instead it will stay in `/usr/local/Cellar`. So the
+cmake command will look something like this:
 
 ```sh
-cmake -DLibreSSL_ROOT=/usr/local/Cellar/libressl/2.8.3 <PATH_TO_FOUNDATIONDB_SOURCE>
+cmake -GNinja -DLibreSSL_ROOT=/usr/local/Cellar/libressl/2.8.3 <PATH_TO_FOUNDATIONDB_SOURCE>
 ```
 
 To generate a installable package, you have to call CMake with the corresponding
 arguments and then use cpack to generate the package:
 
 ```sh
-cmake -DINSTALL_LAYOUT=OSX  <FDB_SOURCE_DIR>
-make
-cpack
+cmake -GNinja <FDB_SOURCE_DIR>
+ninja
+cpack -G productbuild
 ```
 
 ### Windows
@@ -202,7 +206,7 @@ will automatically find it and build with TLS support.
 If you installed WIX before running `cmake` you should find the
 `FDBInstaller.msi` in your build directory under `packaging/msi`. 
 
-## Makefile
+## Makefile (Deprecated - all users should transition to using cmake)
 
 #### MacOS
 
@@ -219,7 +223,7 @@ If you installed WIX before running `cmake` you should find the
 
 1. Install [Docker](https://www.docker.com/).
 1. Check out the foundationdb repo.
-1. Run the docker image interactively [Docker Run](https://docs.docker.com/engine/reference/run/#general-form) with the directory containing the foundationdb repo mounted [Docker Mounts](https://docs.docker.com/storage/volumes/).
+1. Run the docker image interactively with [Docker Run](https://docs.docker.com/engine/reference/run/#general-form), and with the directory containing the foundationdb repo mounted via [Docker Mounts](https://docs.docker.com/storage/volumes/).
 
     ```shell
     docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' foundationdb/foundationdb-build:latest

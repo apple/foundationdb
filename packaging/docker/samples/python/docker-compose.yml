@@ -21,21 +21,29 @@ version: '3'
 services:
   # Specify three fdbserver processes.
   fdb-coordinator:
-    image: foundationdb:6.1.8
+    image: foundationdb/foundationdb:${FDB_VERSION}
     environment:
-      FDB_COORDINATOR: fdb-coordinator
+      FDB_COORDINATOR: ${FDB_COORDINATOR}
+      FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
+      FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
+    ports:
+      - 4500:4500/tcp
   fdb-server-1:
     depends_on:
       - fdb-coordinator
-    image: foundationdb:6.1.8
+    image: foundationdb/foundationdb:${FDB_VERSION}
     environment:
-      FDB_COORDINATOR: fdb-coordinator
+      FDB_COORDINATOR: ${FDB_COORDINATOR}
+      FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
+      FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
   fdb-server-2:
     depends_on:
       - fdb-coordinator
-    image: foundationdb:6.1.8
+    image: foundationdb/foundationdb:${FDB_VERSION}
     environment:
-      FDB_COORDINATOR: fdb-coordinator
+      FDB_COORDINATOR: ${FDB_COORDINATOR}
+      FDB_NETWORKING_MODE: ${FDB_NETWORKING_MODE}
+      FDB_COORDINATOR_PORT: ${FDB_COORDINATOR_PORT}
 
   # Bring up the application so that it depends on the cluster.
   app:
@@ -45,7 +53,10 @@ services:
       - fdb-server-2
     build:
       context: app
+      args:
+        FDB_VERSION: ${FDB_VERSION}
     ports:
       - 5000:5000/tcp
     environment:
-      FDB_COORDINATOR: fdb-coordinator
+      FDB_COORDINATOR: ${FDB_COORDINATOR}
+      FDB_API_VERSION: ${FDB_API_VERSION}

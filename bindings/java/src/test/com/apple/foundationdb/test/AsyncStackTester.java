@@ -223,6 +223,12 @@ public class AsyncStackTester {
 				inst.push(inst.readTcx.readAsync(readTr -> readTr.get((byte[]) param)));
 			});
 		}
+		else if (op == StackOperation.GET_ESTIMATED_RANGE_SIZE) {
+			List<Object> params = inst.popParams(2).join();
+			return inst.readTr.getEstimatedRangeSizeBytes((byte[])params.get(0), (byte[])params.get(1)).thenAcceptAsync(size -> {
+				inst.push("GOT_ESTIMATED_RANGE_SIZE".getBytes());
+			}, FDB.DEFAULT_EXECUTOR);
+		}
 		else if(op == StackOperation.GET_RANGE) {
 			return inst.popParams(5).thenComposeAsync(params -> {
 				int limit = StackUtils.getInt(params.get(2));
@@ -495,6 +501,7 @@ public class AsyncStackTester {
 				db.options().setTransactionRetryLimit(10);
 				db.options().setTransactionRetryLimit(-1);
 				db.options().setTransactionCausalReadRisky();
+				db.options().setTransactionIncludePortInAddress();
 
 				tr.options().setPrioritySystemImmediate();
 				tr.options().setPriorityBatch();
@@ -512,6 +519,7 @@ public class AsyncStackTester {
 				tr.options().setLogTransaction();
 				tr.options().setReadLockAware();
 				tr.options().setLockAware();
+				tr.options().setIncludePortInAddress();
 
 				if(!(new FDBException("Fake", 1020)).isRetryable() ||
 						(new FDBException("Fake", 10)).isRetryable())
@@ -665,10 +673,7 @@ public class AsyncStackTester {
 			};
 
 			if(operations == null || ++currentOp == operations.size()) {
-				Transaction tr = db.createTransaction();
-
-				return tr.getRange(nextKey, endKey, 1000).asList()
-				.whenComplete((x, t) -> tr.close())
+				return db.readAsync(readTr -> readTr.getRange(nextKey, endKey, 1000).asList())
 				.thenComposeAsync(next -> {
 					if(next.size() < 1) {
 						//System.out.println("No key found after: " + ByteArrayUtil.printable(nextKey.getKey()));

@@ -24,20 +24,6 @@
 
 #include "flow/Platform.h"
 
-
-// backtrace() and exception unwinding in glibc both call dl_iterate_phdr(),
-// which takes the loader lock and so is not async signal safe.  Profiling or slow task
-// profiling can deadlock when they interrupt the unwinding of an exception.
-
-// This library overrides the implementation of dl_iterate_phdr() so that it
-// can be async signal safe in this context, at the cost of other restrictions
-
-// Call this function after all dynamic libraries are loaded
-// (no further calls to dlopen() or dlclose() are permitted).
-// After calling it, dl_iterate_phdr() will be async-signal-safe.
-// At this time, it is a no-op on all platforms except Linux
-void initSignalSafeUnwind();
-
 // This can be used by tests to measure the number of calls to dl_iterate_phdr intercepted
 extern int64_t dl_iterate_phdr_calls;
 

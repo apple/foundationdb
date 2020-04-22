@@ -1,12 +1,12 @@
-#######################
-Release Notes (Alpha 5)
-#######################
+#############
+Release Notes
+#############
 
 FoundationDB Alpha 5
 ====================
 
 Language support
--------------------------
+----------------
 
 * FoundationDB now supports :doc:`Ruby </api-ruby>`
 
@@ -17,7 +17,8 @@ Language support
 .. _alpha-5-rel-notes-features:
 
 Features
-------------
+--------
+
 * A new :doc:`backup </backups>` system allows scheduled backups of a snapshot of the FoundationDB database to an external filesystem.
 	
 * :doc:`Integrated HTML documentation </index>`

@@ -344,7 +344,7 @@ struct UnreadableWorkload : TestWorkload {
 					key = RandomTestImpl::getRandomVersionstampKey(arena);
 					value = RandomTestImpl::getRandomValue(arena);
 					tr.atomicOp(key, value, MutationRef::SetVersionstampedKey);
-					range = getVersionstampKeyRange(arena, key, allKeys.end);
+					range = getVersionstampKeyRange(arena, key, tr.getCachedReadVersion().orDefault(0), allKeys.end);
 					unreadableMap.insert(range, true);
 					//TraceEvent("RYWT_SetVersionstampKey").detail("Range", printable(range));
 				}

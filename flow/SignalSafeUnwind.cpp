@@ -27,17 +27,9 @@ int64_t dl_iterate_phdr_calls = 0;
 #include <link.h>
 #include <mutex>
 
-static bool phdr_cache_initialized = false;
-static std::vector< std::vector<uint8_t> > phdr_cache;
-
 static int (*chain_dl_iterate_phdr)(
-          int (*callback) (struct dl_phdr_info *info, size_t size, void *data),
-          void *data) = nullptr;
-
-static int phdr_cache_add( struct dl_phdr_info *info, size_t size, void *data ) {
-	phdr_cache.push_back( std::vector<uint8_t>((uint8_t*)info, (uint8_t*)info + size) );
-	return 0;
-}
+		int (*callback) (struct dl_phdr_info *info, size_t size, void *data),
+		void *data) = nullptr;
 
 static void initChain() {
 	static std::once_flag flag;
@@ -50,15 +42,6 @@ static void initChain() {
 	}
 }
 
-void initSignalSafeUnwind() {
-	initChain();
-
-	phdr_cache.clear();
-	if (chain_dl_iterate_phdr(&phdr_cache_add, 0))
-		criticalError(FDB_EXIT_ERROR, "DLIterateError", "dl_iterate_phdr error");
-	phdr_cache_initialized = true;
-}
-
 // This overrides the function in libc!
 extern "C" int dl_iterate_phdr(
           int (*callback) (struct dl_phdr_info *info, size_t size, void *data),
@@ -66,29 +49,11 @@ extern "C" int dl_iterate_phdr(
 {
 	interlockedIncrement64(&dl_iterate_phdr_calls);
 
-	if (phdr_cache_initialized)
-	{
-		// This path should be async signal safe
-		for(int i=0; i<phdr_cache.size(); i++)
-		{
-			int r = callback( (struct dl_phdr_info*)&phdr_cache[i][0], phdr_cache[i].size(), data );
-			if (r!=0)
-				return r;
-		}
-		return 0;
-	} else {
-		// This path is NOT async signal safe, and serves until and unless initSignalSafeUnwind() is called
-		initChain();
+	initChain();
 
-		setProfilingEnabled(0);
-		int result = chain_dl_iterate_phdr(callback, data);
-		setProfilingEnabled(1);
-		return result;
-	}
+	setProfilingEnabled(0);
+	int result = chain_dl_iterate_phdr(callback, data);
+	setProfilingEnabled(1);
+	return result;
 }
-
-#else  // __linux__
-
-void initSignalSafeUnwind() {}
-
 #endif

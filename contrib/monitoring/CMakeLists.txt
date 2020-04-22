@@ -1,0 +1,2 @@
+add_executable(actor_flamegraph actor_flamegraph.cpp)
+target_link_libraries(actor_flamegraph PRIVATE Threads::Threads)

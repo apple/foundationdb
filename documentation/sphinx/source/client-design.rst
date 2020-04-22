@@ -18,6 +18,8 @@ FoundationDB supports language bindings for application development using the or
 
 * :doc:`api-general` contains information on FoundationDB clients applicable across all language bindings.
 
+* :doc:`api-version-upgrade-guide` contains information about upgrading client code to a new API version.
+
 * :doc:`known-limitations` describes both long-term design limitations of FoundationDB and short-term limitations applicable to the current version.
 
 .. toctree::
@@ -34,3 +36,4 @@ FoundationDB supports language bindings for application development using the or
     client-testing
     api-general
     known-limitations
+    api-version-upgrade-guide

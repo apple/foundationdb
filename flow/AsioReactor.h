@@ -37,7 +37,8 @@ class ASIOReactor {
 public:
 	explicit ASIOReactor(Net2*);
 
-	void sleepAndReact(double timeout);
+	void sleep(double timeout);
+	void react();
 
 	void wake();
 	

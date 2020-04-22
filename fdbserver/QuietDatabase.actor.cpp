@@ -211,10 +211,11 @@ ACTOR Future<std::pair<int64_t,int64_t>> getTLogQueueInfo( Database cx, Referenc
 
 ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, bool use_system_priority = false) {
 	state Transaction tr( cx );
-	if (use_system_priority)
-		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 	loop {
+		if (use_system_priority) {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		}
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			Standalone<RangeResultRef> serverList = wait( tr.getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY ) );
 			ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
@@ -305,6 +306,9 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize( Database cx, Reference<Async
 			maxQueueSize = std::max( maxQueueSize, getQueueSize( messages[i].get() ) );
 		} catch( Error &e ) {
 			TraceEvent("QuietDatabaseFailure").detail("Reason", "Failed to extract MaxStorageServerQueue").detail("SS", servers[i].id());
+			for (auto& m : messages) {
+				TraceEvent("Messages").detail("Info", m.get().toString());
+			}
 			throw;
 		}
 	}
@@ -350,10 +354,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 	state bool ret = false;
 	loop {
 		try {
-			if (!g_network->isSimulated() || 
-				(g_simulator.storagePolicy.isValid() &&
-			    g_simulator.storagePolicy->info().find("data_hall") != std::string::npos)) {
-				// Do not test DD team number for data_hall modes
+			if (!g_network->isSimulated()) {
 				return true;
 			}
 
@@ -550,14 +551,20 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			     success(storageServersRecruiting));
 
 			TraceEvent(("QuietDatabase" + phase).c_str())
-					.detail("DataInFlight", dataInFlight.get())
-					.detail("MaxTLogQueueSize", tLogQueueInfo.get().first)
-					.detail("MaxTLogPoppedVersionLag", tLogQueueInfo.get().second)
-					.detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
-					.detail("TeamCollectionValid", teamCollectionValid.get())
-					.detail("MaxStorageQueueSize", storageQueueSize.get())
-					.detail("DataDistributionActive", dataDistributionActive.get())
-					.detail("StorageServersRecruiting", storageServersRecruiting.get());
+			    .detail("DataInFlight", dataInFlight.get())
+			    .detail("DataInFlightGate", dataInFlightGate)
+			    .detail("MaxTLogQueueSize", tLogQueueInfo.get().first)
+			    .detail("MaxTLogQueueGate", maxTLogQueueGate)
+			    .detail("MaxTLogPoppedVersionLag", tLogQueueInfo.get().second)
+			    .detail("MaxTLogPoppedVersionLagGate", maxPoppedVersionLag)
+			    .detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
+			    .detail("DataDistributionQueueSizeGate", maxDataDistributionQueueSize)
+			    .detail("TeamCollectionValid", teamCollectionValid.get())
+			    .detail("MaxStorageQueueSize", storageQueueSize.get())
+			    .detail("MaxStorageServerQueueGate", maxStorageServerQueueGate)
+			    .detail("DataDistributionActive", dataDistributionActive.get())
+			    .detail("StorageServersRecruiting", storageServersRecruiting.get())
+			    .detail("NumSuccesses", numSuccesses);
 
 			if (dataInFlight.get() > dataInFlightGate || tLogQueueInfo.get().first > maxTLogQueueGate || tLogQueueInfo.get().second > maxPoppedVersionLag ||
 			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||
@@ -570,12 +577,13 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 				if(++numSuccesses == 3) {
 					TraceEvent(("QuietDatabase" + phase + "Done").c_str());
 					break;
+				} else {
+					wait(delay( g_network->isSimulated() ? 2.0 : 30.0));
 				}
-				else
-					wait(delay( 2.0 ) );
 			}
 		} catch (Error& e) {
-			if( e.code() != error_code_actor_cancelled && e.code() != error_code_attribute_not_found && e.code() != error_code_timed_out)
+			if (e.code() != error_code_actor_cancelled && e.code() != error_code_attribute_not_found &&
+			    e.code() != error_code_timed_out)
 				TraceEvent(("QuietDatabase" + phase + "Error").c_str()).error(e);
 
 			//Client invalid operation occurs if we don't get back a message from one of the servers, often corrected by retrying

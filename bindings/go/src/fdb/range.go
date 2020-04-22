@@ -22,12 +22,13 @@
 
 package fdb
 
-// #define FDB_API_VERSION 620
+// #define FDB_API_VERSION 630
 // #include <foundationdb/fdb_c.h>
 import "C"
 
 import (
 	"fmt"
+	"sync"
 )
 
 // KeyValue represents a single key-value pair in the database.
@@ -54,7 +55,8 @@ type RangeOptions struct {
 	// Reverse indicates that the read should be performed in lexicographic
 	// (false) or reverse lexicographic (true) order. When Reverse is true and
 	// Limit is non-zero, the last Limit key-value pairs in the range are
-	// returned.
+	// returned. Reading ranges in reverse is supported natively by the
+	// database and should have minimal extra cost.
 	Reverse bool
 }
 
@@ -139,6 +141,7 @@ func (rr RangeResult) GetSliceWithError() ([]KeyValue, error) {
 	var ret []KeyValue
 
 	ri := rr.Iterator()
+	defer ri.Close()
 
 	if rr.options.Limit != 0 {
 		ri.options.Mode = StreamingModeExact
@@ -206,6 +209,18 @@ type RangeIterator struct {
 	index     int
 	err       error
 	snapshot  bool
+	o         sync.Once
+}
+
+// Close releases the underlying native resources for all the `KeyValue`s
+// ever returned by this iterator. The `KeyValue`s themselves are copied
+// before they're returned, so they are still safe to use after calling
+// this function. This is instended to be called with `defer` inside
+// your transaction function.
+func (ri *RangeIterator) Close() {
+	ri.o.Do(func() {
+		C.fdb_future_destroy(ri.f.ptr)
+	})
 }
 
 // Advance attempts to advance the iterator to the next key-value pair. Advance

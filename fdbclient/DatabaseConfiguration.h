@@ -32,6 +32,7 @@
 struct SatelliteInfo {
 	Key dcId;
 	int32_t priority;
+	int32_t satelliteDesiredTLogCount = -1;
 
 	SatelliteInfo() : priority(0) {}
 
@@ -41,7 +42,7 @@ struct SatelliteInfo {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, dcId, priority);
+		serializer(ar, dcId, priority, satelliteDesiredTLogCount);
 	}
 };
 
@@ -106,7 +107,7 @@ struct DatabaseConfiguration {
 
 	int expectedLogSets( Optional<Key> dcId ) const {
 		int result = 1;
-		if(dcId.present() && getRegion(dcId.get()).satelliteTLogReplicationFactor > 0) {
+		if(dcId.present() && getRegion(dcId.get()).satelliteTLogReplicationFactor > 0 && usableRegions > 1) {
 			result++;
 		}
 		
@@ -176,6 +177,9 @@ struct DatabaseConfiguration {
 	int32_t remoteDesiredTLogCount;
 	int32_t remoteTLogReplicationFactor;
 	Reference<IReplicationPolicy> remoteTLogPolicy;
+
+	// Backup Workers
+	bool backupWorkerEnabled;
 
 	//Data centers
 	int32_t usableRegions;

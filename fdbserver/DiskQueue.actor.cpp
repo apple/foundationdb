@@ -22,7 +22,7 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/crc32c.h"
+#include "flow/crc32c.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -92,7 +92,9 @@ struct StringBuffer {
 			uint8_t* p = (uint8_t*)(int64_t(b+alignment-1) & ~(alignment-1));  // first multiple of alignment greater than or equal to b
 			ASSERT( p>=b && p+reserved<=e && int64_t(p)%alignment == 0 );
 
-			memcpy(p, str.begin(), str.size());
+			if (str.size() > 0) {
+				memcpy(p, str.begin(), str.size());
+			}
 			ref() = StringRef( p, str.size() );
 		}
 	}
@@ -1269,12 +1271,7 @@ private:
 
 		Page* lastPage = (Page*)lastPageData.begin();
 		self->poppedSeq = lastPage->popped;
-		if (self->diskQueueVersion >= DiskQueueVersion::V1) {
-			// poppedSeq can be lagged very behind in logSpilling feature.
-			self->nextReadLocation = std::max(recoverAt.lo, self->poppedSeq);
-		} else {
-			self->nextReadLocation = lastPage->popped;
-		}
+		self->nextReadLocation = std::max(recoverAt.lo, self->poppedSeq);
 
 		/*
 		state std::auto_ptr<Page> testPage(new Page);

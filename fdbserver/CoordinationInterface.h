@@ -41,7 +41,7 @@ struct GenerationRegInterface {
 	//   If gen>0 and there was no prior write(_,_,0) or a data loss fault, throws not_created()?
 	//   (gen1==gen is considered a "successful" write)
 	//   There is some earlier or concurrent read(key,gen1) or write(key,_,gen1).  (In the successful case, the concurrent write is this one)
-	
+
 	// All instances of the pattern
 	//    read(key, g)=>v1 and write(key, v2, g)=>true
 	// thus form a totally ordered sequence of modifications, in which
@@ -136,12 +136,29 @@ struct CandidacyRequest {
 	}
 };
 
+struct LeaderHeartbeatReply {
+	constexpr static FileIdentifier file_identifier = 11;
+
+	bool value = false;
+	LeaderHeartbeatReply() = default;
+	explicit LeaderHeartbeatReply(bool value) : value(value) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value);
+	}
+};
+
+inline bool operator==(const LeaderHeartbeatReply& lhs, const LeaderHeartbeatReply& rhs) {
+	return lhs.value == rhs.value;
+}
+
 struct LeaderHeartbeatRequest {
 	constexpr static FileIdentifier file_identifier = 9495992;
 	Key key;
 	LeaderInfo myInfo;
 	UID prevChangeID;
-	ReplyPromise<bool> reply;
+	ReplyPromise<LeaderHeartbeatReply> reply;
 
 	LeaderHeartbeatRequest() {}
 	explicit LeaderHeartbeatRequest( Key key, LeaderInfo const& myInfo, UID prevChangeID ) : key(key), myInfo(myInfo), prevChangeID(prevChangeID) {}

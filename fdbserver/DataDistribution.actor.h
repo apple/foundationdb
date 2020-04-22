@@ -38,38 +38,6 @@ struct RelocateShard {
 	RelocateShard( KeyRange const& keys, int priority ) : keys(keys), priority(priority) {}
 };
 
-// Higher priorities are executed first
-// Priority/100 is the "priority group"/"superpriority".  Priority inversion
-//   is possible within but not between priority groups; fewer priority groups
-//   mean better worst case time bounds
-enum {
-	PRIORITY_REBALANCE_SHARD = 100,
-	PRIORITY_RECOVER_MOVE    = 110,
-	PRIORITY_REBALANCE_UNDERUTILIZED_TEAM  = 120,
-	PRIORITY_REBALANCE_OVERUTILIZED_TEAM  = 121,
-	PRIORITY_TEAM_HEALTHY    = 140,
-	PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER = 150,
-
-	// Set removing_redundant_team priority lower than merge/split_shard_priority,
-	// so that removing redundant teams does not block merge/split shards.
-	PRIORITY_TEAM_REDUNDANT  = 200,
-
-	PRIORITY_MERGE_SHARD     = 340,
-	PRIORITY_SPLIT_SHARD     = 350,
-
-	PRIORITY_TEAM_UNHEALTHY  = 800,
-	PRIORITY_TEAM_2_LEFT     = 809,
-
-	PRIORITY_TEAM_1_LEFT     = 900,
-
-	PRIORITY_TEAM_0_LEFT     = 999
-};
-
-enum {
-	SOME_SHARED = 2,
-	NONE_SHARED = 3
-};
-
 struct IDataDistributionTeam {
 	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() = 0;
 	virtual int size() = 0;
@@ -77,9 +45,9 @@ struct IDataDistributionTeam {
 	virtual void addDataInFlightToTeam( int64_t delta ) = 0;
 	virtual int64_t getDataInFlightToTeam() = 0;
 	virtual int64_t getLoadBytes( bool includeInFlight = true, double inflightPenalty = 1.0 ) = 0;
-	virtual int64_t getMinFreeSpace( bool includeInFlight = true ) = 0;
-	virtual double getMinFreeSpaceRatio( bool includeInFlight = true ) = 0;
-	virtual bool hasHealthyFreeSpace() = 0;
+	virtual int64_t getMinAvailableSpace( bool includeInFlight = true ) = 0;
+	virtual double getMinAvailableSpaceRatio( bool includeInFlight = true ) = 0;
+	virtual bool hasHealthyAvailableSpace( double minRatio ) = 0;
 	virtual Future<Void> updateStorageMetrics() = 0;
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -107,13 +75,29 @@ struct GetTeamRequest {
 	bool wantsNewServers;
 	bool wantsTrueBest;
 	bool preferLowerUtilization;
+	bool teamMustHaveShards;
 	double inflightPenalty;
-	std::vector<UID> sources;
 	std::vector<UID> completeSources;
 	Promise< Optional< Reference<IDataDistributionTeam> > > reply;
 
 	GetTeamRequest() {}
-	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, double inflightPenalty = 1.0 ) : wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), inflightPenalty( inflightPenalty ) {}
+	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, bool teamMustHaveShards, double inflightPenalty = 1.0 ) 
+		: wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), teamMustHaveShards( teamMustHaveShards ), inflightPenalty( inflightPenalty ) {}
+	
+	std::string getDesc() {
+		std::stringstream ss;
+
+		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
+		   << " PreferLowerUtilization:" << preferLowerUtilization 
+		   << " teamMustHaveShards:" << teamMustHaveShards
+		   << " inflightPenalty:" << inflightPenalty << ";";
+		ss << "CompleteSources:";
+		for (auto& cs : completeSources) {
+			ss << cs.toString() << ",";
+		}
+
+		return ss.str();
+	}
 };
 
 struct GetMetricsRequest {
@@ -165,6 +149,7 @@ public:
 
 	int getNumberOfShards( UID ssID );
 	vector<KeyRange> getShardsFor( Team team );
+	bool hasShards(Team team);
 
 	//The first element of the pair is either the source for non-moving shards or the destination team for in-flight shards
 	//The second element of the pair is all previous sources for in-flight shards
@@ -174,6 +159,7 @@ public:
 	void moveShard( KeyRangeRef keys, std::vector<Team> destinationTeam );
 	void finishMove( KeyRangeRef keys );
 	void check();
+	void eraseServer(UID ssID);
 private:
 	struct OrderByTeamKey {
 		bool operator()( const std::pair<Team,KeyRange>& lhs, const std::pair<Team,KeyRange>& rhs ) const {
@@ -235,6 +221,7 @@ Future<Void> dataDistributionQueue(
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes,
 	UID const& distributorId,
 	int const& teamSize,
+	int const& singleRegionTeamSize,
 	double* const& lastLimited);
 
 //Holds the permitted size and IO Bounds for a shard

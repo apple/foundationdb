@@ -16,9 +16,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.13)
 project(foundationdb
-  VERSION 6.1.0
+  VERSION 6.3.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
@@ -29,17 +29,22 @@ if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
   message(FATAL_ERROR "In-source builds are forbidden")
 endif()
 
+set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  message(STATUS "Setting build type to 'Release' as none was specified")
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build" FORCE)
-  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
-    "MinSizeRel" "RelWithDebInfo")
+  if (OPEN_FOR_IDE)
+    message(STATUS "Defaulting build type to 'Debug' for OPEN_FOR_IDE")
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build" FORCE)
+  else()
+    message(STATUS "Setting build type to 'Release' as none was specified")
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
+      "MinSizeRel" "RelWithDebInfo")
+  endif()
 endif()
 
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
-
-set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
 
 ################################################################################
 # Packages used for bindings
@@ -75,26 +80,10 @@ message(STATUS "Current git version ${CURRENT_GIT_VERSION}")
 # Version information
 ################################################################################
 
-set(USE_VERSIONS_TARGET OFF CACHE BOOL "Use the deprecated versions.target file")
-if(USE_VERSIONS_TARGET)
-  add_custom_target(version_file ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/versions.target)
-  execute_process(
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/get_version.sh ${CMAKE_CURRENT_SOURCE_DIR}/versions.target
-    OUTPUT_VARIABLE FDB_VERSION_WNL)
-  execute_process(
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/get_package_name.sh ${CMAKE_CURRENT_SOURCE_DIR}/versions.target
-    OUTPUT_VARIABLE FDB_PACKAGE_NAME_WNL)
-  string(STRIP "${FDB_VERSION_WNL}" FDB_VERSION)
-  string(STRIP "${FDB_PACKAGE_NAME_WNL}" FDB_PACKAGE_NAME)
-  set(FDB_VERSION_PLAIN ${FDB_VERSION})
-  if(NOT FDB_RELEASE)
-    set(FDB_VERSION "${FDB_VERSION}-PRERELEASE")
-  endif()
-else()
-  set(FDB_PACKAGE_NAME "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
-  set(FDB_VERSION ${PROJECT_VERSION})
-  set(FDB_VERSION_PLAIN ${FDB_VERSION})
-endif()
+set(FDB_PACKAGE_NAME "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+set(FDB_VERSION ${PROJECT_VERSION})
+set(FDB_VERSION_PLAIN ${FDB_VERSION})
+configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_SOURCE_DIR}/versions.target)
 
 message(STATUS "FDB version is ${FDB_VERSION}")
 message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
@@ -158,9 +147,6 @@ set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
 ################################################################################
 
 include(CompileBoost)
-if(WITH_TLS)
-  add_subdirectory(FDBLibTLS)
-endif()
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
 add_subdirectory(fdbclient)
@@ -171,13 +157,15 @@ if(NOT WIN32)
 else()
   add_subdirectory(fdbservice)
 endif()
-add_subdirectory(bindings)
 add_subdirectory(fdbbackup)
+add_subdirectory(contrib)
 add_subdirectory(tests)
+if(WITH_PYTHON)
+  add_subdirectory(bindings)
+endif()
 if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
 endif()
-add_subdirectory(monitoring)
 
 if(WIN32)
   add_subdirectory(packaging/msi)
@@ -189,13 +177,13 @@ endif()
 # process compile commands for IDE
 ################################################################################
 
-if (CMAKE_EXPORT_COMPILE_COMMANDS)
+if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
   add_custom_command(
-	OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
-	COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/gen_compile_db.py
-	ARGS -b ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
-	DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/build/gen_compile_db.py ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
-	COMMENT "Build compile commands for IDE"
+	  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
+	  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/build/gen_compile_db.py
+	  ARGS -b ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
+	  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/build/gen_compile_db.py ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
+	  COMMENT "Build compile commands for IDE"
 	)
   add_custom_target(processed_compile_commands ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json)
 endif()

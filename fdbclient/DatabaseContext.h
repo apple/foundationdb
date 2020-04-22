@@ -25,6 +25,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
@@ -160,19 +161,41 @@ public:
 	CounterCollection cc;
 
 	Counter transactionReadVersions;
+	Counter transactionReadVersionsCompleted;
+	Counter transactionReadVersionBatches;
+	Counter transactionBatchReadVersions;
+	Counter transactionDefaultReadVersions;
+	Counter transactionImmediateReadVersions;
+	Counter transactionBatchReadVersionsCompleted;
+	Counter transactionDefaultReadVersionsCompleted;
+	Counter transactionImmediateReadVersionsCompleted;
 	Counter transactionLogicalReads;
 	Counter transactionPhysicalReads;
+	Counter transactionPhysicalReadsCompleted;
+	Counter transactionGetKeyRequests;
+	Counter transactionGetValueRequests;
+	Counter transactionGetRangeRequests;
+	Counter transactionWatchRequests;
+	Counter transactionGetAddressesForKeyRequests;
+	Counter transactionBytesRead;
+	Counter transactionKeysRead;
+	Counter transactionMetadataVersionReads;
 	Counter transactionCommittedMutations;
 	Counter transactionCommittedMutationBytes;
+	Counter transactionSetMutations;
+	Counter transactionClearMutations;
+	Counter transactionAtomicMutations;
 	Counter transactionsCommitStarted;
 	Counter transactionsCommitCompleted;
+	Counter transactionKeyServerLocationRequests;
+	Counter transactionKeyServerLocationRequestsCompleted;
 	Counter transactionsTooOld;
 	Counter transactionsFutureVersions;
 	Counter transactionsNotCommitted;
 	Counter transactionsMaybeCommitted;
 	Counter transactionsResourceConstrained;
 	Counter transactionsProcessBehind;
-	Counter transactionWaitsForFullRecovery;
+	Counter transactionsThrottled;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
@@ -192,6 +215,10 @@ public:
 	Future<Void> clientInfoMonitor;
 	Future<Void> connected;
 
+	Reference<AsyncVar<Optional<ClusterInterface>>> statusClusterInterface;
+	Future<Void> statusLeaderMon;
+	double lastStatusFetch;
+
 	int apiVersion;
 
 	int mvCacheInsertLocation;
@@ -202,6 +229,8 @@ public:
 	double detailedHealthMetricsLastUpdated;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
+	std::shared_ptr<SpecialKeySpace> specialKeySpace;
+	std::shared_ptr<ConflictingKeysImpl> cKImpl;
 };
 
 #endif

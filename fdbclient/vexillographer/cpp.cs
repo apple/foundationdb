@@ -33,7 +33,7 @@ namespace vexillographer
             outFile.WriteLine("struct FDB{0}s {{", scope.ToString());
             outFile.WriteLine("\tfriend class FDBOptionInfoMap<FDB{0}s>;",scope.ToString());
             outFile.WriteLine();
-            outFile.WriteLine("\tenum Option {");
+            outFile.WriteLine("\tenum Option : int {");
             outFile.WriteLine(string.Join(",\n\n", options.Select(f => c.getCLine(f, "\t\t", "")).ToArray()));
             outFile.WriteLine("\t};");
             outFile.WriteLine();

@@ -77,10 +77,12 @@ struct ResolveTransactionBatchReply {
 	VectorRef<uint8_t> committed;
 	Optional<UID> debugID;
 	VectorRef<VectorRef<StateTransactionRef>> stateMutations;  // [version][transaction#] -> (committed, [mutation#])
+	std::map<int, VectorRef<int>>
+	    conflictingKeyRangeMap; // transaction index -> conflicting read_conflict_range ids given by the resolver
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, committed, stateMutations, arena, debugID);
+		serializer(ar, committed, stateMutations, debugID, conflictingKeyRangeMap, arena);
 	}
 
 };
@@ -103,9 +105,22 @@ struct ResolveTransactionBatchRequest {
 	}
 };
 
+struct ResolutionMetricsReply {
+	constexpr static FileIdentifier file_identifier = 3;
+
+	int64_t value;
+	ResolutionMetricsReply() = default;
+	explicit ResolutionMetricsReply(int64_t value) : value(value) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, value);
+	}
+};
+
 struct ResolutionMetricsRequest {
 	constexpr static FileIdentifier file_identifier = 11663527;
-	ReplyPromise<int64_t> reply;
+	ReplyPromise<ResolutionMetricsReply> reply;
 
 	template <class Archive>
 	void serialize(Archive& ar) {

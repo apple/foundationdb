@@ -34,6 +34,7 @@ ERROR( success, 0, "Success" )
 ERROR( end_of_stream, 1, "End of stream" )
 ERROR( operation_failed, 1000, "Operation failed")
 ERROR( wrong_shard_server, 1001, "Shard is not available from this server")
+ERROR( operation_obsolete, 1002, "Operation result no longer necessary")
 ERROR( timed_out, 1004, "Operation timed out" )
 ERROR( coordinated_state_conflict, 1005, "Conflict occurred while changing coordination information" )
 ERROR( all_alternatives_failed, 1006, "All alternatives failed" )
@@ -65,12 +66,10 @@ ERROR( lookup_failed, 1041, "DNS lookup failed" )
 ERROR( proxy_memory_limit_exceeded, 1042, "Proxy commit memory limit exceeded" )
 ERROR( shutdown_in_progress, 1043, "Operation no longer supported due to shutdown" )
 ERROR( serialization_failed, 1044, "Failed to deserialize an object" )
-ERROR( transaction_not_permitted, 1045, "Operation not permitted")
-ERROR( cluster_not_fully_recovered, 1046, "Cluster not fully recovered")
-ERROR( txn_exec_log_anti_quorum, 1047, "Execute Transaction not supported when log anti quorum is configured")
 ERROR( connection_unreferenced, 1048, "No peer references for connection" )
 ERROR( connection_idle, 1049, "Connection closed after idle timeout" )
 ERROR( disk_adapter_reset, 1050, "The disk queue adpater reset" )
+ERROR(batch_transaction_throttled, 1051, "Batch GRV request rate limit exceeded")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -89,6 +88,7 @@ ERROR( please_reboot_delete, 1208, "Reboot of server process requested, with del
 ERROR( master_proxy_failed, 1209, "Master terminating because a Proxy failed" )
 ERROR( master_resolver_failed, 1210, "Master terminating because a Resolver failed" )
 ERROR( server_overloaded, 1211, "Server is under too much load and cannot respond" )
+ERROR( master_backup_worker_failed, 1212, "Master terminating because a backup worker failed")
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -205,6 +205,17 @@ ERROR( task_interrupted, 2382, "Task execution stopped due to timeout, abort, or
 ERROR( key_not_found, 2400, "Expected key is missing")
 ERROR( json_malformed, 2401, "JSON string was malformed")
 ERROR( json_eof_expected, 2402, "JSON string did not terminate where expected")
+
+// 2500 - disk snapshot based backup errors
+ERROR( snap_disable_tlog_pop_failed,  2500, "Disk Snapshot error")
+ERROR( snap_storage_failed,  2501, "Failed to snapshot storage nodes")
+ERROR( snap_tlog_failed,  2502, "Failed to snapshot TLog nodes")
+ERROR( snap_coord_failed,  2503, "Failed to snapshot coordinator nodes")
+ERROR( snap_enable_tlog_pop_failed,  2504, "Disk Snapshot error")
+ERROR( snap_path_not_whitelisted, 2505, "Snapshot create binary path not whitelisted")
+ERROR( snap_not_fully_recovered_unsupported, 2506, "Unsupported when the cluster is not fully recovered")
+ERROR( snap_log_anti_quorum_unsupported, 2507, "Unsupported when log anti quorum is configured")
+ERROR( snap_with_recovery_unsupported, 2508, "Cluster recovery during snapshot operation not supported")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error

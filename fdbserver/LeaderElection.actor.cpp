@@ -183,9 +183,11 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators, Valu
 		state vector<Future<Void>> true_heartbeats;
 		state vector<Future<Void>> false_heartbeats;
 		for(int i=0; i<coordinators.leaderElectionServers.size(); i++) {
-			Future<bool> hb = retryBrokenPromise( coordinators.leaderElectionServers[i].leaderHeartbeat, LeaderHeartbeatRequest( coordinators.clusterKey, myInfo, prevChangeID ), TaskPriority::CoordinationReply );
-			true_heartbeats.push_back( onEqual(hb, true) );
-			false_heartbeats.push_back( onEqual(hb, false) );
+			Future<LeaderHeartbeatReply> hb = retryBrokenPromise(
+			    coordinators.leaderElectionServers[i].leaderHeartbeat,
+			    LeaderHeartbeatRequest(coordinators.clusterKey, myInfo, prevChangeID), TaskPriority::CoordinationReply);
+			true_heartbeats.push_back(onEqual(hb, LeaderHeartbeatReply{ true }));
+			false_heartbeats.push_back(onEqual(hb, LeaderHeartbeatReply{ false }));
 		}
 
 		state Future<Void> rate = delay( SERVER_KNOBS->HEARTBEAT_FREQUENCY, TaskPriority::CoordinationReply ) || asyncPriorityInfo->onChange(); // SOMEDAY: Move to server side?

@@ -23,6 +23,7 @@
 
 const StringRef BaseEventMetric::metricType = LiteralStringRef("Event");
 template<> const StringRef Int64Metric::metricType = LiteralStringRef("Int64");
+template<> const StringRef DoubleMetric::metricType = LiteralStringRef("Double");
 template<> const StringRef BoolMetric::metricType = LiteralStringRef("Bool");
 template<> const StringRef StringMetric::metricType = LiteralStringRef("String");
 

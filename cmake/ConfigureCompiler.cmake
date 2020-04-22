@@ -1,14 +1,29 @@
+function(env_set var_name default_value type docstring)
+  set(val ${default_value})
+  if(DEFINED ENV{${var_name}})
+    set(val $ENV{${var_name}})
+  endif()
+  set(${var_name} ${val} CACHE ${type} "${docstring}")
+endfunction()
+
 set(USE_GPERFTOOLS OFF CACHE BOOL "Use gperfools for profiling")
-set(USE_VALGRIND OFF CACHE BOOL "Compile for valgrind usage")
+env_set(USE_VALGRIND OFF BOOL "Compile for valgrind usage")
+set(USE_VALGRIND_FOR_CTEST ${USE_VALGRIND} CACHE BOOL "Use valgrind for ctest")
 set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
 set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
 set(USE_ASAN OFF CACHE BOOL "Compile with address sanitizer")
+set(USE_UBSAN OFF CACHE BOOL "Compile with undefined behavior sanitizer")
 set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
-set(USE_LD "LD" CACHE STRING "The linker to use for building: can be LD (system default, default choice), GOLD, or LLD")
-set(USE_LIBCXX OFF CACHE BOOL "Use libc++")
-set(USE_CCACHE OFF CACHE BOOL "Use ccache for compilation if available")
+env_set(USE_LD "DEFAULT" STRING "The linker to use for building: can be LD (system default, default choice), BFD, GOLD, or LLD")
+env_set(USE_LIBCXX OFF BOOL "Use libc++")
+env_set(USE_CCACHE OFF BOOL "Use ccache for compilation if available")
 set(RELATIVE_DEBUG_PATHS OFF CACHE BOOL "Use relative file paths in debug info")
 set(STATIC_LINK_LIBCXX ON CACHE BOOL "Statically link libstdcpp/libc++")
+set(USE_WERROR OFF CACHE BOOL "Compile with -Werror. Recommended for local development and CI.")
+
+if(USE_LIBCXX AND STATIC_LINK_LIBCXX AND NOT USE_LD STREQUAL "LLD")
+  message(FATAL_ERROR "Unsupported configuration: STATIC_LINK_LIBCXX with libc+++ only works if USE_LD=LLD")
+endif()
 
 set(rel_debug_paths OFF)
 if(RELATIVE_DEBUG_PATHS)
@@ -39,6 +54,7 @@ endif()
 
 if(FDB_RELEASE)
   add_compile_options(-DFDB_RELEASE)
+  add_compile_options(-DFDB_CLEAN_BUILD)
 endif()
 
 include_directories(${CMAKE_SOURCE_DIR})
@@ -52,37 +68,41 @@ else()
   add_definitions(-DUSE_UCONTEXT)
 endif()
 
-if ((NOT USE_CCACHE) AND (NOT "$ENV{USE_CCACHE}" STREQUAL ""))
-	string(TOUPPER "$ENV{USE_CCACHE}" USE_CCACHEENV)
-	if (("${USE_CCACHEENV}" STREQUAL "ON") OR ("${USE_CCACHEENV}" STREQUAL "1") OR ("${USE_CCACHEENV}" STREQUAL "YES"))
-		set(USE_CCACHE ON)
-	endif()
-endif()
 if (USE_CCACHE)
-	FIND_PROGRAM(CCACHE_FOUND "ccache")
-	if(CCACHE_FOUND)
-		set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
-		set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
-	else()
-		message(SEND_ERROR "CCACHE is ON, but ccache was not found")
-	endif()
+  FIND_PROGRAM(CCACHE_FOUND "ccache")
+  if(CCACHE_FOUND)
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
+  else()
+    message(SEND_ERROR "CCACHE is ON, but ccache was not found")
+  endif()
 endif()
 
 include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
 set(CMAKE_REQUIRED_LIBRARIES c)
+set(CMAKE_CXX_STANDARD 17)
 
 if(WIN32)
   # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
-  # this sets the windows target version to Windows 7
-  set(WINDOWS_TARGET 0x0601)
-  add_compile_options(/W3 /EHsc /std:c++17 /bigobj $<$<CONFIG:Release>:/Zi> /MP)
-  add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} BOOST_ALL_NO_LIB)
+  # this sets the windows target version to Windows Server 2003
+  set(WINDOWS_TARGET 0x0502)
+  if(CMAKE_CXX_FLAGS MATCHES "/W[0-4]")
+    # TODO: This doesn't seem to be good style, but I couldn't find a better way so far
+    string(REGEX REPLACE "/W[0-4]" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+  endif()
+  add_compile_options(/W0 /EHsc /bigobj $<$<CONFIG:Release>:/Zi> /MP /FC /Gm-)
+  add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} WINVER=${WINDOWS_TARGET} NTDDI_VERSION=0x05020000 BOOST_ALL_NO_LIB)
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
+  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
 else()
   set(GCC NO)
   set(CLANG NO)
+  set(ICC NO)
   if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
     set(CLANG YES)
+  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
+    set(ICC YES)
   else()
     # This is not a very good test. However, as we do not really support many architectures
     # this is good enough for now
@@ -90,14 +110,23 @@ else()
   endif()
 
   # check linker flags.
-  if ((NOT (USE_LD STREQUAL "LD")) AND (NOT (USE_LD STREQUAL "GOLD")) AND (NOT (USE_LD STREQUAL "LLD")))
-    message (FATAL_ERROR "USE_LD must be set to LD, GOLD, or LLD!")
+  if (USE_LD STREQUAL "DEFAULT")
+    set(USE_LD "LD")
+  else()
+    if ((NOT (USE_LD STREQUAL "LD")) AND (NOT (USE_LD STREQUAL "GOLD")) AND (NOT (USE_LD STREQUAL "LLD")) AND (NOT (USE_LD STREQUAL "BFD")))
+      message (FATAL_ERROR "USE_LD must be set to DEFAULT, LD, BFD, GOLD, or LLD!")
+    endif()
   endif()
 
   # if USE_LD=LD, then we don't do anything, defaulting to whatever system
   # linker is available (e.g. binutils doesn't normally exist on macOS, so this
   # implies the default xcode linker, and other distros may choose others by
   # default).
+
+  if(USE_LD STREQUAL "BFD")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=bfd -Wl,--disable-new-dtags")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=bfd -Wl,--disable-new-dtags")
+  endif()
 
   if(USE_LD STREQUAL "GOLD")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=gold -Wl,--disable-new-dtags")
@@ -119,10 +148,21 @@ else()
   if(USE_ASAN)
     add_compile_options(
       -fsanitize=address
-      -DUSE_ASAN)
+      -DUSE_SANITIZER)
     set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fsanitize=address")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=address")
     set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS}    -fsanitize=address ${CMAKE_THREAD_LIBS_INIT}")
+  endif()
+
+  if(USE_UBSAN)
+    add_compile_options(
+      -fsanitize=undefined
+      # TODO(atn34) Re-enable -fsanitize=alignment once https://github.com/apple/foundationdb/issues/1434 is resolved
+      -fno-sanitize=alignment
+      -DUSE_SANITIZER)
+    set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fsanitize=undefined")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=undefined")
+    set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS}    -fsanitize=undefined ${CMAKE_THREAD_LIBS_INIT}")
   endif()
 
   if(PORTABLE_BINARY)
@@ -136,23 +176,38 @@ else()
       add_link_options(-static-libstdc++ -static-libgcc)
     endif()
   endif()
-  # Instruction sets we require to be supported by the CPU
-  add_compile_options(
-    -maes
-    -mmmx
-    -mavx
-    -msse4.2)
-  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-std=c++17>)
+  # # Instruction sets we require to be supported by the CPU
+  # TODO(atn34) Re-enable once https://github.com/apple/foundationdb/issues/1434 is resolved
+  # Some of the following instructions have alignment requirements, so it seems
+  # prudent to disable them until we properly align memory.
+  # add_compile_options(
+  #   -maes
+  #   -mmmx
+  #   -mavx
+  #   -msse4.2)
+
   if (USE_VALGRIND)
     add_compile_options(-DVALGRIND -DUSE_VALGRIND)
   endif()
   if (CLANG)
+    add_compile_options()
+    # Clang has link errors unless `atomic` is specifically requested.
+    if(NOT APPLE)
+      #add_link_options(-latomic)
+    endif()
     if (APPLE OR USE_LIBCXX)
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
       add_compile_definitions(WITH_LIBCXX)
       if (NOT APPLE)
-        add_link_options(-lc++abi -Wl,-build-id=sha1)
+        if (STATIC_LINK_LIBCXX)
+          add_link_options(-static-libgcc -nostdlib++  -Wl,-Bstatic -lc++ -lc++abi -Wl,-Bdynamic)
+        endif()
+        add_link_options(-stdlib=libc++ -Wl,-build-id=sha1)
       endif()
+    endif()
+    if (OPEN_FOR_IDE)
+      add_compile_options(
+        -Wno-unknown-attributes)
     endif()
     add_compile_options(
       -Wno-unknown-warning-option
@@ -162,15 +217,27 @@ else()
       -Wno-unknown-pragmas
       -Wno-delete-non-virtual-dtor
       -Wno-undefined-var-template
-      -Wno-unused-value
       -Wno-tautological-pointer-compare
       -Wno-format)
+    if (USE_CCACHE)
+      add_compile_options(
+        -Wno-register
+        -Wno-unused-command-line-argument)
+    endif()
   endif()
-  if (CMAKE_GENERATOR STREQUAL Xcode)
-  else()
+  if (USE_WERROR)
     add_compile_options(-Werror)
   endif()
-  add_compile_options($<$<BOOL:${GCC}>:-Wno-pragmas>)
+  if (GCC)
+    add_compile_options(-Wno-pragmas)
+
+    # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
+    # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
+    add_compile_options(-Wno-attributes)
+  elseif(ICC)
+    add_compile_options(-wd1879 -wd1011)
+    add_link_options(-static-intel)
+  endif()
   add_compile_options(-Wno-error=format
     -Wunused-variable
     -Wno-deprecated
@@ -188,8 +255,13 @@ else()
   # Check whether we can use dtrace probes
   include(CheckSymbolExists)
   check_symbol_exists(DTRACE_PROBE sys/sdt.h SUPPORT_DTRACE)
+  check_symbol_exists(aligned_alloc stdlib.h HAS_ALIGNED_ALLOC)
+  message(STATUS "Has aligned_alloc: ${HAS_ALIGNED_ALLOC}")
   if(SUPPORT_DTRACE)
     add_compile_definitions(DTRACE_PROBES)
+  endif()
+  if(HAS_ALIGNED_ALLOC)
+    add_compile_definitions(HAS_ALIGNED_ALLOC)
   endif()
 
   if(CMAKE_COMPILER_IS_GNUCXX)

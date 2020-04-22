@@ -37,8 +37,8 @@ class ResultSpecification(object):
         self.ordering_index = ordering_index
 
         if global_error_filter is not None:
-            error_str = '|'.join(['%d' % e for e in global_error_filter])
-            self.error_regex = re.compile(r'\x01+ERROR\x00\xff*\x01' + error_str + r'\x00')
+            error_str = b'|'.join([b'%d' % e for e in global_error_filter])
+            self.error_regex = re.compile(rb'\x01+ERROR\x00\xff*\x01' + error_str + rb'\x00')
         else:
             self.error_regex = None
 
@@ -90,7 +90,7 @@ class Test(object):
     def versionstamp_value(self, raw_bytes, version_pos=0):
         if hasattr(self, 'api_version') and self.api_version < 520:
             if version_pos != 0:
-                raise ValueError("unable to set non-zero version position before 520 in values")
+                raise ValueError('unable to set non-zero version position before 520 in values')
             return raw_bytes
         else:
             return raw_bytes + struct.pack('<L', version_pos)
@@ -109,7 +109,7 @@ class Instruction(object):
     def __init__(self, operation):
         self.operation = operation
         self.argument = None
-        self.value = fdb.tuple.pack((unicode(self.operation),))
+        self.value = fdb.tuple.pack((self.operation,))
 
     def to_value(self):
         return self.value
@@ -125,7 +125,7 @@ class PushInstruction(Instruction):
     def __init__(self, argument):
         self.operation = 'PUSH'
         self.argument = argument
-        self.value = fdb.tuple.pack((unicode("PUSH"), argument))
+        self.value = fdb.tuple.pack(('PUSH', argument))
 
     def __str__(self):
         return '%s %s' % (self.operation, self.argument)

@@ -228,11 +228,22 @@ public:
 	Database src;
 	Map<Key, Future<Reference<KeyRangeMap<Version>>>> key_version;
 
+	CounterCollection cc;
+
+	Counter dispatchSlotChecksStarted;
+	Counter dispatchErrors;
+	Counter dispatchDoTasks;
+	Counter dispatchEmptyTasks;
+	Counter dispatchSlotChecksComplete;
+	UID dbgid;
+
 	double getTimeoutSeconds() const {
 		return (double)timeout / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 	}
 private:
 	friend class TaskBucketImpl;
+
+	Future<Void> metricLogger;
 
 	Subspace prefix;
 	Subspace active;
