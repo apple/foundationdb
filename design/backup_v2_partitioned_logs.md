@@ -69,7 +69,7 @@ A command line tool `fdbconvert` has been written to convert new backup logs int
 * How to start a new type backup: e.g.,
 
   ```
-  fdbbackup start -C fdb.cluster **-****p** -d blob_url
+  fdbbackup start -C fdb.cluster -p -d blob_url
   ```
 
 ### KPI's and Health
