@@ -468,18 +468,23 @@ public:
 
 		Optional<TagInfo> previousBusiestTag;
 
-		void increment(Optional<TagSet> const& tags, int64_t delta) {
+		int64_t costFunction(int64_t bytes) {
+			return bytes / SERVER_KNOBS->OPERATION_COST_BYTE_FACTOR + 1;
+		}
+
+		void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
 			if(tags.present()) {
+				double cost = costFunction(bytes);
 				for(auto& tag : tags.get()) {
 					int64_t &count = intervalCounts[TransactionTag(tag, tags.get().arena)];
-					count += delta;
+					count += cost;
 					if(count > busiestTagCount) {
 						busiestTagCount = count;
 						busiestTag = tag;
 					}
 				}
 
-				intervalTotalSampledCount += delta;
+				intervalTotalSampledCount += cost;
 			}
 		}
 
@@ -973,7 +978,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	data->transactionTagCounter.increment(req.tags, (resultSize / 4096) + 1);
+	data->transactionTagCounter.addRequest(req.tags, resultSize);
 
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
@@ -1519,7 +1524,7 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	data->transactionTagCounter.increment(req.tags, (resultSize / 4096) + 1);
+	data->transactionTagCounter.addRequest(req.tags, resultSize);
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
 
@@ -1579,7 +1584,11 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	data->transactionTagCounter.increment(req.tags, (resultSize/4096) + 1);
+	// SOMEDAY: The size reported here is an undercount of the bytes read due to the fact that we have to scan for the key
+	// It would be more accurate to count all the read bytes, but it's not critical because this function is only used if
+	// read-your-writes is disabled
+	data->transactionTagCounter.addRequest(req.tags, resultSize);
+
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
 	if(data->latencyBandConfig.present()) {
