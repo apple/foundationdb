@@ -80,6 +80,7 @@ struct WorkerInterface {
 		logRouter.getEndpoint( TaskPriority::Worker );
 		debugPing.getEndpoint( TaskPriority::Worker );
 		coordinationPing.getEndpoint( TaskPriority::Worker );
+		eventLogRequest.getEndpoint( TaskPriority::Worker );
 	}
 
 	template <class Ar>
