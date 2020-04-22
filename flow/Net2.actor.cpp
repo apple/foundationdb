@@ -148,7 +148,7 @@ public:
 		if ( thread_network == this )
 			stopCallbacks.emplace_back(std::move(fn));
 		else
-			onMainThreadVoid( [this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, NULL );
+			onMainThreadVoid( [this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, nullptr );
 	}
 
 	virtual bool isSimulated() const { return false; }
@@ -907,13 +907,19 @@ ACTOR static Future<Void> watchFileForChanges( std::string filename, AsyncTrigge
 	if (filename == "") {
 		return Never();
 	}
-	state std::time_t lastModTime = wait(IAsyncFileSystem::filesystem()->lastWriteTime(filename));
+	state bool firstRun = true;
+	state bool statError = false;
+	state std::time_t lastModTime = 0;
 	loop {
-		wait(delay(FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS));
 		try {
 			std::time_t modtime = wait(IAsyncFileSystem::filesystem()->lastWriteTime(filename));
-			if (lastModTime != modtime) {
+			if (firstRun) {
 				lastModTime = modtime;
+				firstRun = false;
+			}
+			if (lastModTime != modtime || statError) {
+				lastModTime = modtime;
+				statError = false;
 				fileChanged->trigger();
 			}
 		} catch (Error& e) {
@@ -923,10 +929,12 @@ ACTOR static Future<Void> watchFileForChanges( std::string filename, AsyncTrigge
 				// certificates, then there's no point in crashing, but we should complain
 				// loudly.  IAsyncFile will log the error, but not necessarily as a warning.
 				TraceEvent(SevWarnAlways, "TLSCertificateRefreshStatError").detail("File", filename);
+				statError = true;
 			} else {
 				throw;
 			}
 		}
+		wait(delay(FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS));
 	}
 }
 
@@ -975,9 +983,9 @@ void Net2::initTLS() {
 		return;
 	}
 #ifndef TLS_DISABLED
+	auto onPolicyFailure = [this]() { this->countTLSPolicyFailures++; };
 	try {
 		boost::asio::ssl::context newContext(boost::asio::ssl::context::tls);
-		auto onPolicyFailure = [this]() { this->countTLSPolicyFailures++; };
 		const LoadedTLSConfig& loaded = tlsConfig.loadSync();
 		TraceEvent("Net2TLSConfig")
 			.detail("CAPath", tlsConfig.getCAPathSync())
@@ -987,11 +995,10 @@ void Net2::initTLS() {
 			.detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"));
 		ConfigureSSLContext( tlsConfig.loadSync(), &newContext, onPolicyFailure );
 		sslContextVar.set(ReferencedObject<boost::asio::ssl::context>::from(std::move(newContext)));
-		backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, onPolicyFailure, &sslContextVar );
 	} catch (Error& e) {
 		TraceEvent("Net2TLSInitError").error(e);
-		throw tls_error();
 	}
+	backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, onPolicyFailure, &sslContextVar );
 #endif
 	tlsInitialized = true;
 }
