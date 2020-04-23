@@ -9,7 +9,7 @@ function(env_set var_name default_value type docstring)
 endfunction()
 
 function(default_linker var_name)
-  if(APPLE OR WIN32)
+  if(APPLE)
     set("${var_name}" "DEFAULT" PARENT_SCOPE)
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     find_program(lld_path ld.lld "Path to LLD - is only used to determine default linker")
