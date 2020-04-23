@@ -448,7 +448,12 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				// Wait until there is something to send.
 				while (self->unsent.empty()) {
 					// Override waiting, if we are in failed state to update failure monitoring status.
-					Future<Void> retryConnectF = retryConnect ? delay(FLOW_KNOBS->SERVER_REQUEST_INTERVAL) : Never();
+					Future<Void> retryConnectF = Never();
+					if (retryConnect) {
+						retryConnectF = IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()
+						                    ? delay(FLOW_KNOBS->FAILURE_DETECTION_DELAY)
+						                    : delay(FLOW_KNOBS->SERVER_REQUEST_INTERVAL);
+					}
 
 					choose {
 						when(wait(self->dataToSend.onTrigger())) {}
