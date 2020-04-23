@@ -172,6 +172,10 @@ private:
 				}
 			}
 
+			if(newClientRate == std::numeric_limits<double>::max()) {
+				return newClientRate;
+			}
+
 			clientRate.setTotal(newClientRate);
 			return clientRate.smoothTotal();
 		}
@@ -184,9 +188,10 @@ public:
 
 	RkTagThrottleData() : smoothRequests(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) {}
 
-	// Inserts or updates a throttle, returning true if the throttle is new
+	// Inserts or updates a throttle, returning the throttle that existed previously 
 	Optional<ClientTagThrottleLimits> insertOrUpdateThrottle(ThrottleApi::Priority priority, bool autoThrottle, double tpsRate, double expiration) {
 		ASSERT(tpsRate >= 0);
+		ASSERT(expiration > now());
 
 		auto &priorityThrottleData = throttleData[priority];
 		Optional<ClientTagThrottleLimits> oldThrottleData;
@@ -199,7 +204,9 @@ public:
 			priorityThrottleData.manualThrottleData = ClientTagThrottleLimits(tpsRate, expiration);
 		}
 
-		priorityThrottleData.updateAndGetClientRate(smoothRequests.smoothRate());
+		double clientRate = priorityThrottleData.updateAndGetClientRate(smoothRequests.smoothRate());
+		ASSERT(clientRate != std::numeric_limits<double>::max());
+
 		return oldThrottleData;
 	}
 
@@ -1060,6 +1067,9 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 								auto &priorityTags = reply.throttledTags.get()[priority];
 								priorityTags.try_emplace(itr->first, ClientTagThrottleLimits(clientRate.get().first, clientRate.get().second));
 							}
+
+							// Handle throttle expiration. We expire a throttle if no rate is returned for the lowest priority,
+							// which means that no throttles are active at any priority.
 							else if(priority == ThrottleApi::Priority::MIN) {
 								itr = self.throttledTags.erase(itr);
 								break;
