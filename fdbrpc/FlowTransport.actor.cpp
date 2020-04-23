@@ -659,6 +659,9 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 		} catch (Error& e) {
 			g_currentDeliveryPeerAddress = {NetworkAddress()};
 			TraceEvent(SevError, "ReceiverError").error(e).detail("Token", destination.token.toString()).detail("Peer", destination.getPrimaryAddress());
+			if(!FlowTransport::isClient()) {
+				flushAndExit(FDB_EXIT_ERROR);
+			}
 			throw;
 		}
 	} else if (destination.token.first() & TOKEN_STREAM_FLAG) {
