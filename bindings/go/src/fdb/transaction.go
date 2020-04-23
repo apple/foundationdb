@@ -410,6 +410,9 @@ func (t *transaction) getApproximateSize() FutureInt64 {
 	}
 }
 
+// Returns a future that is the approximate transaction size so far in this
+// transaction, which is the summation of the estimated size of mutations,
+// read conflict ranges, and write conflict ranges.
 func (t Transaction) GetApproximateSize() FutureInt64 {
 	return t.getApproximateSize()
 }

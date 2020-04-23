@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-7.0.0
+6.3.0
 =====
 
 Features
@@ -30,7 +30,6 @@ Bindings
 * Deprecated ``enable_slow_task_profiling`` transaction option and replaced it with ``enable_run_loop_profiling``. `(PR #2608) <https://github.com/apple/foundationdb/pull/2608>`_
 * Go: Added a ``Close`` function to ``RangeIterator`` which **must** be called to free resources returned from ``Transaction.GetRange``. `(PR #1910) <https://github.com/apple/foundationdb/pull/1910>`_.
 * Go: Finalizers are no longer used to clean up native resources. ``Future`` results are now copied from the native heap to the Go heap, and native resources are freed immediately. `(PR #1910) <https://github.com/apple/foundationdb/pull/1910>`_.
-
 
 Other Changes
 -------------
