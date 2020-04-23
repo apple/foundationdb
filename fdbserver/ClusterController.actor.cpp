@@ -3193,7 +3193,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      bool hasConnected,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                     LocalityData locality, bool reportCoordConnFailure) {
+                                     LocalityData locality, Reference<ClusterConnectionFile> connFile) {
 	loop {
 		state ClusterControllerFullInterface cci;
 		state bool inRole = false;
@@ -3201,7 +3201,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 		try {
 			//Register as a possible leader; wait to be elected
 			state Future<Void> leaderFail =
-			    tryBecomeLeader(coordinators, cci, currentCC, hasConnected, asyncPriorityInfo, reportCoordConnFailure);
+			    tryBecomeLeader(coordinators, cci, currentCC, hasConnected, asyncPriorityInfo, connFile);
 			state Future<Void> shouldReplace = replaceInterface( cci );
 
 			while (!currentCC->get().present() || currentCC->get().get() != cci) {
@@ -3238,10 +3238,7 @@ ACTOR Future<Void> clusterController( Reference<ClusterConnectionFile> connFile,
 				wait(connFile->resolveHostnames());
 			}
 			ServerCoordinators coordinators( connFile );
-			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality,
-			                       // If the cluster string contains host names, we want to capture the connection
-			                       // failure to coordinators and try to re-resolve the hostnames.
-			                       connFile->getConnectionString().hostnames().size() > 0));
+			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, connFile));
 		} catch( Error &e ) {
 			if( e.code() != error_code_coordinators_changed )
 				throw; // Expected to terminate fdbserver
