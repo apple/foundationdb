@@ -3416,15 +3416,6 @@ private:
 			while(i < entries.size() && (i - start < minimumEntries || compressedBytes < pageFillTarget) ) {
 				const RedwoodRecordRef &entry = entries[i];
 
-				// If this is an internal page, first entry, and it has a null value, skip it.
-				// It only exists to serve as an upper boundary for a child page that has not been rewritten in the
-				// current commit, and that purpose will now be served by the parent page's upper boundary
-				if(i == start && height != 1 && !entry.value.present()) {
-					++i;
-					++start;
-					continue;
-				}
-
 				// Get delta from previous record or page lower boundary if this is the first item in a page
 				const RedwoodRecordRef &base = (i == start) ? pageLowerBound : entries[i - 1];
 
@@ -3478,18 +3469,20 @@ private:
 				++i;
 			}
 
-			// If there are no records to write to this page, it is because it would have been an internal page
-			// with exactly one record which would be childless and so it was skipped above.
-			if(start == i) {
-				ASSERT(height != 1);
-				break;
+			// Flush the accumulated records to a page
+			state int nextStart = i;
+			// If we are building internal pages and there is a record after this page (index nextStart) but it has an empty childPage value then skip it.
+			// It only exists to serve as an upper boundary for a child page that has not been rewritten in the current commit, and that
+			// purpose will now be served by the upper bound of the page we are now building.
+			if(height != 1 && nextStart < entries.size() && !entries[nextStart].value.present()) {
+				++nextStart;
 			}
 
-			// Flush the accumulated records to a page
-			state bool isLastPage = (i == entries.size());
-			pageUpperBound = isLastPage ? upperBound->withoutValue() : entries[i].withoutValue();
+			// Use the next entry as the upper bound, or upperBound if there are no more entries beyond this page
+			pageUpperBound = (i == entries.size()) ? upperBound->withoutValue() : entries[i].withoutValue();
 
 			// If this is a leaf page, and not the last one to be written, shorten the upper boundary
+			state bool isLastPage = (nextStart == entries.size());
 			if(!isLastPage && height == 1) {
 				int commonPrefix = pageUpperBound.getCommonPrefixLen(entries[i - 1], 0);
 				pageUpperBound.truncate(commonPrefix + 1);
@@ -3541,7 +3534,7 @@ private:
 			state int p;
 			state BTreePageID childPageID;
 
-			// If we are only writing 1 page and it has the same BTreePageID size as the original they try to reuse the
+			// If we are only writing 1 page and it has the same BTreePageID size as the original then try to reuse the
 			// LogicalPageIDs in previousID and try to update them atomically.
 			bool isOnlyPage = isLastPage && (start == 0);
 			if(isOnlyPage && previousID.size() == pages.size()) {
@@ -3592,16 +3585,17 @@ private:
 				break;
 			}
 
-			start = i;
+			start = nextStart;
 			kvBytes = 0;
 			compressedBytes = BTreePage::BinaryTree::emptyTreeSize();
 			pageLowerBound = pageUpperBound;
 		}
 
-		// If we're writing internal pages, if pageUpperBound is not upperBound then we ended on an empty page because it contained only one childless internal record
-		// So, we have to add a childless internal record for that upper bound for the output set so that the parent of these new pages includes it so the child
-		// page to its left is still decoded correctly.
-		if(height != 1 && !pageUpperBound.sameExceptValue(*upperBound)) {
+		// If we're writing internal pages, if the last entry was the start of a new page and had an empty child link then it would not be written to a page.
+		// This means that the upper boundary for the the page set being built is not the upper bound of the final page in that set, so it must be added
+		// to the output set to preserve the decodability of the subtree to its left.
+		// Fortunately, this is easy to detect because the loop above would exit before i has reached the item count.
+		if(height != 1 && i != entries.size()) {
 			debug_printf("Adding dummy record to avoid writing useless page: %s\n", pageUpperBound.toString(false).c_str());
 			records.push_back_deep(records.arena(), pageUpperBound);
 		}
