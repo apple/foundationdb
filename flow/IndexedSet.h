@@ -874,6 +874,8 @@ void IndexedSet<T,Metric>::erase( typename IndexedSet<T,Metric>::iterator begin,
 	// Removes all nodes in the set between first and last, inclusive.
 	// toFree is extended with the roots of completely removed subtrees.
 
+	ASSERT(!end.i || (begin.i && *begin <= *end));
+
 	if(begin == end)
 		return;
 	
