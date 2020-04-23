@@ -76,6 +76,7 @@ sudo docker run --rm `# delete (temporary) image after return` \\
                 --cap-add=SYS_PTRACE \\
                 --security-opt seccomp=unconfined \\
                 -v "${HOME}:${HOME}" `# Mount home directory` \\
+                -w="\$(pwd)" \\
                 \${ccache_args} \\
                 ${image} "\$@"
 EOF
