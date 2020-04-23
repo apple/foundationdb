@@ -1343,6 +1343,7 @@ public:
 			Standalone<VectorRef<KeyValueRef>> blockData = wait(fileBackup::decodeRangeFileBlock(inFile, j, len));
 			if (!beginKeySet) {
 				beginKey = blockData.front().key;
+				beginKeySet = true;
 			}
 			endKey = blockData.back().key;
 		}
@@ -1372,7 +1373,7 @@ public:
 			    wait(bc->readKeyspaceSnapshot(snapshot.get()));
 			restorable.ranges = std::move(results.first);
 			restorable.keyRanges = std::move(results.second);
-			if (g_network->isSimulated()) {
+			if (false && g_network->isSimulated()) { // TODO: Reenable sanity check
 				// Sanity check key ranges
 				state std::map<std::string, KeyRange>::iterator rit;
 				for (rit = restorable.keyRanges.begin(); rit != restorable.keyRanges.end(); rit++) {
