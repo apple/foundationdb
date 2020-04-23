@@ -216,6 +216,8 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 				lastDetailedReply = now();
 			}
 
+			// Replace our throttles with what was sent by ratekeeper. Because we do this,
+			// we are not required to expire tags out of the map
 			if(rep.throttledTags.present()) {
 				*throttledTags = std::move(rep.throttledTags.get());
 			}
@@ -239,7 +241,6 @@ ACTOR Future<Void> queueTransactionStartRequests(
 	PromiseStream<Void> GRVTimer, double *lastGRVTime,
 	double *GRVBatchTime, FutureStream<double> replyTimes,
 	ProxyStats* stats, TransactionRateInfo* batchRateInfo,
-	PrioritizedTransactionTagMap<ClientTagThrottleLimits>* throttledTags,
 	TransactionTagMap<uint64_t>* transactionTagCounter) 
 {
 	loop choose{
@@ -1378,11 +1379,19 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 
 		reply.tagThrottleInfo.clear();
 
-		auto& priorityThrottledTags = throttledTags[ThrottleApi::priorityFromReadVersionFlags(request.flags)];
-		for(auto tag : request.tags) {
-			auto tagItr = priorityThrottledTags.find(tag.first);
-			if(tagItr != priorityThrottledTags.end()) {
-				reply.tagThrottleInfo[tag.first] = tagItr->second;
+		if(!request.tags.empty()) {
+			auto& priorityThrottledTags = throttledTags[ThrottleApi::priorityFromReadVersionFlags(request.flags)];
+			for(auto tag : request.tags) {
+				auto tagItr = priorityThrottledTags.find(tag.first);
+				if(tagItr != priorityThrottledTags.end()) {
+					if(tagItr->second.expiration > now()) {
+						reply.tagThrottleInfo[tag.first] = tagItr->second;
+					}
+					else {
+						// This isn't required, but we might as well
+						priorityThrottledTags.erase(tagItr);
+					}
+				}
 			}
 		}
 
@@ -1422,7 +1431,7 @@ ACTOR static Future<Void> transactionStarter(
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags));
 	addActor.send(queueTransactionStartRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(),
 	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats, &batchRateInfo,
-	                                            &throttledTags, &transactionTagCounter));
+	                                            &transactionTagCounter));
 
 	// Get a list of the other proxies that go together with us
 	while (std::find(db->get().client.proxies.begin(), db->get().client.proxies.end(), proxy) == db->get().client.proxies.end())
