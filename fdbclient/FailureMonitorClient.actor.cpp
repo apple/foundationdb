@@ -167,8 +167,8 @@ ACTOR Future<Void> failureMonitorClientLoop(
 }
 
 ACTOR Future<Void> failureMonitorClient( Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, bool trackMyStatus ) {
-	TraceEvent("FailureMonitorStart").detail("IsClient", FlowTransport::transport().isClient());
-	if (FlowTransport::transport().isClient()) {
+	TraceEvent("FailureMonitorStart").detail("IsClient", FlowTransport::isClient());
+	if (FlowTransport::isClient()) {
 		wait(Never());
 	}
 

@@ -295,7 +295,7 @@ static ReliablePacket* sendPacket( TransportData* self, Reference<Peer> peer, IS
 ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 	state Endpoint remotePingEndpoint({ peer->destination }, WLTOKEN_PING_PACKET);
 	loop {
-		if (!FlowTransport::transport().isClient() && !peer->destination.isPublic() && peer->compatible) {
+		if (!FlowTransport::isClient() && !peer->destination.isPublic() && peer->compatible) {
 			// Don't send ping messages to clients unless necessary. Instead monitor incoming client pings.
 			// We ignore this block for incompatible clients because pings from server would trigger the
 			// peer->resetPing and prevent 'connection_failed' due to ping timeout.
@@ -324,7 +324,7 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 					(peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY)) {
 				// TODO: What about when peerReference == -1?
 				throw connection_unreferenced();
-			} else if (FlowTransport::transport().isClient() && peer->compatible && peer->destination.isPublic() &&
+			} else if (FlowTransport::isClient() && peer->compatible && peer->destination.isPublic() &&
 									(peer->lastConnectTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT) &&
 									(peer->lastDataPacketSentTime < now() - FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT)) {
 				// First condition is necessary because we may get here if we are server.
@@ -413,7 +413,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				self->outgoingConnectionIdle = true;
 				// Wait until there is something to send.
 				while (self->unsent.empty()) {
-					if (FlowTransport::transport().isClient() && self->destination.isPublic() &&
+					if (FlowTransport::isClient() && self->destination.isPublic() &&
 							clientReconnectDelay) {
 						break;
 					}
@@ -434,7 +434,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 						when( Reference<IConnection> _conn = wait( INetworkConnections::net()->connect(self->destination) ) ) { 
 							conn = _conn;
 							wait(conn->connectHandshake());
-							if (FlowTransport::transport().isClient()) {
+							if (FlowTransport::isClient()) {
 								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 							}
 							if (self->unsent.empty()) {
@@ -459,7 +459,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 						throw;
 					}
 					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
-					if (FlowTransport::transport().isClient()) {
+					if (FlowTransport::isClient()) {
 						IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
 						clientReconnectDelay = true;
 					}
@@ -511,7 +511,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 			if(self->destination.isPublic() 
 				&& IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()
-				&& !FlowTransport::transport().isClient()) 
+				&& !FlowTransport::isClient()) 
 			{
 				auto& it = self->transport->closedPeers[self->destination];
 				if(now() - it.second > FLOW_KNOBS->TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY) {
@@ -526,7 +526,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 			}
 
 			if (conn) {
-				clientReconnectDelay = FlowTransport::transport().isClient() && e.code() != error_code_connection_idle;
+				clientReconnectDelay = FlowTransport::isClient() && e.code() != error_code_connection_idle;
 				conn->close();
 				conn = Reference<IConnection>();
 			}
@@ -659,6 +659,9 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 		} catch (Error& e) {
 			g_currentDeliveryPeerAddress = {NetworkAddress()};
 			TraceEvent(SevError, "ReceiverError").error(e).detail("Token", destination.token.toString()).detail("Peer", destination.getPrimaryAddress());
+			if(!FlowTransport::isClient()) {
+				flushAndExit(FDB_EXIT_ERROR);
+			}
 			throw;
 		}
 	} else if (destination.token.first() & TOKEN_STREAM_FLAG) {
@@ -1107,7 +1110,7 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
 	
 	if(peer->peerReferences == -1) {
-		if (FlowTransport::transport().isClient()) {
+		if (FlowTransport::isClient()) {
 			IFailureMonitor::failureMonitor().setStatus(endpoint.getPrimaryAddress(), FailureStatus(false));
 		}
 		peer->peerReferences = 1;
