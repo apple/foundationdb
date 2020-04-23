@@ -1629,6 +1629,7 @@ int main(int argc, char* argv[]) {
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
+			g_network->addStopCallback( Net2FileSystem::stop );
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
