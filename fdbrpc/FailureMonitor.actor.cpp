@@ -33,9 +33,6 @@ ACTOR Future<Void> waitForContinuousFailure(IFailureMonitor* monitor, Endpoint e
                                             double sustainedFailureDuration, double slope) {
 	state double startT = now();
 
-	// Since, FailureMonitoring is now localized we should add some slack for `connectionKeeper`
-	// to try reconnecting.
-	sustainedFailureDuration += FLOW_KNOBS->FAILURE_DETECTION_DELAY;
 	loop {
 		wait(monitor->onFailed(endpoint));
 		if (monitor->permanentlyFailed(endpoint)) return Void();
