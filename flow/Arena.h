@@ -693,11 +693,6 @@ inline bool operator != (const StringRef& lhs, const StringRef& rhs ) { return !
 inline bool operator <= ( const StringRef& lhs, const StringRef& rhs ) { return !(lhs>rhs); }
 inline bool operator >= ( const StringRef& lhs, const StringRef& rhs ) { return !(lhs<rhs); }
 
-// This trait is used by VectorRef to determine if it should just memcpy the vector contents.
-// FIXME:  VectorRef really should use std::is_trivially_copyable for this BUT that is not implemented
-// in gcc c++0x so instead we will use this custom trait which defaults to std::is_trivial, which
-// handles most situations but others will have to be specialized.
-
 // This trait is used by VectorRef to determine if deep copy constructor should recursively
 // call deep copies of each element.
 // TODO: There should be an easier way to identify the difference between
@@ -785,7 +780,7 @@ public:
 	using value_type = T;
 	static_assert(SerStrategy == VecSerStrategy::FlatBuffers || string_serialized_traits<T>::value);
 
-	// T must be trivially destructible (and copyable)!
+	// T must be trivially destructible!
 	VectorRef() : data(0), m_size(0), m_capacity(0) {}
 
 	template <VecSerStrategy S>
