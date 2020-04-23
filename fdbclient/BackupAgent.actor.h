@@ -934,5 +934,10 @@ struct StringRefReader {
 	Error failure_error;
 };
 
+namespace fileBackup {
+ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset,
+                                                                      int len);
+}
+
 #include "flow/unactorcompiler.h"
 #endif
