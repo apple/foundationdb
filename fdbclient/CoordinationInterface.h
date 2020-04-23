@@ -45,9 +45,11 @@ public:
 	ClusterConnectionString( std::string const& connectionString );
 	ClusterConnectionString( vector<NetworkAddress>, Key );
 	vector<NetworkAddress> const& coordinators() const { return coord; }
-	vector<NetworkAddress>& mutateCoordinators() { return coord; }
+	vector<NetworkAddress>& mutableCoordinators() { return coord; }
 	std::vector<Hostname> const& hostnames() const { return hosts; }
 	std::vector<Hostname>& mutableHostnames() { return hosts; }
+	std::unordered_map<NetworkAddress, Hostname>& mutableResolveResults() { return _resolveResults; }
+	std::unordered_map<NetworkAddress, Hostname> const& resolveResults() const { return _resolveResults; };
 	Key clusterKey() const { return key; }
 	Key clusterKeyName() const { return keyDesc; }  // Returns the "name" or "description" part of the clusterKey (the part before the ':')
 	std::string toString() const;
@@ -61,6 +63,7 @@ private:
 	void parseConnString();
 	void parseKey( std::string const& key );
 	std::vector<Hostname> hosts;
+	std::unordered_map<NetworkAddress, Hostname> _resolveResults;
 	vector<NetworkAddress> coord;
 	Key key, keyDesc;
 	std::string _connectionString;

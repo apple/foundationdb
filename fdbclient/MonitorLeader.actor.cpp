@@ -161,14 +161,15 @@ ACTOR Future<Void> _resolveHostnames(ClusterConnectionString* self) {
 		                 [=](std::vector<NetworkAddress> const& addresses) -> Void {
 			                 NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
 			                 if (hostName.useTLS) addr.flags = NetworkAddress::FLAG_TLS;
-			                 self->mutateCoordinators().push_back(addr);
+			                 self->mutableCoordinators().push_back(addr);
+			                 self->mutableResolveResults().emplace(addr, hostName);
 			                 return Void();
 		                 }));
 	}
 	wait(waitForAll(fs));
-	std::sort(self->mutateCoordinators().begin(), self->mutateCoordinators().end());
-	if (std::unique(self->mutateCoordinators().begin(), self->mutateCoordinators().end()) !=
-	    self->mutateCoordinators().end()) {
+	std::sort(self->mutableCoordinators().begin(), self->mutableCoordinators().end());
+	if (std::unique(self->mutableCoordinators().begin(), self->mutableCoordinators().end()) !=
+	    self->mutableCoordinators().end()) {
 		throw connection_string_invalid();
 	}
 	self->hasUnresolvedHostnames = false;
@@ -206,6 +207,7 @@ void ClusterConnectionString::resetToUnresolved() {
 	if (hosts.size() > 0) {
 		coord.clear();
 		hosts.clear();
+		_resolveResults.clear();
 		hasUnresolvedHostnames = false;
 		parseConnString();
 	}
@@ -454,16 +456,25 @@ ClientLeaderRegInterface::ClientLeaderRegInterface( INetwork* local ) {
 // This function contacts a coordinator coord to ask if the worker is considered as a leader (i.e., if the worker
 // is a nominee)
 ACTOR Future<Void> monitorNominee(Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange,
-                                  Optional<LeaderInfo>* info, AsyncTrigger* connFailedTrigger = nullptr) {
+                                  Optional<LeaderInfo>* info, Optional<Hostname> hostname = Optional<Hostname>()) {
 	state Optional<LeaderInfo> li;
 	loop {
-		if (connFailedTrigger != nullptr) {
+		if (hostname.present()) {
 			state ErrorOr<Optional<LeaderInfo>> rep =
 			    wait(coord.getLeader.tryGetReply(GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
 			                                     TaskPriority::CoordinationReply));
 			if (rep.isError() && rep.getError().code() == error_code_connection_failed) {
 				// connecting to nominee failed, most likely due to timeout.
-				connFailedTrigger->trigger();
+				// re-resolve this single hostname
+				NetworkAddress newAddr = wait(
+				    map(INetworkConnections::net()->resolveTCPEndpoint(hostname.get().host, hostname.get().service),
+				        [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
+					        NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
+					        if (hostname.get().useTLS) addr.flags = NetworkAddress::FLAG_TLS;
+					        return addr;
+				        }));
+				coord = ClientLeaderRegInterface(newAddr);
+				continue;
 			} else if (rep.present()) {
 				li = rep.get();
 			}
@@ -549,11 +560,16 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 
 	std::vector<Future<Void>> actors;
 	// Ask all coordinators if the worker is considered as a leader (leader nominee) by the coordinator.
-	for(int i=0; i<coordinators.clientLeaderServers.size(); i++)
-		actors.push_back(monitorNominee(
-		    coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i],
-		    // Only need to action on connection failure if cluter file contains hostnames
-		    connFile->getConnectionString().hostnames().size() > 0 ? &connToCoordinatorFailed : nullptr));
+	for (int i = 0; i < coordinators.clientLeaderServers.size(); i++) {
+		Optional<Hostname> hn;
+		auto r = connFile->getConnectionString().resolveResults().find(
+		    coordinators.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress());
+		if (r != connFile->getConnectionString().resolveResults().end()) {
+			hn = r->second;
+		}
+		actors.push_back(monitorNominee(coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange,
+		                                &nominees[i], hn));
+	}
 	allActors = waitForAll(actors);
 
 	loop {

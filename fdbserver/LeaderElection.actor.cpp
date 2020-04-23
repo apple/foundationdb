@@ -28,16 +28,25 @@ Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInf
 
 ACTOR Future<Void> submitCandidacy(Key key, LeaderElectionRegInterface coord, LeaderInfo myInfo, UID prevChangeID,
                                    AsyncTrigger* nomineeChanged, Optional<LeaderInfo>* leaderInfo,
-                                   bool reportCoordConnFailure) {
+                                   Optional<Hostname> hostname = Optional<Hostname>()) {
 	state Optional<LeaderInfo> li;
 	loop {
-		if (reportCoordConnFailure) {
+		if (hostname.present()) {
 			ErrorOr<Optional<LeaderInfo>> rep = wait(coord.candidacy.tryGetReply(
 			    CandidacyRequest(key, myInfo, leaderInfo->present() ? leaderInfo->get().changeID : UID(), prevChangeID),
 			    TaskPriority::CoordinationReply));
 			if (rep.isError() && rep.getError().code() == error_code_connection_failed) {
-				// connecting to this coordinator failed, most likely due to timeout.
-				throw coordinators_changed();
+				// connecting to nominee failed, most likely due to timeout.
+				// re-resolve this single hostname
+				NetworkAddress newAddr = wait(
+				    map(INetworkConnections::net()->resolveTCPEndpoint(hostname.get().host, hostname.get().service),
+				        [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
+					        NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
+					        if (hostname.get().useTLS) addr.flags = NetworkAddress::FLAG_TLS;
+					        return addr;
+				        }));
+				coord = LeaderElectionRegInterface(newAddr);
+				continue;
 			} else if (rep.present()) {
 				li = rep.get();
 			}
@@ -95,7 +104,7 @@ ACTOR Future<Void> changeLeaderCoordinators( ServerCoordinators coordinators, Va
 ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators, Value proposedSerializedInterface,
                                            Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected,
                                            Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                           bool reportCoordConnFailure) {
+                                           Reference<ClusterConnectionFile> connFile) {
 	state AsyncTrigger nomineeChanged;
 	state std::vector<Optional<LeaderInfo>> nominees;
 	state LeaderInfo myInfo;
@@ -128,9 +137,16 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators, Valu
 		myInfo.updateChangeID( asyncPriorityInfo->get() );
 
 		vector<Future<Void>> cand;
-		for(int i=0; i<coordinators.leaderElectionServers.size(); i++)
+		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
+			Optional<Hostname> hn;
+			auto r = connFile->getConnectionString().resolveResults().find(
+			    coordinators.leaderElectionServers[i].candidacy.getEndpoint().getPrimaryAddress());
+			if (r != connFile->getConnectionString().resolveResults().end()) {
+				hn = r->second;
+			}
 			cand.push_back(submitCandidacy(coordinators.clusterKey, coordinators.leaderElectionServers[i], myInfo,
-			                               prevChangeID, &nomineeChanged, &nominees[i], reportCoordConnFailure));
+			                               prevChangeID, &nomineeChanged, &nominees[i], hn));
+		}
 		candidacies = waitForAll(cand);
 
 		loop {
