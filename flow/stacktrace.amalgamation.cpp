@@ -2936,6 +2936,7 @@ static class VDSOInitHelper {
 extern "C" {
 #endif
 
+#if !__has_feature(thread_sanitizer)
 void AnnotateRWLockCreate(const char *, int,
                           const volatile void *){}
 void AnnotateRWLockDestroy(const char *, int,
@@ -3016,6 +3017,7 @@ double ValgrindSlowdown(void) {
   }
   return local_slowdown;
 }
+#endif
 
 #ifdef __cplusplus
 }  // extern "C"
