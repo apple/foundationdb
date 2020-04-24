@@ -66,8 +66,8 @@ using std::max;
 using std::min;
 using std::pair;
 
-NetworkOptions networkOptions;
-TLSConfig tlsConfig(TLSEndpointType::CLIENT);
+thread_local NetworkOptions networkOptions;
+thread_local TLSConfig tlsConfig(TLSEndpointType::CLIENT);
 
 // The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
 NetworkOptions::NetworkOptions()

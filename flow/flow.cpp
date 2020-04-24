@@ -209,7 +209,7 @@ Standalone<StringRef> addVersionStampAtEnd(StringRef const& str) {
 
 namespace {
 
-std::vector<bool> buggifyActivated{false, false};
+char buggifyActivated[] = { false, false };
 std::map<BuggifyType, std::map<std::pair<std::string,int>, int>> typedSBVars;
 
 }
