@@ -204,10 +204,25 @@ public:
 			priorityThrottleData.manualThrottleData = ClientTagThrottleLimits(tpsRate, expiration);
 		}
 
+		if(!oldThrottleData.present()) {
+			TraceEvent("RatekeeperAddingThrottle")
+				.detail("Tag", tag)
+				.detail("Rate", tpsRate)
+				.detail("Priority", ThrottleApi::priorityToString(priority))
+				.detail("SecondsToExpiration", expiration - now())
+				.detail("AutoThrottled", autoThrottle);
+		}
+		else if(oldThrottleData.get().tpsRate != tpsRate || oldThrottleData.get().expiration != expiration) {
+			TraceEvent("RatekeeperUpdatingThrottle")
+				.detail("Tag", tag)
+				.detail("Rate", tpsRate)
+				.detail("Priority", ThrottleApi::priorityToString(priority))
+				.detail("SecondsToExpiration", expiration - now())
+				.detail("AutoThrottled", autoThrottle);
+		}
+
 		double clientRate = priorityThrottleData.updateAndGetClientRate(smoothRequests.smoothRate());
 		ASSERT(clientRate != std::numeric_limits<double>::max());
-
-		return oldThrottleData;
 	}
 
 	// Remove the specified throttle and returns true if this tag still has throttles present
