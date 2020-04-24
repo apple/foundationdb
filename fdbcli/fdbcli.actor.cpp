@@ -2043,6 +2043,7 @@ ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, boo
 		for(t = tokens.begin()+1; t != tokens.end(); ++t) {
 			try {
 				// SOMEDAY: Check for keywords
+				// TODO: support parsing hostname here.
 				auto const& addr = NetworkAddress::parse( t->toString() );
 				if (addresses.count(addr)){
 					printf("ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
@@ -2794,6 +2795,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state std::pair<std::string, bool> resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName( opt.clusterFile );
 	try {
 		ccf = Reference<ClusterConnectionFile>( new ClusterConnectionFile( resolvedClusterFile.first ) );
+		if (ccf->hasUnresolvedHostnames()) {
+			wait(ccf->resolveHostnames());
+		}
 	} catch (Error& e) {
 		fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 		return 1;

@@ -956,6 +956,9 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 			if ( cx->getConnectionFile() && old.clusterKeyName().toString() != cx->getConnectionFile()->getConnectionString().clusterKeyName() )
 				return CoordinatorsResult::BAD_DATABASE_STATE;  // Someone changed the "name" of the database??
 
+			if (old.hasUnresolvedHostnames) {
+				wait(old.resolveHostnames());
+			}
 			state CoordinatorsResult::Type result = CoordinatorsResult::SUCCESS;
 			if(!desiredCoordinators.size()) {
 				std::vector<NetworkAddress> _desiredCoordinators = wait( change->getDesiredCoordinators( &tr, old.coordinators(), Reference<ClusterConnectionFile>(new ClusterConnectionFile(old)), result ) );
@@ -1001,9 +1004,6 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 
 			state Reference<ClusterConnectionFile> connFile =
 			    Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn));
-			if (connFile->hasUnresolvedHostnames()) {
-				wait(connFile->resolveHostnames());
-			}
 			ClientCoordinators coord(connFile);
 			vector<Future<Optional<LeaderInfo>>> leaderServers;
 			for( int i = 0; i < coord.clientLeaderServers.size(); i++ )
@@ -1084,9 +1084,6 @@ struct AutoQuorumChange : IQuorumChange {
 		if (oldCoordinators.size() % 2 != 1) return false;
 
 		// Check availability
-		if (ccf->hasUnresolvedHostnames()) {
-			wait(ccf->resolveHostnames());
-		}
 		ClientCoordinators coord(ccf);
 		vector<Future<Optional<LeaderInfo>>> leaderServers;
 		for( int i = 0; i < coord.clientLeaderServers.size(); i++ )
