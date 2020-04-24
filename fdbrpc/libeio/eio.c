@@ -2217,7 +2217,9 @@ X_THREAD_PROC (etp_proc)
 
       X_LOCK (reslock);
 
+      X_LOCK(reqlock);
       ++npending;
+      X_UNLOCK(reqlock);
 
       if (!reqq_push (&res_queue, req) && want_poll_cb)
         want_poll_cb ();

@@ -1,17 +1,8 @@
 #ifndef XTHREAD_H_
 #define XTHREAD_H_
 
-/* whether word reads are potentially non-atomic.
- * this is conservative, likely most arches this runs
- * on have atomic word read/writes.
- */
-#ifndef WORDACCESS_UNSAFE
-# if __i386 || __x86_64
-#  define WORDACCESS_UNSAFE 0
-# else
-#  define WORDACCESS_UNSAFE 1
-# endif
-#endif
+/* Without this there's a data race */
+#define WORDACCESS_UNSAFE 1
 
 /////////////////////////////////////////////////////////////////////////////
 
