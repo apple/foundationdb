@@ -67,24 +67,12 @@ namespace PTreeImpl {
 		PTree(PTree const&);
 	};
 
-    // TODO: Figure out proper copy / move semantics for this (callers copy this around!)
     template <class T>
-    class PTreeFinger { // NonCopyable
-	    struct PTreeFingerEntry {
-		    PTreeFingerEntry() : node(nullptr), less(false) {}
-		    PTreeFingerEntry(PTree<T> const* node, bool less) : node(node), less(less) {}
-		    PTreeFingerEntry(PTreeFingerEntry const& entry) : node(entry.node), less(entry.less) {}
-		    PTreeFingerEntry& operator=(PTreeFingerEntry const& entry) {
-			    node = entry.node;
-			    less = entry.less;
-			    return *this;
-		    }
-
-		    PTree<T> const* node;
-		    bool less;
-	    };
-
-	    static constexpr size_t N = 64;
+    class PTreeFinger {
+	    using PTreeFingerEntry = PTree<T> const*;
+	    // This finger size supports trees with up to exp(96/4.3) ~= 4,964,514,749 entries.
+	    // see also: check().
+	    static constexpr size_t N = 96;
 	    PTreeFingerEntry entries_[N];
 	    size_t size_ = 0;
 	    size_t bound_sz_ = 0;
@@ -111,25 +99,23 @@ namespace PTreeImpl {
 	    }
 
 	    size_t size() const { return size_; }
-	    void push_back(PTree<T> const* node) { this->push_back(node, false); }
-	    PTree<T> const* back() const { return entries_[size_ - 1].node; }
-	    bool back_less() const { return entries_[size_ - 1].less; }
+	    PTree<T> const* back() const { return entries_[size_ - 1]; }
 	    void pop_back() { size_--; }
 	    void clear() { size_ = 0; }
-	    PTree<T> const* operator[](size_t i) const { return entries_[i].node; }
+	    PTree<T> const* operator[](size_t i) const { return entries_[i]; }
 
 	    void resize(size_t sz) {
 		    size_ = sz;
 		    ASSERT(size_ < N);
 	    }
 
-	    void push_back(PTree<T> const* node, bool less) {
-		    entries_[size_++] = { node, less };
+	    void push_back(PTree<T> const* node) {
+		    entries_[size_++] = { node };
 		    ASSERT(size_ < N);
 	    }
 
 	    void push_for_bound(PTree<T> const* node, bool less) {
-		    push_back(node, less);
+		    push_back(node);
 		    bound_sz_ = less ? size_ : bound_sz_;
 	    }
 
