@@ -3867,11 +3867,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 						}
 
-						std::map<TransactionTag, TagThrottleInfo> tags = wait(ThrottleApi::getTags(db, throttleListLimit));
+						std::vector<TagThrottleInfo> tags = wait(ThrottleApi::getThrottledTags(db, throttleListLimit));
 
 						bool anyLogged = false;
 						for(auto itr = tags.begin(); itr != tags.end(); ++itr) {
-							if(itr->second.expirationTime > now()) {
+							if(itr->expirationTime > now()) {
 								if(!anyLogged) {
 									printf("Throttled tags:\n\n");
 									printf("  Rate (txn/s) | Expiration (s) | Priority  | Type   | Tag\n");
@@ -3881,11 +3881,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								}
 
 								printf("  %12d | %13ds | %9s | %6s | %s\n", 
-									(int)(itr->second.tpsRate), 
-									std::min((int)(itr->second.expirationTime-now()), (int)(itr->second.initialDuration)), 
-									ThrottleApi::priorityToString(itr->second.priority, false), 
-									itr->second.autoThrottled ? "auto" : "manual", 
-									itr->first.toString().c_str());
+									(int)(itr->tpsRate), 
+									std::min((int)(itr->expirationTime-now()), (int)(itr->initialDuration)), 
+									ThrottleApi::priorityToString(itr->priority, false), 
+									itr->autoThrottled ? "auto" : "manual", 
+									itr->tag.toString().c_str());
 							}
 						}
 
@@ -3941,12 +3941,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 
-						wait(ThrottleApi::throttleTag(db, tokens[3], tpsRate, duration, false));
+						TagSet tags;
+						tags.addTag(tokens[3]);
+
+						wait(ThrottleApi::throttleTags(db, tags, tpsRate, duration, false, ThrottleApi::Priority::DEFAULT));
 						printf("Tag `%s' has been throttled\n", tokens[3].toString().c_str());
 					}
 					else if(tokencmp(tokens[1], "off")) {
 						if(tokencmp(tokens[2], "tag") && tokens.size() == 4) {
-							bool success = wait(ThrottleApi::unthrottleTag(db, tokens[3]));
+							TagSet tags;
+							tags.addTag(tokens[3]);
+							bool success = wait(ThrottleApi::unthrottleTags(db, tags, false, ThrottleApi::Priority::DEFAULT)); // TODO: Allow targeting priority and auto/manual
 							if(success) {
 								printf("Unthrottled tag `%s'\n", tokens[3].toString().c_str());
 							}

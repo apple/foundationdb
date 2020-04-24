@@ -50,23 +50,6 @@ namespace ThrottleApi {
 typedef StringRef TransactionTagRef;
 typedef Standalone<TransactionTagRef> TransactionTag;
 
-struct TagThrottleInfo {
-	double tpsRate;
-	double expirationTime;
-	double initialDuration;
-	bool autoThrottled;
-	ThrottleApi::Priority priority;
-
-	TagThrottleInfo() : tpsRate(0), expirationTime(0), initialDuration(0), autoThrottled(false), priority(ThrottleApi::Priority::DEFAULT) {}
-	TagThrottleInfo(double tpsRate, double expirationTime, double initialDuration, bool autoThrottled, ThrottleApi::Priority priority) 
-		: tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration), autoThrottled(autoThrottled), priority(priority) {}
-
-	template<class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, tpsRate, expirationTime, initialDuration, autoThrottled, priority);
-	}
-};
-
 class TagSet {
 public:
 	typedef std::set<TransactionTagRef>::const_iterator const_iterator;
@@ -74,7 +57,7 @@ public:
 	TagSet() : bytes(0) {}
 
 	void addTag(TransactionTagRef tag); 
-	size_t size();
+	size_t size() const;
 
 	const_iterator begin() const {
 		return tags.begin();
@@ -132,25 +115,65 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 	}
 };
 
+struct TagThrottleKey {
+	TagSet tags;
+	bool autoThrottled;
+	ThrottleApi::Priority priority;
+
+	TagThrottleKey() : autoThrottled(false), priority(ThrottleApi::Priority::DEFAULT) {}
+	TagThrottleKey(TagSet tags, bool autoThrottled, ThrottleApi::Priority priority) 
+		: tags(tags), autoThrottled(autoThrottled), priority(priority) {}
+
+	Key toKey() const;
+	static TagThrottleKey fromKey(const KeyRef& key);
+};
+
+struct TagThrottleValue {
+	double tpsRate;
+	double expirationTime;
+	double initialDuration;
+
+	TagThrottleValue() : tpsRate(0), expirationTime(0), initialDuration(0) {}
+	TagThrottleValue(double tpsRate, double expirationTime, double initialDuration) 
+		: tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration) {}
+
+	static TagThrottleValue fromValue(const ValueRef& value);
+
+	template<class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tpsRate, expirationTime, initialDuration);
+	}
+};
+
+struct TagThrottleInfo {
+	TransactionTag tag;
+	bool autoThrottled;
+	ThrottleApi::Priority priority;
+	double tpsRate;
+	double expirationTime;
+	double initialDuration;
+
+	TagThrottleInfo(TagThrottleKey key, TagThrottleValue value) 
+		: autoThrottled(key.autoThrottled), priority(key.priority), tpsRate(value.tpsRate), expirationTime(value.expirationTime), initialDuration(value.initialDuration) 
+	{
+		ASSERT(key.tags.size() == 1); // Multiple tags per throttle is not currently supported
+		tag = *key.tags.begin();
+	}
+};
+
 namespace ThrottleApi {
-	// Currently, only 1 tag in a key is supported
-	Key throttleKeyForTags(std::set<TransactionTagRef> const& tags);
-	TransactionTagRef tagFromThrottleKey(KeyRef key);
+	Future<std::vector<TagThrottleInfo>> getThrottledTags(Database const& db, int const& limit);
 
-	Future<std::map<TransactionTag, TagThrottleInfo>> getTags(Database const& db, int const& limit);
+	Future<Void> throttleTags(Database const& db, TagSet const& tags, double const& tpsRate, double const& initialDuration, 
+	                         bool const& autoThrottled, ThrottleApi::Priority const& priority, Optional<double> const& expirationTime = Optional<double>());
 
-	Future<Void> throttleTag(Database const& db, TransactionTagRef const& tag, double const& tpsRate, double const& initialDuration, 
-	                         bool const& autoThrottled, Optional<double> const& expirationTime = Optional<double>()); // TODO: priorities
-
-	Future<bool> unthrottleTag(Database const& db, TransactionTagRef const& tag);
+	Future<bool> unthrottleTags(Database const& db, TagSet const& tags, bool const& autoThrottled, ThrottleApi::Priority const& priority);
 
 	Future<uint64_t> unthrottleManual(Database db);
 	Future<uint64_t> unthrottleAuto(Database db);
 	Future<uint64_t> unthrottleAll(Database db);
 
 	Future<Void> enableAuto(Database const& db, bool const& enabled);
-
-	TagThrottleInfo decodeTagThrottleValue(const ValueRef& value);
 };
 
 BINARY_SERIALIZABLE(ThrottleApi::Priority);

@@ -188,8 +188,8 @@ public:
 
 	RkTagThrottleData() : smoothRequests(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) {}
 
-	// Inserts or updates a throttle, returning the throttle that existed previously 
-	Optional<ClientTagThrottleLimits> insertOrUpdateThrottle(ThrottleApi::Priority priority, bool autoThrottle, double tpsRate, double expiration) {
+	// Inserts or updates a throttle
+	void insertOrUpdateThrottle(TransactionTagRef tag, ThrottleApi::Priority priority, bool autoThrottle, double tpsRate, double expiration) {
 		ASSERT(tpsRate >= 0);
 		ASSERT(expiration > now());
 
@@ -543,40 +543,28 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 
 				TraceEvent("RatekeeperReadThrottledTags").detail("NumThrottledTags", throttledTagKeys.get().size());
 				for(auto entry : throttledTagKeys.get()) {
-					TransactionTagRef tag = ThrottleApi::tagFromThrottleKey(entry.key);
-					TagThrottleInfo throttleInfo = ThrottleApi::decodeTagThrottleValue(entry.value);
-					if(throttleInfo.expirationTime == 0 || throttleInfo.expirationTime > now() + throttleInfo.initialDuration) {
-						throttleInfo.expirationTime = now() + throttleInfo.initialDuration;
+					TagThrottleKey tagKey = TagThrottleKey::fromKey(entry.key);
+					TagThrottleValue tagValue = TagThrottleValue::fromValue(entry.value);
+
+					ASSERT(tagKey.tags.size() == 1); // Currently, only 1 tag per throttle is supported
+
+					if(tagValue.expirationTime == 0 || tagValue.expirationTime > now() + tagValue.initialDuration) {
+						tagValue.expirationTime = now() + tagValue.initialDuration;
 						BinaryWriter wr(IncludeVersion());
-						wr << throttleInfo;
+						wr << tagValue;
 						state Value value = wr.toValue();
 
 						tr.set(entry.key, value);
 					}
 
-					if(throttleInfo.expirationTime <= now()) {
+					if(tagValue.expirationTime <= now()) {
 						tr.clear(entry.key);
 					}
 					else {
+						TransactionTag tag = *tagKey.tags.begin();
 						auto itr = self->throttledTags.find(tag);
 						auto result = updatedTagThrottles.try_emplace(tag);
-						Optional<ClientTagThrottleLimits> oldThrottle = result.first->second.insertOrUpdateThrottle(throttleInfo.priority, throttleInfo.autoThrottled, throttleInfo.tpsRate, throttleInfo.expirationTime);
-						if(!oldThrottle.present()) {
-							TraceEvent("RatekeeperAddingThrottle")
-								.detail("Tag", tag)
-								.detail("Rate", throttleInfo.tpsRate)
-								.detail("Priority", ThrottleApi::priorityToString(throttleInfo.priority))
-								.detail("SecondsToExpiration", throttleInfo.expirationTime - now())
-								.detail("AutoThrottled", throttleInfo.autoThrottled);
-						}
-						else if(oldThrottle.get().tpsRate != throttleInfo.tpsRate || oldThrottle.get().expiration != throttleInfo.expirationTime) {
-								TraceEvent("RatekeeperUpdatingThrottle")
-									.detail("Tag", tag)
-									.detail("Rate", throttleInfo.tpsRate)
-									.detail("Priority", ThrottleApi::priorityToString(throttleInfo.priority))
-									.detail("SecondsToExpiration", throttleInfo.expirationTime - now())
-									.detail("AutoThrottled", throttleInfo.autoThrottled);
-						}
+						result.first->second.insertOrUpdateThrottle(tag, tagKey.priority, tagKey.autoThrottled, tagValue.tpsRate, tagValue.expirationTime);
 					}
 				}
 

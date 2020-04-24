@@ -235,6 +235,7 @@ extern const UID dataDistributionModeLock;
 // Keys to view and control tag throttling
 extern const KeyRangeRef tagThrottleKeys;
 extern const KeyRef tagThrottleKeysPrefix;
+extern const KeyRef tagThrottleAutoKeysPrefix;
 extern const KeyRef tagThrottleSignalKey;
 extern const KeyRef tagThrottleAutoEnabledKey;
 extern const KeyRef tagThrottleLimitKey;

@@ -540,6 +540,7 @@ DatabaseContext::DatabaseContext(
 
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
+	throttleExpirer = recurring([this](){ expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
@@ -782,6 +783,19 @@ Future<Void> DatabaseContext::switchConnectionFile(Reference<ClusterConnectionFi
 
 Future<Void> DatabaseContext::connectionFileChanged() {
 	return connectionFileChangedTrigger.onTrigger();
+}
+
+void DatabaseContext::expireThrottles() {
+	for(auto &priorityItr : throttledTags) {
+		for(auto tagItr = priorityItr.second.begin(); tagItr != priorityItr.second.end();) {
+			if(tagItr->second.expired()) {
+				tagItr = priorityItr.second.erase(tagItr);
+			}
+			else {
+				++tagItr;
+			}
+		}
+	}
 }
 
 extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
@@ -1461,7 +1475,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 				choose {
 					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
 					when(GetKeyReply _reply =
-							wait(loadBalance(ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get(), cx->sampleReadTags() ? tags : Optional<TagSet>(), info.debugID),
+							wait(loadBalance(ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get(), cx->sampleReadTags() ? tags : Optional<TagSet>(), getKeyID),
 											TaskPriority::DefaultPromiseEndpoint, false,
 											cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 						reply = _reply;
@@ -1756,7 +1770,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 	}
 }
 
-Future<Key> resolveKey( Database const& cx, KeySelector const& key, Version const& version, TransactionInfo const& info, TagSet tags ) {
+Future<Key> resolveKey( Database const& cx, KeySelector const& key, Version const& version, TransactionInfo const& info, TagSet const& tags ) {
 	if( key.isFirstGreaterOrEqual() )
 		return Future<Key>( key.getKey() );
 
@@ -2506,12 +2520,34 @@ void Transaction::addWriteConflictRange( const KeyRangeRef& keys ) {
 }
 
 double Transaction::getBackoff(int errCode) {
-	double b = backoff * deterministicRandom()->random01();
-	backoff =
-	    errCode == error_code_proxy_memory_limit_exceeded
-	        ? std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF)
-	        : std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, options.maxBackoff);
-	return b;
+	double returnedBackoff = backoff;
+
+	if(errCode == error_code_tag_throttled) {
+		auto priorityItr = cx->throttledTags.find(ThrottleApi::priorityFromReadVersionFlags(options.getReadVersionFlags));
+		for(auto &tag : options.tags) {
+			if(priorityItr != cx->throttledTags.end()) {
+				auto tagItr = priorityItr->second.find(tag);
+				if(tagItr != priorityItr->second.end()) {
+					returnedBackoff = std::min(CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL, std::max(returnedBackoff, tagItr->second.throttleDuration()));
+					if(returnedBackoff == CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL) {
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	returnedBackoff *= deterministicRandom()->random01();
+
+	// Set backoff for next time
+	if(errCode == error_code_proxy_memory_limit_exceeded) {
+		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF);
+	}
+	else {
+		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, options.maxBackoff);
+	}
+
+	return returnedBackoff;
 }
 
 TransactionOptions::TransactionOptions(Database const& cx) {
@@ -3180,7 +3216,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 	}
 }
 
-ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx, uint32_t transactionCount, uint32_t flags, std::map<TransactionTag, uint32_t> tags, Optional<UID> debugID ) {
+ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx, uint32_t transactionCount, uint32_t flags, TransactionTagMap<uint32_t> tags, Optional<UID> debugID ) {
 	try {
 		++cx->transactionReadVersionBatches;
 		if( debugID.present() )
@@ -3227,7 +3263,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 	state Optional<UID> debugID;
 	state bool send_batch;
 
-	state std::map<TransactionTag, uint32_t> tags;
+	state TransactionTagMap<uint32_t> tags;
 
 	// dynamic batching
 	state PromiseStream<double> replyTimes;
@@ -3270,8 +3306,8 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 			addActor.send(ready(timeReply(GRVReply.getFuture(), replyTimes)));
 
 			Future<Void> batch = incrementalBroadcastWithError(
-			    getConsistentReadVersion(cx, count, flags, tags, std::move(debugID)),
-			    std::vector<Promise<GetReadVersionReply>>(std::move(requests)), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
+			    getConsistentReadVersion(cx, count, flags, std::move(tags), std::move(debugID)),
+			    std::vector<Promise<GetReadVersionReply>>(requests), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 
 			tags.clear();
 			debugID = Optional<UID>();
@@ -3295,6 +3331,18 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Re
 		throw database_locked();
 
 	++cx->transactionReadVersionsCompleted;
+	if((flags & GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) == GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
+		++cx->transactionImmediateReadVersionsCompleted;
+	}
+	else if((flags & GetReadVersionRequest::PRIORITY_DEFAULT) == GetReadVersionRequest::PRIORITY_DEFAULT) {
+		++cx->transactionDefaultReadVersionsCompleted;
+	}
+	else if((flags & GetReadVersionRequest::PRIORITY_BATCH) == GetReadVersionRequest::PRIORITY_BATCH) {
+		++cx->transactionBatchReadVersionsCompleted;
+	}
+	else {
+		ASSERT(false);
+	}
 
 	auto &priorityThrottledTags = cx->throttledTags[ThrottleApi::priorityFromReadVersionFlags(flags)];
 	for(auto &tag : tags) {
@@ -3426,8 +3474,9 @@ Future<Void> Transaction::onError( Error const& e ) {
 			++cx->transactionsResourceConstrained;
 		else if (e.code() == error_code_process_behind)
 			++cx->transactionsProcessBehind;
-		else if (e.code() == error_code_batch_transaction_throttled)
+		else if (e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled) {
 			++cx->transactionsThrottled;
+		}
 
 		double backoff = getBackoff(e.code());
 		reset();

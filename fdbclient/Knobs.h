@@ -211,6 +211,7 @@ public:
 	double READ_TAG_SAMPLE_RATE; // Communicated to clients from cluster
 	double TAG_THROTTLE_SMOOTHING_WINDOW;
 	double TAG_THROTTLE_RECHECK_INTERVAL;
+	double TAG_THROTTLE_EXPIRATION_INTERVAL;
 
 	ClientKnobs();
 	void initialize(bool randomize = false);

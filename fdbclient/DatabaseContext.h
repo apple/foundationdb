@@ -177,6 +177,8 @@ public:
 
 	explicit DatabaseContext( const Error &err );
 
+	void expireThrottles();
+
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
 	AsyncTrigger masterProxiesChangeTrigger;
@@ -278,6 +280,7 @@ public:
 	int snapshotRywEnabled;
 
 	Future<Void> logger;
+	Future<Void> throttleExpirer;
 
 	TaskPriority taskID;
 

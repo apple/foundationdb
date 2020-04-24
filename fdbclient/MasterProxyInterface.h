@@ -193,13 +193,13 @@ struct GetReadVersionRequest : TimedRequest {
 	uint32_t transactionCount;
 	uint32_t flags;
 
-	std::map<TransactionTag, uint32_t> tags; // TODO: compact
+	TransactionTagMap<uint32_t> tags;
 
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
 	GetReadVersionRequest() : transactionCount( 1 ), flags( PRIORITY_DEFAULT ) {}
-	GetReadVersionRequest( uint32_t transactionCount, uint32_t flags, std::map<TransactionTag, uint32_t> tags = std::map<TransactionTag, uint32_t>(), Optional<UID> debugID = Optional<UID>() ) 
+	GetReadVersionRequest( uint32_t transactionCount, uint32_t flags, TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(), Optional<UID> debugID = Optional<UID>() ) 
 	    : transactionCount( transactionCount ), flags( flags ), tags(tags), debugID( debugID ) {}
 	
 	int priority() const { return flags & FLAG_PRIORITY_MASK; }

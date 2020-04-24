@@ -623,6 +623,7 @@ const KeyRangeRef tagThrottleKeys = KeyRangeRef(
 	LiteralStringRef("\xff\x02/throttledTags/tag/"),
 	LiteralStringRef("\xff\x02/throttledTags/tag0"));
 const KeyRef tagThrottleKeysPrefix = tagThrottleKeys.begin;
+const KeyRef tagThrottleAutoKeysPrefix = LiteralStringRef("\xff\x02/throttledTags/tag/\x01");
 const KeyRef tagThrottleSignalKey = LiteralStringRef("\xff\x02/throttledTags/signal");
 const KeyRef tagThrottleAutoEnabledKey = LiteralStringRef("\xff\x02/throttledTags/autoThrottlingEnabled");
 const KeyRef tagThrottleLimitKey = LiteralStringRef("\xff\x02/throttledTags/manualThrottleLimit");
