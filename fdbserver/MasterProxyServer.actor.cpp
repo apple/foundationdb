@@ -269,10 +269,10 @@ ACTOR Future<Void> queueTransactionStartRequests(
 
 				++stats->txnRequestIn;
 				stats->txnStartIn += req.transactionCount;
-				if (req.priority() >= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
+				if (req.priority >= TransactionPriority::IMMEDIATE) {
 					stats->txnSystemPriorityStartIn += req.transactionCount;
 					systemQueue->push_back(req);
-				} else if (req.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
+				} else if (req.priority >= TransactionPriority::DEFAULT) {
 					stats->txnDefaultPriorityStartIn += req.transactionCount;
 					defaultQueue->push_back(req);
 				} else {
@@ -1110,7 +1110,7 @@ ACTOR Future<Void> commitBatch(
 					wait(yield());
 					break; 
 				}
-				when(GetReadVersionReply v = wait(self->getConsistentReadVersion.getReply(GetReadVersionRequest(0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE | GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
+				when(GetReadVersionReply v = wait(self->getConsistentReadVersion.getReply(GetReadVersionRequest(0, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
 					if(v.version > self->committedVersion.get()) {
 						self->locked = v.locked;
 						self->metadataVersion = v.metadataVersion;
@@ -1365,7 +1365,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 
 	double end = g_network->timer();
 	for(GetReadVersionRequest const& request : requests) {
-		if(request.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
+		if(request.priority >= TransactionPriority::DEFAULT) {
 			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
 		}
 
@@ -1380,7 +1380,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 		reply.tagThrottleInfo.clear();
 
 		if(!request.tags.empty()) {
-			auto& priorityThrottledTags = throttledTags[ThrottleApi::priorityFromReadVersionFlags(request.flags)];
+			auto& priorityThrottledTags = throttledTags[request.priority];
 			for(auto tag : request.tags) {
 				auto tagItr = priorityThrottledTags.find(tag.first);
 				if(tagItr != priorityThrottledTags.end()) {
@@ -1482,10 +1482,10 @@ ACTOR static Future<Void> transactionStarter(
 			auto& req = transactionQueue->front();
 			int tc = req.transactionCount;
 
-			if(req.priority() < GetReadVersionRequest::PRIORITY_DEFAULT && !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
+			if(req.priority < TransactionPriority::DEFAULT && !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
 				break;
 			}
-			else if(req.priority() < GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE && !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
+			else if(req.priority < TransactionPriority::IMMEDIATE && !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
 				break;	
 			}
 
@@ -1495,9 +1495,9 @@ ACTOR static Future<Void> transactionStarter(
 			}
 
 			transactionsStarted[req.flags&1] += tc;
-			if (req.priority() >= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE)
+			if (req.priority >= TransactionPriority::IMMEDIATE)
 				systemTransactionsStarted[req.flags & 1] += tc;
-			else if (req.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT)
+			else if (req.priority >= TransactionPriority::DEFAULT)
 				defaultPriTransactionsStarted[req.flags & 1] += tc;
 			else
 				batchPriTransactionsStarted[req.flags & 1] += tc;

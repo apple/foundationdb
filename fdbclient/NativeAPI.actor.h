@@ -131,6 +131,8 @@ struct TransactionOptions {
 	bool includePort : 1;
 	bool reportConflictingKeys : 1;
 
+	TransactionPriority priority;
+
 	TagSet tags; // All tags set on transaction
 	TagSet readTags; // Tags that can be sent with read requests
 
@@ -303,8 +305,6 @@ public:
 	Reference<TransactionLogInfo> trLogInfo;
 private:
 	Future<Version> getReadVersion(uint32_t flags);
-	void setPriority(uint32_t priorityFlag);
-
 	Database cx;
 
 	double backoff;

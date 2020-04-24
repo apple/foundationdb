@@ -87,7 +87,7 @@ Key TagThrottleKey::toKey() const {
 TagThrottleKey TagThrottleKey::fromKey(const KeyRef& key) {
 	const uint8_t *str = key.substr(tagThrottleKeysPrefix.size()).begin();
 	bool autoThrottled = *(str++) != 0;
-	ThrottleApi::Priority priority = ThrottleApi::Priority(*(str++));
+	TransactionPriority priority = TransactionPriority(*(str++));
 	TagSet tags;
 
 	while(str < key.end()) {
@@ -107,35 +107,6 @@ TagThrottleValue TagThrottleValue::fromValue(const ValueRef& value) {
 }
 
 namespace ThrottleApi {
-	Priority priorityFromReadVersionFlags(int flags) {
-		if((flags & GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) == GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
-			return Priority::IMMEDIATE;
-		}
-		else if((flags & GetReadVersionRequest::PRIORITY_DEFAULT) == GetReadVersionRequest::PRIORITY_DEFAULT) {
-			return Priority::DEFAULT;
-		}
-		else if((flags & GetReadVersionRequest::PRIORITY_BATCH) == GetReadVersionRequest::PRIORITY_BATCH) {
-			return Priority::BATCH;
-		}
-
-		ASSERT(false);
-		throw internal_error();
-	}
-
-	const char* priorityToString(Priority priority, bool capitalize) {
-		switch(priority) {
-			case Priority::BATCH:
-				return capitalize ? "Batch" : "batch";
-			case Priority::DEFAULT:
-				return capitalize ? "Default" : "default";
-			case Priority::IMMEDIATE:
-				return capitalize ? "Immediate" : "immediate";
-		}
-
-		ASSERT(false);
-		throw internal_error();
-	}
-
 	void signalThrottleChange(Transaction &tr) {
 		tr.atomicOp(tagThrottleSignalKey, LiteralStringRef("XXXXXXXXXX\x00\x00\x00\x00"), MutationRef::SetVersionstampedValue);
 	}
@@ -190,7 +161,7 @@ namespace ThrottleApi {
 		}
 	}
 
-	ACTOR Future<Void> throttleTags(Database db, TagSet tags, double tpsRate, double initialDuration, bool autoThrottled, ThrottleApi::Priority priority, Optional<double> expirationTime) {
+	ACTOR Future<Void> throttleTags(Database db, TagSet tags, double tpsRate, double initialDuration, bool autoThrottled, TransactionPriority priority, Optional<double> expirationTime) {
 		state Transaction tr(db);
 		state Key key = TagThrottleKey(tags, autoThrottled, priority).toKey();
 
@@ -225,7 +196,7 @@ namespace ThrottleApi {
 		}
 	}
 
-	ACTOR Future<bool> unthrottleTags(Database db, TagSet tags, bool autoThrottled, ThrottleApi::Priority priority) {
+	ACTOR Future<bool> unthrottleTags(Database db, TagSet tags, bool autoThrottled, TransactionPriority priority) {
 		state Transaction tr(db);
 		state Key key = TagThrottleKey(tags, autoThrottled, priority).toKey();
 

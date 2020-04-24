@@ -374,7 +374,7 @@ struct BackupData {
 
 	ACTOR static Future<Version> _getMinKnownCommittedVersion(BackupData* self) {
 		loop {
-			GetReadVersionRequest request(1, GetReadVersionRequest::PRIORITY_DEFAULT |
+			GetReadVersionRequest request(1, TransactionPriority::DEFAULT,
 			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
 				when(wait(self->cx->onMasterProxiesChanged())) {}

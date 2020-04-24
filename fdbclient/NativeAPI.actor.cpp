@@ -1515,7 +1515,7 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 		loop {
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
-				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE ), cx->taskID ) ) ) {
+				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, TransactionPriority::IMMEDIATE ), cx->taskID ) ) ) {
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 
 					if (v.version >= version)
@@ -1535,7 +1535,7 @@ ACTOR Future<Version> getRawVersion( Database cx ) {
 	loop {
 		choose {
 			when ( wait( cx->onMasterProxiesChanged() ) ) {}
-			when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE ), cx->taskID ) ) ) {
+			when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, TransactionPriority::IMMEDIATE ), cx->taskID ) ) ) {
 				return v.version;
 			}
 		}
@@ -2105,9 +2105,7 @@ Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version>
 
 Transaction::Transaction( Database const& cx )
 	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0), trLogInfo(createTrLogInfoProbabilistically(cx))
-{
-	setPriority(GetReadVersionRequest::PRIORITY_DEFAULT);
-}
+{}
 
 Transaction::~Transaction() {
 	flushTrLogsIfEnabled();
@@ -2523,7 +2521,7 @@ double Transaction::getBackoff(int errCode) {
 	double returnedBackoff = backoff;
 
 	if(errCode == error_code_tag_throttled) {
-		auto priorityItr = cx->throttledTags.find(ThrottleApi::priorityFromReadVersionFlags(options.getReadVersionFlags));
+		auto priorityItr = cx->throttledTags.find(options.priority);
 		for(auto &tag : options.tags) {
 			if(priorityItr != cx->throttledTags.end()) {
 				auto tagItr = priorityItr->second.find(tag);
@@ -2563,6 +2561,7 @@ TransactionOptions::TransactionOptions() {
 	sizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 	tags = TagSet();
 	readTags = TagSet();
+	priority = TransactionPriority::DEFAULT;
 }
 
 void TransactionOptions::reset(Database const& cx) {
@@ -2571,6 +2570,7 @@ void TransactionOptions::reset(Database const& cx) {
 	sizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 	tags = TagSet();
 	readTags = TagSet();
+	priority = TransactionPriority::DEFAULT;
 	lockAware = cx->lockAware;
 	if (cx->apiVersionAtLeast(630)) {
 		includePort = true;
@@ -2593,7 +2593,6 @@ void Transaction::reset() {
 
 	if(apiVersionAtLeast(16)) {
 		options.reset(cx);
-		setPriority(GetReadVersionRequest::PRIORITY_DEFAULT);
 	}
 }
 
@@ -3038,10 +3037,6 @@ Future<Void> Transaction::commit() {
 	return committing;
 }
 
-void Transaction::setPriority( uint32_t priorityFlag ) {
-	options.getReadVersionFlags = (options.getReadVersionFlags & ~GetReadVersionRequest::FLAG_PRIORITY_MASK) | priorityFlag;
-}
-
 void Transaction::setOption( FDBTransactionOptions::Option option, Optional<StringRef> value ) {
 	switch(option) {
 		case FDBTransactionOptions::INITIALIZE_NEW_DATABASE:
@@ -3059,12 +3054,12 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 
 		case FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE:
 			validateOptionValue(value, false);
-			setPriority(GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE);
+			options.priority = TransactionPriority::IMMEDIATE;
 			break;
 
 		case FDBTransactionOptions::PRIORITY_BATCH:
 			validateOptionValue(value, false);
-			setPriority(GetReadVersionRequest::PRIORITY_BATCH);
+			options.priority = TransactionPriority::BATCH;
 			break;
 
 		case FDBTransactionOptions::CAUSAL_WRITE_RISKY:
@@ -3216,17 +3211,17 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 	}
 }
 
-ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx, uint32_t transactionCount, uint32_t flags, TransactionTagMap<uint32_t> tags, Optional<UID> debugID ) {
+ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx, uint32_t transactionCount, TransactionPriority priority, uint32_t flags, TransactionTagMap<uint32_t> tags, Optional<UID> debugID ) {
 	try {
 		++cx->transactionReadVersionBatches;
 		if( debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
 		loop {
-			state GetReadVersionRequest req( transactionCount, flags, tags, debugID );
+			state GetReadVersionRequest req( transactionCount, priority, flags, tags, debugID );
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
-					auto &priorityThrottledTags = cx->throttledTags[ThrottleApi::priorityFromReadVersionFlags(flags)];
+					auto &priorityThrottledTags = cx->throttledTags[priority];
 					for(auto& tag : tags) {
 						auto itr = v.tagThrottleInfo.find(tag.first);
 						if(itr == v.tagThrottleInfo.end()) {
@@ -3255,7 +3250,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 	}
 }
 
-ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<DatabaseContext::VersionRequest> versionStream, uint32_t flags ) {
+ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<DatabaseContext::VersionRequest> versionStream, TransactionPriority priority, uint32_t flags ) {
 	state std::vector< Promise<GetReadVersionReply> > requests;
 	state PromiseStream< Future<Void> > addActor;
 	state Future<Void> collection = actorCollection( addActor.getFuture() );
@@ -3306,7 +3301,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 			addActor.send(ready(timeReply(GRVReply.getFuture(), replyTimes)));
 
 			Future<Void> batch = incrementalBroadcastWithError(
-			    getConsistentReadVersion(cx, count, flags, std::move(tags), std::move(debugID)),
+			    getConsistentReadVersion(cx, count, priority, flags, std::move(tags), std::move(debugID)),
 			    std::vector<Promise<GetReadVersionReply>>(requests), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 
 			tags.clear();
@@ -3318,12 +3313,12 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 	}
 }
 
-ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f, bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion, TagSet tags) {
+ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, TransactionPriority priority, Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f, bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion, TagSet tags) {
 	GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
 	if (trLogInfo)
-		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V2(startTime, latency, flags & GetReadVersionRequest::FLAG_PRIORITY_MASK));
+		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V2(startTime, latency, priority));
 	if (rep.version == 1 && rep.locked) {
 		throw proxy_memory_limit_exceeded();
 	}
@@ -3331,20 +3326,21 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Re
 		throw database_locked();
 
 	++cx->transactionReadVersionsCompleted;
-	if((flags & GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) == GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
-		++cx->transactionImmediateReadVersionsCompleted;
-	}
-	else if((flags & GetReadVersionRequest::PRIORITY_DEFAULT) == GetReadVersionRequest::PRIORITY_DEFAULT) {
-		++cx->transactionDefaultReadVersionsCompleted;
-	}
-	else if((flags & GetReadVersionRequest::PRIORITY_BATCH) == GetReadVersionRequest::PRIORITY_BATCH) {
-		++cx->transactionBatchReadVersionsCompleted;
-	}
-	else {
-		ASSERT(false);
+	switch(priority) {
+		case TransactionPriority::IMMEDIATE:
+			++cx->transactionImmediateReadVersionsCompleted;
+			break;
+		case TransactionPriority::DEFAULT:
+			++cx->transactionDefaultReadVersionsCompleted;
+			break;
+		case TransactionPriority::BATCH:
+			++cx->transactionBatchReadVersionsCompleted;
+			break;
+		default:
+			ASSERT(false);
 	}
 
-	auto &priorityThrottledTags = cx->throttledTags[ThrottleApi::priorityFromReadVersionFlags(flags)];
+	auto &priorityThrottledTags = cx->throttledTags[priority];
 	for(auto &tag : tags) {
 		auto itr = priorityThrottledTags.find(tag);
 		if(itr != priorityThrottledTags.end()) {
@@ -3378,23 +3374,27 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
 		++cx->transactionReadVersions;
 		flags |= options.getReadVersionFlags;
-		if((flags & GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) == GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
-			++cx->transactionImmediateReadVersions;
-		}
-		else if((flags & GetReadVersionRequest::PRIORITY_DEFAULT) == GetReadVersionRequest::PRIORITY_DEFAULT) {
-			++cx->transactionDefaultReadVersions;
-		}
-		else if((flags & GetReadVersionRequest::PRIORITY_BATCH) == GetReadVersionRequest::PRIORITY_BATCH) {
-			++cx->transactionBatchReadVersions;
-		}
-		else {
-			ASSERT(false);
+		switch(options.priority) {
+			case TransactionPriority::IMMEDIATE:
+				flags &= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE;
+				++cx->transactionImmediateReadVersions;
+				break;
+			case TransactionPriority::DEFAULT:
+				flags &= GetReadVersionRequest::PRIORITY_DEFAULT;
+				++cx->transactionDefaultReadVersions;
+				break;	
+			case TransactionPriority::BATCH:
+				flags &= GetReadVersionRequest::PRIORITY_BATCH;
+				++cx->transactionBatchReadVersions;
+				break;
+			default:
+				ASSERT(false);
 		}
 
 		double maxThrottleDelay = 0.0;
 		bool canRecheck = false;
 		if(options.tags.size() != 0) {
-			auto &priorityThrottledTags = cx->throttledTags[ThrottleApi::priorityFromReadVersionFlags(flags)];
+			auto &priorityThrottledTags = cx->throttledTags[options.priority];
 			for(auto &tag : options.tags) {
 				auto itr = priorityThrottledTags.find(tag);
 				if(itr != priorityThrottledTags.end()) {
@@ -3423,13 +3423,13 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 
 		auto& batcher = cx->versionBatcher[ flags ];
 		if (!batcher.actor.isValid()) {
-			batcher.actor = readVersionBatcher( cx.getPtr(), batcher.stream.getFuture(), flags );
+			batcher.actor = readVersionBatcher( cx.getPtr(), batcher.stream.getFuture(), options.priority, flags );
 		}
 
 		auto const req = DatabaseContext::VersionRequest(options.tags, info.debugID);
 		batcher.stream.send(req);
 		startTime = now();
-		readVersion = extractReadVersion( cx.getPtr(), flags, trLogInfo, req.reply.getFuture(), options.lockAware, startTime, metadataVersion, options.tags);
+		readVersion = extractReadVersion( cx.getPtr(), options.priority, trLogInfo, req.reply.getFuture(), options.lockAware, startTime, metadataVersion, options.tags);
 	}
 	return readVersion;
 }

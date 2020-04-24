@@ -192,22 +192,53 @@ struct GetReadVersionRequest : TimedRequest {
 
 	uint32_t transactionCount;
 	uint32_t flags;
+	TransactionPriority priority;
 
 	TransactionTagMap<uint32_t> tags;
 
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
-	GetReadVersionRequest() : transactionCount( 1 ), flags( PRIORITY_DEFAULT ) {}
-	GetReadVersionRequest( uint32_t transactionCount, uint32_t flags, TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(), Optional<UID> debugID = Optional<UID>() ) 
-	    : transactionCount( transactionCount ), flags( flags ), tags(tags), debugID( debugID ) {}
+	GetReadVersionRequest() : transactionCount(1), flags(0) {}
+	GetReadVersionRequest(uint32_t transactionCount, TransactionPriority priority, uint32_t flags = 0, TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(), Optional<UID> debugID = Optional<UID>()) 
+	    : transactionCount(transactionCount), priority(priority), flags(flags), tags(tags), debugID(debugID) 
+	{
+		flags = flags & ~FLAG_PRIORITY_MASK;
+		switch(priority) {
+			case TransactionPriority::BATCH:
+				flags &= PRIORITY_BATCH;
+				break;
+			case TransactionPriority::DEFAULT:
+				flags &= PRIORITY_DEFAULT;
+				break;
+			case TransactionPriority::IMMEDIATE:
+				flags &= PRIORITY_SYSTEM_IMMEDIATE;
+				break;
+			default:
+				ASSERT(false);
+		}
+	}
 	
-	int priority() const { return flags & FLAG_PRIORITY_MASK; }
-	bool operator < (GetReadVersionRequest const& rhs) const { return priority() < rhs.priority(); }
+	bool operator < (GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
 		serializer(ar, transactionCount, flags, tags, debugID, reply);
+
+		if(ar.isDeserializing) {
+			if((flags & PRIORITY_SYSTEM_IMMEDIATE) == PRIORITY_SYSTEM_IMMEDIATE) {
+				priority = TransactionPriority::IMMEDIATE;
+			}
+			else if((flags & PRIORITY_DEFAULT) == PRIORITY_DEFAULT) {
+				priority = TransactionPriority::DEFAULT;
+			}
+			else if((flags & PRIORITY_BATCH) == PRIORITY_BATCH) {
+				priority = TransactionPriority::BATCH;
+			}
+			else {
+				priority = TransactionPriority::DEFAULT;
+			}
+		}
 	}
 };
 

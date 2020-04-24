@@ -33,18 +33,6 @@
 class Database;
 
 namespace ThrottleApi {
-	enum class Priority {
-		BATCH,
-		DEFAULT,
-		IMMEDIATE,
-		MIN=BATCH,
-		MAX=IMMEDIATE
-	};
-
-	const std::array<Priority, (int)Priority::MAX+1> allPriorities = { Priority::BATCH, Priority::DEFAULT, Priority::IMMEDIATE };
-
-	const char* priorityToString(Priority priority, bool capitalize=true); 
-	Priority priorityFromReadVersionFlags(int flags); 
 }
 
 typedef StringRef TransactionTagRef;
@@ -118,10 +106,10 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 struct TagThrottleKey {
 	TagSet tags;
 	bool autoThrottled;
-	ThrottleApi::Priority priority;
+	TransactionPriority priority;
 
-	TagThrottleKey() : autoThrottled(false), priority(ThrottleApi::Priority::DEFAULT) {}
-	TagThrottleKey(TagSet tags, bool autoThrottled, ThrottleApi::Priority priority) 
+	TagThrottleKey() : autoThrottled(false), priority(TransactionPriority::DEFAULT) {}
+	TagThrottleKey(TagSet tags, bool autoThrottled, TransactionPriority priority) 
 		: tags(tags), autoThrottled(autoThrottled), priority(priority) {}
 
 	Key toKey() const;
@@ -148,7 +136,7 @@ struct TagThrottleValue {
 struct TagThrottleInfo {
 	TransactionTag tag;
 	bool autoThrottled;
-	ThrottleApi::Priority priority;
+	TransactionPriority priority;
 	double tpsRate;
 	double expirationTime;
 	double initialDuration;
@@ -165,9 +153,9 @@ namespace ThrottleApi {
 	Future<std::vector<TagThrottleInfo>> getThrottledTags(Database const& db, int const& limit);
 
 	Future<Void> throttleTags(Database const& db, TagSet const& tags, double const& tpsRate, double const& initialDuration, 
-	                         bool const& autoThrottled, ThrottleApi::Priority const& priority, Optional<double> const& expirationTime = Optional<double>());
+	                         bool const& autoThrottled, TransactionPriority const& priority, Optional<double> const& expirationTime = Optional<double>());
 
-	Future<bool> unthrottleTags(Database const& db, TagSet const& tags, bool const& autoThrottled, ThrottleApi::Priority const& priority);
+	Future<bool> unthrottleTags(Database const& db, TagSet const& tags, bool const& autoThrottled, TransactionPriority const& priority);
 
 	Future<uint64_t> unthrottleManual(Database db);
 	Future<uint64_t> unthrottleAuto(Database db);
@@ -176,12 +164,12 @@ namespace ThrottleApi {
 	Future<Void> enableAuto(Database const& db, bool const& enabled);
 };
 
-BINARY_SERIALIZABLE(ThrottleApi::Priority);
+BINARY_SERIALIZABLE(TransactionPriority);
 
 template<class Value>
 using TransactionTagMap = std::unordered_map<TransactionTag, Value, std::hash<TransactionTagRef>>;
 
 template<class Value>
-using PrioritizedTransactionTagMap = std::map<ThrottleApi::Priority, TransactionTagMap<Value>>;
+using PrioritizedTransactionTagMap = std::map<TransactionPriority, TransactionTagMap<Value>>;
 
 #endif

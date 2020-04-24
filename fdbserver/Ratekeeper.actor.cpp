@@ -184,12 +184,12 @@ private:
 	Smoother smoothRequests;
 
 public:
-	std::map<ThrottleApi::Priority, PriorityThrottleData> throttleData;
+	std::map<TransactionPriority, PriorityThrottleData> throttleData;
 
 	RkTagThrottleData() : smoothRequests(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) {}
 
 	// Inserts or updates a throttle
-	void insertOrUpdateThrottle(TransactionTagRef tag, ThrottleApi::Priority priority, bool autoThrottle, double tpsRate, double expiration) {
+	void insertOrUpdateThrottle(TransactionTagRef tag, TransactionPriority priority, bool autoThrottle, double tpsRate, double expiration) {
 		ASSERT(tpsRate >= 0);
 		ASSERT(expiration > now());
 
@@ -197,6 +197,11 @@ public:
 		Optional<ClientTagThrottleLimits> oldThrottleData;
 		if(autoThrottle) {
 			oldThrottleData = priorityThrottleData.autoThrottleData;
+			
+			// Auto throttle rates cannot be increased while active
+			if(oldThrottleData.present()) {
+				tpsRate = std::min(oldThrottleData.get().tpsRate, tpsRate);
+			}
 			priorityThrottleData.autoThrottleData = ClientTagThrottleLimits(tpsRate, expiration);
 		}
 		else {
@@ -208,7 +213,7 @@ public:
 			TraceEvent("RatekeeperAddingThrottle")
 				.detail("Tag", tag)
 				.detail("Rate", tpsRate)
-				.detail("Priority", ThrottleApi::priorityToString(priority))
+				.detail("Priority", transactionPriorityToString(priority))
 				.detail("SecondsToExpiration", expiration - now())
 				.detail("AutoThrottled", autoThrottle);
 		}
@@ -216,7 +221,7 @@ public:
 			TraceEvent("RatekeeperUpdatingThrottle")
 				.detail("Tag", tag)
 				.detail("Rate", tpsRate)
-				.detail("Priority", ThrottleApi::priorityToString(priority))
+				.detail("Priority", transactionPriorityToString(priority))
 				.detail("SecondsToExpiration", expiration - now())
 				.detail("AutoThrottled", autoThrottle);
 		}
@@ -226,7 +231,7 @@ public:
 	}
 
 	// Remove the specified throttle and returns true if this tag still has throttles present
-	bool eraseThrottle(ThrottleApi::Priority priority, bool autoThrottle) {
+	bool eraseThrottle(TransactionPriority priority, bool autoThrottle) {
 		auto itr = throttleData.find(priority);
 		if(itr != throttleData.end()) {
 			bool erase = false;
@@ -247,7 +252,7 @@ public:
 		}
 	}
 
-	Optional<std::pair<double, double>> getClientRate(ThrottleApi::Priority minPriority) {
+	Optional<std::pair<double, double>> getClientRate(TransactionPriority minPriority) {
 		Optional<std::pair<double, double>> clientRate;
 		double requestRate = smoothRequests.smoothRate();
 		for(auto itr = throttleData.lower_bound(minPriority); itr != throttleData.end();) {
@@ -269,7 +274,11 @@ public:
 
 	void addRequests(int requests) {
 		smoothRequests.addDelta(requests);
-		getClientRate(ThrottleApi::Priority::BATCH); // Update client rates based on new request rate
+		getClientRate(TransactionPriority::BATCH); // Update client rates based on new request rate
+	}
+
+	double getRequestRate() { 
+		return smoothRequests.smoothRate();
 	}
 };
 
@@ -598,6 +607,35 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 	}
 }
 
+// TODO: limit the number of throttles active for a storage server
+// TODO: correctly limit auto throttled count
+// TODO: allow adjusting existing throttle
+// TODO: wait for all proxies to report before throttling down
+void autoThrottleTag(RatekeeperData *self, StorageQueueInfo const& ss, TransactionTagMap<RkTagThrottleData>& throttledTags) {
+	if(ss.busiestTag.present() && ss.busiestTagFractionalBusyness > SERVER_KNOBS->MIN_TAG_BUSYNESS
+	   && ss.busiestTagRate > SERVER_KNOBS->MIN_TAG_COST && throttledTags.size() <= SERVER_KNOBS->MAX_AUTO_THROTTLED_TRANSACTION_TAGS) {
+		auto &throttle = throttledTags[ss.busiestTag.get()];
+
+		double targetRate = 1e7;
+		double requestRate = throttle.getRequestRate();
+		if(requestRate != 0) { // TODO: figure out this condition
+			double targetFraction = SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS * (1-ss.busiestTagFractionalBusyness) / ((1-SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS) * ss.busiestTagFractionalBusyness);
+			targetRate = requestRate * targetFraction;
+		}
+		TraceEvent("RkSetAutoThrottle").detail("TargetRate", targetRate);
+
+		throttle.insertOrUpdateThrottle(ss.busiestTag.get(), TransactionPriority::DEFAULT, true, targetRate, now() + SERVER_KNOBS->TAG_AUTO_THROTTLE_DURATION);
+		throttle.insertOrUpdateThrottle(ss.busiestTag.get(), TransactionPriority::BATCH, true, 0, now() + SERVER_KNOBS->TAG_AUTO_THROTTLE_DURATION);
+
+		TagSet tags;
+		tags.addTag(ss.busiestTag.get());
+
+		// TODO: same transaction?
+		self->addActor.send(ThrottleApi::throttleTags(self->db, tags, targetRate, SERVER_KNOBS->TAG_AUTO_THROTTLE_DURATION, true, TransactionPriority::DEFAULT, now() + SERVER_KNOBS->TAG_AUTO_THROTTLE_DURATION));
+		self->addActor.send(ThrottleApi::throttleTags(self->db, tags, 0, SERVER_KNOBS->TAG_AUTO_THROTTLE_DURATION, true, TransactionPriority::BATCH, now() + SERVER_KNOBS->TAG_AUTO_THROTTLE_DURATION));
+	}
+}
+
 void updateRate(RatekeeperData* self, RatekeeperLimits* limits, TransactionTagMap<RkTagThrottleData>& throttledTags) {
 	//double controlFactor = ;  // dt / eFoldingTime
 
@@ -665,28 +703,11 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits, TransactionTagMa
 
 		double targetRateRatio = std::min(( storageQueue - targetBytes + springBytes ) / (double)springBytes, 2.0);
 
-		// TODO: limit the number of throttles active for a storage server
-		/*if(storageQueue > targetBytes / 2.0 && ss.busiestTag.present() && ss.busiestTagFractionalBusyness > 0.2
-		   && ss.busiestTagRate > 1000 && throttledTags.size() < 10) {
-			auto &throttle = throttledTags[ss.busiestTag.get()];
-
-			double throttleRate = (storageQueue - targetBytes / 2.0) / targetBytes / 2.0;
-
-			if(throttle.expiration <= now() || throttle.tpsRate > throttleRate * 0.95) {
-				TraceEvent(format("RatekeeperThrottlingTag%s", limits->context).c_str())
-					.detail("Tag", ss.busiestTag.get())
-					.detail("ThrottleRate", throttleRate);
-			}
-
-			if(throttle.expiration <= now()) {
-				throttle.tpsRate = throttleRate;
-			}
-			else {
-				throttle.expiration = std::max(throttle.tpsRate, throttleRate);
-			}
-
-			throttle.expiration = now() + 120.0;
-		}*/
+		// TODO: parameterize by queue
+		TraceEvent("RkCheckingAutoThrottle").detail("StorageQueue", storageQueue).detail("BusiestTag", ss.busiestTag.present() ? ss.busiestTag.get() : LiteralStringRef("<none>")).detail("FractionalBusyness", ss.busiestTagFractionalBusyness).detail("BusiestTagRate", ss.busiestTagRate).detail("ThrottledTags", throttledTags.size());
+		if (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES || storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
+			autoThrottleTag(self, ss, throttledTags);
+		}
 
 		double inputRate = ss.smoothInputBytes.smoothRate();
 		//inputRate = std::max( inputRate, actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
@@ -1064,7 +1085,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 
 					reply.throttledTags = PrioritizedTransactionTagMap<ClientTagThrottleLimits>();
 					for(auto itr = self.throttledTags.begin(); itr != self.throttledTags.end();) {
-						for(auto priority : ThrottleApi::allPriorities) {
+						for(auto priority : allTransactionPriorities) {
 							Optional<std::pair<double, double>> clientRate = itr->second.getClientRate(priority);
 							if(clientRate.present()) {
 								auto &priorityTags = reply.throttledTags.get()[priority];
@@ -1073,7 +1094,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 
 							// Handle throttle expiration. We expire a throttle if no rate is returned for the lowest priority,
 							// which means that no throttles are active at any priority.
-							else if(priority == ThrottleApi::Priority::MIN) {
+							else if(priority == TransactionPriority::MIN) {
 								itr = self.throttledTags.erase(itr);
 								break;
 							}

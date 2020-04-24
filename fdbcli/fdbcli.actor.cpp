@@ -3883,7 +3883,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								printf("  %12d | %13ds | %9s | %6s | %s\n", 
 									(int)(itr->tpsRate), 
 									std::min((int)(itr->expirationTime-now()), (int)(itr->initialDuration)), 
-									ThrottleApi::priorityToString(itr->priority, false), 
+									transactionPriorityToString(itr->priority, false), 
 									itr->autoThrottled ? "auto" : "manual", 
 									itr->tag.toString().c_str());
 							}
@@ -3944,14 +3944,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						TagSet tags;
 						tags.addTag(tokens[3]);
 
-						wait(ThrottleApi::throttleTags(db, tags, tpsRate, duration, false, ThrottleApi::Priority::DEFAULT));
+						wait(ThrottleApi::throttleTags(db, tags, tpsRate, duration, false, TransactionPriority::DEFAULT));
 						printf("Tag `%s' has been throttled\n", tokens[3].toString().c_str());
 					}
 					else if(tokencmp(tokens[1], "off")) {
 						if(tokencmp(tokens[2], "tag") && tokens.size() == 4) {
 							TagSet tags;
 							tags.addTag(tokens[3]);
-							bool success = wait(ThrottleApi::unthrottleTags(db, tags, false, ThrottleApi::Priority::DEFAULT)); // TODO: Allow targeting priority and auto/manual
+							bool success = wait(ThrottleApi::unthrottleTags(db, tags, false, TransactionPriority::DEFAULT)); // TODO: Allow targeting priority and auto/manual
 							if(success) {
 								printf("Unthrottled tag `%s'\n", tokens[3].toString().c_str());
 							}
