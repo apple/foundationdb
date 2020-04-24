@@ -363,6 +363,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 				    .detail("SendBatchRequests", requests.size())
 				    .detail("RequestID", request.first)
 				    .detail("Request", request.second.toString());
+				resetReply(request.second);
 			}
 		}
 	}
