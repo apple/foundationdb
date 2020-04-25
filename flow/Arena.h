@@ -964,7 +964,7 @@ private:
 		// SOMEDAY: Maybe we are right at the end of the arena and can expand cheaply
 		T* newData = (T*)new (p) uint8_t[requiredCapacity * sizeof(T)];
 		if (m_size > 0) {
-			std::copy(data, data + m_size, newData);
+			std::move(data, data + m_size, newData);
 		}
 		data = newData;
 		m_capacity = requiredCapacity;
