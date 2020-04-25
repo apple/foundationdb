@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.2.21
+======
+
+Fixes
+-----
+
+* HTTPS requests made by backup could hang indefinitely.  `(PR #3027) <https://github.com/apple/foundationdb/pull/3027>`_
+
 6.2.20
 ======
 
