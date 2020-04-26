@@ -157,7 +157,7 @@ struct TransactionRateInfo {
 	}
 
 	void setRate(double rate) {
-		ASSERT(rate >= 0 && rate != std::numeric_limits<double>::infinity() && !isnan(rate));
+		ASSERT(rate >= 0 && rate != std::numeric_limits<double>::infinity() && !std::isnan(rate));
 
 		this->rate = rate;
 		if(disabled) {
