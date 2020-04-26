@@ -561,10 +561,10 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				    .detail("MessageIndex", msgIndex)
 				    .detail("RestoreAsset", asset.toString())
 				    .detail("Requests", requests.size());
-				// fSends.push_back(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces,
-				//                                    requests, TaskPriority::RestoreLoaderSendMutations));
-				wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
-				                       TaskPriority::RestoreLoaderSendMutations));
+				fSends.push_back(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces,
+				                                   requests, TaskPriority::RestoreLoaderSendMutations));
+				// wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
+				//                        TaskPriority::RestoreLoaderSendMutations));
 				msgIndex++;
 				msgSize = 0;
 				for (auto& applierID : applierIDs) {
@@ -587,13 +587,12 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 		    .detail("MessageIndex", msgIndex)
 		    .detail("RestoreAsset", asset.toString())
 		    .detail("Requests", requests.size());
-		// fSends.push_back(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces,
-		// requests,
-		//                                    TaskPriority::RestoreLoaderSendMutations));
-		wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
-		                       TaskPriority::RestoreLoaderSendMutations));
+		fSends.push_back(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
+		                                   TaskPriority::RestoreLoaderSendMutations));
+		// wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
+		//                        TaskPriority::RestoreLoaderSendMutations));
 	}
-	// wait(waitForAll(fSends));
+	wait(waitForAll(fSends));
 
 	TraceEvent("FastRestoreLoaderSendMutationToAppliers")
 	    .detail("BatchIndex", batchIndex)

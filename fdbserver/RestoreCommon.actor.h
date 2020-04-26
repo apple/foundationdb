@@ -354,7 +354,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) break;
-			fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
+			// fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
 			TraceEvent(SevWarn, "FastRestoreSendBatchRequests")
 			    .detail("ErrorCode", e.code())
 			    .detail("ErrorInfo", e.what());
