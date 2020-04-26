@@ -594,6 +594,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	}
 	wait(waitForAll(fSends));
 
+	kvOps = VersionedMutationsMap(); // Free memory for parsed mutations at the restore asset.
 	TraceEvent("FastRestoreLoaderSendMutationToAppliers")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("RestoreAsset", asset.toString())
