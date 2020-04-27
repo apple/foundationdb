@@ -829,7 +829,7 @@ Implementation Details
 
 These following sections go into some of the gritty details of FoundationDB. Most users don't need to read or understand this in order to use FoundationDB efficiently.
 
-How FoundationDB detects Conflicts
+How FoundationDB Detects Conflicts
 ----------------------------------
 
 As written above, FoundationDB implements serializable transactions with external consistency. The underlying algorithm uses multi-version concurrency control. At commit time, each transaction is checked for read-write conflicts.
