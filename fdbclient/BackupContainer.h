@@ -68,6 +68,9 @@ static const uint32_t BACKUP_AGENT_MLOG_VERSION = 2001;
 // Mutation log version written by BackupWorker
 static const uint32_t PARTITIONED_MLOG_VERSION = 4110;
 
+// Snapshot file version written by FileBackupAgent
+static const uint32_t BACKUP_AGENT_SNAPSHOT_FILE_VERSION = 1001;
+
 struct LogFile {
 	Version beginVersion;
 	Version endVersion;

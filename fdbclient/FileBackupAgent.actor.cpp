@@ -461,7 +461,8 @@ namespace fileBackup {
 	//   then the space after the final key to the next 1MB boundary would
 	//   just be padding anyway.
 	struct RangeFileWriter {
-		RangeFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0) : file(file), blockSize(blockSize), blockEnd(0), fileVersion(1001) {}
+	    RangeFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
+	      : file(file), blockSize(blockSize), blockEnd(0), fileVersion(BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {}
 
 		// Handles the first block and internal blocks.  Ends current block if needed.
 		// The final flag is used in simulation to pad the file's final block to a whole block size
@@ -557,8 +558,8 @@ namespace fileBackup {
 		state StringRefReader reader(buf, restore_corrupted_data());
 
 		try {
-			// Read header, currently only decoding version 1001
-			if(reader.consume<int32_t>() != 1001)
+			// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION
+			if(reader.consume<int32_t>() != BACKUP_AGENT_SNAPSHOT_FILE_VERSION)
 				throw restore_unsupported_file_version();
 
 			// Read begin key, if this fails then block was invalid.
