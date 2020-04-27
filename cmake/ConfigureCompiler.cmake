@@ -254,7 +254,7 @@ else()
   endif()
   if (GCC)
     add_compile_options(-Wno-pragmas)
-
+    add_compile_options(-mavx)
     # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
     # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
     add_compile_options(-Wno-attributes)

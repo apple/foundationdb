@@ -7,11 +7,10 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include <rte_common.h>
-#include <rte_random.h>
-#include <rte_memcpy.h>
+#include "flow/rte_memcpy.h"
+#include "flow/IRandom.h"
 
-#include "test.h"
+#include "flow/UnitTest.h"
 
 /*
  * Set this to the maximum buffer size you want to test. If it is 0, then the
@@ -54,7 +53,7 @@ test_single_memcpy(unsigned int off_src, unsigned int off_dst, size_t size)
 	/* Setup buffers */
 	for (i = 0; i < SMALL_BUFFER_SIZE + ALIGNMENT_UNIT; i++) {
 		dest[i] = 0;
-		src[i] = (uint8_t) rte_rand();
+		src[i] = (uint8_t) deterministicRandom()->randomUInt32();
 	}
 
 	/* Do the copy */
@@ -99,9 +98,7 @@ test_single_memcpy(unsigned int off_src, unsigned int off_dst, size_t size)
 /*
  * Check functionality for various buffer sizes and data offsets/alignments.
  */
-static int
-func_test(void)
-{
+TEST_CASE("/rte/memcpy") {
 	unsigned int off_src, off_dst, i;
 	unsigned int num_buf_sizes = sizeof(buf_sizes) / sizeof(buf_sizes[0]);
 	int ret;
@@ -111,23 +108,11 @@ func_test(void)
 			for (i = 0; i < num_buf_sizes; i++) {
 				ret = test_single_memcpy(off_src, off_dst,
 				                         buf_sizes[i]);
-				if (ret != 0)
-					return -1;
+				ASSERT(ret == 0);
 			}
 		}
 	}
-	return 0;
+	return Void();
 }
 
-static int
-test_memcpy(void)
-{
-	int ret;
-
-	ret = func_test();
-	if (ret != 0)
-		return -1;
-	return 0;
-}
-
-REGISTER_TEST_COMMAND(memcpy_autotest, test_memcpy);
+void forceLinkMemcpyTests() { }

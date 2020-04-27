@@ -8,14 +8,9 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
-#include <rte_common.h>
-#include <rte_cycles.h>
-#include <rte_random.h>
-#include <rte_malloc.h>
-
-#include <rte_memcpy.h>
-
-#include "test.h"
+#include "flow/rte_memcpy.h"
+#include "flow/IRandom.h"
+#include "flow/UnitTest.h"
 
 /*
  * Set this to the maximum buffer size you want to test. If it is 0, then the
@@ -67,6 +62,20 @@ static size_t buf_sizes[TEST_VALUE_RANGE];
 static uint8_t *large_buf_read, *large_buf_write;
 static uint8_t *small_buf_read, *small_buf_write;
 
+static size_t round_up(size_t sz, size_t alignment) {
+	return (((sz - 1) / alignment) + 1) * alignment;
+}
+
+static uint8_t * rte_malloc(char const * ignored, size_t sz, size_t align) {
+	return (uint8_t*) aligned_alloc(align, round_up(sz, align));
+}
+
+static void rte_free(void * ptr) {
+	if (!!ptr) {
+		free(ptr);
+	}
+}
+
 /* Initialise data buffers. */
 static int
 init_buffers(void)
@@ -90,9 +99,9 @@ init_buffers(void)
 		goto error_small_buf_write;
 
 	for (i = 0; i < LARGE_BUFFER_SIZE; i++)
-		large_buf_read[i] = rte_rand();
+		large_buf_read[i] = deterministicRandom()->randomUInt32();
 	for (i = 0; i < SMALL_BUFFER_SIZE; i++)
-		small_buf_read[i] = rte_rand();
+		small_buf_read[i] = deterministicRandom()->randomUInt32();
 
 	return 0;
 
@@ -124,7 +133,7 @@ free_buffers(void)
 static inline size_t
 get_rand_offset(size_t uoffset)
 {
-	return ((rte_rand() % (LARGE_BUFFER_SIZE - SMALL_BUFFER_SIZE)) &
+	return ((deterministicRandom()->randomUInt32() % (LARGE_BUFFER_SIZE - SMALL_BUFFER_SIZE)) &
 			~(ALIGNMENT_UNIT - 1)) + uoffset;
 }
 
@@ -269,17 +278,14 @@ perf_test_variable_unaligned(void)
 }
 
 /* Run all memcpy tests */
-static int
-perf_test(void)
-{
+TEST_CASE("performance/memcpy/rte") {
 	int ret;
 	struct timeval tv_begin, tv_end;
 	double time_aligned, time_unaligned;
 	double time_aligned_const, time_unaligned_const;
 
 	ret = init_buffers();
-	if (ret != 0)
-		return ret;
+	ASSERT(ret == 0);
 
 #if TEST_VALUE_RANGE != 0
 	/* Set up buf_sizes array, if required */
@@ -335,18 +341,7 @@ perf_test(void)
 	printf("Unaligned constant copy size = %8.3f\n", time_unaligned_const);
 	free_buffers();
 
-	return 0;
+	return Void();
 }
 
-static int
-test_memcpy_perf(void)
-{
-	int ret;
-
-	ret = perf_test();
-	if (ret != 0)
-		return -1;
-	return 0;
-}
-
-REGISTER_TEST_COMMAND(memcpy_perf_autotest, test_memcpy_perf);
+void forceLinkMemcpyPerfTests() {}

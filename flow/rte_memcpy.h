@@ -25,9 +25,8 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-#include <rte_vect.h>
-#include <rte_common.h>
-#include <rte_config.h>
+
+#include <flow/Platform.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -48,7 +47,7 @@ extern "C" {
  * @return
  *   Pointer to the destination data.
  */
-static __rte_always_inline void *
+static force_inline void *
 rte_memcpy(void *dst, const void *src, size_t n);
 
 #ifdef RTE_MACHINE_CPUFLAG_AVX512F
@@ -63,7 +62,7 @@ rte_memcpy(void *dst, const void *src, size_t n);
  * Copy 16 bytes from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov16(uint8_t *dst, const uint8_t *src)
 {
 	__m128i xmm0;
@@ -76,7 +75,7 @@ rte_mov16(uint8_t *dst, const uint8_t *src)
  * Copy 32 bytes from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov32(uint8_t *dst, const uint8_t *src)
 {
 	__m256i ymm0;
@@ -89,7 +88,7 @@ rte_mov32(uint8_t *dst, const uint8_t *src)
  * Copy 64 bytes from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov64(uint8_t *dst, const uint8_t *src)
 {
 	__m512i zmm0;
@@ -102,7 +101,7 @@ rte_mov64(uint8_t *dst, const uint8_t *src)
  * Copy 128 bytes from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov128(uint8_t *dst, const uint8_t *src)
 {
 	rte_mov64(dst + 0 * 64, src + 0 * 64);
@@ -113,7 +112,7 @@ rte_mov128(uint8_t *dst, const uint8_t *src)
  * Copy 256 bytes from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov256(uint8_t *dst, const uint8_t *src)
 {
 	rte_mov64(dst + 0 * 64, src + 0 * 64);
@@ -126,7 +125,7 @@ rte_mov256(uint8_t *dst, const uint8_t *src)
  * Copy 128-byte blocks from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov128blocks(uint8_t *dst, const uint8_t *src, size_t n)
 {
 	__m512i zmm0, zmm1;
@@ -174,7 +173,7 @@ rte_mov512blocks(uint8_t *dst, const uint8_t *src, size_t n)
 	}
 }
 
-static __rte_always_inline void *
+static force_inline void *
 rte_memcpy_generic(void *dst, const void *src, size_t n)
 {
 	uintptr_t dstu = (uintptr_t)dst;
@@ -304,7 +303,7 @@ COPY_BLOCK_128_BACK63:
  * Copy 16 bytes from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov16(uint8_t *dst, const uint8_t *src)
 {
 	__m128i xmm0;
@@ -317,7 +316,7 @@ rte_mov16(uint8_t *dst, const uint8_t *src)
  * Copy 32 bytes from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov32(uint8_t *dst, const uint8_t *src)
 {
 	__m256i ymm0;
@@ -330,7 +329,7 @@ rte_mov32(uint8_t *dst, const uint8_t *src)
  * Copy 64 bytes from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov64(uint8_t *dst, const uint8_t *src)
 {
 	rte_mov32((uint8_t *)dst + 0 * 32, (const uint8_t *)src + 0 * 32);
@@ -341,7 +340,7 @@ rte_mov64(uint8_t *dst, const uint8_t *src)
  * Copy 128 bytes from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov128(uint8_t *dst, const uint8_t *src)
 {
 	rte_mov32((uint8_t *)dst + 0 * 32, (const uint8_t *)src + 0 * 32);
@@ -354,7 +353,7 @@ rte_mov128(uint8_t *dst, const uint8_t *src)
  * Copy 128-byte blocks from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov128blocks(uint8_t *dst, const uint8_t *src, size_t n)
 {
 	__m256i ymm0, ymm1, ymm2, ymm3;
@@ -374,7 +373,7 @@ rte_mov128blocks(uint8_t *dst, const uint8_t *src, size_t n)
 	}
 }
 
-static __rte_always_inline void *
+static force_inline void *
 rte_memcpy_generic(void *dst, const void *src, size_t n)
 {
 	uintptr_t dstu = (uintptr_t)dst;
@@ -497,7 +496,7 @@ COPY_BLOCK_128_BACK31:
  * Copy 16 bytes from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov16(uint8_t *dst, const uint8_t *src)
 {
 	__m128i xmm0;
@@ -510,7 +509,7 @@ rte_mov16(uint8_t *dst, const uint8_t *src)
  * Copy 32 bytes from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov32(uint8_t *dst, const uint8_t *src)
 {
 	rte_mov16((uint8_t *)dst + 0 * 16, (const uint8_t *)src + 0 * 16);
@@ -521,7 +520,7 @@ rte_mov32(uint8_t *dst, const uint8_t *src)
  * Copy 64 bytes from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov64(uint8_t *dst, const uint8_t *src)
 {
 	rte_mov16((uint8_t *)dst + 0 * 16, (const uint8_t *)src + 0 * 16);
@@ -534,7 +533,7 @@ rte_mov64(uint8_t *dst, const uint8_t *src)
  * Copy 128 bytes from one location to another,
  * locations should not overlap.
  */
-static __rte_always_inline void
+static force_inline void
 rte_mov128(uint8_t *dst, const uint8_t *src)
 {
 	rte_mov16((uint8_t *)dst + 0 * 16, (const uint8_t *)src + 0 * 16);
@@ -666,7 +665,7 @@ __extension__ ({                                                      \
     }                                                                 \
 })
 
-static __rte_always_inline void *
+static force_inline void *
 rte_memcpy_generic(void *dst, const void *src, size_t n)
 {
 	__m128i xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8;
@@ -811,7 +810,7 @@ COPY_BLOCK_64_BACK15:
 
 #endif /* RTE_MACHINE_CPUFLAG */
 
-static __rte_always_inline void *
+static force_inline void *
 rte_memcpy_aligned(void *dst, const void *src, size_t n)
 {
 	void *ret = dst;
@@ -871,13 +870,30 @@ rte_memcpy_aligned(void *dst, const void *src, size_t n)
 	return ret;
 }
 
-static __rte_always_inline void *
+static force_inline void *
 rte_memcpy(void *dst, const void *src, size_t n)
 {
 	if (!(((uintptr_t)dst | (uintptr_t)src) & ALIGNMENT_MASK))
 		return rte_memcpy_aligned(dst, src, n);
 	else
 		return rte_memcpy_generic(dst, src, n);
+}
+
+static inline uint64_t
+rte_rdtsc(void)
+{
+	union {
+		uint64_t tsc_64;
+		struct {
+			uint32_t lo_32;
+			uint32_t hi_32;
+		};
+	} tsc;
+
+	asm volatile("rdtsc" :
+		     "=a" (tsc.lo_32),
+		     "=d" (tsc.hi_32));
+	return tsc.tsc_64;
 }
 
 #ifdef __cplusplus
