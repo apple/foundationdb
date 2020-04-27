@@ -44,8 +44,6 @@ import (
 // Subspace represents a well-defined region of keyspace in a FoundationDB
 // database.
 type Subspace interface {
-	fmt.Stringer
-
 	// Sub returns a new Subspace whose prefix extends this Subspace with the
 	// encoding of the provided element(s). If any of the elements are not a
 	// valid tuple.TupleElement, Sub will panic.
