@@ -3376,15 +3376,15 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		flags |= options.getReadVersionFlags;
 		switch(options.priority) {
 			case TransactionPriority::IMMEDIATE:
-				flags &= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE;
+				flags |= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE;
 				++cx->transactionImmediateReadVersions;
 				break;
 			case TransactionPriority::DEFAULT:
-				flags &= GetReadVersionRequest::PRIORITY_DEFAULT;
+				flags |= GetReadVersionRequest::PRIORITY_DEFAULT;
 				++cx->transactionDefaultReadVersions;
 				break;	
 			case TransactionPriority::BATCH:
-				flags &= GetReadVersionRequest::PRIORITY_BATCH;
+				flags |= GetReadVersionRequest::PRIORITY_BATCH;
 				++cx->transactionBatchReadVersions;
 				break;
 			default:

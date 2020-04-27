@@ -206,13 +206,13 @@ struct GetReadVersionRequest : TimedRequest {
 		flags = flags & ~FLAG_PRIORITY_MASK;
 		switch(priority) {
 			case TransactionPriority::BATCH:
-				flags &= PRIORITY_BATCH;
+				flags |= PRIORITY_BATCH;
 				break;
 			case TransactionPriority::DEFAULT:
-				flags &= PRIORITY_DEFAULT;
+				flags |= PRIORITY_DEFAULT;
 				break;
 			case TransactionPriority::IMMEDIATE:
-				flags &= PRIORITY_SYSTEM_IMMEDIATE;
+				flags |= PRIORITY_SYSTEM_IMMEDIATE;
 				break;
 			default:
 				ASSERT(false);
