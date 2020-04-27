@@ -863,7 +863,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			double networkMetricsElapsed = networkMetrics.getDouble("Elapsed");
 
 			try {
-				double runLoopBusy = networkMetrics.getDouble("PriorityBusy1");
+				double runLoopBusy = networkMetrics.getDouble("PriorityStarvedBelow1");
 				statusObj["run_loop_busy"] = runLoopBusy / networkMetricsElapsed;
 			}
 			catch(Error &e) {
