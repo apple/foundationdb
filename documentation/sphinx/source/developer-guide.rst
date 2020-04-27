@@ -899,3 +899,57 @@ Note that the resolver didn't use the write set at all in order to make a decisi
 
 Error Handling
 --------------
+
+When using FoundationDB we strongly recommend users to use the retry-loop. In Python the retry loop would look this this:
+
+.. code-block:: python
+
+   tr = tr.create_transaction()
+   while True:
+       try:
+           # execute reads and writes on FDB using the tr object
+           tr.commit().wait()
+           break
+       except FDBError as e:
+           tr.on_error(e.code).wait()
+
+This is also what the transaction decoration in python does, if you pass a ``Database`` object to a decorated function. There are some interesting properies of this retry loop:
+
+* We never create a new transaction within that loop. Instead ``tr.on_error`` will create a soft reset on the transaction.
+* ``tr.on_error`` returns a future. This is because ``on_error`` will do back off to make sure we don't overwhelm the cluster.
+* We don't catch exceptions that ``tr.on_error`` might throw.
+
+If you use this retry loop, there are very few caveats. If you don't some things might behave differently then you would expect. The following sections will go over the most common errors you will see, the guarantees FoundationDB provides during failures, and common caveats. This retry loop will take care of most of these errors, but it might still be beneficial to understand those.
+
+Errors where we know the State of the Transaction
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The most common errors you will see are errors where we know that the transaction failed to commit. In this case, we're guaranteed that nothing that we attempted to write was written to the database. The most common error codes for this are:
+
+* ``not_committed`` is thrown whenever there was a conflict. This will always be thrown by a ``commit``, read and write operations won't generate this  error.
+* ``too_old`` is thrown if your transaction runs for more than five seconds. If you see this error often, you should try to make your transactions shorter.
+* ``future_version`` is one of the slightly more complex errors. There are several ways how this error could be generated: if you set the read version of your transaction manually to something larger that exists or if the storage servers are falling behind. The second case should be more common. This is usually caused by a write load that is too high for FoundationDB to handle or by faulty/slow disks.
+
+The good thing about these errors is, that retrying is simple: you know that the transaction didn't commit and therefore you can retry even without thinking much about weird corner cases.
+
+The ``unknown_result`` Error
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``unknown_result`` can be thrown during a commit. This error is difficult to handle as you won't know whether your transaction was committed or not. There are mostly two reasons why you might see this error:
+
+#. The client lost the connection to the proxy to which it did send the commit. So it never got a reply and therefore can't know whether the commit was successful or not.
+#. There was a FoundationDB failure - for example a proxy failed during the commit. In that case there is no way for the client know whether the transaction succeeded or not.
+
+However, there is one guarantee FoundationDB gives to the caller: at the point of time where you receive this error, the transaction has either committed or not. Or: it is guaranteed that the transaction is not in-flight anymore. This is an important guarantee as it means that if your transaction is idempotent you can simply retry (see also above ). For more explanations see developer-guide-unknown-results_.
+
+Non-Retryable Errors
+~~~~~~~~~~~~~~~~~~~~
+
+The trickiest errors are non-retryable errors. ``Transaction.on_error`` will rethrow these. Some examples of non-retryable errors are:
+
+#. ``timeout``. If you set a timeout for a transaction, the transaction will throw this error as soon as that timeout accurs.
+#. ``actor_cancelled``. This error is thrown if you call ``cancel()`` on any future returned by a transaction. So if this future is shared by multiple threads or coroutines, all other waiters will see this error.
+
+If you see one of those errors, the best way of action is to fail the client.
+
+At a first glance this looks very similar to an ``unknown_result``. However, for these errors lack the one guarantee ``unknown_result`` still gives to the user: If the commit has already been sent to the database, the transaction could get committed at a later point in time. This means that if you retry the transaction, your new transaction might race with the old transaction. This will cause unexpected results and it does violate FoundationDB's external consistency guarantees.
