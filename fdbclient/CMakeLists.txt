@@ -44,6 +44,8 @@ set(FDBCLIENT_SRCS
   NativeAPI.actor.cpp
   NativeAPI.actor.h
   Notified.h
+  SpecialKeySpace.actor.cpp
+  SpecialKeySpace.actor.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
   RestoreWorkerInterface.actor.h

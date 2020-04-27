@@ -2257,6 +2257,7 @@ namespace fileBackup {
 			}
 
 			std::vector<std::string> files;
+			std::vector<std::pair<Key, Key>> beginEndKeys;
 			state Version maxVer = 0;
 			state Version minVer = std::numeric_limits<Version>::max();
 			state int64_t totalBytes = 0;
@@ -2271,6 +2272,9 @@ namespace fileBackup {
 
 					// Add file to final file list
 					files.push_back(r.fileName);
+
+					// Add (beginKey, endKey) pairs to the list
+					beginEndKeys.emplace_back(i->second.begin, i->first);
 
 					// Update version range seen
 					if(r.version < minVer)
@@ -2293,7 +2297,7 @@ namespace fileBackup {
 			}
 
 			Params.endVersion().set(task, maxVer);
-			wait(bc->writeKeyspaceSnapshotFile(files, totalBytes));
+			wait(bc->writeKeyspaceSnapshotFile(files, beginEndKeys, totalBytes));
 
 			TraceEvent(SevInfo, "FileBackupWroteSnapshotManifest")
 				.detail("BackupUID", config.getUid())

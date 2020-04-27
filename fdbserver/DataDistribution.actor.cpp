@@ -23,6 +23,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "fdbrpc/Replication.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -45,8 +46,10 @@ class TCMachineTeamInfo;
 ACTOR Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self);
 ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self);
 
+
 struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	UID id;
+	DDTeamCollection* collection;
 	StorageServerInterface lastKnownInterface;
 	ProcessClass lastKnownClass;
 	vector<Reference<TCTeamInfo>> teams;
@@ -63,13 +66,14 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	LocalityEntry localityEntry;
 	Promise<Void> updated;
 	AsyncVar<bool> wrongStoreTypeToRemove;
+	AsyncVar<bool> ssVersionTooFarBehind;
 	// A storage server's StoreType does not change.
 	// To change storeType for an ip:port, we destroy the old one and create a new one.
 	KeyValueStoreType storeType; // Storage engine type
 
-	TCServerInfo(StorageServerInterface ssi, ProcessClass processClass, bool inDesiredDC,
+	TCServerInfo(StorageServerInterface ssi, DDTeamCollection* collection, ProcessClass processClass, bool inDesiredDC,
 	             Reference<LocalitySet> storageServerSet)
-	  : id(ssi.id()), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0),
+	  : id(ssi.id()), collection(collection), lastKnownInterface(ssi), lastKnownClass(processClass), dataInFlightToServer(0),
 	    onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), inDesiredDC(inDesiredDC),
 	    storeType(KeyValueStoreType::END) {
 		localityEntry = ((LocalityMap<UID>*) storageServerSet.getPtr())->add(ssi.locality, &id);
@@ -80,6 +84,7 @@ struct TCServerInfo : public ReferenceCounted<TCServerInfo> {
 		// If a storage server does not reply its storeType, it will be tracked by failure monitor and removed.
 		return (storeType == configStoreType || storeType == KeyValueStoreType::END);
 	}
+	~TCServerInfo();
 };
 
 struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
@@ -109,51 +114,7 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 	}
 };
 
-ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
-	state StorageServerInterface ssi = server->lastKnownInterface;
-	state Future<ErrorOr<GetStorageMetricsReply>> metricsRequest = ssi.getStorageMetrics.tryGetReply( GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch );
-	state Future<Void> resetRequest = Never();
-	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged( server->onInterfaceChanged );
-	state Future<Void> serverRemoved( server->onRemoved );
-
-	loop {
-		choose {
-			when( ErrorOr<GetStorageMetricsReply> rep = wait( metricsRequest ) ) {
-				if( rep.present() ) {
-					server->serverMetrics = rep;
-					if(server->updated.canBeSet()) {
-						server->updated.send(Void());
-					}
-					return Void();
-				}
-				metricsRequest = Never();
-				resetRequest = delay( SERVER_KNOBS->METRIC_DELAY, TaskPriority::DataDistributionLaunch );
-			}
-			when( std::pair<StorageServerInterface,ProcessClass> _ssi = wait( interfaceChanged ) ) {
-				ssi = _ssi.first;
-				interfaceChanged = server->onInterfaceChanged;
-				resetRequest = Void();
-			}
-			when( wait( serverRemoved ) ) {
-				return Void();
-			}
-			when( wait( resetRequest ) ) { //To prevent a tight spin loop
-				if(IFailureMonitor::failureMonitor().getState(ssi.getStorageMetrics.getEndpoint()).isFailed()) {
-					resetRequest = IFailureMonitor::failureMonitor().onStateEqual(ssi.getStorageMetrics.getEndpoint(), FailureStatus(false));
-				}
-				else {
-					resetRequest = Never();
-					metricsRequest = ssi.getStorageMetrics.tryGetReply( GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch );
-				}
-			}
-		}
-	}
-}
-
-ACTOR Future<Void> updateServerMetrics( Reference<TCServerInfo> server ) {
-	wait( updateServerMetrics( server.getPtr() ) );
-	return Void();
-}
+ACTOR Future<Void> updateServerMetrics( Reference<TCServerInfo> server);
 
 // TeamCollection's machine team information
 class TCMachineTeamInfo : public ReferenceCounted<TCMachineTeamInfo> {
@@ -596,6 +557,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int64_t unhealthyServers;
 	std::map<int,int> priority_teams;
 	std::map<UID, Reference<TCServerInfo>> server_info;
+	std::map<Key, int> lagging_zones; // zone to number of storage servers lagging
+	AsyncVar<bool> disableFailingLaggingServers;
 
 	// machine_info has all machines info; key must be unique across processes on the same machine
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
@@ -719,6 +682,23 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 
 		teamBuilder.cancel();
+	}
+
+	void addLaggingStorageServer(Key zoneId) {
+		lagging_zones[zoneId]++;
+		if (lagging_zones.size() > std::max(1, configuration.storageTeamSize - 1) && !disableFailingLaggingServers.get())
+			disableFailingLaggingServers.set(true);
+	}
+
+	void removeLaggingStorageServer(Key zoneId) {
+		auto iter = lagging_zones.find(zoneId);
+		ASSERT(iter != lagging_zones.end());
+		iter->second--;
+		ASSERT(iter->second >= 0);
+		if (iter->second == 0)
+			lagging_zones.erase(iter);
+		if (lagging_zones.size() <= std::max(1, configuration.storageTeamSize - 1) && disableFailingLaggingServers.get())
+			disableFailingLaggingServers.set(false);
 	}
 
 	ACTOR static Future<Void> logOnCompletion( Future<Void> signal, DDTeamCollection* self ) {
@@ -2255,6 +2235,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("DoBuildTeams", self->doBuildTeams)
 				    .trackLatest("TeamCollectionInfo");
 			}
+		} else {
+			self->lastBuildTeamsFailed = true;
 		}
 
 		self->evaluateTeamQuality();
@@ -2297,7 +2279,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		allServers.push_back( newServer.id() );
 
 		TraceEvent("AddedStorageServer", distributorId).detail("ServerID", newServer.id()).detail("ProcessClass", processClass.toString()).detail("WaitFailureToken", newServer.waitFailure.getEndpoint().token).detail("Address", newServer.waitFailure.getEndpoint().getPrimaryAddress());
-		auto &r = server_info[newServer.id()] = Reference<TCServerInfo>( new TCServerInfo( newServer, processClass, includedDCs.empty() || std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end(), storageServerSet ) );
+		auto &r = server_info[newServer.id()] = Reference<TCServerInfo>( new TCServerInfo( newServer, this, processClass, includedDCs.empty() || std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end(), storageServerSet ) );
 
 		// Establish the relation between server and machine
 		checkAndCreateMachine(r);
@@ -2585,6 +2567,80 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER);
 	}
 };
+
+
+TCServerInfo::~TCServerInfo() {
+	if (ssVersionTooFarBehind.get()) {
+		collection->removeLaggingStorageServer(lastKnownInterface.locality.zoneId().get());			
+	}
+}
+
+ACTOR Future<Void> updateServerMetrics( TCServerInfo *server ) {
+	state StorageServerInterface ssi = server->lastKnownInterface;
+	state Future<ErrorOr<GetStorageMetricsReply>> metricsRequest = ssi.getStorageMetrics.tryGetReply( GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch );
+	state Future<Void> resetRequest = Never();
+	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged( server->onInterfaceChanged );
+	state Future<Void> serverRemoved( server->onRemoved );
+
+	loop {
+		choose {
+			when( ErrorOr<GetStorageMetricsReply> rep = wait( metricsRequest ) ) {
+				if( rep.present() ) {
+					server->serverMetrics = rep;
+					if(server->updated.canBeSet()) {
+						server->updated.send(Void());
+					}
+					break;
+				}
+				metricsRequest = Never();
+				resetRequest = delay( SERVER_KNOBS->METRIC_DELAY, TaskPriority::DataDistributionLaunch );
+			}
+			when( std::pair<StorageServerInterface,ProcessClass> _ssi = wait( interfaceChanged ) ) {
+				ssi = _ssi.first;
+				interfaceChanged = server->onInterfaceChanged;
+				resetRequest = Void();
+			}
+			when( wait( serverRemoved ) ) {
+				return Void();
+			}
+			when( wait( resetRequest ) ) { //To prevent a tight spin loop
+				if(IFailureMonitor::failureMonitor().getState(ssi.getStorageMetrics.getEndpoint()).isFailed()) {
+					resetRequest = IFailureMonitor::failureMonitor().onStateEqual(ssi.getStorageMetrics.getEndpoint(), FailureStatus(false));
+				}
+				else {
+					resetRequest = Never();
+					metricsRequest = ssi.getStorageMetrics.tryGetReply( GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch );
+				}
+			}
+		}
+	}
+
+	if ( server->serverMetrics.get().lastUpdate < now() - SERVER_KNOBS->DD_SS_STUCK_TIME_LIMIT ) {
+			if (server->ssVersionTooFarBehind.get() == false) {
+				TraceEvent("StorageServerStuck", server->collection->distributorId).detail("ServerId", server->id.toString()).detail("LastUpdate", server->serverMetrics.get().lastUpdate);
+				server->ssVersionTooFarBehind.set(true);
+				server->collection->addLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
+			}
+	} else if ( server->serverMetrics.get().versionLag > SERVER_KNOBS->DD_SS_FAILURE_VERSIONLAG  ) {
+		if (server->ssVersionTooFarBehind.get() == false) {
+			TraceEvent("SSVersionDiffLarge", server->collection->distributorId).detail("ServerId", server->id.toString()).detail("VersionLag", server->serverMetrics.get().versionLag);
+			server->ssVersionTooFarBehind.set(true);
+			server->collection->addLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
+		}
+	} else if ( server->serverMetrics.get().versionLag  < SERVER_KNOBS->DD_SS_ALLOWED_VERSIONLAG ) {
+		if (server->ssVersionTooFarBehind.get() == true) {
+			TraceEvent("SSVersionDiffNormal", server->collection->distributorId).detail("ServerId", server->id.toString()).detail("VersionLag", server->serverMetrics.get().versionLag);
+			server->ssVersionTooFarBehind.set(false);
+			server->collection->removeLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> updateServerMetrics( Reference<TCServerInfo> server) {
+	wait( updateServerMetrics( server.getPtr() ) );
+	return Void();
+}
 
 ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self, double extraDelay = 0) {
 	state int waitCount = 0;
@@ -3332,7 +3388,7 @@ ACTOR Future<Void> waitHealthyZoneChange( DDTeamCollection* self ) {
 	}
 }
 
-ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server) {
+ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server ) {
 	state double lastUpdate = now();
 	loop {
 		wait( updateServerMetrics( server ) );
@@ -3479,6 +3535,7 @@ ACTOR Future<Void> storageServerTracker(
 	state ServerStatus status( false, false, server->lastKnownInterface.locality );
 	state bool lastIsUnhealthy = false;
 	state Future<Void> metricsTracker = serverMetricsPolling( server );
+
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 
 	state Future<Void> storeTypeTracker = keyValueStoreTypeTracker(self, server);
@@ -3489,7 +3546,7 @@ ACTOR Future<Void> storageServerTracker(
 
 	try {
 		loop {
-			status.isUndesired = false;
+			status.isUndesired = !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
 			status.isWrongConfiguration = false;
 			hasWrongDC = !isCorrectDC(self, server);
 			hasInvalidLocality =
@@ -3598,6 +3655,7 @@ ACTOR Future<Void> storageServerTracker(
 			if (hasWrongDC || hasInvalidLocality || server->wrongStoreTypeToRemove.get()) {
 				self->restartRecruiting.trigger();
 			}
+
 
 			if (lastIsUnhealthy && !status.isUnhealthy() &&
 			    ( server->teams.size() < targetTeamNumPerServer || self->lastBuildTeamsFailed)) {
@@ -3753,6 +3811,8 @@ ACTOR Future<Void> storageServerTracker(
 					server->wakeUpTracker = Promise<Void>();
 				}
 				when(wait(storeTypeTracker)) {}
+				when(wait(server->ssVersionTooFarBehind.onChange())) { }
+				when(wait(self->disableFailingLaggingServers.onChange())) { }
 			}
 
 			if (recordTeamCollectionInfo) {
@@ -4844,7 +4904,7 @@ DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy>
 	 	interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(id)));
 		interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(id % 5)));
 		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(id % 3)));
-		collection->server_info[uid] = Reference<TCServerInfo>(new TCServerInfo(interface, ProcessClass(), true, collection->storageServerSet));
+		collection->server_info[uid] = Reference<TCServerInfo>(new TCServerInfo(interface, collection, ProcessClass(), true, collection->storageServerSet));
 		collection->server_status.set(uid, ServerStatus(false, false, interface.locality));
 		collection->checkAndCreateMachine(collection->server_info[uid]);
 	}
@@ -4885,7 +4945,7 @@ DDTeamCollection* testMachineTeamCollection(int teamSize, Reference<IReplication
 		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(data_hall_id)));
 		interface.locality.set(LiteralStringRef("dcid"), Standalone<StringRef>(std::to_string(dc_id)));
 		collection->server_info[uid] =
-		    Reference<TCServerInfo>(new TCServerInfo(interface, ProcessClass(), true, collection->storageServerSet));
+		    Reference<TCServerInfo>(new TCServerInfo(interface, collection, ProcessClass(), true, collection->storageServerSet));
 
 		collection->server_status.set(uid, ServerStatus(false, false, interface.locality));
 	}

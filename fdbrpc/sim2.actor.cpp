@@ -871,7 +871,12 @@ public:
 		return emptyConfig;
 	}
 
-	virtual void stop() { isStopped = true; }
+	virtual void stop() {
+		isStopped = true;
+	}
+	virtual void addStopCallback( std::function<void()> fn ) {
+		stopCallbacks.emplace_back(std::move(fn));
+	}
 	virtual bool isSimulated() const { return true; }
 
 	struct SimThreadArgs {
@@ -995,6 +1000,9 @@ public:
 		}
 		self->currentProcess = callingMachine;
 		self->net2->stop();
+		for ( auto& fn : self->stopCallbacks ) {
+			fn();
+		}
 		return Void();
 	}
 
@@ -1615,6 +1623,7 @@ public:
 		// Not letting currentProcess be NULL eliminates some annoying special cases
 		currentProcess = new ProcessInfo("NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), {NetworkAddress()}, this, "", "");
 		g_network = net2 = newNet2(TLSConfig(), false, true);
+		g_network->addStopCallback( Net2FileSystem::stop );
 		Net2FileSystem::newFileSystem();
 		check_yield(TaskPriority::Zero);
 	}
@@ -1712,6 +1721,8 @@ public:
 
 	//tasks is guarded by ISimulator::mutex
 	std::priority_queue<Task, std::vector<Task>> tasks;
+
+	std::vector<std::function<void()>> stopCallbacks;
 
 	//Sim2Net network;
 	INetwork *net2;

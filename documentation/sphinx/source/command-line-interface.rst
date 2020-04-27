@@ -167,6 +167,11 @@ getversion
 
 The ``getversion`` command fetches the current read version of the cluster or currently running transaction.
 
+advanceversion
+--------------
+
+Forces the cluster to recover at the specified version. If the specified version is larger than the current version of the cluster, the cluster version is advanced to the specified version via a forced recovery.
+
 help
 ----
 
