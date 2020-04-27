@@ -112,7 +112,7 @@ func FromBytes(b []byte) Subspace {
 // String implements the fmt.Stringer interface and return the subspace
 // as a human readable byte string provided by fdb.Printable.
 func (s subspace) String() string {
-	return fdb.Printable(s.b)
+	return fmt.Sprintf("Subspace(rawPrefix=%s)", fdb.Printable(s.b))
 }
 
 func (s subspace) Sub(el ...tuple.TupleElement) Subspace {
