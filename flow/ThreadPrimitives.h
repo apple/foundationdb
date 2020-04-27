@@ -69,7 +69,10 @@ public:
 		ANNOTATE_RWLOCK_RELEASED(this, true);
 #endif
 	}
-	void assertNotEntered() { ASSERT(!isLocked.test_and_set(std::memory_order_acquire)); }
+	void assertNotEntered() {
+		ASSERT(!isLocked.test_and_set(std::memory_order_acquire));
+		isLocked.clear(std::memory_order_release);
+	}
 
 private:
 	ThreadSpinLock(const ThreadSpinLock&);
