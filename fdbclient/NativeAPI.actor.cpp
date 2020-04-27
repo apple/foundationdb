@@ -1483,7 +1483,6 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 		try {
 			if( info.debugID.present() )
 				g_traceBatch.addEvent("GetKeyDebug", getKeyID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
-			if( info.debugID.present() )
 			++cx->transactionPhysicalReads;
 			state GetKeyReply reply;
 			try {
@@ -2222,9 +2221,7 @@ void Watch::setWatch(Future<Void> watchFuture) {
 }
 
 //FIXME: This seems pretty horrible. Now a Database can't die until all of its watches do...
-ACTOR Future<Void> watch(Reference<Watch> watch, Database cx, Transaction *self, TransactionInfo info) {
-	state TagSet tags = self->options.readTags;
-
+ACTOR Future<Void> watch(Reference<Watch> watch, Database cx, TagSet tags, TransactionInfo info) {
 	cx->addWatch();
 	try {
 		choose {
@@ -2267,7 +2264,7 @@ Future< Void > Transaction::watch( Reference<Watch> watch ) {
 	++cx->transactionWatchRequests;
 	cx->addWatch();
 	watches.push_back(watch);
-	return ::watch(watch, cx, this, info);
+	return ::watch(watch, cx, options.readTags, info);
 }
 
 ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Key key, Future<Version> ver, Database cx,
