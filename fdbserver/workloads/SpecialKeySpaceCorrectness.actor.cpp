@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "IRandom.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
@@ -72,6 +73,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	double getCheckTimeout() override { return std::numeric_limits<double>::max(); }
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
+		cx->specialKeySpace = std::make_shared<SpecialKeySpace>();
 		if (self->clientId == 0) {
 			self->ryw = Reference(new ReadYourWritesTransaction(cx));
 			self->ryw->setVersion(100);
@@ -98,7 +100,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		if (self->clientId == 0) {
-			testReadConflictRanges(cx, self);
+			testReadConflictRanges(cx);
 			wait(timeout(self->getRangeCallActor(cx, self), self->testDuration, Void()));
 		}
 		return Void();
@@ -164,6 +166,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("TestValue", printable(res2[i].value));
 				return false;
 			}
+			TEST(true); // Special key space keys equal
 		}
 		return true;
 	}
@@ -205,12 +208,12 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return GetRangeLimits(rowLimits, byteLimits);
 	}
 
-	static void testReadConflictRanges(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
+	static void testReadConflictRanges(Database cx_) {
 		TEST(true); // test read conflict range special key implementation
 		// Get a default special key range instance
-		state Database cx = cx_->clone();
-		state Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
-		state Reference<ReadYourWritesTransaction> referenceTx = Reference(new ReadYourWritesTransaction(cx));
+		Database cx = cx_->clone();
+		Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
+		Reference<ReadYourWritesTransaction> referenceTx = Reference(new ReadYourWritesTransaction(cx));
 		referenceTx->setVersion(100); // Prevent this from doing a GRV or committing
 		referenceTx->clear(normalKeys);
 		int numKeys =
@@ -242,21 +245,34 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			referenceTx->set(range.begin, LiteralStringRef("1"));
 			if (range.end != LiteralStringRef("\xff")) referenceTx->set(range.end, LiteralStringRef("0"));
 		}
-		state int i = 0;
-		for (; i < 10; ++i) {
-			state GetRangeLimits limit = self->randomLimits();
-			state KeySelector begin = self->randomKeySelector();
-			state KeySelector end = self->randomKeySelector();
+		// Add some extra keys to sample range read boundaries from
+		for (int i = 0; i < numKeys; ++i) {
+			keys.push_back("\xab" + deterministicRandom()->randomAlphaNumeric(
+			                            deterministicRandom()->randomInt(1, 10))); // Keep an even number of keys
+		}
+		for (int i = 0; i < 10; ++i) {
+			GetRangeLimits limit;
+			KeySelector begin = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
+			KeySelector end;
+			while (end.getKey() < begin.getKey()) {
+				end = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
+			}
+
 			bool reverse = deterministicRandom()->coinflip();
-			auto correctResultFuture = self->ryw->getRange(begin, end, limit, false, reverse);
+			auto correctResultFuture = referenceTx->getRange(begin, end, limit, false, reverse);
 			ASSERT(correctResultFuture.isReady());
 			begin.setKey(begin.getKey().withPrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
 			                                       begin.arena()));
 			end.setKey(
 			    end.getKey().withPrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"), end.arena()));
-			auto testResultFuture = self->ryw->getRange(begin, end, limit, false, reverse);
+			auto testResultFuture = tx->getRange(begin, end, limit, false, reverse);
 			ASSERT(testResultFuture.isReady());
-			ASSERT(correctResultFuture.get().size() == testResultFuture.get().size());
+			if (correctResultFuture.get().size() != testResultFuture.get().size()) {
+				TraceEvent(SevError, "TestFailure")
+				    .detail("Reason", "Results' sizes are inconsistent")
+				    .detail("CorrestResultSize", correctResultFuture.get().size())
+				    .detail("TestResultSize", testResultFuture.get().size());
+			}
 			auto iter = correctResultFuture.get().begin();
 			for (const auto& kv : testResultFuture.get()) {
 				ASSERT(iter->key == kv.key.removePrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/")));
