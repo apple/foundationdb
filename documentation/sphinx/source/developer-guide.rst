@@ -936,7 +936,7 @@ The most common errors you will see are errors where we know that the transactio
 The good thing about these errors is that retrying is simple: you know that the transaction didn't commit and therefore you can retry even without thinking much about weird corner cases.
 
 The ``commit_unknown_result`` Error
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``commit_unknown_result`` can be thrown during a commit. This error is difficult to handle as you won't know whether your transaction was committed or not. There are mostly two reasons why you might see this error:
 
