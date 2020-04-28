@@ -2407,6 +2407,7 @@ namespace fileBackup {
 			state bool backupWorkerEnabled = dbConfig.backupWorkerEnabled;
 			if (!backupWorkerEnabled) {
 				wait(success(changeConfig(cx, "backup_worker_enabled:=1", true)));
+				backupWorkerEnabled = true;
 			}
 
 			// Set the "backupStartedKey" and wait for all backup worker started
