@@ -30,6 +30,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -211,6 +212,12 @@ public:
 
 TheChunkAllocator chunkAllocator;
 
+struct FBTraceLog {
+	void open(const std::string& directory, const std::string& processName, unsigned rollsize, unsigned maxLogSize) {}
+};
+
+thread_local FBTraceLog g_fbTraceLog;
+
 } // namespace
 
 namespace ChunkAllocatorImpl {
@@ -248,5 +255,10 @@ void FBTraceImpl::operator delete(void* ptr) {
 }
 
 FBTraceImpl::~FBTraceImpl() {}
+
+void FBTraceImpl::open(const std::string& directory, const std::string& processName, unsigned rollsize,
+                       unsigned maxLogSize) {
+	g_fbTraceLog.open(directory, processName, rollsize, maxLogSize);
+}
 
 void fbTraceImpl(Reference<FBTraceImpl> const& traceLine) {}

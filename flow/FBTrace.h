@@ -56,6 +56,8 @@ public:
 	virtual FileIdentifier getFileIdentifier() const = 0;
 	static void* operator new(std::size_t sz);
 	static void operator delete(void* ptr);
+	static void open(std::string const& directory, std::string const& processName, unsigned rollSize,
+	                 unsigned maxLogSize);
 	void addref() const;
 	void delref() const;
 
@@ -243,5 +245,5 @@ void fbTraceImpl(Reference<FBTraceImpl> const& traceLine);
 
 template <class Type, class... Args>
 std::enable_if_t<std::is_base_of_v<FBTraceImpl, Type>> fbTrace(Args&&... args) {
-	fbTraceImpl(Reference<FBTraceImpl>(new Type{std::forward<Args>(args)...}));
+	fbTraceImpl(Reference<FBTraceImpl>(new Type{ std::forward<Args>(args)... }));
 }
