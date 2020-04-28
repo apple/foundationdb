@@ -533,7 +533,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeysRange)),
     rCRImpl(std::make_shared<ReadConflictRangeImpl>(
         KeyRangeRef(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
-                    LiteralStringRef("\xff\xff/transaction/read_conflict_range/\xff\xff")))) {
+                    LiteralStringRef("\xff\xff/transaction/read_conflict_range/\xff\xff")))),
+    wCRImpl(std::make_shared<WriteConflictRangeImpl>(
+        KeyRangeRef(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
+                    LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff")))) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
 
@@ -557,6 +560,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
 	                LiteralStringRef("\xff\xff/transaction/read_conflict_range/\xff\xff")),
 	    rCRImpl.get());
+	specialKeySpace->registerKeyRange(
+	    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
+	                LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff")),
+	    wCRImpl.get());
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc), 

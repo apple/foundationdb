@@ -138,6 +138,7 @@ public:
 	}
 
 	Standalone<RangeResultRef> getReadConflictRangeIntersecting(KeyRangeRef kr);
+	Standalone<RangeResultRef> getWriteConflictRangeIntersecting(KeyRangeRef kr);
 
 private:
 	friend class RYWImpl;

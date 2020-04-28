@@ -260,6 +260,15 @@ Future<Standalone<RangeResultRef>> ReadConflictRangeImpl::getRange(Reference<Rea
 	return getReadConflictRangeImpl(ryw, kr);
 }
 
+WriteConflictRangeImpl::WriteConflictRangeImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> WriteConflictRangeImpl::getRange(Reference<ReadYourWritesTransaction> ryw,
+                                                                    KeyRangeRef kr) const {
+	return ryw->getWriteConflictRangeIntersecting(
+	    KeyRange(KeyRangeRef(kr.begin.removePrefix(LiteralStringRef("\xff\xff/transaction/write_conflict_range/")),
+	                         kr.end.removePrefix(LiteralStringRef("\xff\xff/transaction/write_conflict_range/")))));
+}
+
 ConflictingKeysImpl::ConflictingKeysImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
 
 Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(Reference<ReadYourWritesTransaction> ryw,

@@ -108,8 +108,9 @@ void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& v
 	std::sort(dest.begin(), dest.end());
 }
 
-const KeyRangeRef conflictingKeysRange = KeyRangeRef(LiteralStringRef("\xff\xff/transaction/conflicting_keys/"),
-                                                     LiteralStringRef("\xff\xff/transaction/conflicting_keys/\xff"));
+const KeyRangeRef conflictingKeysRange =
+    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/conflicting_keys/"),
+                LiteralStringRef("\xff\xff/transaction/conflicting_keys/\xff\xff"));
 const ValueRef conflictingKeysTrue = LiteralStringRef("1");
 const ValueRef conflictingKeysFalse = LiteralStringRef("0");
 
