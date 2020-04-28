@@ -1597,6 +1597,14 @@ Standalone<RangeResultRef> ReadYourWritesTransaction::getWriteConflictRangeInter
 			}
 		}
 	}
+
+	if (inConflictRange && conflictBegin < kr.end) {
+		result.push_back(
+		    result.arena(),
+		    KeyValueRef(conflictBegin.toArena(result.arena())
+		                    .withPrefix(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"), result.arena()),
+		                LiteralStringRef("1")));
+	}
 	return result;
 }
 
