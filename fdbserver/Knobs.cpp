@@ -490,8 +490,9 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( MIN_TAG_BUSYNESS,                                      0.2 ); if(randomize && BUGGIFY) MIN_TAG_BUSYNESS = 0.0;
 	init( MIN_TAG_COST,                                         1000 ); if(randomize && BUGGIFY) MIN_TAG_COST = 0.0;
 	init( AUTO_THROTTLE_TARGET_TAG_BUSYNESS,                     0.1 ); if(randomize && BUGGIFY) AUTO_THROTTLE_TARGET_TAG_BUSYNESS = 0.0;
-	init( TAG_AUTO_THROTTLE_DURATION,                          120.0 ); if(randomize && BUGGIFY) TAG_AUTO_THROTTLE_DURATION = 5.0;
+	init( AUTO_TAG_THROTTLE_DURATION,                          120.0 ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLE_DURATION = 5.0;
 	init( TAG_THROTTLE_PUSH_INTERVAL,                            1.0 ); if(randomize && BUGGIFY) TAG_THROTTLE_PUSH_INTERVAL = 0.0;
+	init( AUTO_TAG_THROTTLE_START_AGGREGATION_TIME,              5.0 ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLE_START_AGGREGATION_TIME = 0.5;
 	init( AUTO_TAG_THROTTLING_ENABLED,                          true ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLING_ENABLED = false;
 
 	//Storage Metrics
