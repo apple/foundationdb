@@ -76,16 +76,7 @@ TLSConfig tlsConfig(TLSEndpointType::CLIENT);
 NetworkOptions::NetworkOptions()
 	: localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
 	  traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	  traceFormat("xml"), traceClockSource("now"), runLoopProfilingEnabled(false) {
-
-	Standalone<VectorRef<ClientVersionRef>> defaultSupportedVersions;
-
-	StringRef sourceVersion = StringRef((const uint8_t*)getSourceVersion(), strlen(getSourceVersion()));
-	std::string protocolVersionString = format("%llx", currentProtocolVersion.version());
-	defaultSupportedVersions.push_back_deep(defaultSupportedVersions.arena(), ClientVersionRef(LiteralStringRef(FDB_VT_VERSION), sourceVersion, protocolVersionString));
-
-	supportedVersions = ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>::from(defaultSupportedVersions);
-}
+	  traceFormat("xml"), traceClockSource("now"), runLoopProfilingEnabled(false), supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()) {}
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
@@ -1045,7 +1036,10 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
+	TLS::DisableOpenSSLAtExitHandler();
 	g_network = newNet2(tlsConfig, false, useMetrics || networkOptions.traceDirectory.present());
+	g_network->addStopCallback( Net2FileSystem::stop );
+	g_network->addStopCallback( TLS::DestroyOpenSSLGlobalState );
 	FlowTransport::createInstance(true, transportId);
 	Net2FileSystem::newFileSystem();
 }

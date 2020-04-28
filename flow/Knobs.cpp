@@ -206,6 +206,12 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( FUTURE_VERSION_BACKOFF_GROWTH,                       2.0 );
 	init( LOAD_BALANCE_MAX_BAD_OPTIONS,                          1 ); //should be the same as MAX_MACHINES_FALLING_BEHIND
 	init( LOAD_BALANCE_PENALTY_IS_BAD,                        true );
+
+	// Health Monitor
+	init( FAILURE_DETECTION_DELAY,                             4.0 ); if( randomize && BUGGIFY ) FAILURE_DETECTION_DELAY = 1.0;
+	init( HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS,    true );
+	init( HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS,          30 );
+	init( HEALTH_MONITOR_CONNECTION_MAX_CLOSED,                  5 );
 }
 // clang-format on
 

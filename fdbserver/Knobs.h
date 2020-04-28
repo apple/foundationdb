@@ -86,6 +86,8 @@ public:
 	int64_t MAX_CACHE_VERSIONS;
 	double TXS_POPPED_MAX_DELAY;
 	double TLOG_MAX_CREATE_DURATION;
+	int PEEK_LOGGING_AMOUNT;
+	double PEEK_LOGGING_DELAY;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -173,7 +175,10 @@ public:
 	bool DD_VALIDATE_LOCALITY;
 	int DD_CHECK_INVALID_LOCALITY_DELAY;
 	bool DD_ENABLE_VERBOSE_TRACING;
-
+	int64_t DD_SS_FAILURE_VERSIONLAG; // Allowed SS version lag from the current read version before marking it as failed.
+	int64_t DD_SS_ALLOWED_VERSIONLAG; // SS will be marked as healthy if it's version lag goes below this value.
+	double DD_SS_STUCK_TIME_LIMIT; // If a storage server is not getting new versions for this amount of time, then it becomes undesired.
+	
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
 	double TR_REMOVE_MACHINE_TEAM_DELAY; // wait for the specified time before try to remove next machine team
@@ -521,6 +526,7 @@ public:
 	int64_t FASTRESTORE_HEARTBEAT_MAX_DELAY; // master claim a node is down if no heart beat from the node for this delay
 	int64_t FASTRESTORE_APPLIER_FETCH_KEYS_SIZE; // number of keys to fetch in a txn on applier
 	int64_t FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES; // desired size of mutation message sent from loader to appliers
+	bool FASTRESTORE_GET_RANGE_VERSIONS_EXPENSIVE; // parse each range file to get (range, version) it has?
 
 	ServerKnobs();
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);

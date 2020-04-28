@@ -23,6 +23,7 @@
 #pragma once
 
 #include <algorithm>
+#include "fdbrpc/HealthMonitor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
@@ -123,10 +124,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	double lastDataPacketSentTime;
 	int outstandingReplies;
 
-	explicit Peer(TransportData* transport, NetworkAddress const& destination)
-	  : transport(transport), destination(destination), outgoingConnectionIdle(true), lastConnectTime(0.0),
-	    reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), outstandingReplies(0),
-	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()) {}
+	explicit Peer(TransportData* transport, NetworkAddress const& destination);
 
 	void send(PacketBuffer* pb, ReliablePacket* rp, bool firstUnsent);
 
@@ -204,6 +202,8 @@ public:
 	static NetworkAddressList getGlobalLocalAddresses() { return transport().getLocalAddresses(); }
 
 	Endpoint loadedEndpoint(const UID& token);
+
+	HealthMonitor* healthMonitor();
 
 private:
 	class TransportData* self;

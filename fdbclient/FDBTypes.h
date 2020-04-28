@@ -284,6 +284,7 @@ struct KeyRangeRef {
 	force_inline void serialize(Ar& ar) {
 		serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
 		if( begin > end ) {
+			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end);
 			throw inverted_range();
 		};
 	}
@@ -416,7 +417,7 @@ typedef Standalone<KeyRangeRef> KeyRange;
 typedef Standalone<KeyValueRef> KeyValue;
 typedef Standalone<struct KeySelectorRef> KeySelector;
 
-enum { invalidVersion = -1, latestVersion = -2 };
+enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
 inline Key keyAfter( const KeyRef& key ) {
 	if(key == LiteralStringRef("\xff\xff"))

@@ -485,6 +485,10 @@ public:
 	virtual void stop() = 0;
 	// Terminate the program
 
+	virtual void addStopCallback( std::function<void()> fn ) = 0;
+	// Calls `fn` when stop() is called.
+	// addStopCallback can be called more than once, and each added `fn` will be run once.
+
 	virtual bool isSimulated() const = 0;
 	// Returns true if this network is a local simulation
 

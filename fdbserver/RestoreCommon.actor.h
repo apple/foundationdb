@@ -248,8 +248,6 @@ struct RestoreFileFR {
 };
 
 namespace parallelFileRestore {
-ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset,
-                                                                      int len);
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset,
                                                                     int len);
 } // namespace parallelFileRestore

@@ -13,6 +13,7 @@ set(FDBRPC_SRCS
   FlowTransport.actor.cpp
   genericactors.actor.h
   genericactors.actor.cpp
+  HealthMonitor.actor.cpp
   IAsyncFile.actor.cpp
   LoadBalance.actor.h
   Locality.cpp
