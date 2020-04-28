@@ -277,7 +277,41 @@ function(package_bindingtester)
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bindings ${CMAKE_BINARY_DIR}/bindingtester/tests
     COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/bindingtester.touch"
     COMMENT "Copy test files for bindingtester")
-  add_custom_target(copy_bindingtester_binaries DEPENDS ${outfiles}  "${CMAKE_BINARY_DIR}/bindingtester.touch")
+
+  add_custom_target(copy_generated_files DEPENDS ${CMAKE_BINARY_DIR}/bindingtester.touch python_binding)
+  set(generated_binding_files python/fdb/fdboptions.py)
+  if(WITH_JAVA)
+    add_dependencies(copy_generated_files fdb_java)
+    set(java_dir java/src/main/com/apple/foundationdb)
+    set(generated_binding_files ${generated_binding_files}
+      ${java_dir}/ConflictRangeType.java
+      ${java_dir}/DatabaseOptions.java
+      ${java_dir}/MutationType.java
+      ${java_dir}/NetworkOptions.java
+      ${java_dir}/StreamingMode.java
+      ${java_dir}/TransactionOptions.java
+      ${java_dir}/FDBException.java)
+  endif()
+
+  foreach(generated IN LISTS generated_binding_files)
+    add_custom_command(
+      TARGET copy_generated_files
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/${generated} ${bdir}/tests/${generated}
+      COMMENT "Copy ${generated} to bindingtester")
+  endforeach()
+
+  if(WITH_GO AND NOT OPEN_FOR_IDE)
+    add_dependencies(copy_generated_files fdb_go)
+    add_custom_command(
+      TARGET copy_generated_files
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_BINARY_DIR}/bindings/go/src/github.com/apple/foundationdb/bindings/go/src/fdb/generated.go # SRC
+        ${bdir}/tests/go/src/fdb/ # DEST
+      COMMENT "Copy generated.go for bindingtester")
+  endif()
+
+  add_custom_target(copy_bindingtester_binaries
+    DEPENDS ${outfiles} "${CMAKE_BINARY_DIR}/bindingtester.touch" copy_generated_files)
   add_dependencies(copy_bindingtester_binaries strip_only_fdbserver strip_only_fdbcli strip_only_fdb_c)
   set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester-${CMAKE_PROJECT_VERSION}.tar.gz)
   add_custom_command(
