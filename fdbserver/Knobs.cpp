@@ -487,12 +487,13 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	init( MAX_AUTO_THROTTLED_TRANSACTION_TAGS,                     5 ); if(randomize && BUGGIFY) MAX_AUTO_THROTTLED_TRANSACTION_TAGS = 1;
 	init( MAX_MANUAL_THROTTLED_TRANSACTION_TAGS,                 100 ); if(randomize && BUGGIFY) MAX_MANUAL_THROTTLED_TRANSACTION_TAGS = 1;
-	init( MIN_TAG_BUSYNESS,                                      0.2 ); if(randomize && BUGGIFY) MIN_TAG_BUSYNESS = 0.0;
 	init( MIN_TAG_COST,                                         1000 ); if(randomize && BUGGIFY) MIN_TAG_COST = 0.0;
 	init( AUTO_THROTTLE_TARGET_TAG_BUSYNESS,                     0.1 ); if(randomize && BUGGIFY) AUTO_THROTTLE_TARGET_TAG_BUSYNESS = 0.0;
-	init( AUTO_TAG_THROTTLE_DURATION,                          120.0 ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLE_DURATION = 5.0;
+	init( AUTO_TAG_THROTTLE_RAMP_UP_TIME,                      120.0 ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLE_RAMP_UP_TIME = 5.0;
+	init( AUTO_TAG_THROTTLE_DURATION,                          240.0 ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLE_DURATION = 20.0;
 	init( TAG_THROTTLE_PUSH_INTERVAL,                            1.0 ); if(randomize && BUGGIFY) TAG_THROTTLE_PUSH_INTERVAL = 0.0;
 	init( AUTO_TAG_THROTTLE_START_AGGREGATION_TIME,              5.0 ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLE_START_AGGREGATION_TIME = 0.5;
+	init( AUTO_TAG_THROTTLE_UPDATE_FREQUENCY,                   10.0 ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLE_UPDATE_FREQUENCY = 0.5;
 	init( AUTO_TAG_THROTTLING_ENABLED,                          true ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLING_ENABLED = false;
 
 	//Storage Metrics
