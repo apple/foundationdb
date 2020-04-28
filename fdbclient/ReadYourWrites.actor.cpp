@@ -1546,8 +1546,8 @@ void ReadYourWritesTransaction::getWriteConflicts( KeyRangeMap<bool> *result ) {
 Standalone<RangeResultRef> ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRangeRef kr) {
 	Standalone<RangeResultRef> result;
 	auto iter = readConflicts.rangeContainingKeyBefore(kr.begin);
-	if (iter->begin() == allKeys.begin) {
-		++iter;
+	if (iter->begin() == allKeys.begin && !iter->value()) {
+		++iter; // Conventionally '' is missing from the result range if it's not part of a read conflict
 	}
 	for (; iter->begin() < kr.end; ++iter) {
 		if (kr.begin <= iter->begin() && iter->begin() < kr.end) {
