@@ -147,7 +147,10 @@ ACTOR Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> se
 				}
 				break;
 			}
-			TraceEvent("FastRestore").suppressFor(10.0).detail("NotEnoughWorkers", agentValues.size());
+			TraceEvent("FastRestore")
+			    .suppressFor(10.0)
+			    .detail("NotEnoughWorkers", agentValues.size())
+			    .detail("MinWorkers", min_num_workers);
 			wait(delay(5.0));
 		} catch (Error& e) {
 			wait(tr.onError(e));
