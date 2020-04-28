@@ -97,7 +97,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
-		if (self->clientId == 0) wait(timeout(self->getRangeCallActor(cx, self), self->testDuration, Void()));
+		if (self->clientId == 0) {
+			testReadConflictRanges(cx, self);
+			wait(timeout(self->getRangeCallActor(cx, self), self->testDuration, Void()));
+		}
 		return Void();
 	}
 
@@ -200,6 +203,67 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		    1, keysCount.getValue() * (keyBytes + (rangeCount + 1) + valBytes + 8) + 1);
 
 		return GetRangeLimits(rowLimits, byteLimits);
+	}
+
+	static void testReadConflictRanges(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
+		TEST(true); // test read conflict range special key implementation
+		// Get a default special key range instance
+		state Database cx = cx_->clone();
+		state Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> referenceTx = Reference(new ReadYourWritesTransaction(cx));
+		referenceTx->setVersion(100); // Prevent this from doing a GRV or committing
+		referenceTx->clear(normalKeys);
+		int numKeys =
+		    deterministicRandom()->randomInt(0, 10) * 2; // We want an even number of keys so we can iterate over pairs
+		std::vector<std::string> keys;
+		keys.resize(numKeys);
+		for (auto& key : keys) {
+			// Can't start with \xff\xff, so just fix a prefix
+			key = "\xab" + deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10));
+		}
+		if (deterministicRandom()->coinflip()) {
+			// Include beginning of keyspace
+			keys.push_back("");
+			keys.push_back("\xab" + deterministicRandom()->randomAlphaNumeric(
+			                            deterministicRandom()->randomInt(1, 10))); // Keep an even number of keys
+		}
+		if (deterministicRandom()->coinflip()) {
+			// Include end of keyspace
+			keys.push_back("\xff");
+			keys.push_back("\xab" + deterministicRandom()->randomAlphaNumeric(
+			                            deterministicRandom()->randomInt(1, 10))); // Keep an even number of keys
+		}
+		std::sort(keys.begin(), keys.end());
+		std::string lastKey = "";
+		for (auto iter = keys.begin(); iter != keys.end(); iter += 2) {
+			Standalone<KeyRangeRef> range = KeyRangeRef(*iter, *(iter + 1));
+			tx->addReadConflictRange(range);
+			// TODO test that fails if we don't wait on tx->pendingReads()
+			referenceTx->set(range.begin, LiteralStringRef("1"));
+			if (range.end != LiteralStringRef("\xff")) referenceTx->set(range.end, LiteralStringRef("0"));
+		}
+		state int i = 0;
+		for (; i < 10; ++i) {
+			state GetRangeLimits limit = self->randomLimits();
+			state KeySelector begin = self->randomKeySelector();
+			state KeySelector end = self->randomKeySelector();
+			bool reverse = deterministicRandom()->coinflip();
+			auto correctResultFuture = self->ryw->getRange(begin, end, limit, false, reverse);
+			ASSERT(correctResultFuture.isReady());
+			begin.setKey(begin.getKey().withPrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
+			                                       begin.arena()));
+			end.setKey(
+			    end.getKey().withPrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"), end.arena()));
+			auto testResultFuture = self->ryw->getRange(begin, end, limit, false, reverse);
+			ASSERT(testResultFuture.isReady());
+			ASSERT(correctResultFuture.get().size() == testResultFuture.get().size());
+			auto iter = correctResultFuture.get().begin();
+			for (const auto& kv : testResultFuture.get()) {
+				ASSERT(iter->key == kv.key.removePrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/")));
+				ASSERT(iter->value == kv.value);
+				++iter;
+			}
+		}
 	}
 };
 
