@@ -1229,7 +1229,7 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 		return Optional<Value>();
 	}
 
-	// special key space are only allowed to query if both begin and end start with \xff\xff
+	// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
 	if (specialKeys.contains(key))
 		return getDatabase()->specialKeySpace->get(Reference<ReadYourWritesTransaction>::addRef(this), key);
 
@@ -1284,7 +1284,7 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		}
 	}
 
-	// special key space are only allowed to query if both begin and end start with \xff\xff
+	// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
 	if (specialKeys.contains(begin.getKey()) && specialKeys.contains(end.getKey()))
 		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin, end,
 		                                                limits, reverse);
