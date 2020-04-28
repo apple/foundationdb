@@ -86,6 +86,7 @@ struct WorkerInterface {
 		debugPing.getEndpoint( TaskPriority::Worker );
 		coordinationPing.getEndpoint( TaskPriority::Worker );
 		updateServerDBInfo.getEndpoint( TaskPriority::Worker );
+		eventLogRequest.getEndpoint( TaskPriority::Worker );
 	}
 
 	template <class Ar>
