@@ -844,6 +844,7 @@ Some interesting properties of FoundationDB transactions are:
 * Read-only transactions will never conflict and never cause conflicts with other transactions.
 * Write-only transactions will never conflict but might cause future transactions to conflict.
 * For read-write transactions: A read will never cause any other transaction to be aborted - but reading a key might result in the transaction being aborted at commit time. A write will never cause a conflict in the current transaction but might cause conflicts in transactions that try to commit in the future.
+* FoundationDB only uses the read conflict set and the write conflict set to resolve transactions. A user can read from and write to FoundationDB without adding entries to these sets. If not done carefully, this can cause non-serializable executions (see :ref:`Snapshot Reads <api-python-snapshot-reads>` and the :ref:`no-write-conflict-range option <api-python-no-write-conflict-range>` option).
 
 How Versions are Generated and Assigned
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -866,6 +867,8 @@ As mentioned before, the algorithm to assign read versions is a bit more complex
    * Ask all other proxies for their most recent committed version (the largest version they received from the master for which it successfully wrote the transactions to the transaction log system).
    * Send a message to the transaction log system to verify that it is still writable. This is to prevent that we fetch read versions from a proxy that has been declared to be dead.
 #. It will then take the largest committed version from all proxies (including its own) and send it back to the clients.
+
+Checking whether the log-system is still writeable can be especially expensive if a clusters runs in a multi-region configuration. If a user is fine to sacrafice strict serializability they can use :ref:`option-causal-read-risky <api-python-option-set-causal-read-risky>`.
 
 Conflict Detection
 ~~~~~~~~~~~~~~~~~~
@@ -932,10 +935,10 @@ The most common errors you will see are errors where we know that the transactio
 
 The good thing about these errors is that retrying is simple: you know that the transaction didn't commit and therefore you can retry even without thinking much about weird corner cases.
 
-The ``unknown_result`` Error
+The ``commit_unknown_result`` Error
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``unknown_result`` can be thrown during a commit. This error is difficult to handle as you won't know whether your transaction was committed or not. There are mostly two reasons why you might see this error:
+``commit_unknown_result`` can be thrown during a commit. This error is difficult to handle as you won't know whether your transaction was committed or not. There are mostly two reasons why you might see this error:
 
 #. The client lost the connection to the proxy to which it did send the commit. So it never got a reply and therefore can't know whether the commit was successful or not.
 #. There was a FoundationDB failure - for example a proxy failed during the commit. In that case there is no way for the client know whether the transaction succeeded or not.
@@ -952,4 +955,4 @@ The trickiest errors are non-retryable errors. ``Transaction.on_error`` will ret
 
 If you see one of those errors, the best way of action is to fail the client.
 
-At a first glance this looks very similar to an ``unknown_result``. However, these errors lack the one guarantee ``unknown_result`` still gives to the user: if the commit has already been sent to the database, the transaction could get committed at a later point in time. This means that if you retry the transaction, your new transaction might race with the old transaction. This can cause unexpected results and may violate FoundationDB's external consistency guarantees.
+At a first glance this looks very similar to an ``commit_unknown_result``. However, these errors lack the one guarantee ``commit_unknown_result`` still gives to the user: if the commit has already been sent to the database, the transaction could get committed at a later point in time. This means that if you retry the transaction, your new transaction might race with the old transaction. This can cause unexpected results and may violate FoundationDB's external consistency guarantees.
