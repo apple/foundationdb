@@ -530,7 +530,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
     specialKeySpace(std::make_shared<SpecialKeySpace>(normalKeys.begin, specialKeys.end)),
-    cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeysRange)) {
+    cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeysRange)),
+    rCRImpl(std::make_shared<ReadConflictRangeImpl>(
+        KeyRangeRef(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
+                    LiteralStringRef("\xff\xff/transaction/read_conflict_range/\xff\xff")))) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
 
@@ -550,6 +553,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	specialKeySpace->registerKeyRange(conflictingKeysRange, cKImpl.get());
+	specialKeySpace->registerKeyRange(
+	    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
+	                LiteralStringRef("\xff\xff/transaction/read_conflict_range/\xff\xff")),
+	    rCRImpl.get());
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc), 

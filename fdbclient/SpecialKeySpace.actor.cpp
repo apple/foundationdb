@@ -19,6 +19,8 @@
  */
 
 #include "fdbclient/SpecialKeySpace.actor.h"
+#include "FDBTypes.h"
+#include "ReadYourWrites.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -241,6 +243,21 @@ ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* pks, Re
 
 Future<Optional<Value>> SpecialKeySpace::get(Reference<ReadYourWritesTransaction> ryw, const Key& key) {
 	return getActor(this, ryw, key);
+}
+
+ReadConflictRangeImpl::ReadConflictRangeImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+
+ACTOR static Future<Standalone<RangeResultRef>> getReadConflictRangeImpl(Reference<ReadYourWritesTransaction> ryw,
+                                                                         KeyRange kr) {
+	wait(ryw->debug_onIdle());
+	return ryw->getReadConflictRangeIntersecting(
+	    KeyRange(KeyRangeRef(kr.begin.removePrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/")),
+	                         kr.end.removePrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/")))));
+}
+
+Future<Standalone<RangeResultRef>> ReadConflictRangeImpl::getRange(Reference<ReadYourWritesTransaction> ryw,
+                                                                   KeyRangeRef kr) const {
+	return getReadConflictRangeImpl(ryw, kr);
 }
 
 ConflictingKeysImpl::ConflictingKeysImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}

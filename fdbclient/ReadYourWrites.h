@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_READYOURWRITES_H
 #define FDBCLIENT_READYOURWRITES_H
+#include "FDBTypes.h"
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
@@ -135,6 +136,9 @@ public:
 	const TransactionInfo& getTransactionInfo() const {
 		return tr.info;
 	}
+
+	Standalone<RangeResultRef> getReadConflictRangeIntersecting(KeyRangeRef kr);
+
 private:
 	friend class RYWImpl;
 

@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "Arena.h"
+#include "FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"
@@ -1538,6 +1540,29 @@ void ReadYourWritesTransaction::getWriteConflicts( KeyRangeMap<bool> *result ) {
 	if( inConflictRange ) {
 		result->insert(  KeyRangeRef( conflictBegin.toArenaOrRef(arena), getMaxWriteKey() ), true );
 	}
+}
+
+Standalone<RangeResultRef> ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRangeRef kr) {
+	Standalone<RangeResultRef> result;
+	auto conflictRanges = readConflicts.ranges();
+	for (auto iter = conflictRanges.begin(); iter != conflictRanges.end(); ++iter) {
+		if (iter->value()) {
+			if (iter->begin() >= kr.begin)
+				result.push_back(
+				    result.arena(),
+				    KeyValueRef(iter->begin().withPrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
+				                                         result.arena()),
+				                LiteralStringRef("1")));
+
+			if (iter->end() < kr.end)
+				result.push_back(
+				    result.arena(),
+				    KeyValueRef(iter->end().withPrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
+				                                       result.arena()),
+				                LiteralStringRef("0")));
+		}
+	}
+	return result;
 }
 
 void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& operand, uint32_t operationType ) {
