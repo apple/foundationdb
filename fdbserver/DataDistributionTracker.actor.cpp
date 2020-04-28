@@ -173,7 +173,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker* self, KeyRange key
 
 	wait( delay( 0, TaskPriority::DataDistribution ) );
 
-	/*TraceEvent("trackShardMetricsStarting")
+	/*TraceEvent("TrackShardMetricsStarting")
 	    .detail("TrackerID", trackerID)
 	    .detail("Keys", keys)
 	    .detail("TrackedBytesInitiallyPresent", shardMetrics->get().present())

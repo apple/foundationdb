@@ -27,7 +27,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ReadHotDetectionWorkload : TestWorkload {
-	int actorCount, rowCount;
+	int actorCount, keyCount;
 
 	double testDuration, transactionsPerSecond;
 	vector<Future<Void>> clients;
@@ -38,7 +38,8 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
 		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 1000.0) / clientCount;
 		actorCount = getOption(options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5);
-		rowCount = getOption(options, LiteralStringRef("rowCount"), 1000);
+		keyCount = getOption(options, LiteralStringRef("keyCount"), 100);
+		readKey = StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, keyCount)));
 	}
 
 	virtual std::string description() { return "ReadHotDetection"; }
@@ -46,11 +47,9 @@ struct ReadHotDetectionWorkload : TestWorkload {
 	virtual Future<Void> setup(Database const& cx) { return _setup(cx, this); }
 
 	virtual Future<Void> start(Database const& cx) {
-		int group = deterministicRandom()->randomInt(0, 100);
-		int nodeIndex = deterministicRandom()->randomInt(0, this->rowCount / 100);
-		this->readKey = Key(format("key%08x%08x", group, nodeIndex));
 		for (int c = 0; c < actorCount; c++) {
-			clients.push_back(timeout(keyReader(cx->clone(), this, actorCount / transactionsPerSecond, this->readKey),
+			clients.push_back(timeout(keyReader(cx->clone(), this, actorCount / transactionsPerSecond,
+			                                    deterministicRandom()->random01() > 0.4),
 			                          testDuration, Void()));
 		}
 		return delay(testDuration);
@@ -64,23 +63,27 @@ struct ReadHotDetectionWorkload : TestWorkload {
 	ACTOR Future<Void> _setup(Database cx, ReadHotDetectionWorkload* self) {
 		state int g = 0;
 		state Standalone<StringRef> largeValue;
-		largeValue = self->randomString(largeValue.arena(), 20);
-		for (; g < 100; g++) {
-			state ReadYourWritesTransaction tr(cx);
-			loop {
-				try {
-					for (int i = 0; i < self->rowCount / 100; i++) {
-						tr.set(StringRef(format("key%08x%08x", g, i)), largeValue);
+		state Standalone<StringRef> smallValue;
+		largeValue = self->randomString(largeValue.arena(), 100000);
+		smallValue = self->randomString(smallValue.arena(), 100);
+		state ReadYourWritesTransaction tr(cx);
+		loop {
+			try {
+				for (int i = 0; i < self->keyCount; i++) {
+					auto key = StringRef(format("testkey%08x", i));
+					if (key == self->readKey) {
+						tr.set(key, largeValue);
+					} else {
+						tr.set(key, deterministicRandom()->random01() > 0.8 ? largeValue : smallValue);
 					}
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
 				}
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
 			}
 		}
-		self->wholeRange = KeyRangeRef(KeyRef(format("key%08x%08x", 0, 0)),
-		                               KeyRef(format("key%08x%08x", 99, self->rowCount / 100 - 1)));
+		self->wholeRange = KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\xff"));
 		// TraceEvent("RHDLog").detail("Phase", "DoneSetup");
 		return Void();
 	}
@@ -99,14 +102,21 @@ struct ReadHotDetectionWorkload : TestWorkload {
 			//     .detail("KeyRangesBackBeginKey", keyRanges.back().begin)
 			//     .detail("KeyRangesBackEndKey", keyRanges.back().end);
 			// Loose check.
-			if (keyRanges.size() != 1 || !keyRanges.back().contains(self->readKey)) {
-				// TraceEvent("RHDCheckPhaseFailed")
-				//     .detail("KeyRangesSize", keyRanges.size())
-				//     .detail("ReadKey", self->readKey.printable().c_str())
-				//     .detail("KeyRangesBackBeginKey", keyRanges.back().begin)
-				//     .detail("KeyRangesBackEndKey", keyRanges.back().end);
-				return false;
+			for (auto kr : keyRanges) {
+				if (kr.contains(self->readKey)) {
+					return true;
+				}
 			}
+			// The key ranges deemed read hot does not contain the readKey, which is impossible here.
+			// TraceEvent("RHDCheckPhaseFailed")
+			// 	.detail("KeyRangesSize", keyRanges.size())
+			// 	.detail("ReadKey", self->readKey.printable().c_str())
+			// 	.detail("KeyRangesBackBeginKey", keyRanges.back().begin)
+			// 	.detail("KeyRangesBackEndKey", keyRanges.back().end);
+			// for(auto kr : keyRanges) {
+			// 	TraceEvent("RHDCheckPhaseFailed").detail("KeyRagneBegin", kr.begin).detail("KeyRagneEnd", kr.end);
+			// }
+			return false;
 		} catch (Error& e) {
 			// TraceEvent("RHDCheckPhaseReadGotError").error(e);
 			wait(tr.onError(e));
@@ -117,14 +127,17 @@ struct ReadHotDetectionWorkload : TestWorkload {
 
 	virtual void getMetrics(vector<PerfMetric>& m) {}
 
-	ACTOR Future<Void> keyReader(Database cx, ReadHotDetectionWorkload* self, double delay, KeyRef readKey) {
+	ACTOR Future<Void> keyReader(Database cx, ReadHotDetectionWorkload* self, double delay, bool useReadKey) {
 		state double lastTime = now();
 		loop {
 			wait(poisson(&lastTime, delay));
 			state ReadYourWritesTransaction tr(cx);
 			loop {
 				try {
-					Optional<Value> v = wait(tr.get(readKey));
+					Optional<Value> v = wait(tr.get(
+					    useReadKey
+					        ? self->readKey
+					        : StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, self->keyCount)))));
 					break;
 				} catch (Error& e) {
 					wait(tr.onError(e));
