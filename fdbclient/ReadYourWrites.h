@@ -120,7 +120,8 @@ public:
 	void reset();
 	void debugTransaction(UID dID) { tr.debugTransaction(dID); }
 
-	Future<Void> debug_onIdle() {  return reading; }
+	// Wait for all reads that are currently pending to complete
+	Future<Void> pendingReads() { return reading; }
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods
 	Error deferredError;
