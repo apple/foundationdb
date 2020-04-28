@@ -12,6 +12,10 @@
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 
+extern "C" {
+	void* folly_memcpy(void* dst, void* src, uint32_t length);
+}
+
 /*
  * Set this to the maximum buffer size you want to test. If it is 0, then the
  * values in the buf_sizes[] array below will be used.
@@ -46,13 +50,13 @@ static size_t buf_sizes[TEST_VALUE_RANGE];
 #define TEST_BATCH_SIZE         100
 
 /* Data is aligned on this many bytes (power of 2) */
-#ifdef RTE_MACHINE_CPUFLAG_AVX512F
+// #ifdef RTE_MACHINE_CPUFLAG_AVX512F
 #define ALIGNMENT_UNIT          64
-#elif defined RTE_MACHINE_CPUFLAG_AVX2
-#define ALIGNMENT_UNIT          32
-#else /* RTE_MACHINE_CPUFLAG */
-#define ALIGNMENT_UNIT          16
-#endif /* RTE_MACHINE_CPUFLAG */
+// #elif defined RTE_MACHINE_CPUFLAG_AVX2
+// #define ALIGNMENT_UNIT          32
+// #else /* RTE_MACHINE_CPUFLAG */
+// #define ALIGNMENT_UNIT          16
+// #endif /* RTE_MACHINE_CPUFLAG */
 
 /*
  * Pointers used in performance tests. The two large buffers are for uncached

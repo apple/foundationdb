@@ -75,6 +75,7 @@ set(FLOW_SRCS
   flat_buffers.h
   flow.cpp
   flow.h
+  folly_memcpy.S
   genericactors.actor.cpp
   genericactors.actor.h
   network.cpp

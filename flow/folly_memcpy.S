@@ -79,9 +79,9 @@ _memcpy_short:
  *
  */
         .align    16
-        .globl    memcpy
-        .type     memcpy, @function
-memcpy:
+        .globl    folly_memcpy
+        .type     folly_memcpy, @function
+folly_memcpy:
         .cfi_startproc
 
         mov       %rdx, %rcx
@@ -173,6 +173,6 @@ memcpy:
         ret
 
         .cfi_endproc
-        .size memcpy, .-memcpy
+        .size folly_memcpy, .-folly_memcpy
 
 #endif
