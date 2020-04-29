@@ -1566,9 +1566,10 @@ Standalone<RangeResultRef> ReadYourWritesTransaction::getWriteConflictRangeInter
 
 	WriteMap::iterator it(&writes);
 	it.skip(kr.begin);
+	if (it.beginKey() != allKeys.begin) --it;
 
-	bool inConflictRange = it.is_conflict_range();
-	ExtStringRef conflictBegin = std::max(ExtStringRef(allKeys.begin), it.beginKey());
+	bool inConflictRange = false;
+	ExtStringRef conflictBegin;
 
 	for (; it.beginKey() < kr.end; ++it) {
 		if (it.is_conflict_range() && !inConflictRange) {

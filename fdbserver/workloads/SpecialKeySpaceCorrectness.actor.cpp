@@ -220,28 +220,26 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		Reference<ReadYourWritesTransaction> referenceTx = Reference(new ReadYourWritesTransaction(cx));
 		referenceTx->setVersion(100); // Prevent this from doing a GRV or committing
 		referenceTx->clear(normalKeys);
+		referenceTx->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		int numKeys =
 		    deterministicRandom()->randomInt(0, 10) * 2; // We want an even number of keys so we can iterate over pairs
-		std::vector<std::string> keys;
+		std::vector<std::string> keys; // Must all be distinct
 		keys.resize(numKeys);
+		int lastKey = 0;
 		for (auto& key : keys) {
-			// Can't start with \xff\xff, so just fix a prefix
-			key = "\xab" + deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 10));
+			key = std::to_string(lastKey++);
 		}
 		if (deterministicRandom()->coinflip()) {
 			// Include beginning of keyspace
 			keys.push_back("");
-			keys.push_back("\xab" + deterministicRandom()->randomAlphaNumeric(
-			                            deterministicRandom()->randomInt(1, 10))); // Keep an even number of keys
+			keys.push_back(std::to_string(lastKey++)); // Keep an even number of keys
 		}
 		if (deterministicRandom()->coinflip()) {
 			// Include end of keyspace
 			keys.push_back("\xff");
-			keys.push_back("\xab" + deterministicRandom()->randomAlphaNumeric(
-			                            deterministicRandom()->randomInt(1, 10))); // Keep an even number of keys
+			keys.push_back(std::to_string(lastKey++)); // Keep an even number of keys
 		}
 		std::sort(keys.begin(), keys.end());
-		std::string lastKey = "";
 		for (auto iter = keys.begin(); iter != keys.end(); iter += 2) {
 			Standalone<KeyRangeRef> range = KeyRangeRef(*iter, *(iter + 1));
 			if (read) {
@@ -251,12 +249,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			}
 			// TODO test that fails if we don't wait on tx->pendingReads()
 			referenceTx->set(range.begin, LiteralStringRef("1"));
-			if (range.end != LiteralStringRef("\xff")) referenceTx->set(range.end, LiteralStringRef("0"));
+			referenceTx->set(range.end, LiteralStringRef("0"));
 		}
 		// Add some extra keys to sample range read boundaries from
-		for (int i = 0; i < numKeys; ++i) {
-			keys.push_back("\xab" + deterministicRandom()->randomAlphaNumeric(
-			                            deterministicRandom()->randomInt(1, 10))); // Keep an even number of keys
+		for (int i = 0; i < numKeys + 2; ++i) {
+			keys.push_back(std::to_string(lastKey++));
 		}
 		for (int i = 0; i < 10; ++i) {
 			GetRangeLimits limit;
@@ -275,6 +272,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			ASSERT(testResultFuture.isReady());
 			auto correct_iter = correctResultFuture.get().begin();
 			auto test_iter = testResultFuture.get().begin();
+			bool had_error = false;
 			while (correct_iter != correctResultFuture.get().end() && test_iter != testResultFuture.get().end()) {
 				if (correct_iter->key != test_iter->key.removePrefix(prefix) ||
 				    correct_iter->value != test_iter->value) {
@@ -287,6 +285,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    .detail("TestValue", test_iter->value)
 					    .detail("Begin", begin.toString())
 					    .detail("End", end.toString());
+					had_error = true;
 				}
 				++correct_iter;
 				++test_iter;
@@ -300,6 +299,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("Begin", begin.toString())
 				    .detail("End", end.toString());
 				++correct_iter;
+				had_error = true;
 			}
 			while (test_iter != testResultFuture.get().end()) {
 				TraceEvent(SevError, "TestFailure")
@@ -310,7 +310,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("Begin", begin.toString())
 				    .detail("End", end.toString());
 				++test_iter;
+				had_error = true;
 			}
+			if (had_error) break;
 		}
 	}
 };
