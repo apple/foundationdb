@@ -808,7 +808,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 				}
 				wait( waitForAll( operations ) );
 				ASSERT( timebomb == 0 || 1000*(now() - startTime) <= timebomb + 1 );
-				wait( tr.pendingReads() );
+				wait( tr.debug_onIdle() );
 				wait( delay(0.000001) ); //to ensure triggered watches have a change to register
 				self->finished.trigger();
 				wait( waitForAll( watches ) ); //only for errors, should have all returned
