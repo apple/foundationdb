@@ -25,7 +25,6 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbmonitor/SimpleIni.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"

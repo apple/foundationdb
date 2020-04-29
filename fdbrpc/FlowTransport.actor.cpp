@@ -208,6 +208,7 @@ public:
 	Int64MetricHandle countConnClosedWithoutError;
 
 	std::map<NetworkAddress, std::pair<uint64_t, double>> incompatiblePeers;
+	AsyncTrigger incompatiblePeersChanged;
 	uint32_t numIncompatibleConnections;
 	std::map<uint64_t, double> multiVersionConnections;
 	double lastIncompatibleMessage;
@@ -1122,10 +1123,14 @@ bool TransportData::isLocalAddress(const NetworkAddress& address) const {
 ACTOR static Future<Void> multiVersionCleanupWorker( TransportData* self ) {
 	loop {
 		wait(delay(FLOW_KNOBS->CONNECTION_CLEANUP_DELAY));
+		bool foundIncompatible = false;
 		for(auto it = self->incompatiblePeers.begin(); it != self->incompatiblePeers.end();) {
 			if( self->multiVersionConnections.count(it->second.first) ) {
 				it = self->incompatiblePeers.erase(it);
 			} else {
+				if( now() - it->second.second > FLOW_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING ) {
+					foundIncompatible = true;
+				}
 				it++;
 			}
 		}
@@ -1136,6 +1141,10 @@ ACTOR static Future<Void> multiVersionCleanupWorker( TransportData* self ) {
 			} else {
 				it++;
 			}
+		}
+
+		if(foundIncompatible) {
+			self->incompatiblePeersChanged.trigger();
 		}
 	}
 }
@@ -1165,6 +1174,10 @@ std::map<NetworkAddress, std::pair<uint64_t, double>>* FlowTransport::getIncompa
 		}
 	}
 	return &self->incompatiblePeers;
+}
+
+Future<Void> FlowTransport::onIncompatibleChanged() {
+	return self->incompatiblePeersChanged.onTrigger();
 }
 
 Future<Void> FlowTransport::bind( NetworkAddress publicAddress, NetworkAddress listenAddress ) {

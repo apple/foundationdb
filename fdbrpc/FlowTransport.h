@@ -45,7 +45,9 @@ public:
 	}
 
 	void choosePrimaryAddress() {
-		if(addresses.secondaryAddress.present() && !g_network->getLocalAddresses().secondaryAddress.present() && (addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS())) {
+		if(addresses.secondaryAddress.present() && 
+		((!g_network->getLocalAddresses().secondaryAddress.present() && (addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS())) ||
+		(g_network->getLocalAddresses().secondaryAddress.present() && !addresses.address.isTLS()))) {
 			std::swap(addresses.address, addresses.secondaryAddress.get());
 		}
 	}
@@ -57,6 +59,10 @@ public:
 	// all addresses this endpoint listens to.
 	const NetworkAddress& getPrimaryAddress() const {
 		return addresses.address;
+	}
+
+	NetworkAddress getStableAddress() const {
+		return addresses.getTLSAddress();
 	}
 
 	bool operator == (Endpoint const& r) const {
@@ -161,6 +167,9 @@ public:
 
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
+
+	Future<Void> onIncompatibleChanged();
+	// Returns when getIncompatiblePeers has at least one peer which is incompatible.
 
 	void addPeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is being used, even if no messages are currently being sent to the peer
