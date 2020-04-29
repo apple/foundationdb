@@ -2836,7 +2836,25 @@ void crashHandler(int sig) {
 	fprintf(stderr, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
 	fprintf(stderr, "Trace: %s\n", backtrace.c_str());
 
-	_exit(128 + sig);
+	struct sigaction sa;
+	sa.sa_handler = SIG_DFL;
+	if (sigemptyset(&sa.sa_mask)) {
+		int err = errno;
+		fprintf(stderr, "sigemptyset failed: %s\n", strerror(err));
+		_exit(sig + 128);
+	}
+	sa.sa_flags = 0;
+	if (sigaction(sig, &sa, NULL)) {
+		int err = errno;
+		fprintf(stderr, "sigaction failed: %s\n", strerror(err));
+		_exit(sig + 128);
+	}
+	if (kill(getpid(), sig)) {
+		int err = errno;
+		fprintf(stderr, "kill failed: %s\n", strerror(err));
+		_exit(sig + 128);
+	}
+	// Rely on kill to end the process
 #else
 	// No crash handler for other platforms!
 #endif

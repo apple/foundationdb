@@ -3628,6 +3628,29 @@ public:
 	ACTOR static Future<Void> submitParallelRestore(Database cx, Key backupTag,
 	                                                Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
 	                                                Version targetVersion, bool lockDB, UID randomUID) {
+		// Sanity check backup is valid
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(bcUrl.toString());
+		state BackupDescription desc = wait(bc->describeBackup());
+		wait(desc.resolveVersionTimes(cx));
+
+		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
+
+		if (!restoreSet.present()) {
+			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
+			    .detail("BackupContainer", bc->getURL())
+			    .detail("TargetVersion", targetVersion);
+			throw restore_invalid_version();
+		}
+
+		if (targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
+			targetVersion = desc.maxRestorableVersion.get();
+			TraceEvent(SevWarn, "FastRestoreSubmitRestoreRequestWithInvalidTargetVersion")
+			    .detail("OverrideTargetVersion", targetVersion);
+		}
+		TraceEvent("FastRestoreSubmitRestoreRequest")
+		    .detail("BackupDesc", desc.toString())
+		    .detail("TargetVersion", targetVersion);
+
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state int restoreIndex = 0;
 		state int numTries = 0;

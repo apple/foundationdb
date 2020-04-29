@@ -20,7 +20,7 @@ cd ${tmpdir}
 echo
 
 cat <<EOF >> Dockerfile
-FROM foundationdb/foundationdb-build:latest
+FROM foundationdb/foundationdb-dev:0.11.1
 RUN yum install -y sudo
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 RUN groupadd -g 1100 sudo
@@ -64,13 +64,19 @@ then
         ccache_args=\$args
 fi
 
+if [ -t 1 ] ; then
+    TERMINAL_ARGS=-it `# Run in interactive mode and simulate a TTY`
+else
+    TERMINAL_ARGS=-i `# Run in interactive mode`
+fi
 
 sudo docker run --rm `# delete (temporary) image after return` \\
-                -it `# Run in interactive mode and simulate a TTY` \\
+                \${TERMINAL_ARGS}  \\
                 --privileged=true `# Run in privileged mode ` \\
                 --cap-add=SYS_PTRACE \\
                 --security-opt seccomp=unconfined \\
                 -v "${HOME}:${HOME}" `# Mount home directory` \\
+                -w="\$(pwd)" \\
                 \${ccache_args} \\
                 ${image} "\$@"
 EOF
@@ -87,6 +93,7 @@ then
         echo -e "\tThis can cause problems with some scripts (like fdb-clangd)"
 fi
 chmod +x $HOME/bin/fdb-dev
+chmod +x $HOME/bin/clangd
 echo "To start the dev docker image run $HOME/bin/fdb-dev"
 echo "$HOME/bin/clangd can be used for IDE integration"
 echo "You can edit these files but be aware that this script will overwrite your changes if you rerun it"
