@@ -79,9 +79,9 @@ class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<
 	Func func;
 	ErrFunc errFunc;
 
-	virtual void fire(T const& t) override { CallbackType::remove(); func(t); delete this; }
-	virtual void fire(T && t) override { CallbackType::remove(); func(std::move(t)); delete this; }
-	virtual void error(Error e) override { CallbackType::remove(); errFunc(e); delete this; }
+	virtual void fire(T const& t) { CallbackType::remove(); func(t); delete this; }
+	virtual void fire(T && t) { CallbackType::remove(); func(std::move(t)); delete this; }
+	virtual void error(Error e) { CallbackType::remove(); errFunc(e); delete this; }
 
 public:
 	LambdaCallback(Func&& f, ErrFunc&& e) : func(std::move(f)), errFunc(std::move(e)) {}
