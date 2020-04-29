@@ -2190,6 +2190,7 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 		state int kvfiles = deterministicRandom()->randomInt(0, 3);
 		state Key begin = LiteralStringRef("");
 		state Key end = LiteralStringRef("");
+		state int blockSize = 3 * sizeof(uint32_t) + begin.size() + end.size() + 8;
 
 		while(kvfiles > 0) {
 			if(snapshots.empty()) {
@@ -2200,7 +2201,7 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 					v = nextVersion(v);
 				}
 			}
-			Reference<IBackupFile> range = wait(c->writeRangeFile(snapshots.rbegin()->first, 0, v, 16));
+			Reference<IBackupFile> range = wait(c->writeRangeFile(snapshots.rbegin()->first, 0, v, blockSize));
 			++nRangeFiles;
 			v = nextVersion(v);
 			snapshots.rbegin()->second.push_back(range->getFileName());
@@ -2210,7 +2211,7 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 			snapshotSizes.rbegin()->second += size;
 			// Write in actual range file format, instead of random data.
 			// writes.push_back(writeAndVerifyFile(c, range, size));
-			wait(testWriteSnapshotFile(range, begin, end, 16));
+			wait(testWriteSnapshotFile(range, begin, end, blockSize));
 
 			if(deterministicRandom()->random01() < .2) {
 				writes.push_back(c->writeKeyspaceSnapshotFile(
