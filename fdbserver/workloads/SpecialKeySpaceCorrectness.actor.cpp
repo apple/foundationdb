@@ -221,8 +221,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		referenceTx->setVersion(100); // Prevent this from doing a GRV or committing
 		referenceTx->clear(normalKeys);
 		referenceTx->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		int numKeys =
-		    deterministicRandom()->randomInt(0, 10) * 2; // We want an even number of keys so we can iterate over pairs
+		int numKeys = deterministicRandom()->randomInt(1, 10) * 4;
 		std::vector<std::string> keys; // Must all be distinct
 		keys.resize(numKeys);
 		int lastKey = 0;
@@ -232,15 +231,17 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		if (deterministicRandom()->coinflip()) {
 			// Include beginning of keyspace
 			keys.push_back("");
-			keys.push_back(std::to_string(lastKey++)); // Keep an even number of keys
 		}
 		if (deterministicRandom()->coinflip()) {
 			// Include end of keyspace
 			keys.push_back("\xff");
-			keys.push_back(std::to_string(lastKey++)); // Keep an even number of keys
 		}
-		std::sort(keys.begin(), keys.end());
-		for (auto iter = keys.begin(); iter != keys.end(); iter += 2) {
+		std::mt19937 g(deterministicRandom()->randomUInt32());
+		std::shuffle(keys.begin(), keys.end(), g);
+		// First half of the keys will be ranges, the other keys will mix in some read boundaries that aren't range
+		// boundaries
+		std::sort(keys.begin(), keys.begin() + keys.size() / 2);
+		for (auto iter = keys.begin(); iter + 1 < keys.begin() + keys.size() / 2; iter += 2) {
 			Standalone<KeyRangeRef> range = KeyRangeRef(*iter, *(iter + 1));
 			if (read) {
 				tx->addReadConflictRange(range);
@@ -250,10 +251,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			// TODO test that fails if we don't wait on tx->pendingReads()
 			referenceTx->set(range.begin, LiteralStringRef("1"));
 			referenceTx->set(range.end, LiteralStringRef("0"));
-		}
-		// Add some extra keys to sample range read boundaries from
-		for (int i = 0; i < numKeys + 2; ++i) {
-			keys.push_back(std::to_string(lastKey++));
 		}
 		for (int i = 0; i < 10; ++i) {
 			GetRangeLimits limit;
