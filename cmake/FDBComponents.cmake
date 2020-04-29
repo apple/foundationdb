@@ -20,9 +20,7 @@ else()
   find_package(OpenSSL)
   if(OPENSSL_FOUND)
     set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
-    CHECK_CXX_SOURCE_COMPILES(
-      "#include <openssl/crypto.h>
-       int main() { (void) OPENSSL_INIT_NO_ATEXIT; }" OPENSSL_HAS_NO_ATEXIT)
+    check_symbol_exists("OPENSSL_INIT_NO_ATEXIT" "openssl/crypto.h" OPENSSL_HAS_NO_ATEXIT)
     if(OPENSSL_HAS_NO_ATEXIT)
       set(WITH_TLS ON)
       add_compile_options(-DHAVE_OPENSSL)
