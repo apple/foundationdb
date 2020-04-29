@@ -3628,7 +3628,7 @@ public:
 	}
 
 	ACTOR static Future<Void> submitParallelRestore(Database cx, Key backupTag,
-	                                                Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
+	                                                Standalone<VectorRef<KeyRangeRef>> backupRanges, Key bcUrl,
 	                                                Version targetVersion, bool lockDB, UID randomUID) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state int restoreIndex = 0;
@@ -4608,7 +4608,7 @@ Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx, UID randomUID) 
 }
 
 Future<Void> FileBackupAgent::submitParallelRestore(Database cx, Key backupTag,
-                                                    Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
+                                                    Standalone<VectorRef<KeyRangeRef>> backupRanges, Key bcUrl,
                                                     Version targetVersion, bool lockDB, UID randomUID) {
 	return FileBackupAgentImpl::submitParallelRestore(cx, backupTag, backupRanges, bcUrl, targetVersion, lockDB,
 	                                                  randomUID);
