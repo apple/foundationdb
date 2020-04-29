@@ -7,6 +7,8 @@ set(TEST_KEEP_LOGS "FAILED" CACHE STRING "Which logs to keep (NONE, FAILED, ALL)
 set(TEST_KEEP_SIMDIR "NONE" CACHE STRING "Which simfdb directories to keep (NONE, FAILED, ALL)")
 set(TEST_AGGREGATE_TRACES "NONE" CACHE STRING "Create aggregated trace files (NONE, FAILED, ALL)")
 set(TEST_LOG_FORMAT "xml" CACHE STRING "Format for test trace files (xml, json)")
+set(TEST_INCLUDE ".*" CACHE STRING "Include only tests that match the given regex")
+set(TEST_EXCLUDE ".^" CACHE STRING "Exclude all tests matching the given regex")
 
 # for the restart test we optimally want to use the last stable fdbserver
 # to test upgrades
