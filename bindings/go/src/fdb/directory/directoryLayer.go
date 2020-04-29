@@ -417,7 +417,6 @@ func (dl directoryLayer) subdirNames(rtr fdb.ReadTransaction, node subspace.Subs
 
 	rr := rtr.GetRange(sd, fdb.RangeOptions{})
 	ri := rr.Iterator()
-	defer ri.Close()
 
 	var ret []string
 
@@ -443,7 +442,6 @@ func (dl directoryLayer) subdirNodes(tr fdb.Transaction, node subspace.Subspace)
 
 	rr := tr.GetRange(sd, fdb.RangeOptions{})
 	ri := rr.Iterator()
-	defer ri.Close()
 
 	var ret []subspace.Subspace
 

@@ -319,11 +319,12 @@ struct TxnStateRequest {
 	VectorRef<KeyValueRef> data;
 	Sequence sequence;
 	bool last;
+	std::vector<Endpoint> broadcastInfo;
 	ReplyPromise<Void> reply;
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, data, sequence, last, reply, arena);
+		serializer(ar, data, sequence, last, broadcastInfo, reply, arena);
 	}
 };
 

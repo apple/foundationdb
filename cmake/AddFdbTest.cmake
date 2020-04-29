@@ -87,6 +87,9 @@ function(add_fdb_test)
   if (NOT "${ADD_FDB_TEST_TEST_NAME}" STREQUAL "")
     set(test_name ${ADD_FDB_TEST_TEST_NAME})
   endif()
+  if((NOT test_name MATCHES "${TEST_INCLUDE}") OR (test_name MATCHES "${TEST_EXCLUDE}"))
+    return()
+  endif()
   math(EXPR test_idx "${CURRENT_TEST_INDEX} + ${NUM_TEST_FILES}")
   set(CURRENT_TEST_INDEX "${test_idx}" PARENT_SCOPE)
   # set(<var> <value> PARENT_SCOPE) doesn't set the
@@ -160,8 +163,6 @@ function(create_test_package)
         string(SUBSTRING ${file} ${base_length} -1 rel_out_file)
         set(out_file ${CMAKE_BINARY_DIR}/packages/tests/${rel_out_file})
         list(APPEND out_files ${out_file})
-        get_filename_component(test_dir ${out_file} DIRECTORY)
-        file(MAKE_DIRECTORY packages/tests/${test_dir})
         add_custom_command(
           OUTPUT ${out_file}
           DEPENDS ${file}
