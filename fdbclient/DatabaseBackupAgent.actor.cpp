@@ -1491,7 +1491,7 @@ namespace dbBackup {
 					beginVersionKey = BinaryWriter::toValue(bVersion, Unversioned());
 
 					state Key versionKey = logUidValue.withPrefix(destUidValue).withPrefix(backupLatestVersionsPrefix);
-					Optional<Key> versionRecord = wait( scrTr->get(versionKey) );
+					Optional<Key> versionRecord = wait( srcTr->get(versionKey) );
 					if(!versionRecord.present()) {
 						srcTr->set(versionKey, beginVersionKey);
 					}
