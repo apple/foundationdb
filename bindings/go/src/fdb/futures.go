@@ -273,6 +273,7 @@ type futureKeyValueArray struct {
 	*future
 }
 
+//go:nocheckptr
 func stringRefToSlice(ptr unsafe.Pointer) []byte {
 	size := *((*C.int)(unsafe.Pointer(uintptr(ptr) + 8)))
 
