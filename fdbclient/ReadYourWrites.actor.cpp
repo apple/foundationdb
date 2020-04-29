@@ -1562,49 +1562,52 @@ Standalone<RangeResultRef> ReadYourWritesTransaction::getReadConflictRangeInters
 }
 
 Standalone<RangeResultRef> ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRangeRef kr) {
+	Standalone<RangeResultRef> result;
+
 	WriteMap::iterator it(&writes);
 	it.skip(kr.begin);
-	if (it.beginKey() != allKeys.begin) {
-		--it;
-	}
 
-	bool inConflictRange = false;
-	ExtStringRef conflictBegin;
+	bool inConflictRange = it.is_conflict_range();
+	ExtStringRef conflictBegin = std::max(ExtStringRef(allKeys.begin), it.beginKey());
 
-	Standalone<RangeResultRef> result;
 	for (; it.beginKey() < kr.end; ++it) {
 		if (it.is_conflict_range() && !inConflictRange) {
-			conflictBegin = it.beginKey();
+			conflictBegin = std::max(ExtStringRef(allKeys.begin), it.beginKey());
 			inConflictRange = true;
 		} else if (!it.is_conflict_range() && inConflictRange) {
+			KeyRangeRef keyrange(conflictBegin.toArena(result.arena()), it.beginKey().toArena(result.arena()));
+			if (kr.contains(keyrange.begin))
+				result.push_back(
+				    result.arena(),
+				    KeyValueRef(keyrange.begin.withPrefix(
+				                    LiteralStringRef("\xff\xff/transaction/write_conflict_range/"), result.arena()),
+				                LiteralStringRef("1")));
+			if (kr.contains(keyrange.end))
+				result.push_back(
+				    result.arena(),
+				    KeyValueRef(keyrange.end.withPrefix(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
+				                                        result.arena()),
+				                LiteralStringRef("0")));
 			inConflictRange = false;
-			if (conflictBegin >= kr.begin) {
-				result.push_back(
-				    result.arena(),
-				    KeyValueRef(
-				        conflictBegin.toArena(result.arena())
-				            .withPrefix(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"), result.arena()),
-				        LiteralStringRef("1")));
-			}
-			if (it.beginKey() < kr.end) {
-				result.push_back(
-				    result.arena(),
-				    KeyValueRef(
-				        it.beginKey()
-				            .toArena(result.arena())
-				            .withPrefix(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"), result.arena()),
-				        LiteralStringRef("0")));
-			}
 		}
 	}
 
-	if (inConflictRange && conflictBegin < kr.end) {
-		result.push_back(
-		    result.arena(),
-		    KeyValueRef(conflictBegin.toArena(result.arena())
-		                    .withPrefix(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"), result.arena()),
-		                LiteralStringRef("1")));
+	if (inConflictRange) {
+		KeyRangeRef keyrange(conflictBegin.toArena(result.arena()), allKeys.end);
+		if (kr.contains(keyrange.begin))
+			result.push_back(
+			    result.arena(),
+			    KeyValueRef(keyrange.begin.withPrefix(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
+			                                          result.arena()),
+			                LiteralStringRef("1")));
+		if (kr.contains(keyrange.end))
+			result.push_back(
+			    result.arena(),
+			    KeyValueRef(keyrange.end.withPrefix(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
+			                                        result.arena()),
+			                LiteralStringRef("0")));
 	}
+
 	return result;
 }
 

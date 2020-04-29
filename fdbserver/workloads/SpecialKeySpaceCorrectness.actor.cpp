@@ -100,7 +100,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		if (self->clientId == 0) {
-			testReadConflictRanges(cx);
+			testConflictRanges(cx, /*read*/ true);
+			testConflictRanges(cx, /*read*/ false);
 			wait(timeout(self->getRangeCallActor(cx, self), self->testDuration, Void()));
 		}
 		return Void();
@@ -208,8 +209,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return GetRangeLimits(rowLimits, byteLimits);
 	}
 
-	static void testReadConflictRanges(Database cx_) {
-		TEST(true); // test read conflict range special key implementation
+	static void testConflictRanges(Database cx_, bool read) {
+		StringRef prefix = read ? LiteralStringRef("\xff\xff/transaction/read_conflict_range/")
+		                        : LiteralStringRef("\xff\xff/transaction/write_conflict_range/");
+		TEST(read); // test read conflict range special key implementation
+		TEST(!read); // test write conflict range special key implementation
 		// Get a default special key range instance
 		Database cx = cx_->clone();
 		Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
@@ -240,7 +244,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		std::string lastKey = "";
 		for (auto iter = keys.begin(); iter != keys.end(); iter += 2) {
 			Standalone<KeyRangeRef> range = KeyRangeRef(*iter, *(iter + 1));
-			tx->addReadConflictRange(range);
+			if (read) {
+				tx->addReadConflictRange(range);
+			} else {
+				tx->addWriteConflictRange(range);
+			}
 			// TODO test that fails if we don't wait on tx->pendingReads()
 			referenceTx->set(range.begin, LiteralStringRef("1"));
 			if (range.end != LiteralStringRef("\xff")) referenceTx->set(range.end, LiteralStringRef("0"));
@@ -257,27 +265,51 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			while (end.getKey() < begin.getKey()) {
 				end = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
 			}
-
 			bool reverse = deterministicRandom()->coinflip();
+
 			auto correctResultFuture = referenceTx->getRange(begin, end, limit, false, reverse);
 			ASSERT(correctResultFuture.isReady());
-			begin.setKey(begin.getKey().withPrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
-			                                       begin.arena()));
-			end.setKey(
-			    end.getKey().withPrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"), end.arena()));
+			begin.setKey(begin.getKey().withPrefix(prefix, begin.arena()));
+			end.setKey(end.getKey().withPrefix(prefix, begin.arena()));
 			auto testResultFuture = tx->getRange(begin, end, limit, false, reverse);
 			ASSERT(testResultFuture.isReady());
-			if (correctResultFuture.get().size() != testResultFuture.get().size()) {
-				TraceEvent(SevError, "TestFailure")
-				    .detail("Reason", "Results' sizes are inconsistent")
-				    .detail("CorrestResultSize", correctResultFuture.get().size())
-				    .detail("TestResultSize", testResultFuture.get().size());
+			auto correct_iter = correctResultFuture.get().begin();
+			auto test_iter = testResultFuture.get().begin();
+			while (correct_iter != correctResultFuture.get().end() && test_iter != testResultFuture.get().end()) {
+				if (correct_iter->key != test_iter->key.removePrefix(prefix) ||
+				    correct_iter->value != test_iter->value) {
+					TraceEvent(SevError, "TestFailure")
+					    .detail("Reason", "Mismatched keys")
+					    .detail("ConflictType", read ? "read" : "write")
+					    .detail("CorrectKey", correct_iter->key)
+					    .detail("TestKey", test_iter->key)
+					    .detail("CorrectValue", correct_iter->value)
+					    .detail("TestValue", test_iter->value)
+					    .detail("Begin", begin.toString())
+					    .detail("End", end.toString());
+				}
+				++correct_iter;
+				++test_iter;
 			}
-			auto iter = correctResultFuture.get().begin();
-			for (const auto& kv : testResultFuture.get()) {
-				ASSERT(iter->key == kv.key.removePrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/")));
-				ASSERT(iter->value == kv.value);
-				++iter;
+			while (correct_iter != correctResultFuture.get().end()) {
+				TraceEvent(SevError, "TestFailure")
+				    .detail("Reason", "Extra correct key")
+				    .detail("ConflictType", read ? "read" : "write")
+				    .detail("CorrectKey", correct_iter->key)
+				    .detail("CorrectValue", correct_iter->value)
+				    .detail("Begin", begin.toString())
+				    .detail("End", end.toString());
+				++correct_iter;
+			}
+			while (test_iter != testResultFuture.get().end()) {
+				TraceEvent(SevError, "TestFailure")
+				    .detail("Reason", "Extra test key")
+				    .detail("ConflictType", read ? "read" : "write")
+				    .detail("TestKey", test_iter->key)
+				    .detail("TestValue", test_iter->value)
+				    .detail("Begin", begin.toString())
+				    .detail("End", end.toString());
+				++test_iter;
 			}
 		}
 	}
