@@ -78,7 +78,6 @@ func (tuple Tuple) String() string {
 }
 
 func printTuple(tuple Tuple, sb *strings.Builder) {
-	// TODO: Add VersionStamp printer
 	sb.WriteString("(")
 
 	for i, t := range tuple {
@@ -129,6 +128,11 @@ func (uuid UUID) String() string {
 type Versionstamp struct {
 	TransactionVersion [10]byte
 	UserVersion        uint16
+}
+
+// Returns a human-readable string for this Versionstamp.
+func (vs Versionstamp) String() string {
+	return fmt.Sprintf("Versionstamp(%s, %d)", fdb.Printable(vs.TransactionVersion[:]), vs.UserVersion)
 }
 
 var incompleteTransactionVersion = [10]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}

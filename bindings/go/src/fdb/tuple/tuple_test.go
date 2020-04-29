@@ -141,7 +141,10 @@ func TestTupleString(t *testing.T) {
 			Tuple{"UUID", testUUID},
 			"(\"UUID\", UUID(1100aabb-ccdd-eeff-1100-aabbccddeeff))",
 		},
-		// TODO: Add VersionStamp testcase
+		{
+			Tuple{"Versionstamp", Versionstamp{[10]byte{0, 0, 0, 0xaa, 0, 0xbb, 0, 0xcc, 0, 0xdd}, 620}},
+			"(\"Versionstamp\", Versionstamp(\\x00\\x00\\x00\\xaa\\x00\\xbb\\x00\\xcc\\x00\\xdd, 620))",
+		},
 	}
 
 	for _, testCase := range testCases {
