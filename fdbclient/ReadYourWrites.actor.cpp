@@ -20,6 +20,7 @@
 
 #include "Arena.h"
 #include "FDBTypes.h"
+#include "KeyRangeMap.h"
 #include "SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Atomic.h"
@@ -1546,17 +1547,37 @@ void ReadYourWritesTransaction::getWriteConflicts( KeyRangeMap<bool> *result ) {
 Standalone<RangeResultRef> ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRangeRef kr) {
 	ASSERT(!tr.options.checkWritesEnabled)
 	Standalone<RangeResultRef> result;
-	auto iter = readConflicts.rangeContainingKeyBefore(kr.begin);
-	if (iter->begin() == allKeys.begin && !iter->value()) {
-		++iter; // Conventionally '' is missing from the result range if it's not part of a read conflict
-	}
-	for (; iter->begin() < kr.end; ++iter) {
-		if (kr.begin <= iter->begin() && iter->begin() < kr.end) {
-			result.push_back(
-			    result.arena(),
-			    KeyValueRef(iter->begin().withPrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
-			                                         result.arena()),
-			                iter->value() ? LiteralStringRef("1") : LiteralStringRef("0")));
+	if (!options.readYourWritesDisabled) {
+		auto iter = readConflicts.rangeContainingKeyBefore(kr.begin);
+		if (iter->begin() == allKeys.begin && !iter->value()) {
+			++iter; // Conventionally '' is missing from the result range if it's not part of a read conflict
+		}
+		for (; iter->begin() < kr.end; ++iter) {
+			if (kr.begin <= iter->begin() && iter->begin() < kr.end) {
+				result.push_back(
+				    result.arena(),
+				    KeyValueRef(iter->begin().withPrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
+				                                         result.arena()),
+				                iter->value() ? LiteralStringRef("1") : LiteralStringRef("0")));
+			}
+		}
+	} else {
+		kr = kr.withPrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"), result.arena());
+		CoalescedKeyRefRangeMap<ValueRef> readConflicts{ LiteralStringRef("0"), specialKeys.end };
+		for (const auto& range : tr.readConflictRanges())
+			readConflicts.insert(
+			    range.withPrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"), result.arena()),
+			    LiteralStringRef("1"));
+		for (const auto& f : tr.getExtraReadConflictRanges())
+			if (f.isReady() && f.get().first < f.get().second)
+				readConflicts.insert(
+				    KeyRangeRef(f.get().first, f.get().second)
+				        .withPrefix(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"), result.arena()),
+				    LiteralStringRef("1"));
+		auto beginIter = readConflicts.rangeContaining(kr.begin);
+		if (beginIter->begin() != kr.begin) ++beginIter;
+		for (auto it = beginIter; it->begin() < kr.end; ++it) {
+			result.push_back(result.arena(), KeyValueRef(it->begin(), it->value()));
 		}
 	}
 	return result;
@@ -1565,19 +1586,38 @@ Standalone<RangeResultRef> ReadYourWritesTransaction::getReadConflictRangeInters
 Standalone<RangeResultRef> ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRangeRef kr) {
 	Standalone<RangeResultRef> result;
 
-	WriteMap::iterator it(&writes);
-	it.skip(kr.begin);
-	if (it.beginKey() != allKeys.begin) --it;
+	if (!options.readYourWritesDisabled) {
+		WriteMap::iterator it(&writes);
+		it.skip(kr.begin);
+		if (it.beginKey() != allKeys.begin) --it;
 
-	bool inConflictRange = false;
-	ExtStringRef conflictBegin;
+		bool inConflictRange = false;
+		ExtStringRef conflictBegin;
 
-	for (; it.beginKey() < kr.end; ++it) {
-		if (it.is_conflict_range() && !inConflictRange) {
-			conflictBegin = std::max(ExtStringRef(allKeys.begin), it.beginKey());
-			inConflictRange = true;
-		} else if (!it.is_conflict_range() && inConflictRange) {
-			KeyRangeRef keyrange(conflictBegin.toArena(result.arena()), it.beginKey().toArena(result.arena()));
+		for (; it.beginKey() < kr.end; ++it) {
+			if (it.is_conflict_range() && !inConflictRange) {
+				conflictBegin = std::max(ExtStringRef(allKeys.begin), it.beginKey());
+				inConflictRange = true;
+			} else if (!it.is_conflict_range() && inConflictRange) {
+				KeyRangeRef keyrange(conflictBegin.toArena(result.arena()), it.beginKey().toArena(result.arena()));
+				if (kr.contains(keyrange.begin))
+					result.push_back(
+					    result.arena(),
+					    KeyValueRef(keyrange.begin.withPrefix(
+					                    LiteralStringRef("\xff\xff/transaction/write_conflict_range/"), result.arena()),
+					                LiteralStringRef("1")));
+				if (kr.contains(keyrange.end))
+					result.push_back(
+					    result.arena(),
+					    KeyValueRef(keyrange.end.withPrefix(
+					                    LiteralStringRef("\xff\xff/transaction/write_conflict_range/"), result.arena()),
+					                LiteralStringRef("0")));
+				inConflictRange = false;
+			}
+		}
+
+		if (inConflictRange) {
+			KeyRangeRef keyrange(conflictBegin.toArena(result.arena()), allKeys.end);
 			if (kr.contains(keyrange.begin))
 				result.push_back(
 				    result.arena(),
@@ -1590,24 +1630,19 @@ Standalone<RangeResultRef> ReadYourWritesTransaction::getWriteConflictRangeInter
 				    KeyValueRef(keyrange.end.withPrefix(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
 				                                        result.arena()),
 				                LiteralStringRef("0")));
-			inConflictRange = false;
 		}
-	}
-
-	if (inConflictRange) {
-		KeyRangeRef keyrange(conflictBegin.toArena(result.arena()), allKeys.end);
-		if (kr.contains(keyrange.begin))
-			result.push_back(
-			    result.arena(),
-			    KeyValueRef(keyrange.begin.withPrefix(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
-			                                          result.arena()),
-			                LiteralStringRef("1")));
-		if (kr.contains(keyrange.end))
-			result.push_back(
-			    result.arena(),
-			    KeyValueRef(keyrange.end.withPrefix(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
-			                                        result.arena()),
-			                LiteralStringRef("0")));
+	} else {
+		kr = kr.withPrefix(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"), result.arena());
+		CoalescedKeyRefRangeMap<ValueRef> writeConflicts{ LiteralStringRef("0"), specialKeys.end };
+		for (const auto& range : tr.writeConflictRanges())
+			writeConflicts.insert(
+			    range.withPrefix(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"), result.arena()),
+			    LiteralStringRef("1"));
+		auto beginIter = writeConflicts.rangeContaining(kr.begin);
+		if (beginIter->begin() != kr.begin) ++beginIter;
+		for (auto it = beginIter; it->begin() < kr.end; ++it) {
+			result.push_back(result.arena(), KeyValueRef(it->begin(), it->value()));
+		}
 	}
 
 	return result;

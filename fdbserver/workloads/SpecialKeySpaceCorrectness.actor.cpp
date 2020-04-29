@@ -218,6 +218,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		Database cx = cx_->clone();
 		Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
 		Reference<ReadYourWritesTransaction> referenceTx = Reference(new ReadYourWritesTransaction(cx));
+		bool ryw = deterministicRandom()->coinflip();
+		if (!ryw) {
+			tx->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+		}
 		referenceTx->setVersion(100); // Prevent this from doing a GRV or committing
 		referenceTx->clear(normalKeys);
 		referenceTx->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -245,7 +249,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			Standalone<KeyRangeRef> range = KeyRangeRef(*iter, *(iter + 1));
 			if (read) {
 				tx->addReadConflictRange(range);
+				// Add it twice so that we can observe the de-duplication that should get done
+				tx->addReadConflictRange(range);
 			} else {
+				tx->addWriteConflictRange(range);
 				tx->addWriteConflictRange(range);
 			}
 			// TODO test that fails if we don't wait on tx->pendingReads()
@@ -281,7 +288,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    .detail("CorrectValue", correct_iter->value)
 					    .detail("TestValue", test_iter->value)
 					    .detail("Begin", begin.toString())
-					    .detail("End", end.toString());
+					    .detail("End", end.toString())
+					    .detail("Ryw", ryw);
 					had_error = true;
 				}
 				++correct_iter;
@@ -294,7 +302,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("CorrectKey", correct_iter->key)
 				    .detail("CorrectValue", correct_iter->value)
 				    .detail("Begin", begin.toString())
-				    .detail("End", end.toString());
+				    .detail("End", end.toString())
+				    .detail("", end.toString())
+				    .detail("Ryw", ryw);
 				++correct_iter;
 				had_error = true;
 			}
@@ -305,7 +315,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("TestKey", test_iter->key)
 				    .detail("TestValue", test_iter->value)
 				    .detail("Begin", begin.toString())
-				    .detail("End", end.toString());
+				    .detail("End", end.toString())
+				    .detail("Ryw", ryw);
 				++test_iter;
 				had_error = true;
 			}

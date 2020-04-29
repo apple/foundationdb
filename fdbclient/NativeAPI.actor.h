@@ -300,6 +300,11 @@ public:
 	TransactionOptions options;
 	double startTime;
 	Reference<TransactionLogInfo> trLogInfo;
+
+	const vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
+	const VectorRef<KeyRangeRef>& readConflictRanges() const { return tr.transaction.read_conflict_ranges; }
+	const VectorRef<KeyRangeRef>& writeConflictRanges() const { return tr.transaction.write_conflict_ranges; }
+
 private:
 	Future<Version> getReadVersion(uint32_t flags);
 	void setPriority(uint32_t priorityFlag);
