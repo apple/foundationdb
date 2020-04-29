@@ -114,6 +114,14 @@ const KeyRangeRef conflictingKeysRange =
 const ValueRef conflictingKeysTrue = LiteralStringRef("1");
 const ValueRef conflictingKeysFalse = LiteralStringRef("0");
 
+const KeyRangeRef readConflictRangeKeysRange =
+    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
+                LiteralStringRef("\xff\xff/transaction/read_conflict_range/\xff\xff"));
+
+const KeyRangeRef writeConflictRangeKeysRange =
+    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
+                LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff"));
+
 //    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
 const KeyRangeRef storageCacheKeys( LiteralStringRef("\xff/storageCache/"), LiteralStringRef("\xff/storageCache0") );
 const KeyRef storageCachePrefix = storageCacheKeys.begin;

@@ -531,12 +531,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
     specialKeySpace(std::make_shared<SpecialKeySpace>(normalKeys.begin, specialKeys.end)),
     cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeysRange)),
-    rCRImpl(std::make_shared<ReadConflictRangeImpl>(
-        KeyRangeRef(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
-                    LiteralStringRef("\xff\xff/transaction/read_conflict_range/\xff\xff")))),
-    wCRImpl(std::make_shared<WriteConflictRangeImpl>(
-        KeyRangeRef(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
-                    LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff")))) {
+    rCRImpl(std::make_shared<ReadConflictRangeImpl>(readConflictRangeKeysRange)),
+    wCRImpl(std::make_shared<WriteConflictRangeImpl>(writeConflictRangeKeysRange)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
 
@@ -556,14 +552,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	specialKeySpace->registerKeyRange(conflictingKeysRange, cKImpl.get());
-	specialKeySpace->registerKeyRange(
-	    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
-	                LiteralStringRef("\xff\xff/transaction/read_conflict_range/\xff\xff")),
-	    rCRImpl.get());
-	specialKeySpace->registerKeyRange(
-	    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
-	                LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff")),
-	    wCRImpl.get());
+	specialKeySpace->registerKeyRange(readConflictRangeKeysRange, rCRImpl.get());
+	specialKeySpace->registerKeyRange(writeConflictRangeKeysRange, wCRImpl.get());
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc), 

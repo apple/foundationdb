@@ -210,8 +210,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 
 	static void testConflictRanges(Database cx_, bool read) {
-		StringRef prefix = read ? LiteralStringRef("\xff\xff/transaction/read_conflict_range/")
-		                        : LiteralStringRef("\xff\xff/transaction/write_conflict_range/");
+		StringRef prefix = read ? readConflictRangeKeysRange.begin : writeConflictRangeKeysRange.begin;
 		TEST(read); // test read conflict range special key implementation
 		TEST(!read); // test write conflict range special key implementation
 		// Get a default special key range instance

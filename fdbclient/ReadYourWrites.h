@@ -140,7 +140,9 @@ public:
 		return tr.info;
 	}
 
+	// Read from the special key space readConflictRangeKeysRange
 	Standalone<RangeResultRef> getReadConflictRangeIntersecting(KeyRangeRef kr);
+	// Read from the special key space writeConflictRangeKeysRange
 	Standalone<RangeResultRef> getWriteConflictRangeIntersecting(KeyRangeRef kr);
 
 private:
