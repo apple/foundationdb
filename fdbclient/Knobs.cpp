@@ -224,9 +224,9 @@ void ClientKnobs::initialize(bool randomize) {
 	// transaction tags
 	init( MAX_TAGS_PER_TRANSACTION,                 100 );
 	init( MAX_TRANSACTION_TAG_LENGTH,               100 );
-	init( READ_TAG_SAMPLE_RATE,                     1.0 ); // Communicated to clients from cluster
-	init( TAG_THROTTLE_SMOOTHING_WINDOW,            5.0 );
-	init( TAG_THROTTLE_RECHECK_INTERVAL,            5.0 );
+	init( READ_TAG_SAMPLE_RATE,                    0.01 ); // Communicated to clients from cluster
+	init( TAG_THROTTLE_SMOOTHING_WINDOW,            2.0 );
+	init( TAG_THROTTLE_RECHECK_INTERVAL,            5.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_RECHECK_INTERVAL = 0.0;
 	init( TAG_THROTTLE_EXPIRATION_INTERVAL,        60.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_EXPIRATION_INTERVAL = 1.0;
 
 	// clang-format on
