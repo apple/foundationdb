@@ -373,17 +373,6 @@ struct LogFileWriter {
 		return wr.toValue();
 	}
 
-	// Return a block of contiguous padding bytes, growing if needed.
-	static Value makePadding(int size) {
-		static Value pad;
-		if (pad.size() < size) {
-			pad = makeString(size);
-			memset(mutateString(pad), '\xff', pad.size());
-		}
-
-		return pad.substr(0, size);
-	}
-
 	// Start a new block if needed, then write the key and value
 	ACTOR static Future<Void> writeKV_impl(LogFileWriter* self, Key k, Value v) {
 		// If key and value do not fit in this block, end it and start a new one
@@ -392,7 +381,7 @@ struct LogFileWriter {
 			// Write padding if needed
 			int bytesLeft = self->blockEnd - self->file->size();
 			if (bytesLeft > 0) {
-				state Value paddingFFs = makePadding(bytesLeft);
+				state Value paddingFFs = fileBackup::makePadding(bytesLeft);
 				wait(self->file->append(paddingFFs.begin(), bytesLeft));
 			}
 

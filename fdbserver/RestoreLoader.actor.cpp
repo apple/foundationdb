@@ -817,7 +817,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 
 	// The set of key value version is rangeFile.version. the key-value set in the same range file has the same version
 	Reference<IAsyncFile> inFile = wait(bc->readFile(asset.filename));
-	state VectorRef<KeyValueRef> blockData;
+	state Standalone<VectorRef<KeyValueRef>> blockData;
 	try {
 		Standalone<VectorRef<KeyValueRef>> kvs =
 		    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len));
