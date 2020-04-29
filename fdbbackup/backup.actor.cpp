@@ -2234,7 +2234,7 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 				    .detail("RestoreUID", randomUID)
 				    .detail("OperationGuide", "Manually unlock DB when restore finishes");
 				printf("WARNING: DB will be in locked state after restore. Need UID:%s to unlock DB\n",
-				       randomUID.toString());
+				       randomUID.toString().c_str());
 			}
 
 			restoreVersion = dbVersion;
