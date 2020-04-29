@@ -11,7 +11,8 @@ endif()
 ################################################################################
 # SSL
 ################################################################################
-
+include(CheckSymbolExists)
+ 
 set(DISABLE_TLS OFF CACHE BOOL "Don't try to find OpenSSL and always build without TLS support")
 if(DISABLE_TLS)
   set(WITH_TLS OFF)
