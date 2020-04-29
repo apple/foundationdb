@@ -1544,6 +1544,7 @@ void ReadYourWritesTransaction::getWriteConflicts( KeyRangeMap<bool> *result ) {
 }
 
 Standalone<RangeResultRef> ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRangeRef kr) {
+	ASSERT(!tr.options.checkWritesEnabled)
 	Standalone<RangeResultRef> result;
 	auto iter = readConflicts.rangeContainingKeyBefore(kr.begin);
 	if (iter->begin() == allKeys.begin && !iter->value()) {
