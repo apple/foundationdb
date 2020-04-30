@@ -39,6 +39,7 @@ package fdb
 import "C"
 
 import (
+	"runtime"
 	"sync"
 	"unsafe"
 )
@@ -74,7 +75,9 @@ type future struct {
 }
 
 func newFuture(ptr *C.FDBFuture) *future {
-	return &future{ptr}
+	f := &future{ptr}
+	runtime.SetFinalizer(f, func(f *future) { C.fdb_future_destroy(f.ptr) })
+	return f
 }
 
 // Note: This function guarantees the callback will be executed **at most once**.
@@ -97,14 +100,17 @@ func fdb_future_block_until_ready(f *C.FDBFuture) {
 }
 
 func (f *future) BlockUntilReady() {
+	defer runtime.KeepAlive(f)
 	fdb_future_block_until_ready(f.ptr)
 }
 
 func (f *future) IsReady() bool {
+	defer runtime.KeepAlive(f)
 	return C.fdb_future_is_ready(f.ptr) != 0
 }
 
 func (f *future) Cancel() {
+	defer runtime.KeepAlive(f)
 	C.fdb_future_cancel(f.ptr)
 }
 
@@ -136,7 +142,7 @@ type futureByteSlice struct {
 
 func (f *futureByteSlice) Get() ([]byte, error) {
 	f.o.Do(func() {
-		defer C.fdb_future_destroy(f.ptr)
+		defer runtime.KeepAlive(f.future)
 
 		var present C.fdb_bool_t
 		var value *C.uint8_t
@@ -150,14 +156,10 @@ func (f *futureByteSlice) Get() ([]byte, error) {
 		}
 
 		if present != 0 {
-			// Copy the native `value` into a Go byte slice so the underlying
-			// native Future can be freed. This avoids the need for finalizers.
-			valueDestination := make([]byte, length)
-			valueSource := C.GoBytes(unsafe.Pointer(value), length)
-			copy(valueDestination, valueSource)
-
-			f.v = valueDestination
+			f.v = C.GoBytes(unsafe.Pointer(value), length)
 		}
+
+		C.fdb_future_release_memory(f.ptr)
 	})
 
 	return f.v, f.e
@@ -197,7 +199,7 @@ type futureKey struct {
 
 func (f *futureKey) Get() (Key, error) {
 	f.o.Do(func() {
-		defer C.fdb_future_destroy(f.ptr)
+		defer runtime.KeepAlive(f.future)
 
 		var value *C.uint8_t
 		var length C.int
@@ -209,11 +211,8 @@ func (f *futureKey) Get() (Key, error) {
 			return
 		}
 
-		keySource := C.GoBytes(unsafe.Pointer(value), length)
-		keyDestination := make([]byte, length)
-		copy(keyDestination, keySource)
-
-		f.k = keyDestination
+		f.k = C.GoBytes(unsafe.Pointer(value), length)
+		C.fdb_future_release_memory(f.ptr)
 	})
 
 	return f.k, f.e
@@ -246,21 +245,17 @@ type FutureNil interface {
 
 type futureNil struct {
 	*future
-	o sync.Once
-	e error
 }
 
 func (f *futureNil) Get() error {
-	f.o.Do(func() {
-		defer C.fdb_future_destroy(f.ptr)
+	defer runtime.KeepAlive(f.future)
 
-		f.BlockUntilReady()
-		if err := C.fdb_future_get_error(f.ptr); err != 0 {
-			f.e = Error{int(err)}
-		}
-	})
+	f.BlockUntilReady()
+	if err := C.fdb_future_get_error(f.ptr); err != 0 {
+		return Error{int(err)}
+	}
 
-	return f.e
+	return nil
 }
 
 func (f *futureNil) MustGet() {
@@ -273,6 +268,7 @@ type futureKeyValueArray struct {
 	*future
 }
 
+//go:nocheckptr
 func stringRefToSlice(ptr unsafe.Pointer) []byte {
 	size := *((*C.int)(unsafe.Pointer(uintptr(ptr) + 8)))
 
@@ -286,6 +282,8 @@ func stringRefToSlice(ptr unsafe.Pointer) []byte {
 }
 
 func (f *futureKeyValueArray) Get() ([]KeyValue, bool, error) {
+	defer runtime.KeepAlive(f.future)
+
 	f.BlockUntilReady()
 
 	var kvs *C.FDBKeyValue
@@ -296,42 +294,13 @@ func (f *futureKeyValueArray) Get() ([]KeyValue, bool, error) {
 		return nil, false, Error{int(err)}
 	}
 
-	// To minimize the number of individual allocations, we first calculate the
-	// final size used by all keys and values returned from this iteration,
-	// then perform one larger allocation and slice within it.
-
-	poolSize := 0
-	for i := 0; i < int(count); i++ {
-		kvptr := unsafe.Pointer(uintptr(unsafe.Pointer(kvs)) + uintptr(i*24))
-
-		poolSize += len(stringRefToSlice(kvptr))
-		poolSize += len(stringRefToSlice(unsafe.Pointer(uintptr(kvptr) + 12)))
-	}
-
-	poolOffset := 0
-	pool := make([]byte, poolSize)
-
 	ret := make([]KeyValue, int(count))
 
 	for i := 0; i < int(count); i++ {
 		kvptr := unsafe.Pointer(uintptr(unsafe.Pointer(kvs)) + uintptr(i*24))
 
-		keySource := stringRefToSlice(kvptr)
-		valueSource := stringRefToSlice(unsafe.Pointer(uintptr(kvptr) + 12))
-
-		keyDestination := pool[poolOffset : poolOffset+len(keySource)]
-		poolOffset += len(keySource)
-
-		valueDestination := pool[poolOffset : poolOffset+len(valueSource)]
-		poolOffset += len(valueSource)
-
-		copy(keyDestination, keySource)
-		copy(valueDestination, valueSource)
-
-		ret[i] = KeyValue{
-			Key:   keyDestination,
-			Value: valueDestination,
-		}
+		ret[i].Key = stringRefToSlice(kvptr)
+		ret[i].Value = stringRefToSlice(unsafe.Pointer(uintptr(kvptr) + 12))
 	}
 
 	return ret, (more != 0), nil
@@ -356,28 +325,19 @@ type FutureInt64 interface {
 
 type futureInt64 struct {
 	*future
-	o sync.Once
-	e error
-	v int64
 }
 
 func (f *futureInt64) Get() (int64, error) {
-	f.o.Do(func() {
-		defer C.fdb_future_destroy(f.ptr)
+	defer runtime.KeepAlive(f.future)
 
-		f.BlockUntilReady()
+	f.BlockUntilReady()
 
-		var ver C.int64_t
-		if err := C.fdb_future_get_int64(f.ptr, &ver); err != 0 {
-			f.v = 0
-			f.e = Error{int(err)}
-			return
-		}
+	var ver C.int64_t
+	if err := C.fdb_future_get_int64(f.ptr, &ver); err != 0 {
+		return 0, Error{int(err)}
+	}
 
-		f.v = int64(ver)
-	})
-
-	return f.v, f.e
+	return int64(ver), nil
 }
 
 func (f *futureInt64) MustGet() int64 {
@@ -408,40 +368,27 @@ type FutureStringSlice interface {
 
 type futureStringSlice struct {
 	*future
-	o sync.Once
-	e error
-	v []string
 }
 
 func (f *futureStringSlice) Get() ([]string, error) {
-	f.o.Do(func() {
-		defer C.fdb_future_destroy(f.ptr)
+	defer runtime.KeepAlive(f.future)
 
-		f.BlockUntilReady()
+	f.BlockUntilReady()
 
-		var strings **C.char
-		var count C.int
+	var strings **C.char
+	var count C.int
 
-		if err := C.fdb_future_get_string_array(f.ptr, (***C.char)(unsafe.Pointer(&strings)), &count); err != 0 {
-			f.e = Error{int(err)}
-			return
-		}
+	if err := C.fdb_future_get_string_array(f.ptr, (***C.char)(unsafe.Pointer(&strings)), &count); err != 0 {
+		return nil, Error{int(err)}
+	}
 
-		ret := make([]string, int(count))
+	ret := make([]string, int(count))
 
-		for i := 0; i < int(count); i++ {
-			source := C.GoString((*C.char)(*(**C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(strings)) + uintptr(i*8)))))
+	for i := 0; i < int(count); i++ {
+		ret[i] = C.GoString((*C.char)(*(**C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(strings)) + uintptr(i*8)))))
+	}
 
-			destination := make([]byte, len(source))
-			copy(destination, source)
-
-			ret[i] = string(destination)
-		}
-
-		f.v = ret
-	})
-
-	return f.v, f.e
+	return ret, nil
 }
 
 func (f *futureStringSlice) MustGet() []string {

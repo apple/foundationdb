@@ -717,7 +717,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 ACTOR static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersions, RestoreFileFR* file,
                                              Reference<IBackupContainer> bc) {
 	TraceEvent("FastRestoreMasterDecodeRangeVersion").detail("File", file->toString());
-	RangeFile rangeFile(file->version, file->blockSize, file->fileName, file->fileSize);
+	RangeFile rangeFile = { file->version, (uint32_t)file->blockSize, file->fileName, file->fileSize };
 
 	// First and last key are the range for this file: endKey is exclusive
 	KeyRange fileRange = wait(bc->getSnapshotFileKeyRange(rangeFile));

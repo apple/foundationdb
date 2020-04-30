@@ -278,7 +278,7 @@ public:
 	// parallel restore
 	Future<Void> parallelRestoreFinish(Database cx, UID randomUID);
 	Future<Void> submitParallelRestore(Database cx, Key backupTag, Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                                   KeyRef bcUrl, Version targetVersion, bool lockDB, UID randomUID);
+	                                   Key bcUrl, Version targetVersion, bool lockDB, UID randomUID);
 	Future<Void> atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                   Key addPrefix, Key removePrefix);
 
@@ -893,10 +893,6 @@ public:
 	}
 };
 
-ACTOR Future<Version> fastRestore(Database cx, Standalone<StringRef> tagName, Standalone<StringRef> url,
-                                  bool waitForComplete, long targetVersion, bool verbose, Standalone<KeyRangeRef> range,
-                                  Standalone<StringRef> addPrefix, Standalone<StringRef> removePrefix);
-
 // Helper class for reading restore data from a buffer and throwing the right errors.
 struct StringRefReader {
 	StringRefReader(StringRef s = StringRef(), Error e = Error()) : rptr(s.begin()), end(s.end()), failure_error(e) {}
@@ -937,6 +933,9 @@ struct StringRefReader {
 namespace fileBackup {
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset,
                                                                       int len);
+
+// Return a block of contiguous padding bytes "\0xff" for backup files, growing if needed.
+Value makePadding(int size);
 }
 
 #include "flow/unactorcompiler.h"
