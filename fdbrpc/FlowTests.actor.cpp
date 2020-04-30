@@ -1458,6 +1458,7 @@ TEST_CASE("/flow/flow/PromiseStream/move2") {
 	stream.send(Tracker{});
 	Tracker tracker = waitNext(stream.getFuture());
 	Tracker movedTracker = std::move(tracker);
+	ASSERT(tracker.moved);
 	ASSERT(!movedTracker.moved);
 	ASSERT(movedTracker.copied == 0);
 	return Void();
