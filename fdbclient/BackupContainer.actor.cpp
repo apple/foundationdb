@@ -1777,7 +1777,6 @@ public:
 	virtual ~BackupContainerBlobStore() {}
 
 	Future<Reference<IAsyncFile>> readFile(std::string path) final {
-		ASSERT(m_bstore->knobs.read_ahead_blocks > 0);
 		return Reference<IAsyncFile>(
 			new AsyncFileReadAheadCache(
 				Reference<IAsyncFile>(new AsyncFileBlobStoreRead(m_bstore, m_bucket, dataPath(path))),

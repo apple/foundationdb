@@ -2198,13 +2198,15 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 		state Version restoreVersion = invalidVersion;
 
 		if (ranges.size() > 1) {
-			fprintf(stderr, "Currently only a single restore range is supported!\n");
-			throw restore_error();
+			fprintf(stdout, "[WARNING] Currently only a single restore range is tested!\n");
 		}
 
-		state KeyRange range = (ranges.size() == 0) ? normalKeys : ranges.front();
+		if (ranges.size() == 0) {
+			ranges.push_back(normalKeys);
+		}
 
-		printf("[INFO] runFastRestoreAgent: num_ranges:%d restore_range:%s\n", ranges.size(), range.toString().c_str());
+		printf("[INFO] runFastRestoreAgent: restore_ranges:%d first range:%s\n", ranges.size(),
+		       ranges.front().toString().c_str());
 
 		if (performRestore) {
 			if (dbVersion == invalidVersion) {
