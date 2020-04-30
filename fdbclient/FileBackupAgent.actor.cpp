@@ -3635,6 +3635,12 @@ public:
 		state BackupDescription desc = wait(bc->describeBackup());
 		wait(desc.resolveVersionTimes(cx));
 
+		if (targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
+			targetVersion = desc.maxRestorableVersion.get();
+			TraceEvent(SevWarn, "FastRestoreSubmitRestoreRequestWithInvalidTargetVersion")
+			    .detail("OverrideTargetVersion", targetVersion);
+		}
+
 		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
 
 		if (!restoreSet.present()) {
@@ -3644,11 +3650,6 @@ public:
 			throw restore_invalid_version();
 		}
 
-		if (targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
-			targetVersion = desc.maxRestorableVersion.get();
-			TraceEvent(SevWarn, "FastRestoreSubmitRestoreRequestWithInvalidTargetVersion")
-			    .detail("OverrideTargetVersion", targetVersion);
-		}
 		TraceEvent("FastRestoreSubmitRestoreRequest")
 		    .detail("BackupDesc", desc.toString())
 		    .detail("TargetVersion", targetVersion);
