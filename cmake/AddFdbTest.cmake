@@ -278,7 +278,51 @@ function(package_bindingtester)
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bindings ${CMAKE_BINARY_DIR}/bindingtester/tests
     COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/bindingtester.touch"
     COMMENT "Copy test files for bindingtester")
-  add_custom_target(copy_bindingtester_binaries DEPENDS ${outfiles}  "${CMAKE_BINARY_DIR}/bindingtester.touch")
+
+  add_custom_target(copy_binding_output_files DEPENDS ${CMAKE_BINARY_DIR}/bindingtester.touch python_binding fdb_flow_tester)
+  add_custom_command(
+    TARGET copy_binding_output_files
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_flow_tester> ${bdir}/tests/flow/bin/fdb_flow_tester
+    COMMENT "Copy Flow tester for bindingtester")
+
+  set(generated_binding_files python/fdb/fdboptions.py)
+  if(WITH_JAVA)
+    if(NOT FDB_RELEASE)
+      set(prerelease_string "-PRERELEASE")
+    else()
+      set(prerelease_string "")
+    endif()
+    add_custom_command(
+      TARGET copy_binding_output_files
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_BINARY_DIR}/packages/fdb-java-${CMAKE_PROJECT_VERSION}${prerelease_string}.jar
+        ${bdir}/tests/java/foundationdb-client.jar
+      COMMENT "Copy Java bindings for bindingtester")
+    add_dependencies(copy_binding_output_files fat-jar)
+    add_dependencies(copy_binding_output_files foundationdb-tests)
+    set(generated_binding_files ${generated_binding_files} java/foundationdb-tests.jar)
+  endif()
+
+  if(WITH_GO AND NOT OPEN_FOR_IDE)
+    add_dependencies(copy_binding_output_files fdb_go_tester fdb_go)
+    add_custom_command(
+      TARGET copy_binding_output_files
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/go/bin/_stacktester ${bdir}/tests/go/build/bin/_stacktester
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_BINARY_DIR}/bindings/go/src/github.com/apple/foundationdb/bindings/go/src/fdb/generated.go # SRC
+        ${bdir}/tests/go/src/fdb/ # DEST
+      COMMENT "Copy generated.go for bindingtester")
+  endif()
+
+  foreach(generated IN LISTS generated_binding_files)
+    add_custom_command(
+      TARGET copy_binding_output_files
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/${generated} ${bdir}/tests/${generated}
+      COMMENT "Copy ${generated} to bindingtester")
+  endforeach()
+
+  add_custom_target(copy_bindingtester_binaries
+    DEPENDS ${outfiles} "${CMAKE_BINARY_DIR}/bindingtester.touch" copy_binding_output_files)
   add_dependencies(copy_bindingtester_binaries strip_only_fdbserver strip_only_fdbcli strip_only_fdb_c)
   set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester-${CMAKE_PROJECT_VERSION}.tar.gz)
   add_custom_command(
