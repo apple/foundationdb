@@ -68,6 +68,9 @@ static const uint32_t BACKUP_AGENT_MLOG_VERSION = 2001;
 // Mutation log version written by BackupWorker
 static const uint32_t PARTITIONED_MLOG_VERSION = 4110;
 
+// Snapshot file version written by FileBackupAgent
+static const uint32_t BACKUP_AGENT_SNAPSHOT_FILE_VERSION = 1001;
+
 struct LogFile {
 	Version beginVersion;
 	Version endVersion;
@@ -107,12 +110,6 @@ struct RangeFile {
 	uint32_t blockSize;
 	std::string fileName;
 	int64_t fileSize;
-
-	RangeFile() {}
-	RangeFile(Version v, uint32_t bSize, std::string name, int64_t size)
-	  : version(v), blockSize(bSize), fileName(name), fileSize(size) {}
-	RangeFile(const RangeFile& f)
-	  : version(f.version), blockSize(f.blockSize), fileName(f.fileName), fileSize(f.fileSize) {}
 
 	// Order by version, break ties with name
 	bool operator< (const RangeFile &rhs) const {
