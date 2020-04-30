@@ -283,10 +283,8 @@ struct KeyRangeRef {
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
 		if (!ar.isDeserializing && equalsKeyAfter(begin, end)) {
-			KeyRef hold = begin;
-			const_cast<KeyRef&>(begin) = KeyRef();
-			serializer(ar, const_cast<KeyRef&>(end), const_cast<KeyRef&>(begin));
-			const_cast<KeyRef&>(begin) = hold;
+			StringRef empty;
+			serializer(ar, const_cast<KeyRef&>(end), empty);
 		} else {
 			serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
 		}
