@@ -1088,6 +1088,10 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	state UID peekId;
 	state double queueStart = now();
 
+	if(req.tag.locality == tagLocalityTxs && req.tag.id >= logData->txsTags && logData->txsTags > 0) {
+		req.tag.id = req.tag.id % logData->txsTags;
+	}
+
 	if(req.sequence.present()) {
 		try {
 			peekId = req.sequence.get().first;
