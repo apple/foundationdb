@@ -415,7 +415,6 @@ struct StorageServerMetrics {
 	// `StorageMetricsSampleTests.txt` after change made.
 	std::vector<KeyRangeRef> getReadHotRanges(KeyRangeRef shard, double readDensityRatio, int64_t baseChunkSize,
 	                                          int64_t minShardReadBandwidthPerKSeconds) {
-		double chunkSize = (double)baseChunkSize;
 		std::vector<KeyRangeRef> toReturn;
 		double shardSize = (double)byteSample.getEstimate(shard);
 		int64_t shardReadBandwidth = bytesReadSample.getEstimate(shard);
@@ -423,25 +422,24 @@ struct StorageServerMetrics {
 		    minShardReadBandwidthPerKSeconds) {
 			return toReturn;
 		}
-		if (shardSize <= chunkSize) {
+		if (shardSize <= baseChunkSize) {
 			// Shard is small, use it as is
-			if (bytesReadSample.getEstimate(shard) / shardSize > readDensityRatio) {
+			if (bytesReadSample.getEstimate(shard) > (readDensityRatio * shardSize)) {
 				toReturn.push_back(shard);
 			}
 			return toReturn;
 		}
 		KeyRef beginKey = shard.begin;
 		IndexedSet<Key, int64_t>::iterator endKey =
-		    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
+		    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + baseChunkSize);
 		while (endKey != byteSample.sample.end()) {
 			if (*endKey > shard.end) endKey = byteSample.sample.lower_bound(shard.end);
 			if (*endKey == beginKey) {
-				chunkSize += baseChunkSize;
-				endKey = byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) +
-				                                 chunkSize);
+				++endKey;
 				continue;
 			}
-			if (bytesReadSample.getEstimate(KeyRangeRef(beginKey, *endKey)) > (readDensityRatio * chunkSize)) {
+			if (bytesReadSample.getEstimate(KeyRangeRef(beginKey, *endKey)) >
+			    (readDensityRatio * std::max(baseChunkSize, byteSample.getEstimate(KeyRangeRef(beginKey, *endKey))))) {
 				auto range = KeyRangeRef(beginKey, *endKey);
 				if (!toReturn.empty() && toReturn.back().end == range.begin) {
 					// in case two consecutive chunks both are over the ratio, merge them.
@@ -453,9 +451,8 @@ struct StorageServerMetrics {
 				}
 			}
 			beginKey = *endKey;
-			chunkSize = baseChunkSize;
-			endKey =
-			    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
+			endKey = byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) +
+			                                 baseChunkSize);
 		}
 		return toReturn;
 	}
