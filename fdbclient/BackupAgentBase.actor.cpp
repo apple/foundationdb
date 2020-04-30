@@ -131,7 +131,7 @@ bool copyParameter(Reference<Task> source, Reference<Task> dest, Key key) {
 }
 
 Version getVersionFromString(std::string const& value) {
-	Version version(-1);
+	Version version = invalidVersion;
 	int n = 0;
 	if (sscanf(value.c_str(), "%lld%n", (long long*)&version, &n) != 1 || n != value.size()) {
 		TraceEvent(SevWarnAlways, "GetVersionFromString").detail("InvalidVersion", value);
@@ -204,7 +204,7 @@ Key getApplyKey( Version version, Key backupUid ) {
 //returns(version, part) where version is the database version number of
 //the transaction log data in the value, and part is 0 for the first such
 //data for a given version, 1 for the second block of data, etc.
-std::pair<uint64_t, uint32_t> decodeBKMutationLogKey(Key key) {
+std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key) {
 	return std::make_pair(bigEndian64(*(int64_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t))),
 		bigEndian32(*(int32_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t) + sizeof(int64_t))));
 }
@@ -379,7 +379,9 @@ void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int& mut
 		throw;
 	}
 }
+
 static double lastErrorTime = 0;
+
 void logErrorWorker(Reference<ReadYourWritesTransaction> tr, Key keyErrors, std::string message) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);

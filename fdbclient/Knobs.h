@@ -40,11 +40,16 @@ public:
 	double CLIENT_FAILURE_TIMEOUT_DELAY;
 	double FAILURE_EMERGENCY_DELAY;
 	double FAILURE_MAX_GENERATIONS;
+	double RECOVERY_DELAY_START_GENERATION;
+	double RECOVERY_DELAY_SECONDS_PER_GENERATION;
+	double MAX_GENERATIONS;
+	double MAX_GENERATIONS_OVERRIDE;
 
 	double COORDINATOR_RECONNECTION_DELAY;
 	int CLIENT_EXAMPLE_AMOUNT;
 	double MAX_CLIENT_STATUS_AGE;
-	int MAX_CLIENT_PROXY_CONNECTIONS;
+	int MAX_PROXY_CONNECTIONS;
+	double STATUS_IDLE_TIMEOUT;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
@@ -75,6 +80,7 @@ public:
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;
 	int STORAGE_METRICS_SHARD_LIMIT;
+	int SHARD_COUNT_LIMIT;
 	double STORAGE_METRICS_UNFAIR_SPLIT_LIMIT;
 	double STORAGE_METRICS_TOO_MANY_SHARDS_DELAY;
 	double AGGREGATE_HEALTH_METRICS_MAX_STALENESS;
@@ -133,6 +139,8 @@ public:
 	int BACKUP_COPY_TASKS;
 	int BACKUP_BLOCK_SIZE;
 	int BACKUP_TASKS_PER_AGENT;
+	int BACKUP_POLL_PROGRESS_SECONDS;
+	int64_t VERSIONS_PER_SECOND; // Copy of SERVER_KNOBS, as we can't link with it
 	int SIM_BACKUP_TASKS_PER_AGENT;
 	int BACKUP_RANGEFILE_BLOCK_SIZE;
 	int BACKUP_LOGFILE_BLOCK_SIZE;
@@ -190,7 +198,15 @@ public:
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX;
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
 
-	ClientKnobs(bool randomize = false);
+	// fdbcli
+	int CLI_CONNECT_PARALLELISM;
+	double CLI_CONNECT_TIMEOUT;
+
+	// trace
+	int TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH;
+
+	ClientKnobs();
+	void initialize(bool randomize = false);
 };
 
 extern ClientKnobs const* CLIENT_KNOBS;

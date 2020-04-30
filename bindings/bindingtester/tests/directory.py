@@ -52,12 +52,12 @@ class DirectoryTest(Test):
         self.dir_list.append(child)
         self.dir_index = directory_util.DEFAULT_DIRECTORY_INDEX
 
-    def generate_layer(self):
+    def generate_layer(self, allow_partition=True):
         if random.random() < 0.7:
             return b''
         else:
             choice = random.randint(0, 3)
-            if choice == 0:
+            if choice == 0 and allow_partition:
                 return b'partition'
             elif choice == 1:
                 return b'test_layer'
@@ -184,7 +184,9 @@ class DirectoryTest(Test):
                     test_util.blocking_commit(instructions)
 
                 path = generate_path()
-                op_args = test_util.with_length(path) + (self.generate_layer(),)
+                # Partitions that use the high-contention allocator can result in non-determinism if they fail to commit, 
+                # so we disallow them in comparison tests
+                op_args = test_util.with_length(path) + (self.generate_layer(allow_partition=args.concurrency>1),)
                 directory_util.push_instruction_and_record_prefix(instructions, op, op_args, path, len(self.dir_list), self.random, self.prefix_log)
 
                 if not op.endswith('_DATABASE') and args.concurrency == 1:

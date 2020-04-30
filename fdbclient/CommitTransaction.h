@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbserver/Knobs.h"
 
 // The versioned message has wire format : -1, version, messages
 static const int32_t VERSION_HEADER = -1;
@@ -47,9 +48,10 @@ static const char* typeString[] = { "SetValue",
 	                                "ByteMax",
 	                                "MinV2",
 	                                "AndV2",
-	                                "CompareAndClear"};
+	                                "CompareAndClear",
+	                                "MAX_ATOMIC_OP" };
 
-struct MutationRef { 
+struct MutationRef {
 	static const int OVERHEAD_BYTES = 12; //12 is the size of Header in MutationList entries
 	enum Type : uint8_t {
 		SetValue = 0,
@@ -82,8 +84,18 @@ struct MutationRef {
 	MutationRef() {}
 	MutationRef( Type t, StringRef a, StringRef b ) : type(t), param1(a), param2(b) {}
 	MutationRef( Arena& to, const MutationRef& from ) : type(from.type), param1( to, from.param1 ), param2( to, from.param2 ) {}
-	int totalSize() const { return OVERHEAD_BYTES + param1.size() + param2.size(); } 
+	int totalSize() const { return OVERHEAD_BYTES + param1.size() + param2.size(); }
 	int expectedSize() const { return param1.size() + param2.size(); }
+	int weightedTotalSize() const {
+		// AtomicOp can cause more workload to FDB cluster than the same-size set mutation;
+		// Amplify atomicOp size to consider such extra workload.
+		// A good value for FASTRESTORE_ATOMICOP_WEIGHT needs experimental evaluations.
+		if (isAtomicOp()) {
+			return totalSize() * SERVER_KNOBS->FASTRESTORE_ATOMICOP_WEIGHT;
+		} else {
+			return totalSize();
+		}
+	}
 
 	std::string toString() const {
 		if (type < MutationRef::MAX_ATOMIC_OP) {
@@ -93,6 +105,8 @@ struct MutationRef {
 			return format("code: Invalid param1: %s param2: %s", printable(param1).c_str(), printable(param2).c_str());
 		}
 	}
+
+	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -123,6 +137,10 @@ struct MutationRef {
 	};
 };
 
+static inline std::string getTypeString(MutationRef::Type type) {
+	return type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "Unset";
+}
+
 // A 'single key mutation' is one which affects exactly the value of the key specified by its param1
 static inline bool isSingleKeyMutation(MutationRef::Type type) {
 	return (MutationRef::SINGLE_KEY_MASK & (1<<type)) != 0;
@@ -149,21 +167,28 @@ static inline bool isNonAssociativeOp(MutationRef::Type mutationType) {
 }
 
 struct CommitTransactionRef {
-	CommitTransactionRef() : read_snapshot(0) {}
-	CommitTransactionRef(Arena &a, const CommitTransactionRef &from)
-	  : read_conflict_ranges(a, from.read_conflict_ranges),
-		write_conflict_ranges(a, from.write_conflict_ranges),
-		mutations(a, from.mutations),
-		read_snapshot(from.read_snapshot) {
-	}
+	CommitTransactionRef() : read_snapshot(0), report_conflicting_keys(false) {}
+	CommitTransactionRef(Arena& a, const CommitTransactionRef& from)
+	  : read_conflict_ranges(a, from.read_conflict_ranges), write_conflict_ranges(a, from.write_conflict_ranges),
+	    mutations(a, from.mutations), read_snapshot(from.read_snapshot),
+	    report_conflicting_keys(from.report_conflicting_keys) {}
 	VectorRef< KeyRangeRef > read_conflict_ranges;
 	VectorRef< KeyRangeRef > write_conflict_ranges;
 	VectorRef< MutationRef > mutations;
 	Version read_snapshot;
+	bool report_conflicting_keys;
 
 	template <class Ar>
-	force_inline void serialize( Ar& ar ) {
-		serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
+	force_inline void serialize(Ar& ar) {
+		if constexpr (is_fb_function<Ar>) {
+			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot,
+			           report_conflicting_keys);
+		} else {
+			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
+			if (ar.protocolVersion().hasReportConflictingKeys()) {
+				serializer(ar, report_conflicting_keys);
+			}
+		}
 	}
 
 	// Convenience for internal code required to manipulate these without the Native API

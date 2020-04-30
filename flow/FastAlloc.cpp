@@ -24,6 +24,7 @@
 #include "flow/Trace.h"
 #include "flow/Error.h"
 #include "flow/Knobs.h"
+#include "flow/crc32c.h"
 #include "flow/flow.h"
 
 #include <cstdint>
@@ -46,6 +47,9 @@
 // warning 4073 warns about "initializers put in library initialization area", which is our intent
 #pragma warning (disable: 4073)
 #pragma init_seg(lib)
+#define INIT_SEG
+#elif defined(__INTEL_COMPILER)
+// intel compiler ignored INIT_SEG for thread local variables
 #define INIT_SEG
 #elif defined(__GNUG__)
 #ifdef __linux__
@@ -143,9 +147,9 @@ void recordAllocation( void *ptr, size_t size ) {
 #error Instrumentation not supported on this platform
 #endif
 
-		uint32_t a = 0, b = 0;
+		uint32_t a = 0;
 		if( nptrs > 0 ) {
-			hashlittle2( buffer, nptrs * sizeof(void *), &a, &b );
+			a = crc32c_append( 0xfdbeefdb, buffer, nptrs * sizeof(void *));
 		}
 
 		double countDelta = std::max(1.0, ((double)SAMPLE_BYTES) / size);
@@ -453,8 +457,10 @@ void FastAllocator<Size>::getMagazine() {
 	// FIXME: We should be able to allocate larger magazine sizes here if we
 	// detect that the underlying system supports hugepages.  Using hugepages
 	// with smaller-than-2MiB magazine sizes strands memory.  See issue #909.
-	if(FLOW_KNOBS && g_trace_depth == 0 && nondeterministicRandom()->random01() < (magazine_size * Size)/FLOW_KNOBS->FAST_ALLOC_LOGGING_BYTES) {
+	if(FLOW_KNOBS && g_allocation_tracing_disabled == 0 && nondeterministicRandom()->random01() < (magazine_size * Size)/FLOW_KNOBS->FAST_ALLOC_LOGGING_BYTES) {
+		++g_allocation_tracing_disabled;
 		TraceEvent("GetMagazineSample").detail("Size", Size).backtrace();
+		--g_allocation_tracing_disabled;
 	}
 	block = (void **)::allocate(magazine_size * Size, false);
 #endif

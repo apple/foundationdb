@@ -48,7 +48,6 @@
     <ClInclude Include="HTTP.h" />
     <ClInclude Include="KeyBackedTypes.h" />
     <ClInclude Include="MetricLogger.h" />
-    <ClInclude Include="FailureMonitorClient.h" />
     <ClInclude Include="IClientApi.h" />
     <ClInclude Include="JsonBuilder.h" />
     <ClInclude Include="JSONDoc.h" />
@@ -84,6 +83,7 @@
     <ClInclude Include="Schemas.h" />
     <ClInclude Include="sha1\SHA1.h" />
     <ClInclude Include="SnapshotCache.h" />
+    <ActorCompiler Include="SpecialKeySpace.actor.h" />
     <ClInclude Include="Status.h" />
     <ClInclude Include="StatusClient.h" />
     <ClInclude Include="StorageServerInterface.h" />
@@ -111,7 +111,6 @@
     <ActorCompiler Include="BlobStore.actor.cpp" />
     <ActorCompiler Include="DatabaseBackupAgent.actor.cpp" />
     <ClCompile Include="DatabaseConfiguration.cpp" />
-    <ActorCompiler Include="FailureMonitorClient.actor.cpp" />
     <ClCompile Include="FDBOptions.g.cpp" />
     <ActorCompiler Include="FileBackupAgent.actor.cpp" />
     <ActorCompiler Include="HTTP.actor.cpp" />
@@ -131,6 +130,7 @@
     <ClCompile Include="Schemas.cpp" />
     <ClCompile Include="SystemData.cpp" />
     <ClCompile Include="sha1\SHA1.cpp" />
+    <ActorCompiler Include="SpecialKeySpace.actor.cpp" />
     <ActorCompiler Include="ThreadSafeTransaction.actor.cpp" />
     <ActorCompiler Include="TaskBucket.actor.cpp" />
     <ClCompile Include="Subspace.cpp" />

@@ -77,6 +77,7 @@
 #include <ftw.h>
 #include <pwd.h>
 #include <sched.h>
+#include <cpuid.h>
 
 /* Needed for disk capacity */
 #include <sys/statvfs.h>
@@ -133,12 +134,12 @@ std::string removeWhitespace(const std::string &t)
 	if (found != std::string::npos)
 		str.erase(found + 1);
 	else
-		str.clear();			// str is all whitespace
+		str.clear(); // str is all whitespace
 	found = str.find_first_not_of(ws);
 	if (found != std::string::npos)
 		str.erase(0, found);
 	else
-		str.clear();			// str is all whitespace
+		str.clear(); // str is all whitespace
 
 	return str;
 }
@@ -1786,7 +1787,7 @@ bool deleteFile( std::string const& filename ) {
 #endif
 	Error e = systemErrorCodeToError();
 	TraceEvent(SevError, "DeleteFile").detail("Filename", filename).GetLastError().error(e);
-	throw errno;
+	throw e;
 }
 
 static void createdDirectory() { INJECT_FAULT( platform_error, "createDirectory" ); }
@@ -1820,16 +1821,29 @@ bool createDirectory( std::string const& directory ) {
 		if ( mkdir( directory.substr(0, sep).c_str(), 0755 ) != 0 ) {
 			if (errno == EEXIST)
 				continue;
+			auto mkdirErrno = errno;
+
+			// check if directory already exists
+			// necessary due to old kernel bugs
+			struct stat s;
+			const char* dirname = directory.c_str();
+			if (stat(dirname, &s) != -1 && S_ISDIR(s.st_mode)) {
+				TraceEvent("DirectoryAlreadyExists").detail("Directory", dirname).detail("IgnoredError", mkdirErrno);
+				continue;
+			}
 
 			Error e;
-			if(errno == EACCES) {
+			if (mkdirErrno == EACCES) {
 				e = file_not_writable();
-			}
-			else {
+			} else {
 				e = systemErrorCodeToError();
 			}
 
-			TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError().error(e);
+			TraceEvent(SevError, "CreateDirectory")
+			    .detail("Directory", directory)
+			    .detailf("UnixErrorCode", "%x", errno)
+			    .detail("UnixError", strerror(mkdirErrno))
+			    .error(e);
 			throw e;
 		}
 		createdDirectory();
@@ -2369,25 +2383,27 @@ std::string getWorkingDirectory() {
 
 extern std::string format( const char *form, ... );
 
-
 namespace platform {
-
-std::string getDefaultPluginPath( const char* plugin_name ) {
+std::string getDefaultConfigPath() {
 #ifdef _WIN32
-	std::string installPath;
-	if(!platform::getEnvironmentVar("FOUNDATIONDB_INSTALL_PATH", installPath)) {
-		// This is relying of the DLL search order to load the plugin,
-		//  starting in the same directory as the executable.
-		return plugin_name;
+	TCHAR szPath[MAX_PATH];
+	if( SHGetFolderPath(NULL, CSIDL_COMMON_APPDATA, NULL, 0, szPath)  != S_OK ) {
+		TraceEvent(SevError, "WindowsAppDataError").GetLastError();
+		throw platform_error();
 	}
-	return format( "%splugins\\%s.dll", installPath.c_str(), plugin_name );
+	std::string _filepath(szPath);
+	return _filepath + "\\foundationdb";
 #elif defined(__linux__)
-	return format( "/usr/lib/foundationdb/plugins/%s.so", plugin_name );
+	return "/etc/foundationdb";
 #elif defined(__APPLE__)
-	return format( "/usr/local/foundationdb/plugins/%s.dylib", plugin_name );
+	return "/usr/local/etc/foundationdb";
 #else
 	#error Port me!
 #endif
+}
+
+std::string getDefaultClusterFilePath() {
+	return joinPath(getDefaultConfigPath(), "fdb.cluster");
 }
 } // namespace platform
 
@@ -2500,6 +2516,54 @@ void outOfMemory() {
 
 	criticalError(FDB_EXIT_NO_MEM, "OutOfMemory", "Out of memory");
 }
+
+// Because the lambda used with nftw below cannot capture
+int __eraseDirectoryRecurseiveCount;
+
+int eraseDirectoryRecursive(std::string const& dir) {
+	__eraseDirectoryRecurseiveCount = 0;
+#ifdef _WIN32
+	system( ("rd /s /q \"" + dir + "\"").c_str() );
+#elif defined(__linux__) || defined(__APPLE__)
+	int error =
+		nftw(dir.c_str(),
+			[](const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf) -> int {
+				int r = remove(fpath);
+				if(r == 0)
+					++__eraseDirectoryRecurseiveCount;
+				return r;
+			},
+			64, FTW_DEPTH | FTW_PHYS);
+	/* Looks like calling code expects this to continue silently if
+	   the directory we're deleting doesn't exist in the first
+	   place */
+	if (error && errno != ENOENT) {
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "EraseDirectoryRecursiveError").detail("Directory", dir).GetLastError().error(e);
+		throw e;
+	}
+#else
+#error Port me!
+#endif
+	//INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
+	return __eraseDirectoryRecurseiveCount;
+}
+
+bool isSse42Supported()
+{
+#if defined(_WIN32)
+	int info[4];
+	__cpuid(info, 1);
+	return (info[2] & (1 << 20)) != 0;
+#elif defined(__unixish__)
+	uint32_t eax, ebx, ecx, edx, level = 1, count = 0;
+	__cpuid_count(level, count, eax, ebx, ecx, edx);
+	return ((ecx >> 20) & 1) != 0;
+#else
+	#error Port me!
+#endif
+}
+
 } // namespace platform
 
 extern "C" void criticalError(int exitCode, const char *type, const char *message) {
@@ -2772,7 +2836,25 @@ void crashHandler(int sig) {
 	fprintf(stderr, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
 	fprintf(stderr, "Trace: %s\n", backtrace.c_str());
 
-	_exit(128 + sig);
+	struct sigaction sa;
+	sa.sa_handler = SIG_DFL;
+	if (sigemptyset(&sa.sa_mask)) {
+		int err = errno;
+		fprintf(stderr, "sigemptyset failed: %s\n", strerror(err));
+		_exit(sig + 128);
+	}
+	sa.sa_flags = 0;
+	if (sigaction(sig, &sa, NULL)) {
+		int err = errno;
+		fprintf(stderr, "sigaction failed: %s\n", strerror(err));
+		_exit(sig + 128);
+	}
+	if (kill(getpid(), sig)) {
+		int err = errno;
+		fprintf(stderr, "kill failed: %s\n", strerror(err));
+		_exit(sig + 128);
+	}
+	// Rely on kill to end the process
 #else
 	// No crash handler for other platforms!
 #endif
@@ -2803,8 +2885,11 @@ extern volatile size_t net2backtraces_offset;
 extern volatile size_t net2backtraces_max;
 extern volatile bool net2backtraces_overflow;
 extern volatile int64_t net2backtraces_count;
-extern std::atomic<int64_t> net2liveness;
+extern std::atomic<int64_t> net2RunLoopIterations;
+extern std::atomic<int64_t> net2RunLoopSleeps;
 extern void initProfiling();
+
+std::atomic<double> checkThreadTime;
 #endif
 
 volatile thread_local bool profileThread = false;
@@ -2852,7 +2937,9 @@ void profileHandler(int sig) {
 	// We are casting away the volatile-ness of the backtrace array, but we believe that should be reasonably safe in the signal handler
 	ProfilingSample* ps = const_cast<ProfilingSample*>((volatile ProfilingSample*)(net2backtraces + net2backtraces_offset));
 
-	ps->timestamp = timer();
+	// We can only read the check thread time in a signal handler if the atomic is lock free.
+	// We can't get the time from a timer() call because it's not signal safe.
+	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
 
 	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
 	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
@@ -2885,27 +2972,64 @@ void* checkThread(void *arg) {
 	pthread_t mainThread = *(pthread_t*)arg;
 	free(arg);
 
-	int64_t lastValue = net2liveness.load();
-	double lastSignal = 0;
-	double logInterval = FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL;
+	int64_t lastRunLoopIterations = net2RunLoopIterations.load();
+	int64_t lastRunLoopSleeps = net2RunLoopSleeps.load();
+
+	double lastSlowTaskSignal = 0;
+	double lastSaturatedSignal = 0;
+
+	const double minSlowTaskLogInterval = std::max(FLOW_KNOBS->SLOWTASK_PROFILING_LOG_INTERVAL, FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
+	const double minSaturationLogInterval = std::max(FLOW_KNOBS->SATURATION_PROFILING_LOG_INTERVAL, FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
+
+	double slowTaskLogInterval = minSlowTaskLogInterval;
+	double saturatedLogInterval = minSaturationLogInterval;
+
 	while(true) {
-		threadSleep(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL);
-		int64_t currentLiveness = net2liveness.load();
-		if(lastValue == currentLiveness) {
+		threadSleep(FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
+
+		int64_t currentRunLoopIterations = net2RunLoopIterations.load();
+		int64_t currentRunLoopSleeps = net2RunLoopSleeps.load();
+
+		bool slowTask = lastRunLoopIterations == currentRunLoopIterations;
+		bool saturated = lastRunLoopSleeps == currentRunLoopSleeps;
+
+		if(slowTask) {
 			double t = timer();
-			if(lastSignal == 0 || t - lastSignal >= logInterval) {
-				if(lastSignal > 0) {
-					logInterval = std::min(FLOW_KNOBS->SLOWTASK_PROFILING_MAX_LOG_INTERVAL, FLOW_KNOBS->SLOWTASK_PROFILING_LOG_BACKOFF * logInterval);
+			if(lastSlowTaskSignal == 0 || t - lastSlowTaskSignal >= slowTaskLogInterval) {
+				if(lastSlowTaskSignal > 0) {
+					slowTaskLogInterval = std::min(FLOW_KNOBS->SLOWTASK_PROFILING_MAX_LOG_INTERVAL, FLOW_KNOBS->SLOWTASK_PROFILING_LOG_BACKOFF * slowTaskLogInterval);
 				}
 
-				lastSignal = t;
+				lastSlowTaskSignal = t;
+				checkThreadTime.store(lastSlowTaskSignal);
 				pthread_kill(mainThread, SIGPROF);
 			}
 		}
 		else {
-			lastValue = currentLiveness;
-			lastSignal = 0;
-			logInterval = FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL;
+			lastSlowTaskSignal = 0;
+			lastRunLoopIterations = currentRunLoopIterations;
+			slowTaskLogInterval = minSlowTaskLogInterval;
+		}
+
+		if(saturated) {
+			double t = timer();
+			if(lastSaturatedSignal == 0 || t - lastSaturatedSignal >= saturatedLogInterval) {
+				if(lastSaturatedSignal > 0) {
+					saturatedLogInterval = std::min(FLOW_KNOBS->SATURATION_PROFILING_MAX_LOG_INTERVAL, FLOW_KNOBS->SATURATION_PROFILING_LOG_BACKOFF * saturatedLogInterval);
+				}
+
+				lastSaturatedSignal = t;
+
+				if(!slowTask) {
+					checkThreadTime.store(lastSaturatedSignal);
+					pthread_kill(mainThread, SIGPROF);
+				}
+			}
+		}
+		else {
+			lastSaturatedSignal = 0;
+			lastRunLoopSleeps = currentRunLoopSleeps;
+			saturatedLogInterval = minSaturationLogInterval;
 		}
 	}
 	return NULL;
@@ -2931,10 +3055,10 @@ void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {
 #endif
 
 
-void setupSlowTaskProfiler() {
+void setupRunLoopProfiler() {
 #ifdef __linux__
-	if (!profileThread && FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0) {
-		TraceEvent("StartingSlowTaskProfilingThread").detail("Interval", FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL);
+	if (!profileThread && FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
+		TraceEvent("StartingRunLoopProfilingThread").detail("Interval", FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
 		initProfiling();
 		profileThread = true;
 

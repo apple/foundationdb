@@ -18,8 +18,6 @@ set(FDBCLIENT_SRCS
   DatabaseConfiguration.h
   DatabaseContext.h
   EventTypes.actor.h
-  FailureMonitorClient.actor.cpp
-  FailureMonitorClient.h
   FDBOptions.h
   FDBTypes.h
   FileBackupAgent.actor.cpp
@@ -46,6 +44,8 @@ set(FDBCLIENT_SRCS
   NativeAPI.actor.cpp
   NativeAPI.actor.h
   Notified.h
+  SpecialKeySpace.actor.cpp
+  SpecialKeySpace.actor.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
   RestoreWorkerInterface.actor.h

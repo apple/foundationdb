@@ -9,17 +9,16 @@ set(FDBRPC_SRCS
   AsyncFileNonDurable.actor.cpp
   AsyncFileWriteChecker.cpp
   batcher.actor.h
-  crc32c.cpp
   FailureMonitor.actor.cpp
   FlowTransport.actor.cpp
   genericactors.actor.h
   genericactors.actor.cpp
+  HealthMonitor.actor.cpp
   IAsyncFile.actor.cpp
   LoadBalance.actor.h
   Locality.cpp
   Net2FileSystem.cpp
   networksender.actor.h
-  Platform.cpp
   QueueModel.cpp
   ReplicationPolicy.cpp
   ReplicationTypes.cpp
@@ -27,7 +26,6 @@ set(FDBRPC_SRCS
   sim2.actor.cpp
   sim_validation.cpp
   TimedRequest.h
-  TLSConnection.actor.cpp
   TraceFileIO.cpp)
 
 set(FDBRPC_THIRD_PARTY_SRCS

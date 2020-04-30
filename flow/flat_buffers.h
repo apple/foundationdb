@@ -286,6 +286,11 @@ private:
 		} else {
 			return struct_offset_impl<RightAlign(o, fb_scalar_size<T>) + fb_scalar_size<T>, index - 1, Ts...>::offset;
 		}
+#ifdef __INTEL_COMPILER
+		// ICC somehow thinks that this method does not return
+		// see: https://software.intel.com/en-us/forums/intel-c-compiler/topic/799473
+		return 1;
+#endif
 	}
 
 public:
@@ -343,15 +348,16 @@ struct _SizeOf {
 	static constexpr unsigned int align = fb_align<T>;
 };
 
-extern std::vector<int>* writeToOffsetsMemory;
+// Re-use this intermediate memory to avoid frequent new/delete
+void swapWithThreadLocalGlobal(std::vector<int>& writeToOffsets);
 
 template <class Context>
 struct PrecomputeSize : Context {
 	PrecomputeSize(const Context& context) : Context(context) {
-		writeToOffsets.swap(*writeToOffsetsMemory);
+		swapWithThreadLocalGlobal(writeToOffsets);
 		writeToOffsets.clear();
 	}
-	~PrecomputeSize() { writeToOffsets.swap(*writeToOffsetsMemory); }
+	~PrecomputeSize() { swapWithThreadLocalGlobal(writeToOffsets); }
 	// |offset| is measured from the end of the buffer. Precondition: len <=
 	// offset.
 	void write(const void*, int offset, int /*len*/) { current_buffer_size = std::max(current_buffer_size, offset); }
@@ -491,7 +497,7 @@ extern VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& si
 
 template <unsigned... MembersAndAlignments>
 const VTable* gen_vtable3() {
-	static VTable table =
+	static thread_local VTable table =
 	    generate_vtable(sizeof...(MembersAndAlignments) / 2, std::vector<unsigned>{ MembersAndAlignments... });
 	return &table;
 }
@@ -619,7 +625,7 @@ VTableSet get_vtableset_impl(const Root& root, const Context& context) {
 
 template <class Root, class Context>
 const VTableSet* get_vtableset(const Root& root, const Context& context) {
-	static VTableSet result = get_vtableset_impl(root, context);
+	static thread_local VTableSet result = get_vtableset_impl(root, context);
 	return &result;
 }
 
@@ -922,28 +928,30 @@ struct LoadSaveHelper : Context {
 		static constexpr bool isSerializing = false;
 		static constexpr bool is_fb_visitor = true;
 
-		const uint16_t* vtable;
 		const uint8_t* current;
 
-		SerializeFun(const uint16_t* vtable, const uint8_t* current, Context& context)
-		  : Context(context), vtable(vtable), current(current) {}
+		SerializeFun(const uint8_t* current, Context& context) : Context(context), current(current) {}
 
 		template <class... Args>
 		void operator()(Args&... members) {
+			if (sizeof...(Args) == 0) {
+				return;
+			}
+			uint32_t current_offset = interpret_as<uint32_t>(current);
+			current += current_offset;
+			int32_t vtable_offset = interpret_as<int32_t>(current);
+			const uint16_t* vtable = reinterpret_cast<const uint16_t*>(current - vtable_offset);
 			int i = 0;
 			uint16_t vtable_length = vtable[i++] / sizeof(uint16_t);
 			uint16_t table_length = vtable[i++];
-			for_each(LoadMember<Context>{ vtable, current, vtable_length, table_length, i, this->context() }, members...);
+			for_each(LoadMember<Context>{ vtable, current, vtable_length, table_length, i, this->context() },
+			         members...);
 		}
 	};
 
 	template <class Member>
 	std::enable_if_t<expect_serialize_member<Member>> load(Member& member, const uint8_t* current) {
-		uint32_t current_offset = interpret_as<uint32_t>(current);
-		current += current_offset;
-		int32_t vtable_offset = interpret_as<int32_t>(current);
-		const uint16_t* vtable = reinterpret_cast<const uint16_t*>(current - vtable_offset);
-		SerializeFun fun(vtable, current, this->context());
+		SerializeFun fun(current, this->context());
 		if constexpr (serializable_traits<Member>::value) {
 			serializable_traits<Member>::serialize(fun, member);
 		} else {
