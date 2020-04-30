@@ -450,7 +450,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						targetVersion = desc.minRestorableVersion.get();
 					} else if (deterministicRandom()->random01() < 0.1) {
 						targetVersion = desc.maxRestorableVersion.get();
-					} else if (deterministicRandom()->random01() < 0.5) {
+					} else if (deterministicRandom()->random01() < 0.5 &&
+					           desc.minRestorableVersion.get() < desc.contiguousLogEnd.get()) {
 						// The assertion may fail because minRestorableVersion may be decided by snapshot version.
 						// ASSERT_WE_THINK(desc.minRestorableVersion.get() <= desc.contiguousLogEnd.get());
 						// This assertion can fail when contiguousLogEnd < maxRestorableVersion and

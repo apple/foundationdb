@@ -68,6 +68,9 @@ static const uint32_t BACKUP_AGENT_MLOG_VERSION = 2001;
 // Mutation log version written by BackupWorker
 static const uint32_t PARTITIONED_MLOG_VERSION = 4110;
 
+// Snapshot file version written by FileBackupAgent
+static const uint32_t BACKUP_AGENT_SNAPSHOT_FILE_VERSION = 1001;
+
 struct LogFile {
 	Version beginVersion;
 	Version endVersion;
@@ -193,6 +196,14 @@ struct RestorableFileSet {
 	Version targetVersion;
 	std::vector<LogFile> logs;
 	std::vector<RangeFile> ranges;
+
+	// Range file's key ranges. Can be empty for backups generated before 6.3.
+	std::map<std::string, KeyRange> keyRanges;
+
+	// Mutation logs continuous range [begin, end). Both can be invalidVersion
+	// when the entire key space snapshot is at the target version.
+	Version continuousBeginVersion, continuousEndVersion;
+
 	KeyspaceSnapshotFile snapshot; // Info. for debug purposes
 };
 
@@ -231,10 +242,16 @@ public:
 
 	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
 	// snapshot of the key ranges this backup is targeting.
-	virtual Future<Void> writeKeyspaceSnapshotFile(std::vector<std::string> fileNames, int64_t totalBytes) = 0;
+	virtual Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
+	                                               const std::vector<std::pair<Key, Key>>& beginEndKeys,
+	                                               int64_t totalBytes) = 0;
 
 	// Open a file for read by name
 	virtual Future<Reference<IAsyncFile>> readFile(std::string name) = 0;
+
+	// Returns the key ranges in the snapshot file. This is an expensive function
+	// and should only be used in simulation for sanity check.
+	virtual Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file) = 0;
 
 	struct ExpireProgress {
 		std::string step;

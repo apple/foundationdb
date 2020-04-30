@@ -22,13 +22,13 @@
 #define FDBSERVER_SERVERDBINFO_H
 #pragma once
 
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LatencyBandConfig.h"
+#include "fdbserver/WorkerInterface.actor.h"
 
 struct ServerDBInfo {
 	constexpr static FileIdentifier file_identifier = 13838807;
@@ -51,29 +51,45 @@ struct ServerDBInfo {
 	std::vector<UID> priorCommittedLogServers;   // If !fullyRecovered and logSystemConfig refers to a new log system which may not have been committed to the coordinated state yet, then priorCommittedLogServers are the previous, fully committed generation which need to stay alive in case this recovery fails
 	Optional<LatencyBandConfig> latencyBandConfig;
 	std::vector<std::pair<uint16_t,StorageServerInterface>> storageCaches;
+	int64_t infoGeneration;
 
-	explicit ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0) {}
+	ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0), infoGeneration(0) {}
 
 	bool operator == (ServerDBInfo const& r) const { return id == r.id; }
 	bool operator != (ServerDBInfo const& r) const { return id != r.id; }
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, id, clusterInterface, client, distributor, master, ratekeeper, resolvers, recoveryCount, recoveryState, masterLifetime, logSystemConfig, priorCommittedLogServers, latencyBandConfig, storageCaches);
+		serializer(ar, id, clusterInterface, client, distributor, master, ratekeeper, resolvers, recoveryCount, recoveryState, masterLifetime, logSystemConfig, priorCommittedLogServers, latencyBandConfig, storageCaches, infoGeneration);
+	}
+};
+
+struct UpdateServerDBInfoRequest {
+	constexpr static FileIdentifier file_identifier = 9467438;
+	Standalone<StringRef> serializedDbInfo;
+	std::vector<Endpoint> broadcastInfo;
+	ReplyPromise<std::vector<Endpoint>> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, serializedDbInfo, broadcastInfo, reply);
 	}
 };
 
 struct GetServerDBInfoRequest {
-	constexpr static FileIdentifier file_identifier = 9467438;
+	constexpr static FileIdentifier file_identifier = 9467439;
 	UID knownServerInfoID;
-	Standalone<VectorRef<StringRef>> issues;
-	std::vector<NetworkAddress> incompatiblePeers;
-	ReplyPromise< CachedSerialization<struct ServerDBInfo> > reply;
+	ReplyPromise<struct ServerDBInfo> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, knownServerInfoID, issues, incompatiblePeers, reply);
+		serializer(ar, knownServerInfoID, reply);
 	}
 };
+
+
+Future<Void> broadcastTxnRequest(TxnStateRequest const& req, int const& sendAmount, bool const& sendReply);
+
+Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest const& req, int const& sendAmount, Optional<Endpoint> const& sender, bool const& sendReply);
 
 #endif

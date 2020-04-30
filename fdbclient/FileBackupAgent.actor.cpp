@@ -461,7 +461,8 @@ namespace fileBackup {
 	//   then the space after the final key to the next 1MB boundary would
 	//   just be padding anyway.
 	struct RangeFileWriter {
-		RangeFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0) : file(file), blockSize(blockSize), blockEnd(0), fileVersion(1001) {}
+	    RangeFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
+	      : file(file), blockSize(blockSize), blockEnd(0), fileVersion(BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {}
 
 		// Handles the first block and internal blocks.  Ends current block if needed.
 		// The final flag is used in simulation to pad the file's final block to a whole block size
@@ -557,8 +558,8 @@ namespace fileBackup {
 		state StringRefReader reader(buf, restore_corrupted_data());
 
 		try {
-			// Read header, currently only decoding version 1001
-			if(reader.consume<int32_t>() != 1001)
+			// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION
+			if(reader.consume<int32_t>() != BACKUP_AGENT_SNAPSHOT_FILE_VERSION)
 				throw restore_unsupported_file_version();
 
 			// Read begin key, if this fails then block was invalid.
@@ -2257,6 +2258,7 @@ namespace fileBackup {
 			}
 
 			std::vector<std::string> files;
+			std::vector<std::pair<Key, Key>> beginEndKeys;
 			state Version maxVer = 0;
 			state Version minVer = std::numeric_limits<Version>::max();
 			state int64_t totalBytes = 0;
@@ -2271,6 +2273,9 @@ namespace fileBackup {
 
 					// Add file to final file list
 					files.push_back(r.fileName);
+
+					// Add (beginKey, endKey) pairs to the list
+					beginEndKeys.emplace_back(i->second.begin, i->first);
 
 					// Update version range seen
 					if(r.version < minVer)
@@ -2293,7 +2298,7 @@ namespace fileBackup {
 			}
 
 			Params.endVersion().set(task, maxVer);
-			wait(bc->writeKeyspaceSnapshotFile(files, totalBytes));
+			wait(bc->writeKeyspaceSnapshotFile(files, beginEndKeys, totalBytes));
 
 			TraceEvent(SevInfo, "FileBackupWroteSnapshotManifest")
 				.detail("BackupUID", config.getUid())
@@ -2402,6 +2407,7 @@ namespace fileBackup {
 			state bool backupWorkerEnabled = dbConfig.backupWorkerEnabled;
 			if (!backupWorkerEnabled) {
 				wait(success(changeConfig(cx, "backup_worker_enabled:=1", true)));
+				backupWorkerEnabled = true;
 			}
 
 			// Set the "backupStartedKey" and wait for all backup worker started
@@ -3622,8 +3628,32 @@ public:
 	}
 
 	ACTOR static Future<Void> submitParallelRestore(Database cx, Key backupTag,
-	                                                Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
+	                                                Standalone<VectorRef<KeyRangeRef>> backupRanges, Key bcUrl,
 	                                                Version targetVersion, bool lockDB, UID randomUID) {
+		// Sanity check backup is valid
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(bcUrl.toString());
+		state BackupDescription desc = wait(bc->describeBackup());
+		wait(desc.resolveVersionTimes(cx));
+
+		if (targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
+			targetVersion = desc.maxRestorableVersion.get();
+			TraceEvent(SevWarn, "FastRestoreSubmitRestoreRequestWithInvalidTargetVersion")
+			    .detail("OverrideTargetVersion", targetVersion);
+		}
+
+		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
+
+		if (!restoreSet.present()) {
+			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
+			    .detail("BackupContainer", bc->getURL())
+			    .detail("TargetVersion", targetVersion);
+			throw restore_invalid_version();
+		}
+
+		TraceEvent("FastRestoreSubmitRestoreRequest")
+		    .detail("BackupDesc", desc.toString())
+		    .detail("TargetVersion", targetVersion);
+
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state int restoreIndex = 0;
 		state int numTries = 0;
@@ -4602,7 +4632,7 @@ Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx, UID randomUID) 
 }
 
 Future<Void> FileBackupAgent::submitParallelRestore(Database cx, Key backupTag,
-                                                    Standalone<VectorRef<KeyRangeRef>> backupRanges, KeyRef bcUrl,
+                                                    Standalone<VectorRef<KeyRangeRef>> backupRanges, Key bcUrl,
                                                     Version targetVersion, bool lockDB, UID randomUID) {
 	return FileBackupAgentImpl::submitParallelRestore(cx, backupTag, backupRanges, bcUrl, targetVersion, lockDB,
 	                                                  randomUID);

@@ -23,6 +23,7 @@
 
 #include "flow/UnitTest.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 
@@ -816,11 +817,18 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 
 	// The set of key value version is rangeFile.version. the key-value set in the same range file has the same version
 	Reference<IAsyncFile> inFile = wait(bc->readFile(asset.filename));
-	Standalone<VectorRef<KeyValueRef>> blockData =
-	    wait(parallelFileRestore::decodeRangeFileBlock(inFile, asset.offset, asset.len));
-	TraceEvent("FastRestore")
-	    .detail("DecodedRangeFile", asset.filename)
-	    .detail("DataSize", blockData.contents().size());
+	state Standalone<VectorRef<KeyValueRef>> blockData;
+	try {
+		Standalone<VectorRef<KeyValueRef>> kvs =
+		    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len));
+		TraceEvent("FastRestore")
+		    .detail("DecodedRangeFile", asset.filename)
+		    .detail("DataSize", kvs.contents().size());
+		blockData = kvs;
+	} catch (Error& e) {
+		TraceEvent(SevError, "FileRestoreCorruptRangeFileBlock").error(e);
+		throw;
+	}
 
 	// First and last key are the range for this file
 	KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
