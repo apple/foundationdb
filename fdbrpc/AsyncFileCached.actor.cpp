@@ -252,6 +252,12 @@ Future<Void> AsyncFileCached::changeFileSize( int64_t size ) {
 	});
 }
 
+Future<Void> AsyncFileCached::invalidateCache(int64_t offset, int length) {
+	return Void();
+}
+
+void AsyncFileCached::prefetch(int64_t offset, int length) {}
+
 Future<Void> AsyncFileCached::flush() {
 	++countFileCacheWrites;
 	++countCacheWrites;

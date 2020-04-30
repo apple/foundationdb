@@ -562,6 +562,7 @@
              "ssd-1",
              "ssd-2",
              "ssd-redwood-experimental",
+             "ssd-rocksdb-experimental",
              "memory"
          ]},
          "coordinators_count":1,

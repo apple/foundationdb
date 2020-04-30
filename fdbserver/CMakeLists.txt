@@ -28,6 +28,7 @@ set(FDBSERVER_SRCS
   IPager.h
   IVersionedStore.h
   KeyValueStoreCompressTestData.actor.cpp
+  KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreSQLite.actor.cpp
   Knobs.cpp
@@ -210,6 +211,9 @@ add_library(fdb_sqlite STATIC
   sqlite/sqliteLimit.h
   sqlite/sqlite3.amalgamation.c)
 
+set(ROCKSDB_USE_STATIC_LIBS ON)
+find_package(RocksDB REQUIRED)
+
 # Suppress warnings in sqlite since it's third party
 if(NOT WIN32)
   target_compile_definitions(fdb_sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
@@ -224,7 +228,7 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_BINARY_DIR}/bindings/c
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
-target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
+target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite, RocksDB)
 if (GPERFTOOLS_FOUND)
   add_compile_definitions(USE_GPERFTOOLS)
   target_link_libraries(fdbserver PRIVATE gperftools)

@@ -145,6 +145,8 @@ class AsyncFileCached : public IAsyncFile, public ReferenceCounted<AsyncFileCach
 	friend struct AFCPage;
 
 public:
+	virtual Future<Void> flush();
+
 	static Future<Reference<IAsyncFile>> open( std::string filename, int flags, int mode ) {
 		//TraceEvent("AsyncFileCachedOpen").detail("Filename", filename);
 		if ( openFiles.find(filename) == openFiles.end() ) {
@@ -203,6 +205,12 @@ public:
 
 	// This is the 'real' truncate that does the actual removal of cache blocks and then shortens the file
 	Future<Void> changeFileSize( int64_t size );
+
+	// TODO: implement
+	Future<Void> invalidateCache(int64_t offset, int length);
+
+	// TODO: implement
+	void prefetch(int64_t offset, int length);
 
 	// This wrapper for the actual truncation operation enforces ordering of truncates.
 	// It maintains currentTruncate and currentTruncateSize so writers can wait behind truncates that would affect them.
@@ -335,8 +343,6 @@ private:
 			throw e;
 		}
 	}
-
-	virtual Future<Void> flush();
 
 	Future<Void> quiesce();
 
