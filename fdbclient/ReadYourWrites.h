@@ -131,6 +131,10 @@ public:
 	Database getDatabase() const {
 		return tr.getDatabase();
 	}
+
+	const TransactionInfo& getTransactionInfo() const {
+		return tr.info;
+	}
 private:
 	friend class RYWImpl;
 

@@ -88,6 +88,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( TLOG_IGNORE_POP_AUTO_ENABLE_DELAY,                   300.0 );
 	init( TXS_POPPED_MAX_DELAY,                                  1.0 ); if ( randomize && BUGGIFY ) TXS_POPPED_MAX_DELAY = deterministicRandom()->random01();
 	init( TLOG_MAX_CREATE_DURATION,                             10.0 );
+	init( PEEK_LOGGING_AMOUNT,                                     5 );
+	init( PEEK_LOGGING_DELAY,                                    5.0 );
 
 	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
 	init( SNAP_CREATE_MAX_TIMEOUT,                             300.0 );
@@ -201,7 +203,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( STORAGE_METRICS_POLLING_DELAY,                         2.0 ); if( randomize && BUGGIFY ) STORAGE_METRICS_POLLING_DELAY = 15.0;
 	init( STORAGE_METRICS_RANDOM_DELAY,                          0.2 );
 	init( AVAILABLE_SPACE_RATIO_CUTOFF,                         0.05 );
-	init( DESIRED_TEAMS_PER_SERVER,                                5 ); DESIRED_TEAMS_PER_SERVER = deterministicRandom()->randomInt(1, 10);
+	init( DESIRED_TEAMS_PER_SERVER,                                5 ); if( randomize && BUGGIFY ) DESIRED_TEAMS_PER_SERVER = deterministicRandom()->randomInt(1, 10);
 	init( MAX_TEAMS_PER_SERVER,           5*DESIRED_TEAMS_PER_SERVER );
 	init( DD_SHARD_SIZE_GRANULARITY,                         5000000 );
 	init( DD_SHARD_SIZE_GRANULARITY_SIM,                      500000 ); if( randomize && BUGGIFY ) DD_SHARD_SIZE_GRANULARITY_SIM = 0;
@@ -219,6 +221,9 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( DD_VALIDATE_LOCALITY,                                 true ); if( randomize && BUGGIFY ) DD_VALIDATE_LOCALITY = false;
 	init( DD_CHECK_INVALID_LOCALITY_DELAY,                       60  ); if( randomize && BUGGIFY ) DD_CHECK_INVALID_LOCALITY_DELAY = 1 + deterministicRandom()->random01() * 600;
 	init( DD_ENABLE_VERBOSE_TRACING,                           false ); if( randomize && BUGGIFY ) DD_ENABLE_VERBOSE_TRACING = true;
+	init( DD_SS_FAILURE_VERSIONLAG,                        250000000 ); 
+	init( DD_SS_ALLOWED_VERSIONLAG,                        200000000 ); if( randomize && BUGGIFY ) { DD_SS_FAILURE_VERSIONLAG = deterministicRandom()->randomInt(15000000, 500000000); DD_SS_ALLOWED_VERSIONLAG = 0.75 * DD_SS_FAILURE_VERSIONLAG; }
+	init( DD_SS_STUCK_TIME_LIMIT,                              300.0 ); if( randomize && BUGGIFY ) { DD_SS_STUCK_TIME_LIMIT = 200.0 + deterministicRandom()->random01() * 100.0; }
 
 	// TeamRemover
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
@@ -456,7 +461,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( SPRING_BYTES_TLOG_BATCH,                             300e6 ); if( smallTlogTarget ) SPRING_BYTES_TLOG_BATCH = 150e3;
 	init( TLOG_SPILL_THRESHOLD,                               1500e6 ); if( smallTlogTarget ) TLOG_SPILL_THRESHOLD = 1500e3; if( randomize && BUGGIFY ) TLOG_SPILL_THRESHOLD = 0;
 	init( REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT,            20e6 ); if( (randomize && BUGGIFY) || smallTlogTarget ) REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT = 1e6;
-	init( TLOG_HARD_LIMIT_BYTES,                              3000e6 ); if( smallTlogTarget ) TLOG_HARD_LIMIT_BYTES = 3000e3;
+	init( TLOG_HARD_LIMIT_BYTES,                              3000e6 ); if( smallTlogTarget ) TLOG_HARD_LIMIT_BYTES = 30e6;
 	init( TLOG_RECOVER_MEMORY_LIMIT, TARGET_BYTES_PER_TLOG + SPRING_BYTES_TLOG );
 
 	init( MAX_TRANSACTIONS_PER_BYTE,                            1000 );
@@ -564,19 +569,19 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	// Fast Restore
 	init( FASTRESTORE_FAILURE_TIMEOUT,                          3600 );
 	init( FASTRESTORE_HEARTBEAT_INTERVAL,                         60 );
-	init( FASTRESTORE_SAMPLING_PERCENT,                            1 ); if( randomize ) { FASTRESTORE_SAMPLING_PERCENT = deterministicRandom()->random01() * 100; }
-	init( FASTRESTORE_NUM_LOADERS,                                 3 ); if( randomize ) { FASTRESTORE_NUM_LOADERS = deterministicRandom()->random01() * 10 + 1; }
-	init( FASTRESTORE_NUM_APPLIERS,                                3 ); if( randomize ) { FASTRESTORE_NUM_APPLIERS = deterministicRandom()->random01() * 10 + 1; }
-	init( FASTRESTORE_TXN_BATCH_MAX_BYTES,                     512.0 ); if( randomize ) { FASTRESTORE_TXN_BATCH_MAX_BYTES = deterministicRandom()->random01() * 1024.0 * 1024.0 + 1.0; }
-	init( FASTRESTORE_VERSIONBATCH_MAX_BYTES, 10.0 * 1024.0 * 1024.0 ); if( randomize ) { FASTRESTORE_VERSIONBATCH_MAX_BYTES = deterministicRandom()->random01() * 10.0 * 1024.0 * 1024.0 * 1024.0; }
-	init( FASTRESTORE_VB_PARALLELISM,                              3 ); if( randomize ) { FASTRESTORE_VB_PARALLELISM = deterministicRandom()->random01() * 20 + 1; }
-	init( FASTRESTORE_VB_MONITOR_DELAY,                            5 ); if( randomize ) { FASTRESTORE_VB_MONITOR_DELAY = deterministicRandom()->random01() * 20 + 1; }
-	init( FASTRESTORE_VB_LAUNCH_DELAY,                             5 ); if( randomize ) { FASTRESTORE_VB_LAUNCH_DELAY = deterministicRandom()->random01() * 60 + 1; }
-	init( FASTRESTORE_ROLE_LOGGING_DELAY,                          5 ); if( randomize ) { FASTRESTORE_ROLE_LOGGING_DELAY = deterministicRandom()->random01() * 60 + 1; }
-	init( FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL,               5 ); if( randomize ) { FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL = deterministicRandom()->random01() * 60 + 1; }
-	init( FASTRESTORE_ATOMICOP_WEIGHT,                           100 ); if( randomize ) { FASTRESTORE_ATOMICOP_WEIGHT = deterministicRandom()->random01() * 200 + 1; }
-	init( FASTRESTORE_APPLYING_PARALLELISM,               	     100 ); if( randomize ) { FASTRESTORE_APPLYING_PARALLELISM = deterministicRandom()->random01() * 10 + 1; }
-	init( FASTRESTORE_MONITOR_LEADER_DELAY,                        5 ); if( randomize ) { FASTRESTORE_MONITOR_LEADER_DELAY = deterministicRandom()->random01() * 100; }
+	init( FASTRESTORE_SAMPLING_PERCENT,                            1 ); if( randomize && BUGGIFY ) { FASTRESTORE_SAMPLING_PERCENT = deterministicRandom()->random01() * 100; }
+	init( FASTRESTORE_NUM_LOADERS,                                 3 ); if( randomize && BUGGIFY ) { FASTRESTORE_NUM_LOADERS = deterministicRandom()->random01() * 10 + 1; }
+	init( FASTRESTORE_NUM_APPLIERS,                                3 ); if( randomize && BUGGIFY ) { FASTRESTORE_NUM_APPLIERS = deterministicRandom()->random01() * 10 + 1; }
+	init( FASTRESTORE_TXN_BATCH_MAX_BYTES,                     512.0 ); if( randomize && BUGGIFY ) { FASTRESTORE_TXN_BATCH_MAX_BYTES = deterministicRandom()->random01() * 1024.0 * 1024.0 + 1.0; }
+	init( FASTRESTORE_VERSIONBATCH_MAX_BYTES, 10.0 * 1024.0 * 1024.0 ); if( randomize && BUGGIFY ) { FASTRESTORE_VERSIONBATCH_MAX_BYTES = deterministicRandom()->random01() * 10.0 * 1024.0 * 1024.0 * 1024.0; }
+	init( FASTRESTORE_VB_PARALLELISM,                              3 ); if( randomize && BUGGIFY ) { FASTRESTORE_VB_PARALLELISM = deterministicRandom()->random01() * 20 + 1; }
+	init( FASTRESTORE_VB_MONITOR_DELAY,                            5 ); if( randomize && BUGGIFY ) { FASTRESTORE_VB_MONITOR_DELAY = deterministicRandom()->random01() * 20 + 1; }
+	init( FASTRESTORE_VB_LAUNCH_DELAY,                             5 ); if( randomize && BUGGIFY ) { FASTRESTORE_VB_LAUNCH_DELAY = deterministicRandom()->random01() * 60 + 1; }
+	init( FASTRESTORE_ROLE_LOGGING_DELAY,                          5 ); if( randomize && BUGGIFY ) { FASTRESTORE_ROLE_LOGGING_DELAY = deterministicRandom()->random01() * 60 + 1; }
+	init( FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL,               5 ); if( randomize && BUGGIFY ) { FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL = deterministicRandom()->random01() * 60 + 1; }
+	init( FASTRESTORE_ATOMICOP_WEIGHT,                           100 ); if( randomize && BUGGIFY ) { FASTRESTORE_ATOMICOP_WEIGHT = deterministicRandom()->random01() * 200 + 1; }
+	init( FASTRESTORE_APPLYING_PARALLELISM,               	     100 ); if( randomize && BUGGIFY ) { FASTRESTORE_APPLYING_PARALLELISM = deterministicRandom()->random01() * 10 + 1; }
+	init( FASTRESTORE_MONITOR_LEADER_DELAY,                        5 ); if( randomize && BUGGIFY ) { FASTRESTORE_MONITOR_LEADER_DELAY = deterministicRandom()->random01() * 100; }
 	init( FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS,                60 ); if( randomize && BUGGIFY ) { FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS = deterministicRandom()->random01() * 240 + 10; }
 	init( FASTRESTORE_TRACK_REQUEST_LATENCY,              	    true ); if( randomize && BUGGIFY ) { FASTRESTORE_TRACK_REQUEST_LATENCY = false; }
 	init( FASTRESTORE_TRACK_LOADER_SEND_REQUESTS,              false ); if( randomize && BUGGIFY ) { FASTRESTORE_TRACK_LOADER_SEND_REQUESTS = true; }
@@ -584,8 +589,9 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( FASTRESTORE_WAIT_FOR_MEMORY_LATENCY,                    10 ); if( randomize && BUGGIFY ) { FASTRESTORE_WAIT_FOR_MEMORY_LATENCY = 60; }
 	init( FASTRESTORE_HEARTBEAT_DELAY,                            10 ); if( randomize && BUGGIFY ) { FASTRESTORE_HEARTBEAT_DELAY = deterministicRandom()->random01() * 120 + 2; }
 	init( FASTRESTORE_HEARTBEAT_MAX_DELAY,                        10 ); if( randomize && BUGGIFY ) { FASTRESTORE_HEARTBEAT_MAX_DELAY = FASTRESTORE_HEARTBEAT_DELAY * 10; }
-	init( FASTRESTORE_APPLIER_FETCH_KEYS_SIZE,                   100 ); if( randomize && BUGGIFY ) { FASTRESTORE_APPLIER_FETCH_KEYS_SIZE =  deterministicRandom()->random01() * 10240 + 1; }
-	init( FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES, 1.0 * 1024.0 * 1024.0 ); if( randomize && BUGGIFY ) { FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES =  deterministicRandom()->random01() * 10.0 * 1024.0 * 1024.0 + 1; }
+	init( FASTRESTORE_APPLIER_FETCH_KEYS_SIZE,                   100 ); if( randomize && BUGGIFY ) { FASTRESTORE_APPLIER_FETCH_KEYS_SIZE = deterministicRandom()->random01() * 10240 + 1; }
+	init( FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES, 1.0 * 1024.0 * 1024.0 ); if( randomize && BUGGIFY ) { FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES = deterministicRandom()->random01() * 10.0 * 1024.0 * 1024.0 + 1; }
+	init( FASTRESTORE_GET_RANGE_VERSIONS_EXPENSIVE,            false ); if( randomize && BUGGIFY ) { FASTRESTORE_GET_RANGE_VERSIONS_EXPENSIVE = deterministicRandom()->random01() < 0.5 ? true : false; }
 
 	// clang-format on
 

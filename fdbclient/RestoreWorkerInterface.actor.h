@@ -362,20 +362,24 @@ struct RestoreSysInfoRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 75960741;
 
 	RestoreSysInfo sysInfo;
+	Standalone<VectorRef<std::pair<KeyRangeRef, Version>>> rangeVersions;
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSysInfoRequest() = default;
-	explicit RestoreSysInfoRequest(RestoreSysInfo sysInfo) : sysInfo(sysInfo) {}
+	explicit RestoreSysInfoRequest(RestoreSysInfo sysInfo,
+	                               Standalone<VectorRef<std::pair<KeyRangeRef, Version>>> rangeVersions)
+	  : sysInfo(sysInfo), rangeVersions(rangeVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sysInfo, reply);
+		serializer(ar, sysInfo, rangeVersions, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "RestoreSysInfoRequest";
+		ss << "RestoreSysInfoRequest "
+		   << "rangeVersions.size:" << rangeVersions.size();
 		return ss.str();
 	}
 };

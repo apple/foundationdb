@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -29,24 +29,30 @@
 
 #define REDWOOD_DEBUG 0
 
-#define debug_printf_stream stderr
-#define debug_printf_always(...) { fprintf(debug_printf_stream, "%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__); fprintf(debug_printf_stream, __VA_ARGS__); fflush(debug_printf_stream); }
+#define debug_printf_stream stdout
+#define debug_printf_always(...)                                                                                       \
+	{                                                                                                                  \
+		fprintf(debug_printf_stream, "%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__); \
+		fprintf(debug_printf_stream, __VA_ARGS__);                                                                     \
+		fflush(debug_printf_stream);                                                                                   \
+	}
 
 #define debug_printf_noop(...)
 
 #if defined(NO_INTELLISENSE)
-	#if REDWOOD_DEBUG
-		#define debug_printf debug_printf_always
-	#else
-		#define debug_printf debug_printf_noop
-	#endif
+#if REDWOOD_DEBUG
+#define debug_printf debug_printf_always
 #else
-	// To get error-checking on debug_printf statements in IDE
-	#define debug_printf printf
+#define debug_printf debug_printf_noop
+#endif
+#else
+// To get error-checking on debug_printf statements in IDE
+#define debug_printf printf
 #endif
 
 #define BEACON debug_printf_always("HERE\n")
-#define TRACE debug_printf_always("%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
+#define TRACE                                                                                                          \
+	debug_printf_always("%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
 
 #ifndef VALGRIND
 #define VALGRIND_MAKE_MEM_UNDEFINED(x, y)
@@ -67,12 +73,10 @@ public:
 	// Must return the same size for all pages created by the same pager instance
 	virtual int size() const = 0;
 
-	StringRef asStringRef() const {
-		return StringRef(begin(), size());
-	}
+	StringRef asStringRef() const { return StringRef(begin(), size()); }
 
 	virtual ~IPage() {
-		if(userData != nullptr && userDataDestructor != nullptr) {
+		if (userData != nullptr && userDataDestructor != nullptr) {
 			userDataDestructor(userData);
 		}
 	}
@@ -82,8 +86,8 @@ public:
 	virtual void addref() const = 0;
 	virtual void delref() const = 0;
 
-	mutable void *userData;
-	mutable void (*userDataDestructor)(void *);
+	mutable void* userData;
+	mutable void (*userDataDestructor)(void*);
 };
 
 class IPagerSnapshot {

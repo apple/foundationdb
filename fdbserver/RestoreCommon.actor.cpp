@@ -297,63 +297,6 @@ std::string RestoreConfigFR::toString() {
 // parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfigFR is copied
 namespace parallelFileRestore {
 
-ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset,
-                                                                      int len) {
-	state Standalone<StringRef> buf = makeString(len);
-	int rLen = wait(file->read(mutateString(buf), len, offset));
-	if (rLen != len) throw restore_bad_read();
-
-	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
-	state StringRefReader reader(buf, restore_corrupted_data());
-
-	try {
-		// Read header, currently only decoding version 1001
-		if (reader.consume<int32_t>() != 1001) throw restore_unsupported_file_version();
-
-		// Read begin key, if this fails then block was invalid.
-		uint32_t kLen = reader.consumeNetworkUInt32();
-		const uint8_t* k = reader.consume(kLen);
-		results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-
-		// Read kv pairs and end key
-		while (1) {
-			// Read a key.
-			kLen = reader.consumeNetworkUInt32();
-			k = reader.consume(kLen);
-
-			// If eof reached or first value len byte is 0xFF then a valid block end was reached.
-			if (reader.eof() || *reader.rptr == 0xFF) {
-				results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-				break;
-			}
-
-			// Read a value, which must exist or the block is invalid
-			uint32_t vLen = reader.consumeNetworkUInt32();
-			const uint8_t* v = reader.consume(vLen);
-			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
-
-			// If eof reached or first byte of next key len is 0xFF then a valid block end was reached.
-			if (reader.eof() || *reader.rptr == 0xFF) break;
-		}
-
-		// Make sure any remaining bytes in the block are 0xFF
-		for (auto b : reader.remainder())
-			if (b != 0xFF) throw restore_corrupted_data_padding();
-
-		return results;
-
-	} catch (Error& e) {
-		TraceEvent(SevError, "FileRestoreCorruptRangeFileBlock")
-		    .error(e)
-		    .detail("Filename", file->getFilename())
-		    .detail("BlockOffset", offset)
-		    .detail("BlockLen", len)
-		    .detail("ErrorRelativeOffset", reader.rptr - buf.begin())
-		    .detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
-		throw;
-	}
-}
-
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset,
                                                                     int len) {
 	state Standalone<StringRef> buf = makeString(len);

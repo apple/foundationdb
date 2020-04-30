@@ -31,10 +31,12 @@
 namespace detail {
 
 namespace {
-std::vector<int> mWriteToOffsetsMemoy;
+thread_local std::vector<int> gWriteToOffsetsMemory;
 }
 
-std::vector<int>* writeToOffsetsMemory = &mWriteToOffsetsMemoy;
+void swapWithThreadLocalGlobal(std::vector<int>& writeToOffsets) {
+	gWriteToOffsetsMemory.swap(writeToOffsets);
+}
 
 VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlignments) {
 	if (numMembers == 0) {
@@ -488,10 +490,6 @@ TEST_CASE("/flow/FlatBuffers/Standalone") {
 // Meant to be run with valgrind or asan, to catch heap buffer overflows
 TEST_CASE("/flow/FlatBuffers/Void") {
 	Standalone<StringRef> msg = ObjectWriter::toValue(Void(), Unversioned());
-	// Manually verified to be a valid flatbuffers message. This is technically brittle since there are other valid
-	// encodings of this message, but our implementation is unlikely to change.
-	ASSERT(msg == LiteralStringRef("\x14\x00\x00\x00J\xad\x1e\x00\x00\x00\x04\x00\x04\x00\x06\x00\x08\x00\x04\x00\x06"
-	                               "\x00\x00\x00\x04\x00\x00\x00\x12\x00\x00\x00"));
 	auto buffer = std::make_unique<uint8_t[]>(msg.size()); // Make a heap allocation of precisely the right size, so
 	                                                       // that asan or valgrind will catch any overflows
 	memcpy(buffer.get(), msg.begin(), msg.size());
