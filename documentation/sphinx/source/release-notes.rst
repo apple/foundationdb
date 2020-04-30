@@ -9,6 +9,7 @@ Fixes
 -----
 
 * HTTPS requests made by backup could hang indefinitely.  `(PR #3027) <https://github.com/apple/foundationdb/pull/3027>`_
+* ``fdbrestore`` prefix options required exactly a single hyphen instead of the standard two.  `(PR #3056) <https://github.com/apple/foundationdb/pull/3056>`_
 
 6.2.20
 ======
