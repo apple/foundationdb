@@ -162,6 +162,10 @@ private:
 	double creationTime;
 	bool commitStarted;
 
+	// If true, then this transactions write conflict range is not known until commit time.
+	// Currently only set if this transaction has a SetVersionstampedKey mutation
+	bool writeConflictRangeUnknown = false;
+
 	Reference<TransactionDebugInfo> transactionDebugInfo;
 
 	void resetTimeout();

@@ -1581,6 +1581,9 @@ Standalone<RangeResultRef> ReadYourWritesTransaction::getReadConflictRangeInters
 }
 
 Standalone<RangeResultRef> ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRangeRef kr) {
+	if (writeConflictRangeUnknown) {
+		throw accessed_unreadable();
+	}
 	ASSERT(writeConflictRangeKeysRange.contains(kr));
 	Standalone<RangeResultRef> result;
 
@@ -1682,6 +1685,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	}
 
 	if(operationType == MutationRef::SetVersionstampedKey) {
+		writeConflictRangeUnknown = true;
 		// this does validation of the key and needs to be performed before the readYourWritesDisabled path
 		KeyRangeRef range = getVersionstampKeyRange(arena, k, tr.getCachedReadVersion().orDefault(0), getMaxReadKey());
 		if(!options.readYourWritesDisabled) {
