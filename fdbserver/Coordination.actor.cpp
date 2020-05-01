@@ -47,6 +47,7 @@ UID WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT( -1, 5 );
 UID WLTOKEN_LEADERELECTIONREG_FORWARD( -1, 6 );
 UID WLTOKEN_GENERATIONREG_READ( -1, 7 );
 UID WLTOKEN_GENERATIONREG_WRITE( -1, 8 );
+UID WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT( -1, 9 );
 
 
 GenerationRegInterface::GenerationRegInterface( NetworkAddress remote )
@@ -73,6 +74,7 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local)
 	: ClientLeaderRegInterface(local)
 {
 	candidacy.makeWellKnownEndpoint( WLTOKEN_LEADERELECTIONREG_CANDIDACY, TaskPriority::Coordination );
+	electionResult.makeWellKnownEndpoint( WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT, TaskPriority::Coordination );
 	leaderHeartbeat.makeWellKnownEndpoint( WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT, TaskPriority::Coordination );
 	forward.makeWellKnownEndpoint( WLTOKEN_LEADERELECTIONREG_FORWARD, TaskPriority::Coordination );
 }
@@ -236,6 +238,16 @@ ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<Asyn
 	return Void();
 }
 
+ACTOR Future<Void> remoteMonitorLeader( Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader, ReplyPromise<Optional<LeaderInfo>> reply ) {
+	loop {
+		wait( currentElectedLeader->onChange() );
+		if (currentElectedLeader->get().present())
+			break;
+	}
+	reply.send( currentElectedLeader->get() );
+	return Void();
+}
+
 // This actor implements a *single* leader-election register (essentially, it ignores
 // the .key member of each request).  It returns any time the leader election is in the
 // default state, so that only active registers consume memory.
@@ -252,14 +264,26 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	state int clientCount = 0;
 	state Reference<AsyncVar<bool>> hasConnectedClients = Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) );
 	state ActorCollection actors(false);
-	state Future<Void> leaderMon;
+	state Future<Void> clientLeaderMon;
+	state AsyncVar<Value> leaderInterface;
+	state Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader = Reference<AsyncVar<Optional<LeaderInfo>>>( new AsyncVar<Optional<LeaderInfo>>() );
+	state Future<Void> fullLeaderMon;
 
 	loop choose {
-		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {
-			if(!leaderMon.isValid()) {
-				leaderMon = monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData);
+		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) { if(!clientLeaderMon.isValid()) {
+				clientLeaderMon = monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData);
 			}
 			actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
+		}
+		when ( ElectionResultRequest req = waitNext( interf.electionResult.getFuture() ) ) {
+			if (!fullLeaderMon.isValid()) {
+				fullLeaderMon = monitorLeaderInternal2( ClientCoordinators(req.key, req.coordinators), currentElectedLeader );
+			}
+			if (currentElectedLeader->get().present() && currentElectedLeader->get().get().changeID != req.knownLeader) {
+				req.reply.send( currentElectedLeader->get() );
+			} else {
+				actors.add( remoteMonitorLeader( currentElectedLeader, req.reply ) );
+			}
 		}
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
 			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
@@ -484,6 +508,13 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			} else {
 				regs.getInterface(req.clusterKey, id).openDatabase.send( req );
 			}
+		}
+		when ( ElectionResultRequest req = waitNext( interf.electionResult.getFuture() ) ) {
+			Optional<LeaderInfo> forward = regs.getForward(req.key);
+			if( forward.present() )
+				req.reply.send( forward.get() );
+			else
+				regs.getInterface(req.key, id).electionResult.send( req );
 		}
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);

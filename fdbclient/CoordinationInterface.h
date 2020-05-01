@@ -170,6 +170,7 @@ public:
 	Reference<ClusterConnectionFile> ccf; 
 
 	explicit ClientCoordinators( Reference<ClusterConnectionFile> ccf );
+	explicit ClientCoordinators( Key clusterKey, std::vector<NetworkAddress> coordinators );
 	ClientCoordinators() {}
 };
 

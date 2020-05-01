@@ -49,11 +49,11 @@ struct ClientData {
 	ClientData() : clientInfo( new AsyncVar<CachedSerialization<ClientDBInfo>>( CachedSerialization<ClientDBInfo>() ) ) {}
 };
 
-template <class LeaderInterface>
-Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader );
 // Monitors the given coordination group's leader election process and provides a best current guess
 // of the current leader.  If a leader is elected for long enough and communication with a quorum of
 // coordinators is possible, eventually outKnownLeader will be that leader's interface.
+template <class LeaderInterface>
+Future<Void> monitorLeader( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader );
 
 Future<Void> monitorLeaderForProxies( Value const& key, vector<NetworkAddress> const& coordinators, ClientData* const& clientData );
 
@@ -66,6 +66,7 @@ void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::ve
 #endif
 
 Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Value>> const& outSerializedLeaderInfo );
+Future<Void> monitorLeaderInternal2( ClientCoordinators const& coords, Reference<AsyncVar<Optional<LeaderInfo>>> const& leaderInfo );
 
 template <class LeaderInterface>
 struct LeaderDeserializer {

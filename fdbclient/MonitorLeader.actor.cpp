@@ -24,6 +24,7 @@
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "flow/Platform.h"
+#include "fdbserver/ClusterRecruitmentInterface.h" // TODO(alexmiller): do the binary serialization hack
 #include "flow/actorcompiler.h" // has to be last include
 
 std::pair< std::string, bool > ClusterConnectionFile::lookupClusterFileName( std::string const& filename ) {
@@ -363,6 +364,15 @@ ClientCoordinators::ClientCoordinators( Reference<ClusterConnectionFile> ccf )
 	clusterKey = cs.clusterKey();
 }
 
+ClientCoordinators::ClientCoordinators( Key clusterKey, std::vector<NetworkAddress> coordinators )
+	: clusterKey(clusterKey) {
+	for (const auto& coord : coordinators) {
+		clientLeaderServers.push_back( ClientLeaderRegInterface( coord ) );
+	}
+	ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile( ClusterConnectionString( coordinators, clusterKey ) ) );
+}
+
+
 UID WLTOKEN_CLIENTLEADERREG_GETLEADER( -1, 2 );
 UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE( -1, 3 );
 
@@ -499,11 +509,61 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 	}
 }
 
+Future<Void> monitorLeaderRemotelyInternal( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Value>> const& outSerializedLeaderInfo );
+
+template <class LeaderInterface>
+Future<Void> monitorLeaderRemotely(Reference<ClusterConnectionFile> const& connFile,
+						   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
+	LeaderDeserializer<LeaderInterface> deserializer;
+	Reference<AsyncVar<Value>> serializedInfo( new AsyncVar<Value> );
+	Future<Void> m = monitorLeaderRemotelyInternal( connFile, serializedInfo );
+	return m || deserializer( serializedInfo, outKnownLeader );
+}
+
 ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo ) {
 	state MonitorLeaderInfo info(connFile);
 	loop {
 		MonitorLeaderInfo _info = wait( monitorLeaderOneGeneration( connFile, outSerializedLeaderInfo, info ) );
 		info = _info;
+	}
+}
+
+// Leader is the process that will be elected by coordinators as the cluster controller
+ACTOR Future<ClientCoordinators> monitorLeaderOneGeneration2( ClientCoordinators coordinators, Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo ) {
+	state AsyncTrigger nomineeChange;
+	state std::vector<Optional<LeaderInfo>> nominees;
+	state Future<Void> allActors;
+
+	nominees.resize(coordinators.clientLeaderServers.size());
+
+	std::vector<Future<Void>> actors;
+	// Ask all coordinators if the worker is considered as a leader (leader nominee) by the coordinator.
+	for(int i=0; i<coordinators.clientLeaderServers.size(); i++)
+		actors.push_back( monitorNominee( coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i] ) );
+	allActors = waitForAll(actors);
+
+	loop {
+		Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
+		TraceEvent("MonitorLeaderChange").detail("NewLeader", leader.present() ? leader.get().first.changeID : UID(1,1));
+		if (leader.present()) {
+			if( leader.get().first.forward ) {
+				ClusterConnectionString ccs = ClusterConnectionString(leader.get().first.serializedInfo.toString());
+				TraceEvent("MonitorLeaderForwarding").detail("NewConnStr", leader.get().first.serializedInfo.toString()).detail("OldConnStr", coordinators.ccf->getConnectionString().toString());
+				return ClientCoordinators( ccs.clusterKey(), ccs.coordinators() );
+			}
+
+			if (leader.get().second) {
+				leaderInfo->set( leader.get().first );
+			}
+		}
+		wait( nomineeChange.onTrigger() || allActors );
+	}
+}
+
+ACTOR Future<Void> monitorLeaderInternal2( ClientCoordinators coords, Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo ) {
+	loop {
+		ClientCoordinators _coords = wait( monitorLeaderOneGeneration2( coords, leaderInfo ) );
+		coords = _coords;
 	}
 }
 
