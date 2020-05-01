@@ -155,7 +155,7 @@ static inline int getBytes( CommitTransactionRequest const& r ) {
 	return total;
 }
 
-struct GetReadVersionReply {
+struct GetReadVersionReply : public BasicLoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 15709388;
 	Version version;
 	bool locked;
@@ -165,7 +165,7 @@ struct GetReadVersionReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked, metadataVersion);
+		serializer(ar, BasicLoadBalancedReply::recentRequests, version, locked, metadataVersion);
 	}
 };
 

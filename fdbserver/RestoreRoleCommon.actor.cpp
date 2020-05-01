@@ -100,6 +100,7 @@ void updateProcessStats(Reference<RestoreRoleData> self) {
 // in increasing order of their version batch.
 ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex, std::string name) {
 	self->delayedActors++;
+	state double memoryThresholdBytes = SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT * 1024 * 1024;
 	loop {
 		double memory = getSystemStatistics().processMemory;
 		if (g_network->isSimulated() && BUGGIFY) {
@@ -107,13 +108,13 @@ ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatch
 			// memory will be larger than threshold when deterministicRandom()->random01() > 1/2
 			memory = SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT * 2 * deterministicRandom()->random01();
 		}
-		if (memory < SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT ||
-		    self->finishedBatch.get() + 1 == actorBatchIndex) {
-			if (memory >= SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT) {
+		if (memory < memoryThresholdBytes || self->finishedBatch.get() + 1 == actorBatchIndex) {
+			if (memory >= memoryThresholdBytes) {
 				TraceEvent(SevWarn, "FastRestoreMemoryUsageAboveThreshold")
 				    .detail("BatchIndex", actorBatchIndex)
 				    .detail("FinishedBatch", self->finishedBatch.get())
-				    .detail("Actor", name);
+				    .detail("Actor", name)
+				    .detail("Memory", memory);
 			}
 			self->delayedActors--;
 			break;

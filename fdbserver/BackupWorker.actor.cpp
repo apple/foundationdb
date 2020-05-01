@@ -395,7 +395,7 @@ struct BackupData {
 			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
 				when(wait(self->cx->onMasterProxiesChanged())) {}
-				when(GetReadVersionReply reply = wait(loadBalance(self->cx->getMasterProxies(false),
+				when(GetReadVersionReply reply = wait(basicLoadBalance(self->cx->getMasterProxies(false),
 				                                                  &MasterProxyInterface::getConsistentReadVersion,
 				                                                  request, self->cx->taskID))) {
 					return reply.version;
