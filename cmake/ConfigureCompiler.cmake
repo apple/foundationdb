@@ -243,6 +243,12 @@ else()
       -Wno-tautological-pointer-compare
       -Wno-format
       -Woverloaded-virtual)
+    set(USE_AVX ON CACHE BOOL "Enable AVX instructions")
+    if (USE_AVX)
+      add_compile_options(-mavx)
+    else()
+      add_compile_options(-msse4)
+    endif()
     if (USE_CCACHE)
       add_compile_options(
         -Wno-register
@@ -254,7 +260,12 @@ else()
   endif()
   if (GCC)
     add_compile_options(-Wno-pragmas)
-    add_compile_options(-mavx)
+    set(USE_AVX ON CACHE BOOL "Enable AVX instructions")
+    if (USE_AVX)
+      add_compile_options(-mavx)
+    else()
+      add_compile_options(-msse4)
+    endif()
     # Intentionally using builtin memcpy.  G++ does a good job on small memcpy's when the size is known at runtime.
     # If the size is not known, then it falls back on the memcpy that's available at runtime (rte_memcpy, as of this
     # writing; see flow.cpp).

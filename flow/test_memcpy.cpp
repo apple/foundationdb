@@ -58,16 +58,16 @@ test_single_memcpy(unsigned int off_src, unsigned int off_dst, size_t size)
 	}
 
 	/* Do the copy */
-	ret = rte_memcpy(dest + off_dst, src + off_src, size);
+	ret = memcpy(dest + off_dst, src + off_src, size);
 	if (ret != (dest + off_dst)) {
-		printf("rte_memcpy() returned %p, not %p\n",
+		printf("memcpy() returned %p, not %p\n",
 		       ret, dest + off_dst);
 	}
 
 	/* Check nothing before offset is affected */
 	for (i = 0; i < off_dst; i++) {
 		if (dest[i] != 0) {
-			printf("rte_memcpy() failed for %u bytes (offsets=%u,%u): "
+			printf("memcpy() failed for %u bytes (offsets=%u,%u): "
 			       "[modified before start of dst].\n",
 			       (unsigned)size, off_src, off_dst);
 			return -1;
@@ -77,7 +77,7 @@ test_single_memcpy(unsigned int off_src, unsigned int off_dst, size_t size)
 	/* Check everything was copied */
 	for (i = 0; i < size; i++) {
 		if (dest[i + off_dst] != src[i + off_src]) {
-			printf("rte_memcpy() failed for %u bytes (offsets=%u,%u): "
+			printf("memcpy() failed for %u bytes (offsets=%u,%u): "
 			       "[didn't copy byte %u].\n",
 			       (unsigned)size, off_src, off_dst, i);
 			return -1;
@@ -87,7 +87,7 @@ test_single_memcpy(unsigned int off_src, unsigned int off_dst, size_t size)
 	/* Check nothing after copy was affected */
 	for (i = size; i < SMALL_BUFFER_SIZE; i++) {
 		if (dest[i + off_dst] != 0) {
-			printf("rte_memcpy() failed for %u bytes (offsets=%u,%u): "
+			printf("memcpy() failed for %u bytes (offsets=%u,%u): "
 			       "[copied too many].\n",
 			       (unsigned)size, off_src, off_dst);
 			return -1;

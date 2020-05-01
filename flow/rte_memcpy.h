@@ -50,8 +50,10 @@ extern "C" {
 static force_inline void *
 rte_memcpy(void *dst, const void *src, size_t n);
 
-//#define RTE_MACHINE_CPUFLAG_AVX512F
+#ifdef __AVX__
+//#define RTE_MACHINE_CPUFLAG_AVX512F  -- our g++ is too old for this
 #define RTE_MACHINE_CPUFLAG_AVX2
+#endif
 
 #ifdef RTE_MACHINE_CPUFLAG_AVX512F
 
