@@ -562,8 +562,6 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				    .detail("Requests", requests.size());
 				fSends.push_back(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces,
 				                                   requests, TaskPriority::RestoreLoaderSendMutations));
-				// wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
-				//                        TaskPriority::RestoreLoaderSendMutations));
 				msgIndex++;
 				msgSize = 0;
 				for (auto& applierID : applierIDs) {
@@ -588,8 +586,6 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 		    .detail("Requests", requests.size());
 		fSends.push_back(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
 		                                   TaskPriority::RestoreLoaderSendMutations));
-		// wait(sendBatchRequests(&RestoreApplierInterface::sendMutationVector, *pApplierInterfaces, requests,
-		//                        TaskPriority::RestoreLoaderSendMutations));
 	}
 	wait(waitForAll(fSends));
 
