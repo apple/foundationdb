@@ -2202,7 +2202,7 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 		}
 
 		if (ranges.size() == 0) {
-			ranges.push_back(normalKeys);
+			ranges.push_back(ranges.arena(), normalKeys);
 		}
 
 		printf("[INFO] runFastRestoreAgent: restore_ranges:%d first range:%s\n", ranges.size(),
