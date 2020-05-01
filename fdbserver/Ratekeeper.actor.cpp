@@ -297,16 +297,15 @@ public:
 						}
 					}
 
-					if(manualItr->second.empty()) {
-						manualThrottledTags.erase(manualItr);
-					}
-					else {
-						tagPresent = true;
-					}
-
 					if(manualClientRate.present()) {
+						tagPresent = true;
 						clientRates[*priority][tagItr->first] = manualClientRate.get();
 					}
+				}
+
+				if(manualItr->second.empty()) {
+					manualThrottledTags.erase(manualItr);
+					break;
 				}
 			}
 
@@ -396,6 +395,7 @@ struct RatekeeperLimits {
 	std::string context;
 
 	RatekeeperLimits(TransactionPriority priority, std::string context, int64_t storageTargetBytes, int64_t storageSpringBytes, int64_t logTargetBytes, int64_t logSpringBytes, double maxVersionDifference, int64_t durabilityLagTargetVersions) :
+		priority(priority),
 		tpsLimit(std::numeric_limits<double>::infinity()),
 		tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
 		reasonMetric(StringRef("Ratekeeper.Reason" + context)),
