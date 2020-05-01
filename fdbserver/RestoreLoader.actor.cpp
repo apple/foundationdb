@@ -542,7 +542,6 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 					    .detail("Version", commitVersion.toString())
 					    .detail("Mutation", kvm.toString());
 				}
-				// TODO: shallow copy may be fine here because kvm has longer life time
 				applierVersionedMutationsBuffer[applierID].push_back(applierVersionedMutationsBuffer[applierID].arena(),
 				                                                     VersionedMutation(kvm, commitVersion));
 				msgSize += kvm.expectedSize();
