@@ -499,4 +499,17 @@ TEST_CASE("/flow/FlatBuffers/Void") {
 	return Void();
 }
 
+TEST_CASE("/flow/FlatBuffers/EmptyStrings") {
+	int kSize = 10;
+	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<StringRef>(kSize), Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<StringRef> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == kSize);
+	for (const auto& x : xs) {
+		ASSERT(x == StringRef());
+	}
+	return Void();
+}
+
 } // namespace unit_tests
