@@ -652,7 +652,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					limit = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
 
-			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && specialKeys.contains(keysel2.getKey());
+			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && keysel2.getKey() <= specialKeys.end;
 
 			contract = {
 				std::make_pair( error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(limit < 0) ),
@@ -685,7 +685,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			keysel2 = makeKeySel();
 			limits = makeRangeLimits();
 
-			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && specialKeys.contains(keysel2.getKey());
+			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && keysel2.getKey() <= specialKeys.end;
 
 			contract = {
 				std::make_pair( error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf( !limits.isReached() && !limits.isValid()) ),
@@ -729,7 +729,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					limit = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
 
-			bool isSpecialKeyRange = specialKeys.contains(key1) && specialKeys.contains(key2);
+			bool isSpecialKeyRange = specialKeys.contains(key1) && key2 <= specialKeys.end;
 
 			contract = {
 				std::make_pair( error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2) ),
@@ -764,7 +764,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			key2 = makeKey();
 			limits = makeRangeLimits();
 
-			bool isSpecialKeyRange = specialKeys.contains(key1) && specialKeys.contains(key2);
+			bool isSpecialKeyRange = specialKeys.contains(key1) && key2 <= specialKeys.end;
 
 			contract = {
 				std::make_pair( error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2) ),
