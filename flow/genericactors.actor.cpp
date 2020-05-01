@@ -69,6 +69,8 @@ ACTOR Future<Void> timeoutWarningCollector( FutureStream<Void> input, double log
 ACTOR Future<bool> quorumEqualsTrue( std::vector<Future<bool>> futures, int required ) {
 	state std::vector< Future<Void> > true_futures;
 	state std::vector< Future<Void> > false_futures;
+	true_futures.reserve(futures.size());
+	false_futures.reserve(futures.size());
 	for(int i=0; i<futures.size(); i++) {
 		true_futures.push_back( onEqual( futures[i], true ) );
 		false_futures.push_back( onEqual( futures[i], false ) );
@@ -82,4 +84,60 @@ ACTOR Future<bool> quorumEqualsTrue( std::vector<Future<bool>> futures, int requ
 			return false;
 		}
 	}
+}
+
+ACTOR Future<bool> shortCircuitAny( std::vector<Future<bool>> f )
+{
+	std::vector<Future<Void>> sc;
+	sc.reserve(f.size());
+	for(Future<bool> fut : f) {
+		sc.push_back(returnIfTrue(fut));
+	}
+
+	choose {
+		when( wait( waitForAll( f ) ) ) {
+			// Handle a possible race condition? If the _last_ term to
+			// be evaluated triggers the waitForAll before bubbling
+			// out of the returnIfTrue quorum
+			for (const auto& fut : f) {
+				if ( fut.get() ) {
+					return true;
+				}
+			}
+			return false;
+		}
+		when( wait( waitForAny( sc ) ) ) {
+			return true;
+		}
+	}
+}
+
+Future<Void> orYield( Future<Void> f ) {
+	if(f.isReady()) {
+		if(f.isError())
+			return tagError<Void>(yield(), f.getError());
+		else
+			return yield();
+	}
+	else
+		return f;
+}
+
+ACTOR Future<Void> returnIfTrue( Future<bool> f )
+{
+	bool b = wait( f );
+	if ( b ) {
+		return Void();
+	}
+	wait( Never() );
+	throw internal_error();
+}
+
+ACTOR Future<Void> lowPriorityDelay( double waitTime ) {
+	state int loopCount = 0;
+	while(loopCount < FLOW_KNOBS->LOW_PRIORITY_DELAY_COUNT) {
+		wait(delay(waitTime/FLOW_KNOBS->LOW_PRIORITY_DELAY_COUNT, TaskPriority::Low));
+		loopCount++;
+	}
+	return Void();
 }

@@ -22,7 +22,7 @@
 #define FLOW_PLATFORM_H
 #pragma once
 
-#if (defined(__linux__) || defined(__APPLE__))
+#if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 #define __unixish__ 1
 #endif
 
@@ -171,6 +171,8 @@ THREAD_HANDLE startThread(void *(func) (void *), void *arg);
 #if defined(_WIN32)
 #define DYNAMIC_LIB_EXT ".dll"
 #elif defined(__linux)
+#define DYNAMIC_LIB_EXT ".so"
+#elif defined(__FreeBSD__)
 #define DYNAMIC_LIB_EXT ".so"
 #elif defined(__APPLE__)
 #define DYNAMIC_LIB_EXT ".dylib"
@@ -375,8 +377,11 @@ int setEnvironmentVar(const char *name, const char *value, int overwrite);
 
 std::string getWorkingDirectory();
 
-// Returns the ... something something figure out plugin locations
-std::string getDefaultPluginPath( const char* plugin_name );
+// Returns the absolute platform-dependant path for server-based files
+std::string getDefaultConfigPath();
+
+// Returns the absolute platform-dependant path for the default fdb.cluster file
+std::string getDefaultClusterFilePath();
 
 void *getImageOffset();
 
@@ -384,6 +389,11 @@ void *getImageOffset();
 size_t raw_backtrace(void** addresses, int maxStackDepth);
 std::string get_backtrace();
 std::string format_backtrace(void **addresses, int numAddresses);
+
+// Avoid in production code: not atomic, not fast, not reliable in all environments
+int eraseDirectoryRecursive(std::string const& directory);
+
+bool isSse42Supported();
 
 } // namespace platform
 
@@ -405,6 +415,16 @@ dev_t getDeviceId(std::string path);
 
 // Version of CLang bundled with XCode doesn't yet include ia32intrin.h.
 #ifdef __APPLE__
+#if !(__has_builtin(__rdtsc))
+inline static uint64_t __rdtsc() {
+	uint64_t lo, hi;
+	asm( "rdtsc" : "=a" (lo), "=d" (hi) );
+	return( lo | (hi << 32) );
+}
+#endif
+#endif
+
+#ifdef __FreeBSD__
 #if !(__has_builtin(__rdtsc))
 inline static uint64_t __rdtsc() {
 	uint64_t lo, hi;
@@ -523,6 +543,8 @@ inline static void aligned_free(void* ptr) { free(ptr); }
 #if (!defined(_ISOC11_SOURCE)) // old libc versions
 inline static void* aligned_alloc(size_t alignment, size_t size) { return memalign(alignment, size); }
 #endif
+#elif defined(__FreeBSD__)
+inline static void aligned_free(void* ptr) { free(ptr); }
 #elif defined(__APPLE__)
 #if !defined(HAS_ALIGNED_ALLOC)
 #include <cstdlib>
@@ -611,7 +633,7 @@ EXTERNC void flushAndExit(int exitCode);
 void platformInit();
 
 void registerCrashHandler();
-void setupSlowTaskProfiler();
+void setupRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 
 // Use _exit() or criticalError(), not exit()

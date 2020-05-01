@@ -73,7 +73,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		nodes = newNodes;
 
 		TEST(adjacentKeys && (nodes + minNode) > CLIENT_KNOBS->KEY_SIZE_LIMIT); //WriteDuringReadWorkload testing large keys
-		
+
 		useExtraDB = g_simulator.extraDB != NULL;
 		if(useExtraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
@@ -724,7 +724,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 								if(!self->useSystemKeys && deterministicRandom()->random01() < 0.01) {
 									Key versionStampKey = self->getRandomVersionStampKey();
 									Value value = self->getRandomValue();
-									KeyRangeRef range = getVersionstampKeyRange(versionStampKey.arena(), versionStampKey, normalKeys.end);
+									KeyRangeRef range = getVersionstampKeyRange(versionStampKey.arena(), versionStampKey, tr.getCachedReadVersion().orDefault(0), normalKeys.end);
 									self->changeCount.insert( range, changeNum++ );
 									//TraceEvent("WDRVersionStamp").detail("VersionStampKey", printable(versionStampKey)).detail("Range", printable(range));
 									tr.atomicOp( versionStampKey, value, MutationRef::SetVersionstampedKey );
@@ -827,7 +827,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 					self->addedConflicts.insert(allKeys, false);
 					return Void();
 				}
-				if( e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result || e.code() == error_code_transaction_too_large || e.code() == error_code_key_too_large || e.code() == error_code_value_too_large || cancelled )
+				if( e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result || e.code() == error_code_transaction_too_large || e.code() == error_code_key_too_large || e.code() == error_code_value_too_large || e.code() == error_code_too_many_watches || cancelled )
 					throw not_committed();
 				try {
 					wait( tr.onError(e) );

@@ -107,6 +107,11 @@ Fixes
 * Java: fix race condition when removing an empty directory which could lead to a NoSuchElementException <rdar://problem/28858833>
 * Fixed a source of potential crashes in fdbcli <rdar://problem/27063940>
 
+Bindings
+--------
+
+* API version updated to 460. There are no behavior changes in this API version. See the :ref:`API version upgrade guide <api-version-upgrade-guide-460>` for upgrade details.
+
 Status
 ------
 

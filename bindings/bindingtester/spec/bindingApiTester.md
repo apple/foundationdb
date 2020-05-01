@@ -164,6 +164,13 @@ futures must apply the following rules to the result:
     database using the get() method. May optionally push a future onto the
     stack.
 
+#### GET_ESTIMATED_RANGE_SIZE
+
+    Pops the top two items off of the stack as BEGIN_KEY and END_KEY to 
+    construct a key range. Then call the `getEstimatedRangeSize` API of 
+    the language binding. Make sure the API returns without error. Finally 
+    push the string "GOT_ESTIMATED_RANGE_SIZE" onto the stack.
+
 #### GET_KEY (_SNAPSHOT, _DATABASE)
 
     Pops the top four items off of the stack as KEY, OR_EQUAL, OFFSET, PREFIX

@@ -31,10 +31,12 @@
 namespace detail {
 
 namespace {
-std::vector<int> mWriteToOffsetsMemoy;
+thread_local std::vector<int> gWriteToOffsetsMemory;
 }
 
-std::vector<int>* writeToOffsetsMemory = &mWriteToOffsetsMemoy;
+void swapWithThreadLocalGlobal(std::vector<int>& writeToOffsets) {
+	gWriteToOffsetsMemory.swap(writeToOffsets);
+}
 
 VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlignments) {
 	if (numMembers == 0) {
@@ -482,6 +484,18 @@ TEST_CASE("/flow/FlatBuffers/Standalone") {
 	for (int i = 0; i < vecOut.size(); ++i) {
 		ASSERT(vecOut[i] == vecIn[i]);
 	}
+	return Void();
+}
+
+// Meant to be run with valgrind or asan, to catch heap buffer overflows
+TEST_CASE("/flow/FlatBuffers/Void") {
+	Standalone<StringRef> msg = ObjectWriter::toValue(Void(), Unversioned());
+	auto buffer = std::make_unique<uint8_t[]>(msg.size()); // Make a heap allocation of precisely the right size, so
+	                                                       // that asan or valgrind will catch any overflows
+	memcpy(buffer.get(), msg.begin(), msg.size());
+	ObjectReader rd(buffer.get(), Unversioned());
+	Void x;
+	rd.deserialize(x);
 	return Void();
 }
 
