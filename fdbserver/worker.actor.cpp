@@ -1276,6 +1276,7 @@ ACTOR Future<Void> workerServer(
 			}
 			when( InitializeMasterProxyRequest req = waitNext(interf.masterProxy.getFuture()) ) {
 				MasterProxyInterface recruited;
+				recruited.processId = locality.processId();
 				recruited.provisional = false;
 				recruited.initEndpoints();
 
