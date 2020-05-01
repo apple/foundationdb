@@ -266,9 +266,9 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	explicit ApplierBatchData(UID nodeID, int batchIndex)
 	  : counters(this, nodeID, batchIndex), applyStagingKeysBatchLock(SERVER_KNOBS->FASTRESTORE_APPLYING_PARALLELISM),
 	    vbState(ApplierVersionBatchState::NOT_INIT) {
-		pollMetrics =
-		    traceCounters("FastRestoreApplierMetrics", nodeID, SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
-		                  &counters.cc, nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
+		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex), nodeID,
+		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
+		                            nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreApplierMetricsCreated").detail("Node", nodeID);
 	}
 	~ApplierBatchData() = default;
