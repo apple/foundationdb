@@ -1067,7 +1067,7 @@ public:
 		// Get proxy classes
 		std::vector<WorkerDetails> proxyClasses;
 		for(auto& it : dbi.client.proxies ) {
-			auto proxyWorker = id_worker.find(it.locality.processId());
+			auto proxyWorker = id_worker.find(it.processId);
 			if ( proxyWorker == id_worker.end() )
 				return false;
 			if ( proxyWorker->second.priorityInfo.isExcluded )
@@ -1264,7 +1264,7 @@ public:
 			}
 		}
 		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
-			if (interf.locality.processId() == processId) return true;
+			if (interf.processId == processId) return true;
 		}
 		for (const ResolverInterface& interf: dbInfo.resolvers) {
 			if (interf.locality.processId() == processId) return true;
@@ -1296,8 +1296,8 @@ public:
 			}
 		}
 		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
-			ASSERT(interf.locality.processId().present());
-			idUsed[interf.locality.processId()]++;
+			ASSERT(interf.processId.present());
+			idUsed[interf.processId]++;
 		}
 		for (const ResolverInterface& interf: dbInfo.resolvers) {
 			ASSERT(interf.locality.processId().present());
