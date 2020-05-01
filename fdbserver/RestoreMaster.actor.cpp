@@ -494,6 +494,12 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
                                                             VersionBatch versionBatch) {
 	state Reference<MasterBatchData> batchData = self->batch[batchIndex];
 	state Reference<MasterBatchStatus> batchStatus = self->batchStatus[batchIndex];
+	state double startTime = now();
+
+	TraceEvent("FastRestoreMasterDispatchVersionBatchesStart")
+	    .detail("BatchIndex", batchIndex)
+	    .detail("BatchSize", versionBatch.size)
+	    .detail("RunningVersionBatches", self->runningVersionBatches.get());
 
 	self->runningVersionBatches.set(self->runningVersionBatches.get() + 1);
 
@@ -540,6 +546,13 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	if (self->delayedActors > 0) {
 		self->checkMemory.trigger();
 	}
+
+	TraceEvent("FastRestoreMasterDispatchVersionBatchesDone")
+	    .detail("BatchIndex", batchIndex)
+	    .detail("BatchSize", versionBatch.size)
+	    .detail("RunningVersionBatches", self->runningVersionBatches.get())
+	    .detail("Latency", now() - startTime);
+
 	return Void();
 }
 
