@@ -302,7 +302,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("CorrectValue", correct_iter->value)
 				    .detail("Begin", begin.toString())
 				    .detail("End", end.toString())
-				    .detail("", end.toString())
 				    .detail("Ryw", ryw);
 				++correct_iter;
 				had_error = true;
