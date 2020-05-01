@@ -327,7 +327,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 				    isAtomicOp((MutationRef::Type)m->type))
 					continue;
 				else {
-					TraceEvent(SevError, "FastRestore").detail("UnknownMutationType", m->type);
+					TraceEvent(SevError, "FastRestoreApplier").detail("UnknownMutationType", m->type);
 					return false;
 				}
 			}

@@ -326,7 +326,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 
 	wait(waitForAll(fBatches));
 
-	TraceEvent("FastRestore").detail("RestoreToVersion", request.targetVersion);
+	TraceEvent("FastRestoreMaster").detail("RestoreToVersion", request.targetVersion);
 	return request.targetVersion;
 }
 
@@ -945,7 +945,7 @@ ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreMasterData> se
 		}
 	}
 
-	TraceEvent("FastRestore").detail("RestoreMaster", "AllRestoreCompleted");
+	TraceEvent("FastRestoreMasterAllRestoreCompleted");
 
 	return Void();
 }

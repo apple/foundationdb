@@ -66,7 +66,7 @@ ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Refer
 		return Void();
 	}));
 
-	TraceEvent("FastRestore").detail("HandleTerminateWorkerReq", self->id());
+	TraceEvent("FastRestoreWorker").detail("HandleTerminateWorkerReq", self->id());
 
 	return Void();
 }
@@ -97,7 +97,7 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWo
 		DUMPTOKEN(recruited.collectRestoreRoleInterfaces);
 		DUMPTOKEN(recruited.finishRestore);
 		actors->add(restoreLoaderCore(self->loaderInterf.get(), req.nodeIndex, cx));
-		TraceEvent("FastRestore").detail("RecruitedLoaderNodeIndex", req.nodeIndex);
+		TraceEvent("FastRestoreWorker").detail("RecruitedLoaderNodeIndex", req.nodeIndex);
 		req.reply.send(
 		    RestoreRecruitRoleReply(self->loaderInterf.get().id(), RestoreRole::Loader, self->loaderInterf.get()));
 	} else if (req.role == RestoreRole::Applier) {
@@ -111,12 +111,11 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWo
 		DUMPTOKEN(recruited.collectRestoreRoleInterfaces);
 		DUMPTOKEN(recruited.finishRestore);
 		actors->add(restoreApplierCore(self->applierInterf.get(), req.nodeIndex, cx));
-		TraceEvent("FastRestore").detail("RecruitedApplierNodeIndex", req.nodeIndex);
+		TraceEvent("FastRestoreWorker").detail("RecruitedApplierNodeIndex", req.nodeIndex);
 		req.reply.send(
 		    RestoreRecruitRoleReply(self->applierInterf.get().id(), RestoreRole::Applier, self->applierInterf.get()));
 	} else {
-		TraceEvent(SevError, "FastRestore")
-		    .detail("HandleRecruitRoleRequest", "UnknownRole"); //.detail("Request", req.printable());
+		TraceEvent(SevError, "FastRestoreWorkerHandleRecruitRoleRequestUnknownRole").detail("Request", req.toString());
 	}
 
 	return;
@@ -147,7 +146,7 @@ ACTOR Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> se
 				}
 				break;
 			}
-			TraceEvent("FastRestore")
+			TraceEvent("FastRestoreWorker")
 			    .suppressFor(10.0)
 			    .detail("NotEnoughWorkers", agentValues.size())
 			    .detail("MinWorkers", min_num_workers);
@@ -158,7 +157,7 @@ ACTOR Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> se
 	}
 	ASSERT(agents.size() >= min_num_workers); // ASSUMPTION: We must have at least 1 loader and 1 applier
 
-	TraceEvent("FastRestore").detail("CollectWorkerInterfaceNumWorkers", self->workerInterfaces.size());
+	TraceEvent("FastRestoreWorker").detail("CollectWorkerInterfaceNumWorkers", self->workerInterfaces.size());
 
 	return Void();
 }
@@ -182,12 +181,12 @@ ACTOR Future<Void> monitorWorkerLiveness(Reference<RestoreWorkerData> self) {
 ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, RestoreWorkerInterface workerInterf,
                                             Database cx) {
 	// We must wait for enough time to make sure all restore workers have registered their workerInterfaces into the DB
-	TraceEvent("FastRestore")
+	TraceEvent("FastRestoreWorker")
 	    .detail("Master", workerInterf.id())
 	    .detail("WaitForRestoreWorkerInterfaces",
 	            SERVER_KNOBS->FASTRESTORE_NUM_LOADERS + SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS);
 	wait(delay(10.0));
-	TraceEvent("FastRestore")
+	TraceEvent("FastRestoreWorker")
 	    .detail("Master", workerInterf.id())
 	    .detail("CollectRestoreWorkerInterfaces",
 	            SERVER_KNOBS->FASTRESTORE_NUM_LOADERS + SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS);
@@ -236,13 +235,13 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 					exitRole = handlerTerminateWorkerRequest(req, self, interf, cx);
 				}
 				when(wait(exitRole)) {
-					TraceEvent("FastRestore").detail("RestoreWorkerCore", "ExitRole").detail("NodeID", self->id());
+					TraceEvent("FastRestoreWorkerCoreExitRole", self->id());
 					break;
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestore")
-			    .detail("RestoreWorkerError", e.what())
+			TraceEvent(SevWarn, "FastRestoreWorkerError")
+			    .detail("Error", e.what())
 			    .detail("RequestType", requestTypeStr);
 			break;
 		}

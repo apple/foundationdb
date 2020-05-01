@@ -359,7 +359,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 			    .detail("ErrorCode", e.code())
 			    .detail("ErrorInfo", e.what());
 			for (auto& request : requests) {
-				TraceEvent(SevWarn, "FastRestore")
+				TraceEvent(SevWarn, "FastRestoreLoader")
 				    .detail("SendBatchRequests", requests.size())
 				    .detail("RequestID", request.first)
 				    .detail("Request", request.second.toString());

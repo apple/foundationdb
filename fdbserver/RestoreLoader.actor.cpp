@@ -111,13 +111,13 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 					updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 				}
 				when(wait(exitRole)) {
-					TraceEvent("FastRestore").detail("RestoreLoaderCore", "ExitRole").detail("NodeID", self->id());
+					TraceEvent("FastRestoreLoaderCoreExitRole").detail("NodeID", self->id());
 					break;
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestore")
-			    .detail("RestoreLoaderError", e.what())
+			TraceEvent(SevWarn, "FastRestoreLoader", self->id())
+			    .detail("Error", e.what())
 			    .detail("RequestType", requestTypeStr);
 			break;
 		}
@@ -186,7 +186,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 	int rLen = wait(file->read(mutateString(buf), asset.len, asset.offset));
 	if (rLen != asset.len) throw restore_bad_read();
 
-	TraceEvent("FastRestore")
+	TraceEvent("FastRestoreLoader")
 	    .detail("DecodingLogFile", asset.filename)
 	    .detail("Offset", asset.offset)
 	    .detail("Length", asset.len);
@@ -687,7 +687,7 @@ bool concatenateBackupMutationForLogFile(SerializedMutationListMap* pMutationMap
 	if (it == mutationMap.end()) {
 		mutationMap.emplace(id, std::make_pair(val_input, 0));
 		if (part != 0) {
-			TraceEvent(SevError, "FastRestore")
+			TraceEvent(SevError, "FastRestoreLoader")
 			    .detail("FirstPartNotZero", part)
 			    .detail("KeyInput", getHexString(key_input));
 		}
@@ -697,7 +697,7 @@ bool concatenateBackupMutationForLogFile(SerializedMutationListMap* pMutationMap
 		auto& currentPart = it->second.second;
 		if (part != (currentPart + 1)) {
 			// Check if the same range or log file has been processed more than once!
-			TraceEvent(SevError, "FastRestore")
+			TraceEvent(SevError, "FastRestoreLoader")
 			    .detail("CurrentPart1", currentPart)
 			    .detail("CurrentPart2", part)
 			    .detail("KeyInput", getHexString(key_input))
@@ -828,7 +828,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	try {
 		Standalone<VectorRef<KeyValueRef>> kvs =
 		    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len));
-		TraceEvent("FastRestore")
+		TraceEvent("FastRestoreLoader")
 		    .detail("DecodedRangeFile", asset.filename)
 		    .detail("DataSize", kvs.contents().size());
 		blockData = kvs;
@@ -906,7 +906,7 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pPro
 	// decodeLogFileBlock() must read block by block!
 	state Standalone<VectorRef<KeyValueRef>> data =
 	    wait(parallelFileRestore::decodeLogFileBlock(inFile, asset.offset, asset.len));
-	TraceEvent("FastRestore")
+	TraceEvent("FastRestoreLoader")
 	    .detail("DecodedLogFile", asset.filename)
 	    .detail("Offset", asset.offset)
 	    .detail("Length", asset.len)
