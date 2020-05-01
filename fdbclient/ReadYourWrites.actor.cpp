@@ -1620,15 +1620,11 @@ Standalone<RangeResultRef> ReadYourWritesTransaction::getWriteConflictRangeInter
 		}
 
 		if (inConflictRange) {
-			KeyRangeRef keyrange(conflictBegin.toArena(result.arena()), allKeys.end);
-			if (kr.contains(keyrange.begin))
-				result.push_back(result.arena(), KeyValueRef(keyrange.begin.withPrefix(
-				                                                 writeConflictRangeKeysRange.begin, result.arena()),
-				                                             LiteralStringRef("1")));
-			if (kr.contains(keyrange.end))
+			KeyRef begin = conflictBegin.toArena(result.arena());
+			if (kr.contains(begin))
 				result.push_back(result.arena(),
-				                 KeyValueRef(keyrange.end.withPrefix(writeConflictRangeKeysRange.begin, result.arena()),
-				                             LiteralStringRef("0")));
+				                 KeyValueRef(begin.withPrefix(writeConflictRangeKeysRange.begin, result.arena()),
+				                             LiteralStringRef("1")));
 		}
 	} else {
 		CoalescedKeyRefRangeMap<ValueRef> writeConflicts{ LiteralStringRef("0"), specialKeys.end };
