@@ -829,17 +829,17 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
                                                         Reference<MasterBatchStatus> batchStatus,
                                                         std::map<UID, RestoreApplierInterface> appliersInterf,
                                                         int batchIndex, NotifiedVersion* finishedBatch) {
-
-	wait(finishedBatch->whenAtLeast(batchIndex - 1));
-	TraceEvent("FastRestoreMasterPhaseApplyToDB")
+	TraceEvent("FastRestoreMasterPhaseApplyToDBStart")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("FinishedBatch", finishedBatch->get());
+
+	wait(finishedBatch->whenAtLeast(batchIndex - 1));
 
 	if (finishedBatch->get() == batchIndex - 1) {
 		// Prepare the applyToDB requests
 		std::vector<std::pair<UID, RestoreVersionBatchRequest>> requests;
 
-		TraceEvent("FastRestoreMasterPhaseApplyToDB")
+		TraceEvent("FastRestoreMasterPhaseApplyToDBRunning")
 		    .detail("BatchIndex", batchIndex)
 		    .detail("Appliers", appliersInterf.size());
 		for (auto& applier : appliersInterf) {
