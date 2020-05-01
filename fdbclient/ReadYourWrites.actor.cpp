@@ -1289,7 +1289,7 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	}
 
 	// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
-	if (specialKeys.contains(begin.getKey()) && specialKeys.contains(end.getKey()))
+	if (specialKeys.contains(begin.getKey()) && end.getKey() <= specialKeys.end)
 		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin, end,
 		                                                limits, reverse);
 
