@@ -111,14 +111,12 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 					updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 				}
 				when(wait(exitRole)) {
-					TraceEvent("FastRestoreLoaderCoreExitRole").detail("NodeID", self->id());
+					TraceEvent("FastRestoreLoaderCoreExitRole", self->id());
 					break;
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestoreLoader", self->id())
-			    .detail("Error", e.what())
-			    .detail("RequestType", requestTypeStr);
+			TraceEvent(SevWarn, "FastRestoreLoader", self->id()).detail("RequestType", requestTypeStr).error(e);
 			break;
 		}
 	}

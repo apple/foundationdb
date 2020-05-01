@@ -84,14 +84,12 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 					updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 				}
 				when(wait(exitRole)) {
-					TraceEvent("RestoreApplierCoreExitRole").detail("NodeID", self->id());
+					TraceEvent("RestoreApplierCoreExitRole", self->id());
 					break;
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestoreApplierError", self->id())
-			    .detail("Error", e.what())
-			    .detail("RequestType", requestTypeStr);
+			TraceEvent(SevWarn, "FastRestoreApplierError", self->id()).detail("RequestType", requestTypeStr).error(e);
 			break;
 		}
 	}

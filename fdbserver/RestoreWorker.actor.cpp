@@ -240,9 +240,7 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestoreWorkerError")
-			    .detail("Error", e.what())
-			    .detail("RequestType", requestTypeStr);
+			TraceEvent(SevWarn, "FastRestoreWorkerError").detail("RequestType", requestTypeStr).error(e);
 			break;
 		}
 	}
