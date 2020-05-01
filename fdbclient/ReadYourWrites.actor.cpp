@@ -1023,7 +1023,12 @@ public:
 			return Void();
 		}
 
-		watchFuture = ryw->tr.watch(watch); // throws if there are too many outstanding watches	
+		try {
+			watchFuture = ryw->tr.watch(watch); // throws if there are too many outstanding watches	
+		} catch( Error &e ) {
+			done.send(Void());
+			throw;
+		}
 		done.send(Void());
 
 		wait(watchFuture);

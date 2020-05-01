@@ -60,7 +60,7 @@
 
 #include "fdbmonitor/SimpleIni.h"
 
-#ifdef  __linux__
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 #include <signal.h>
 #ifdef ALLOC_INSTRUMENTATION
@@ -75,6 +75,7 @@
 #endif
 
 #include "flow/SimpleOpt.h"
+#include <fstream>
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // clang-format off
@@ -291,7 +292,7 @@ public:
 			throw platform_error();
 		}
 		permission.set_permissions( &sa );
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 		// There is nothing to do here, since the default permissions are fine
 #else
 		#error Port me!
@@ -301,7 +302,7 @@ public:
 	virtual ~WorldReadablePermissions() {
 #ifdef _WIN32
 		LocalFree( sa.lpSecurityDescriptor );
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 		// There is nothing to do here, since the default permissions are fine
 #else
 		#error Port me!
