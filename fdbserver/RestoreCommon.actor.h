@@ -296,7 +296,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 				if (ongoingReplies.empty()) {
 					break;
 				} else {
-					wait(waitForAny(ongoingReplies));
+					wait(waitForAll(ongoingReplies));
 				}
 				// At least one reply is received; Calculate the reply duration
 				for (int j = 0; j < ongoingReplies.size(); ++j) {
