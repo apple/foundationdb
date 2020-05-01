@@ -50,6 +50,9 @@ extern "C" {
 static force_inline void *
 rte_memcpy(void *dst, const void *src, size_t n);
 
+//#define RTE_MACHINE_CPUFLAG_AVX512F
+#define RTE_MACHINE_CPUFLAG_AVX2
+
 #ifdef RTE_MACHINE_CPUFLAG_AVX512F
 
 #define ALIGNMENT_MASK 0x3F

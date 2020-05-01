@@ -255,7 +255,14 @@ else()
   if (GCC)
     add_compile_options(-Wno-pragmas)
     add_compile_options(-mavx)
-#    add_compile_options(-fno-builtin-memcpy)
+    # Intentionally using builtin memcpy.  G++ does a good job on small memcpy's when the size is known at runtime.
+    # If the size is not known, then it falls back on the memcpy that's available at runtime (rte_memcpy, as of this
+    # writing; see flow.cpp).
+    #
+    # The downside of the builtin memcpy is that it's slower at large copies, so if we spend a lot of time on large
+    # copies of sizes that are known at compile time, this might not be a win.  See the output of performance/memcpy
+    # for more information.
+    #add_compile_options(-fno-builtin-memcpy)
     # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
     # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
     add_compile_options(-Wno-attributes)

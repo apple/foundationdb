@@ -21,8 +21,19 @@
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/UnitTest.h"
+#include "flow/rte_memcpy.h"
+#include "flow/folly_memcpy.h"
 #include <stdarg.h>
 #include <cinttypes>
+
+void * rte_memcpy_noinline(void *__restrict __dest, const void *__restrict __src, size_t __n) {
+	return rte_memcpy(__dest, __src, __n);
+}
+
+// This compilation unit will be linked in to the main binary, so this should override glibc memcpy
+__attribute__((visibility ("default"))) void *memcpy (void *__restrict __dest, const void *__restrict __src, size_t __n) {
+	return rte_memcpy(__dest, __src, __n);
+}
 
 INetwork *g_network = 0;
 

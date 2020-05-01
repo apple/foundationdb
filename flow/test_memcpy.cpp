@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include "flow/folly_memcpy.h"
 #include "flow/rte_memcpy.h"
 #include "flow/IRandom.h"
 

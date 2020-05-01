@@ -11,10 +11,14 @@
 #include "flow/rte_memcpy.h"
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
+#include "flow/flow.h"
 
 extern "C" {
-	void* folly_memcpy(void* dst, void* src, uint32_t length);
+	void* folly_memcpy(void* dst, const void* src, uint32_t length);
 }
+
+
+void * rte_memcpy_noinline(void* dst, const void* src, size_t length); // for performance comparisons
 
 /*
  * Set this to the maximum buffer size you want to test. If it is 0, then the
@@ -170,7 +174,7 @@ do_uncached_write(uint8_t *dst, int is_dst_cached,
 		fill_addr_arrays(dst_addrs, is_dst_cached, 0,
 						 src_addrs, is_src_cached, 0);
 		for (j = 0; j < TEST_BATCH_SIZE; j++) {
-			rte_memcpy(dst+dst_addrs[j], src+src_addrs[j], size);
+			memcpy(dst+dst_addrs[j], src+src_addrs[j], size);
 		}
 	}
 }
@@ -191,7 +195,7 @@ do {                                                                        \
                          src_addrs, is_src_cached, src_uoffset);            \
         start_time = rte_rdtsc();                                           \
         for (t = 0; t < TEST_BATCH_SIZE; t++)                               \
-            rte_memcpy(dst+dst_addrs[t], src+src_addrs[t], size);           \
+            rte_memcpy_noinline(dst+dst_addrs[t], src+src_addrs[t], size);           \
         total_time += rte_rdtsc() - start_time;                             \
     }                                                                       \
     for (iter = 0; iter < (TEST_ITERATIONS / TEST_BATCH_SIZE); iter++) {    \
