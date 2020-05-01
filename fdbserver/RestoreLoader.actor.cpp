@@ -443,7 +443,6 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	return Void();
 }
 
-// TODO: Enable sending mutation batches out of order;
 // Assume: kvOps data are from the same RestoreAsset.
 // Input: pkvOps: versioned kv mutation for the asset in the version batch (batchIndex)
 //   isRangeFile: is pkvOps from range file? Let receiver (applier) know if the mutation is log mutation;
@@ -542,6 +541,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 					    .detail("Version", commitVersion.toString())
 					    .detail("Mutation", kvm.toString());
 				}
+				// kvm data is saved in pkvOps in batchData, so shallow copy is ok here.
 				applierVersionedMutationsBuffer[applierID].push_back(applierVersionedMutationsBuffer[applierID].arena(),
 				                                                     VersionedMutation(kvm, commitVersion));
 				msgSize += kvm.expectedSize();
