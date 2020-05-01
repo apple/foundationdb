@@ -244,7 +244,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			KeyRange keys;
 			int rowLimit, byteLimit;
-			ThreadReturnPromise<Standalone<VectorRef<KeyValueRef>>> result;
+			ThreadReturnPromise<Standalone<RangeResultRef>> result;
 			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit) : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
 			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
@@ -253,7 +253,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				cursor.reset(db->NewIterator(readOptions));
 			}
 			cursor->Seek(toSlice(a.keys.begin));
-			Standalone<VectorRef<KeyValueRef>> result;
+			Standalone<RangeResultRef> result;
 			int accumulatedBytes = 0;
 			while (cursor->Valid() &&
 				   toStringRef(cursor->key()) < a.keys.end &&
@@ -263,6 +263,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 				result.push_back_deep(result.arena(), kv);
 				cursor->Next();
+			}
+			result.more = (result.size() == a.rowLimit);
+			if (result.more) {
+			  result.readThrough = result[result.size()-1].key;
 			}
 			a.result.send(result);
 		}
@@ -360,7 +364,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
-	Future<Standalone<VectorRef<KeyValueRef>>> readRange(KeyRangeRef keys, int rowLimit, int byteLimit) override {
+	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit, int byteLimit) override {
 		auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
