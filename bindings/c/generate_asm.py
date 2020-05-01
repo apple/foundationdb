@@ -61,7 +61,7 @@ def write_windows_asm(asmfile, functions):
 def write_unix_asm(asmfile, functions, prefix):
     asmfile.write(".intel_syntax noprefix\n")
 
-    if platform == "linux":
+    if platform == "linux" or platform == "freebsd":
         asmfile.write("\n.data\n")
         for f in functions:
             asmfile.write("\t.extern fdb_api_ptr_%s\n" % f)

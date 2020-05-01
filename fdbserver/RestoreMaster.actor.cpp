@@ -196,7 +196,7 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	state int numTries = 0;
 	state int restoreIndex = 0;
 
-	TraceEvent("FastRestoreMasterWaitOnRestoreRequests", self->id());
+	TraceEvent("FastRestoreMasterWaitOnRestoreRequests", self->id()).detail("RestoreRequests", restoreRequests.size());
 
 	// DB has been locked where restore request is submitted
 	wait(clearDB(cx));
@@ -636,6 +636,8 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 						TraceEvent("FastRestoreMasterPhaseCollectRestoreRequests")
 						    .detail("RestoreRequest", restoreRequests.back().toString());
 					}
+				} else {
+					TraceEvent(SevWarnAlways, "FastRestoreMasterPhaseCollectRestoreRequestsEmptyRequests");
 				}
 				break;
 			}
