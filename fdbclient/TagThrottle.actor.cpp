@@ -263,16 +263,14 @@ namespace ThrottleApi {
 					wait(updateThrottleCount(&tr, -manualUnthrottledTags));
 				}
 
-				if(localUnthrottledTags > 0) {
+				if(unthrottledTags > 0) {
 					signalThrottleChange(tr);
 				}
 
 				wait(tr.commit());
 
-				unthrottledTags += localUnthrottledTags;
-
 				if(!tags.more) {
-					return unthrottledTags;
+					return removed;
 				}
 
 				ASSERT(tags.size() > 0);
