@@ -1060,7 +1060,7 @@ struct LoadSaveHelper : Context {
 		}
 		int padding = 0;
 		int start =
-		    RightAlign(writer.current_buffer_size + len, std::max(4, size == 0 ? 0 : fb_align<T>), &padding) + 4;
+		    RightAlign(writer.current_buffer_size + len, std::max(4, num_entries == 0 ? 0 : fb_align<T>), &padding) + 4;
 		writer.write(&num_entries, start, sizeof(uint32_t));
 		self.writeTo(writer, start - sizeof(uint32_t));
 		writer.write(&zeros, start - len - 4, padding);
