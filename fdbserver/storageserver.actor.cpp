@@ -1095,10 +1095,13 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	state StorageServer::VersionedData::iterator vCurrent = view.end();
 	state KeyRef readBegin;
 	state KeyRef readEnd;
+	state Key readBeginTemp;
 	state int vCount = 0;
 
 	// for caching the storage queue results during the first PTree traversal
 	state VectorRef<KeyValueRef> resultCache;
+
+
 	// for remembering the position in the resultCache
 	state int pos = 0;
 
@@ -1148,7 +1151,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			// Read the data on disk up to vCurrent (or the end of the range)
 			readEnd = vCurrent ? std::min( vCurrent.key(), range.end ) : range.end;
 			Standalone<RangeResultRef> atStorageVersion = wait(
-					data->storage.readRange( KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes ) );
+				data->storage.readRange( KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes ) );
 
 			ASSERT( atStorageVersion.size() <= limit );
 			if (data->storageVersion() > version) throw transaction_too_old();
@@ -1171,7 +1174,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			// If we hit our limits reading from disk but then combining with MVCC gave us back more room
 			if (atStorageVersion.more) { // if there might be more data, begin reading right after what we already found to find out
 				ASSERT(result.data.end()[-1].key == atStorageVersion.end()[-1].key);
-				readBegin = keyAfter( result.data.end()[-1].key );
+				readBegin = readBeginTemp = keyAfter( result.data.end()[-1].key );
 			} else if (vCurrent && vCurrent->isClearTo()){ // if vCurrent is a clear, skip it.
 				ASSERT(vCurrent->getEndKey() > readBegin);
 				readBegin = vCurrent->getEndKey();  // next disk read should start at the end of the clear
@@ -1252,7 +1255,6 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 
 	// all but the last item are less than *pLimitBytes
 	ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
-
 	result.more = limit == 0 || *pLimitBytes<=0;  // FIXME: Does this have to be exact?
 	result.version = version;
 	return result;
