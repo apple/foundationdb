@@ -2899,8 +2899,11 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 				&& e.code() != error_code_not_committed
 				&& e.code() != error_code_database_locked
 				&& e.code() != error_code_proxy_memory_limit_exceeded
-				&& e.code() != error_code_batch_transaction_throttled)
+				&& e.code() != error_code_batch_transaction_throttled
+				&& e.code() != error_code_tag_throttled)
+			{
 				TraceEvent(SevError, "TryCommitError").error(e);
+			}
 			if (trLogInfo)
 				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
 			throw;
