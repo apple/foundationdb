@@ -507,20 +507,47 @@ TEST_CASE("/flow/FlatBuffers/EmptyStrings") {
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
 	for (const auto& x : xs) {
-		ASSERT(x == StringRef());
+		ASSERT(x.size() == 0);
 	}
 	return Void();
 }
 
 TEST_CASE("/flow/FlatBuffers/EmptyVectors") {
 	int kSize = deterministicRandom()->randomInt(0, 100);
-	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<std::vector<int>>(kSize), Unversioned());
+	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<std::vector<Void>>(kSize), Unversioned());
 	ObjectReader rd(msg.begin(), Unversioned());
-	std::vector<std::vector<int>> xs;
+	std::vector<std::vector<Void>> xs;
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
 	for (const auto& x : xs) {
-		ASSERT(x == std::vector<int>());
+		ASSERT(x.size() == 0);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/EmptyVectorRefs") {
+	int kSize = deterministicRandom()->randomInt(0, 100);
+	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<VectorRef<Void>>(kSize), Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<VectorRef<Void>> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == kSize);
+	for (const auto& x : xs) {
+		ASSERT(x.size() == 0);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/EmptyPreSerVectorRefs") {
+	int kSize = deterministicRandom()->randomInt(0, 100);
+	Standalone<StringRef> msg =
+	    ObjectWriter::toValue(std::vector<VectorRef<Void, VecSerStrategy::FlatBuffers>>(kSize), Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<VectorRef<Void>> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == kSize);
+	for (const auto& x : xs) {
+		ASSERT(x.size() == 0);
 	}
 	return Void();
 }
