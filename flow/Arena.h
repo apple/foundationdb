@@ -227,7 +227,7 @@ inline void Arena::dependsOn( const Arena& p ) {
 }
 inline size_t Arena::getSize() const { return impl ? impl->totalSize() : 0; }
 inline bool Arena::hasFree( size_t size, const void *address ) {
-	return impl && impl->unused() >= size && impl->getNextData() == address && impl->alignment_for(size) == 0;
+	return impl && impl->canAlloc(size) && impl->getNextData() == address;
 }
 inline void* operator new ( size_t size, Arena& p ) {
 	UNSTOPPABLE_ASSERT( size < std::numeric_limits<int>::max() );

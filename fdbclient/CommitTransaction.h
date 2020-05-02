@@ -51,8 +51,8 @@ static const char* typeString[] = { "SetValue",
 	                                "CompareAndClear",
 	                                "MAX_ATOMIC_OP" };
 
-struct MutationRef {
-	static const int OVERHEAD_BYTES = 12; //12 is the size of Header in MutationList entries
+struct MutationRef { 
+	static const int OVERHEAD_BYTES = 8; //8 is the size of Header in MutationList entries
 	enum Type : uint8_t {
 		SetValue = 0,
 		ClearRange,
