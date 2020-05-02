@@ -181,27 +181,9 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 		}
 		return a - off;
 	}
-	void* alignedPtr(int alignment) {
-		auto ptr = reinterpret_cast<uintptr_t>(this);
-		auto res = reinterpret_cast<uint8_t*>(this);
-		if (ptr % alignment != 0) {
-			return res + alignment - (ptr % alignment);
-		}
-		return res;
-	}
-	const void* alignedPtr(int alignment) const {
-		return const_cast<ArenaBlock*>(this)->alignedPtr(alignment);
-	}
-	uint8_t* end() {
-		return reinterpret_cast<uint8_t*>(this) + size();
-	}
-	const uint8_t* end() const {
-		return const_cast<ArenaBlock*>(this)->end();
-	}
 	inline bool canAlloc(int bytes) const {
 		if (bytes == 0) return true;
-		auto self = reinterpret_cast<const uint8_t*>(this);
-		return self + bytes + alignment(bytes) > end();
+		return used() + bytes + alignment(bytes) <= size();
 	}
 	static int sizeWithOffset(int bytes, int offset) {
 		if (bytes == 0) {

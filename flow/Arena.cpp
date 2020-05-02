@@ -18,7 +18,8 @@
  * limitations under the License.
  */
 
-#include "Arena.h"
+#include "flow/Arena.h"
+#include "flow/Error.h"
 
 void ArenaBlock::delref() {
 	if (delref_no_destroy()) destroy();
@@ -81,10 +82,12 @@ int ArenaBlock::addUsed(int bytes) {
 	if (isTiny()) {
 		int t = tinyUsed;
 		tinyUsed += bytes;
+		UNSTOPPABLE_ASSERT(tinyUsed <= tinySize);
 		return t;
 	} else {
 		int t = bigUsed;
 		bigUsed += bytes;
+		UNSTOPPABLE_ASSERT(bigUsed <= bigSize);
 		return t;
 	}
 }
