@@ -98,12 +98,9 @@ struct MutationRef {
 	}
 
 	std::string toString() const {
-		if (type < MutationRef::MAX_ATOMIC_OP) {
-			return format("code: %s param1: %s param2: %s", typeString[type], printable(param1).c_str(), printable(param2).c_str());
-		}
-		else {
-			return format("code: Invalid param1: %s param2: %s", printable(param1).c_str(), printable(param2).c_str());
-		}
+		return format("code: %s param1: %s param2: %s",
+		              type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "Unset", printable(param1).c_str(),
+		              printable(param2).c_str());
 	}
 
 	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
@@ -137,6 +134,10 @@ struct MutationRef {
 
 static inline std::string getTypeString(MutationRef::Type type) {
 	return type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "Unset";
+}
+
+static inline std::string getTypeString(uint8_t type) {
+	return type < MutationRef::MAX_ATOMIC_OP ? typeString[type] : "Unset";
 }
 
 // A 'single key mutation' is one which affects exactly the value of the key specified by its param1

@@ -89,7 +89,7 @@ struct MasterBatchData : public ReferenceCounted<MasterBatchData> {
 			if (applierToRange.find(applier.second) == applierToRange.end()) {
 				applierToRange[applier.second] = applier.first;
 			} else {
-				TraceEvent(SevError, "FastRestore")
+				TraceEvent(SevError, "FastRestoreMaster")
 				    .detail("SanityCheckApplierKeyRange", applierToRange.size())
 				    .detail("ApplierID", applier.second)
 				    .detail("Key1", applierToRange[applier.second])

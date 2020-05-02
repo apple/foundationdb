@@ -84,14 +84,12 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 					updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 				}
 				when(wait(exitRole)) {
-					TraceEvent("FastRestore").detail("RestoreApplierCore", "ExitRole").detail("NodeID", self->id());
+					TraceEvent("RestoreApplierCoreExitRole", self->id());
 					break;
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestore")
-			    .detail("RestoreLoaderError", e.what())
-			    .detail("RequestType", requestTypeStr);
+			TraceEvent(SevWarn, "FastRestoreApplierError", self->id()).detail("RequestType", requestTypeStr).error(e);
 			break;
 		}
 	}
@@ -128,29 +126,29 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	state bool isDuplicated = true;
 	if (curMsgIndex.get() == req.msgIndex - 1) {
 		isDuplicated = false;
-		ASSERT(req.mutations.size() == req.mVersions.size());
 
-		for (int mIndex = 0; mIndex < req.mutations.size(); mIndex++) {
-			const MutationRef& mutation = req.mutations[mIndex];
-			const LogMessageVersion mutationVersion(req.mVersions[mIndex]);
+		for (int mIndex = 0; mIndex < req.versionedMutations.size(); mIndex++) {
+			const VersionedMutation& versionedMutation = req.versionedMutations[mIndex];
 			TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 			    .detail("RestoreAsset", req.asset.toString())
-			    .detail("Version", mutationVersion.toString())
+			    .detail("Version", versionedMutation.version.toString())
 			    .detail("Index", mIndex)
-			    .detail("MutationReceived", mutation.toString());
-			batchData->counters.receivedBytes += mutation.totalSize();
-			batchData->counters.receivedWeightedBytes += mutation.weightedTotalSize(); // atomicOp will be amplified
+			    .detail("MutationReceived", versionedMutation.mutation.toString());
+			batchData->counters.receivedBytes += versionedMutation.mutation.totalSize();
+			batchData->counters.receivedWeightedBytes +=
+			    versionedMutation.mutation.weightedTotalSize(); // atomicOp will be amplified
 			batchData->counters.receivedMutations += 1;
-			batchData->counters.receivedAtomicOps += isAtomicOp((MutationRef::Type)mutation.type) ? 1 : 0;
+			batchData->counters.receivedAtomicOps +=
+			    isAtomicOp((MutationRef::Type)versionedMutation.mutation.type) ? 1 : 0;
 			// Sanity check
-			ASSERT_WE_THINK(req.asset.isInVersionRange(mutationVersion.version));
-			ASSERT_WE_THINK(req.asset.isInKeyRange(mutation));
+			ASSERT_WE_THINK(req.asset.isInVersionRange(versionedMutation.version.version));
+			ASSERT_WE_THINK(req.asset.isInKeyRange(versionedMutation.mutation));
 
 			// Note: Log and range mutations may be delivered out of order. Can we handle it?
-			batchData->addMutation(mutation, mutationVersion);
+			batchData->addMutation(versionedMutation.mutation, versionedMutation.version);
 
-			ASSERT(mutation.type != MutationRef::SetVersionstampedKey &&
-			       mutation.type != MutationRef::SetVersionstampedValue);
+			ASSERT(versionedMutation.mutation.type != MutationRef::SetVersionstampedKey &&
+			       versionedMutation.mutation.type != MutationRef::SetVersionstampedValue);
 		}
 		curMsgIndex.set(req.msgIndex);
 	}
@@ -447,7 +445,7 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 // Write mutations to the destination DB
 ACTOR Future<Void> writeMutationsToDB(UID applierID, int64_t batchIndex, Reference<ApplierBatchData> batchData,
                                       Database cx) {
-	TraceEvent("FastRestoreApplerPhaseApplyTxn", applierID).detail("BatchIndex", batchIndex);
+	TraceEvent("FastRestoreApplerPhaseApplyTxnStart", applierID).detail("BatchIndex", batchIndex);
 	wait(precomputeMutationsResult(batchData, applierID, batchIndex, cx));
 
 	wait(applyStagingKeys(batchData, applierID, batchIndex, cx));
@@ -521,7 +519,7 @@ Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef:
 	else {
 		TraceEvent(SevError, "ApplyAtomicOpUnhandledType")
 		    .detail("TypeCode", (int)type)
-		    .detail("TypeName", typeString[type]);
+		    .detail("TypeName", getTypeString(type));
 		ASSERT(false);
 	}
 	return Value();
