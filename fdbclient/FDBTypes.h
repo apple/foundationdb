@@ -398,11 +398,11 @@ uint16_t longCommonPrefix(StringRef x, StringRef y) {
 
 template<>
 struct string_serialized_traits<KeyValueRef> : std::true_type {
-	int32_t getSize(const KeyValueRef& item) const {
+	int32_t getSize(const KeyValueRef& item, const KeyValueRef* prev) const {
 		return 2*sizeof(uint32_t) + item.key.size() + item.value.size();
 	}
 
-	uint32_t save(uint8_t* out, const KeyValueRef& item) const {
+	uint32_t save(uint8_t* out, const KeyValueRef& item, const KeyValueRef* prev) const {
 		auto begin = out;
 		uint32_t sz = item.key.size();
 		*reinterpret_cast<decltype(sz)*>(out) = sz;
@@ -418,7 +418,7 @@ struct string_serialized_traits<KeyValueRef> : std::true_type {
 	}
 
 	template <class Context>
-	uint32_t load(const uint8_t* data, KeyValueRef& t, Context& context) {
+	uint32_t load(const uint8_t* data, KeyValueRef& t, const KeyValueRef* prev, Context& context) {
 		auto begin = data;
 		uint32_t sz;
 		memcpy(&sz, data, sizeof(sz));

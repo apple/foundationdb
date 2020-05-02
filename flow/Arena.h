@@ -709,18 +709,14 @@ struct memcpy_able : std::is_trivial<T> {};
 template <>
 struct memcpy_able<UID> : std::integral_constant<bool, true> {};
 
-template<class T>
+template <class T>
 struct string_serialized_traits : std::false_type {
-	int32_t getSize(const T& item) const {
-		return 0;
-	}
+	int32_t getSize(const T& item, const T* prev) const { return 0; }
 
-	uint32_t save(uint8_t* out, const T& t) const {
-		return 0;
-	}
+	uint32_t save(uint8_t* out, const T& t, const T* prev) const { return 0; }
 
 	template <class Context>
-	uint32_t load(const uint8_t* data, T& t, Context& context) {
+	uint32_t load(const uint8_t* data, T& t, const T* prev, Context& context) {
 		return 0;
 	}
 };
@@ -738,8 +734,8 @@ struct VectorRefPreserializer {
 	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>&) { return *this; }
 
 	void invalidate() {}
-	void add(const T& item) {}
-	void remove(const T& item) {}
+	void add(const T& item, const T* prev) {}
+	void remove(const T& item, const T* prev) {}
 };
 
 template <class T>
@@ -761,14 +757,14 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 	}
 
 	void invalidate() { _cached_size = -1; }
-	void add(const T& item) {
+	void add(const T& item, const T* prev) {
 		if (_cached_size > 0) {
-			_cached_size += _string_traits.getSize(item);
+			_cached_size += _string_traits.getSize(item, prev);
 		}
 	}
-	void remove(const T& item) {
+	void remove(const T& item, const T* prev) {
 		if (_cached_size > 0) {
-			_cached_size -= _string_traits.getSize(item);
+			_cached_size -= _string_traits.getSize(item, prev);
 		}
 	}
 };
@@ -814,7 +810,7 @@ public:
 	  : VPS(), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
 		for (int i = 0; i < m_size; i++) {
 			auto ptr = new (&data[i]) T(p, toCopy[i]);
-			VPS::add(*ptr);
+			VPS::add(*ptr, i == 0 ? nullptr : (ptr - 1));
 		}
 	}
 
@@ -830,8 +826,10 @@ public:
 		if (VPS::_cached_size >= 0) {
 			return result + VPS::_cached_size;
 		}
+		int i = 0;
 		for (const auto& v : *this) {
-			result += t.getSize(v);
+			result += t.getSize(v, i == 0 ? nullptr : (&v - 1));
+			++i;
 		}
 		VPS::_cached_size = result - sizeof(uint32_t);
 		return result;
@@ -886,14 +884,14 @@ public:
 	void push_back(Arena& p, const T& value) {
 		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
 		auto ptr = new (&data[m_size]) T(value);
-		VPS::add(*ptr);
+		VPS::add(*ptr, m_size == 0 ? nullptr : (ptr - 1));
 		m_size++;
 	}
 	// invokes the "Deep copy constructor" T(Arena&, const T&) moving T entirely into arena
 	void push_back_deep(Arena& p, const T& value) {
 		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
 		auto ptr = new (&data[m_size]) T(p, value);
-		VPS::add(*ptr);
+		VPS::add(*ptr, m_size == 0 ? nullptr : (ptr - 1));
 		m_size++;
 	}
 	void append(Arena& p, const T* begin, int count) {
@@ -909,12 +907,12 @@ public:
 		if (m_size + count > m_capacity) reallocate(p, m_size + count);
 		for (int i = 0; i < count; i++) {
 			auto ptr = new (&data[m_size + i]) T(p, *begin++);
-			VPS::add(*ptr);
+			VPS::add(*ptr, i == 0 ? nullptr : (ptr - 1));
 		}
 		m_size += count;
 	}
 	void pop_back() {
-		VPS::remove(back());
+		VPS::remove(back(), m_size == 1 ? nullptr : (&back() - 1));
 		m_size--;
 	}
 
@@ -931,7 +929,7 @@ public:
 		if (size > m_capacity) reallocate(p, size);
 		for (int i = m_size; i < size; i++) {
 			auto ptr = new (&data[i]) T();
-			VPS::add(*ptr);
+			VPS::add(*ptr, i == 0 ? nullptr : (ptr - 1));
 		}
 		m_size = size;
 	}
@@ -1051,8 +1049,10 @@ struct dynamic_size_traits<VectorRef<V, VecSerStrategy::String>> : std::true_typ
 		uint32_t length = t.size();
 		*reinterpret_cast<decltype(length)*>(out) = length;
 		out += sizeof(length);
+		int i = 0;
 		for (const auto& item : t) {
-			out += traits.save(out, item);
+			out += traits.save(out, item, i == 0 ? nullptr : (&item - 1));
+			++i;
 		}
 		ASSERT(out - p == t._cached_size + sizeof(uint32_t));
 	}
@@ -1068,7 +1068,7 @@ struct dynamic_size_traits<VectorRef<V, VecSerStrategy::String>> : std::true_typ
 		data += sizeof(num_elements);
 		t.resize(context.arena(), num_elements);
 		for (unsigned i = 0; i < num_elements; ++i) {
-			data += traits.load(data, t[i], context);
+			data += traits.load(data, t[i], i == 0 ? nullptr : &t[i - 1], context);
 		}
 		ASSERT(data - p == size);
 		t._cached_size = size - sizeof(uint32_t);
