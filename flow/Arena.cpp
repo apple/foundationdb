@@ -107,15 +107,17 @@ void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
 
 void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 	ArenaBlock* b = self.getPtr();
-	if (!self || self->unused() < bytes) b = create(bytes, self);
+	if (!self || self->canAlloc(bytes)) b = create(bytes, self);
 
-	return (char*)b->getData() + b->addUsed(bytes);
+	auto a = b->alignment(bytes);
+	return (char*)b->getData() + b->addUsed(bytes + a);
 }
 
 // Return an appropriately-sized ArenaBlock to store the given data
 ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	ArenaBlock* b;
-	if (dataSize <= SMALL - TINY_HEADER && !next) {
+	auto tinyBytes = sizeWithOffset(dataSize, TINY_HEADER);
+	if (tinyBytes <= SMALL - TINY_HEADER && !next) {
 		if (dataSize <= 16 - TINY_HEADER) {
 			b = (ArenaBlock*)FastAllocator<16>::allocate();
 			b->tinySize = 16;
@@ -132,6 +134,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 		b->tinyUsed = TINY_HEADER;
 
 	} else {
+		dataSize = sizeWithOffset(dataSize, sizeof(ArenaBlock));
 		int reqSize = dataSize + sizeof(ArenaBlock);
 		if (next) reqSize += sizeof(ArenaBlockRef);
 

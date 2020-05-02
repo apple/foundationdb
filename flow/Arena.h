@@ -89,6 +89,15 @@ class NonCopyable
 	NonCopyable & operator = (const NonCopyable &);
 };
 
+inline int alignment_for(int size) {
+	if (size == 1) {
+		return size;
+	} else if (size <= 4) {
+		return size;
+	}
+	return 8;
+}
+
 class Arena {
 public:
 	inline Arena();
@@ -161,6 +170,50 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 	static ArenaBlock* create(int dataSize, Reference<ArenaBlock>& next);
 	void destroy();
 	void destroyLeaf();
+
+	int alignment(int bytes) const {
+		if (bytes == 0) return 0;
+		auto self = reinterpret_cast<uintptr_t>(this);
+		auto a = alignment_for(bytes);
+		auto off = int((self + used()) % a);
+		if (off == 0) {
+			return 0;
+		}
+		return a - off;
+	}
+	void* alignedPtr(int alignment) {
+		auto ptr = reinterpret_cast<uintptr_t>(this);
+		auto res = reinterpret_cast<uint8_t*>(this);
+		if (ptr % alignment != 0) {
+			return res + alignment - (ptr % alignment);
+		}
+		return res;
+	}
+	const void* alignedPtr(int alignment) const {
+		return const_cast<ArenaBlock*>(this)->alignedPtr(alignment);
+	}
+	uint8_t* end() {
+		return reinterpret_cast<uint8_t*>(this) + size();
+	}
+	const uint8_t* end() const {
+		return const_cast<ArenaBlock*>(this)->end();
+	}
+	inline bool canAlloc(int bytes) const {
+		if (bytes == 0) return true;
+		auto self = reinterpret_cast<const uint8_t*>(this);
+		return self + bytes + alignment(bytes) > end();
+	}
+	static int sizeWithOffset(int bytes, int offset) {
+		if (bytes == 0) {
+			return 0;
+		}
+		auto a = alignment_for(bytes);
+		auto off = offset % a;
+		if (off == 0) {
+			return bytes;
+		}
+		return a - off + bytes;
+	}
 
 private:
 	static void* operator new(size_t s); // not implemented
