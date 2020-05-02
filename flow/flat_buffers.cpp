@@ -500,7 +500,7 @@ TEST_CASE("/flow/FlatBuffers/Void") {
 }
 
 TEST_CASE("/flow/FlatBuffers/EmptyStrings") {
-	int kSize = 10;
+	int kSize = deterministicRandom()->randomInt(0, 100);
 	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<StringRef>(kSize), Unversioned());
 	ObjectReader rd(msg.begin(), Unversioned());
 	std::vector<StringRef> xs;
@@ -508,6 +508,19 @@ TEST_CASE("/flow/FlatBuffers/EmptyStrings") {
 	ASSERT(xs.size() == kSize);
 	for (const auto& x : xs) {
 		ASSERT(x == StringRef());
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/EmptyVectors") {
+	int kSize = deterministicRandom()->randomInt(0, 100);
+	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<std::vector<int>>(kSize), Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<std::vector<int>> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == kSize);
+	for (const auto& x : xs) {
+		ASSERT(x == std::vector<int>());
 	}
 	return Void();
 }
