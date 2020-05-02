@@ -193,7 +193,6 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreMasterData> masterD
 ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self, Database cx) {
 	state UID randomUID = deterministicRandom()->randomUniqueID();
 	state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait(collectRestoreRequests(cx));
-	state int numTries = 0;
 	state int restoreIndex = 0;
 
 	TraceEvent("FastRestoreMasterWaitOnRestoreRequests", self->id()).detail("RestoreRequests", restoreRequests.size());
