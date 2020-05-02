@@ -42,13 +42,12 @@ public:
 	Blob *blob_begin;
 private:
 	struct Header {
-		int type, p1len, p2len;
-		const uint8_t* p1begin() const {
-			//(this+1) moves the pointer by Header size and get to the beginning of p1_content
-			return (const uint8_t*)(this + 1);
-		}
-		const uint8_t* p2begin() const { return (const uint8_t*)(this+1) + p1len; }
-		const uint8_t* end() const { return (const uint8_t*)(this+1) + p1len + p2len; }
+		int type;
+		uint16_t p1len, p2len, next;
+		//(this+1) moves the pointer by Header size and get to the beginning of p1_content
+		const uint8_t* p1begin() const { return reinterpret_cast<const uint8_t*>(this+1); }
+		const uint8_t* p2begin() const { return reinterpret_cast<const uint8_t*>(this+1) + p1len; }
+		const uint8_t* end() const { return reinterpret_cast<const uint8_t*>(this+1) + next; }
 	};
 	static_assert( sizeof(Header) == 12, "Header packing problem" );
 	static_assert( sizeof(Header) == MutationRef::OVERHEAD_BYTES, "Invalid MutationRef Overhead Bytes");
@@ -97,14 +96,14 @@ public:
 
 	MutationListRef() : blob_begin(NULL), blob_end(NULL), totalBytes(0) {
 	}
-	MutationListRef( Arena& ar, MutationListRef const& r ) : blob_begin(NULL), blob_end(NULL), totalBytes(0) {
+	MutationListRef( Arena& ar, MutationListRef const& r ) : blob_begin(nullptr), blob_end(nullptr), totalBytes(0) {
 		append_deep(ar, r.begin(), r.end());
 	}
 	Iterator begin() const {
 		if (blob_begin) return Iterator(blob_begin, (Header*)blob_begin->data.begin());
-		return Iterator(NULL, NULL);
+		return Iterator(nullptr, nullptr);
 	}
-	Iterator end() const { return Iterator(NULL, NULL); }
+	Iterator end() const { return Iterator(nullptr, nullptr); }
 	size_t expectedSize() const { return sizeof(Blob) + totalBytes; }
 	int totalSize() const { return totalBytes; }
 
@@ -114,11 +113,13 @@ public:
 		p->type = m.type;
 		p->p1len = m.param1.size();
 		p->p2len = m.param2.size();
+		p->next = p->p1len + p->p2len;
 		memcpy(p+1, m.param1.begin(), p->p1len);
 		memcpy( (uint8_t*)(p+1) + p->p1len, m.param2.begin(), p->p2len );
 		totalBytes += mutationSize;
 		return MutationRef((MutationRef::Type)p->type, StringRef(p->p1begin(), p->p1len), StringRef(p->p2begin(), p->p2len));
 	}
+
 	void append_deep( Arena& arena, Iterator begin, Iterator end ) {
 		for(auto blob = begin.blob; blob; blob=blob->next) {
 			const uint8_t* b = blob==begin.blob ? (const uint8_t*)begin.ptr : blob->data.begin();
