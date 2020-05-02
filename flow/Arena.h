@@ -165,6 +165,8 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 	static int alignment_for(int size) {
 		if (size == 1) {
 			return 1;
+		} else if (size <= 2) {
+			return 2;
 		} else if (size <= 4) {
 			return 4;
 		} else if (size <= 8) {

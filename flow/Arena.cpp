@@ -93,16 +93,19 @@ int ArenaBlock::addUsed(int bytes) {
 }
 
 void ArenaBlock::makeReference(ArenaBlock* next) {
-	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
+	auto a = alignment(sizeof(ArenaBlockRef));
+
+	auto off = addUsed(a + sizeof(ArenaBlockRef)) + a;
+	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + off);
 	r->next = next;
 	r->nextBlockOffset = nextBlockOffset;
-	nextBlockOffset = bigUsed;
+	nextBlockOffset = off;
 	bigUsed += sizeof(ArenaBlockRef);
 }
 
 void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
 	other->addref();
-	if (!self || self->isTiny() || self->unused() < sizeof(ArenaBlockRef))
+	if (!self || self->isTiny() || !self->canAlloc(sizeof(ArenaBlockRef)))
 		create(SMALL, self)->makeReference(other);
 	else
 		self->makeReference(other);
@@ -113,7 +116,9 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 	if (!self || self->canAlloc(bytes)) b = create(bytes, self);
 
 	auto a = b->alignment(bytes);
-	return (char*)b->getData() + b->addUsed(bytes + a);
+	auto res = (char*)b->getData() + a + b->addUsed(bytes + a);
+	ASSERT(reinterpret_cast<uintptr_t>(res) % alignment_for(bytes) == 0);
+	return res;
 }
 
 // Return an appropriately-sized ArenaBlock to store the given data

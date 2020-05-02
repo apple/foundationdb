@@ -157,7 +157,7 @@ else()
     add_compile_options(
       -fsanitize=undefined
       # TODO(atn34) Re-enable -fsanitize=alignment once https://github.com/apple/foundationdb/issues/1434 is resolved
-      -fno-sanitize=alignment
+      #-fno-sanitize=alignment
       -DUSE_SANITIZER)
     set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fsanitize=undefined")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=undefined")

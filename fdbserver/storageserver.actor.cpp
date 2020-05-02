@@ -1596,7 +1596,7 @@ bool changeDurableVersion( StorageServer* data, Version desiredDurableVersion ) 
 			verData.createNewVersion( data->version.get()+1 );
 
 		int64_t bytesDurable = VERSION_OVERHEAD;
-		for(auto m = v.mutations.begin(); m; ++m) {
+		for(auto m = v.mutations.begin(); m != v.mutations.end(); ++m) {
 			bytesDurable += mvccStorageBytes(*m);
 			auto i = verData.atLatest().find(m->param1);
 			if (i) {
@@ -3032,7 +3032,7 @@ void StorageServerDisk::writeMutation( MutationRef mutation ) {
 }
 
 void StorageServerDisk::writeMutations( MutationListRef mutations, Version debugVersion, const char* debugContext ) {
-	for(auto m = mutations.begin(); m; ++m) {
+	for(auto m = mutations.begin(); m != mutations.end(); ++m) {
 		debugMutation(debugContext, debugVersion, *m);
 		if (m->type == MutationRef::SetValue) {
 			storage->set( KeyValueRef(m->param1, m->param2) );
@@ -3052,7 +3052,7 @@ bool StorageServerDisk::makeVersionMutationsDurable( Version& prevStorageVersion
 		ASSERT( v.version > prevStorageVersion && v.version <= newStorageVersion );
 		debugKeyRange("makeVersionMutationsDurable", v.version, allKeys);
 		writeMutations(v.mutations, v.version, "makeVersionDurable");
-		for(auto m=v.mutations.begin(); m; ++m)
+		for(auto m=v.mutations.begin(); m != v.mutations.end(); ++m)
 			bytesLeft -= mvccStorageBytes(*m);
 		prevStorageVersion = v.version;
 		return false;
