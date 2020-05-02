@@ -409,6 +409,24 @@ struct KeyValueRef {
 	};
 };
 
+uint16_t longCommonPrefix(StringRef x, StringRef y) {
+	uint16_t end = std::min<int>({ x.size(), y.size(), std::numeric_limits<uint16_t>::max() });
+	uint16_t i = 0;
+	constexpr auto kStepSize = 16;
+	for (; i + kStepSize < end; i += kStepSize) {
+		// Hopefully it compiles to a double-width compare instruction
+		if (std::memcmp(x.begin() + i, y.begin() + i, kStepSize)) {
+			break;
+		}
+	}
+	for (; i < end; ++i) {
+		if (x[i] != y[i]) {
+			break;
+		}
+	}
+	return i;
+}
+
 template<>
 struct string_serialized_traits<KeyValueRef> : std::true_type {
 	int32_t getSize(const KeyValueRef& item) const {
