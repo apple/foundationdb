@@ -3404,7 +3404,8 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 
 			if(maxThrottleDelay > 0.0 && !canRecheck) { // TODO: allow delaying?
 				++cx->transactionReadVersionsThrottled;
-				return Future<Version>(tag_throttled());
+				readVersion = tag_throttled();
+				return readVersion;
 			}
 
 			for(auto &tag : options.tags) {
