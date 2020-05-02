@@ -89,15 +89,6 @@ class NonCopyable
 	NonCopyable & operator = (const NonCopyable &);
 };
 
-inline int alignment_for(int size) {
-	if (size == 1) {
-		return 1;
-	} else if (size <= 4) {
-		return 4;
-	}
-	return 8;
-}
-
 class Arena {
 public:
 	inline Arena();
@@ -171,15 +162,28 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 	void destroy();
 	void destroyLeaf();
 
-	int alignment(int bytes) const {
+	static int alignment_for(int size) {
+		if (size == 1) {
+			return 1;
+		} else if (size <= 4) {
+			return 4;
+		} else if (size <= 8) {
+			return 8;
+		}
+		return 16;
+	}
+
+	static int alignment_from(int bytes, uintptr_t addr) {
 		if (bytes == 0) return 0;
-		auto self = reinterpret_cast<uintptr_t>(this);
 		auto a = alignment_for(bytes);
-		auto off = int((self + used()) % a);
+		auto off = int(addr % a);
 		if (off == 0) {
 			return 0;
 		}
 		return a - off;
+	}
+	int alignment(int bytes) const {
+		return alignment_from(bytes, reinterpret_cast<uintptr_t>(this) + used());
 	}
 	inline bool canAlloc(int bytes) const {
 		if (bytes == 0) return true;
@@ -222,7 +226,9 @@ inline void Arena::dependsOn( const Arena& p ) {
 		ArenaBlock::dependOn( impl, p.impl.getPtr() );
 }
 inline size_t Arena::getSize() const { return impl ? impl->totalSize() : 0; }
-inline bool Arena::hasFree( size_t size, const void *address ) { return impl && impl->unused() >= size && impl->getNextData() == address; }
+inline bool Arena::hasFree( size_t size, const void *address ) {
+	return impl && impl->unused() >= size && impl->getNextData() == address && impl->alignment_for(size) == 0;
+}
 inline void* operator new ( size_t size, Arena& p ) {
 	UNSTOPPABLE_ASSERT( size < std::numeric_limits<int>::max() );
 	return ArenaBlock::allocate( p.impl, (int)size );
