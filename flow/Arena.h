@@ -380,12 +380,6 @@ public:
 	}
 #else
 	Standalone( const T& t, const Arena& arena ) : Arena( arena ), T( t ) {}
-	Standalone( const Standalone<T> & t ) : Arena((Arena const&)t), T((T const&)t) {}
-	Standalone<T>& operator=( const Standalone<T> & t ) {
-		*(Arena*)this = (Arena const&)t;
-		*(T*)this = (T const&)t;
-		return *this;
-	}
 #endif
 
 	template <class U> Standalone<U> castTo() const {
@@ -968,7 +962,7 @@ private:
 	void reallocate(Arena& p, int requiredCapacity) {
 		requiredCapacity = std::max(m_capacity * 2, requiredCapacity);
 		// SOMEDAY: Maybe we are right at the end of the arena and can expand cheaply
-		T* newData = (T*)new (p) uint8_t[requiredCapacity * sizeof(T)];
+		T* newData = new (p) T[requiredCapacity];
 		if (m_size > 0) {
 			std::move(data, data + m_size, newData);
 		}
