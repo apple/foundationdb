@@ -347,6 +347,16 @@ TEST_CASE("flow/FlatBuffers/vectorBool") {
 
 } // namespace unit_tests
 
+template <>
+struct string_serialized_traits<Void> : std::true_type {
+	int32_t getSize(const Void& item) const { return 0; }
+	uint32_t save(uint8_t* out, const Void& t) const { return 0; }
+	template <class Context>
+	uint32_t load(const uint8_t* data, Void& t, Context& context) {
+		return 0;
+	}
+};
+
 namespace unit_tests {
 
 struct Y1 {
@@ -541,9 +551,9 @@ TEST_CASE("/flow/FlatBuffers/EmptyVectorRefs") {
 TEST_CASE("/flow/FlatBuffers/EmptyPreSerVectorRefs") {
 	int kSize = deterministicRandom()->randomInt(0, 100);
 	Standalone<StringRef> msg =
-	    ObjectWriter::toValue(std::vector<VectorRef<Void, VecSerStrategy::FlatBuffers>>(kSize), Unversioned());
+	    ObjectWriter::toValue(std::vector<VectorRef<Void, VecSerStrategy::String>>(kSize), Unversioned());
 	ObjectReader rd(msg.begin(), Unversioned());
-	std::vector<VectorRef<Void>> xs;
+	std::vector<VectorRef<Void, VecSerStrategy::String>> xs;
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
 	for (const auto& x : xs) {
