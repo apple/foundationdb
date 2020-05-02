@@ -3982,16 +3982,31 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 						}
 						else if(tokencmp(tokens[2], "all") && tokens.size() == 3) {
-							uint64_t unthrottledTags = wait(ThrottleApi::unthrottleAll(db));
-							printf("Unthrottled %lld tags\n", unthrottledTags);
+							bool unthrottled = wait(ThrottleApi::unthrottleAll(db));
+							if(unthrottled) {
+								printf("Unthrottled all tags\n");
+							}
+							else {
+								printf("There were no tags being throttled\n");
+							}
 						}
 						else if(tokencmp(tokens[2], "auto") && tokens.size() == 3) {
-							uint64_t unthrottledTags = wait(ThrottleApi::unthrottleAuto(db));
-							printf("Unthrottled %lld tags\n", unthrottledTags);
+							bool unthrottled = wait(ThrottleApi::unthrottleAuto(db));
+							if(unthrottled) {
+								printf("Unthrottled all auto-throttled tags\n");
+							}
+							else {
+								printf("There were no tags being throttled\n");
+							}
 						}
 						else if(tokencmp(tokens[2], "manual") && tokens.size() == 3) {
-							uint64_t unthrottledTags = wait(ThrottleApi::unthrottleManual(db));
-							printf("Unthrottled %lld tags\n", unthrottledTags);
+							bool unthrottled = wait(ThrottleApi::unthrottleManual(db));
+							if(unthrottled) {
+								printf("Unthrottled all manually throttled tags\n");
+							}
+							else {
+								printf("There were no tags being throttled\n");
+							}
 						}
 						else {
 							printf("Usage: throttle off <all|auto|manual|tag> [TAG]\n");

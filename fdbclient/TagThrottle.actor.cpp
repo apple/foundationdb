@@ -199,6 +199,8 @@ namespace ThrottleApi {
 	ACTOR Future<bool> unthrottleTags(Database db, TagSet tags, bool autoThrottled, TransactionPriority priority) {
 		state Transaction tr(db);
 		state Key key = TagThrottleKey(tags, autoThrottled, priority).toKey();
+		state bool removed = false;
+
 
 		loop {
 			try {
@@ -211,10 +213,15 @@ namespace ThrottleApi {
 					tr.clear(key);
 					signalThrottleChange(tr);
 
+					// Report that we are removing this tag if we ever see it present.
+					// This protects us from getting confused if the transaction is maybe committed.
+					// It's ok if someone else actually ends up removing this tag at the same time
+					// and we aren't the ones to actually do it.
+					removed = true;
 					wait(tr.commit());
 				}
 
-				return value.present();
+				return removed;
 			}
 			catch(Error& e) {
 				wait(tr.onError(e));
@@ -222,29 +229,33 @@ namespace ThrottleApi {
 		}
 	}
 
-	ACTOR Future<uint64_t> unthrottleTags(Database db, KeyRef beginKey, KeyRef endKey) {
+	ACTOR Future<bool> unthrottleTags(Database db, KeyRef beginKey, KeyRef endKey, bool onlyExpiredThrottles) {
 		state Transaction tr(db);
 
 		state KeySelector begin = firstGreaterOrEqual(beginKey);
-		state KeySelectorRef end = firstGreaterOrEqual(endKey);
+		state KeySelector end = firstGreaterOrEqual(endKey);
 
-		state uint64_t unthrottledTags = 0;
+		state bool removed = false;
 
 		loop {
 			try {
 				state Standalone<RangeResultRef> tags = wait(tr.getRange(begin, end, 1000));
-				state uint64_t localUnthrottledTags = 0;
+				state uint64_t unthrottledTags = 0;
 				uint64_t manualUnthrottledTags = 0;
 				for(auto tag : tags) {
-					bool autoThrottled = TagThrottleKey::fromKey(tag.key).autoThrottled;
-					if(autoThrottled) {
-						++localUnthrottledTags;
+					if(onlyExpiredThrottles) {
+						double expirationTime = TagThrottleValue::fromValue(tag.value).expirationTime;
+						if(expirationTime == 0 || expirationTime > now()) {
+							continue;
+						}
 					}
-					else {
-						++localUnthrottledTags;
+
+					bool autoThrottled = TagThrottleKey::fromKey(tag.key).autoThrottled;
+					if(!autoThrottled) {
 						++manualUnthrottledTags;
 					}
 
+					removed = true;
 					tr.clear(tag.key);
 				}
 
@@ -273,16 +284,20 @@ namespace ThrottleApi {
 		}
 	}	
 
-	Future<uint64_t> unthrottleManual(Database db) {
-		return unthrottleTags(db, tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix);	
+	Future<bool> unthrottleManual(Database db) {
+		return unthrottleTags(db, tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix, false);	
 	}
 
-	Future<uint64_t> unthrottleAuto(Database db) {
-		return unthrottleTags(db, tagThrottleAutoKeysPrefix, tagThrottleKeys.end);	
+	Future<bool> unthrottleAuto(Database db) {
+		return unthrottleTags(db, tagThrottleAutoKeysPrefix, tagThrottleKeys.end, false);	
 	}
 
-	Future<uint64_t> unthrottleAll(Database db) {
-		return unthrottleTags(db, tagThrottleKeys.begin, tagThrottleKeys.end);	
+	Future<bool> unthrottleAll(Database db) {
+		return unthrottleTags(db, tagThrottleKeys.begin, tagThrottleKeys.end, false);	
+	}
+
+	Future<bool> expire(Database db) {
+		return unthrottleTags(db, tagThrottleKeys.begin, tagThrottleKeys.end, true);
 	}
 
 	ACTOR Future<Void> enableAuto(Database db, bool enabled) {

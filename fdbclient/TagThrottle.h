@@ -141,6 +141,9 @@ struct TagThrottleInfo {
 	double expirationTime;
 	double initialDuration;
 
+	TagThrottleInfo(TransactionTag tag, bool autoThrottled, TransactionPriority priority, double tpsRate, double expirationTime, double initialDuration)
+		: tag(tag), autoThrottled(autoThrottled), priority(priority), tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration) {}
+
 	TagThrottleInfo(TagThrottleKey key, TagThrottleValue value) 
 		: autoThrottled(key.autoThrottled), priority(key.priority), tpsRate(value.tpsRate), expirationTime(value.expirationTime), initialDuration(value.initialDuration) 
 	{
@@ -157,9 +160,10 @@ namespace ThrottleApi {
 
 	Future<bool> unthrottleTags(Database const& db, TagSet const& tags, bool const& autoThrottled, TransactionPriority const& priority);
 
-	Future<uint64_t> unthrottleManual(Database db);
-	Future<uint64_t> unthrottleAuto(Database db);
-	Future<uint64_t> unthrottleAll(Database db);
+	Future<bool> unthrottleManual(Database db);
+	Future<bool> unthrottleAuto(Database db);
+	Future<bool> unthrottleAll(Database db);
+	Future<bool> expire(Database db);
 
 	Future<Void> enableAuto(Database const& db, bool const& enabled);
 };

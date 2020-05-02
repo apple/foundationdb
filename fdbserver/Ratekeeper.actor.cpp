@@ -448,6 +448,8 @@ struct RatekeeperData {
 	Deque<double> actualTpsHistory;
 	Optional<Key> remoteDC;
 
+	Future<Void> expiredTagThrottleCleanup;
+
 	bool autoThrottlingEnabled;
 
 	RatekeeperData(Database db) : db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), 
@@ -456,7 +458,9 @@ struct RatekeeperData {
 		normalLimits(TransactionPriority::DEFAULT, "", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER, SERVER_KNOBS->TARGET_BYTES_PER_TLOG, SERVER_KNOBS->SPRING_BYTES_TLOG, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE, SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS),
 		batchLimits(TransactionPriority::BATCH, "Batch", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH, SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH, SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH, SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH, SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
 		autoThrottlingEnabled(false)
-	{}
+	{
+		expiredTagThrottleCleanup = recurring([this](){ ThrottleApi::expire(this->db); }, SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
+	}
 };
 
 //SOMEDAY: template trackStorageServerQueueInfo and trackTLogQueueInfo into one function
@@ -677,10 +681,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 						tr.set(entry.key, value);
 					}
 
-					if(tagValue.expirationTime <= now()) {
-						tr.clear(entry.key);
-					}
-					else {
+					if(tagValue.expirationTime > now()) {
 						TransactionTag tag = *tagKey.tags.begin();
 						Optional<ClientTagThrottleLimits> oldLimits = self->throttledTags.getManualTagThrottleLimits(tag, tagKey.priority);
 
