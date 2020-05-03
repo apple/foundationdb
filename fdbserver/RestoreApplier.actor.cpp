@@ -89,7 +89,9 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestoreApplierError", self->id()).detail("RequestType", requestTypeStr).error(e);
+			TraceEvent(SevWarn, "FastRestoreApplierError", self->id())
+			    .detail("RequestType", requestTypeStr)
+			    .error(e, true);
 			break;
 		}
 	}

@@ -116,7 +116,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestoreLoader", self->id()).detail("RequestType", requestTypeStr).error(e);
+			TraceEvent(SevWarn, "FastRestoreLoader", self->id()).detail("RequestType", requestTypeStr).error(e, true);
 			break;
 		}
 	}
