@@ -93,13 +93,11 @@ int ArenaBlock::addUsed(int bytes) {
 }
 
 void ArenaBlock::makeReference(ArenaBlock* next) {
-	auto a = alignment(sizeof(ArenaBlockRef));
-
-	auto off = addUsed(a + sizeof(ArenaBlockRef)) + a;
-	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + off);
+	// TODO: Align memory here?
+	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
 	r->next = next;
 	r->nextBlockOffset = nextBlockOffset;
-	nextBlockOffset = off;
+	nextBlockOffset = bigUsed;
 	bigUsed += sizeof(ArenaBlockRef);
 }
 
@@ -112,7 +110,7 @@ void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
 }
 
 static int alignment_for(int size) {
-	if (size == 1) {
+	if (size <= 1) {
 		return 1;
 	} else if (size <= 2) {
 		return 2;
@@ -126,7 +124,8 @@ static int alignment_for(int size) {
 
 void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 	ArenaBlock* b = self.getPtr();
-	if (!self || self->canAlloc(bytes)) b = create(bytes, self);
+	if (!self || !self->canAlloc(bytes))
+		b = create(bytes, self);
 
 	auto a = b->alignment(bytes);
 	auto res = (char*)b->getData() + a + b->addUsed(bytes + a);
@@ -151,11 +150,11 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	ArenaBlock* b;
 	auto tinyBytes = sizeWithOffset(dataSize, TINY_HEADER);
 	if (tinyBytes <= SMALL - TINY_HEADER && !next) {
-		if (dataSize <= 16 - TINY_HEADER) {
+		if (tinyBytes <= 16 - TINY_HEADER) {
 			b = (ArenaBlock*)FastAllocator<16>::allocate();
 			b->tinySize = 16;
 			INSTRUMENT_ALLOCATE("Arena16");
-		} else if (dataSize <= 32 - TINY_HEADER) {
+		} else if (tinyBytes <= 32 - TINY_HEADER) {
 			b = (ArenaBlock*)FastAllocator<32>::allocate();
 			b->tinySize = 32;
 			INSTRUMENT_ALLOCATE("Arena32");
