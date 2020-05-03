@@ -161,50 +161,11 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 	static ArenaBlock* create(int dataSize, Reference<ArenaBlock>& next);
 	void destroy();
 	void destroyLeaf();
-
-	static int alignment_for(int size) {
-		if (size == 1) {
-			return 1;
-		} else if (size <= 2) {
-			return 2;
-		} else if (size <= 4) {
-			return 4;
-		} else if (size <= 8) {
-			return 8;
-		}
-		return 16;
-	}
-
-	static int alignment_from(int bytes, uintptr_t addr) {
-		if (bytes == 0) return 0;
-		auto a = alignment_for(bytes);
-		auto off = int(addr % a);
-		if (off == 0) {
-			return 0;
-		}
-		return a - off;
-	}
-	int alignment(int bytes) const {
-		return alignment_from(bytes, reinterpret_cast<uintptr_t>(this) + used());
-	}
-	inline bool canAlloc(int bytes) const {
-		if (bytes == 0) return true;
-		return used() + bytes + alignment(bytes) <= size();
-	}
-	static int sizeWithOffset(int bytes, int offset) {
-		if (bytes == 0) {
-			return 0;
-		}
-		auto a = alignment_for(bytes);
-		auto off = offset % a;
-		if (off == 0) {
-			return bytes;
-		}
-		return a - off + bytes;
-	}
+	bool canAlloc(int bytes) const;
 
 private:
 	static void* operator new(size_t s); // not implemented
+	int alignment(int bytes) const;
 };
 
 inline Arena::Arena() : impl( NULL ) {}

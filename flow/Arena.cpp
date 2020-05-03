@@ -111,6 +111,19 @@ void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
 		self->makeReference(other);
 }
 
+static int alignment_for(int size) {
+	if (size == 1) {
+		return 1;
+	} else if (size <= 2) {
+		return 2;
+	} else if (size <= 4) {
+		return 4;
+	} else if (size <= 8) {
+		return 8;
+	}
+	return 16;
+}
+
 void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 	ArenaBlock* b = self.getPtr();
 	if (!self || self->canAlloc(bytes)) b = create(bytes, self);
@@ -119,6 +132,18 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 	auto res = (char*)b->getData() + a + b->addUsed(bytes + a);
 	ASSERT(reinterpret_cast<uintptr_t>(res) % alignment_for(bytes) == 0);
 	return res;
+}
+
+static inline int sizeWithOffset(int bytes, int offset) {
+	if (bytes == 0) {
+		return 0;
+	}
+	auto a = alignment_for(bytes);
+	auto off = offset % a;
+	if (off == 0) {
+		return bytes;
+	}
+	return a - off + bytes;
 }
 
 // Return an appropriately-sized ArenaBlock to store the given data
@@ -284,4 +309,23 @@ void ArenaBlock::destroyLeaf() {
 			delete[](uint8_t*) this;
 		}
 	}
+}
+
+bool ArenaBlock::canAlloc(int bytes) const {
+	if (bytes == 0) return true;
+	return used() + bytes + alignment(bytes) <= size();
+}
+
+static inline int alignment_from(int bytes, uintptr_t addr) {
+	if (bytes == 0) return 0;
+	auto a = alignment_for(bytes);
+	auto off = int(addr % a);
+	if (off == 0) {
+		return 0;
+	}
+	return a - off;
+}
+
+int ArenaBlock::alignment(int bytes) const {
+	return alignment_from(bytes, reinterpret_cast<uintptr_t>(this) + used());
 }
