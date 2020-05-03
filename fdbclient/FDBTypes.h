@@ -378,7 +378,7 @@ struct KeyValueRef {
 	};
 };
 
-uint16_t longCommonPrefix(StringRef x, StringRef y) {
+inline uint16_t longCommonPrefix(StringRef x, StringRef y) {
 	uint16_t end = std::min<int>({ x.size(), y.size(), std::numeric_limits<uint16_t>::max() });
 	uint16_t i = 0;
 	constexpr auto kStepSize = 16;
