@@ -396,20 +396,24 @@ inline uint16_t longCommonPrefix(StringRef x, StringRef y) {
 	return i;
 }
 
-template<>
+template <>
 struct string_serialized_traits<KeyValueRef> : std::true_type {
 	int32_t getSize(const KeyValueRef& item, const KeyValueRef* prev) const {
-		return 2*sizeof(uint32_t) + item.key.size() + item.value.size();
+		return 2 * sizeof(uint16_t) + sizeof(uint32_t) + item.key.size() + item.value.size() -
+		       (prev ? longCommonPrefix(item.key, prev->key) : 0);
 	}
 
 	uint32_t save(uint8_t* out, const KeyValueRef& item, const KeyValueRef* prev) const {
 		auto begin = out;
-		uint32_t sz = item.key.size();
-		*reinterpret_cast<decltype(sz)*>(out) = sz;
-		out += sizeof(sz);
-		memcpy(out, item.key.begin(), sz);
-		out += sz;
-		sz = item.value.size();
+		uint16_t prefixLength = prev ? longCommonPrefix(item.key, prev->key) : 0;
+		uint16_t suffixLength = item.key.size() - prefixLength;
+		*reinterpret_cast<decltype(prefixLength)*>(out) = prefixLength;
+		out += sizeof(prefixLength);
+		*reinterpret_cast<decltype(suffixLength)*>(out) = suffixLength;
+		out += sizeof(suffixLength);
+		memcpy(out, item.key.begin() + prefixLength, suffixLength);
+		out += suffixLength;
+		uint32_t sz = item.value.size();
 		*reinterpret_cast<decltype(sz)*>(out) = sz;
 		out += sizeof(sz);
 		memcpy(out, item.value.begin(), sz);
@@ -420,11 +424,21 @@ struct string_serialized_traits<KeyValueRef> : std::true_type {
 	template <class Context>
 	uint32_t load(const uint8_t* data, KeyValueRef& t, const KeyValueRef* prev, Context& context) {
 		auto begin = data;
+		uint16_t prefixLength;
+		memcpy(&prefixLength, data, sizeof(prefixLength));
+		data += sizeof(prefixLength);
+		uint16_t suffixLength;
+		memcpy(&suffixLength, data, sizeof(suffixLength));
+		data += sizeof(suffixLength);
+		if (prefixLength == 0) {
+			t.key = StringRef(context.tryReadZeroCopy(data, suffixLength), suffixLength);
+		} else {
+			ASSERT(prev != nullptr);
+			t.key = StringRef(context.tryReadZeroCopy(data, suffixLength), suffixLength)
+			            .withPrefix(StringRef(prev->key.begin(), prefixLength), context.arena());
+		}
+		data += suffixLength;
 		uint32_t sz;
-		memcpy(&sz, data, sizeof(sz));
-		data += sizeof(sz);
-		t.key = StringRef(context.tryReadZeroCopy(data, sz), sz);
-		data += sz;
 		memcpy(&sz, data, sizeof(sz));
 		data += sizeof(sz);
 		t.value = StringRef(context.tryReadZeroCopy(data, sz), sz);
