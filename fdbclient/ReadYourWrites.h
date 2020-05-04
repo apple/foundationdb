@@ -165,6 +165,10 @@ private:
 	// For reading conflict ranges from the special key space
 	VectorRef<KeyRef> versionStampKeys;
 	Future<Standalone<StringRef>> versionStampFuture;
+	Standalone<VectorRef<KeyRangeRef>>
+	    nativeReadRanges; // Used to read conflict ranges after committing an ryw disabled transaction
+	Standalone<VectorRef<KeyRangeRef>>
+	    nativeWriteRanges; // Used to read conflict ranges after committing an ryw disabled transaction
 
 	Reference<TransactionDebugInfo> transactionDebugInfo;
 

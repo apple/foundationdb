@@ -302,8 +302,12 @@ public:
 	Reference<TransactionLogInfo> trLogInfo;
 
 	const vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
-	const VectorRef<KeyRangeRef>& readConflictRanges() const { return tr.transaction.read_conflict_ranges; }
-	const VectorRef<KeyRangeRef>& writeConflictRanges() const { return tr.transaction.write_conflict_ranges; }
+	Standalone<VectorRef<KeyRangeRef>> readConflictRanges() const {
+		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.read_conflict_ranges, tr.arena);
+	}
+	Standalone<VectorRef<KeyRangeRef>> writeConflictRanges() const {
+		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
+	}
 
 private:
 	Future<Version> getReadVersion(uint32_t flags);
