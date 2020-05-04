@@ -57,6 +57,9 @@ ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req,
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("Role", getRoleStr(self->role))
 	    .detail("VersionBatchNotifiedVersion", self->versionBatchId.get());
+	// Loader destroy batchData once the batch finishes and self->finishedBatch.set(req.batchIndex);
+	ASSERT(self->finishedBatch.get() < req.batchIndex);
+
 	// batchId is continuous. (req.batchIndex-1) is the id of the just finished batch.
 	wait(self->versionBatchId.whenAtLeast(req.batchIndex - 1));
 

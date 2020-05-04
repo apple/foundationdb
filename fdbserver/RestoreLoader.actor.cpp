@@ -336,6 +336,8 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	    .detail("NotProcessed", !paramExist)
 	    .detail("Processed", isReady)
 	    .detail("CurrentMemory", getSystemStatistics().processMemory);
+	// Loader destroy batchData once the batch finishes and self->finishedBatch.set(req.batchIndex);
+	ASSERT(self->finishedBatch.get() < req.batchIndex);
 
 	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 
@@ -376,6 +378,8 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("UseRangeFile", req.useRangeFile)
 	    .detail("LoaderSendStatus", batchStatus->toString());
+	// Loader destroy batchData once the batch finishes and self->finishedBatch.set(req.batchIndex);
+	ASSERT(self->finishedBatch.get() < req.batchIndex);
 
 	// Ensure each file is sent exactly once by using batchStatus->sendAllLogs and batchStatus->sendAllRanges
 	if (!req.useRangeFile) {
@@ -945,6 +949,9 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 	wait(self->finishedBatch.whenAtLeast(req.batchIndex - 1));
 	if (self->finishedBatch.get() == req.batchIndex - 1) {
 		self->finishedBatch.set(req.batchIndex);
+		// Clean up batchData
+		self->batch.erase(req.batchIndex);
+		self->status.erase(req.batchIndex);
 	}
 	if (self->delayedActors > 0) {
 		self->checkMemory.trigger();
