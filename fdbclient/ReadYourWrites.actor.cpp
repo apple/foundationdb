@@ -1049,11 +1049,11 @@ public:
 				ryw->nativeReadRanges = ryw->tr.readConflictRanges();
 				ryw->nativeWriteRanges = ryw->tr.writeConflictRanges();
 				for (const auto& f : ryw->tr.getExtraReadConflictRanges()) {
-					ASSERT(f.isReady() && f.get().first < f.get().second);
-					ryw->nativeReadRanges.push_back(
-					    ryw->nativeReadRanges.arena(),
-					    KeyRangeRef(f.get().first, f.get().second)
-					        .withPrefix(readConflictRangeKeysRange.begin, ryw->nativeReadRanges.arena()));
+					if (f.isReady() && f.get().first < f.get().second)
+						ryw->nativeReadRanges.push_back(
+						    ryw->nativeReadRanges.arena(),
+						    KeyRangeRef(f.get().first, f.get().second)
+						        .withPrefix(readConflictRangeKeysRange.begin, ryw->nativeReadRanges.arena()));
 				}
 
 				if (ryw->resetPromise.isSet())
@@ -1587,10 +1587,10 @@ Standalone<RangeResultRef> ReadYourWritesTransaction::getReadConflictRangeInters
 			readConflicts.insert(range.withPrefix(readConflictRangeKeysRange.begin, result.arena()),
 			                     LiteralStringRef("1"));
 		for (const auto& f : tr.getExtraReadConflictRanges()) {
-			ASSERT(f.isReady() && f.get().first < f.get().second);
-			readConflicts.insert(
-			    KeyRangeRef(f.get().first, f.get().second).withPrefix(readConflictRangeKeysRange.begin, result.arena()),
-			    LiteralStringRef("1"));
+			if (f.isReady() && f.get().first < f.get().second)
+				readConflicts.insert(KeyRangeRef(f.get().first, f.get().second)
+				                         .withPrefix(readConflictRangeKeysRange.begin, result.arena()),
+				                     LiteralStringRef("1"));
 		}
 		auto beginIter = readConflicts.rangeContaining(kr.begin);
 		if (beginIter->begin() != kr.begin) ++beginIter;
