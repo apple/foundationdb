@@ -49,19 +49,18 @@ RUN cp -iv /usr/local/bin/clang++ /usr/local/bin/clang++.deref &&\
 	ldconfig &&\
 	rm -rf /mnt/artifacts
 
-LABEL version=0.11.4
-ENV DOCKER_IMAGEVER=0.11.4
+LABEL version=0.11.5
+ENV DOCKER_IMAGEVER=0.11.5
 
-ENV CLANGCC=/usr/local/bin/clang.457a3d3d
-ENV CLANGCXX=/usr/local/bin/clang++.457a3d3d
+ENV CLANGCC=/usr/local/bin/clang.de8a65ef
+ENV CLANGCXX=/usr/local/bin/clang++.de8a65ef
 ENV GCC80CC=/opt/rh/devtoolset-8/root/usr/bin/gcc.b4f14270
 ENV GCC80CXX=/opt/rh/devtoolset-8/root/usr/bin/g++.0bea8e1c
 ENV GCC93CC=/usr/local/bin/gcc.04edd07a
 ENV GCC93CXX=/usr/local/bin/g++.b058d8c5
-ENV CC=/usr/local/bin/clang.457a3d3d
-ENV CXX=/usr/local/bin/clang++.457a3d3d
+ENV CC=/usr/local/bin/clang.de8a65ef
+ENV CXX=/usr/local/bin/clang++.de8a65ef
 ENV USE_LD=LLD
-ENV USE_CCACHE=1
 ENV USE_LIBCXX=1
 ENV CCACHE_NOHASHDIR=true
 ENV CCACHE_UMASK=0000
