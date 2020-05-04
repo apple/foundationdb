@@ -563,6 +563,9 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
                               std::map<UID, RestoreApplierInterface> appliersInterf, int batchIndex) {
 	ASSERT(batchData->samplesSize >= 0);
+	// Sanity check: samples should not be used after freed
+	ASSERT((batchData->samplesSize > 0 && !batchData->samples.empty()) ||
+	       batchData->samplesSize == 0 && batchData->samples.empty());
 	int numAppliers = appliersInterf.size();
 	double slotSize = std::max(batchData->samplesSize / numAppliers, 1.0);
 	double cumulativeSize = slotSize;
@@ -621,6 +624,7 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 	    .detail("BatchIndex", batchIndex)
 	    .detail("SamplingSize", batchData->samplesSize)
 	    .detail("SlotSize", slotSize);
+	batchData->samples.clear();
 }
 
 ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx) {
