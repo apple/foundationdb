@@ -3691,8 +3691,7 @@ public:
 					auto range = backupRanges[restoreIndex];
 					Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
 					// Register the request request in DB, which will be picked up by restore worker leader
-					struct RestoreRequest restoreRequest(restoreIndex, restoreTag, bcUrl, true, targetVersion, true,
-					                                     range, Key(), Key(), lockDB,
+					struct RestoreRequest restoreRequest(restoreIndex, restoreTag, bcUrl, targetVersion, range,
 					                                     deterministicRandom()->randomUniqueID());
 					tr->set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
 				}

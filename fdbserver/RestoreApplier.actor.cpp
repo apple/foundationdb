@@ -220,7 +220,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	ASSERT(fValues.size() == incompleteStagingKeys.size());
 	int i = 0;
 	for (auto& key : incompleteStagingKeys) {
-		if (!fValues[i].get().present()) {
+		if (!fValues[i].get().present()) { // Debug info to understand which key does not exist in DB
 			TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
 			    .detail("Key", key.first)
 			    .detail("Reason", "Not found in DB")
@@ -253,7 +253,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> batchData, UID applierID,
                                                     int64_t batchIndex, Database cx) {
 	// Apply range mutations (i.e., clearRange) to database cx
-	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResult", applierID)
+	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResultStart", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Step", "Applying clear range mutations to DB")
 	    .detail("ClearRanges", batchData->stagingKeyRanges.size());
@@ -420,7 +420,7 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 	std::map<Key, StagingKey>::iterator cur = begin;
 	double txnSize = 0;
 	std::vector<Future<Void>> fBatches;
-	TraceEvent("FastRestoreApplerPhaseApplyStagingKeys", applierID)
+	TraceEvent("FastRestoreApplerPhaseApplyStagingKeysStart", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("StagingKeys", batchData->stagingKeys.size());
 	while (cur != batchData->stagingKeys.end()) {
