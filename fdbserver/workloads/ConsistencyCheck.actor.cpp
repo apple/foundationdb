@@ -667,7 +667,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			state int bytesReadInRange = 0;
 
-			decodeKeyServersValue(keyLocations[shard].value, sourceStorageServers, destStorageServers);
+			Standalone<RangeResultRef> UIDtoTagMap = wait( tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY ) );
+			ASSERT( !UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY );
+			decodeKeyServersValue(UIDtoTagMap, keyLocations[shard].value, sourceStorageServers, destStorageServers);
 
 			//If the destStorageServers is non-empty, then this shard is being relocated
 			state bool isRelocating = destStorageServers.size() > 0;
@@ -1139,12 +1141,12 @@ struct ConsistencyCheckWorkload : TestWorkload
 		std::set<Optional<Key>> missingStorage;
 
 		for( int i = 0; i < workers.size(); i++ ) {
-			NetworkAddress addr = workers[i].interf.tLog.getEndpoint().addresses.getTLSAddress();
-			if( !configuration.isExcludedServer(addr) &&
+			NetworkAddress addr = workers[i].interf.stableAddress();
+			if( !configuration.isExcludedServer(workers[i].interf.addresses()) &&
 				( workers[i].processClass == ProcessClass::StorageClass || workers[i].processClass == ProcessClass::UnsetClass ) ) {
 				bool found = false;
 				for( int j = 0; j < storageServers.size(); j++ ) {
-					if( storageServers[j].getValue.getEndpoint().addresses.getTLSAddress() == addr ) {
+					if( storageServers[j].stableAddress() == addr ) {
 						found = true;
 						break;
 					}

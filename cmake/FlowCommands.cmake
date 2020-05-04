@@ -135,11 +135,11 @@ function(strip_debug_symbols target)
   add_custom_target(strip_only_${target} DEPENDS ${out_file})
   if(is_exec AND NOT APPLE)
     add_custom_command(OUTPUT "${out_file}.debug"
+      DEPENDS strip_only_${target}
       COMMAND objcopy --verbose --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug"
       COMMAND objcopy --verbose --add-gnu-debuglink="${out_file}.debug" "${out_file}"
       COMMENT "Copy debug symbols to ${out_name}.debug")
     add_custom_target(strip_${target} DEPENDS  "${out_file}.debug")
-    add_dependencies(strip_${target} ${target} strip_only_${target})
   else()
     add_custom_target(strip_${target})
     add_dependencies(strip_${target} strip_only_${target})
@@ -185,12 +185,12 @@ function(add_flow_target)
         if(WIN32)
           add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
             COMMAND $<TARGET_FILE:actorcompiler> "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags}
-            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" ${actor_exe}
             COMMENT "Compile actor: ${src}")
         else()
           add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
             COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags} > /dev/null
-            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" ${actor_exe}
             COMMENT "Compile actor: ${src}")
         endif()
       else()

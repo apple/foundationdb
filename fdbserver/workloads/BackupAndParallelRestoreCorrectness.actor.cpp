@@ -21,6 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
@@ -136,9 +137,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 	ACTOR static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
 		loop {
-			wait(backupAgent->taskBucket->changePause(cx, true));
+			wait(backupAgent->changePause(cx, true));
 			wait(delay(30 * deterministicRandom()->random01()));
-			wait(backupAgent->taskBucket->changePause(cx, false));
+			wait(backupAgent->changePause(cx, false));
 			wait(delay(120 * deterministicRandom()->random01()));
 		}
 	}
@@ -213,9 +214,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 					state bool restorable = false;
 					if (lastBackupContainer) {
-						state Future<BackupDescription> fdesc = self->usePartitionedLogs
-						                                            ? lastBackupContainer->describePartitionedBackup()
-						                                            : lastBackupContainer->describeBackup();
+						state Future<BackupDescription> fdesc = lastBackupContainer->describeBackup();
 						wait(ready(fdesc));
 
 						if(!fdesc.isError()) {
@@ -423,6 +422,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					// wait(attemptDirtyRestore(self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()),
 					// randomID));
 				}
+
+				// We must ensure no backup workers are running, otherwise the clear DB
+				// below can be picked up by backup workers and applied during restore.
+				wait(success(changeConfig(cx, "backup_worker_enabled:=0", true)));
+
 				// Clear DB before restore
 				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 					for (auto& kvrange : self->backupRanges) tr->clear(kvrange);
@@ -436,14 +440,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				    .detail("BackupTag", printable(self->backupTag));
 
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
-				BackupDescription desc = wait(self->usePartitionedLogs ? container->describePartitionedBackup()
-				                                                       : container->describeBackup());
-
-				TraceEvent("BAFRW_Restore", randomID)
-				    .detail("LastBackupContainer", lastBackupContainer->getURL())
-				    .detail("MinRestorableVersion", desc.minRestorableVersion.get())
-				    .detail("MaxRestorableVersion", desc.maxRestorableVersion.get())
-				    .detail("ContiguousLogEnd", desc.contiguousLogEnd.get());
+				BackupDescription desc = wait(container->describeBackup());
+				ASSERT(self->usePartitionedLogs == desc.partitioned);
+				ASSERT(desc.minRestorableVersion.present()); // We must have a valid backup now.
 
 				state Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {
@@ -451,7 +450,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						targetVersion = desc.minRestorableVersion.get();
 					} else if (deterministicRandom()->random01() < 0.1) {
 						targetVersion = desc.maxRestorableVersion.get();
-					} else if (deterministicRandom()->random01() < 0.5) {
+					} else if (deterministicRandom()->random01() < 0.5 &&
+					           desc.minRestorableVersion.get() < desc.contiguousLogEnd.get()) {
 						// The assertion may fail because minRestorableVersion may be decided by snapshot version.
 						// ASSERT_WE_THINK(desc.minRestorableVersion.get() <= desc.contiguousLogEnd.get());
 						// This assertion can fail when contiguousLogEnd < maxRestorableVersion and
@@ -462,6 +462,13 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						                                                   desc.contiguousLogEnd.get());
 					}
 				}
+
+				TraceEvent("BAFRW_Restore", randomID)
+				    .detail("LastBackupContainer", lastBackupContainer->getURL())
+				    .detail("MinRestorableVersion", desc.minRestorableVersion.get())
+				    .detail("MaxRestorableVersion", desc.maxRestorableVersion.get())
+				    .detail("ContiguousLogEnd", desc.contiguousLogEnd.get())
+				    .detail("TargetVersion", targetVersion);
 
 				state std::vector<Future<Version>> restores;
 				state std::vector<Standalone<StringRef>> restoreTags;

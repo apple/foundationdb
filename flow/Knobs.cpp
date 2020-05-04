@@ -27,8 +27,12 @@ FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
+FlowKnobs::FlowKnobs() {
+	initialize();
+}
+
 // clang-format off
-FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
+void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( AUTOMATIC_TRACE_DUMP,                                  1 );
 	init( PREVENT_FAST_SPIN_DELAY,                             .01 );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
@@ -44,9 +48,13 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( DISABLE_ASSERTS,                                       0 );
 	init( QUEUE_MODEL_SMOOTHING_AMOUNT,                        2.0 );
 
-	init( SLOWTASK_PROFILING_INTERVAL,                       0.125 ); // A value of 0 disables SlowTask profiling
+	init( RUN_LOOP_PROFILING_INTERVAL,                       0.125 ); // A value of 0 disables run loop profiling
+	init( SLOWTASK_PROFILING_LOG_INTERVAL,                       0 ); // A value of 0 means use RUN_LOOP_PROFILING_INTERVAL
 	init( SLOWTASK_PROFILING_MAX_LOG_INTERVAL,                 1.0 );
 	init( SLOWTASK_PROFILING_LOG_BACKOFF,                      2.0 );
+	init( SATURATION_PROFILING_LOG_INTERVAL,                   0.5 ); // A value of 0 means use RUN_LOOP_PROFILING_INTERVAL
+	init( SATURATION_PROFILING_MAX_LOG_INTERVAL,               5.0 );
+	init( SATURATION_PROFILING_LOG_BACKOFF,                    2.0 );
 
 	init( RANDOMSEED_RETRY_LIMIT,                                4 );
 	init( FAST_ALLOC_LOGGING_BYTES,                           10e6 );
@@ -72,6 +80,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
 	init( PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT,           3600.0 );
+	init( INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING,              5.0 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );
@@ -124,6 +133,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( SLOW_LOOP_CUTOFF,                          15.0 / 1000.0 );
 	init( SLOW_LOOP_SAMPLING_RATE,                             0.1 );
 	init( TSC_YIELD_TIME,                                  1000000 );
+	init( MIN_LOGGED_PRIORITY_BUSY_FRACTION,                  0.05 );
 	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
 
 	//Network
@@ -197,6 +207,16 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( FUTURE_VERSION_BACKOFF_GROWTH,                       2.0 );
 	init( LOAD_BALANCE_MAX_BAD_OPTIONS,                          1 ); //should be the same as MAX_MACHINES_FALLING_BEHIND
 	init( LOAD_BALANCE_PENALTY_IS_BAD,                        true );
+	init( BASIC_LOAD_BALANCE_UPDATE_RATE,                      2.0 );
+	init( BASIC_LOAD_BALANCE_MAX_CHANGE,                      0.05 );
+	init( BASIC_LOAD_BALANCE_MAX_PROB,                         2.0 );
+	init( BASIC_LOAD_BALANCE_BUCKETS,                           40 );
+
+	// Health Monitor
+	init( FAILURE_DETECTION_DELAY,                             4.0 ); if( randomize && BUGGIFY ) FAILURE_DETECTION_DELAY = 1.0;
+	init( HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS,    true );
+	init( HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS,          30 );
+	init( HEALTH_MONITOR_CONNECTION_MAX_CLOSED,                  5 );
 }
 // clang-format on
 
@@ -211,6 +231,7 @@ static std::string toLower( std::string const& name ) {
 }
 
 bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
+	explicitlySetKnobs.insert(toLower(knob));
 	if (double_knobs.count(knob)) {
 		double v;
 		int n=0;
@@ -261,32 +282,43 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 		*string_knobs[knob] = value;
 		return true;
 	}
+	explicitlySetKnobs.erase(toLower(knob)); // don't store knobs that don't exist
 	return false;
 }
 
 void Knobs::initKnob( double& knob, double value, std::string const& name ) {
-	knob = value;
-	double_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		double_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( int64_t& knob, int64_t value, std::string const& name ) {
-	knob = value;
-	int64_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		int64_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( int& knob, int value, std::string const& name ) {
-	knob = value;
-	int_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		int_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( std::string& knob, const std::string& value, const std::string& name ) {
-	knob = value;
-	string_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		string_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( bool& knob, bool value, std::string const& name ) {
-	knob = value;
-	bool_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		bool_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::trace() {

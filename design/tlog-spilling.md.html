@@ -209,11 +209,11 @@ until for this tag.
 
 The rough outline of concrete changes proposed looks like:
 
-0. Allow a new TLog and old TLog to co-exist and be configurable, upgradeable, and recoverable
-0. Modify spilling in new TLogServer
-0. Modify peeking in new TLogServer
-0. Modify popping in new TLogServer
-0. Spill txsTag specially
+1. Allow a new TLog and old TLog to co-exist and be configurable, upgradeable, and recoverable
+1. Modify spilling in new TLogServer
+1. Modify peeking in new TLogServer
+1. Modify popping in new TLogServer
+1. Spill txsTag specially
 
 ### Configuring and Upgrading
 
@@ -224,13 +224,13 @@ design document: "Forward Compatibility for Transaction Logs".
 
 That document describes a `log_version` configuration setting that controls the
 availability of new transaction log features.  A similar configuration setting
-was created, `log_spill`, that at `log_version >= 3`, one may `fdbcli>
+was created, `log_spill`, that at `log_version>=3`, one may `fdbcli>
 configure log_spill:=2` to enable spill-by-reference.  Only FDB 6.1 or newer
 will be unable to recover transaction log files that were using
 spill-by-reference.  FDB 6.2 will use spill-by-reference by default.
 
 | FDB Version | Default | Configurable |
-+-------------+---------+--------------+
+|-------------|---------|--------------|
 | 6.0         | No      | No           |
 | 6.1         | No      | Yes          |
 | 6.2         | Yes     | Yes          |
@@ -587,11 +587,6 @@ minor impacts on recovery times:
 		`pushLocation - popLocation` as the number of "active" bytes, and then
 		shrink the file by `TLOG_DISK_QUEUE_SHRINK_BYTES` bytes if the file is
 		larger than `active + TLOG_DISK_QUEUE_EXTENSION_BYTES + TLOG_DISK_QUEUE_SHRINK_BYTES`.
-
-!!! note
-    While writing this, I've realized it's probably a good idea to limit that
-    the disk queue can't shrink under 4GB of size, to prevent size thrashing on
-    bursty workloads.
 
 ## Knobs
 

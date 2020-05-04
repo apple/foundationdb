@@ -25,6 +25,7 @@
 #include "flow/Platform.h"
 
 #include <map>
+#include <set>
 #include <string>
 #include <stdint.h>
 
@@ -45,6 +46,7 @@ protected:
 	std::map<std::string, int*> int_knobs;
 	std::map<std::string, std::string*> string_knobs;
 	std::map<std::string, bool*> bool_knobs;
+	std::set<std::string> explicitlySetKnobs;
 };
 
 class FlowKnobs : public Knobs {
@@ -67,10 +69,14 @@ public:
 	double HUGE_ARENA_LOGGING_BYTES;
 	double HUGE_ARENA_LOGGING_INTERVAL;
 
-	//slow task profiling
-	double SLOWTASK_PROFILING_INTERVAL;
+	//run loop profiling
+	double RUN_LOOP_PROFILING_INTERVAL;
+	double SLOWTASK_PROFILING_LOG_INTERVAL;
 	double SLOWTASK_PROFILING_MAX_LOG_INTERVAL;
 	double SLOWTASK_PROFILING_LOG_BACKOFF;
+	double SATURATION_PROFILING_LOG_INTERVAL;
+	double SATURATION_PROFILING_MAX_LOG_INTERVAL;
+	double SATURATION_PROFILING_LOG_BACKOFF;
 
 	//connectionMonitor
 	double CONNECTION_MONITOR_LOOP_TIME;
@@ -88,6 +94,7 @@ public:
 	double RECONNECTION_TIME_GROWTH_RATE;
 	double RECONNECTION_RESET_TIME;
 	int ACCEPT_BATCH_SIZE;
+	double INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING;
 
 	int TLS_CERT_REFRESH_DELAY_SECONDS;
 	double TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT;
@@ -144,6 +151,7 @@ public:
 	double SLOW_LOOP_SAMPLING_RATE;
 	int64_t TSC_YIELD_TIME;
 	int64_t REACTOR_FLAGS;
+	double MIN_LOGGED_PRIORITY_BUSY_FRACTION;
 	int CERT_FILE_MAX_SIZE;
 
 	//Network
@@ -218,8 +226,19 @@ public:
 	double FUTURE_VERSION_BACKOFF_GROWTH;
 	int LOAD_BALANCE_MAX_BAD_OPTIONS;
 	bool LOAD_BALANCE_PENALTY_IS_BAD;
+	double BASIC_LOAD_BALANCE_UPDATE_RATE;
+	double BASIC_LOAD_BALANCE_MAX_CHANGE;
+	double BASIC_LOAD_BALANCE_MAX_PROB;
+	int BASIC_LOAD_BALANCE_BUCKETS;
 
-	FlowKnobs(bool randomize = false, bool isSimulated = false);
+	// Health Monitor
+	int FAILURE_DETECTION_DELAY;
+	bool HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS;
+	int HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS;
+	int HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
+
+	FlowKnobs();
+	void initialize(bool randomize = false, bool isSimulated = false);
 };
 
 extern FlowKnobs const* FLOW_KNOBS;

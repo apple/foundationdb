@@ -45,17 +45,21 @@ void BackupProgress::addBackupStatus(const WorkerBackupStatus& status) {
 }
 
 void BackupProgress::updateTagVersions(std::map<Tag, Version>* tagVersions, std::set<Tag>* tags,
-                                       const std::map<Tag, Version>& progress, Version endVersion, LogEpoch epoch) {
+                                       const std::map<Tag, Version>& progress, Version endVersion,
+                                       Version adjustedBeginVersion, LogEpoch epoch) {
 	for (const auto& [tag, savedVersion] : progress) {
 		// If tag is not in "tags", it means the old epoch has more tags than
 		// new epoch's tags. Just ignore the tag here.
 		auto n = tags->erase(tag);
 		if (n > 0 && savedVersion < endVersion - 1) {
-			tagVersions->insert({ tag, savedVersion + 1 });
+			const Version beginVersion =
+			    (savedVersion + 1 > adjustedBeginVersion) ? (savedVersion + 1) : adjustedBeginVersion;
+			tagVersions->insert({ tag, beginVersion });
 			TraceEvent("BackupVersionRange", dbgid)
 			    .detail("OldEpoch", epoch)
 			    .detail("Tag", tag.toString())
 			    .detail("BeginVersion", savedVersion + 1)
+			    .detail("AdjustedBeginVersion", beginVersion)
 			    .detail("EndVersion", endVersion);
 		}
 	}
@@ -66,12 +70,29 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 
 	if (!backupStartedValue.present()) return toRecruit; // No active backups
 
+	Version lastEnd = invalidVersion;
 	for (const auto& [epoch, info] : epochInfos) {
 		std::set<Tag> tags = enumerateLogRouterTags(info.logRouterTags);
 		std::map<Tag, Version> tagVersions;
+
+		// Sometimes, an epoch's begin version is lower than the previous epoch's
+		// end version. In this case, adjust the epoch's begin version to be the
+		// same as previous end version.
+		Version adjustedBeginVersion = lastEnd > info.epochBegin ? lastEnd : info.epochBegin;
+		lastEnd = info.epochEnd;
+
 		auto progressIt = progress.lower_bound(epoch);
 		if (progressIt != progress.end() && progressIt->first == epoch) {
-			updateTagVersions(&tagVersions, &tags, progressIt->second, info.epochEnd, epoch);
+			if (progressIt != progress.begin()) {
+				// Previous epoch is gone, consolidate the progress.
+				auto prev = std::prev(progressIt);
+				for (auto [tag, version] : prev->second) {
+					if (tags.count(tag) > 0) {
+						progressIt->second[tag] = std::max(version, progressIt->second[tag]);
+					}
+				}
+			}
+			updateTagVersions(&tagVersions, &tags, progressIt->second, info.epochEnd, adjustedBeginVersion, epoch);
 		} else {
 			auto rit = std::find_if(
 			    progress.rbegin(), progress.rend(),
@@ -90,17 +111,18 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 					// The logRouterTags are the same
 					// ASSERT(info.logRouterTags == epochTags[rit->first]);
 
-					updateTagVersions(&tagVersions, &tags, rit->second, info.epochEnd, epoch);
+					updateTagVersions(&tagVersions, &tags, rit->second, info.epochEnd, adjustedBeginVersion, epoch);
 				}
 			}
 		}
 
 		for (const Tag tag : tags) { // tags without progress data
-			tagVersions.insert({ tag, info.epochBegin });
+			tagVersions.insert({ tag, adjustedBeginVersion });
 			TraceEvent("BackupVersionRange", dbgid)
 			    .detail("OldEpoch", epoch)
 			    .detail("Tag", tag.toString())
 			    .detail("BeginVersion", info.epochBegin)
+			    .detail("AdjustedBeginVersion", adjustedBeginVersion)
 			    .detail("EndVersion", info.epochEnd);
 		}
 		if (!tagVersions.empty()) {

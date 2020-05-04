@@ -1817,7 +1817,7 @@ ACTOR void _test_versionstamp() {
 	try {
 		g_network = newNet2(TLSConfig());
 
-		API *fdb = FDB::API::selectAPIVersion(700);
+		API *fdb = FDB::API::selectAPIVersion(630);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);

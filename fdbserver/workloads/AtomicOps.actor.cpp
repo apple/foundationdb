@@ -205,7 +205,7 @@ struct AtomicOpsWorkload : TestWorkload {
 				} catch( Error &e ) {
 					if (e.code() == 1021) {
 						self->ubsum += intValue;
-						TraceEvent(SevWarnAlways, "TxnCommitUnknownResult")
+						TraceEvent(SevInfo, "TxnCommitUnknownResult")
 						    .detail("Value", intValue)
 						    .detail("LogKey", logDebugKey.first)
 						    .detail("OpsKey", opsKey);

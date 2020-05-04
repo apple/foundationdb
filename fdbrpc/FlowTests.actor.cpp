@@ -236,6 +236,7 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	virtual double now() { return baseNetwork->now(); }
 	virtual double timer() { return baseNetwork->timer(); }
 	virtual void stop() { return baseNetwork->stop(); }
+	virtual void addStopCallback( std::function<void()> fn ) { ASSERT(false); return; }
 	virtual bool isSimulated() const { return baseNetwork->isSimulated(); }
 	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) { return baseNetwork->onMainThread(std::move(signal), taskID); }
 	bool isOnMainThread() const override { return baseNetwork->isOnMainThread(); }
@@ -1358,5 +1359,96 @@ TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 	ASSERT(deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::max() - 1,
 	                                          std::numeric_limits<int64_t>::max()) ==
 	       std::numeric_limits<int64_t>::max() - 1);
+	return Void();
+}
+
+struct Tracker {
+	int copied;
+	bool moved;
+	Tracker(int copied = 0) : moved(false), copied(copied) {}
+	Tracker(Tracker&& other) : Tracker(other.copied) {
+		ASSERT(!other.moved);
+		other.moved = true;
+	}
+	Tracker& operator=(Tracker&& other) {
+		ASSERT(!other.moved);
+		other.moved = true;
+		this->moved = false;
+		this->copied = other.copied;
+		return *this;
+	}
+	Tracker(const Tracker& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
+	Tracker& operator=(const Tracker& other) {
+		ASSERT(!other.moved);
+		this->moved = false;
+		this->copied = other.copied + 1;
+		return *this;
+	}
+
+	ACTOR static Future<Void> listen(FutureStream<Tracker> stream) {
+		Tracker t = waitNext(stream);
+		ASSERT(!t.moved);
+		ASSERT(t.copied == 0);
+		return Void();
+	}
+};
+
+TEST_CASE("/flow/flow/PromiseStream/move") {
+	state PromiseStream<Tracker> stream;
+	{
+		// This tests the case when a callback is added before
+		// a movable value is sent
+		state Future<Void> listener = Tracker::listen(stream.getFuture());
+		stream.send(Tracker{});
+		wait(listener);
+	}
+
+	{
+		// This tests the case when a callback is added before
+		// a unmovable value is sent
+		listener = Tracker::listen(stream.getFuture());
+		Tracker namedTracker;
+		stream.send(namedTracker);
+		wait(listener);
+	}
+	{
+		// This tests the case when no callback is added until
+		// after a movable value is sent
+		stream.send(Tracker{});
+		stream.send(Tracker{});
+		{
+			Tracker t = waitNext(stream.getFuture());
+			ASSERT(!t.moved);
+			ASSERT(t.copied == 0);
+		}
+		choose {
+			when(Tracker t = waitNext(stream.getFuture())) {
+				ASSERT(!t.moved);
+				ASSERT(t.copied == 0);
+			}
+		}
+	}
+	{
+		// This tests the case when no callback is added until
+		// after an unmovable value is sent
+		Tracker namedTracker1;
+		Tracker namedTracker2;
+		stream.send(namedTracker1);
+		stream.send(namedTracker2);
+		{
+			Tracker t = waitNext(stream.getFuture());
+			ASSERT(!t.moved);
+			// must copy onto queue
+			ASSERT(t.copied == 1);
+		}
+		choose {
+			when(Tracker t = waitNext(stream.getFuture())) {
+				ASSERT(!t.moved);
+				// must copy onto queue
+				ASSERT(t.copied == 1);
+			}
+		}
+	}
+
 	return Void();
 }

@@ -35,6 +35,7 @@
 
 enum class TaskPriority {
 	Max = 1000000,
+	RunLoop = 30000,
 	ASIOReactor = 20001,
 	RunCycleFunction = 20000,
 	FlushTrace = 10500,
@@ -84,7 +85,9 @@ enum class TaskPriority {
 	MoveKeys = 3550,
 	DataDistributionLaunch = 3530,
 	Ratekeeper = 3510,
-	DataDistribution = 3500,
+	DataDistribution = 3502,
+	DataDistributionLow = 3501,
+	DataDistributionVeryLow = 3500,
 	DiskWrite = 3010,
 	UpdateStorage = 3000,
 	CompactCache = 2900,
@@ -322,18 +325,31 @@ struct NetworkMetrics {
 	enum { SLOW_EVENT_BINS = 16 };
 	uint64_t countSlowEvents[SLOW_EVENT_BINS] = {};
 
-	enum { PRIORITY_BINS = 9 };
-	TaskPriority priorityBins[PRIORITY_BINS] = {};
-	bool priorityBlocked[PRIORITY_BINS] = {};
-	double priorityBlockedDuration[PRIORITY_BINS] = {};
-	double priorityMaxBlockedDuration[PRIORITY_BINS] = {};
-	double priorityTimer[PRIORITY_BINS] = {};
-	double windowedPriorityTimer[PRIORITY_BINS] = {};
-
 	double secSquaredSubmit = 0;
 	double secSquaredDiskStall = 0;
 
-	NetworkMetrics() {}
+	struct PriorityStats {
+		TaskPriority priority;
+
+		bool active = false;
+		double duration = 0;
+		double timer = 0;
+		double windowedTimer = 0;
+		double maxDuration = 0;
+
+		PriorityStats(TaskPriority priority) : priority(priority) {}
+	};
+
+	std::unordered_map<TaskPriority, struct PriorityStats> activeTrackers;
+	std::vector<struct PriorityStats> starvationTrackers;
+
+	static const std::vector<int> starvationBins;
+
+	NetworkMetrics() {
+		for(int priority : starvationBins) {
+			starvationTrackers.emplace_back(static_cast<TaskPriority>(priority));
+		}
+	}
 };
 
 struct BoundedFlowLock;
@@ -468,6 +484,10 @@ public:
 
 	virtual void stop() = 0;
 	// Terminate the program
+
+	virtual void addStopCallback( std::function<void()> fn ) = 0;
+	// Calls `fn` when stop() is called.
+	// addStopCallback can be called more than once, and each added `fn` will be run once.
 
 	virtual bool isSimulated() const = 0;
 	// Returns true if this network is a local simulation

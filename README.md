@@ -33,8 +33,8 @@ CMake-based build system. Both of them should currently work for most users,
 and CMake should be the preferred choice as it will eventually become the only
 build system available.
 
-If compiling for local development, please set -DUSE_WERROR=ON in
-cmake. Our CI compiles with -Werror on, so this way you'll find out about
+If compiling for local development, please set `-DUSE_WERROR=ON` in
+cmake. Our CI compiles with `-Werror` on, so this way you'll find out about
 compiler warnings that break the build earlier.
 
 ## CMake
@@ -51,8 +51,8 @@ Mac OS - for Windows see below):
 1. Create a build directory (you can have the build directory anywhere you
    like): `mkdir build`
 1. `cd build`
-1. `cmake -DBOOST_ROOT=<PATH_TO_BOOST> <PATH_TO_FOUNDATIONDB_DIRECTORY>`
-1. `make`
+1. `cmake -GNinja -DBOOST_ROOT=<PATH_TO_BOOST> <PATH_TO_FOUNDATIONDB_DIRECTORY>`
+1. `ninja`
 
 CMake will try to find its dependencies. However, for LibreSSL this can be often
 problematic (especially if OpenSSL is installed as well). For that we recommend
@@ -61,7 +61,7 @@ LibreSSL is installed under `/usr/local/libressl-2.8.3`, you should call cmake l
 this:
 
 ```
-cmake -DLibreSSL_ROOT=/usr/local/libressl-2.8.3/ ../foundationdb
+cmake -GNinja -DLibreSSL_ROOT=/usr/local/libressl-2.8.3/ ../foundationdb
 ```
 
 FoundationDB will build just fine without LibreSSL, however, the resulting
@@ -123,6 +123,37 @@ cmake -G Xcode -DOPEN_FOR_IDE=ON <FDB_SOURCE_DIRECTORY>
 You should create a second build-directory which you will use for building
 (probably with make or ninja) and debugging.
 
+#### FreeBSD
+
+1. Check out this repo on your server.
+1. Install compile-time dependencies from ports.
+1. (Optional) Use tmpfs & ccache for significantly faster repeat builds
+1. (Optional) Install a [JDK](https://www.freshports.org/java/openjdk8/)
+   for Java Bindings. FoundationDB currently builds with Java 8.
+1. Navigate to the directory where you checked out the foundationdb
+   repo.
+1. Build from source.
+
+    ```shell
+    sudo pkg install -r FreeBSD \
+        shells/bash devel/cmake devel/ninja devel/ccache  \
+        lang/mono lang/python3 \
+        devel/boost-libs devel/libeio \
+        security/openssl
+    mkdir .build && cd .build
+    cmake -G Ninja \
+        -DUSE_CCACHE=on \
+        -DDISABLE_TLS=off \
+        -DUSE_DTRACE=off \
+        ..
+    ninja -j 10
+    # run fast tests
+    ctest -L fast
+    # run all tests
+    ctest --output-on-failure -v
+    ```
+
+
 ### Linux
 
 There are no special requirements for Linux.  A docker image can be pulled from
@@ -133,8 +164,8 @@ If you want to create a package you have to tell cmake what platform it is for.
 And then you can build by simply calling `cpack`. So for debian, call:
 
 ```
-cmake <FDB_SOURCE_DIR>
-make
+cmake -GNinja <FDB_SOURCE_DIR>
+ninja
 cpack -G DEB
 ```
 
@@ -142,21 +173,21 @@ For RPM simply replace `DEB` with `RPM`.
 
 ### MacOS
 
-The build under MacOS will work the same way as on Linux. To get LibreSSL and boost you
-can use [Homebrew](https://brew.sh/). LibreSSL will not be installed in
-`/usr/local` instead it will stay in `/usr/local/Cellar`. So the cmake command
-will look something like this:
+The build under MacOS will work the same way as on Linux. To get LibreSSL,
+boost, and ninja you can use [Homebrew](https://brew.sh/). LibreSSL will not be
+installed in `/usr/local` instead it will stay in `/usr/local/Cellar`. So the
+cmake command will look something like this:
 
 ```sh
-cmake -DLibreSSL_ROOT=/usr/local/Cellar/libressl/2.8.3 <PATH_TO_FOUNDATIONDB_SOURCE>
+cmake -GNinja -DLibreSSL_ROOT=/usr/local/Cellar/libressl/2.8.3 <PATH_TO_FOUNDATIONDB_SOURCE>
 ```
 
 To generate a installable package, you have to call CMake with the corresponding
 arguments and then use cpack to generate the package:
 
 ```sh
-cmake <FDB_SOURCE_DIR>
-make
+cmake -GNinja <FDB_SOURCE_DIR>
+ninja
 cpack -G productbuild
 ```
 
@@ -205,38 +236,4 @@ will automatically find it and build with TLS support.
 
 If you installed WIX before running `cmake` you should find the
 `FDBInstaller.msi` in your build directory under `packaging/msi`. 
-
-## Makefile (Deprecated - all users should transition to using cmake)
-
-#### MacOS
-
-1. Check out this repo on your Mac.
-1. Install the Xcode command-line tools.
-1. Download version 1.67.0 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.67.0/).
-1. Set the `BOOSTDIR` environment variable to the location containing this boost installation.
-1. Install [Mono](http://www.mono-project.com/download/stable/).
-1. Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
-1. Navigate to the directory where you checked out the foundationdb repo.
-1. Run `make`.
-
-#### Linux
-
-1. Install [Docker](https://www.docker.com/).
-1. Check out the foundationdb repo.
-1. Run the docker image interactively with [Docker Run](https://docs.docker.com/engine/reference/run/#general-form), and with the directory containing the foundationdb repo mounted via [Docker Mounts](https://docs.docker.com/storage/volumes/).
-
-    ```shell
-    docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' foundationdb/foundationdb-build:latest
-    ```
-
-1. Run `$ scl enable devtoolset-8 python27 rh-python36 rh-ruby24 -- bash` within the running container.  This enables a more modern compiler, which is required to build FoundationDB.
-1. Navigate to the container's mounted directory which contains the foundationdb repo.
-
-    ```shell
-    cd /docker/dir/path/foundationdb
-    ```
-
-1. Run `make`.
-
-This will build the fdbserver binary and the python bindings. If you want to build our other bindings, you will need to install a runtime for the language whose binding you want to build. Each binding has an `.mk` file which provides specific targets for that binding.
 

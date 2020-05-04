@@ -22,7 +22,7 @@
 
 package fdb
 
-// #define FDB_API_VERSION 700
+// #define FDB_API_VERSION 630
 // #include <foundationdb/fdb_c.h>
 import "C"
 
@@ -406,6 +406,9 @@ func (t *transaction) getApproximateSize() FutureInt64 {
 	}
 }
 
+// Returns a future that is the approximate transaction size so far in this
+// transaction, which is the summation of the estimated size of mutations,
+// read conflict ranges, and write conflict ranges.
 func (t Transaction) GetApproximateSize() FutureInt64 {
 	return t.getApproximateSize()
 }

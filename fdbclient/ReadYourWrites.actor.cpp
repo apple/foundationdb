@@ -21,6 +21,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/Util.h"
@@ -1018,7 +1019,12 @@ public:
 			return Void();
 		}
 
-		watchFuture = ryw->tr.watch(watch); // throws if there are too many outstanding watches	
+		try {
+			watchFuture = ryw->tr.watch(watch); // throws if there are too many outstanding watches	
+		} catch( Error &e ) {
+			done.send(Void());
+			throw;
+		}
 		done.send(Void());
 
 		wait(watchFuture);
@@ -1228,6 +1234,10 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 		return Optional<Value>();
 	}
 
+	// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
+	if (specialKeys.contains(key))
+		return getDatabase()->specialKeySpace->get(Reference<ReadYourWritesTransaction>::addRef(this), key);
+
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
 	}
@@ -1279,41 +1289,10 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		}
 	}
 
-	// Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
-	// to retrieve keys which caused latest not_committed(conflicting with another transaction) error.
-	// The returned key value pairs are interpretted as :
-	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
-	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
-	// Currently, the conflicting keyranges returned are original read_conflict_ranges or union of them.
-	// TODO : This interface needs to be integrated into the framework that handles special keys' calls in the future
-	if (begin.getKey().startsWith(conflictingKeysAbsolutePrefix) &&
-	    end.getKey().startsWith(conflictingKeysAbsolutePrefix)) {
-		// Remove the special key prefix "\xff\xff"
-		KeyRef beginConflictingKey = begin.getKey().removePrefix(specialKeys.begin);
-		KeyRef endConflictingKey = end.getKey().removePrefix(specialKeys.begin);
-		// Check if the conflicting key range to be read is valid
-		KeyRef maxKey = getMaxReadKey();
-		if (beginConflictingKey > maxKey || endConflictingKey > maxKey) return key_outside_legal_range();
-		begin.setKey(beginConflictingKey);
-		end.setKey(endConflictingKey);
-		if (tr.info.conflictingKeysRYW) {
-			Future<Standalone<RangeResultRef>> resultWithoutPrefixFuture =
-			    tr.info.conflictingKeysRYW->getRange(begin, end, limits, snapshot, reverse);
-			// Make sure it happens locally
-			ASSERT(resultWithoutPrefixFuture.isReady());
-			Standalone<RangeResultRef> resultWithoutPrefix = resultWithoutPrefixFuture.get();
-			// Add prefix to results, making keys consistent with the getRange query
-			Standalone<RangeResultRef> resultWithPrefix;
-			resultWithPrefix.reserve(resultWithPrefix.arena(), resultWithoutPrefix.size());
-			for (auto const& kv : resultWithoutPrefix) {
-				KeyValueRef kvWithPrefix(kv.key.withPrefix(specialKeys.begin, resultWithPrefix.arena()), kv.value);
-				resultWithPrefix.push_back(resultWithPrefix.arena(), kvWithPrefix);
-			}
-			return resultWithPrefix;
-		} else {
-			return Standalone<RangeResultRef>();
-		}
-	}
+	// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
+	if (specialKeys.contains(begin.getKey()) && specialKeys.contains(end.getKey()))
+		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin, end,
+		                                                limits, reverse);
 
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
@@ -1611,6 +1590,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	}
 
 	if(operationType == MutationRef::SetVersionstampedKey) {
+		TEST(options.readYourWritesDisabled); // SetVersionstampedKey without ryw enabled
 		// this does validation of the key and needs to be performed before the readYourWritesDisabled path
 		KeyRangeRef range = getVersionstampKeyRange(arena, k, tr.getCachedReadVersion().orDefault(0), getMaxReadKey());
 		if(!options.readYourWritesDisabled) {

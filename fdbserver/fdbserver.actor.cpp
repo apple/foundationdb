@@ -34,7 +34,6 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ConflictSet.h"
@@ -59,7 +58,7 @@
 
 #include "fdbmonitor/SimpleIni.h"
 
-#ifdef  __linux__
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 #include <signal.h>
 #ifdef ALLOC_INSTRUMENTATION
@@ -74,6 +73,7 @@
 #endif
 
 #include "flow/SimpleOpt.h"
+#include <fstream>
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // clang-format off
@@ -200,8 +200,8 @@ vector< Standalone<VectorRef<DebugEntryRef>> > debugEntries;
 int64_t totalDebugEntriesSize = 0;
 
 #if CENABLED(0, NOT_IN_CLEAN)
-StringRef debugKey = LiteralStringRef( "" );
-StringRef debugKey2 = LiteralStringRef( "\xff\xff\xff\xff" );
+StringRef debugKey = LiteralStringRef("");
+StringRef debugKey2 = LiteralStringRef("\xff\xff\xff\xff");
 
 bool debugMutation( const char* context, Version version, MutationRef const& mutation ) {
 	if ((mutation.type == mutation.SetValue || mutation.type == mutation.AddValue || mutation.type==mutation.DebugKey) && (mutation.param1 == debugKey || mutation.param1 == debugKey2))
@@ -290,7 +290,7 @@ public:
 			throw platform_error();
 		}
 		permission.set_permissions( &sa );
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 		// There is nothing to do here, since the default permissions are fine
 #else
 		#error Port me!
@@ -300,7 +300,7 @@ public:
 	virtual ~WorldReadablePermissions() {
 #ifdef _WIN32
 		LocalFree( sa.lpSecurityDescriptor );
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 		// There is nothing to do here, since the default permissions are fine
 #else
 		#error Port me!
@@ -1552,9 +1552,9 @@ int main(int argc, char* argv[]) {
 		delete FLOW_KNOBS;
 		delete SERVER_KNOBS;
 		delete CLIENT_KNOBS;
-		FlowKnobs* flowKnobs = new FlowKnobs(true, role == Simulation);
-		ClientKnobs* clientKnobs = new ClientKnobs(true);
-		ServerKnobs* serverKnobs = new ServerKnobs(true, clientKnobs, role == Simulation);
+		FlowKnobs* flowKnobs = new FlowKnobs;
+		ClientKnobs* clientKnobs = new ClientKnobs;
+		ServerKnobs* serverKnobs = new ServerKnobs;
 		FLOW_KNOBS = flowKnobs;
 		SERVER_KNOBS = serverKnobs;
 		CLIENT_KNOBS = clientKnobs;
@@ -1585,6 +1585,11 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(opts.memLimit))) ASSERT(false);
+
+		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
+		flowKnobs->initialize(true, role == Simulation);
+		clientKnobs->initialize(true);
+		serverKnobs->initialize(true, clientKnobs, role == Simulation);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);
@@ -1622,6 +1627,7 @@ int main(int argc, char* argv[]) {
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
+			g_network->addStopCallback( Net2FileSystem::stop );
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
@@ -1866,7 +1872,7 @@ int main(int argc, char* argv[]) {
 			} else { // Call fdbd roles in conventional way
 				ASSERT(opts.connectionFile);
 
-				setupSlowTaskProfiler();
+				setupRunLoopProfiler();
 
 				auto dataFolder = opts.dataFolder;
 				if (!dataFolder.size())
@@ -1892,7 +1898,7 @@ int main(int argc, char* argv[]) {
 			                       opts.localities));
 			g_network->run();
 		} else if (role == ConsistencyCheck) {
-			setupSlowTaskProfiler();
+			setupRunLoopProfiler();
 
 			auto m = startSystemMonitor(opts.dataFolder, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_CONSISTENCY_CHECK, TEST_HERE, 1, opts.testFile,

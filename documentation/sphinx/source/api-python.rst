@@ -108,7 +108,7 @@ Opening a database
 After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     import fdb
-    fdb.api_version(700)
+    fdb.api_version(630)
     db = fdb.open()
 
 .. function:: open( cluster_file=None, event_model=None )
@@ -804,6 +804,13 @@ Transaction misc functions
     Get the estimated byte size of the given key range. Returns a :class:`FutureInt64`.
 
 .. _api-python-transaction-options:
+
+Transaction misc functions
+--------------------------
+
+.. method:: Transaction.get_approximate_size()
+
+    |transaction-get-approximate-size-blurb|. Returns a :class:`FutureInt64`.
 
 Transaction options
 -------------------
