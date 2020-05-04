@@ -1706,7 +1706,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	if(operationType == MutationRef::SetVersionstampedKey) {
 		// this does validation of the key and needs to be performed before the readYourWritesDisabled path
 		KeyRangeRef range = getVersionstampKeyRange(arena, k, tr.getCachedReadVersion().orDefault(0), getMaxReadKey());
-		versionStampKeys.push_back_deep(arena, k);
+		versionStampKeys.push_back(arena, k);
 		addWriteConflict = false;
 		if(!options.readYourWritesDisabled) {
 			writeRangeToNativeTransaction(range);
@@ -2026,6 +2026,9 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) BOOST_N
 	cache.arena = &arena;
 	writes.arena = &arena;
 	persistentOptions = std::move(r.persistentOptions);
+	nativeReadRanges = std::move(r.nativeReadRanges);
+	nativeWriteRanges = std::move(r.nativeWriteRanges);
+	versionStampKeys = std::move(r.versionStampKeys);
 }
 
 ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT :
@@ -2050,6 +2053,9 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&&
 	watchMap = std::move( r.watchMap );
 	r.resetPromise = Promise<Void>();
 	persistentOptions = std::move(r.persistentOptions);
+	nativeReadRanges = std::move(r.nativeReadRanges);
+	nativeWriteRanges = std::move(r.nativeWriteRanges);
+	versionStampKeys = std::move(r.versionStampKeys);
 }
 
 Future<Void> ReadYourWritesTransaction::onError(Error const& e) {
