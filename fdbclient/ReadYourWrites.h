@@ -162,9 +162,9 @@ private:
 	double creationTime;
 	bool commitStarted;
 
-	// If true, then this transactions write conflict range is not known until commit time.
-	// Currently only set if this transaction has a SetVersionstampedKey mutation
-	bool writeConflictRangeUnknown = false;
+	// For reading conflict ranges from the special key space
+	VectorRef<KeyRef> versionStampKeys;
+	Future<Standalone<StringRef>> versionStampFuture;
 
 	Reference<TransactionDebugInfo> transactionDebugInfo;
 

@@ -2433,7 +2433,7 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 
 	t.mutations.push_back( req.arena, MutationRef( operationType, r.begin, v ) );
 
-	if( addConflictRange )
+	if (addConflictRange && operationType != MutationRef::SetVersionstampedKey)
 		t.write_conflict_ranges.push_back( req.arena, r );
 
 	TEST(true); //NativeAPI atomic operation
