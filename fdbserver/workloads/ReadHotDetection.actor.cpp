@@ -31,8 +31,10 @@ struct ReadHotDetectionWorkload : TestWorkload {
 
 	double testDuration, transactionsPerSecond;
 	vector<Future<Void>> clients;
+	Future<Void> readHotCheck;
 	Key readKey;
 	KeyRange wholeRange;
+	bool passed;
 
 	ReadHotDetectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
@@ -52,12 +54,13 @@ struct ReadHotDetectionWorkload : TestWorkload {
 			                                    deterministicRandom()->random01() > 0.4),
 			                          testDuration, Void()));
 		}
+		readHotCheck = clientId == 0 ? _check(cx->clone(), this) : Void();
 		return delay(testDuration);
 	}
 
 	virtual Future<bool> check(Database const& cx) {
 		if (clientId != 0) return true;
-		return _check(cx, this);
+		return passed;
 	}
 
 	ACTOR Future<Void> _setup(Database cx, ReadHotDetectionWorkload* self) {
@@ -88,41 +91,41 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<bool> _check(Database cx, ReadHotDetectionWorkload* self) {
-		state Transaction tr(cx);
-		try {
-			StorageMetrics sm = wait(tr.getStorageMetrics(self->wholeRange, 100));
-			// TraceEvent("RHDCheckPhaseLog")
-			//     .detail("KeyRangeSize", sm.bytes)
-			//     .detail("KeyRangeReadBandwith", sm.bytesReadPerKSecond);
-			Standalone<VectorRef<KeyRangeRef>> keyRanges = wait(tr.getReadHotRanges(self->wholeRange));
-			// TraceEvent("RHDCheckPhaseLog")
-			//     .detail("KeyRangesSize", keyRanges.size())
-			//     .detail("ReadKey", self->readKey.printable().c_str())
-			//     .detail("KeyRangesBackBeginKey", keyRanges.back().begin)
-			//     .detail("KeyRangesBackEndKey", keyRanges.back().end);
-			// Loose check.
-			for (auto kr : keyRanges) {
-				if (kr.contains(self->readKey)) {
-					return true;
+	ACTOR Future<Void> _check(Database cx, ReadHotDetectionWorkload* self) {
+		loop {
+			state Transaction tr(cx);
+			try {
+				StorageMetrics sm = wait(tr.getStorageMetrics(self->wholeRange, 100));
+				// TraceEvent("RHDCheckPhaseLog")
+				//     .detail("KeyRangeSize", sm.bytes)
+				//     .detail("KeyRangeReadBandwith", sm.bytesReadPerKSecond);
+				Standalone<VectorRef<KeyRangeRef>> keyRanges = wait(tr.getReadHotRanges(self->wholeRange));
+				// TraceEvent("RHDCheckPhaseLog")
+				//     .detail("KeyRangesSize", keyRanges.size())
+				//     .detail("ReadKey", self->readKey.printable().c_str())
+				//     .detail("KeyRangesBackBeginKey", keyRanges.back().begin)
+				//     .detail("KeyRangesBackEndKey", keyRanges.back().end);
+				// Loose check.
+				for (auto kr : keyRanges) {
+					if (kr.contains(self->readKey)) {
+						self->passed = true;
+					}
 				}
+				// The key ranges deemed read hot does not contain the readKey, which is impossible here.
+				// TraceEvent("RHDCheckPhaseFailed")
+				// 	.detail("KeyRangesSize", keyRanges.size())
+				// 	.detail("ReadKey", self->readKey.printable().c_str())
+				// 	.detail("KeyRangesBackBeginKey", keyRanges.back().begin)
+				// 	.detail("KeyRangesBackEndKey", keyRanges.back().end);
+				// for(auto kr : keyRanges) {
+				// 	TraceEvent("RHDCheckPhaseFailed").detail("KeyRagneBegin", kr.begin).detail("KeyRagneEnd", kr.end);
+				// }
+				self->passed = false;
+			} catch (Error& e) {
+				// TraceEvent("RHDCheckPhaseReadGotError").error(e);
+				wait(tr.onError(e));
 			}
-			// The key ranges deemed read hot does not contain the readKey, which is impossible here.
-			// TraceEvent("RHDCheckPhaseFailed")
-			// 	.detail("KeyRangesSize", keyRanges.size())
-			// 	.detail("ReadKey", self->readKey.printable().c_str())
-			// 	.detail("KeyRangesBackBeginKey", keyRanges.back().begin)
-			// 	.detail("KeyRangesBackEndKey", keyRanges.back().end);
-			// for(auto kr : keyRanges) {
-			// 	TraceEvent("RHDCheckPhaseFailed").detail("KeyRagneBegin", kr.begin).detail("KeyRagneEnd", kr.end);
-			// }
-			return false;
-		} catch (Error& e) {
-			// TraceEvent("RHDCheckPhaseReadGotError").error(e);
-			wait(tr.onError(e));
 		}
-
-		return true;
 	}
 
 	virtual void getMetrics(vector<PerfMetric>& m) {}
