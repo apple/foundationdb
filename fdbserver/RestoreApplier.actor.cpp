@@ -47,8 +47,8 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 	state Future<Void> exitRole = Never();
 	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
-	actors.add(traceProcessMetrics(self, "Applier"));
-	actors.add(traceRoleVersionBatchProgress(self, "Applier"));
+	actors.add(traceProcessMetrics(self, "RestoreApplier"));
+	actors.add(traceRoleVersionBatchProgress(self, "RestoreApplier"));
 
 	loop {
 		state std::string requestTypeStr = "[Init]";

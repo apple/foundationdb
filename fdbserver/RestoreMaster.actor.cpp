@@ -81,6 +81,7 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker,
 
 		actors.add(updateHeartbeatTime(self));
 		actors.add(checkRolesLiveness(self));
+		actors.add(traceProcessMetrics(self, "RestoreMaster"));
 
 		wait(startProcessRestoreRequests(self, cx));
 	} catch (Error& e) {

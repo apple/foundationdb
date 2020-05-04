@@ -67,7 +67,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 	state Future<Void> exitRole = Never();
 	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
-	actors.add(traceProcessMetrics(self, "Loader"));
+	actors.add(traceProcessMetrics(self, "RestoreLoader"));
 
 	loop {
 		state std::string requestTypeStr = "[Init]";
