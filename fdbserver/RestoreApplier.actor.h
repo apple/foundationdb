@@ -117,8 +117,9 @@ struct StagingKey {
 
 	// Precompute the final value of the key.
 	// TODO: Look at the last LogMessageVersion, if it set or clear, we can ignore the rest of versions.
-	void precomputeResult(const char* context) {
-		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult")
+	void precomputeResult(const char* context, UID applierID, int batchIndex) {
+		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult", applierID)
+		    .detail("BatchIndex", batchIndex)
 		    .detail("Context", context)
 		    .detail("Version", version.toString())
 		    .detail("Key", key)
@@ -136,7 +137,9 @@ struct StagingKey {
 			MutationRef m = lb->second;
 			if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
 				if (std::tie(type, key, val) != std::tie(m.type, m.param1, m.param2)) {
-					TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnhandledSituation")
+					TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnhandledSituation", applierID)
+					    .detail("BatchIndex", batchIndex)
+					    .detail("Context", context)
 					    .detail("BufferedType", getTypeString(type))
 					    .detail("PendingType", getTypeString(m.type))
 					    .detail("BufferedVal", val.toString())
@@ -167,11 +170,15 @@ struct StagingKey {
 				type = MutationRef::SetValue; // Precomputed result should be set to DB.
 			} else if (mutation.type == MutationRef::SetValue || mutation.type == MutationRef::ClearRange) {
 				type = MutationRef::SetValue; // Precomputed result should be set to DB.
-				TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnexpectedSet")
+				TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnexpectedSet", applierID)
+				    .detail("BatchIndex", batchIndex)
+				    .detail("Context", context)
 				    .detail("MutationType", getTypeString(mutation.type))
 				    .detail("Version", lb->first.toString());
 			} else {
-				TraceEvent(SevWarnAlways, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation")
+				TraceEvent(SevWarnAlways, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation", applierID)
+				    .detail("BatchIndex", batchIndex)
+				    .detail("Context", context)
 				    .detail("MutationType", getTypeString(mutation.type))
 				    .detail("Version", lb->first.toString());
 			}

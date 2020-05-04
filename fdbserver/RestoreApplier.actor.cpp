@@ -188,12 +188,14 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 
 // Get keys in incompleteStagingKeys and precompute the stagingKey which is stored in batchData->stagingKeys
 ACTOR static Future<Void> getAndComputeStagingKeys(
-    std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys, Database cx, UID applierID) {
+    std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys, Database cx, UID applierID,
+    int batchIndex) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state std::vector<Future<Optional<Value>>> fValues;
 	state int retries = 0;
 
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysStart", applierID)
+	    .detail("BatchIndex", batchIndex)
 	    .detail("GetKeys", incompleteStagingKeys.size());
 	loop {
 		try {
@@ -207,7 +209,8 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			break;
 		} catch (Error& e) {
 			if (retries++ > 10) {
-				TraceEvent(SevError, "FastRestoreApplierGetAndComputeStagingKeysGetKeysStuck")
+				TraceEvent(SevError, "FastRestoreApplierGetAndComputeStagingKeysGetKeysStuck", applierID)
+				    .detail("BatchIndex", batchIndex)
 				    .detail("GetKeys", incompleteStagingKeys.size())
 				    .error(e);
 				break;
@@ -221,7 +224,8 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	int i = 0;
 	for (auto& key : incompleteStagingKeys) {
 		if (!fValues[i].get().present()) { // Debug info to understand which key does not exist in DB
-			TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
+			TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB", applierID)
+			    .detail("BatchIndex", batchIndex)
 			    .detail("Key", key.first)
 			    .detail("Reason", "Not found in DB")
 			    .detail("PendingMutations", key.second->second.pendingMutations.size())
@@ -231,7 +235,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 				    .detail("PendingMutationVersion", vm.first.toString())
 				    .detail("PendingMutation", vm.second.toString());
 			}
-			key.second->second.precomputeResult("GetAndComputeStagingKeysNoBaseValueInDB");
+			key.second->second.precomputeResult("GetAndComputeStagingKeysNoBaseValueInDB", applierID, batchIndex);
 			i++;
 			continue;
 		} else {
@@ -239,12 +243,13 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			// But as long as it is > 1 and less than the start version of the version batch, it is the same result.
 			MutationRef m(MutationRef::SetValue, key.first, fValues[i].get().get());
 			key.second->second.add(m, LogMessageVersion(1));
-			key.second->second.precomputeResult("GetAndComputeStagingKeys");
+			key.second->second.precomputeResult("GetAndComputeStagingKeys", applierID, batchIndex);
 			i++;
 		}
 	}
 
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysDone", applierID)
+	    .detail("BatchIndex", batchIndex)
 	    .detail("GetKeys", incompleteStagingKeys.size());
 
 	return Void();
@@ -289,7 +294,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 		std::map<Key, StagingKey>::iterator ub = batchData->stagingKeys.lower_bound(rangeMutation.mutation.param2);
 		while (lb != ub) {
 			if (lb->first >= rangeMutation.mutation.param2) {
-				TraceEvent(SevError, "FastRestoreApplerPhasePrecomputeMutationsResult_IncorrectUpperBound")
+				TraceEvent(SevError, "FastRestoreApplerPhasePrecomputeMutationsResultIncorrectUpperBound")
 				    .detail("Key", lb->first)
 				    .detail("ClearRangeUpperBound", rangeMutation.mutation.param2)
 				    .detail("UsedUpperBound", ub->first);
@@ -320,13 +325,13 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 			numKeysInBatch++;
 		}
 		if (numKeysInBatch == SERVER_KNOBS->FASTRESTORE_APPLIER_FETCH_KEYS_SIZE) {
-			fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, cx, applierID));
+			fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, cx, applierID, batchIndex));
 			numKeysInBatch = 0;
 			incompleteStagingKeys.clear();
 		}
 	}
 	if (numKeysInBatch > 0) {
-		fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, cx, applierID));
+		fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, cx, applierID, batchIndex));
 	}
 
 	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResult", applierID)
@@ -337,7 +342,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	for (stagingKeyIter = batchData->stagingKeys.begin(); stagingKeyIter != batchData->stagingKeys.end();
 	     stagingKeyIter++) {
 		if (stagingKeyIter->second.hasBaseValue()) {
-			stagingKeyIter->second.precomputeResult("HasBaseValue");
+			stagingKeyIter->second.precomputeResult("HasBaseValue", applierID, batchIndex);
 		}
 	}
 
