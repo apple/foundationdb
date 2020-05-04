@@ -45,7 +45,7 @@ private:
 };
 
 typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
-typedef MultiInterface<MasterProxyInterface> ProxyInfo;
+typedef ModelInterface<MasterProxyInterface> ProxyInfo;
 
 class ClientTagThrottleData : NonCopyable {
 private:
