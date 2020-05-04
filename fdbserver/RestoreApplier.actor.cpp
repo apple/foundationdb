@@ -210,8 +210,8 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 				TraceEvent(SevError, "FastRestoreApplierGetAndComputeStagingKeysGetKeysStuck")
 				    .detail("GetKeys", incompleteStagingKeys.size())
 				    .error(e);
+				break;
 			}
-
 			wait(tr->onError(e));
 			fValues.clear();
 		}
@@ -221,13 +221,13 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	int i = 0;
 	for (auto& key : incompleteStagingKeys) {
 		if (!fValues[i].get().present()) {
-			TraceEvent(SevDebug, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
+			TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
 			    .detail("Key", key.first)
 			    .detail("Reason", "Not found in DB")
 			    .detail("PendingMutations", key.second->second.pendingMutations.size())
 			    .detail("StagingKeyType", (int)key.second->second.type);
 			for (auto& vm : key.second->second.pendingMutations) {
-				TraceEvent(SevDebug, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
+				TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
 				    .detail("PendingMutationVersion", vm.first.toString())
 				    .detail("PendingMutation", vm.second.toString());
 			}
