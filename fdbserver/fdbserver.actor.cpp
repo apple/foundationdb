@@ -54,9 +54,7 @@
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/TLSConfig.actor.h"
-#if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "versions.h"
-#endif
+#include "fdbclient/IncludeVersions.h"
 
 #include "fdbmonitor/SimpleIni.h"
 
