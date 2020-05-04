@@ -34,18 +34,11 @@
 #include "bindings/flow/DirectoryLayer.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-#define LOG_ALL 0
-#if LOG_ALL == 1
-#  define LOG_INSTRUCTIONS 1
-#  define LOG_OPS LOG_ALL 1
-#  define LOG_DIRS LOG_ALL 1
-#  define LOG_ERRORS LOG_ALL 1
-#else
-#  define LOG_INSTRUCTIONS 0
-#  define LOG_OPS 0
-#  define LOG_DIRS 0
-#  define LOG_ERRORS 0
-#endif
+constexpr bool LOG_ALL = false;
+constexpr bool LOG_INSTRUCTIONS = LOG_ALL || false;
+constexpr bool LOG_OPS = LOG_ALL || false;
+constexpr bool LOG_DIRS = LOG_ALL || false;
+constexpr bool LOG_ERRORS = LOG_ALL || false;
 
 struct FlowTesterData;
 
