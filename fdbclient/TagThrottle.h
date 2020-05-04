@@ -66,29 +66,35 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 	// May be called multiple times during one serialization
 	template <class Context>
 	static size_t size(const TagSet& t, Context&) {
-		return 1 + t.tags.size() + t.bytes;
+		return t.tags.size() + t.bytes;
 	}
 
 	// Guaranteed to be called only once during serialization
 	template <class Context>
-	static void save(uint8_t* out, const TagSet& t, Context&) {
-		*(out++) = (uint8_t)t.size();
+	static void save(uint8_t* out, const TagSet& t, Context& c) {
 		for (const auto& tag : t.tags) {
 			*(out++) = (uint8_t)tag.size();
 
 			std::copy(tag.begin(), tag.end(), out);
 			out += tag.size();
 		}
+
+		ASSERT((size_t)(out-start) == size(t, c));
+
+		/*int length = (int)(out - start);
+		TraceEvent("SerializedTagSet").detail("SerializedValue", StringRef(start, length)).detail("Size", length).detail("Count", t.tags.size());
+		for(auto tag : t.tags) {
+			TraceEvent("SerializedTag").detail("Tag", tag).detail("Size", tag.size());
+		}*/
 	}
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.
 	template <class Context>
 	static void load(const uint8_t* data, size_t size, TagSet& t, Context& context) {
-		const uint8_t *start = data;
+		//const uint8_t *start = data;
 		const uint8_t *end = data + size;
-		uint8_t count = *(data++);
-		for(uint8_t i = 0; i < count; ++i) {
+		while(data < end) {
 			uint8_t len = *(data++);
 			TransactionTagRef tag(context.tryReadZeroCopy(data, len), len);
 			data += len;
@@ -97,7 +103,7 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 			t.bytes += tag.size();
 		}
 
-		ASSERT(data <= end);
+		ASSERT(data == end);
 
 		// Deserialized tag sets share the arena with the request that contained them
 		// For this reason, persisting a TagSet that shares memory with other request

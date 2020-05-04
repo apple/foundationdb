@@ -2122,7 +2122,7 @@ bool DatabaseContext::debugUseTags = true;
 const std::vector<std::string> DatabaseContext::debugTransactionTagChoices = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t" }; 
 
 void debugAddTags(Transaction *tr) {
-	int numTags = deterministicRandom()->randomInt(0, SERVER_KNOBS->MAX_TAGS_PER_TRANSACTION+1);
+	int numTags = deterministicRandom()->randomInt(0, CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION+1);
 	for(int i = 0; i < numTags; ++i) { 
 		TransactionTag tag;
 		if(deterministicRandom()->random01() < 0.7) {

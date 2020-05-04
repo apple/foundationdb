@@ -35,8 +35,10 @@ void TagSet::addTag(TransactionTagRef tag) {
 		throw too_many_tags();
 	}
 
-	tags.insert(TransactionTagRef(arena, tag));
-	bytes += tag.size();
+	auto result = tags.insert(TransactionTagRef(arena, tag));
+	if(result.second) {
+		bytes += tag.size();
+	}
 }
 
 size_t TagSet::size() const {
