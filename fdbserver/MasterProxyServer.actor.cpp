@@ -1408,10 +1408,12 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 				auto tagItr = priorityThrottledTags.find(tag.first);
 				if(tagItr != priorityThrottledTags.end()) {
 					if(tagItr->second.expiration > now()) {
+						TEST(true); // Proxy returning tag throttle
 						reply.tagThrottleInfo[tag.first] = tagItr->second;
 					}
 					else {
 						// This isn't required, but we might as well
+						TEST(true); // Proxy expiring tag throttle
 						priorityThrottledTags.erase(tagItr);
 					}
 				}

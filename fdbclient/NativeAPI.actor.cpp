@@ -801,6 +801,7 @@ void DatabaseContext::expireThrottles() {
 	for(auto &priorityItr : throttledTags) {
 		for(auto tagItr = priorityItr.second.begin(); tagItr != priorityItr.second.end();) {
 			if(tagItr->second.expired()) {
+				TEST(true); // Expiring client throttle
 				tagItr = priorityItr.second.erase(tagItr);
 			}
 			else {
@@ -2538,6 +2539,7 @@ double Transaction::getBackoff(int errCode) {
 			if(priorityItr != cx->throttledTags.end()) {
 				auto tagItr = priorityItr->second.find(tag);
 				if(tagItr != priorityItr->second.end()) {
+					TEST(true); // Returning throttle backoff
 					returnedBackoff = std::min(CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL, std::max(returnedBackoff, tagItr->second.throttleDuration()));
 					if(returnedBackoff == CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL) {
 						break;
@@ -3219,9 +3221,11 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 					for(auto& tag : tags) {
 						auto itr = v.tagThrottleInfo.find(tag.first);
 						if(itr == v.tagThrottleInfo.end()) {
+							TEST(true); // Removing client throttle
 							priorityThrottledTags.erase(tag.first);
 						}
 						else {
+							TEST(true); // Setting client throttle
 							auto result = priorityThrottledTags.try_emplace(tag.first, itr->second);
 							if(!result.second) {
 								result.first->second.update(itr->second);
@@ -3342,6 +3346,7 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, TransactionPriorit
 				priorityThrottledTags.erase(itr);
 			}
 			else if(itr->second.throttleDuration() > 0) {
+				TEST(true); // Throttling transaction after getting read version
 				++cx->transactionReadVersionsThrottled;
 				throw tag_throttled();
 			}
@@ -3403,9 +3408,13 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			}
 
 			if(maxThrottleDelay > 0.0 && !canRecheck) { // TODO: allow delaying?
+				TEST(true); // Throttling tag before GRV request
 				++cx->transactionReadVersionsThrottled;
 				readVersion = tag_throttled();
 				return readVersion;
+			}
+			else {
+				TEST(maxThrottleDelay > 0.0); // Rechecking throttle
 			}
 
 			for(auto &tag : options.tags) {

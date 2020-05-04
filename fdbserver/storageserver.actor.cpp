@@ -474,6 +474,7 @@ public:
 
 		void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
 			if(tags.present()) {
+				TEST(true); // Tracking tag on storage server
 				double cost = costFunction(bytes);
 				for(auto& tag : tags.get()) {
 					int64_t &count = intervalCounts[TransactionTag(tag, tags.get().arena)];

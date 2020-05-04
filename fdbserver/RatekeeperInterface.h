@@ -56,7 +56,7 @@ struct ClientTagThrottleLimits {
 	double tpsRate;
 	double expiration;
 
-	ClientTagThrottleLimits() {}
+	ClientTagThrottleLimits() : tpsRate(0), expiration(0) {}
 	ClientTagThrottleLimits(double tpsRate, double expiration) : tpsRate(tpsRate), expiration(expiration) {}
 
 	template <class Archive>
