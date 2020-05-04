@@ -2118,9 +2118,41 @@ Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version>
 	return getRange(cx, Reference<TransactionLogInfo>(), fVersion, begin, end, limits, Promise<std::pair<Key, Key>>(), true, reverse, info, tags);
 }
 
+bool DatabaseContext::debugUseTags = true;
+const std::vector<std::string> DatabaseContext::debugTransactionTagChoices = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t" }; 
+
+void debugAddTags(Transaction *tr) {
+	int numTags = deterministicRandom()->randomInt(0, 11); 
+	for(int i = 0; i < numTags; ++i) { 
+		TransactionTag tag;
+		if(deterministicRandom()->random01() < 0.7) {
+			tag = TransactionTagRef(deterministicRandom()->randomChoice(DatabaseContext::debugTransactionTagChoices));
+		}
+		else {
+			int length = deterministicRandom()->randomInt(1, CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH+1);
+			uint8_t* s = new (tag.arena()) uint8_t[length];
+			for(int j = 0; j < length; ++j) {
+				s[j] = (uint8_t)deterministicRandom()->randomInt(0, 256);
+			}
+
+			tag.contents() = TransactionTagRef(s, length);
+		}
+
+		if(deterministicRandom()->coinflip()) {
+			tr->options.readTags.addTag(tag);
+		}
+		tr->options.tags.addTag(tag);
+	}
+
+}
+
 Transaction::Transaction( Database const& cx )
 	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0), trLogInfo(createTrLogInfoProbabilistically(cx))
-{}
+{
+	if(DatabaseContext::debugUseTags) {
+		debugAddTags(this);
+	}
+}
 
 Transaction::~Transaction() {
 	flushTrLogsIfEnabled();

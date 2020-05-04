@@ -308,6 +308,9 @@ public:
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 	std::shared_ptr<SpecialKeySpace> specialKeySpace;
 	std::shared_ptr<ConflictingKeysImpl> cKImpl;
+
+	static bool debugUseTags;
+	static const std::vector<std::string> debugTransactionTagChoices; 
 };
 
 #endif
