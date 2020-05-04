@@ -458,24 +458,29 @@ ACTOR Future<Void> writeMutationsToDB(UID applierID, int64_t batchIndex, Referen
 
 ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self,
                                                  Database cx) {
+	TraceEvent("FastRestoreApplierPhaseHandleApplyToDBStart", self->id())
+	    .detail("BatchIndex", req.batchIndex)
+	    .detail("FinishedBatch", self->finishedBatch.get());
+
 	// Ensure batch (i-1) is applied before batch i
 	wait(self->finishedBatch.whenAtLeast(req.batchIndex - 1));
 
 	state bool isDuplicated = true;
-	Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
-	TraceEvent("FastRestoreApplierPhaseHandleApplyToDBStart", self->id())
-	    .detail("BatchIndex", req.batchIndex)
-	    .detail("FinishedBatch", self->finishedBatch.get())
-	    .detail("HasStarted", batchData->dbApplier.present())
-	    .detail("WroteToDB", batchData->dbApplier.present() ? batchData->dbApplier.get().isReady() : "No")
-	    .detail("PreviousVersionBatchState", batchData->vbState.get());
-	batchData->vbState = ApplierVersionBatchState::WRITE_TO_DB;
 	if (self->finishedBatch.get() == req.batchIndex - 1) {
+		Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
+		TraceEvent("FastRestoreApplierPhaseHandleApplyToDBRunning", self->id())
+		    .detail("BatchIndex", req.batchIndex)
+		    .detail("FinishedBatch", self->finishedBatch.get())
+		    .detail("HasStarted", batchData->dbApplier.present())
+		    .detail("WroteToDBDone", batchData->dbApplier.present() ? batchData->dbApplier.get().isReady() : 0)
+		    .detail("PreviousVersionBatchState", batchData->vbState.get());
+
 		ASSERT(batchData.isValid());
 		if (!batchData->dbApplier.present()) {
 			isDuplicated = false;
 			batchData->dbApplier = Never();
 			batchData->dbApplier = writeMutationsToDB(self->id(), req.batchIndex, batchData, cx);
+			batchData->vbState = ApplierVersionBatchState::WRITE_TO_DB;
 		}
 
 		ASSERT(batchData->dbApplier.present());
@@ -486,21 +491,21 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 		// Avoid setting finishedBatch when finishedBatch > req.batchIndex
 		if (self->finishedBatch.get() == req.batchIndex - 1) {
 			self->finishedBatch.set(req.batchIndex);
+			self->batch[req.batchIndex]->vbState = ApplierVersionBatchState::DONE;
+			// Free memory for the version batch
+			self->batch.erase(req.batchIndex);
+			if (self->delayedActors > 0) {
+				self->checkMemory.trigger();
+			}
 		}
 	}
 
-	if (self->delayedActors > 0) {
-		self->checkMemory.trigger();
-	}
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 
-	TraceEvent("FastRestoreApplierPhaseHandleApplyToDBStart", self->id())
+	TraceEvent("FastRestoreApplierPhaseHandleApplyToDBDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("FinishedBatch", self->finishedBatch.get())
-	    .detail("HasStarted", batchData->dbApplier.present())
-	    .detail("WroteToDB", batchData->dbApplier.present() ? batchData->dbApplier.get().isReady() : "No")
-	    .detail("PreviousVersionBatchState", batchData->vbState.get());
-	batchData->vbState = ApplierVersionBatchState::DONE;
+	    .detail("IsDuplicated", isDuplicated);
 
 	return Void();
 }
