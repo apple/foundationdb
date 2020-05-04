@@ -34,7 +34,6 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ConflictSet.h"
@@ -61,7 +60,7 @@
 
 #include "fdbmonitor/SimpleIni.h"
 
-#ifdef  __linux__
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 #include <signal.h>
 #ifdef ALLOC_INSTRUMENTATION
@@ -76,6 +75,7 @@
 #endif
 
 #include "flow/SimpleOpt.h"
+#include <fstream>
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // clang-format off
@@ -292,7 +292,7 @@ public:
 			throw platform_error();
 		}
 		permission.set_permissions( &sa );
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 		// There is nothing to do here, since the default permissions are fine
 #else
 		#error Port me!
@@ -302,7 +302,7 @@ public:
 	virtual ~WorldReadablePermissions() {
 #ifdef _WIN32
 		LocalFree( sa.lpSecurityDescriptor );
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 		// There is nothing to do here, since the default permissions are fine
 #else
 		#error Port me!
@@ -1629,6 +1629,7 @@ int main(int argc, char* argv[]) {
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
+			g_network->addStopCallback( Net2FileSystem::stop );
 			FlowTransport::createInstance(false, 1);
 
 			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);

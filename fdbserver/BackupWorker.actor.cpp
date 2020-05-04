@@ -68,7 +68,6 @@ struct BackupData {
 	const UID myId;
 	const Tag tag; // LogRouter tag for this worker, i.e., (-2, i)
 	const int totalTags; // Total log router tags
-	// Backup request's commit version. Mutations are logged at some version after this.
 	const Version startVersion; // This worker's start version
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
@@ -209,8 +208,12 @@ struct BackupData {
 		}
 
 		BackupData* self = nullptr;
+
+		// Backup request's commit version. Mutations are logged at some version after this.
 		Version startVersion = invalidVersion;
+		// The last mutation log's saved version (not inclusive), i.e., next log's begin version.
 		Version lastSavedVersion = invalidVersion;
+
 		Future<Optional<Reference<IBackupContainer>>> container;
 		Future<Optional<std::vector<KeyRange>>> ranges; // Key ranges of this backup
 		Future<Void> updateWorker;
@@ -392,7 +395,7 @@ struct BackupData {
 			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
 				when(wait(self->cx->onMasterProxiesChanged())) {}
-				when(GetReadVersionReply reply = wait(loadBalance(self->cx->getMasterProxies(false),
+				when(GetReadVersionReply reply = wait(basicLoadBalance(self->cx->getMasterProxies(false),
 				                                                  &MasterProxyInterface::getConsistentReadVersion,
 				                                                  request, self->cx->taskID))) {
 					return reply.version;
@@ -568,17 +571,6 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 	}
 }
 
-// Return a block of contiguous padding bytes, growing if needed.
-static Value makePadding(int size) {
-	static Value pad;
-	if (pad.size() < size) {
-		pad = makeString(size);
-		memset(mutateString(pad), '\xff', pad.size());
-	}
-
-	return pad.substr(0, size);
-}
-
 // Write a mutation to a log file. Note the mutation can be different from
 // message.message for clear mutations.
 ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile, VersionedMessage message, StringRef mutation,
@@ -599,7 +591,7 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile, VersionedMessage 
 		// Write padding if needed
 		const int bytesLeft = *blockEnd - logFile->size();
 		if (bytesLeft > 0) {
-			state Value paddingFFs = makePadding(bytesLeft);
+			state Value paddingFFs = fileBackup::makePadding(bytesLeft);
 			wait(logFile->append(paddingFFs.begin(), bytesLeft));
 		}
 
@@ -762,6 +754,10 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 
 		state int numMsg = 0;
 		Version lastPopVersion = popVersion;
+		// index of last version's end position in self->messages
+		int lastVersionIndex = 0;
+		Version lastVersion = invalidVersion;
+
 		if (self->messages.empty()) {
 			// Even though messages is empty, we still want to advance popVersion.
 			if (!self->endVersion.present()) {
@@ -770,18 +766,30 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		} else {
 			for (const auto& message : self->messages) {
 				// message may be prefetched in peek; uncommitted message should not be uploaded.
-				if (message.getVersion() > self->maxPopVersion()) break;
-				popVersion = std::max(popVersion, message.getVersion());
+				const Version version = message.getVersion();
+				if (version > self->maxPopVersion()) break;
+				if (version > popVersion) {
+					lastVersionIndex = numMsg;
+					lastVersion = popVersion;
+					popVersion = version;
+				}
 				numMsg++;
 			}
 		}
 		if (self->pullFinished()) {
 			popVersion = self->endVersion.get();
+		} else {
+			// make sure file is saved on version boundary
+			popVersion = lastVersion;
+			numMsg = lastVersionIndex;
 		}
 		if (((numMsg > 0 || popVersion > lastPopVersion) && self->pulling) || self->pullFinished()) {
 			TraceEvent("BackupWorkerSave", self->myId)
 			    .detail("Version", popVersion)
+			    .detail("LastPopVersion", lastPopVersion)
+			    .detail("Pulling", self->pulling)
 			    .detail("SavedVersion", self->savedVersion)
+			    .detail("NumMsg", numMsg)
 			    .detail("MsgQ", self->messages.size());
 			// save an empty file for old epochs so that log file versions are continuous
 			wait(saveMutationsToFile(self, popVersion, numMsg));

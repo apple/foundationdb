@@ -12,6 +12,9 @@
 
 #if defined(__linux__)
 #include <linux/limits.h>
+#elif defined(__FreeBSD__)
+#include <sys/stat.h>
+#define CLOCK_MONOTONIC_COARSE CLOCK_MONOTONIC_FAST
 #elif defined(__APPLE__)
 #include <sys/syslimits.h>
 #define CLOCK_MONOTONIC_COARSE CLOCK_MONOTONIC

@@ -57,12 +57,20 @@ double QueueModel::addRequest( uint64_t id ) {
 	return d.penalty;
 }
 
-Optional<LoadBalancedReply> getLoadBalancedReply(LoadBalancedReply *reply) {
+Optional<LoadBalancedReply> getLoadBalancedReply(const LoadBalancedReply *reply) {
 	return *reply;
 }
 
-Optional<LoadBalancedReply> getLoadBalancedReply(void*) {
+Optional<LoadBalancedReply> getLoadBalancedReply(const void*) {
 	return Optional<LoadBalancedReply>();
+}
+
+Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const BasicLoadBalancedReply *reply) {
+	return *reply;
+}
+
+Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const void*) {
+	return Optional<BasicLoadBalancedReply>();
 }
 
 /*

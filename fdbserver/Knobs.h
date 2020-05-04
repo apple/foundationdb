@@ -86,6 +86,8 @@ public:
 	int64_t MAX_CACHE_VERSIONS;
 	double TXS_POPPED_MAX_DELAY;
 	double TLOG_MAX_CREATE_DURATION;
+	int PEEK_LOGGING_AMOUNT;
+	double PEEK_LOGGING_DELAY;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -173,7 +175,10 @@ public:
 	bool DD_VALIDATE_LOCALITY;
 	int DD_CHECK_INVALID_LOCALITY_DELAY;
 	bool DD_ENABLE_VERBOSE_TRACING;
-
+	int64_t DD_SS_FAILURE_VERSIONLAG; // Allowed SS version lag from the current read version before marking it as failed.
+	int64_t DD_SS_ALLOWED_VERSIONLAG; // SS will be marked as healthy if it's version lag goes below this value.
+	double DD_SS_STUCK_TIME_LIMIT; // If a storage server is not getting new versions for this amount of time, then it becomes undesired.
+	
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
 	double TR_REMOVE_MACHINE_TEAM_DELAY; // wait for the specified time before try to remove next machine team
@@ -281,6 +286,7 @@ public:
 	double MAX_PROXY_COMPUTE;
 	int PROXY_COMPUTE_BUCKETS;
 	double PROXY_COMPUTE_GROWTH_RATE;
+	int TXN_STATE_SEND_AMOUNT;
 
 	// Master Server
 	double COMMIT_SLEEP_TIME;
@@ -345,6 +351,8 @@ public:
 	int EXPECTED_PROXY_FITNESS;
 	int EXPECTED_RESOLVER_FITNESS;
 	double RECRUITMENT_TIMEOUT;
+	int DBINFO_SEND_AMOUNT;
+	double DBINFO_BATCH_DELAY;
 
 	//Move Keys
 	double SHARD_READY_DELAY;
@@ -457,13 +465,13 @@ public:
 
 	//Worker
 	double WORKER_LOGGING_INTERVAL;
-	double INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING;
 	double HEAP_PROFILER_INTERVAL;
 	double DEGRADED_RESET_INTERVAL;
 	double DEGRADED_WARNING_LIMIT;
 	double DEGRADED_WARNING_RESET_DELAY;
 	int64_t TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS;
 	double TRACE_LOG_PING_TIMEOUT_SECONDS;
+	double DBINFO_FAILED_DELAY;
 
 	// Test harness
 	double WORKER_POLL_DELAY;
@@ -522,6 +530,7 @@ public:
 	int64_t FASTRESTORE_APPLIER_FETCH_KEYS_SIZE; // number of keys to fetch in a txn on applier
 	int64_t FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES; // desired size of mutation message sent from loader to appliers
 	bool FASTRESTORE_GET_RANGE_VERSIONS_EXPENSIVE; // parse each range file to get (range, version) it has?
+	int64_t FASTRESTORE_REQBATCH_PARALLEL; // number of requests to wait on for getBatchReplies()
 
 	ServerKnobs();
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
