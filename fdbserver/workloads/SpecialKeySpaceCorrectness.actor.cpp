@@ -100,9 +100,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		if (self->clientId == 0) {
-			testConflictRanges(cx, /*read*/ true);
-			testConflictRanges(cx, /*read*/ false);
-			wait(timeout(self->getRangeCallActor(cx, self), self->testDuration, Void()));
+			wait(timeout(self->getRangeCallActor(cx, self) && testConflictRanges(cx, /*read*/ true) &&
+			                 testConflictRanges(cx, /*read*/ false),
+			             self->testDuration, Void()));
 		}
 		return Void();
 	}
@@ -209,15 +209,15 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return GetRangeLimits(rowLimits, byteLimits);
 	}
 
-	static void testConflictRanges(Database cx_, bool read) {
-		StringRef prefix = read ? readConflictRangeKeysRange.begin : writeConflictRangeKeysRange.begin;
+	ACTOR static Future<Void> testConflictRanges(Database cx_, bool read) {
+		state StringRef prefix = read ? readConflictRangeKeysRange.begin : writeConflictRangeKeysRange.begin;
 		TEST(read); // test read conflict range special key implementation
 		TEST(!read); // test write conflict range special key implementation
 		// Get a default special key range instance
 		Database cx = cx_->clone();
-		Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
-		Reference<ReadYourWritesTransaction> referenceTx = Reference(new ReadYourWritesTransaction(cx));
-		bool ryw = deterministicRandom()->coinflip();
+		state Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> referenceTx = Reference(new ReadYourWritesTransaction(cx));
+		state bool ryw = deterministicRandom()->coinflip();
 		if (!ryw) {
 			tx->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 		}
@@ -225,7 +225,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		referenceTx->clear(normalKeys);
 		referenceTx->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		int numKeys = deterministicRandom()->randomInt(1, 10) * 4;
-		std::vector<std::string> keys; // Must all be distinct
+		state std::vector<std::string> keys; // Must all be distinct
 		keys.resize(numKeys);
 		int lastKey = 0;
 		for (auto& key : keys) {
@@ -257,6 +257,15 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			// TODO test that fails if we don't wait on tx->pendingReads()
 			referenceTx->set(range.begin, LiteralStringRef("1"));
 			referenceTx->set(range.end, LiteralStringRef("0"));
+		}
+		if (!read && deterministicRandom()->coinflip()) {
+			try {
+				wait(tx->commit());
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) throw;
+				return Void();
+			}
+			TEST(true); // Read write conflict range of committed transaction
 		}
 		for (int i = 0; i < 10; ++i) {
 			GetRangeLimits limit;
@@ -320,6 +329,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			}
 			if (had_error) break;
 		}
+		return Void();
 	}
 };
 
