@@ -72,6 +72,7 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 	// Guaranteed to be called only once during serialization
 	template <class Context>
 	static void save(uint8_t* out, const TagSet& t, Context& c) {
+		uint8_t *start = out;
 		for (const auto& tag : t.tags) {
 			*(out++) = (uint8_t)tag.size();
 
