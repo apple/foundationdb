@@ -39,12 +39,7 @@
 
 template <typename T>
 typename std::enable_if<std::is_integral<T>::value, int>::type compare(T l, T r) {
-	const int gt = l > r;
-	const int lt = l < r;
-	return gt - lt;
-	// GCC also emits branchless code for the following, but the above performs
-	// slightly better in benchmarks as of this writing.
-	// return l < r ? -1 : l == r ? 0 : 1;
+	return l < r ? -1 : l == r ? 0 : 1;
 }
 
 template <typename T, typename U>
