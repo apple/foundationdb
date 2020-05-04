@@ -35,6 +35,8 @@ package subspace
 import (
 	"bytes"
 	"errors"
+	"fmt"
+
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
@@ -82,7 +84,7 @@ type Subspace interface {
 }
 
 type subspace struct {
-	b []byte
+	rawPrefix []byte
 }
 
 // AllKeys returns the Subspace corresponding to all keys in a FoundationDB
@@ -105,40 +107,46 @@ func FromBytes(b []byte) Subspace {
 	return subspace{s}
 }
 
+// String implements the fmt.Stringer interface and return the subspace
+// as a human readable byte string provided by fdb.Printable.
+func (s subspace) String() string {
+	return fmt.Sprintf("Subspace(rawPrefix=%s)", fdb.Printable(s.rawPrefix))
+}
+
 func (s subspace) Sub(el ...tuple.TupleElement) Subspace {
 	return subspace{concat(s.Bytes(), tuple.Tuple(el).Pack()...)}
 }
 
 func (s subspace) Bytes() []byte {
-	return s.b
+	return s.rawPrefix
 }
 
 func (s subspace) Pack(t tuple.Tuple) fdb.Key {
-	return fdb.Key(concat(s.b, t.Pack()...))
+	return fdb.Key(concat(s.rawPrefix, t.Pack()...))
 }
 
 func (s subspace) PackWithVersionstamp(t tuple.Tuple) (fdb.Key, error) {
-	return t.PackWithVersionstamp(s.b)
+	return t.PackWithVersionstamp(s.rawPrefix)
 }
 
 func (s subspace) Unpack(k fdb.KeyConvertible) (tuple.Tuple, error) {
 	key := k.FDBKey()
-	if !bytes.HasPrefix(key, s.b) {
+	if !bytes.HasPrefix(key, s.rawPrefix) {
 		return nil, errors.New("key is not in subspace")
 	}
-	return tuple.Unpack(key[len(s.b):])
+	return tuple.Unpack(key[len(s.rawPrefix):])
 }
 
 func (s subspace) Contains(k fdb.KeyConvertible) bool {
-	return bytes.HasPrefix(k.FDBKey(), s.b)
+	return bytes.HasPrefix(k.FDBKey(), s.rawPrefix)
 }
 
 func (s subspace) FDBKey() fdb.Key {
-	return fdb.Key(s.b)
+	return fdb.Key(s.rawPrefix)
 }
 
 func (s subspace) FDBRangeKeys() (fdb.KeyConvertible, fdb.KeyConvertible) {
-	return fdb.Key(concat(s.b, 0x00)), fdb.Key(concat(s.b, 0xFF))
+	return fdb.Key(concat(s.rawPrefix, 0x00)), fdb.Key(concat(s.rawPrefix, 0xFF))
 }
 
 func (s subspace) FDBRangeKeySelectors() (fdb.Selectable, fdb.Selectable) {

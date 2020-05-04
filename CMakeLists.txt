@@ -146,6 +146,10 @@ set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
 # components
 ################################################################################
 
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  include_directories(/usr/local/include)
+endif()
+
 include(CompileBoost)
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
@@ -171,6 +175,10 @@ if(WIN32)
   add_subdirectory(packaging/msi)
 else()
   include(CPack)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  add_link_options(-lexecinfo)
 endif()
 
 ################################################################################

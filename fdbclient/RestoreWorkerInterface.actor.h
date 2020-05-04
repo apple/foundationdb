@@ -466,29 +466,26 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 
 	Version msgIndex; // Monitonically increasing index of mutation messages
 	bool isRangeFile;
-	MutationsVec mutations; // Mutations that may be at different versions parsed by one loader
-	LogMessageVersionVec mVersions; // (version, subversion) of each mutation in mutations field
+	VersionedMutationsVec versionedMutations; // Versioned mutations may be at different versions parsed by one loader
 
 	ReplyPromise<RestoreCommonReply> reply;
 
 	RestoreSendVersionedMutationsRequest() = default;
 	explicit RestoreSendVersionedMutationsRequest(int batchIndex, const RestoreAsset& asset, Version msgIndex,
-	                                              bool isRangeFile, MutationsVec mutations,
-	                                              LogMessageVersionVec mVersions)
-	  : batchIndex(batchIndex), asset(asset), msgIndex(msgIndex), isRangeFile(isRangeFile), mutations(mutations),
-	    mVersions(mVersions) {}
+	                                              bool isRangeFile, VersionedMutationsVec versionedMutations)
+	  : batchIndex(batchIndex), asset(asset), msgIndex(msgIndex), isRangeFile(isRangeFile),
+	    versionedMutations(versionedMutations) {}
 
 	std::string toString() {
 		std::stringstream ss;
 		ss << "VersionBatchIndex:" << batchIndex << "RestoreAsset:" << asset.toString() << " msgIndex:" << msgIndex
-		   << " isRangeFile:" << isRangeFile << " mutations.size:" << mutations.size()
-		   << " mVersions.size:" << mVersions.size();
+		   << " isRangeFile:" << isRangeFile << " versionedMutations.size:" << versionedMutations.size();
 		return ss.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, batchIndex, asset, msgIndex, isRangeFile, mutations, mVersions, reply);
+		serializer(ar, batchIndex, asset, msgIndex, isRangeFile, versionedMutations, reply);
 	}
 };
 

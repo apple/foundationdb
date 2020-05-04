@@ -1373,7 +1373,8 @@ public:
 			    wait(bc->readKeyspaceSnapshot(snapshot.get()));
 			restorable.ranges = std::move(results.first);
 			restorable.keyRanges = std::move(results.second);
-			if (false && g_network->isSimulated()) { // TODO: Reenable sanity check
+			// TODO: Reenable the sanity check after TooManyFiles error is resolved
+			if (false && g_network->isSimulated()) {
 				// Sanity check key ranges
 				state std::map<std::string, KeyRange>::iterator rit;
 				for (rit = restorable.keyRanges.begin(); rit != restorable.keyRanges.end(); rit++) {
@@ -1776,7 +1777,6 @@ public:
 	virtual ~BackupContainerBlobStore() {}
 
 	Future<Reference<IAsyncFile>> readFile(std::string path) final {
-		ASSERT(m_bstore->knobs.read_ahead_blocks > 0);
 		return Reference<IAsyncFile>(
 			new AsyncFileReadAheadCache(
 				Reference<IAsyncFile>(new AsyncFileBlobStoreRead(m_bstore, m_bucket, dataPath(path))),
@@ -2097,6 +2097,8 @@ ACTOR Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference
 	return found.first + (v - found.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 }
 
+namespace backup_test {
+
 int chooseFileSize(std::vector<int> &sizes) {
 	int size = 1000;
 	if(!sizes.empty()) {
@@ -2134,7 +2136,30 @@ Version nextVersion(Version v) {
 	return v + increment;
 }
 
-ACTOR Future<Void> testBackupContainer(std::string url) {
+// Write a snapshot file with only begin & end key
+ACTOR static Future<Void> testWriteSnapshotFile(Reference<IBackupFile> file, Key begin, Key end, uint32_t blockSize) {
+	ASSERT(blockSize > 3 * sizeof(uint32_t) + begin.size() + end.size());
+
+	uint32_t fileVersion = BACKUP_AGENT_SNAPSHOT_FILE_VERSION;
+	// write Header
+	wait(file->append((uint8_t*)&fileVersion, sizeof(fileVersion)));
+
+	// write begin key length and key
+	wait(file->appendStringRefWithLen(begin));
+
+	// write end key length and key
+	wait(file->appendStringRefWithLen(end));
+
+	int bytesLeft = blockSize - file->size();
+	if (bytesLeft > 0) {
+		Value paddings = fileBackup::makePadding(bytesLeft);
+		wait(file->append(paddings.begin(), bytesLeft));
+	}
+	wait(file->finish());
+	return Void();
+}
+
+ACTOR static Future<Void> testBackupContainer(std::string url) {
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
 	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url);
@@ -2163,6 +2188,9 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	loop {
 		state Version logStart = v;
 		state int kvfiles = deterministicRandom()->randomInt(0, 3);
+		state Key begin = LiteralStringRef("");
+		state Key end = LiteralStringRef("");
+		state int blockSize = 3 * sizeof(uint32_t) + begin.size() + end.size() + 8;
 
 		while(kvfiles > 0) {
 			if(snapshots.empty()) {
@@ -2173,15 +2201,17 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 					v = nextVersion(v);
 				}
 			}
-			Reference<IBackupFile> range = wait(c->writeRangeFile(snapshots.rbegin()->first, 0, v, 10));
+			Reference<IBackupFile> range = wait(c->writeRangeFile(snapshots.rbegin()->first, 0, v, blockSize));
 			++nRangeFiles;
 			v = nextVersion(v);
 			snapshots.rbegin()->second.push_back(range->getFileName());
-			snapshotBeginEndKeys.rbegin()->second.emplace_back(LiteralStringRef(""), LiteralStringRef(""));
+			snapshotBeginEndKeys.rbegin()->second.emplace_back(begin, end);
 
 			int size = chooseFileSize(fileSizes);
 			snapshotSizes.rbegin()->second += size;
-			writes.push_back(writeAndVerifyFile(c, range, size));
+			// Write in actual range file format, instead of random data.
+			// writes.push_back(writeAndVerifyFile(c, range, size));
+			wait(testWriteSnapshotFile(range, begin, end, blockSize));
 
 			if(deterministicRandom()->random01() < .2) {
 				writes.push_back(c->writeKeyspaceSnapshotFile(
@@ -2378,3 +2408,5 @@ TEST_CASE("/backup/continuous") {
 
 	return Void();
 }
+
+} // namespace backup_test

@@ -131,9 +131,9 @@ set(install_destination_for_log_el6 "var/log/foundationdb")
 set(install_destination_for_log_el7 "var/log/foundationdb")
 set(install_destination_for_log_pm "")
 set(install_destination_for_data_tgz "lib/foundationdb")
-set(install_destination_for_data_deb "var/lib/foundationdb")
-set(install_destination_for_data_el6 "var/lib/foundationdb")
-set(install_destination_for_data_el7 "var/lib/foundationdb")
+set(install_destination_for_data_deb "var/lib/foundationdb/data")
+set(install_destination_for_data_el6 "var/lib/foundationdb/data")
+set(install_destination_for_data_el7 "var/lib/foundationdb/data")
 set(install_destination_for_data_pm "")
 
 set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -210,6 +210,12 @@ endif()
 set(CPACK_PACKAGE_CHECKSUM SHA256)
 configure_file("${CMAKE_SOURCE_DIR}/cmake/CPackConfig.cmake" "${CMAKE_BINARY_DIR}/packaging/CPackConfig.cmake")
 set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_BINARY_DIR}/packaging/CPackConfig.cmake")
+
+################################################################################
+# User config
+################################################################################
+
+set(GENERATE_DEBUG_PACKAGES "${FDB_RELEASE}" CACHE BOOL "Build debug rpm/deb packages (default: only ON for FDB_RELEASE)")
 
 ################################################################################
 # Version information
@@ -337,7 +343,7 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/lib/systemd"
   "/lib/systemd/system"
   "/etc/rc.d/init.d")
-set(CPACK_RPM_DEBUGINFO_PACKAGE ON)
+set(CPACK_RPM_DEBUGINFO_PACKAGE ${GENERATE_DEBUG_PACKAGES})
 #set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX /usr/src)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 
@@ -382,7 +388,7 @@ set(CPACK_RPM_SERVER-EL7_PACKAGE_REQUIRES
 set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME "${deb-clients-filename}_amd64.deb")
 set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME "${deb-server-filename}_amd64.deb")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
-set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
+set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ${GENERATE_DEBUG_PACKAGES})
 set(CPACK_DEBIAN_PACKAGE_SECTION "database")
 set(CPACK_DEBIAN_ENABLE_COMPONENT_DEPENDS ON)
 

@@ -13,6 +13,7 @@ set(FDBRPC_SRCS
   FlowTransport.actor.cpp
   genericactors.actor.h
   genericactors.actor.cpp
+  HealthMonitor.actor.cpp
   IAsyncFile.actor.cpp
   LoadBalance.actor.h
   Locality.cpp
@@ -48,7 +49,16 @@ if(APPLE)
   list(APPEND FDBRPC_THIRD_PARTY_SRCS libcoroutine/asm.S)
 endif()
 if(NOT WIN32)
-  list(APPEND FDBRPC_THIRD_PARTY_SRCS libcoroutine/context.c libeio/eio.c)
+  if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    find_library(EIO eio)
+    if(EIO)
+      list(APPEND FDBRPC_THIRD_PARTY_SRCS libcoroutine/context.c)
+    else()
+      list(APPEND FDBRPC_THIRD_PARTY_SRCS libcoroutine/context.c libeio/eio.c)
+    endif()
+  else()
+    list(APPEND FDBRPC_THIRD_PARTY_SRCS libcoroutine/context.c libeio/eio.c)
+  endif()
 endif()
 
 add_library(thirdparty STATIC ${FDBRPC_THIRD_PARTY_SRCS})

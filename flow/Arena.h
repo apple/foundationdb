@@ -845,6 +845,12 @@ public:
 	bool empty() const { return m_size == 0; }
 	const T& operator[](int i) const { return data[i]; }
 
+	// const versions of some VectorRef operators
+	const T* cbegin() const { return data; }
+	const T* cend() const { return data + m_size; }
+	T const& cfront() const { return *begin(); }
+	T const& cback() const { return end()[-1]; }
+
 	std::reverse_iterator<const T*> rbegin() const { return std::reverse_iterator<const T*>(end()); }
 	std::reverse_iterator<const T*> rend() const { return std::reverse_iterator<const T*>(begin()); }
 

@@ -395,7 +395,7 @@ struct BackupData {
 			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
 				when(wait(self->cx->onMasterProxiesChanged())) {}
-				when(GetReadVersionReply reply = wait(loadBalance(self->cx->getMasterProxies(false),
+				when(GetReadVersionReply reply = wait(basicLoadBalance(self->cx->getMasterProxies(false),
 				                                                  &MasterProxyInterface::getConsistentReadVersion,
 				                                                  request, self->cx->taskID))) {
 					return reply.version;
@@ -571,17 +571,6 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 	}
 }
 
-// Return a block of contiguous padding bytes, growing if needed.
-static Value makePadding(int size) {
-	static Value pad;
-	if (pad.size() < size) {
-		pad = makeString(size);
-		memset(mutateString(pad), '\xff', pad.size());
-	}
-
-	return pad.substr(0, size);
-}
-
 // Write a mutation to a log file. Note the mutation can be different from
 // message.message for clear mutations.
 ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile, VersionedMessage message, StringRef mutation,
@@ -602,7 +591,7 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile, VersionedMessage 
 		// Write padding if needed
 		const int bytesLeft = *blockEnd - logFile->size();
 		if (bytesLeft > 0) {
-			state Value paddingFFs = makePadding(bytesLeft);
+			state Value paddingFFs = fileBackup::makePadding(bytesLeft);
 			wait(logFile->append(paddingFFs.begin(), bytesLeft));
 		}
 
