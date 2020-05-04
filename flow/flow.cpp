@@ -26,12 +26,14 @@
 #include <stdarg.h>
 #include <cinttypes>
 
+// For benchmarking; need a version of rte_memcpy that doesn't live in the same compilation unit as the test.
 void * rte_memcpy_noinline(void *__restrict __dest, const void *__restrict __src, size_t __n) {
 	return rte_memcpy(__dest, __src, __n);
 }
 
 // This compilation unit will be linked in to the main binary, so this should override glibc memcpy
 __attribute__((visibility ("default"))) void *memcpy (void *__restrict __dest, const void *__restrict __src, size_t __n) {
+	// folly_memcpy is faster for small copies, but rte seems to win out in most other circumstances
 	return rte_memcpy(__dest, __src, __n);
 }
 
