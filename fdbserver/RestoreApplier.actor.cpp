@@ -463,10 +463,11 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 
 	state bool isDuplicated = true;
 	Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
-	TraceEvent("FastRestoreApplierPhaseHandleApplyToDB", self->id())
+	TraceEvent("FastRestoreApplierPhaseHandleApplyToDBStart", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("FinishedBatch", self->finishedBatch.get())
 	    .detail("HasStarted", batchData->dbApplier.present())
+	    .detail("WroteToDB", batchData->dbApplier.present() ? batchData->dbApplier.get().isReady() : "No")
 	    .detail("PreviousVersionBatchState", batchData->vbState.get());
 	batchData->vbState = ApplierVersionBatchState::WRITE_TO_DB;
 	if (self->finishedBatch.get() == req.batchIndex - 1) {
@@ -492,6 +493,14 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 		self->checkMemory.trigger();
 	}
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
+
+	TraceEvent("FastRestoreApplierPhaseHandleApplyToDBStart", self->id())
+	    .detail("BatchIndex", req.batchIndex)
+	    .detail("FinishedBatch", self->finishedBatch.get())
+	    .detail("HasStarted", batchData->dbApplier.present())
+	    .detail("WroteToDB", batchData->dbApplier.present() ? batchData->dbApplier.get().isReady() : "No")
+	    .detail("PreviousVersionBatchState", batchData->vbState.get());
+	batchData->vbState = ApplierVersionBatchState::DONE;
 
 	return Void();
 }

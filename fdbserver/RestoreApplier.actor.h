@@ -218,7 +218,8 @@ public:
 	static const int INIT = 1;
 	static const int RECEIVE_MUTATIONS = 2;
 	static const int WRITE_TO_DB = 3;
-	static const int INVALID = 4;
+	static const int DONE = 4;
+	static const int INVALID = 5;
 
 	explicit ApplierVersionBatchState(int newState) {
 		vbState = newState;
