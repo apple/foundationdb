@@ -213,7 +213,11 @@ public:
 TheChunkAllocator chunkAllocator;
 
 struct FBTraceLog {
-	void open(const std::string& directory, const std::string& processName, unsigned rollsize, unsigned maxLogSize) {}
+	std::string directory;
+	std::string processName;
+
+	void open(const std::string& directory, const std::string& processName, unsigned rollsize, unsigned maxLogSize) {
+	}
 };
 
 thread_local FBTraceLog g_fbTraceLog;
