@@ -313,10 +313,10 @@ set(CPACK_RPM_CLIENTS-EL7_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.el7-debug
 set(CPACK_RPM_SERVER-EL6_DEBUGINFO_FILE_NAME "${rpm-server-filename}.el6-debuginfo.x86_64.rpm")
 set(CPACK_RPM_SERVER-EL7_DEBUGINFO_FILE_NAME "${rpm-server-filename}.el7-debuginfo.x86_64.rpm")
 
-file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/foundationdb")
-fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/foundationdb/" DESTINATION data COMPONENT server)
-fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/foundationdb/" DESTINATION log COMPONENT server)
-fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/foundationdb/" DESTINATION etc COMPONENT clients)
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir")
+fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION data COMPONENT server)
+fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION log COMPONENT server)
+fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION etc COMPONENT clients)
 
 set(CPACK_RPM_SERVER-EL6_USER_FILELIST
   "%config(noreplace) /etc/foundationdb/foundationdb.conf"
