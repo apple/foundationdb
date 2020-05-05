@@ -42,7 +42,7 @@ public:
 
 struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
-	int actorCount, minKeysPerRange, maxKeysPerRange, rangeCount, keyBytes, valBytes;
+	int actorCount, minKeysPerRange, maxKeysPerRange, rangeCount, keyBytes, valBytes, conflictRangeSizeFactor;
 	double testDuration, absoluteRandomProb, transactionsPerSecond;
 	PerfIntCounter wrongResults, keysCount;
 	Reference<ReadYourWritesTransaction> ryw; // used to store all populated data
@@ -60,6 +60,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 100.0);
 		actorCount = getOption(options, LiteralStringRef("actorCount"), 1);
 		absoluteRandomProb = getOption(options, LiteralStringRef("absoluteRandomProb"), 0.5);
+		// Controls the relative size of read/write conflict ranges and the number of random getranges
+		conflictRangeSizeFactor = getOption(options, LiteralStringRef("conflictRangeSizeFactor"), 10);
+		ASSERT(conflictRangeSizeFactor >= 1);
 	}
 
 	virtual std::string description() { return "SpecialKeySpaceCorrectness"; }
@@ -99,8 +102,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		if (self->clientId == 0) {
-			wait(timeout(self->getRangeCallActor(cx, self) && testConflictRanges(cx, /*read*/ true) &&
-			                 testConflictRanges(cx, /*read*/ false),
+			wait(timeout(self->getRangeCallActor(cx, self) && testConflictRanges(cx, /*read*/ true, self) &&
+			                 testConflictRanges(cx, /*read*/ false, self),
 			             self->testDuration, Void()));
 		}
 		return Void();
@@ -208,7 +211,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return GetRangeLimits(rowLimits, byteLimits);
 	}
 
-	ACTOR static Future<Void> testConflictRanges(Database cx_, bool read) {
+	ACTOR static Future<Void> testConflictRanges(Database cx_, bool read, SpecialKeySpaceCorrectnessWorkload* self) {
 		state StringRef prefix = read ? readConflictRangeKeysRange.begin : writeConflictRangeKeysRange.begin;
 		TEST(read); // test read conflict range special key implementation
 		TEST(!read); // test write conflict range special key implementation
@@ -223,7 +226,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		referenceTx->setVersion(100); // Prevent this from doing a GRV or committing
 		referenceTx->clear(normalKeys);
 		referenceTx->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		int numKeys = deterministicRandom()->randomInt(1, 10) * 4;
+		int numKeys = deterministicRandom()->randomInt(1, self->conflictRangeSizeFactor) * 4;
 		state std::vector<std::string> keys; // Must all be distinct
 		keys.resize(numKeys);
 		int lastKey = 0;
@@ -266,7 +269,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			}
 			TEST(true); // Read write conflict range of committed transaction
 		}
-		for (int i = 0; i < 10; ++i) {
+		for (int i = 0; i < self->conflictRangeSizeFactor; ++i) {
 			GetRangeLimits limit;
 			KeySelector begin = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
 			KeySelector end;
