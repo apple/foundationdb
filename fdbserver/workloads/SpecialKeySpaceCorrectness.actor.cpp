@@ -78,6 +78,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		cx->specialKeySpace = std::make_shared<SpecialKeySpace>();
 		if (self->clientId == 0) {
 			self->ryw = Reference(new ReadYourWritesTransaction(cx));
+			self->ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 			self->ryw->setVersion(100);
 			self->ryw->clear(normalKeys);
 			// generate key ranges
@@ -218,6 +219,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// Get a default special key range instance
 		Database cx = cx_->clone();
 		state Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
+		tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 		state Reference<ReadYourWritesTransaction> referenceTx = Reference(new ReadYourWritesTransaction(cx));
 		state bool ryw = deterministicRandom()->coinflip();
 		if (!ryw) {
