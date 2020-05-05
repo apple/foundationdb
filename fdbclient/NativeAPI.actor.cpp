@@ -493,6 +493,12 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bo
 Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed);
 }
+
+void DatabaseContext::registerSpecialKeySpaceModule(std::unique_ptr<SpecialKeyRangeBaseImpl> module) {
+	specialKeySpace->registerKeyRange(module->getKeyRange(), module.get());
+	specialKeySpaceModules.push_back(std::move(module));
+}
+
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
                                  TaskPriority taskID, LocalityData const& clientLocality,
@@ -527,10 +533,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
-    specialKeySpace(std::make_shared<SpecialKeySpace>(normalKeys.begin, specialKeys.end)),
-    cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeysRange)),
-    rCRImpl(std::make_shared<ReadConflictRangeImpl>(readConflictRangeKeysRange)),
-    wCRImpl(std::make_shared<WriteConflictRangeImpl>(writeConflictRangeKeysRange)) {
+    specialKeySpace(std::make_unique<SpecialKeySpace>(normalKeys.begin, specialKeys.end)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
 
@@ -550,9 +553,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	if (apiVersionAtLeast(630)) {
-		specialKeySpace->registerKeyRange(conflictingKeysRange, cKImpl.get());
-		specialKeySpace->registerKeyRange(readConflictRangeKeysRange, rCRImpl.get());
-		specialKeySpace->registerKeyRange(writeConflictRangeKeysRange, wCRImpl.get());
+		registerSpecialKeySpaceModule(std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
+		registerSpecialKeySpaceModule(std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
+		registerSpecialKeySpaceModule(std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
 	}
 }
 

@@ -75,7 +75,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	double getCheckTimeout() override { return std::numeric_limits<double>::max(); }
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
-		cx->specialKeySpace = std::make_shared<SpecialKeySpace>();
+		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();
 		if (self->clientId == 0) {
 			self->ryw = Reference(new ReadYourWritesTransaction(cx));
 			self->ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);

@@ -229,10 +229,10 @@ public:
 	double detailedHealthMetricsLastUpdated;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
-	std::shared_ptr<SpecialKeySpace> specialKeySpace;
-	std::shared_ptr<ConflictingKeysImpl> cKImpl;
-	std::shared_ptr<ReadConflictRangeImpl> rCRImpl;
-	std::shared_ptr<WriteConflictRangeImpl> wCRImpl;
+
+	std::vector<std::unique_ptr<SpecialKeyRangeBaseImpl>> specialKeySpaceModules;
+	std::unique_ptr<SpecialKeySpace> specialKeySpace;
+	void registerSpecialKeySpaceModule(std::unique_ptr<SpecialKeyRangeBaseImpl> module);
 };
 
 #endif

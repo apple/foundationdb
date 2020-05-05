@@ -44,6 +44,8 @@ public:
 	ACTOR Future<Void> normalizeKeySelectorActor(const SpecialKeyRangeBaseImpl* pkrImpl,
 	                                             Reference<ReadYourWritesTransaction> ryw, KeySelector* ks);
 
+	virtual ~SpecialKeyRangeBaseImpl() {}
+
 protected:
 	KeyRange range; // underlying key range for this function
 };
