@@ -23,6 +23,7 @@
 #pragma once
 
 #include "flow/flow.h"
+#include "flow/IndexedSet.h"
 #include "fdbrpc/FlowTransport.h" // Endpoint
 #include <unordered_map>
 

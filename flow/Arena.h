@@ -530,12 +530,11 @@ public:
 	int expectedSize() const { return size(); }
 
 	int compare(StringRef const& other) const {
-		size_t minSize = std::min(size(), other.size());
-		if (minSize != 0) {
-			int c = memcmp(begin(), other.begin(), minSize);
+		if (std::min(size(), other.size()) > 0) {
+			int c = memcmp(begin(), other.begin(), std::min(size(), other.size()));
 			if (c != 0) return c;
 		}
-		return ::compare(size(), other.size());
+		return size() - other.size();
 	}
 
 	// Removes bytes from begin up to and including the sep string, returns StringRef of the part before sep

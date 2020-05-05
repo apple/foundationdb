@@ -67,63 +67,7 @@ namespace PTreeImpl {
 		PTree(PTree const&);
 	};
 
-    template <class T>
-    class PTreeFinger {
-	    using PTreeFingerEntry = PTree<T> const*;
-	    // This finger size supports trees with up to exp(96/4.3) ~= 4,964,514,749 entries.
-	    // see also: check().
-	    static constexpr size_t N = 96;
-	    PTreeFingerEntry entries_[N];
-	    size_t size_ = 0;
-	    size_t bound_sz_ = 0;
-
-	public:
-	    PTreeFinger() {}
-
-	    // Explicit copy constructors ensure we copy the live values in entries_.
-	    PTreeFinger(PTreeFinger const& f) { *this = f; }
-	    PTreeFinger(PTreeFinger&& f) { *this = f; }
-
-	    PTreeFinger& operator=(PTreeFinger const& f) {
-		    size_ = f.size_;
-		    bound_sz_ = f.bound_sz_;
-		    std::copy(f.entries_, f.entries_ + size_, entries_);
-		    return *this;
-	    }
-
-	    PTreeFinger& operator=(PTreeFinger&& f) {
-		    size_ = std::exchange(f.size_, 0);
-		    bound_sz_ = f.bound_sz_;
-		    std::copy(f.entries_, f.entries_ + size_, entries_);
-		    return *this;
-	    }
-
-	    size_t size() const { return size_; }
-	    PTree<T> const* back() const { return entries_[size_ - 1]; }
-	    void pop_back() { size_--; }
-	    void clear() { size_ = 0; }
-	    PTree<T> const* operator[](size_t i) const { return entries_[i]; }
-
-	    void resize(size_t sz) {
-		    size_ = sz;
-		    ASSERT(size_ < N);
-	    }
-
-	    void push_back(PTree<T> const* node) {
-		    entries_[size_++] = { node };
-		    ASSERT(size_ < N);
-	    }
-
-	    void push_for_bound(PTree<T> const* node, bool less) {
-		    push_back(node);
-		    bound_sz_ = less ? size_ : bound_sz_;
-	    }
-
-	    // remove the end of the finger so that the last entry is less than the probe
-	    void trim_to_bound() { size_ = bound_sz_; }
-    };
-
-    template<class T>
+	template<class T>
 	static Reference<PTree<T>> update( Reference<PTree<T>> const& node, bool which, Reference<PTree<T>> const& ptr, Version at ) {
 		if (ptr.getPtr() == node->child(which, at).getPtr()/* && node->replacedVersion <= at*/) {
 			return node;
@@ -165,41 +109,38 @@ namespace PTreeImpl {
 	template<class T, class X>
 	bool contains(const Reference<PTree<T>>& p, Version at, const X& x) {
 		if (!p) return false;
-		int cmp = compare(x, p->data);
-		bool less = cmp < 0;
-		if (cmp == 0) return true;
+		bool less = x < p->data;
+		if (!less && !(p->data<x)) return true;  // x == p->data
 		return contains(p->child(!less, at), at, x);
 	}
 
-	// TODO: Remove the number of invocations of operator<, and replace with something closer to memcmp.
-	// and same for upper_bound.
-    template <class T, class X>
-    void lower_bound(const Reference<PTree<T>>& p, Version at, const X& x, PTreeFinger<T>& f) {
-	    if (!p) {
-		    f.trim_to_bound();
-		    return;
+	template<class T, class X>
+	void lower_bound(const Reference<PTree<T>>& p, Version at, const X& x, std::vector<const PTree<T>*>& f){
+		if (!p) {
+			while (f.size() && !(x < f.back()->data))
+				f.pop_back();
+			return;
 		}
-		int cmp = compare(x, p->data);
-		bool less = cmp < 0;
-	    f.push_for_bound(p.getPtr(), less);
-	    if (cmp == 0) return;
-	    lower_bound(p->child(!less, at), at, x, f);
-    }
-
-    template <class T, class X>
-    void upper_bound(const Reference<PTree<T>>& p, Version at, const X& x, PTreeFinger<T>& f) {
-	    if (!p) {
-		    f.trim_to_bound();
-		    return;
-		}
+		f.push_back(p.getPtr());
 		bool less = x < p->data;
-	    f.push_for_bound(p.getPtr(), less);
-	    upper_bound(p->child(!less, at), at, x, f);
-    }
+		if (!less && !(p->data<x)) return;  // x == p->data
+		lower_bound(p->child(!less, at), at, x, f);
+	}
 
-    template <class T, bool forward>
-    void move(Version at, PTreeFinger<T>& f) {
-	    ASSERT(f.size());
+	template<class T, class X>
+	void upper_bound(const Reference<PTree<T>>& p, Version at, const X& x, std::vector<const PTree<T>*>& f){
+		if (!p) {
+			while (f.size() && !(x < f.back()->data))
+				f.pop_back();
+			return;
+		}
+		f.push_back(p.getPtr());
+		upper_bound(p->child(!(x < p->data), at), at, x, f);
+	}
+	
+	template<class T, bool forward>
+	void move(Version at, std::vector<const PTree<T>*>& f){
+		ASSERT(f.size());
 		const PTree<T> *n;
 		n = f.back();
 		if (n->child(forward, at)){
@@ -214,11 +155,11 @@ namespace PTreeImpl {
 				f.pop_back();
 			} while (f.size() && f.back()->child(forward, at).getPtr() == n);
 		}
-    }
+	}
 
-    template <class T, bool forward>
-    int halfMove(Version at, PTreeFinger<T>& f) {
-	    // Post: f[:return_value] is the finger that would have been returned by move<forward>(at,f), and f[:original_length_of_f] is unmodified
+	template<class T, bool forward>
+	int halfMove(Version at, std::vector<const PTree<T>*>& f) {
+		// Post: f[:return_value] is the finger that would have been returned by move<forward>(at,f), and f[:original_length_of_f] is unmodified
 		ASSERT(f.size());
 		const PTree<T> *n;
 		n = f.back();
@@ -237,35 +178,35 @@ namespace PTreeImpl {
 			} while (s && f[s-1]->child(forward, at).getPtr() == n);
 			return s;
 		}
-    }
+	}
 
-    template <class T>
-    void next(Version at, PTreeFinger<T>& f) {
-	    move<T,true>(at, f);
-    }
+	template<class T>
+	void next(Version at, std::vector<const PTree<T>*>& f){
+		move<T,true>(at, f);
+	}
+	
+	template<class T>
+	void previous(Version at, std::vector<const PTree<T>*>& f){
+		move<T,false>(at, f);
+	}
 
-    template <class T>
-    void previous(Version at, PTreeFinger<T>& f) {
-	    move<T,false>(at, f);
-    }
+	template<class T>
+	int halfNext(Version at, std::vector<const PTree<T>*>& f){
+		return halfMove<T,true>(at, f);
+	}
+	
+	template<class T>
+	int halfPrevious(Version at, std::vector<const PTree<T>*>& f){
+		return halfMove<T,false>(at, f);
+	}
 
-    template <class T>
-    int halfNext(Version at, PTreeFinger<T>& f) {
-	    return halfMove<T,true>(at, f);
-    }
-
-    template <class T>
-    int halfPrevious(Version at, PTreeFinger<T>& f) {
-	    return halfMove<T,false>(at, f);
-    }
-
-    template <class T>
-    T get(PTreeFinger<T>& f) {
-	    ASSERT(f.size());
+	template<class T>
+	T get(std::vector<const PTree<T>*>& f){
+		ASSERT(f.size());
 		return f.back()->data;
-    }
+	}
 
-    // Modifies p to point to a PTree with x inserted
+	// Modifies p to point to a PTree with x inserted
 	template<class T>
 	void insert(Reference<PTree<T>>& p, Version at, const T& x) {
 		if (!p){
@@ -294,24 +235,24 @@ namespace PTreeImpl {
 		return lastNode(p->right(at), at);
 	}
 
-    template <class T, bool last>
-    void firstOrLastFinger(const Reference<PTree<T>>& p, Version at, PTreeFinger<T>& f) {
-	    if (!p) return;
+	template<class T, bool last>
+	void firstOrLastFinger(const Reference<PTree<T>>& p, Version at, std::vector<const PTree<T>*>& f) {
+		if (!p) return;
 		f.push_back(p.getPtr());
 		firstOrLastFinger<T, last>(p->child(last, at), at, f);
-    }
+	}
+	
+	template<class T>
+	void first(const Reference<PTree<T>>& p, Version at, std::vector<const PTree<T>*>& f) {
+		return firstOrLastFinger<T, false>(p, at, f);
+	}
 
-    template <class T>
-    void first(const Reference<PTree<T>>& p, Version at, PTreeFinger<T>& f) {
-	    return firstOrLastFinger<T, false>(p, at, f);
-    }
+	template<class T>
+	void last(const Reference<PTree<T>>& p, Version at, std::vector<const PTree<T>*>& f) {
+		return firstOrLastFinger<T, true>(p, at, f);
+	}
 
-    template <class T>
-    void last(const Reference<PTree<T>>& p, Version at, PTreeFinger<T>& f) {
-	    return firstOrLastFinger<T, true>(p, at, f);
-    }
-
-    // modifies p to point to a PTree with the root of p removed
+	// modifies p to point to a PTree with the root of p removed
 	template<class T>
 	void removeRoot(Reference<PTree<T>>& p, Version at) {
 		if (!p->right(at))
@@ -331,27 +272,24 @@ namespace PTreeImpl {
 	template<class T, class X>
 	void remove(Reference<PTree<T>>& p, Version at, const X& x) {
 		if (!p) ASSERT(false); // attempt to remove item not present in PTree
-		int cmp = compare(x, p->data);
-		if (cmp < 0) {
+		if (x < p->data) {
 			Reference<PTree<T>> child = p->child(0, at);
 			remove(child, at, x);
 			p = update(p, 0, child, at);
-		} else if (cmp > 0) {
+		} else if (p->data < x) {
 			Reference<PTree<T>> child = p->child(1, at);
 			remove(child, at, x);
 			p = update(p, 1, child, at);
-		} else {
+		} else
 			removeRoot(p, at);
-		}
 	}
 
 	template<class T, class X>
 	void remove(Reference<PTree<T>>& p, Version at, const X& begin, const X& end) {
 		if (!p) return;
 		int beginDir, endDir;
-		int beginCmp = compare(begin, p->data);
-		if (beginCmp < 0) beginDir = -1;
-		else if (beginCmp > 0) beginDir = +1;
+		if (begin < p->data) beginDir = -1;
+		else if (p->data < begin) beginDir = +1;
 		else beginDir = 0;
 		if (!(p->data < end)) endDir = -1;
 		else endDir = +1;
@@ -426,9 +364,7 @@ namespace PTreeImpl {
 		if (!right) return left;
 
 		Reference<PTree<T>> r = Reference<PTree<T>>(new PTree<T>(lastNode(left, at)->data, at));
-		if (EXPENSIVE_VALIDATION) {
-			ASSERT( r->data < firstNode(right, at)->data);
-		}
+		ASSERT( r->data < firstNode(right, at)->data);
 		Reference<PTree<T>> a = left;
 		remove(a, at, r->data);
 
@@ -577,7 +513,6 @@ class VersionedMap : NonCopyable {
 //private:
 public:
 	typedef PTreeImpl::PTree<MapPair<K,std::pair<T,Version>>> PTreeT;
-	typedef PTreeImpl::PTreeFinger<MapPair<K, std::pair<T, Version>>> PTreeFingerT;
 	typedef Reference< PTreeT > Tree;
 
 	Version oldestVersion, latestVersion;
@@ -654,7 +589,7 @@ public:
 
 		UNSTOPPABLE_ASSERT(r->first == newOldestVersion);
 
-		std::vector<Tree> toFree;
+		vector<Tree> toFree;
 		toFree.reserve(10000);
 		auto newBegin = r;
 		Tree *lastRoot = nullptr;
@@ -744,7 +679,7 @@ public:
 		friend class VersionedMap<K,T>;
 		Tree root;
 		Version at;
-		PTreeFingerT finger;
+		vector< PTreeT const* > finger;
 	};
 
 	class ViewAtVersion {

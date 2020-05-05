@@ -72,7 +72,7 @@ RYWIterator& RYWIterator::operator++() {
 	if (end_key_cmp <= 0) ++cache;
 	if (end_key_cmp >= 0) ++writes;
 	begin_key_cmp = -end_key_cmp;
-	end_key_cmp = cache.endKey().compare(writes.endKey());
+	end_key_cmp = cache.endKey().cmp(writes.endKey());
 	return *this;
 }
 
@@ -80,7 +80,7 @@ RYWIterator& RYWIterator::operator--() {
 	if (begin_key_cmp >= 0) --cache;
 	if (begin_key_cmp <= 0) --writes;
 	end_key_cmp = -begin_key_cmp;
-	begin_key_cmp = cache.beginKey().compare(writes.beginKey());
+	begin_key_cmp = cache.beginKey().cmp(writes.beginKey());
 	return *this;
 }
 
@@ -117,8 +117,8 @@ void RYWIterator::dbg() {
 }
 
 void RYWIterator::updateCmp() {
-	begin_key_cmp = cache.beginKey().compare(writes.beginKey());
-	end_key_cmp = cache.endKey().compare(writes.endKey());
+	begin_key_cmp = cache.beginKey().cmp(writes.beginKey());
+	end_key_cmp = cache.endKey().cmp(writes.endKey());
 }
 
 void testESR() {
@@ -157,13 +157,13 @@ void testESR() {
 				printf("Error: '%s' cmp '%s' = %d\n", printable(ssrs[i]).c_str(), printable(ssrs[j]).c_str(), c2);
 				return;
 			}
-
+			
 			/*
 			int c = ssrs[i] < ssrs[j] ? -1 : ssrs[i] == ssrs[j] ? 0 : 1;
-			int c2 = srs[i].compare(srs[j]);
+			int c2 = srs[i].cmp(srs[j]);
 			if ( c != (0<c2)-(c2<0) ) {
-			    printf("Error: '%s' cmp '%s' = %d\n", printable(ssrs[i]).c_str(), printable(ssrs[j]).c_str(), c2);
-			    return;
+				printf("Error: '%s' cmp '%s' = %d\n", printable(ssrs[i]).c_str(), printable(ssrs[j]).c_str(), c2);
+				return;
 			}*/
 
 			/*
@@ -413,8 +413,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedKey") {
 	it.skip(allKeys.begin);
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00")) == 0);
+	ASSERT(it.beginKey().cmp(LiteralStringRef("")) == 0);
+	ASSERT(it.endKey().cmp(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00")) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(!it.is_conflict_range());
 	ASSERT(!it.is_operation());
@@ -423,8 +423,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedKey") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00\x00")) == 0);
+	ASSERT(it.beginKey().cmp(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00")) == 0);
+	ASSERT(it.endKey().cmp(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00\x00")) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(it.is_conflict_range());
 	ASSERT(it.is_operation());
@@ -434,8 +434,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedKey") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00\x00")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp:ZZZZZZZZZZ")) == 0);
+	ASSERT(it.beginKey().cmp(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00\x00")) == 0);
+	ASSERT(it.endKey().cmp(LiteralStringRef("stamp:ZZZZZZZZZZ")) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(!it.is_conflict_range());
 	ASSERT(!it.is_operation());
@@ -444,8 +444,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedKey") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp:ZZZZZZZZZZ")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp:ZZZZZZZZZZ\x00")) == 0);
+	ASSERT(it.beginKey().cmp(LiteralStringRef("stamp:ZZZZZZZZZZ")) == 0);
+	ASSERT(it.endKey().cmp(LiteralStringRef("stamp:ZZZZZZZZZZ\x00")) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(it.is_conflict_range());
 	ASSERT(it.is_operation());
@@ -455,8 +455,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedKey") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp:ZZZZZZZZZZ\x00")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("\xff\xff")) == 0);
+	ASSERT(it.beginKey().cmp(LiteralStringRef("stamp:ZZZZZZZZZZ\x00")) == 0);
+	ASSERT(it.endKey().cmp(LiteralStringRef("\xff\xff")) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(!it.is_conflict_range());
 	ASSERT(!it.is_operation());
@@ -486,8 +486,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedValue") {
 	it.skip(allKeys.begin);
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp")) == 0);
+	ASSERT(it.beginKey().cmp(LiteralStringRef("")) == 0);
+	ASSERT(it.endKey().cmp(LiteralStringRef("stamp")) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(!it.is_conflict_range());
 	ASSERT(!it.is_operation());
@@ -496,8 +496,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedValue") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp\x00")) == 0);
+	ASSERT(it.beginKey().cmp(LiteralStringRef("stamp")) == 0);
+	ASSERT(it.endKey().cmp(LiteralStringRef("stamp\x00")) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(it.is_conflict_range());
 	ASSERT(it.is_operation());
@@ -507,8 +507,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedValue") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp\x00")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp123")) == 0);
+	ASSERT(it.beginKey().cmp(LiteralStringRef("stamp\x00")) == 0);
+	ASSERT(it.endKey().cmp(LiteralStringRef("stamp123")) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(!it.is_conflict_range());
 	ASSERT(!it.is_operation());
@@ -517,8 +517,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedValue") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp123")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp123\x00")) == 0);
+	ASSERT(it.beginKey().cmp(LiteralStringRef("stamp123")) == 0);
+	ASSERT(it.endKey().cmp(LiteralStringRef("stamp123\x00")) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(it.is_conflict_range());
 	ASSERT(it.is_operation());
@@ -528,8 +528,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedValue") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp123\x00")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("\xff\xff")) == 0);
+	ASSERT(it.beginKey().cmp(LiteralStringRef("stamp123\x00")) == 0);
+	ASSERT(it.endKey().cmp(LiteralStringRef("\xff\xff")) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(!it.is_conflict_range());
 	ASSERT(!it.is_operation());
