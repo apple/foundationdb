@@ -1209,46 +1209,44 @@ ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces (Reference<ClusterC
 
 Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool snapshot ) {
 	TEST(true);
-	
-	if (key == LiteralStringRef("\xff\xff/status/json")){
-		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-			return getJSON(tr.getDatabase());
+
+	if (getDatabase()->apiVersionAtLeast(630)) {
+		if (specialKeys.contains(key))
+			return getDatabase()->specialKeySpace->get(Reference<ReadYourWritesTransaction>::addRef(this), key);
+	} else {
+		if (key == LiteralStringRef("\xff\xff/status/json")) {
+			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+				return getJSON(tr.getDatabase());
+			} else {
+				return Optional<Value>();
+			}
 		}
-		else {
+
+		if (key == LiteralStringRef("\xff\xff/cluster_file_path")) {
+			try {
+				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+					Optional<Value> output = StringRef(tr.getDatabase()->getConnectionFile()->getFilename());
+					return output;
+				}
+			} catch (Error& e) {
+				return e;
+			}
 			return Optional<Value>();
 		}
-	} 
-	
-	if (key == LiteralStringRef("\xff\xff/cluster_file_path")) {
-		try {
-			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-				Optional<Value> output = StringRef(tr.getDatabase()->getConnectionFile()->getFilename());
-				return output;
-			}
-		}
-		catch (Error &e){ 
-			return e;
-		}
-		return Optional<Value>();
-	}
 
-	if (key == LiteralStringRef("\xff\xff/connection_string")){
-		try {
-			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-				Reference<ClusterConnectionFile> f = tr.getDatabase()->getConnectionFile();
-				Optional<Value> output = StringRef(f->getConnectionString().toString());
-				return output;
+		if (key == LiteralStringRef("\xff\xff/connection_string")) {
+			try {
+				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+					Reference<ClusterConnectionFile> f = tr.getDatabase()->getConnectionFile();
+					Optional<Value> output = StringRef(f->getConnectionString().toString());
+					return output;
+				}
+			} catch (Error& e) {
+				return e;
 			}
+			return Optional<Value>();
 		}
-		catch (Error &e){
-			return e;
-		}
-		return Optional<Value>();
 	}
-
-	// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
-	if (getDatabase()->apiVersionAtLeast(630) && specialKeys.contains(key))
-		return getDatabase()->specialKeySpace->get(Reference<ReadYourWritesTransaction>::addRef(this), key);
 
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
@@ -1292,20 +1290,22 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	bool snapshot,
 	bool reverse )
 {
-	if (begin.getKey() == LiteralStringRef("\xff\xff/worker_interfaces")){
-		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-			return getWorkerInterfaces(tr.getDatabase()->getConnectionFile());
-		}
-		else {
-			return Standalone<RangeResultRef>();
+
+	if (getDatabase()->apiVersionAtLeast(630)) {
+		// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
+		if (specialKeys.contains(begin.getKey()) && end.getKey() <= specialKeys.end)
+			return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin,
+			                                                end, limits, reverse);
+
+	} else {
+		if (begin.getKey() == LiteralStringRef("\xff\xff/worker_interfaces")) {
+			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+				return getWorkerInterfaces(tr.getDatabase()->getConnectionFile());
+			} else {
+				return Standalone<RangeResultRef>();
+			}
 		}
 	}
-
-	// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
-	if (getDatabase()->apiVersionAtLeast(630) && specialKeys.contains(begin.getKey()) &&
-	    end.getKey() <= specialKeys.end)
-		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin, end,
-		                                                limits, reverse);
 
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
