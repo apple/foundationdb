@@ -57,6 +57,7 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 	RestoreWorkerData() = default;
 
 	~RestoreWorkerData() {
+		TraceEvent("RestoreWorkerDataDeleted").detail("WorkerID", workerID.toString());
 		printf("[Exit] Worker:%s RestoreWorkerData is deleted\n", workerID.toString().c_str());
 	}
 

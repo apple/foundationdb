@@ -35,11 +35,28 @@
 #include <cstdint>
 #include <cstdarg>
 
-//#define SevFRMutationInfo SevVerbose
-#define SevFRMutationInfo SevInfo
+#define SevFRMutationInfo SevVerbose
+//#define SevFRMutationInfo SevInfo
+
+struct VersionedMutation {
+	MutationRef mutation;
+	LogMessageVersion version;
+
+	VersionedMutation() = default;
+	explicit VersionedMutation(MutationRef mutation, LogMessageVersion version)
+	  : mutation(mutation), version(version) {}
+	explicit VersionedMutation(Arena& arena, const VersionedMutation& vm)
+	  : mutation(arena, vm.mutation), version(vm.version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mutation, version);
+	}
+};
 
 using MutationsVec = Standalone<VectorRef<MutationRef>>;
 using LogMessageVersionVec = Standalone<VectorRef<LogMessageVersion>>;
+using VersionedMutationsVec = Standalone<VectorRef<VersionedMutation>>;
 
 enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);

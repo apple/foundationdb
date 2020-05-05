@@ -23,12 +23,13 @@
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
-#include "boost/asio.hpp"
-#include "boost/bind.hpp"
-#include "boost/date_time/posix_time/posix_time_types.hpp"
+#include <boost/asio.hpp>
+#include <boost/bind.hpp>
+#include <boost/date_time/posix_time/posix_time_types.hpp>
+#include <boost/range.hpp>
+#include <boost/algorithm/string/join.hpp>
 #include "flow/network.h"
 #include "flow/IThreadPool.h"
-#include "boost/range.hpp"
 
 #include "flow/ActorCollection.h"
 #include "flow/ThreadSafeQueue.h"
@@ -54,7 +55,7 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 
 std::atomic<int64_t> net2RunLoopIterations(0);
@@ -142,8 +143,13 @@ public:
 		if ( thread_network == this )
 			stopImmediately();
 		else
-			// SOMEDAY: NULL for deferred error, no analysis of correctness (itp)
 			onMainThreadVoid( [this] { this->stopImmediately(); }, NULL );
+	}
+	virtual void addStopCallback( std::function<void()> fn ) {
+		if ( thread_network == this )
+			stopCallbacks.emplace_back(std::move(fn));
+		else
+			onMainThreadVoid( [this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, nullptr );
 	}
 
 	virtual bool isSimulated() const { return false; }
@@ -232,6 +238,7 @@ public:
 	EventMetricHandle<SlowTask> slowTaskMetric;
 
 	std::vector<std::string> blobCredentialFiles;
+	std::vector<std::function<void()>> stopCallbacks;
 };
 
 static boost::asio::ip::address tcpAddress(IPAddress const& n) {
@@ -261,11 +268,19 @@ public:
 		try {
 			if (error) {
 				// Log the error...
-				TraceEvent(SevWarn, errContext, errID).suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message())
+				{
+					TraceEvent evt(SevWarn, errContext, errID);
+					evt.suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
 #ifndef TLS_DISABLED
-				.detail("WhichMeans", TLSPolicy::ErrorString(error))
+					// There is no function in OpenSSL to use to check if an error code is from OpenSSL,
+					// but all OpenSSL errors have a non-zero "library" code set in bits 24-32, and linux
+					// error codes should never go that high.
+					if (error.value() >= (1 << 24L)) {
+						evt.detail("WhichMeans", TLSPolicy::ErrorString(error));
+					}
 #endif
-				;
+				}
+				
 				p.sendError( connection_failed() );
 			} else
 				p.send( Void() );
@@ -790,11 +805,11 @@ private:
 	}
 
 	void onReadError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_ReadError", id).suppressFor(1.0).detail("Message", error.value());
+		TraceEvent(SevWarn, "N2_ReadError", id).suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
 		closeSocket();
 	}
 	void onWriteError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_WriteError", id).suppressFor(1.0).detail("Message", error.value());
+		TraceEvent(SevWarn, "N2_WriteError", id).suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
 		closeSocket();
 	}
 };
@@ -896,13 +911,19 @@ ACTOR static Future<Void> watchFileForChanges( std::string filename, AsyncTrigge
 	if (filename == "") {
 		return Never();
 	}
-	state std::time_t lastModTime = wait(IAsyncFileSystem::filesystem()->lastWriteTime(filename));
+	state bool firstRun = true;
+	state bool statError = false;
+	state std::time_t lastModTime = 0;
 	loop {
-		wait(delay(FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS));
 		try {
 			std::time_t modtime = wait(IAsyncFileSystem::filesystem()->lastWriteTime(filename));
-			if (lastModTime != modtime) {
+			if (firstRun) {
 				lastModTime = modtime;
+				firstRun = false;
+			}
+			if (lastModTime != modtime || statError) {
+				lastModTime = modtime;
+				statError = false;
 				fileChanged->trigger();
 			}
 		} catch (Error& e) {
@@ -912,10 +933,12 @@ ACTOR static Future<Void> watchFileForChanges( std::string filename, AsyncTrigge
 				// certificates, then there's no point in crashing, but we should complain
 				// loudly.  IAsyncFile will log the error, but not necessarily as a warning.
 				TraceEvent(SevWarnAlways, "TLSCertificateRefreshStatError").detail("File", filename);
+				statError = true;
 			} else {
 				throw;
 			}
 		}
+		wait(delay(FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS));
 	}
 }
 
@@ -964,16 +987,22 @@ void Net2::initTLS() {
 		return;
 	}
 #ifndef TLS_DISABLED
+	auto onPolicyFailure = [this]() { this->countTLSPolicyFailures++; };
 	try {
 		boost::asio::ssl::context newContext(boost::asio::ssl::context::tls);
-		auto onPolicyFailure = [this]() { this->countTLSPolicyFailures++; };
+		const LoadedTLSConfig& loaded = tlsConfig.loadSync();
+		TraceEvent("Net2TLSConfig")
+			.detail("CAPath", tlsConfig.getCAPathSync())
+			.detail("CertificatePath", tlsConfig.getCertificatePathSync())
+			.detail("KeyPath", tlsConfig.getKeyPathSync())
+			.detail("HasPassword", !loaded.getPassword().empty())
+			.detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"));
 		ConfigureSSLContext( tlsConfig.loadSync(), &newContext, onPolicyFailure );
 		sslContextVar.set(ReferencedObject<boost::asio::ssl::context>::from(std::move(newContext)));
-		backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, onPolicyFailure, &sslContextVar );
 	} catch (Error& e) {
 		TraceEvent("Net2TLSInitError").error(e);
-		throw tls_error();
 	}
+	backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, onPolicyFailure, &sslContextVar );
 #endif
 	tlsInitialized = true;
 }
@@ -1197,6 +1226,10 @@ void Net2::run() {
 
 		if ((nnow-now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && nondeterministicRandom()->random01() < (nnow-now)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopBottom").detail("Elapsed", nnow - now); // This includes the time spent running tasks
+	}
+
+	for ( auto& fn : stopCallbacks ) {
+		fn();
 	}
 
 	#ifdef WIN32

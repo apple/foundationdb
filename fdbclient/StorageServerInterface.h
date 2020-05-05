@@ -64,6 +64,7 @@ struct StorageServerInterface {
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
 	RequestStream<struct SplitMetricsRequest> splitMetrics;
+	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct GetStorageMetricsRequest> getStorageMetrics;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct StorageQueuingMetricsRequest> getQueuingMetrics;
@@ -74,6 +75,7 @@ struct StorageServerInterface {
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
 	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
+	NetworkAddress stableAddress() const { return getValue.getEndpoint().getStableAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return getValue.getEndpoint().addresses.secondaryAddress; }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
@@ -83,12 +85,12 @@ struct StorageServerInterface {
 		// versioned carefully!
 
 		if constexpr (!is_fb_function<Ar>) {
-			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
+			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics, splitMetrics,
+			           getReadHotRanges, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
 		} else {
-			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
+			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics, splitMetrics,
+			           getReadHotRanges, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
 			           watchValue);
 		}
 	}
@@ -388,18 +390,44 @@ struct SplitMetricsRequest {
 	}
 };
 
+struct ReadHotSubRangeReply {
+	constexpr static FileIdentifier file_identifier = 10424537;
+	Standalone<VectorRef<KeyRangeRef>> readHotRanges;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, readHotRanges);
+	}
+};
+struct ReadHotSubRangeRequest {
+	constexpr static FileIdentifier file_identifier = 10259266;
+	Arena arena;
+	KeyRangeRef keys;
+	ReplyPromise<ReadHotSubRangeReply> reply;
+
+	ReadHotSubRangeRequest() {}
+	ReadHotSubRangeRequest(KeyRangeRef const& keys) : keys(arena, keys) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, reply, arena);
+	}
+};
+
 struct GetStorageMetricsReply {
 	constexpr static FileIdentifier file_identifier = 15491478;
 	StorageMetrics load;
 	StorageMetrics available;
 	StorageMetrics capacity;
 	double bytesInputRate;
+	int64_t versionLag;
+	double lastUpdate;
 
 	GetStorageMetricsReply() : bytesInputRate(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, load, available, capacity, bytesInputRate);
+		serializer(ar, load, available, capacity, bytesInputRate, versionLag, lastUpdate);
 	}
 };
 

@@ -92,9 +92,9 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	} counters;
 
 	explicit LoaderBatchData(UID nodeID, int batchIndex) : counters(this, nodeID, batchIndex), vbState(LoaderVersionBatchState::NOT_INIT) {
-		pollMetrics =
-		    traceCounters("FastRestoreLoaderMetrics", nodeID, SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
-		                  &counters.cc, nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
+		pollMetrics = traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex), nodeID,
+		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
+		                            nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreLoaderMetricsCreated").detail("Node", nodeID);
 	}
 
@@ -169,7 +169,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	}
 
 	void initVersionBatch(int batchIndex) {
-		TraceEvent("FastRestore").detail("InitVersionBatchOnLoader", nodeID);
+		TraceEvent("FastRestoreLoaderInitVersionBatch", nodeID).detail("BatchIndex", batchIndex);
 		batch[batchIndex] = Reference<LoaderBatchData>(new LoaderBatchData(nodeID, batchIndex));
 		status[batchIndex] = Reference<LoaderBatchStatus>(new LoaderBatchStatus());
 	}

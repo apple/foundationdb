@@ -219,7 +219,9 @@ ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<Asyn
 	++(*clientCount);
 	hasConnectedClients->set(true);
 	
-	db->clientStatusInfoMap[req.reply.getEndpoint().getPrimaryAddress()] = ClientStatusInfo(req.traceLogGroup, req.supportedVersions, req.issues);
+	if(req.supportedVersions.size() > 0) {
+		db->clientStatusInfoMap[req.reply.getEndpoint().getPrimaryAddress()] = ClientStatusInfo(req.traceLogGroup, req.supportedVersions, req.issues);
+	}
 
 	while (db->clientInfo->get().read().id == req.knownClientInfoID && !db->clientInfo->get().read().forward.present()) {
 		choose {
@@ -228,7 +230,9 @@ ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<Asyn
 		}
 	}
 
-	db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
+	if(req.supportedVersions.size() > 0) {
+		db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
+	}
 
 	req.reply.send( db->clientInfo->get() );
 

@@ -321,7 +321,11 @@ struct VersionStampWorkload : TestWorkload {
 				versionStampValue = value.withSuffix(LiteralStringRef("\x00\x00\x00\x00"));
 			}
 
+			state bool ryw = deterministicRandom()->coinflip();
 			loop{
+				if (!ryw) {
+					tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+				}
 				state bool error = false;
 				state Error err;
 				//TraceEvent("VST_CommitBegin").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).detail("Clear", printable(range));
