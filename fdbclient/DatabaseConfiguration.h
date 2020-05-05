@@ -187,7 +187,7 @@ struct DatabaseConfiguration {
 	std::vector<RegionInfo> regions;
 
 	// Excluded servers (no state should be here)
-	bool isExcludedServer( NetworkAddress ) const;
+	bool isExcludedServer( NetworkAddressList ) const;
 	std::set<AddressExclusion> getExcludedServers() const;
 
 	int32_t getDesiredProxies() const { if(masterProxyCount == -1) return autoMasterProxyCount; return masterProxyCount; }

@@ -39,6 +39,8 @@
 
 #ifdef __linux__
 #include "config.h.linux"
+#elif defined(__FreeBSD__)
+#include "config.h.FreeBSD"
 #elif defined(__APPLE__)
 #include "config.h.osx"
 #endif

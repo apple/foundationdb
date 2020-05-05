@@ -1808,6 +1808,26 @@ ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> tr, U
 	return Void();
 }
 
+ACTOR Future<Void> advanceVersion(Database cx, Version v) {
+	state Transaction tr(cx);
+	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			Version rv = wait(tr.getReadVersion());
+			if (rv <= v) {
+				tr.set(minRequiredCommitVersionKey, BinaryWriter::toValue(v + 1, Unversioned()));
+				wait(tr.commit());
+			} else {
+				printf("Current read version is %ld\n", rv);
+				return Void();
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> forceRecovery( Reference<ClusterConnectionFile> clusterFile, Key dcId ) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
@@ -1851,7 +1871,6 @@ ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
 	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
 	loop {
-		//TraceEvent(SevDebug, "ChangeCachedRangeInLoop").detail("BeginKey", range.begin.toString()).detail("EndKey", range.end.toString());
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
@@ -1870,12 +1889,10 @@ ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 				// we need to uncache from here
 				tr.set(sysRange.begin, falseValue);
 				tr.set(privateRange.begin, serverKeysFalse);
-				//TraceEvent(SevDebug, "ChangeCachedRangeSetBegin1").detail("BeginKey", sysRange.begin.toString());
 			} else if (!prevIsCached && add) {
 				// we need to cache, starting from here
 				tr.set(sysRange.begin, trueValue);
 				tr.set(privateRange.begin, serverKeysTrue);
-				//TraceEvent(SevDebug, "ChangeCachedRangeSetBegin2").detail("BeginKey", sysRange.begin.toString());
 			}
 			Standalone<RangeResultRef> after =
 			    wait(tr.getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, false));
@@ -1888,14 +1905,11 @@ ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 			if (afterIsCached && !add) {
 				tr.set(sysRange.end, trueValue);
 				tr.set(privateRange.end, serverKeysTrue);
-				//TraceEvent(SevDebug, "ChangeCachedRangeSetEnd1").detail("EndKey", sysRange.end.toString());
 			} else if (!afterIsCached && add) {
 				tr.set(sysRange.end, falseValue);
 				tr.set(privateRange.end, serverKeysFalse);
-				//TraceEvent(SevDebug, "ChangeCachedRangeSetEnd2").detail("EndKey", sysRange.end.toString());
 			}
 			wait(tr.commit());
-			//TraceEvent(SevDebug, "ChangeCachedRangeReturn");
 			return Void();
 		} catch (Error& e) {
 			state Error err = e;

@@ -32,7 +32,7 @@ const KeyRangeRef systemKeys(systemKeysPrefix, LiteralStringRef("\xff\xff") );
 const KeyRangeRef nonMetadataSystemKeys(LiteralStringRef("\xff\x02"), LiteralStringRef("\xff\x03"));
 const KeyRangeRef allKeys = KeyRangeRef(normalKeys.begin, systemKeys.end);
 const KeyRef afterAllKeys = LiteralStringRef("\xff\xff\x00");
-const KeyRangeRef specialKeys = KeyRangeRef(LiteralStringRef("\xff\xff"), LiteralStringRef("\xff\xff\xff\xff"));
+const KeyRangeRef specialKeys = KeyRangeRef(LiteralStringRef("\xff\xff"), LiteralStringRef("\xff\xff\xff"));
 
 // keyServersKeys.contains(k) iff k.startsWith(keyServersPrefix)
 const KeyRangeRef keyServersKeys( LiteralStringRef("\xff/keyServers/"), LiteralStringRef("\xff/keyServers0") );
@@ -110,8 +110,8 @@ void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& v
 	std::sort(dest.begin(), dest.end());
 }
 
-const KeyRef conflictingKeysPrefix = LiteralStringRef("/transaction/conflicting_keys/");
-const Key conflictingKeysAbsolutePrefix = conflictingKeysPrefix.withPrefix(specialKeys.begin);
+const KeyRangeRef conflictingKeysRange = KeyRangeRef(LiteralStringRef("\xff\xff/transaction/conflicting_keys/"),
+                                                     LiteralStringRef("\xff\xff/transaction/conflicting_keys/\xff"));
 const ValueRef conflictingKeysTrue = LiteralStringRef("1");
 const ValueRef conflictingKeysFalse = LiteralStringRef("0");
 

@@ -74,6 +74,7 @@ struct StorageServerInterface {
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ), isCacheServer(false) {}
 	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ), isCacheServer(false) {}
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
+	NetworkAddress stableAddress() const { return getValue.getEndpoint().getStableAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return getValue.getEndpoint().addresses.secondaryAddress; }
 	UID id() const { return uniqueID; }
 	std::string toString() const { return id().shortString(); }
@@ -398,12 +399,14 @@ struct GetStorageMetricsReply {
 	StorageMetrics available;
 	StorageMetrics capacity;
 	double bytesInputRate;
+	int64_t versionLag;
+	double lastUpdate;
 
 	GetStorageMetricsReply() : bytesInputRate(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, load, available, capacity, bytesInputRate);
+		serializer(ar, load, available, capacity, bytesInputRate, versionLag, lastUpdate);
 	}
 };
 

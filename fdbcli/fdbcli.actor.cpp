@@ -525,6 +525,11 @@ void initHelp() {
 	helpMap["getversion"] =
 	    CommandHelp("getversion", "Fetch the current read version",
 	                "Displays the current read version of the database or currently running transaction.");
+	helpMap["advanceversion"] = CommandHelp(
+	    "advanceversion <VERSION>", "Force the cluster to recover at the specified version",
+	    "Forces the cluster to recover at the specified version. If the specified version is larger than the current "
+	    "version of the cluster, the cluster version is advanced "
+	    "to the specified version via a forced recovery.");
 	helpMap["reset"] = CommandHelp(
 		"reset",
 		"reset the current transaction",
@@ -3213,6 +3218,23 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					} else {
 						Version v = wait(makeInterruptable(getTransaction(db, tr, options, intrans)->getReadVersion()));
 						printf("%ld\n", v);
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "advanceversion")) {
+					if (tokens.size() != 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						Version v;
+						int n = 0;
+						if (sscanf(tokens[1].toString().c_str(), "%ld%n", &v, &n) != 1 || n != tokens[1].size()) {
+							printUsage(tokens[0]);
+							is_error = true;
+						} else {
+							wait(makeInterruptable(advanceVersion(db, v)));
+						}
 					}
 					continue;
 				}

@@ -884,7 +884,6 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 			++data->counters.rowsQueried;
 			resultSize = v.get().size();
 			data->counters.bytesQueried += resultSize;
-			//TraceEvent(SevDebug, "SSGetValueQPresent", data->thisServerID).detail("ResultSize",resultSize).detail("Version", version).detail("ReqKey",req.key).detail("Value",v);
 		}
 		else {
 			++data->counters.emptyQueries;
@@ -1332,8 +1331,6 @@ KeyRange getShardKeyRange( StorageServer* data, const KeySelectorRef& sel )
 // Returns largest range such that the shard state isReadable and selectorInRange(sel, range) or wrong_shard_server if no such range exists
 {
 	auto i = sel.isBackward() ? data->shards.rangeContainingKeyBefore( sel.getKey() ) : data->shards.rangeContaining( sel.getKey() );
-	//if (sel.getKey().startsWith(storageCacheServersPrefix))
-	//	TraceEvent("SSGetShardKeyRange", data->thisServerID).detail("SelKey", sel.getKey());
 	if (!i->value()->isReadable()) throw wrong_shard_server();
 	ASSERT( selectorInRange(sel, i->range()) );
 	return i->range();
@@ -1769,7 +1766,6 @@ void applyMutation( StorageServer *self, MutationRef const& m, Arena& arena, Sto
 	self->metrics.notify(m.param1, metrics);
 
 	if (m.type == MutationRef::SetValue) {
-		//TraceEvent("ApplyMutation", self->thisServerID).detail("Mutation", m.toString()).detail("Version", data.latestVersion);
 		auto prev = data.atLatest().lastLessOrEqual(m.param1);
 		if (prev && prev->isClearTo() && prev->getEndKey() > m.param1) {
 			ASSERT( prev.key() <= m.param1 );
@@ -2489,17 +2485,12 @@ public:
 		}
 
 		if (m.param1.startsWith( systemKeys.end )) {
-			if (m.param1.startsWith( storageCacheServersPrefix))
-				TraceEvent(SevDebug, "SSApplyMutation", data->thisServerID).detail("Mutation", m.toString());
 			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix))
 				applyPrivateCacheData( data, m);
 			else {
-				//TraceEvent("PrivateData", data->thisServerID).detail("Mutation", m.toString()).detail("Version", ver);
 				applyPrivateData( data, m );
 			}
 		} else {
-			if (m.param1.startsWith( storageCacheServersPrefix))
-				TraceEvent(SevDebug, "SSSplitMutation", data->thisServerID).detail("Mutation", m.toString());
 			// FIXME: enable when debugMutation is active
 			//for(auto m = changes[c].mutations.begin(); m; ++m) {
 			//	debugMutation("SSUpdateMutation", changes[c].version, *m);
@@ -2585,17 +2576,14 @@ private:
 	}
 
 	void applyPrivateCacheData( StorageServer* data, MutationRef const& m ) {
-		TraceEvent(SevDebug, "SSPrivateCacheMutation", data->thisServerID).detail("Mutation", m.toString());
+		//TraceEvent(SevDebug, "SSPrivateCacheMutation", data->thisServerID).detail("Mutation", m.toString());
 
 		if (processedCacheStartKey) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
 			ASSERT((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix));
 			KeyRangeRef keys( cacheStartKey.removePrefix(systemKeys.begin).removePrefix( storageCachePrefix ),
 							  m.param1.removePrefix(systemKeys.begin).removePrefix( storageCachePrefix ));
-			TraceEvent(SevDebug, "SSPrivateCacheMutationInsert", data->thisServerID).detail("Begin", keys.begin).detail("End", keys.end);
 			data->cachedRangeMap.insert(keys, true);
-			//TraceEvent(SevDebug, "SSPrivateCacheMutation", data->thisServerID).detail("Begin", keys.begin).detail("End", keys.end);
-			//fprintf(stderr, "applyPrivateCacheData : begin: %s, end: %s\n", printable(keys.begin).c_str(), printable(keys.end).c_str());
 
 			//Figure out the affected shard ranges and maintain the cached key-range information in the in-memory map
 			// TODO revisit- we are not splitting the cached ranges based on shards as of now.
@@ -3512,7 +3500,7 @@ ACTOR Future<Void> metricsCore( StorageServer* self, StorageServerInterface ssi 
 			}
 			when (GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
 				StorageBytes sb = self->storage.getStorageBytes();
-				self->metrics.getStorageMetrics( req, sb, self->counters.bytesInput.getRate() );
+				self->metrics.getStorageMetrics( req, sb, self->counters.bytesInput.getRate(), self->versionLag, self->lastUpdate );
 			}
 			when (wait(doPollMetrics) ) {
 				self->metrics.poll();
@@ -3789,9 +3777,9 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 
 	loop {
 		state Future<Void> infoChanged = self->db->onChange();
-		state Reference<ProxyInfo> proxies( new ProxyInfo(self->db->get().client.proxies, self->db->get().myLocality) );
+		state Reference<ProxyInfo> proxies( new ProxyInfo(self->db->get().client.proxies) );
 		choose {
-			when( GetStorageServerRejoinInfoReply _rep = wait( proxies->size() ? loadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()) ) : Never() ) ) {
+			when( GetStorageServerRejoinInfoReply _rep = wait( proxies->size() ? basicLoadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()) ) : Never() ) ) {
 				state GetStorageServerRejoinInfoReply rep = _rep;
 				try {
 					tr.reset();

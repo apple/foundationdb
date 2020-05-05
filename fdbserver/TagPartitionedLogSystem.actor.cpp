@@ -189,6 +189,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	bool remoteLogsWrittenToCoreState;
 	bool hasRemoteServers;
 	AsyncTrigger backupWorkerChanged;
+	std::set<UID> removedBackupWorkers; // Workers that are removed before setting them.
 
 	Optional<Version> recoverAt;
 	Optional<Version> recoveredAt;
@@ -1402,6 +1403,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		LogEpoch logsetEpoch = this->epoch;
 		oldestBackupEpoch = this->epoch;
 		for (const auto& reply : replies) {
+			if (removedBackupWorkers.count(reply.interf.id()) > 0) {
+				removedBackupWorkers.erase(reply.interf.id());
+				continue;
+			}
 			Reference<AsyncVar<OptionalInterface<BackupInterface>>> worker(new AsyncVar<OptionalInterface<BackupInterface>>(OptionalInterface<BackupInterface>(reply.interf)));
 			if (reply.backupEpoch != logsetEpoch) {
 				// find the logset from oldLogData
@@ -1411,6 +1416,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				ASSERT(logset.isValid());
 			}
 			logset->backupWorkers.push_back(worker);
+			TraceEvent("AddBackupWorker", dbgid)
+			    .detail("Epoch", logsetEpoch)
+			    .detail("BackupWorkerID", reply.interf.id());
 		}
 		TraceEvent("SetOldestBackupEpoch", dbgid).detail("Epoch", oldestBackupEpoch);
 		backupWorkerChanged.trigger();
@@ -1437,6 +1445,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 			}
 			backupWorkerChanged.trigger();
+		} else {
+			removedBackupWorkers.insert(req.workerUID);
 		}
 
 		TraceEvent("RemoveBackupWorker", dbgid)

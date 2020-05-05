@@ -664,7 +664,6 @@ KeyRange getCachedKeyRange( StorageCacheData* data, const KeySelectorRef& sel )
 	auto i = sel.isBackward() ? data->cachedRangeMap.rangeContainingKeyBefore( sel.getKey() ) :
 		data->cachedRangeMap.rangeContaining( sel.getKey() );
 
-	//TraceEvent(SevDebug, "SCGetCachedKeyRange", data->thisServerID).detail("SelKey", sel.getKey()).detail("Begin", i->range().begin).detail("End", i->range().end).detail("Value", i->value()->debugDescribeState());
 	if (i->value()->notAssigned())
 		throw wrong_shard_server();
 	else if (!i->value()->isReadable())
@@ -706,16 +705,13 @@ ACTOR Future<Void> getKeyValues( StorageCacheData* data, GetKeyValuesRequest req
 
 		state KeyRange cachedKeyRange = getCachedKeyRange( data, req.begin );
 
-		//TraceEvent(SevDebug, "SCGetKeyValues1", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
-		//	detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end);
-
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storagecache.getKeyValues.AfterVersion");
 		//.detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end);
 
 		if ( !selectorInRange(req.end, cachedKeyRange) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == cachedKeyRange.end) ) {
-			TraceEvent(SevDebug, "WrongCacheRangeServer1", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
-			detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end).detail("In", "getKeyValues>checkShardExtents");
+			//TraceEvent(SevDebug, "WrongCacheRangeServer1", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
+			//detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end).detail("In", "getKeyValues>checkShardExtents");
 			throw wrong_shard_server();
 		}
 
@@ -735,9 +731,9 @@ ACTOR Future<Void> getKeyValues( StorageCacheData* data, GetKeyValuesRequest req
 			// We could detect when offset1 takes us off the beginning of the database or offset2 takes us off the end, and return a clipped range rather
 			// than an error (since that is what the NativeAPI.getRange will do anyway via its "slow path"), but we would have to add some flags to the response
 			// to encode whether we went off the beginning and the end, since it needs that information.
-			TraceEvent(SevDebug, "WrongCacheRangeServer2", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
-			detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end).detail("In", "getKeyValues>checkOffsets").
-			detail("BeginKey", begin).detail("EndKey", end).detail("BeginOffset", offset1).detail("EndOffset", offset2);
+			//TraceEvent(SevDebug, "WrongCacheRangeServer2", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
+			//detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end).detail("In", "getKeyValues>checkOffsets").
+			//detail("BeginKey", begin).detail("EndKey", end).detail("BeginOffset", offset1).detail("EndOffset", offset2);
 			throw wrong_shard_server();
 		}
 		//TraceEvent(SevDebug, "SCGetKeyValues", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
@@ -826,8 +822,8 @@ ACTOR Future<Void> getKey( StorageCacheData* data, GetKeyRequest req ) {
 		req.reply.send(reply);
 	}
 	catch (Error& e) {
-		if (e.code() == error_code_wrong_shard_server) TraceEvent("SCWrongCacheRangeServer").detail("In","getKey");
-		if (e.code() == error_code_future_version) TraceEvent("SCColdCacheRangeServer").detail("In","getKey");
+		//if (e.code() == error_code_wrong_shard_server) TraceEvent("SCWrongCacheRangeServer").detail("In","getKey");
+		//if (e.code() == error_code_future_version) TraceEvent("SCColdCacheRangeServer").detail("In","getKey");
 		if(!canReplyWith(e))
 			throw;
 		req.reply.sendError(e);
@@ -1598,7 +1594,7 @@ public:
 		}
 
 		if (m.param1.startsWith( systemKeys.end )) {
-			TraceEvent("SCPrivateData", data->thisServerID).detail("Mutation", m.toString()).detail("Version", ver);
+			//TraceEvent("SCPrivateData", data->thisServerID).detail("Mutation", m.toString()).detail("Version", ver);
 			applyPrivateCacheData( data, m );
 		} else {
 			// FIXME: enable when debugMutation is active
@@ -1624,7 +1620,7 @@ private:
 	// that this cache server is responsible for
 	// TODO Revisit during failure handling. Might we loose some private mutations?
 	void applyPrivateCacheData( StorageCacheData* data, MutationRef const& m ) {
-		TraceEvent(SevDebug, "SCPrivateCacheMutation", data->thisServerID).detail("Mutation", m.toString());
+		//TraceEvent(SevDebug, "SCPrivateCacheMutation", data->thisServerID).detail("Mutation", m.toString());
 
 		if (processedCacheStartKey) {
 			// we expect changes in pairs, [begin,end). This mutation is for end key of the range
@@ -1737,9 +1733,6 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 			}
 		}
 		try {
-			//TraceEvent("Versions", data->thisServerID).detail("CursorVersion", cursor->version().version).detail("PoppedVer", cursor->popped()).
-			//	detail("CursorMaxKnownVersion", cursor->getMaxKnownVersion());
-
 			// If the popped version is greater than our last version, we need to clear the cache
 			if (cursor->version().version <= cursor->popped())
 				throw please_reboot();
@@ -1771,12 +1764,10 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 						cloneReader >> lpm;
 						dbgLastMessageWasProtocol = true;
 						cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
-						//TraceEvent(SevDebug, "SCReadingLPM", data->thisServerID).detail("Mutation", lpm.toString());
 					}
 					else {
 						MutationRef msg;
 						cloneReader >> msg;
-						//TraceEvent(SevDebug, "SCReadingLog", data->thisServerID).detail("Mutation", msg.toString());
 
 						if (firstMutation && msg.param1.startsWith(systemKeys.end))
 							hasPrivateData = true;
@@ -1814,7 +1805,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 				state int mutationNum = 0;
 				state VerUpdateRef* pUpdate = &fii.changes[changeNum];
 				for(; mutationNum < pUpdate->mutations.size(); mutationNum++) {
-					TraceEvent("InjectedChanges", data->thisServerID).detail("Version", pUpdate->version);
+					//TraceEvent("InjectedChanges", data->thisServerID).detail("Version", pUpdate->version);
 					applyMutation(&updater, data, pUpdate->mutations[mutationNum], pUpdate->version);
 					mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 					injectedChanges = true;
@@ -1834,7 +1825,6 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 			for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
 				ArenaReader& reader = *cloneCursor2->reader();
 
-				//TraceEvent("Versions", data->thisServerID).detail("CursorVersion", cloneCursor2->version().version).detail("Ver", ver).detail("DataVersion", data->version.get()).detail("TLogVersion", data->lastTLogVersion);
 				if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
 					++data->counters.updateVersions;
 					ver = cloneCursor2->version().version;
@@ -1846,7 +1836,6 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 					// TODO should we store the logProtocol?
 					data->logProtocol = reader.protocolVersion();
 					cloneCursor2->setProtocolVersion(data->logProtocol);
-					//TraceEvent(SevDebug, "SCReadingLPM", data->thisServerID).detail("Mutation", lpm.toString()).detail("LogProtocolVersion", data->logProtocol.version());
 				}
 				else {
 					MutationRef msg;
@@ -1927,9 +1916,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 
 			validate(data);
 
-			//TraceEvent("SCUpdatedVersions", data->thisServerID).detail("DataVersion", data->version.get()).detail("Version", ver);
 			data->lastTLogVersion = cloneCursor2->getMaxKnownVersion();
-			//TraceEvent("CursorVersions", data->thisServerID).detail("CursorVersion", cursor->version().version).detail("CloneCurserVersion", cloneCursor2->version().version).detail("TLogVersion", data->lastTLogVersion);
 			cursor->advanceTo( cloneCursor2->version() );
 			data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
 			if(cursor->version().version >= data->lastTLogVersion) {
