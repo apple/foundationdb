@@ -23,6 +23,7 @@
 #pragma once
 
 #include "flow/flow.h"
+#include <random>
 
 struct opTimer {
 	double start = timer();
@@ -78,6 +79,8 @@ struct MapHarness {
 
 template <typename T, typename F>
 void treeBenchmark(T& tree, F generateKey) {
+	std::mt19937_64 urng(deterministicRandom()->randomUInt32());
+
 	using key = typename T::key_type;
 
 	int keyCount = 1000000;
@@ -105,7 +108,7 @@ void treeBenchmark(T& tree, F generateKey) {
 
 	timedRun("find (sorted)", keys, [&tree](key const& k) { ASSERT(tree.find(k) != tree.end()); });
 
-	std::random_shuffle(keys.begin(), keys.end());
+	std::shuffle(keys.begin(), keys.end(), urng);
 
 	timedRun("erase", keys, [&tree](key const& k) { tree.erase(k); });
 	ASSERT(tree.begin() == tree.end());

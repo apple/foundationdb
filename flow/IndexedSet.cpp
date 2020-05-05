@@ -252,6 +252,8 @@ TEST_CASE("performance/map/int/StdMap") {
 }
 
 TEST_CASE("performance/flow/IndexedSet/integers") {
+	std::mt19937_64 urng(deterministicRandom()->randomUInt32());
+
 	std::vector<int> x;
 	for (int i = 0; i<1000000; i++)
 		x.push_back(deterministicRandom()->randomInt(0, 10000000));
@@ -306,7 +308,7 @@ TEST_CASE("performance/flow/IndexedSet/integers") {
 
 	is.testonly_assertBalanced();
 
-	std::random_shuffle(x.begin(), x.end());
+	std::shuffle(x.begin(), x.end(), urng);
 	start = timer();
 	for (int i = 0; i<x.size(); i++) {
 		is.erase(x[i]);
