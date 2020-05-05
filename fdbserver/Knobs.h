@@ -137,7 +137,8 @@ public:
 	int64_t SHARD_MAX_BYTES_PER_KSEC, // Shards with more than this bandwidth will be split immediately
 		SHARD_MIN_BYTES_PER_KSEC,     // Shards with more than this bandwidth will not be merged
 		SHARD_SPLIT_BYTES_PER_KSEC;   // When splitting a shard, it is split into pieces with less than this bandwidth
-	int64_t SHARD_MAX_BYTES_READ_PER_KSEC;
+	double SHARD_MAX_READ_DENSITY_RATIO;
+	int64_t SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS;
 	double SHARD_MAX_BYTES_READ_PER_KSEC_JITTER;
 	double STORAGE_METRIC_TIMEOUT;
 	double METRIC_DELAY;
@@ -440,6 +441,7 @@ public:
 	int64_t IOPS_UNITS_PER_SAMPLE;
 	int64_t BANDWIDTH_UNITS_PER_SAMPLE;
 	int64_t BYTES_READ_UNITS_PER_SAMPLE;
+	int64_t READ_HOT_SUB_RANGE_CHUNK_SIZE;
 	int64_t EMPTY_READ_PENALTY;
 	bool READ_SAMPLING_ENABLED;
 
