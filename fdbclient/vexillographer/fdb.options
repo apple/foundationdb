@@ -263,7 +263,7 @@ description is not currently required but encouraged.
     <Option name="report_conflicting_keys" code="712"
             description="The transaction can retrieve keys that are conflicting with other transactions." />
     <Option name="special_key_space_relaxed" code="713"
-            description="Allow cross-module range reads in the special key space. Users who set this option should be ready for new modules to be added, which may have different behaviors than the modules they're currently reading. For example, a new module might block or return an error." />
+            description="By default, the special key space will only allow users to read from exactly one module. Use this option to allow reading from zero or more modules. Users who set this option should be prepared for new modules, which may have different behaviors than the modules they're currently reading. For example, a new module might block or return an error." />
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

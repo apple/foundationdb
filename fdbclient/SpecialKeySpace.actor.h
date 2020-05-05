@@ -71,12 +71,15 @@ public:
 	}
 
 private:
-	ACTOR Future<Optional<Value>> getActor(SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeyRef key);
+	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeyRef key);
 
-	ACTOR Future<Standalone<RangeResultRef>> getRangeAggregationActor(SpecialKeySpace* pks,
-	                                                                  Reference<ReadYourWritesTransaction> ryw,
-	                                                                  KeySelector begin, KeySelector end,
-	                                                                  GetRangeLimits limits, bool reverse);
+	ACTOR static Future<Standalone<RangeResultRef>> checkModuleFound(SpecialKeySpace* pks,
+	                                                          Reference<ReadYourWritesTransaction> ryw,
+	                                                          KeySelector begin, KeySelector end, GetRangeLimits limits,
+	                                                          bool reverse);
+	ACTOR static Future<std::pair<Standalone<RangeResultRef>, Optional<SpecialKeyRangeBaseImpl*>>> getRangeAggregationActor(
+	    SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeySelector begin, KeySelector end,
+	    GetRangeLimits limits, bool reverse);
 
 	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
 	KeyRange range;
