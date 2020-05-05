@@ -169,7 +169,7 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
                                                    Database cx, UID applierID, int batchIndex) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int count = 0;
-	state double size = 0;
+	state double numOps = 0;
 	wait(delay(delayTime + deterministicRandom()->random01() * delayTime));
 	TraceEvent("FastRestoreApplierClearRangeMutationsStart", applierID)
 	    .detail("BatchIndex", batchIndex)
@@ -184,6 +184,13 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 				debugFRMutation("FastRestoreApplierApplyClearRangeMutation", 0,
 				                MutationRef(MutationRef::ClearRange, range.begin, range.end));
 				tr->clear(range);
+				++numOps;
+				if (numOps > 10000) {
+					TraceEvent(SevWarnAlways, "FastRestoreApplierClearRangeMutationsTooManyClearsInTxn")
+					    .detail("Clears", numOps)
+					    .detail("Ranges", ranges.size())
+					    .suppressFor(10.0);
+				}
 			}
 			wait(tr->commit());
 			break;
