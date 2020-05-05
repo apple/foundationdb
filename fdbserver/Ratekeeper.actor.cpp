@@ -201,7 +201,14 @@ public:
 		ASSERT(!tpsRate.present() || tpsRate.get() >= 0);
 		ASSERT(!expiration.present() || expiration.get() > now());
 
-		auto &throttle = autoThrottledTags[tag];
+		auto itr = autoThrottledTags.find(tag);
+		if(itr == autoThrottledTags.end() && autoThrottledTags.size() >= SERVER_KNOBS->MAX_AUTO_THROTTLED_TRANSACTION_TAGS) {
+			TEST(true); // Reached auto-throttle limit
+			return Optional<double>();
+		}
+
+		itr = autoThrottledTags.try_emplace(itr, tag);
+		auto &throttle = itr->second;
 
 		if(!tpsRate.present()) {
 			if(now() <= throttle.created + SERVER_KNOBS->AUTO_TAG_THROTTLE_START_AGGREGATION_TIME) {
@@ -765,9 +772,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 }
 
 void tryAutoThrottleTag(RatekeeperData *self, StorageQueueInfo const& ss, RkTagThrottleCollection& throttledTags) {
-	if(ss.busiestTag.present() && ss.busiestTagFractionalBusyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS
-	   && ss.busiestTagRate > SERVER_KNOBS->MIN_TAG_COST && throttledTags.autoThrottleCount() <= SERVER_KNOBS->MAX_AUTO_THROTTLED_TRANSACTION_TAGS) 
-	{
+	if(ss.busiestTag.present() && ss.busiestTagFractionalBusyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && ss.busiestTagRate > SERVER_KNOBS->MIN_TAG_COST) {
 		TEST(true); // Transaction tag auto-throttled
 
 		Optional<double> clientRate = self->throttledTags.autoThrottleTag(ss.busiestTag.get(), ss.busiestTagFractionalBusyness);

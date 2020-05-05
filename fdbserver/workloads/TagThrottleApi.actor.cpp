@@ -108,17 +108,22 @@ struct TagThrottleApiWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> getTags(Database cx, std::map<std::pair<TransactionTag, TransactionPriority>, TagThrottleInfo> const* manuallyThrottledTags) { 
-		state double tagLimit = SERVER_KNOBS->MAX_AUTO_THROTTLED_TRANSACTION_TAGS + SERVER_KNOBS->MAX_MANUAL_THROTTLED_TRANSACTION_TAGS + 1;
-		std::vector<TagThrottleInfo> tags = wait(ThrottleApi::getThrottledTags(cx, tagLimit));
-		ASSERT(tags.size() < tagLimit);
+		std::vector<TagThrottleInfo> tags = wait(ThrottleApi::getThrottledTags(cx, CLIENT_KNOBS->TOO_MANY));
 
 		int manualThrottledTags = 0;
+		int activeAutoThrottledTags = 0;
 		for(auto &tag : tags) {
 			if(!tag.autoThrottled) {
 				ASSERT(manuallyThrottledTags->find(std::make_pair(tag.tag, tag.priority)) != manuallyThrottledTags->end());
 				++manualThrottledTags;
 			}
+			else if(tag.expirationTime > now()) {
+				++activeAutoThrottledTags;
+			}
 		}
+
+		ASSERT(manualThrottledTags <= SERVER_KNOBS->MAX_MANUAL_THROTTLED_TRANSACTION_TAGS);
+		ASSERT(activeAutoThrottledTags <= SERVER_KNOBS->MAX_AUTO_THROTTLED_TRANSACTION_TAGS);
 
 		int minManualThrottledTags = 0;
 		int maxManualThrottledTags = 0;
