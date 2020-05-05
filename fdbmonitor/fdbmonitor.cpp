@@ -77,9 +77,7 @@
 #include "flow/SimpleOpt.h"
 #include "SimpleIni.h"
 
-#if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "versions.h"
-#endif
+#include "fdbclient/IncludeVersions.h"
 
 #ifdef __linux__
 typedef fd_set* fdb_fd_set;

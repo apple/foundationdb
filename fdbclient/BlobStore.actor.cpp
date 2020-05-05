@@ -27,7 +27,7 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include "fdbrpc/IAsyncFile.h"
-#include "rapidxml/rapidxml.hpp"
+#include "fdbclient/rapidxml/rapidxml.hpp"
 #include "flow/actorcompiler.h" // has to be last include
 
 using namespace rapidxml;
