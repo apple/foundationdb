@@ -281,13 +281,16 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 				ongoingReplies.clear();
 				ongoingRepliesIndex.clear();
 				for (int i = 0; i < cmdReplies.size(); ++i) {
-					// TraceEvent(SevDebug, "FastRestoreGetBatchReplies")
-					//     .detail("Requests", requests.size())
-					//     .detail("OutstandingReplies", oustandingReplies)
-					//     .detail("ReplyIndex", i)
-					//     .detail("ReplyReady", cmdReplies[i].isReady())
-					//     .detail("RequestNode", requests[i].first)
-					//     .detail("Request", requests[i].second.toString());
+					if (SERVER_KNOBS->FASTRESTORE_REQBATCH_LOG) {
+						TraceEvent(SevInfo, "FastRestoreGetBatchReplies")
+						    .detail("Requests", requests.size())
+						    .detail("OutstandingReplies", oustandingReplies)
+						    .detail("ReplyIndex", i)
+						    .detail("ReplyIsReady", cmdReplies[i].isReady())
+						    .detail("ReplyIsError", cmdReplies[i].isError())
+						    .detail("RequestNode", requests[i].first)
+						    .detail("Request", requests[i].second.toString());
+					}
 					if (!cmdReplies[i].isReady()) { // still wait for reply
 						ongoingReplies.push_back(cmdReplies[i]);
 						ongoingRepliesIndex.push_back(i);
