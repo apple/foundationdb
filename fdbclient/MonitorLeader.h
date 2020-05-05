@@ -66,7 +66,6 @@ void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::ve
 #endif
 
 Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Value>> const& outSerializedLeaderInfo );
-Future<Void> monitorLeaderInternal2( ClientCoordinators const& coords, Reference<AsyncVar<Optional<LeaderInfo>>> const& leaderInfo );
 
 template <class LeaderInterface>
 struct LeaderDeserializer {

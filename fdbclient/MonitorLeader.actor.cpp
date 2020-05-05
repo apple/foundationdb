@@ -528,45 +528,6 @@ ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connF
 	}
 }
 
-// Leader is the process that will be elected by coordinators as the cluster controller
-ACTOR Future<ClientCoordinators> monitorLeaderOneGeneration2( ClientCoordinators coordinators, Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo ) {
-	state AsyncTrigger nomineeChange;
-	state std::vector<Optional<LeaderInfo>> nominees;
-	state Future<Void> allActors;
-
-	nominees.resize(coordinators.clientLeaderServers.size());
-
-	std::vector<Future<Void>> actors;
-	// Ask all coordinators if the worker is considered as a leader (leader nominee) by the coordinator.
-	for(int i=0; i<coordinators.clientLeaderServers.size(); i++)
-		actors.push_back( monitorNominee( coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i] ) );
-	allActors = waitForAll(actors);
-
-	loop {
-		Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
-		TraceEvent("MonitorLeaderChange").detail("NewLeader", leader.present() ? leader.get().first.changeID : UID(1,1));
-		if (leader.present()) {
-			if( leader.get().first.forward ) {
-				ClusterConnectionString ccs = ClusterConnectionString(leader.get().first.serializedInfo.toString());
-				TraceEvent("MonitorLeaderForwarding").detail("NewConnStr", leader.get().first.serializedInfo.toString()).detail("OldConnStr", coordinators.ccf->getConnectionString().toString());
-				return ClientCoordinators( ccs.clusterKey(), ccs.coordinators() );
-			}
-
-			if (leader.get().second) {
-				leaderInfo->set( leader.get().first );
-			}
-		}
-		wait( nomineeChange.onTrigger() || allActors );
-	}
-}
-
-ACTOR Future<Void> monitorLeaderInternal2( ClientCoordinators coords, Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo ) {
-	loop {
-		ClientCoordinators _coords = wait( monitorLeaderOneGeneration2( coords, leaderInfo ) );
-		coords = _coords;
-	}
-}
-
 ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> serializedInfo,
 													Reference<AsyncVar<Optional<ClusterInterface>>> outKnownLeader) {
 	state Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader(
