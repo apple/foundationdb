@@ -499,6 +499,57 @@ void DatabaseContext::registerSpecialKeySpaceModule(std::unique_ptr<SpecialKeyRa
 	specialKeySpaceModules.push_back(std::move(module));
 }
 
+ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces(Reference<ClusterConnectionFile> clusterFile);
+ACTOR Future<Optional<Value>> getJSON(Database db);
+
+struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeBaseImpl {
+	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+	                                            KeyRangeRef kr) const override {
+		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
+			return map(getWorkerInterfaces(ryw->getDatabase()->getConnectionFile()),
+			           [kr = KeyRange(kr.removePrefix(getKeyRange().begin)),
+			            prefix = Key(getKeyRange().begin)](const Standalone<RangeResultRef>& in) {
+				           auto begin = std::lower_bound(in.begin(), in.end(), kr.begin, KeyValueRef::OrderByKey{});
+				           auto end = kr.end == StringRef()
+				                          ? in.end()
+				                          : std::upper_bound(in.begin(), in.end(), kr.end, KeyValueRef::OrderByKey{});
+				           Standalone<RangeResultRef> result;
+				           result.reserve(result.arena(), end - begin);
+				           for (auto iter = begin; iter < end; ++iter) {
+					           result.push_back_deep(result.arena(),
+					                                 KeyValueRef(iter->key.withPrefix(prefix), iter->value));
+				           }
+				           return result;
+			           });
+		} else {
+			return Standalone<RangeResultRef>();
+		}
+	}
+
+	explicit WorkerInterfacesSpecialKeyImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+};
+
+struct SingleSpecialKeyImpl : SpecialKeyRangeBaseImpl {
+	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+	                                            KeyRangeRef kr) const override {
+		return map(f(ryw), [k = k](Optional<Value> v) {
+			Standalone<RangeResultRef> result;
+			if (v.present()) {
+				result.push_back_deep(result.arena(), KeyValueRef(k, v.get()));
+			}
+			return result;
+		});
+	}
+
+	SingleSpecialKeyImpl(KeyRef k,
+	                     const std::function<Future<Optional<Value>>(Reference<ReadYourWritesTransaction>)>& f)
+	  : SpecialKeyRangeBaseImpl(singleKeyRange(k)), k(k), f(f) {}
+
+private:
+	Key k;
+	std::function<Future<Optional<Value>>(Reference<ReadYourWritesTransaction>)> f;
+};
+
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
                                  TaskPriority taskID, LocalityData const& clientLocality,
@@ -556,6 +607,45 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		registerSpecialKeySpaceModule(std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
 		registerSpecialKeySpaceModule(std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
 		registerSpecialKeySpaceModule(std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
+		registerSpecialKeySpaceModule(std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
+		    LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
+		registerSpecialKeySpaceModule(std::make_unique<SingleSpecialKeyImpl>(
+		    LiteralStringRef("\xff\xff/status/json"),
+		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
+			    if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
+				    return getJSON(ryw->getDatabase());
+			    } else {
+				    return Optional<Value>();
+			    }
+		    }));
+		registerSpecialKeySpaceModule(std::make_unique<SingleSpecialKeyImpl>(
+		    LiteralStringRef("\xff\xff/cluster_file_path"),
+		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
+			    try {
+				    if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
+					    Optional<Value> output = StringRef(ryw->getDatabase()->getConnectionFile()->getFilename());
+					    return output;
+				    }
+			    } catch (Error& e) {
+				    return e;
+			    }
+			    return Optional<Value>();
+		    }));
+
+		registerSpecialKeySpaceModule(std::make_unique<SingleSpecialKeyImpl>(
+		    LiteralStringRef("\xff\xff/connection_string"),
+		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
+			    try {
+				    if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
+					    Reference<ClusterConnectionFile> f = ryw->getDatabase()->getConnectionFile();
+					    Optional<Value> output = StringRef(f->getConnectionString().toString());
+					    return output;
+				    }
+			    } catch (Error& e) {
+				    return e;
+			    }
+			    return Optional<Value>();
+		    }));
 	}
 }
 
