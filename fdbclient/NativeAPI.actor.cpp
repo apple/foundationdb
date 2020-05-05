@@ -549,9 +549,11 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
-	specialKeySpace->registerKeyRange(conflictingKeysRange, cKImpl.get());
-	specialKeySpace->registerKeyRange(readConflictRangeKeysRange, rCRImpl.get());
-	specialKeySpace->registerKeyRange(writeConflictRangeKeysRange, wCRImpl.get());
+	if (apiVersionAtLeast(630)) {
+		specialKeySpace->registerKeyRange(conflictingKeysRange, cKImpl.get());
+		specialKeySpace->registerKeyRange(readConflictRangeKeysRange, rCRImpl.get());
+		specialKeySpace->registerKeyRange(writeConflictRangeKeysRange, wCRImpl.get());
+	}
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc), 

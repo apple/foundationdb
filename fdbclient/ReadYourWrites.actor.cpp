@@ -1247,7 +1247,7 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 	}
 
 	// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
-	if (specialKeys.contains(key))
+	if (getDatabase()->apiVersionAtLeast(630) && specialKeys.contains(key))
 		return getDatabase()->specialKeySpace->get(Reference<ReadYourWritesTransaction>::addRef(this), key);
 
 	if(checkUsedDuringCommit()) {
@@ -1302,7 +1302,8 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	}
 
 	// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
-	if (specialKeys.contains(begin.getKey()) && end.getKey() <= specialKeys.end)
+	if (getDatabase()->apiVersionAtLeast(630) && specialKeys.contains(begin.getKey()) &&
+	    end.getKey() <= specialKeys.end)
 		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin, end,
 		                                                limits, reverse);
 
