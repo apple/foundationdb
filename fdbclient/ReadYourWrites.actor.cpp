@@ -1995,6 +1995,9 @@ void ReadYourWritesTransaction::setOptionImpl( FDBTransactionOptions::Option opt
 
 			options.disableUsedDuringCommitProtection = true;
 			break;
+		case FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED:
+			validateOptionValue(value, false);
+			options.specialKeySpaceRelaxed = true;
 		default:
 			break;
 	}

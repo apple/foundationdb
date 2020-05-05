@@ -37,6 +37,7 @@ struct ReadYourWritesTransactionOptions {
 	bool nextWriteDisableConflictRange : 1;
 	bool debugRetryLogging : 1;
 	bool disableUsedDuringCommitProtection : 1;
+	bool specialKeySpaceRelaxed : 1;
 	double timeoutInSeconds;
 	int maxRetries;
 	int snapshotRywEnabled;
@@ -143,6 +144,8 @@ public:
 	Standalone<RangeResultRef> getReadConflictRangeIntersecting(KeyRangeRef kr);
 	// Read from the special key space writeConflictRangeKeysRange
 	Standalone<RangeResultRef> getWriteConflictRangeIntersecting(KeyRangeRef kr);
+
+	bool specialKeySpaceRelaxed() const { return options.specialKeySpaceRelaxed; }
 
 private:
 	friend class RYWImpl;

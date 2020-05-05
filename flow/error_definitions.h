@@ -148,6 +148,7 @@ ERROR( address_in_use, 2105, "Local address in use" )
 ERROR( invalid_local_address, 2106, "Invalid local address" )
 ERROR( tls_error, 2107, "TLS error" )
 ERROR( unsupported_operation, 2108, "Operation is not supported" )
+ERROR(special_keys_cross_module_read, 2109, "Special key space range read crosses modules. Refer to the `special_key_space_relaxed' transaction option for more details.")
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

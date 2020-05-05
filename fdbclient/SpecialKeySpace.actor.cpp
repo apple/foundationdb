@@ -82,6 +82,14 @@ ACTOR Future<Void> SpecialKeyRangeBaseImpl::normalizeKeySelectorActor(const Spec
 	return Void();
 }
 
+void checkCrossModuleRead(const Reference<ReadYourWritesTransaction>& ryw, SpecialKeyRangeBaseImpl* module,
+                          Optional<SpecialKeyRangeBaseImpl*>& lastModuleRead) {
+	if (ryw && !ryw->specialKeySpaceRelaxed() && lastModuleRead.present() && lastModuleRead.get() != module) {
+		throw special_keys_cross_module_read();
+	}
+	lastModuleRead = module;
+}
+
 ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationActor(
     SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeySelector begin, KeySelector end,
     GetRangeLimits limits, bool reverse) {
@@ -91,14 +99,17 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter;
 	state int actualBeginOffset;
 	state int actualEndOffset;
+	state Optional<SpecialKeyRangeBaseImpl*> lastModuleRead;
 
 	// make sure offset == 1
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator beginIter =
 	    pks->impls.rangeContaining(begin.getKey());
 	while ((begin.offset < 1 && beginIter != pks->impls.ranges().begin()) ||
 	       (begin.offset > 1 && beginIter != pks->impls.ranges().end())) {
-		if (beginIter->value() != nullptr)
+		if (beginIter->value() != nullptr) {
+			checkCrossModuleRead(ryw, beginIter->value(), lastModuleRead);
 			wait(beginIter->value()->normalizeKeySelectorActor(beginIter->value(), ryw, &begin));
+		}
 		begin.offset < 1 ? --beginIter : ++beginIter;
 	}
 
@@ -123,7 +134,10 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	    pks->impls.rangeContaining(end.getKey());
 	while ((end.offset < 1 && endIter != pks->impls.ranges().begin()) ||
 	       (end.offset > 1 && endIter != pks->impls.ranges().end())) {
-		if (endIter->value() != nullptr) wait(endIter->value()->normalizeKeySelectorActor(endIter->value(), ryw, &end));
+		if (endIter->value() != nullptr) {
+			checkCrossModuleRead(ryw, endIter->value(), lastModuleRead);
+			wait(endIter->value()->normalizeKeySelectorActor(endIter->value(), ryw, &end));
+		}
 		end.offset < 1 ? --endIter : ++endIter;
 	}
 
@@ -167,6 +181,7 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
+			checkCrossModuleRead(ryw, iter->value(), lastModuleRead);
 			Standalone<RangeResultRef> pairs = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
 			result.arena().dependsOn(pairs.arena());
 			// limits handler
@@ -189,6 +204,7 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
+			checkCrossModuleRead(ryw, iter->value(), lastModuleRead);
 			Standalone<RangeResultRef> pairs = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
 			result.arena().dependsOn(pairs.arena());
 			// limits handler
