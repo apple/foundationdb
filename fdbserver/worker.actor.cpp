@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <tuple>
 #include <boost/lexical_cast.hpp>
 
 #include "flow/ActorCollection.h"
@@ -1557,35 +1558,12 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	}
 }
 
-/*
-ACTOR Future<Void> monitorLeaderWithDelayedCandidacy( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, Future<Void> recoveredDiskFiles, LocalityData locality ) {
-	state Future<Void> leader = monitorLeader( connFile, currentCC );
-	state Future<Void> timeout = delay( SERVER_KNOBS->DELAY_STORAGE_CANDIDACY_SECONDS );
-	state Future<Void> failed = Never(); 
-	state Future<Void> leader = Never();
-
-	loop choose {
-		when( wait(currentCC->onChange()) ) {
-			failed = IFailureMonitor::failureMonitor().onFailed( currentCC->get().get().getWorkers.getEndpoint() );
-			timeout = Never();
-		}
-		when ( wait(timeout) ) {
-			leader = clusterController( connFile, currentCC , asyncPriorityInfo, recoveredDiskFiles, locality );
-		}
-		when ( wait(failed) ) {
-			timeout = delay( SERVER_KNOBS->DELAY_STORAGE_CANDIDACY_SECONDS );
-		}
-	}
-
-	return Void();
-}
-*/
-
-ACTOR Future<ClusterConnectionString> monitorLeaderRemotelyOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> result ) {
+ACTOR Future<std::pair<ClusterConnectionString, UID>> monitorLeaderRemotelyOneGeneration( Reference<ClusterConnectionFile> connFile, UID changeID, Reference<AsyncVar<Value>> result ) {
 	state ClusterConnectionString ccf = connFile->getConnectionString();
 	state ElectionResultRequest request;
 	request.key = ccf.clusterKey();
 	request.coordinators = ccf.coordinators();
+	request.knownLeader = changeID;
 	state int index = 0;
 
 	loop {
@@ -1594,9 +1572,11 @@ ACTOR Future<ClusterConnectionString> monitorLeaderRemotelyOneGeneration( Refere
 		try {
 			ErrorOr<Optional<LeaderInfo>> leader = wait( interf.electionResult.tryGetReply( request ) );
 			if (leader.isError()) throw leader.getError();
+			if (!leader.get().present()) continue;
 
+			request.knownLeader = leader.get().get().changeID;
 			if( leader.get().get().forward ) {
-				return ClusterConnectionString( leader.get().get().serializedInfo.toString() );
+				return std::make_pair(ClusterConnectionString( leader.get().get().serializedInfo.toString() ), request.knownLeader);
 			}
 
 			if (leader.get().get().serializedInfo.size()) {
@@ -1613,9 +1593,12 @@ ACTOR Future<ClusterConnectionString> monitorLeaderRemotelyOneGeneration( Refere
 	}
 }
 
-ACTOR Future<Void> monitorLeaderRemotelyInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo ) {
+ACTOR Future<Void> monitorLeaderRemotelyInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedInterface ) {
+	state UID changeID = UID(-1, -1);
+	state ClusterConnectionString ccs;
 	loop {
-		ClusterConnectionString ccs = wait( monitorLeaderRemotelyOneGeneration( connFile, outSerializedLeaderInfo ) );
+		std::pair<ClusterConnectionString, UID> result	= wait( monitorLeaderRemotelyOneGeneration( connFile, changeID, outSerializedInterface ) );
+		std::tie(ccs, changeID) = result;
 		connFile->setConnectionString(ccs);
 	}
 }
@@ -1627,6 +1610,28 @@ Future<Void> monitorLeaderRemotely(Reference<ClusterConnectionFile> const& connF
 	Reference<AsyncVar<Value>> serializedInfo( new AsyncVar<Value> );
 	Future<Void> m = monitorLeaderRemotelyInternal( connFile, serializedInfo );
 	return m || deserializer( serializedInfo, outKnownLeader );
+}
+
+ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, Future<Void> recoveredDiskFiles, LocalityData locality ) {
+	state Future<Void> monitor = monitorLeaderRemotely( connFile, currentCC );
+	state Future<Void> timeout = delay( SERVER_KNOBS->DELAY_STORAGE_CANDIDACY_SECONDS );
+	state Future<Void> leader = Never();
+	state Future<Void> failed = Never();
+
+	loop choose {
+		when( wait(currentCC->onChange()) ) {
+			failed = IFailureMonitor::failureMonitor().onFailed( currentCC->get().get().getWorkers.getEndpoint() );
+			timeout = Never();
+		}
+		when ( wait(timeout) ) {
+			wait( clusterController( connFile, currentCC , asyncPriorityInfo, recoveredDiskFiles, locality ) );
+			return Void();
+		}
+		when ( wait(failed) ) {
+			failed = Never();
+			timeout = delay( SERVER_KNOBS->DELAY_STORAGE_CANDIDACY_SECONDS );
+		}
+	}
 }
 
 ACTOR Future<Void> fdbd(
@@ -1673,8 +1678,7 @@ ACTOR Future<Void> fdbd(
 		if (processClass == ProcessClass::TesterClass) {
 			actors.push_back( reportErrors( monitorLeader( connFile, cc ), "ClusterController" ) );
 		} else if (processClass == ProcessClass::StorageClass && SERVER_KNOBS->DELAY_STORAGE_CANDIDACY_SECONDS) {
-			actors.push_back( reportErrors( monitorLeaderRemotely( connFile, cc ), "ClusterController" ) );
-			//monitorLeaderWithDelayedCandidacy( connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController" ) );
+			actors.push_back( reportErrors( monitorLeaderRemotelyWithDelayedCandidacy( connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController" ) );
 		} else {
 			actors.push_back( reportErrors( clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
 		}

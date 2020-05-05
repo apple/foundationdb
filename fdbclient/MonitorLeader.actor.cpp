@@ -680,7 +680,7 @@ ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterC
 	}
 }
 
-ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddress> coordinators, ClientData* clientData ) {
+ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddress> coordinators, ClientData* clientData, Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo ) {
 	state vector< ClientLeaderRegInterface > clientLeaderServers;
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
@@ -719,6 +719,9 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 				ClusterControllerClientInterface res;
 				reader.deserialize(res);
 				knownLeader->set(res);
+				if (leader.get().second) {
+					leaderInfo->set(leader.get().first);
+				}
 			}
 		}
 		wait( nomineeChange.onTrigger() || allActors );

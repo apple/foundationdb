@@ -238,13 +238,27 @@ ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<Asyn
 	return Void();
 }
 
-ACTOR Future<Void> remoteMonitorLeader( Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader, ReplyPromise<Optional<LeaderInfo>> reply ) {
-	loop {
-		wait( currentElectedLeader->onChange() );
-		if (currentElectedLeader->get().present())
-			break;
+ACTOR Future<Void> remoteMonitorLeader( int* clientCount, Reference<AsyncVar<bool>> hasConnectedClients, Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader, ElectionResultRequest req ) {
+	if (currentElectedLeader->get().present() && req.knownLeader != currentElectedLeader->get().get().changeID) {
+		req.reply.send( currentElectedLeader->get() );
 	}
-	reply.send( currentElectedLeader->get() );
+
+	++(*clientCount);
+	hasConnectedClients->set(true);
+
+	while (!currentElectedLeader->get().present() || req.knownLeader == currentElectedLeader->get().get().changeID) {
+		choose {
+		  when (wait( yieldedFuture(currentElectedLeader->onChange()) ) ) {}
+			when (wait( delayJittered( SERVER_KNOBS->CLIENT_REGISTER_INTERVAL ) )) { break; }
+		}
+	}
+
+	req.reply.send( currentElectedLeader->get() );
+
+	if(--(*clientCount) == 0) {
+		hasConnectedClients->set(false);
+	}
+
 	return Void();
 }
 
@@ -264,26 +278,22 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	state int clientCount = 0;
 	state Reference<AsyncVar<bool>> hasConnectedClients = Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) );
 	state ActorCollection actors(false);
-	state Future<Void> clientLeaderMon;
+	state Future<Void> leaderMon;
 	state AsyncVar<Value> leaderInterface;
 	state Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader = Reference<AsyncVar<Optional<LeaderInfo>>>( new AsyncVar<Optional<LeaderInfo>>() );
-	state Future<Void> fullLeaderMon;
 
 	loop choose {
-		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) { if(!clientLeaderMon.isValid()) {
-				clientLeaderMon = monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData);
+		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {
+			if(!leaderMon.isValid()) {
+				leaderMon = monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
 			}
 			actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
 		}
 		when ( ElectionResultRequest req = waitNext( interf.electionResult.getFuture() ) ) {
-			if (!fullLeaderMon.isValid()) {
-				fullLeaderMon = monitorLeaderInternal2( ClientCoordinators(req.key, req.coordinators), currentElectedLeader );
+			if(!leaderMon.isValid()) {
+				leaderMon = monitorLeaderForProxies(req.key, req.coordinators, &clientData, currentElectedLeader);
 			}
-			if (currentElectedLeader->get().present() && currentElectedLeader->get().get().changeID != req.knownLeader) {
-				req.reply.send( currentElectedLeader->get() );
-			} else {
-				actors.add( remoteMonitorLeader( currentElectedLeader, req.reply ) );
-			}
+			actors.add( remoteMonitorLeader( &clientCount, hasConnectedClients, currentElectedLeader, req ) );
 		}
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
 			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
