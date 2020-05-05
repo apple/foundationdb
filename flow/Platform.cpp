@@ -26,6 +26,7 @@
 #endif
 
 #include "flow/Platform.h"
+#include "flow/Platform.actor.h"
 #include "flow/Arena.h"
 
 #include "flow/Trace.h"
@@ -2348,105 +2349,14 @@ std::string getUserHomeDirectory() {
 #endif
 }
 
-#ifdef _WIN32
-#define FILE_ATTRIBUTE_DATA DWORD
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-#define FILE_ATTRIBUTE_DATA mode_t
-#else
-#error Port me!
-#endif
-
-bool acceptFile( FILE_ATTRIBUTE_DATA fileAttributes, std::string name, std::string extension ) {
-#ifdef _WIN32
-	return !(fileAttributes & FILE_ATTRIBUTE_DIRECTORY) && StringRef(name).endsWith(extension);
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-	return S_ISREG(fileAttributes) && StringRef(name).endsWith(extension);
-#else
-	#error Port me!
-#endif
-}
-
-bool acceptDirectory( FILE_ATTRIBUTE_DATA fileAttributes, std::string name, std::string extension ) {
-#ifdef _WIN32
-	return (fileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-	return S_ISDIR(fileAttributes);
-#else
-	#error Port me!
-#endif
-}
-
-std::vector<std::string> findFiles( std::string const& directory, std::string const& extension,
-		bool (*accept_file)(FILE_ATTRIBUTE_DATA, std::string, std::string)) {
-	INJECT_FAULT( platform_error, "findFiles" );
-	std::vector<std::string> result;
-
-#ifdef _WIN32
-	WIN32_FIND_DATA fd;
-	HANDLE h = FindFirstFile( (directory + "/*" + extension).c_str(), &fd );
-	if (h == INVALID_HANDLE_VALUE) {
-		if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) {
-			TraceEvent(SevError, "FindFirstFile").detail("Directory", directory).detail("Extension", extension).GetLastError();
-			throw platform_error();
-		}
-	} else {
-		while (true) {
-			std::string name = fd.cFileName;
-			if ((*accept_file)(fd.dwFileAttributes, name, extension)) {
-				result.push_back( name );
-			}
-			if (!FindNextFile( h, &fd ))
-				break;
-		}
-		if (GetLastError() != ERROR_NO_MORE_FILES) {
-			TraceEvent(SevError, "FindNextFile").detail("Directory", directory).detail("Extension", extension).GetLastError();
-			FindClose(h);
-			throw platform_error();
-		}
-		FindClose(h);
-	}
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-	DIR *dip;
-
-	if ((dip = opendir(directory.c_str())) != NULL) {
-		struct dirent *dit;
-		while ((dit = readdir(dip)) != NULL) {
-			std::string name(dit->d_name);
-			struct stat buf;
-			if (stat(joinPath(directory, name).c_str(), &buf)) {
-				bool isError = errno != ENOENT;
-				TraceEvent(isError ? SevError : SevWarn, "StatFailed")
-					.detail("Directory", directory)
-					.detail("Extension", extension)
-					.detail("Name", name)
-					.GetLastError();
-				if( isError )
-					throw platform_error();
-				else
-					continue;
-			}
-			if ((*accept_file)(buf.st_mode, name, extension))
-				result.push_back( name );
-		}
-
-		closedir(dip);
-	}
-#else
-	#error Port me!
-#endif
-	std::sort(result.begin(), result.end());
-	return result;
-}
-
-
 namespace platform {
 
 std::vector<std::string> listFiles( std::string const& directory, std::string const& extension ) {
-	return findFiles( directory, extension, &acceptFile );
+	return findFiles( directory, extension, false /* directoryOnly */, false ).get();
 }
 
 std::vector<std::string> listDirectories( std::string const& directory ) {
-	return findFiles( directory, "", &acceptDirectory );
+	return findFiles( directory, "", true /* directoryOnly */, false ).get();
 }
 
 void findFilesRecursively(std::string path, std::vector<std::string> &out) {

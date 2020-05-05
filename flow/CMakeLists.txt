@@ -39,6 +39,8 @@ set(FLOW_SRCS
   Net2.actor.cpp
   Net2Packet.cpp
   Net2Packet.h
+  Platform.actor.cpp
+  Platform.actor.h
   Platform.cpp
   Platform.h
   Profiler.actor.cpp
