@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "IRandom.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SpecialKeySpace.actor.h"

@@ -20,7 +20,6 @@
 
 #ifndef FDBCLIENT_READYOURWRITES_H
 #define FDBCLIENT_READYOURWRITES_H
-#include "FDBTypes.h"
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
