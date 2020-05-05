@@ -187,10 +187,10 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 				++numOps;
 				if (numOps >= SERVER_KNOBS->FASTRESTORE_TXN_CLEAR_MAX) {
 					TraceEvent(SevWarnAlways, "FastRestoreApplierClearRangeMutationsTooManyClearsInTxn")
+					    .suppressFor(1.0)
 					    .detail("Clears", numOps)
 					    .detail("Ranges", ranges.size())
-					    .detail("Range", range.toString())
-					    .suppressFor(1.0);
+					    .detail("Range", range.toString());
 				}
 			}
 			wait(tr->commit());
