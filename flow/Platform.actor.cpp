@@ -110,7 +110,7 @@ ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string 
                                                   bool directoryOnly, bool async) {
 	INJECT_FAULT( platform_error, "findFiles" );
 	state vector<std::string> result;
-    state double timer = now();
+    state int64_t tsc_begin = __rdtsc();
 
 
 	state WIN32_FIND_DATA fd;
@@ -129,10 +129,9 @@ ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string 
 			}
 			if (!FindNextFile( h, &fd ))
 				break;
-            if (async && now() - timer > FLOW_KNOBS->TSC_YIELD_TIME) {
-                TraceEvent("ListFilesYield");
+            if (async && __rdtsc() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME) {
                 wait( yield() );
-                timer = now();
+                tsc_begin = __rdtsc();
             }
 
 		}
@@ -161,7 +160,7 @@ ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string 
                                                   bool directoryOnly, bool async) {
 	INJECT_FAULT( platform_error, "findFiles" );
 	state vector<std::string> result;
-    state double timer = now();
+    state int64_t tsc_begin = __rdtsc();
 
 	state DIR *dip = NULL;
 
@@ -191,10 +190,10 @@ ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string 
                 (!directoryOnly && acceptFile(buf.st_mode, name, extension))) {
 				result.push_back( name );
             }
-            if (async && now() - timer > FLOW_KNOBS->TSC_YIELD_TIME) {
-                TraceEvent("ListFilesYield");
+
+            if (async && __rdtsc() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME) {
                 wait( yield() );
-                timer = now();
+                tsc_begin = __rdtsc();
             }
 		}
 
