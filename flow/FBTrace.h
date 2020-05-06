@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "FileIdentifier.h"
+#include "flow/FileIdentifier.h"
 #include "flow/FastRef.h"
 #include "flow/ObjectSerializer.h"
 #include <cstddef>
@@ -43,21 +43,39 @@ struct ChunkAllocator {
 	void deallocate(pointer ptr, size_t) { ChunkAllocatorImpl::free(ptr); }
 };
 
+template <class Object>
+class ChunkAllocated {
+public:
+	[[nodiscard]] static void* operator new(size_t s) {
+		if (s != sizeof(Object)) abort();
+		INSTRUMENT_ALLOCATE(typeid(Object).name());
+		void* p = ChunkAllocatorImpl::allocate(sizeof(Object));
+		return p;
+	}
+
+	static void operator delete(void* s) {
+		INSTRUMENT_RELEASE(typeid(Object).name());
+		ChunkAllocatorImpl::free(s);
+	}
+	// Redefine placement new so you can still use it
+	static void* operator new(size_t, void* p) { return p; }
+	static void operator delete(void*, void*) {}
+};
+
 class FBTraceImpl {
 	mutable std::atomic<unsigned> refCount = 1;
 
-protected:
+public:
 	virtual void write(ObjectWriter& writer) = 0;
 	virtual void read(ObjectReader& reader) = 0;
 	virtual void read(ArenaObjectReader& reader) = 0;
 
-public:
 	virtual ~FBTraceImpl();
 	virtual FileIdentifier getFileIdentifier() const = 0;
 	static void* operator new(std::size_t sz);
 	static void operator delete(void* ptr);
-	static void open(std::string const& directory, std::string const& processName, unsigned rollSize,
-	                 unsigned maxLogSize);
+	static void open(std::string const& directory, std::string const& processName, std::string const& basename,
+	                 unsigned rollSize, unsigned maxLogSize);
 	void addref() const;
 	void delref() const;
 

@@ -195,33 +195,6 @@ public:
 		}
 	};
 
-	struct IssuesList : ITraceLogIssuesReporter, ThreadSafeReferenceCounted<IssuesList> {
-		IssuesList(){};
-		void addIssue(std::string issue) override {
-			MutexHolder h(mutex);
-			issues.insert(issue);
-		}
-
-		void retrieveIssues(std::set<std::string>& out) override {
-			MutexHolder h(mutex);
-			for (auto const& i : issues) {
-				out.insert(i);
-			}
-		}
-
-		void resolveIssue(std::string issue) override {
-			MutexHolder h(mutex);
-			issues.erase(issue);
-		}
-
-		void addref() { ThreadSafeReferenceCounted<IssuesList>::addref(); }
-		void delref() { ThreadSafeReferenceCounted<IssuesList>::delref(); }
-
-	private:
-		Mutex mutex;
-		std::set<std::string> issues;
-	};
-
 	Reference<IssuesList> issues;
 
 	Reference<BarrierList> barriers;

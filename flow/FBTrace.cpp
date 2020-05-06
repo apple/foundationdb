@@ -19,11 +19,18 @@
  */
 
 #include "flow/FBTrace.h"
-#include "FastAlloc.h"
-#include "FileIdentifier.h"
-#include "Platform.h"
+#include "flow/FileTraceLogWriter.h"
+#include "flow/FastAlloc.h"
+#include "flow/FileIdentifier.h"
+#include "flow/IThreadPool.h"
+#include "flow/Platform.h"
+#include "flow/ThreadHelper.actor.h"
+#include "flow/Trace.h"
+#include "flow/network.h"
+#include "flow/serialize.h"
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -212,11 +219,92 @@ public:
 
 TheChunkAllocator chunkAllocator;
 
+template<class T, class U>
+struct ZeroEstimateAction : ChunkAllocated<U>, TypedAction<T, U> {
+	double getTimeEstimate() override { return 0; }
+};
+
+struct WriterThread : IThreadPoolReceiver {
+	Reference<ITraceLogWriter> logWriter;
+	unsigned rollsize;
+	explicit WriterThread(Reference<ITraceLogWriter> logWriter, unsigned rollsize)
+		: logWriter(logWriter), rollsize(rollsize)
+	{}
+	void init() override {}
+	struct Open : ZeroEstimateAction<WriterThread, Open> {};
+	void action(Open&) {
+		logWriter->open();
+	}
+	struct Close : ZeroEstimateAction<WriterThread, Close> {};
+	void action(Close&) {
+		logWriter->close();
+	}
+	struct Role : ZeroEstimateAction<WriterThread, Role> {};
+	void action(Role&) {
+		logWriter->roll();
+	}
+	struct Write : ZeroEstimateAction<WriterThread, Write> {
+		Reference<FBTraceImpl> msg;
+		explicit Write(Reference<FBTraceImpl> const& msg) : msg(msg) {}
+	};
+	void action(Write& w) {
+		ObjectWriter writer(Unversioned());
+		w.msg->write(writer);
+		logWriter->write(writer.toStringRef());
+	}
+};
+
+using namespace std::literals;
+
 struct FBTraceLog {
+	using Clock = std::chrono::steady_clock;
 	std::string directory;
 	std::string processName;
+	Reference<ITraceLogWriter> logWriter;
+	Reference<IThreadPool> writer;
+	Reference<IssuesList> issues;
+	Clock::time_point latestTrace;
+	bool opened = false;
 
-	void open(const std::string& directory, const std::string& processName, unsigned rollsize, unsigned maxLogSize) {
+	FBTraceLog() : issues(new IssuesList{}), latestTrace(Clock::now() - 1s) {}
+
+	void traceIssues() {
+		// we want to trace at most once per second
+		if (Clock::now() < (latestTrace + 1s)) {
+			return;
+		}
+		std::set<std::string> issueSet;
+		issues->retrieveIssues(issueSet);
+		onMainThread([&issueSet]() -> Future<Void> {
+			TraceEvent evt(SevError, "FBTraceHasIssues");
+			evt.detail("NumIssues", issueSet.size());
+			int cnt = 1;
+			for (auto const& s : issueSet) {
+				evt.detail(format("Issue%d", cnt++).c_str(), s);
+			}
+			return Void();
+		}).getBlocking();
+	}
+
+	void open(const std::string& directory, const std::string& processName, const std::string& basename,
+	          unsigned rollsize, unsigned maxLogsSize) {
+		if (g_network->isSimulated()) {
+			writer = Reference<IThreadPool>{ new DummyThreadPool{} };
+		} else {
+			writer = createGenericThreadPool();
+		}
+		logWriter = Reference<ITraceLogWriter>(new FileTraceLogWriter(
+		    directory, processName, basename, "fb", maxLogsSize, [this]() { traceIssues(); }, issues));
+		writer->addThread(new WriterThread{logWriter, rollsize});
+		writer->post(new WriterThread::Open{});
+		opened = true;
+	}
+
+	void write(Reference<FBTraceImpl> const& msg) {
+		if (!opened) {
+			return;
+		}
+		writer->post(new WriterThread::Write{msg});
 	}
 };
 
@@ -260,9 +348,11 @@ void FBTraceImpl::operator delete(void* ptr) {
 
 FBTraceImpl::~FBTraceImpl() {}
 
-void FBTraceImpl::open(const std::string& directory, const std::string& processName, unsigned rollsize,
-                       unsigned maxLogSize) {
-	g_fbTraceLog.open(directory, processName, rollsize, maxLogSize);
+void FBTraceImpl::open(const std::string& directory, const std::string& processName, const std::string& basename,
+                       unsigned rollsize, unsigned maxLogSize) {
+	g_fbTraceLog.open(directory, processName, basename, rollsize, maxLogSize);
 }
 
-void fbTraceImpl(Reference<FBTraceImpl> const& traceLine) {}
+void fbTraceImpl(Reference<FBTraceImpl> const& traceLine) {
+	g_fbTraceLog.write(traceLine);
+}

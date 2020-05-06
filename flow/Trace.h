@@ -512,11 +512,14 @@ private:
 	bool init( struct TraceInterval& );
 };
 
+class StringRef;
+
 struct ITraceLogWriter {
 	virtual void open() = 0;
 	virtual void roll() = 0;
 	virtual void close() = 0;
 	virtual void write(const std::string&) = 0;
+	virtual void write(const StringRef&) = 0;
 	virtual void sync() = 0;
 
 	virtual void addref() = 0;
@@ -534,6 +537,7 @@ struct ITraceLogFormatter {
 };
 
 struct ITraceLogIssuesReporter {
+	virtual ~ITraceLogIssuesReporter();
 	virtual void addIssue(std::string issue) = 0;
 	virtual void resolveIssue(std::string issue) = 0;
 
