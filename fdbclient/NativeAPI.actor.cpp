@@ -507,21 +507,17 @@ struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeBaseImpl {
 	                                            KeyRangeRef kr) const override {
 		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
 			Key prefix = Key(getKeyRange().begin);
-			return map(
-			    getWorkerInterfaces(ryw->getDatabase()->getConnectionFile()),
-			    [prefix = prefix, kr = KeyRange(kr)](const Standalone<RangeResultRef>& in) {
-				    auto begin = std::lower_bound(in.begin(), in.end(), kr.begin, [&](KeyValueRef x, KeyRef y) {
-					    return x.key.withPrefix(prefix) < y;
-				    });
-				    auto end = std::lower_bound(in.begin(), in.end(), kr.end,
-				                                [&](KeyValueRef x, KeyRef y) { return x.key.withPrefix(prefix) < y; });
-				    Standalone<RangeResultRef> result;
-				    result.reserve(result.arena(), end - begin);
-				    for (auto iter = begin; iter < end; ++iter) {
-					    result.push_back_deep(result.arena(), KeyValueRef(iter->key.withPrefix(prefix), iter->value));
-				    }
-				    return result;
-			    });
+			return map(getWorkerInterfaces(ryw->getDatabase()->getConnectionFile()),
+			           [prefix = prefix, kr = KeyRange(kr)](const Standalone<RangeResultRef>& in) {
+				           Standalone<RangeResultRef> result;
+				           for (const auto& [k_, v] : in) {
+					           auto k = k_.withPrefix(prefix);
+					           if (kr.contains(k)) result.push_back_deep(result.arena(), KeyValueRef(k, v));
+				           }
+
+				           std::sort(result.begin(), result.end(), KeyValueRef::OrderByKey{});
+				           return result;
+			           });
 		} else {
 			return Standalone<RangeResultRef>();
 		}
