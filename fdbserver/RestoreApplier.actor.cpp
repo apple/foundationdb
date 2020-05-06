@@ -113,6 +113,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	state NotifiedVersion& curMsgIndex = batchData->processedFileState[req.asset];
 
 	TraceEvent(SevInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
+	    .suppressFor(1.0)
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
 	    .detail("RestoreAssetMesssageIndex", curMsgIndex.get())
@@ -157,6 +158,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 	TraceEvent(SevInfo, "FastRestoreApplierPhaseReceiveMutationsDone", self->id())
+	    .suppressFor(1.0)
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
 	    .detail("ProcessedMessageIndex", curMsgIndex.get())

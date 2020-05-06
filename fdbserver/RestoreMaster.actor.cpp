@@ -317,7 +317,8 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 		TraceEvent("FastRestoreMasterDispatchVersionBatches")
 		    .detail("BatchIndex", batchIndex)
 		    .detail("BatchSize", versionBatch->size)
-		    .detail("RunningVersionBatches", self->runningVersionBatches.get());
+		    .detail("RunningVersionBatches", self->runningVersionBatches.get())
+		    .detail("VersionBatches", versionBatches.size());
 		self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
 		self->batchStatus[batchIndex] = Reference<MasterBatchStatus>(new MasterBatchStatus());
 		fBatches.push_back(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, *versionBatch));

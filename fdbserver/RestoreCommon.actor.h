@@ -283,6 +283,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 				for (int i = 0; i < cmdReplies.size(); ++i) {
 					if (SERVER_KNOBS->FASTRESTORE_REQBATCH_LOG) {
 						TraceEvent(SevInfo, "FastRestoreGetBatchReplies")
+						    .suppressFor(1.0)
 						    .detail("Requests", requests.size())
 						    .detail("OutstandingReplies", oustandingReplies)
 						    .detail("ReplyIndex", i)
@@ -296,6 +297,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 						ongoingRepliesIndex.push_back(i);
 					}
 				}
+				ASSERT(ongoingReplies.size() == oustandingReplies);
 				if (ongoingReplies.empty()) {
 					break;
 				} else {
@@ -359,7 +361,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 			// fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
 			TraceEvent(SevWarn, "FastRestoreSendBatchRequests").error(e);
 			for (auto& request : requests) {
-				TraceEvent(SevWarn, "FastRestoreLoader")
+				TraceEvent(SevWarn, "FastRestoreSendBatchRequests")
 				    .detail("SendBatchRequests", requests.size())
 				    .detail("RequestID", request.first)
 				    .detail("Request", request.second.toString());
