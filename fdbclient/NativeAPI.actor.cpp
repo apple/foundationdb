@@ -513,8 +513,8 @@ struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeBaseImpl {
 				    auto begin = std::lower_bound(in.begin(), in.end(), kr.begin, [&](KeyValueRef x, KeyRef y) {
 					    return x.key.withPrefix(prefix) < y;
 				    });
-				    auto end = std::upper_bound(in.begin(), in.end(), kr.end,
-				                                [&](KeyRef x, KeyValueRef y) { return x < y.key.withPrefix(prefix); });
+				    auto end = std::lower_bound(in.begin(), in.end(), kr.end,
+				                                [&](KeyValueRef x, KeyRef y) { return x.key.withPrefix(prefix) < y; });
 				    Standalone<RangeResultRef> result;
 				    result.reserve(result.arena(), end - begin);
 				    for (auto iter = begin; iter < end; ++iter) {
