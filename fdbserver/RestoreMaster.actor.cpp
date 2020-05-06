@@ -405,6 +405,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		++paramIdx;
 	}
 	TraceEvent(files->size() != paramIdx ? SevError : SevInfo, "FastRestoreMasterPhaseLoadFiles")
+	    .detail("BatchIndex", batchIndex)
 	    .detail("Files", files->size())
 	    .detail("LoadParams", paramIdx);
 
