@@ -55,6 +55,8 @@
 //    during an open trace event
 thread_local int g_allocation_tracing_disabled = 1;
 
+ITraceLogIssuesReporter::~ITraceLogIssuesReporter() {}
+
 struct SuppressionMap {
 	struct SuppressionInfo {
 		double endTime;
