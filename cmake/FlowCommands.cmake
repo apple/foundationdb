@@ -185,12 +185,12 @@ function(add_flow_target)
         if(WIN32)
           add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
             COMMAND $<TARGET_FILE:actorcompiler> "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags}
-            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" ${actor_exe}
             COMMENT "Compile actor: ${src}")
         else()
           add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
             COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags} > /dev/null
-            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" ${actor_exe}
             COMMENT "Compile actor: ${src}")
         endif()
       else()
@@ -237,5 +237,4 @@ function(add_flow_target)
       strip_debug_symbols(${AFT_NAME})
     endif()
   endif()
-  target_include_directories(${AFT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 endfunction()

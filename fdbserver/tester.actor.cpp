@@ -28,13 +28,13 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using namespace std;
@@ -1018,11 +1018,40 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 	return result;
 }
 
+ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                       LocalityData locality,
+                                       Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	// Initially most of the serverDBInfo is not known, but we know our locality right away
+	ServerDBInfo localInfo;
+	localInfo.myLocality = locality;
+	dbInfo->set(localInfo);
+
+	loop {
+		GetServerDBInfoRequest req;
+		req.knownServerInfoID = dbInfo->get().id;
+
+		choose {
+			when( ServerDBInfo _localInfo = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
+				ServerDBInfo localInfo = _localInfo;
+				TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
+				.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
+				.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
+
+				localInfo.myLocality = locality;
+				dbInfo->set(localInfo);
+			}
+			when( wait( ccInterface->onChange() ) ) {
+				if(ccInterface->get().present())
+					TraceEvent("GotCCInterfaceChange").detail("CCID", ccInterface->get().get().id()).detail("CCMachine", ccInterface->get().get().getWorkers.getEndpoint().getPrimaryAddress());
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc, Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector< TesterInterface > testers, vector<TestSpec> tests, StringRef startingConfiguration, LocalityData locality ) {
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo> );
-	state Future<Void> ccMonitor =
-	    monitorServerDBInfo(cc, Reference<ClusterConnectionFile>(), LocalityData(), dbInfo); // FIXME: locality
+	state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
 
 	state bool useDB = false;
 	state bool waitForQuiescenceBegin = false;
@@ -1193,7 +1222,7 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 	if (at == TEST_HERE) {
 		Reference<AsyncVar<ServerDBInfo>> db( new AsyncVar<ServerDBInfo> );
 		vector<TesterInterface> iTesters(1);
-		actors.push_back( reportErrors(monitorServerDBInfo( cc, Reference<ClusterConnectionFile>(), LocalityData(), db ), "MonitorServerDBInfo") );  // FIXME: Locality
+		actors.push_back( reportErrors(monitorServerDBInfo( cc, LocalityData(), db ), "MonitorServerDBInfo") );  // FIXME: Locality
 		actors.push_back( reportErrors(testerServerCore( iTesters[0], connFile, db, locality ), "TesterServerCore") );
 		tests = runTests( cc, ci, iTesters, testSpecs, startingConfiguration, locality );
 	} else {

@@ -20,7 +20,7 @@ cd ${tmpdir}
 echo
 
 cat <<EOF >> Dockerfile
-FROM foundationdb/foundationdb-build:latest
+FROM foundationdb/foundationdb-dev:0.11.1
 RUN yum install -y sudo
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 RUN groupadd -g 1100 sudo
@@ -76,6 +76,7 @@ sudo docker run --rm `# delete (temporary) image after return` \\
                 --cap-add=SYS_PTRACE \\
                 --security-opt seccomp=unconfined \\
                 -v "${HOME}:${HOME}" `# Mount home directory` \\
+                -w="\$(pwd)" \\
                 \${ccache_args} \\
                 ${image} "\$@"
 EOF

@@ -33,7 +33,6 @@
 #include "fdbserver/TesterInterface.actor.h"  // for poisson()
 #include "fdbserver/IDiskQueue.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -49,6 +48,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
+#if defined(__linux__) || defined(__FreeBSD__)
 #ifdef USE_GPERFTOOLS
 #include "gperftools/profiler.h"
 #include "gperftools/heap-profiler.h"
@@ -68,6 +69,44 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 # define KV_STORE(filename,uid) keyValueStoreMemory(filename,uid)
 #endif
 
+ACTOR Future<std::vector<Endpoint>> tryDBInfoBroadcast(RequestStream<UpdateServerDBInfoRequest> stream, UpdateServerDBInfoRequest req) {
+	ErrorOr<std::vector<Endpoint>> rep = wait( stream.getReplyUnlessFailedFor(req, SERVER_KNOBS->DBINFO_FAILED_DELAY, 0) );
+	if(rep.present()) {
+		return rep.get();
+	}
+	req.broadcastInfo.push_back(stream.getEndpoint());
+	return req.broadcastInfo;
+}
+
+ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req, int sendAmount, Optional<Endpoint> sender, bool sendReply) {
+	state std::vector<Future<std::vector<Endpoint>>> replies;
+	state ReplyPromise<std::vector<Endpoint>> reply = req.reply;
+	resetReply( req );
+	int currentStream = 0;
+	std::vector<Endpoint> broadcastEndpoints = req.broadcastInfo;
+	for(int i = 0; i < sendAmount && currentStream < broadcastEndpoints.size(); i++) {
+		std::vector<Endpoint> endpoints;
+		RequestStream<UpdateServerDBInfoRequest> cur(broadcastEndpoints[currentStream++]);
+		while(currentStream < broadcastEndpoints.size()*(i+1)/sendAmount) {
+			endpoints.push_back(broadcastEndpoints[currentStream++]);
+		}
+		req.broadcastInfo = endpoints;
+		replies.push_back( tryDBInfoBroadcast( cur, req ) );
+		resetReply( req );
+	}
+	wait( waitForAll(replies) );
+	std::vector<Endpoint> notUpdated;
+	if(sender.present()) {
+		notUpdated.push_back(sender.get());
+	}
+	for(auto& it : replies) {
+		notUpdated.insert(notUpdated.end(), it.get().begin(), it.get().end());
+	}
+	if(sendReply) {
+		reply.send(notUpdated);
+	}
+	return notUpdated;
+}
 
 ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
 	state std::vector<UID> lastProxyUIDs;
@@ -80,25 +119,9 @@ ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> d
 	}
 }
 
-ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
-	state std::vector<UID> lastProxyUIDs;
-	state std::vector<MasterProxyInterface> lastProxies;
-	loop {
-		ClientDBInfo ni = db->get().read().client;
-		shrinkProxyList(ni, lastProxyUIDs, lastProxies);
-		info->set( ni );
-		wait( db->onChange() );
-	}
-}
-
 Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, TaskPriority taskID, bool enableLocalityLoadBalance, bool lockAware ) {
 	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
 	return DatabaseContext::create( info, extractClientInfo(db, info), enableLocalityLoadBalance ? db->get().myLocality : LocalityData(), enableLocalityLoadBalance, taskID, lockAware );
-}
-
-Database openDBOnServer( Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> const& db, TaskPriority taskID, bool enableLocalityLoadBalance, bool lockAware ) {
-	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
-	return DatabaseContext::create( info, extractClientInfo(db, info), enableLocalityLoadBalance ? db->get().read().myLocality : LocalityData(), enableLocalityLoadBalance, taskID, lockAware );
 }
 
 struct ErrorInfo {
@@ -413,7 +436,9 @@ ACTOR Future<Void> registrationClient(
 		Reference<AsyncVar<bool>> degraded,
 		PromiseStream< ErrorInfo > errors,
 		LocalityData locality,
-		Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+		Reference<AsyncVar<ServerDBInfo>> dbInfo,
+		Reference<ClusterConnectionFile> connFile,
+		Reference<AsyncVar<std::set<std::string>>> issues) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply (requiring us to re-register)
 	// The registration request piggybacks optional distributor interface if it exists.
@@ -422,8 +447,41 @@ ACTOR Future<Void> registrationClient(
 	state Reference<AsyncVar<Optional<std::pair<uint16_t,StorageServerInterface>>>> scInterf( new AsyncVar<Optional<std::pair<uint16_t,StorageServerInterface>>>() );
 	state Future<Void> cacheProcessFuture;
 	state Future<Void> cacheErrorsFuture;
+	state Optional<double> incorrectTime;
 	loop {
 		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), scInterf->get(), degraded->get());
+		for (auto const& i : issues->get()) {
+			request.issues.push_back_deep(request.issues.arena(), i);
+		}
+		ClusterConnectionString fileConnectionString;
+		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
+			request.issues.push_back_deep(request.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
+			std::string connectionString = connFile->getConnectionString().toString();
+			if(!incorrectTime.present()) {
+				incorrectTime = now();
+			}
+			if(connFile->canGetFilename()) {
+				// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing the file right before us)
+				TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
+					.detail("Filename", connFile->getFilename())
+					.detail("ConnectionStringFromFile", fileConnectionString.toString())
+					.detail("CurrentConnectionString", connectionString);
+			}
+		}
+		else {
+			incorrectTime = Optional<double>();
+		}
+
+		auto peers = FlowTransport::transport().getIncompatiblePeers();
+		for(auto it = peers->begin(); it != peers->end();) {
+			if( now() - it->second.second > FLOW_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING ) {
+				request.incompatiblePeers.push_back(it->first);
+				it = peers->erase(it);
+			} else {
+				it++;
+			}
+		}
+
 		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply(request) ) : Never();
 		choose {
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
@@ -448,6 +506,7 @@ ACTOR Future<Void> registrationClient(
 					DUMPTOKEN(recruited.getShardState);
 					DUMPTOKEN(recruited.waitMetrics);
 					DUMPTOKEN(recruited.splitMetrics);
+					DUMPTOKEN(recruited.getReadHotRanges);
 					DUMPTOKEN(recruited.getStorageMetrics);
 					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.getQueuingMetrics);
@@ -464,11 +523,13 @@ ACTOR Future<Void> registrationClient(
 			when ( wait( rkInterf->onChange() ) ) {}
 			when ( wait( scInterf->onChange() ) ) {}
 			when ( wait( degraded->onChange() ) ) {}
+			when ( wait( FlowTransport::transport().onIncompatibleChanged() ) ) {}
+			when ( wait( issues->onChange() ) ) {}
 		}
 	}
 }
 
-#if defined(__linux__) && defined(USE_GPERFTOOLS)
+#if (defined(__linux__) || defined(__FreeBSD__)) && defined(USE_GPERFTOOLS)
 //A set of threads that should be profiled
 std::set<std::thread::id> profiledThreads;
 
@@ -480,7 +541,7 @@ int filter_in_thread(void *arg) {
 
 //Enables the calling thread to be profiled
 void registerThreadForProfiling() {
-#if defined(__linux__) && defined(USE_GPERFTOOLS)
+#if (defined(__linux__) || defined(__FreeBSD__)) && defined(USE_GPERFTOOLS)
 	//Not sure if this is actually needed, but a call to backtrace was advised here:
 	//http://groups.google.com/group/google-perftools/browse_thread/thread/0dfd74532e038eb8/2686d9f24ac4365f?pli=1
 	profiledThreads.insert(std::this_thread::get_id());
@@ -494,7 +555,7 @@ void registerThreadForProfiling() {
 void updateCpuProfiler(ProfilerRequest req) {
 	switch (req.type) {
 	case ProfilerRequest::Type::GPROF:
-#if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
+#if (defined(__linux__) || defined(__FreeBSD__)) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
 		switch (req.action) {
 		case ProfilerRequest::Action::ENABLE: {
 			const char *path = (const char*)req.outputFile.begin();
@@ -635,6 +696,7 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 		DUMPTOKEN(recruited.getShardState);
 		DUMPTOKEN(recruited.waitMetrics);
 		DUMPTOKEN(recruited.splitMetrics);
+		DUMPTOKEN(recruited.getReadHotRanges);
 		DUMPTOKEN(recruited.getStorageMetrics);
 		DUMPTOKEN(recruited.waitFailure);
 		DUMPTOKEN(recruited.getQueuingMetrics);
@@ -749,7 +811,10 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFol
 	return Void();
 }
 
-ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::set<std::string>>>> issues) {
+// TODO: `issues` is right now only updated by `monitorTraceLogIssues` and thus is being `set` on every update.
+// It could be changed to `insert` and `trigger` later if we want to use it as a generic way for the caller of this
+// function to report issues to cluster controller.
+ACTOR Future<Void> monitorTraceLogIssues(Reference<AsyncVar<std::set<std::string>>> issues) {
 	state bool pingTimeout = false;
 	loop {
 		wait(delay(SERVER_KNOBS->TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS));
@@ -764,87 +829,14 @@ ACTOR Future<Void> monitorTraceLogIssues(Optional<Reference<AsyncVar<std::set<st
 				throw;
 			}
 		}
-		if (issues.present()) {
-			std::set<std::string> _issues;
-			retriveTraceLogIssues(_issues);
-			if (pingTimeout) {
-				// Ping trace log writer thread timeout.
-				_issues.insert("trace_log_writer_thread_unresponsive");
-				pingTimeout = false;
-			}
-			issues.get()->set(_issues);
+		std::set<std::string> _issues;
+		retriveTraceLogIssues(_issues);
+		if (pingTimeout) {
+			// Ping trace log writer thread timeout.
+			_issues.insert("trace_log_writer_thread_unresponsive");
+			pingTimeout = false;
 		}
-	}
-}
-
-// TODO: `issues` is right now only updated by `monitorTraceLogIssues` and thus is being `set` on every update.
-// It could be changed to `insert` and `trigger` later if we want to use it as a generic way for the caller of this
-// function to report issues to cluster controller.
-ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
-                                       Reference<ClusterConnectionFile> connFile, LocalityData locality,
-                                       Reference<AsyncVar<ServerDBInfo>> dbInfo,
-                                       Optional<Reference<AsyncVar<std::set<std::string>>>> issues) {
-	// Initially most of the serverDBInfo is not known, but we know our locality right away
-	ServerDBInfo localInfo;
-	localInfo.myLocality = locality;
-	dbInfo->set(localInfo);
-
-	state Optional<double> incorrectTime;
-	loop {
-		GetServerDBInfoRequest req;
-		req.knownServerInfoID = dbInfo->get().id;
-
-		if (issues.present()) {
-			for (auto const& i : issues.get()->get()) {
-				req.issues.push_back_deep(req.issues.arena(), i);
-			}
-		}
-
-		ClusterConnectionString fileConnectionString;
-		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
-			req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
-			std::string connectionString = connFile->getConnectionString().toString();
-			if(!incorrectTime.present()) {
-				incorrectTime = now();
-			}
-			if(connFile->canGetFilename()) {
-				// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing the file right before us)
-				TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
-					.detail("Filename", connFile->getFilename())
-					.detail("ConnectionStringFromFile", fileConnectionString.toString())
-					.detail("CurrentConnectionString", connectionString);
-			}
-		}
-		else {
-			incorrectTime = Optional<double>();
-		}
-
-		auto peers = FlowTransport::transport().getIncompatiblePeers();
-		for(auto it = peers->begin(); it != peers->end();) {
-			if( now() - it->second.second > SERVER_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING ) {
-				req.incompatiblePeers.push_back(it->first);
-				it = peers->erase(it);
-			} else {
-				it++;
-			}
-		}
-
-		choose {
-			when( CachedSerialization<ServerDBInfo> ni = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
-				ServerDBInfo localInfo = ni.read();
-				TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
-				.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
-				.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
-
-				localInfo.myLocality = locality;
-				dbInfo->set(localInfo);
-			}
-			when( wait( ccInterface->onChange() ) ) {
-				if(ccInterface->get().present())
-					TraceEvent("GotCCInterfaceChange").detail("CCID", ccInterface->get().get().id()).detail("CCMachine", ccInterface->get().get().getWorkers.getEndpoint().getPrimaryAddress());
-			}
-			when(wait(issues.present() ? issues.get()->onChange() : Never())) {}
-		}
+		issues->set(_issues);
 	}
 }
 
@@ -934,8 +926,7 @@ ACTOR Future<Void> workerServer(
 	errorForwarders.add( resetAfter(degraded, SERVER_KNOBS->DEGRADED_RESET_INTERVAL, false, SERVER_KNOBS->DEGRADED_WARNING_LIMIT, SERVER_KNOBS->DEGRADED_WARNING_RESET_DELAY, "DegradedReset"));
 	errorForwarders.add( loadedPonger( interf.debugPing.getFuture() ) );
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
-	errorForwarders.add(monitorTraceLogIssues(issues));
-	errorForwarders.add(monitorServerDBInfo(ccInterface, connFile, locality, dbInfo, issues));
+	errorForwarders.add( monitorTraceLogIssues(issues) );
 	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo, locality ) );
 	errorForwarders.add(monitorHighMemory(memoryProfileThreshold));
 
@@ -958,6 +949,7 @@ ACTOR Future<Void> workerServer(
 		DUMPTOKEN(recruited.setMetricsRate);
 		DUMPTOKEN(recruited.eventLogRequest);
 		DUMPTOKEN(recruited.traceBatchDumpRequest);
+		DUMPTOKEN(recruited.updateServerDBInfo);
 	}
 
 	state std::vector<Future<Void>> recoveries;
@@ -988,6 +980,7 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.getShardState);
 				DUMPTOKEN(recruited.waitMetrics);
 				DUMPTOKEN(recruited.splitMetrics);
+				DUMPTOKEN(recruited.getReadHotRanges);
 				DUMPTOKEN(recruited.getStorageMetrics);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.getQueuingMetrics);
@@ -1051,12 +1044,34 @@ ACTOR Future<Void> workerServer(
 		wait(waitForAll(recoveries));
 		recoveredDiskFiles.send(Void());
 
-		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, ddInterf, rkInterf, degraded, errors, locality, dbInfo ) );
+		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass, ddInterf, rkInterf, degraded, errors, locality, dbInfo, connFile, issues) );
 
 		TraceEvent("RecoveriesComplete", interf.id());
 
 		loop choose {
+			when( UpdateServerDBInfoRequest req = waitNext( interf.updateServerDBInfo.getFuture() ) ) {
+				ServerDBInfo localInfo = BinaryReader::fromStringRef<ServerDBInfo>(req.serializedDbInfo, AssumeVersion(currentProtocolVersion));
+				localInfo.myLocality = locality;
 
+				if(localInfo.infoGeneration < dbInfo->get().infoGeneration && localInfo.clusterInterface == dbInfo->get().clusterInterface) {
+					std::vector<Endpoint> rep = req.broadcastInfo;
+					rep.push_back(interf.updateServerDBInfo.getEndpoint());
+					req.reply.send(rep);
+				} else {
+					Optional<Endpoint> notUpdated;
+					if(!ccInterface->get().present() || localInfo.clusterInterface != ccInterface->get().get()) {
+						notUpdated = interf.updateServerDBInfo.getEndpoint();
+					}
+					else if(localInfo.infoGeneration > dbInfo->get().infoGeneration || dbInfo->get().clusterInterface != ccInterface->get().get()) {
+						
+						TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
+						.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
+						.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
+						dbInfo->set(localInfo);
+					}
+					errorForwarders.add(success(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, notUpdated, true)));
+				}
+			}
 			when( RebootRequest req = waitNext( interf.clientInterface.reboot.getFuture() ) ) {
 				state RebootRequest rebootReq = req;
 				// If suspendDuration is INT_MAX, the trace will not be logged if it was inside the next block
@@ -1241,6 +1256,7 @@ ACTOR Future<Void> workerServer(
 					DUMPTOKEN(recruited.getShardState);
 					DUMPTOKEN(recruited.waitMetrics);
 					DUMPTOKEN(recruited.splitMetrics);
+					DUMPTOKEN(recruited.getReadHotRanges);
 					DUMPTOKEN(recruited.getStorageMetrics);
 					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.getQueuingMetrics);

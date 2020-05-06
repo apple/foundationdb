@@ -1019,7 +1019,12 @@ public:
 			return Void();
 		}
 
-		watchFuture = ryw->tr.watch(watch); // throws if there are too many outstanding watches	
+		try {
+			watchFuture = ryw->tr.watch(watch); // throws if there are too many outstanding watches	
+		} catch( Error &e ) {
+			done.send(Void());
+			throw;
+		}
 		done.send(Void());
 
 		wait(watchFuture);
@@ -1229,8 +1234,8 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 		return Optional<Value>();
 	}
 
-	// special key space are only allowed to query if both begin and end start with \xff\xff
-	if (key.startsWith(specialKeys.begin))
+	// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
+	if (specialKeys.contains(key))
 		return getDatabase()->specialKeySpace->get(Reference<ReadYourWritesTransaction>::addRef(this), key);
 
 	if(checkUsedDuringCommit()) {
@@ -1284,8 +1289,8 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 		}
 	}
 
-	// special key space are only allowed to query if both begin and end start with \xff\xff
-	if (begin.getKey().startsWith(specialKeys.begin) && end.getKey().startsWith(specialKeys.begin))
+	// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
+	if (specialKeys.contains(begin.getKey()) && specialKeys.contains(end.getKey()))
 		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin, end,
 		                                                limits, reverse);
 
@@ -1585,6 +1590,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	}
 
 	if(operationType == MutationRef::SetVersionstampedKey) {
+		TEST(options.readYourWritesDisabled); // SetVersionstampedKey without ryw enabled
 		// this does validation of the key and needs to be performed before the readYourWritesDisabled path
 		KeyRangeRef range = getVersionstampKeyRange(arena, k, tr.getCachedReadVersion().orDefault(0), getMaxReadKey());
 		if(!options.readYourWritesDisabled) {

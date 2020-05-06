@@ -40,6 +40,7 @@ struct MasterInterface {
 	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
+	NetworkAddressList addresses() const { return changeCoordinators.getEndpoint().addresses; }
 
 	UID id() const { return changeCoordinators.getEndpoint().token; }
 	template <class Archive>
