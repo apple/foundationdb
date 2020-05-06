@@ -271,10 +271,12 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 		for (int i = 0; i < self->conflictRangeSizeFactor; ++i) {
 			GetRangeLimits limit;
-			KeySelector begin = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
+			KeySelector begin;
 			KeySelector end;
-			while (end.getKey() < begin.getKey()) {
+			loop {
+				begin = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
 				end = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
+				if (begin.getKey() <= end.getKey()) break;
 			}
 			bool reverse = deterministicRandom()->coinflip();
 
