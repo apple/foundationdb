@@ -506,21 +506,22 @@ struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeBaseImpl {
 	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
 	                                            KeyRangeRef kr) const override {
 		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
-			return map(getWorkerInterfaces(ryw->getDatabase()->getConnectionFile()),
-			           [kr = KeyRange(kr.removePrefix(getKeyRange().begin)),
-			            prefix = Key(getKeyRange().begin)](const Standalone<RangeResultRef>& in) {
-				           auto begin = std::lower_bound(in.begin(), in.end(), kr.begin, KeyValueRef::OrderByKey{});
-				           auto end = kr.end == StringRef()
-				                          ? in.end()
-				                          : std::upper_bound(in.begin(), in.end(), kr.end, KeyValueRef::OrderByKey{});
-				           Standalone<RangeResultRef> result;
-				           result.reserve(result.arena(), end - begin);
-				           for (auto iter = begin; iter < end; ++iter) {
-					           result.push_back_deep(result.arena(),
-					                                 KeyValueRef(iter->key.withPrefix(prefix), iter->value));
-				           }
-				           return result;
-			           });
+			Key prefix = Key(getKeyRange().begin);
+			return map(
+			    getWorkerInterfaces(ryw->getDatabase()->getConnectionFile()),
+			    [prefix = prefix, kr = KeyRange(kr)](const Standalone<RangeResultRef>& in) {
+				    auto begin = std::lower_bound(in.begin(), in.end(), kr.begin, [&](KeyValueRef x, KeyRef y) {
+					    return x.key.withPrefix(prefix) < y;
+				    });
+				    auto end = std::upper_bound(in.begin(), in.end(), kr.end,
+				                                [&](KeyRef x, KeyValueRef y) { return x < y.key.withPrefix(prefix); });
+				    Standalone<RangeResultRef> result;
+				    result.reserve(result.arena(), end - begin);
+				    for (auto iter = begin; iter < end; ++iter) {
+					    result.push_back_deep(result.arena(), KeyValueRef(iter->key.withPrefix(prefix), iter->value));
+				    }
+				    return result;
+			    });
 		} else {
 			return Standalone<RangeResultRef>();
 		}
