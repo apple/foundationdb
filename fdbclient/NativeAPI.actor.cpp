@@ -547,6 +547,42 @@ private:
 	std::function<Future<Optional<Value>>(Reference<ReadYourWritesTransaction>)> f;
 };
 
+struct TransactionModule : SpecialKeyRangeBaseImpl {
+	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+	                                            KeyRangeRef kr) const override {
+		return getRange_(ryw, kr, this);
+	}
+
+	TransactionModule(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {
+		impls.emplace_back(std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
+		impls.emplace_back(std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
+		impls.emplace_back(std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
+	}
+
+private:
+	ACTOR static Future<Standalone<RangeResultRef>> getRange_(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr,
+	                                                          const TransactionModule* self) {
+		state std::vector<Future<Standalone<RangeResultRef>>> futures;
+		futures.reserve(self->impls.size());
+		for (const auto& impl : self->impls) {
+			auto begin = std::max(kr.begin, impl->getKeyRange().begin);
+			auto end = std::min(kr.end, impl->getKeyRange().end);
+			if (begin < end) {
+				futures.push_back(impl->getRange(ryw, KeyRangeRef(begin, end)));
+			}
+		}
+		self = nullptr;
+		wait(waitForAll(futures));
+		Standalone<RangeResultRef> result;
+		for (const auto& f : futures) {
+			result.append(result.arena(), f.get().begin(), f.get().size());
+			result.arena().dependsOn(f.get().arena());
+		}
+		return result;
+	}
+	std::vector<std::unique_ptr<SpecialKeyRangeBaseImpl>> impls;
+};
+
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
                                  TaskPriority taskID, LocalityData const& clientLocality,
@@ -601,9 +637,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	if (apiVersionAtLeast(630)) {
-		registerSpecialKeySpaceModule(std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
-		registerSpecialKeySpaceModule(std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
-		registerSpecialKeySpaceModule(std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
+		registerSpecialKeySpaceModule(std::make_unique<TransactionModule>(
+		    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0"))));
 		registerSpecialKeySpaceModule(std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
 		    LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
 		registerSpecialKeySpaceModule(std::make_unique<SingleSpecialKeyImpl>(
