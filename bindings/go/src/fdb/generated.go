@@ -535,13 +535,13 @@ const (
 	// minimize costs if the client doesn't read the entire range), and as the
 	// caller iterates over more items in the range larger batches will be
 	// transferred in order to minimize latency. After enough iterations, the
-	// iterator mode will eventually reach the same byte limit as “WANT_ALL“
+	// iterator mode will eventually reach the same byte limit as ``WANT_ALL``
 	StreamingModeIterator StreamingMode = 0
 
 	// Infrequently used. The client has passed a specific row limit and wants
 	// that many rows delivered in a single batch. Because of iterator operation
 	// in client drivers make request batches transparent to the user, consider
-	// “WANT_ALL“ StreamingMode instead. A row limit must be specified if this
+	// ``WANT_ALL`` StreamingMode instead. A row limit must be specified if this
 	// mode is used.
 	StreamingModeExact StreamingMode = 1
 
@@ -658,15 +658,15 @@ type ErrorPredicate int
 
 const (
 
-	// Returns “true“ if the error indicates the operations in the transactions
+	// Returns ``true`` if the error indicates the operations in the transactions
 	// should be retried because of transient error.
 	ErrorPredicateRetryable ErrorPredicate = 50000
 
-	// Returns “true“ if the error indicates the transaction may have succeeded,
+	// Returns ``true`` if the error indicates the transaction may have succeeded,
 	// though not in a way the system can verify.
 	ErrorPredicateMaybeCommitted ErrorPredicate = 50001
 
-	// Returns “true“ if the error indicates the transaction has not committed,
+	// Returns ``true`` if the error indicates the transaction has not committed,
 	// though in a way that can be retried.
 	ErrorPredicateRetryableNotCommitted ErrorPredicate = 50002
 )
