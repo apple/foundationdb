@@ -22,7 +22,7 @@
 
 // See https://dox.ipxe.org/memcheck_8h_source.html and https://dox.ipxe.org/valgrind_8h_source.html for an explanation
 // of valgrind client requests
-#ifdef USE_VALGRIND
+#ifdef VALGRIND_ARENA
 #include <memcheck.h>
 #else
 #define VALGRIND_MAKE_MEM_NOACCESS(addr, size) ((void)(addr), (void)(size))
