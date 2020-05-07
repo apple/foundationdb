@@ -116,7 +116,9 @@ const Endpoint& EndpointMap::insert( NetworkAddressList localAddresses, std::vec
 	if(adjacentStart == -1) {
 		data.resize( data.size()+streams.size()-adjacentFree );
 		adjacentStart = data.size()-streams.size();
-		firstFree = -1;
+		if(adjacentFree > 0) {
+			firstFree = data[adjacentStart].nextFree;
+		}
 	}
 
 	UID base = deterministicRandom()->randomUniqueID();
@@ -592,7 +594,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 			// Don't immediately mark connection as failed. To stay closed to earlier behaviour of centralized
 			// failure monitoring, wait until connection stays failed for FLOW_KNOBS->FAILURE_DETECTION_DELAY timeout.
-			retryConnect = self->destination.isPublic() && e.code() == error_code_connection_failed;
+			retryConnect = true;
 			if (e.code() == error_code_connection_failed) {
 				if (!self->destination.isPublic()) {
 					// Can't connect back to non-public addresses.
