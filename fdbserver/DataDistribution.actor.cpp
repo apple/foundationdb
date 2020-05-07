@@ -4865,6 +4865,7 @@ ACTOR Future<Void> waitFailCacheServer(Database* db, StorageServerInterface ssi)
 			tr.addReadConflictRange(storageCacheServerKeys);
 			tr.clear(key);
 			wait(tr.commit());
+			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
