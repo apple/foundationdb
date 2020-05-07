@@ -1556,7 +1556,8 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 					if(!g_network->isSimulated()) {
 						throw;
 					}
-					deleteFile(lockFilePath);
+					lockFile = ErrorOr<Reference<IAsyncFile>>();
+					wait(IAsyncFileSystem::filesystem()->deleteFile(lockFilePath, true));
 				}
 			}
 		}
