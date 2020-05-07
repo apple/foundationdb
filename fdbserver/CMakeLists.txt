@@ -77,6 +77,7 @@ set(FDBSERVER_SRCS
   RestoreWorker.actor.cpp
   Resolver.actor.cpp
   ResolverInterface.h
+  ServerDBInfo.actor.h
   ServerDBInfo.h
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
