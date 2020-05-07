@@ -81,12 +81,6 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 		}
 
 		ASSERT((size_t)(out-start) == size(t, c));
-
-		/*int length = (int)(out - start);
-		TraceEvent("SerializedTagSet").detail("SerializedValue", StringRef(start, length)).detail("Size", length).detail("Count", t.tags.size());
-		for(auto tag : t.tags) {
-			TraceEvent("SerializedTag").detail("Tag", tag).detail("Size", tag.size());
-		}*/
 	}
 
 	// Context is an arbitrary type that is plumbed by reference throughout the

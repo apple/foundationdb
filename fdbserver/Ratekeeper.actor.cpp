@@ -765,6 +765,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 				TEST(true); // Tag throttle changes detected
 				break;
 			} catch (Error& e) {
+				TraceEvent("RatekeeperMonitorThrottlingChangesError").error(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -852,7 +853,6 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits, RkTagThrottleCol
 
 		double targetRateRatio = std::min(( storageQueue - targetBytes + springBytes ) / (double)springBytes, 2.0);
 
-		TraceEvent("RkCheckingAutoThrottle").detail("StorageQueue", storageQueue).detail("BusiestTag", ss.busiestTag.present() ? ss.busiestTag.get() : LiteralStringRef("<none>")).detail("FractionalBusyness", ss.busiestTagFractionalBusyness).detail("BusiestTagRate", ss.busiestTagRate).detail("AutoThrottledTags", throttledTags.autoThrottleCount());
 		if(limits->priority == TransactionPriority::DEFAULT && (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES || storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS)) {
 			tryAutoThrottleTag(self, ss, throttledTags);
 		}
