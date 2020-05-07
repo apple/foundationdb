@@ -70,7 +70,7 @@ public:
 	std::string shortString() const;
 	bool isValid() const { return part[0] || part[1]; }
 
-	bool compare(const UID& r) const {
+	int compare(const UID& r) const {
 		if (int cmp = ::compare(part[0], r.part[0])) {
 			return cmp;
 		}

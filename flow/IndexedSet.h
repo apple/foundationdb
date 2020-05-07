@@ -713,7 +713,7 @@ int IndexedSet<T,Metric>::insert(const std::vector<std::pair<T,Metric>>& dataVec
 			bool foundNode = false;
 			while (true) {
 				int cmp = compare(data, t->data);
-				d = cmp >= 0;
+				d = cmp > 0;
 				if (!d)
 					blockEnd = t;
 				if (cmp == 0) {
