@@ -306,7 +306,7 @@ public:
 			auto manualItr = manualThrottledTags.find(tagItr->first);
 			if(manualItr != manualThrottledTags.end()) {
 				Optional<ClientTagThrottleLimits> manualClientRate;
-				for(auto priority = allTransactionPriorities.rbegin(); priority != allTransactionPriorities.rend(); ++priority) {
+				for(auto priority = allTransactionPriorities.rbegin(); !(priority == allTransactionPriorities.rend()); ++priority) {
 					auto priorityItr = manualItr->second.find(*priority);
 					if(priorityItr != manualItr->second.end()) {
 						Optional<double> priorityClientRate = priorityItr->second.updateAndGetClientRate(requestRate);
