@@ -170,7 +170,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRangeRef>> ranges, double delayTime,
                                                    Database cx, UID applierID, int batchIndex) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state int count = 0;
+	state int retries = 0;
 	state double numOps = 0;
 	wait(delay(delayTime + deterministicRandom()->random01() * delayTime));
 	TraceEvent("FastRestoreApplierClearRangeMutationsStart", applierID)
@@ -198,8 +198,8 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {
-			count++;
-			if (count > 100) {
+			retries++;
+			if (retries > SERVER_KNOBS->FASTRESTORE_TXN_RETRY_MAX) {
 				TraceEvent(SevWarnAlways, "RestoreApplierApplyClearRangeMutationsStuck", applierID)
 				    .detail("BatchIndex", batchIndex)
 				    .detail("ClearRanges", ranges.size())
@@ -263,16 +263,14 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 				    .detail("PendingMutation", vm.second.toString());
 			}
 			key.second->second.precomputeResult("GetAndComputeStagingKeysNoBaseValueInDB", applierID, batchIndex);
-			i++;
-			continue;
 		} else {
 			// The key's version ideally should be the most recently committed version.
 			// But as long as it is > 1 and less than the start version of the version batch, it is the same result.
 			MutationRef m(MutationRef::SetValue, key.first, fValues[i].get().get());
 			key.second->second.add(m, LogMessageVersion(1));
 			key.second->second.precomputeResult("GetAndComputeStagingKeys", applierID, batchIndex);
-			i++;
 		}
+		i++;
 	}
 
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysDone", applierID)
