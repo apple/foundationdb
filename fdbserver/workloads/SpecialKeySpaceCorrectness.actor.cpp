@@ -219,7 +219,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// Get a default special key range instance
 		Database cx = cx_->clone();
 		state Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
-		tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 		state Reference<ReadYourWritesTransaction> referenceTx = Reference(new ReadYourWritesTransaction(cx));
 		state bool ryw = deterministicRandom()->coinflip();
 		if (!ryw) {
@@ -278,7 +277,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			loop {
 				begin = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
 				end = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
-				if (begin.getKey() <= end.getKey()) break;
+				if (begin.getKey() < end.getKey()) break;
 			}
 			bool reverse = deterministicRandom()->coinflip();
 
