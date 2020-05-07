@@ -77,8 +77,34 @@ ACTOR Future<int> spawnProcess(std::string binPath, std::vector<std::string> par
 	return 0;
 }
 #else
+
+pid_t fork_child(const std::string& path,
+				 std::vector<char*>& paramList)
+{
+	pid_t pid = fork();
+	if (pid == -1) {
+		return -1;
+	}
+	if (pid == 0) {
+		execv(const_cast<char*>(path.c_str()), &paramList[0]);
+		_exit(EXIT_FAILURE);
+	}
+	return pid;
+}
+
 ACTOR Future<int> spawnProcess(std::string path, std::vector<std::string> args, double maxWaitTime, bool isSync, double maxSimDelayTime)
 {
+	// for async calls in simulator, always delay by a deterministic amount of time and then
+	// do the call synchronously, otherwise the predictability of the simulator breaks
+	if (!isSync && g_network->isSimulated()) {
+		double snapDelay = std::max(maxSimDelayTime - 1, 0.0);
+		// add some randomness
+		snapDelay += deterministicRandom()->random01();
+		TraceEvent("SnapDelaySpawnProcess")
+				.detail("SnapDelay", snapDelay);
+		wait(delay(snapDelay));
+	}
+
 	std::vector<char*> paramList;
 	for (int i = 0; i < args.size(); i++) {
 		paramList.push_back(const_cast<char*>(args[i].c_str()));
@@ -90,32 +116,58 @@ ACTOR Future<int> spawnProcess(std::string path, std::vector<std::string> args, 
 		allArgs += args[i];
 	}
 
-	pid_t pid = fork();
+	state pid_t pid = fork_child(path, paramList);
 	if (pid == -1) {
 		TraceEvent(SevWarnAlways, "SpawnProcess: Command failed to spawn")
 			.detail("Cmd", path)
 			.detail("Args", allArgs);
 		return -1;
 	} else if (pid > 0) {
-		int status;
-		waitpid(pid, &status, 0);
-		if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-			TraceEvent(SevWarnAlways, "SpawnProcess : Command failed")
-				.detail("Cmd", path)
-				.detail("Args", allArgs)
-				.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
-			return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+		state int status = -1;
+		state double runTime = 0;
+		while (true) {
+			if (runTime > maxWaitTime) {
+				// timing out
+				TraceEvent(SevWarnAlways, "SpawnProcess : Command failed, timeout")
+					.detail("Cmd", path)
+					.detail("Args", allArgs);
+				return -1;
+			}
+			int err = waitpid(pid, &status, WNOHANG);
+			if (err < 0) {
+				TraceEvent(SevWarnAlways, "SpawnProcess : Command failed")
+					.detail("Cmd", path)
+					.detail("Args", allArgs)
+					.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+				return -1;
+			} else if (err == 0) {
+				// child process has not completed yet
+				if (isSync || g_network->isSimulated()) {
+					// synchronously sleep
+					threadSleep(0.1);
+				} else {
+					// yield for other actors to run
+					wait(delay(0.1));
+				}
+				runTime += 0.1;
+			} else {
+				// child process completed
+				if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
+					TraceEvent(SevWarnAlways, "SpawnProcess : Command failed")
+						.detail("Cmd", path)
+						.detail("Args", allArgs)
+						.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+					return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+				}
+				TraceEvent("SpawnProcess : Command status")
+					.detail("Cmd", path)
+					.detail("Args", allArgs)
+					.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : 0);
+				return 0;
+			}
 		}
-		TraceEvent("SpawnProcess : Command status")
-			.detail("Cmd", path)
-			.detail("Args", allArgs)
-			.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : 0);
-	} else {
-		execv(const_cast<char*>(path.c_str()), &paramList[0]);
-		_exit(EXIT_FAILURE);
 	}
-	wait(delay(0.0));
-	return 0;
+	return -1;
 
 }
 #endif
