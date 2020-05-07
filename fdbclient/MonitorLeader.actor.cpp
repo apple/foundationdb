@@ -24,7 +24,6 @@
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "flow/Platform.h"
-#include "fdbserver/ClusterRecruitmentInterface.h" // TODO(alexmiller): do the binary serialization hack
 #include "flow/actorcompiler.h" // has to be last include
 
 std::pair< std::string, bool > ClusterConnectionFile::lookupClusterFileName( std::string const& filename ) {
