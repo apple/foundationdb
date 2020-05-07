@@ -387,10 +387,17 @@ struct PrecomputeSize : Context {
 	void write(const void*, int offset, int /*len*/) { current_buffer_size = std::max(current_buffer_size, offset); }
 
 	template <class T>
-	std::enable_if_t<is_dynamic_size<T>> visitDynamicSize(const T& t) {
+	std::enable_if_t<is_dynamic_size<T>, bool> visitDynamicSize(const T& t) {
 		uint32_t size = dynamic_size_traits<T>::size(t, this->context());
+		if (size == 0 && emptyVector.value != -1) {
+			return true;
+		}
 		int start = RightAlign(current_buffer_size + size + 4, 4);
 		current_buffer_size = std::max(current_buffer_size, start);
+		if (size == 0) {
+			emptyVector = RelativeOffset{ current_buffer_size };
+		}
+		return false;
 	}
 
 	struct Noop {
@@ -416,6 +423,9 @@ struct PrecomputeSize : Context {
 	const int buffer_length = -1; // Dummy, the value of this should not affect anything.
 	const int vtable_start = -1; // Dummy, the value of this should not affect anything.
 	std::vector<int> writeToOffsets;
+
+	// We only need to write an empty vector once, then we can re-use the relative offset.
+	RelativeOffset emptyVector{ -1 };
 };
 
 template <class Member, class Context>
@@ -473,8 +483,11 @@ struct WriteToBuffer : Context {
 	}
 
 	template <class T>
-	std::enable_if_t<is_dynamic_size<T>> visitDynamicSize(const T& t) {
+	std::enable_if_t<is_dynamic_size<T>, bool> visitDynamicSize(const T& t) {
 		uint32_t size = dynamic_size_traits<T>::size(t, this->context());
+		if (size == 0 && emptyVector.value != -1) {
+			return true;
+		}
 		int padding = 0;
 		int start = RightAlign(current_buffer_size + size + 4, 4, &padding);
 		write(&size, start, 4);
@@ -482,11 +495,16 @@ struct WriteToBuffer : Context {
 		dynamic_size_traits<T>::save(&buffer[buffer_length - start], t, this->context());
 		start -= size;
 		memset(&buffer[buffer_length - start], 0, padding);
+		if (size == 0) {
+			emptyVector = RelativeOffset{ current_buffer_size };
+		}
+		return false;
 	}
 
 	const int buffer_length;
 	const int vtable_start;
 	int current_buffer_size = 0;
+	RelativeOffset emptyVector{ -1 };
 
 private:
 	void copy_memory(const void* src, int offset, int len) {
@@ -1031,7 +1049,7 @@ struct LoadSaveHelper : Context {
 	template <class U, class Writer, typename = std::enable_if_t<is_dynamic_size<U>>>
 	RelativeOffset save(const U& message, Writer& writer, const VTableSet*,
 	                    std::enable_if_t<is_dynamic_size<U>, int> _ = 0) {
-		writer.visitDynamicSize(message);
+		if (writer.visitDynamicSize(message)) return writer.emptyVector;
 		return RelativeOffset{ writer.current_buffer_size };
 	}
 
@@ -1053,6 +1071,9 @@ struct LoadSaveHelper : Context {
 		using T = typename VectorTraits::value_type;
 		constexpr auto size = fb_size<T>;
 		uint32_t num_entries = VectorTraits::num_entries(members, this->context());
+		if (num_entries == 0 && writer.emptyVector.value != -1) {
+			return writer.emptyVector;
+		}
 		uint32_t len = num_entries * size;
 		auto self = writer.getMessageWriter(len);
 		auto iter = VectorTraits::begin(members, this->context());
@@ -1062,10 +1083,14 @@ struct LoadSaveHelper : Context {
 			++iter;
 		}
 		int padding = 0;
-		int start = RightAlign(writer.current_buffer_size + len, std::max(4, fb_align<T>), &padding) + 4;
+		int start =
+		    RightAlign(writer.current_buffer_size + len, std::max(4, num_entries == 0 ? 0 : fb_align<T>), &padding) + 4;
 		writer.write(&num_entries, start, sizeof(uint32_t));
 		self.writeTo(writer, start - sizeof(uint32_t));
 		writer.write(&zeros, start - len - 4, padding);
+		if (num_entries == 0) {
+			writer.emptyVector = RelativeOffset{ writer.current_buffer_size };
+		}
 		return RelativeOffset{ writer.current_buffer_size };
 	}
 };
