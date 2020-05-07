@@ -1,9 +1,6 @@
 #ifndef XTHREAD_H_
 #define XTHREAD_H_
 
-/* Without this there's a data race */
-#define WORDACCESS_UNSAFE 1
-
 /////////////////////////////////////////////////////////////////////////////
 
 #ifdef _WIN32
