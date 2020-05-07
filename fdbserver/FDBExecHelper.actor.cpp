@@ -85,29 +85,31 @@ ACTOR Future<int> spawnProcess(std::string path, std::vector<std::string> args, 
 	}
 	paramList.push_back(nullptr);
 
-	auto te = TraceEvent("fdbFork");
-	te.detail("cmd", path);
+	state std::string allArgs;
 	for (int i = 0; i < args.size(); i++) {
-		//te.detail("args", args[i]);
+		allArgs += args[i];
 	}
 
 	pid_t pid = fork();
 	if (pid == -1) {
-		TraceEvent(SevWarnAlways, "Command failed to spawn")
-			.detail("cmd", path);
+		TraceEvent(SevWarnAlways, "SpawnProcess: Command failed to spawn")
+			.detail("Cmd", path)
+			.detail("Args", allArgs);
 		return -1;
 	} else if (pid > 0) {
 		int status;
 		waitpid(pid, &status, 0);
 		if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-			TraceEvent(SevWarnAlways, "Command failed")
-				.detail("cmd", path)
-				.detail("errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+			TraceEvent(SevWarnAlways, "SpawnProcess : Command failed")
+				.detail("Cmd", path)
+				.detail("Args", allArgs)
+				.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
 			return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 		}
-		TraceEvent("Command status")
-			.detail("cmd", path)
-			.detail("errno", WIFEXITED(status) ? WEXITSTATUS(status) : 0);
+		TraceEvent("SpawnProcess : Command status")
+			.detail("Cmd", path)
+			.detail("Args", allArgs)
+			.detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : 0);
 	} else {
 		execv(const_cast<char*>(path.c_str()), &paramList[0]);
 		_exit(EXIT_FAILURE);
