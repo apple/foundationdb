@@ -2630,7 +2630,6 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		}
 
 		state Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
-		//TraceEvent("SSUpdatePeeking", data->thisServerID).detail("MyVer", data->version.get()).detail("Epoch", data->updateEpoch).detail("Seq", data->updateSequence);
 
 		loop {
 			wait( cursor->getMore() );
@@ -2670,8 +2669,6 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			cloneCursor2 = cursor->cloneNoMore();
 
 			cloneCursor1->setProtocolVersion(data->logProtocol);
-			TraceEvent(SevDebug, "SSUpdate", data->thisServerID).detail("CurrentLPV", currentProtocolVersion.version()).
-					detail("DataLPV", data->logProtocol.version());
 
 			for (; cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
 				ArenaReader& cloneReader = *cloneCursor1->reader();
@@ -2750,7 +2747,6 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		state Version ver = invalidVersion;
 		cloneCursor2->setProtocolVersion(data->logProtocol);
-		//TraceEvent("SSUpdatePeeked", data->thisServerID).detail("FromEpoch", data->updateEpoch).detail("FromSeq", data->updateSequence).detail("ToEpoch", results.end_epoch).detail("ToSeq", results.end_seq).detail("MsgSize", results.messages.size());
 		for (;cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
 			if(mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 				mutationBytes = 0;

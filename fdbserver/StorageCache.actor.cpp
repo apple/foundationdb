@@ -73,7 +73,7 @@ struct AddingCacheRange : NonCopyable {
 
 	Phase phase;
 
-	AddingCacheRange( StorageCacheData* server, StorageCacheUpdater* updater, KeyRangeRef const& keys );
+	AddingCacheRange( StorageCacheData* server, KeyRangeRef const& keys );
 
 	~AddingCacheRange() {
 		if( !fetchComplete.isSet() )
@@ -104,7 +104,7 @@ struct CacheRangeInfo : ReferenceCounted<CacheRangeInfo>, NonCopyable {
 
 	static CacheRangeInfo* newNotAssigned(KeyRange keys) { return new CacheRangeInfo(keys, NULL, NULL); }
 	static CacheRangeInfo* newReadWrite(KeyRange keys, StorageCacheData* data) { return new CacheRangeInfo(keys, NULL, data); }
-	static CacheRangeInfo* newAdding(StorageCacheData* data, StorageCacheUpdater* updater, KeyRange keys) { return new CacheRangeInfo(keys, new AddingCacheRange(data, updater, keys), NULL); }
+	static CacheRangeInfo* newAdding(StorageCacheData* data, KeyRange keys) { return new CacheRangeInfo(keys, new AddingCacheRange(data, keys), NULL); }
 
 	bool isReadable() const { return readWrite!=NULL; }
 	bool isAdding() const { return adding!=NULL; }
@@ -147,8 +147,9 @@ public:
 	ProtocolVersion logProtocol;
 	Reference<ILogSystem> logSystem;
 	Key ck; //cacheKey
-	Database cx;
 	Reference<AsyncVar<ServerDBInfo>> const& db;
+	Database cx;
+	StorageCacheUpdater *updater;
 
 	//KeyRangeMap <bool> cachedRangeMap; // map of cached key-ranges
 	KeyRangeMap <Reference<CacheRangeInfo>> cachedRangeMap; // map of cached key-ranges
@@ -1165,7 +1166,7 @@ ACTOR Future<Standalone<RangeResultRef>> tryFetchRange( Database cx, Version ver
 	}
 }
 
-ACTOR Future<Void> fetchKeys( StorageCacheData *data, StorageCacheUpdater* updater, AddingCacheRange* cacheRange ) {
+ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRange ) {
 	state TraceInterval interval("SCFetchKeys");
 	state KeyRange keys = cacheRange->keys;
 	//state Future<Void> warningLogger = logFetchKeysWarning(cacheRange);
@@ -1262,7 +1263,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, StorageCacheUpdater* updat
 				//Write this_block to mutationLog and versionedMap
 				state KeyValueRef *kvItr = this_block.begin();
 				for(; kvItr != this_block.end(); ++kvItr) {
-					applyMutation(updater, data, MutationRef(MutationRef::SetValue, kvItr->key, kvItr->value), fetchVersion);
+					applyMutation(data->updater, data, MutationRef(MutationRef::SetValue, kvItr->key, kvItr->value), fetchVersion);
 					data->counters.bytesFetched += expectedSize;
 					wait(yield());
 				}
@@ -1424,10 +1425,10 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, StorageCacheUpdater* updat
 	return Void();
 };
 
-AddingCacheRange::AddingCacheRange( StorageCacheData* server, StorageCacheUpdater* updater, KeyRangeRef const& keys )
+AddingCacheRange::AddingCacheRange( StorageCacheData* server, KeyRangeRef const& keys )
 	: server(server), keys(keys), transferredVersion(invalidVersion), phase(WaitPrevious)
 {
-	fetchClient = fetchKeys(server, updater, this);
+	fetchClient = fetchKeys(server, this);
 }
 
 void AddingCacheRange::addMutation( Version version, MutationRef const& mutation ){
@@ -1468,7 +1469,7 @@ void CacheRangeInfo::addMutation(Version version, MutationRef const& mutation) {
 	}
 }
 
-void cacheWarmup( StorageCacheData *data, StorageCacheUpdater* updater, const KeyRangeRef& keys, bool nowAssigned, Version version) {
+void cacheWarmup( StorageCacheData *data, const KeyRangeRef& keys, bool nowAssigned, Version version) {
 
 	ASSERT( !keys.empty() );
 
@@ -1513,7 +1514,7 @@ void cacheWarmup( StorageCacheData *data, StorageCacheUpdater* updater, const Ke
 			data->addCacheRange( CacheRangeInfo::newReadWrite(ranges[i], data) );
 		else {
 			ASSERT( ranges[i].value->adding );
-			data->addCacheRange( CacheRangeInfo::newAdding( data, updater, ranges[i] ) );
+			data->addCacheRange( CacheRangeInfo::newAdding( data, ranges[i] ) );
 			TEST( true );	// cacheWarmup reFetchKeys
 		}
 	}
@@ -1551,7 +1552,7 @@ void cacheWarmup( StorageCacheData *data, StorageCacheUpdater* updater, const Ke
 			} else {
 				auto& cacheRange = data->cachedRangeMap[range.begin];
 				if( !cacheRange->assigned() || cacheRange->keys != range )
-					data->addCacheRange( CacheRangeInfo::newAdding(data, updater, range) );
+					data->addCacheRange( CacheRangeInfo::newAdding(data, range) );
 			}
 		} else {
 			changeNewestAvailable.emplace_back(range, latestVersion);
@@ -1631,7 +1632,7 @@ private:
 			//fprintf(stderr, "SCPrivateCacheMutation: begin: %s, end: %s\n", printable(keys.begin).c_str(), printable(keys.end).c_str());
 
 			// Warmup the cache for the newly added key-range
-			cacheWarmup(data, this, keys, nowAssigned, currentVersion-1);
+			cacheWarmup(data, /*this,*/ keys, nowAssigned, currentVersion-1);
 			processedCacheStartKey = false;
 		} else if (m.type == MutationRef::SetValue && m.param1.startsWith( data->ck )) {
 			// We expect changes in pairs, [begin,end), This mutation is for start key of the range
@@ -1713,7 +1714,6 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 	state Reference<ILogSystem::IPeekCursor> cursor;
 	state Version tagAt = 0;
 
-	state StorageCacheUpdater updater(data->lastVersionWithData);
 	state Version ver = invalidVersion;
 	++data->counters.updateBatches;
 
@@ -1724,9 +1724,10 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 					break;
 				}
 				when( wait( dbInfoChange ) ) {
-					if( data->logSystem )
+					if( data->logSystem ) {
+						TraceEvent(SevDebug, "PullAsyncData", data->thisServerID).detail("DataVersion", data->version.get());
 						cursor = data->logSystem->peekSingle( data->thisServerID, data->version.get() + 1, cacheTag, std::vector<std::pair<Version,Tag>>()) ;
-					else
+					} else
 						cursor = Reference<ILogSystem::IPeekCursor>();
 					dbInfoChange = data->db->onChange();
 				}
@@ -1806,7 +1807,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 				state VerUpdateRef* pUpdate = &fii.changes[changeNum];
 				for(; mutationNum < pUpdate->mutations.size(); mutationNum++) {
 					//TraceEvent("InjectedChanges", data->thisServerID).detail("Version", pUpdate->version);
-					applyMutation(&updater, data, pUpdate->mutations[mutationNum], pUpdate->version);
+					applyMutation(data->updater, data, pUpdate->mutations[mutationNum], pUpdate->version);
 					mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 					injectedChanges = true;
 					if(false && mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
@@ -1844,7 +1845,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 
 					if (ver != invalidVersion) // This change belongs to a version < minVersion
 					{
-						applyMutation(&updater, data, msg, ver);
+						applyMutation(data->updater, data, msg, ver);
 						data->counters.mutationBytes += msg.totalSize();
 						++data->counters.mutations;
 
@@ -1969,15 +1970,73 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, R
 	state StorageCacheData self(ssi.id(), id, db);
 	state ActorCollection actors(false);
 	state Future<Void> dbInfoChange = Void();
+	state StorageCacheUpdater updater(self.lastVersionWithData);
+	self.updater = &updater;
+	state Transaction tr(self.cx);
+	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
+	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
+	state MutationRef privatized;
+	state Version readVersion;
 
 	//TraceEvent("StorageCache_CacheServerInterface", self.thisServerID).detail("UID", ssi.uniqueID).detail("IsCacheServer", ssi.isCacheServer);
+
 	// This helps identify the private mutations meant for this cache server
 	self.ck = cacheKeysPrefixFor( id ).withPrefix(systemKeys.begin);  // FFFF/02cacheKeys/[this server]/
 
 	actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
 	actors.add(traceCounters("CacheMetrics", self.thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self.counters.cc, self.thisServerID.toString() + "/CacheMetrics"));
 
-	// compactCache actor will periodically compact the cache when certain version condition is met
+	TraceEvent(SevDebug, "SCStartUpPostWarmup", self.thisServerID).detail("DataVersionBefore", self.version.get());
+	// Fetch metadata mutation from the database to establish cache ranges and apply them
+	try {
+		loop {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			try {
+				Standalone<RangeResultRef> range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!range.more);
+				readVersion = tr.getReadVersion().get();
+				bool currCached = false;
+				KeyRef begin, end;
+				for (const auto& kv : range) {
+					// These booleans have to flip consistently
+					ASSERT(currCached == (kv.value == falseValue));
+					if (kv.value == trueValue) {
+						//begin = kv.key.substr(storageCacheKeys.begin.size());
+						begin = kv.key;
+						privatized.param1 = begin.withPrefix(systemKeys.begin);
+						privatized.param2 = serverKeysTrue;
+						TraceEvent(SevDebug, "SCStartupFetch", self.thisServerID).detail("BeginKey", begin.substr(storageCacheKeys.begin.size()));
+						applyMutation(self.updater, &self, privatized, readVersion);
+						currCached = true;
+					} else {
+						currCached = false;
+						//end = kv.key.substr(storageCacheKeys.begin.size());
+						end = kv.key;
+						privatized.param1 = begin.withPrefix(systemKeys.begin);
+						privatized.param2 = serverKeysFalse;
+						TraceEvent(SevDebug, "SCStartupFetch", self.thisServerID).detail("EndKey", end.substr(storageCacheKeys.begin.size()));
+						applyMutation(self.updater, &self, privatized, readVersion);
+						//KeyRangeRef cachedRange{begin, end};
+						//TraceEvent(SevDebug, "SCStartupWarmup", self.thisServerID).detail("BeginKey", begin).detail("EndKey", end);
+						//cacheWarmup(&self, cachedRange, TRUE, updater.currentVersion-1);
+					}
+				}
+				// FIXME: Some tests start failing when I set the version as below. Commenting out makes the tests pass. Ideas?
+				self.version.set(readVersion);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent(SevError, "SCFetchCachedRangesFailed").error(e);
+		throw;
+	}
+
+	TraceEvent(SevDebug, "SCStartUpPostWarmup", self.thisServerID).detail("DataVersionAfter", self.version.get());
+
+	//compactCache actor will periodically compact the cache when certain version condition is met
 	actors.add(compactCache(&self));
 
 	// pullAsyncData actor pulls mutations from the TLog and also applies them.
@@ -1991,7 +2050,6 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, R
 		choose {
 		when( wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
-			//self.logSystem->set(ILogSystem::fromServerDBInfo( ssi.id(), db->get(), true ));
 			self.logSystem = ILogSystem::fromServerDBInfo( self.thisServerID, self.db->get() );
 		}
 		when( GetValueRequest req = waitNext(ssi.getValue.getFuture()) ) {
