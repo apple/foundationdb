@@ -20,6 +20,7 @@
 
 
 #include <stdint.h>
+#include "fdbclient/FDBTypes.h"
 #include "flow/Arena.h"
 #include "flow/Platform.h"
 
@@ -47,7 +48,11 @@ struct art_tree {
 #define ART_NEITHER 0
 
 
-#define ART_IS_LEAF(x) ( (*((ART_NODE_TYPE*)x) == ART_LEAF))
+//#define ART_IS_LEAF(x) ( (*((ART_NODE_TYPE*)x) == ART_LEAF))
+    template<class T>
+    static inline bool ART_IS_LEAF(T const& x) {
+        return *((ART_NODE_TYPE*)x) == ART_LEAF;
+    }
 
 #define ART_LEAF_RAW(x) ((art_leaf*)(x))
 

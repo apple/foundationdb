@@ -392,6 +392,7 @@ struct SingleCallback {
 	SingleCallback<T> *next;
 
 	virtual void fire(T const&) {}
+	virtual void fire(T &&) {}
 	virtual void error(Error) {}
 	virtual void unwait() {}
 
@@ -1015,10 +1016,13 @@ struct ActorCallback : Callback<ValueType> {
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
-	virtual void fire(ValueType const& value) {
+	virtual void fire(ValueType const& value) override {
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
-	virtual void error(Error e) {
+	virtual void fire(ValueType && value) override {
+		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
+	}
+	virtual void error(Error e) override {
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
 	}
 };

@@ -376,7 +376,8 @@ ACTOR Future<Void> testDatabaseLiveness( Database cx, double databasePingDelay, 
 	loop {
 		try {
 			state double start = now();
-			TraceEvent(("PingingDatabaseLiveness_" + context).c_str());
+			auto traceMsg = "PingingDatabaseLiveness_" + context;
+			TraceEvent(traceMsg.c_str());
 			wait( timeoutError( pingDatabase( cx ), databasePingDelay ) );
 			double pingTime = now() - start;
 			ASSERT( pingTime > 0 );

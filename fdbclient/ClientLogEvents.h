@@ -113,6 +113,41 @@ namespace FdbClientLogEvents {
 		}
 	};
 
+	// Version V3 of EventGetVersion starting at 6.3
+	struct EventGetVersion_V3 : public Event {
+		EventGetVersion_V3(double ts, double lat, uint32_t type, Version version) : Event(GET_VERSION_LATENCY, ts), latency(lat), readVersion(version) {
+			if(type == GetReadVersionRequest::PRIORITY_DEFAULT) {
+				priorityType = PRIORITY_DEFAULT;
+			} else if (type == GetReadVersionRequest::PRIORITY_BATCH) {
+				priorityType = PRIORITY_BATCH;
+			} else if (type == GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE){
+				priorityType = PRIORITY_IMMEDIATE;
+			} else {
+				ASSERT(0);
+			}
+		 }
+		EventGetVersion_V3() { }
+
+		template <typename Ar>	Ar& serialize(Ar &ar) {
+			if (!ar.isDeserializing)
+				return serializer(Event::serialize(ar), latency, priorityType, readVersion);
+			else
+				return serializer(ar, latency, priorityType, readVersion);
+		}
+
+		double latency;
+		TrasactionPriorityType priorityType {PRIORITY_END};
+		Version readVersion;
+
+		void logEvent(std::string id, int maxFieldLength) const {
+			TraceEvent("TransactionTrace_GetVersion")
+			.detail("TransactionID", id)
+			.detail("Latency", latency)
+			.detail("PriorityType", priorityType)
+			.detail("ReadVersion", readVersion);
+		}
+	};
+
 	struct EventGet : public Event {
 		EventGet(double ts, double lat, int size, const KeyRef &in_key) : Event(GET_LATENCY, ts), latency(lat), valueSize(size), key(in_key) { }
 		EventGet() { }
@@ -212,6 +247,61 @@ namespace FdbClientLogEvents {
 
 			TraceEvent("TransactionTrace_Commit")
 			.detail("TransactionID", id)
+			.detail("Latency", latency)
+			.detail("NumMutations", numMutations)
+			.detail("CommitSizeBytes", commitBytes);
+		}
+	};
+
+	// Version V2 of EventGetVersion starting at 6.3
+	struct EventCommit_V2 : public Event {
+		EventCommit_V2(double ts, double lat, int mut, int bytes, Version version, const CommitTransactionRequest &commit_req) 
+			: Event(COMMIT_LATENCY, ts), latency(lat), numMutations(mut), commitBytes(bytes), commitVersion(version), req(commit_req) { }
+		EventCommit_V2() { }
+
+		template <typename Ar>	Ar& serialize(Ar &ar) {
+			if (!ar.isDeserializing)
+				return serializer(Event::serialize(ar), latency, numMutations, commitBytes, commitVersion, req.transaction, req.arena);
+			else
+				return serializer(ar, latency, numMutations, commitBytes, commitVersion, req.transaction, req.arena);
+		}
+
+		double latency;
+		int numMutations;
+		int commitBytes;
+		Version commitVersion;
+		CommitTransactionRequest req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
+
+		void logEvent(std::string id, int maxFieldLength) const {
+			for (auto &read_range : req.transaction.read_conflict_ranges) {
+				TraceEvent("TransactionTrace_Commit_ReadConflictRange")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Begin", read_range.begin)
+				.detail("End", read_range.end);
+			}
+
+			for (auto &write_range : req.transaction.write_conflict_ranges) {
+				TraceEvent("TransactionTrace_Commit_WriteConflictRange")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Begin", write_range.begin)
+				.detail("End", write_range.end);
+			}
+
+			for (auto &mutation : req.transaction.mutations) {
+				TraceEvent("TransactionTrace_Commit_Mutation")
+				.setMaxEventLength(-1)
+				.detail("TransactionID", id)
+				.setMaxFieldLength(maxFieldLength)
+				.detail("Mutation", mutation.toString());
+			}
+
+			TraceEvent("TransactionTrace_Commit")
+			.detail("TransactionID", id)
+			.detail("CommitVersion", commitVersion)
 			.detail("Latency", latency)
 			.detail("NumMutations", numMutations)
 			.detail("CommitSizeBytes", commitBytes);

@@ -2874,7 +2874,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->commitLatencies.addSample(latency);
 					cx->latencies.addSample(now() - tr->startTime);
 					if (trLogInfo)
-						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), req));
+						trLogInfo->addLog(FdbClientLogEvents::EventCommit_V2(startTime, latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), ci.version, req));
 					return Void();
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
@@ -3346,7 +3346,7 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, TransactionPriorit
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
 	if (trLogInfo)
-		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V2(startTime, latency, priority));
+		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V2(startTime, latency, priority, rep.version));
 	if (rep.version == 1 && rep.locked) {
 		throw proxy_memory_limit_exceeded();
 	}
