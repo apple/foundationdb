@@ -1211,8 +1211,10 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 	TEST(true);
 
 	if (getDatabase()->apiVersionAtLeast(630)) {
-		if (specialKeys.contains(key))
+		if (specialKeys.contains(key)) {
+			TEST(true); // Special keys get
 			return getDatabase()->specialKeySpace->get(Reference<ReadYourWritesTransaction>::addRef(this), key);
+		}
 	} else {
 		if (key == LiteralStringRef("\xff\xff/status/json")) {
 			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
@@ -1291,10 +1293,11 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	bool reverse )
 {
 	if (getDatabase()->apiVersionAtLeast(630)) {
-		if (specialKeys.contains(begin.getKey()) && end.getKey() <= specialKeys.end)
+		if (specialKeys.contains(begin.getKey()) && end.getKey() <= specialKeys.end) {
+			TEST(true); // Special key space get range
 			return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin,
 			                                                end, limits, reverse);
-
+		}
 	} else {
 		if (begin.getKey() == LiteralStringRef("\xff\xff/worker_interfaces")) {
 			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
@@ -1557,6 +1560,7 @@ void ReadYourWritesTransaction::getWriteConflicts( KeyRangeMap<bool> *result ) {
 }
 
 Standalone<RangeResultRef> ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRangeRef kr) {
+	TEST(true); // Special keys read conflict range
 	ASSERT(readConflictRangeKeysRange.contains(kr));
 	ASSERT(!tr.options.checkWritesEnabled)
 	Standalone<RangeResultRef> result;
@@ -1597,6 +1601,7 @@ Standalone<RangeResultRef> ReadYourWritesTransaction::getReadConflictRangeInters
 }
 
 Standalone<RangeResultRef> ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRangeRef kr) {
+	TEST(true); // Special keys write conflict range
 	ASSERT(writeConflictRangeKeysRange.contains(kr));
 	Standalone<RangeResultRef> result;
 
