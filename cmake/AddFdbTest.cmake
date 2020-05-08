@@ -123,6 +123,7 @@ function(add_fdb_test)
     -b ${PROJECT_BINARY_DIR}
     -t ${test_type}
     -O ${OLD_FDBSERVER_BINARY}
+    --crash
     --aggregate-traces ${TEST_AGGREGATE_TRACES}
     --log-format ${TEST_LOG_FORMAT}
     --keep-logs ${TEST_KEEP_LOGS}

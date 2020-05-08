@@ -64,6 +64,7 @@ struct StorageServerInterface {
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
 	RequestStream<struct SplitMetricsRequest> splitMetrics;
+	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct GetStorageMetricsRequest> getStorageMetrics;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct StorageQueuingMetricsRequest> getQueuingMetrics;
@@ -84,12 +85,12 @@ struct StorageServerInterface {
 		// versioned carefully!
 
 		if constexpr (!is_fb_function<Ar>) {
-			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
+			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics, splitMetrics,
+			           getReadHotRanges, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
 		} else {
-			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
-			           splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
+			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics, splitMetrics,
+			           getReadHotRanges, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
 			           watchValue);
 		}
 	}
@@ -386,6 +387,30 @@ struct SplitMetricsRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, limits, used, estimated, isLastShard, reply, arena);
+	}
+};
+
+struct ReadHotSubRangeReply {
+	constexpr static FileIdentifier file_identifier = 10424537;
+	Standalone<VectorRef<KeyRangeRef>> readHotRanges;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, readHotRanges);
+	}
+};
+struct ReadHotSubRangeRequest {
+	constexpr static FileIdentifier file_identifier = 10259266;
+	Arena arena;
+	KeyRangeRef keys;
+	ReplyPromise<ReadHotSubRangeReply> reply;
+
+	ReadHotSubRangeRequest() {}
+	ReadHotSubRangeRequest(KeyRangeRef const& keys) : keys(arena, keys) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, reply, arena);
 	}
 };
 

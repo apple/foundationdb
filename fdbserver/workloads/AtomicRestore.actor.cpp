@@ -86,7 +86,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 		TraceEvent("AtomicRestore_RestoreStart");
 
 		if (self->fastRestore) { // New fast parallel restore
-			TraceEvent(SevWarnAlways, "AtomicParallelRestore");
+			TraceEvent(SevInfo, "AtomicParallelRestore");
 			wait(backupAgent.atomicParallelRestore(cx, BackupAgentBase::getDefaultTag(), self->backupRanges,
 			                                       StringRef(), StringRef()));
 		} else { // Old style restore

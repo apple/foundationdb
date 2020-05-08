@@ -49,9 +49,7 @@
 #include "flow/TLSConfig.actor.h"
 #include "flow/UnitTest.h"
 
-#if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "versions.h"
-#endif
+#include "fdbclient/IncludeVersions.h"
 
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -473,7 +471,7 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bo
 		choose {
 			when(wait(cx->onMasterProxiesChanged())) {}
 			when(GetHealthMetricsReply rep =
-				 wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getHealthMetrics,
+				 wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getHealthMetrics,
 							 GetHealthMetricsRequest(sendDetailedRequest)))) {
 				cx->healthMetrics.update(rep.healthMetrics, detailed, true);
 				if (detailed) {
@@ -530,7 +528,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
     specialKeySpace(std::make_shared<SpecialKeySpace>(normalKeys.begin, specialKeys.end)),
-    cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeysRange)) {
+    cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeysRange)),
+    rCRImpl(std::make_shared<ReadConflictRangeImpl>(readConflictRangeKeysRange)),
+    wCRImpl(std::make_shared<WriteConflictRangeImpl>(writeConflictRangeKeysRange)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
 
@@ -550,6 +550,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	specialKeySpace->registerKeyRange(conflictingKeysRange, cKImpl.get());
+	specialKeySpace->registerKeyRange(readConflictRangeKeysRange, rCRImpl.get());
+	specialKeySpace->registerKeyRange(writeConflictRangeKeysRange, wCRImpl.get());
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc), 
@@ -693,7 +695,7 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 			case FDBDatabaseOptions::MACHINE_ID:
 				clientLocality = LocalityData( clientLocality.processId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>(), clientLocality.machineId(), clientLocality.dcId() );
 				if( clientInfo->get().proxies.size() )
-					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ) );
+					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ) );
 				server_interf.clear();
 				locationCache.insert( allKeys, Reference<LocationInfo>() );
 				break;
@@ -703,7 +705,7 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 			case FDBDatabaseOptions::DATACENTER_ID:
 				clientLocality = LocalityData(clientLocality.processId(), clientLocality.zoneId(), clientLocality.machineId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>());
 				if( clientInfo->get().proxies.size() )
-					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ));
+					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ));
 				server_interf.clear();
 				locationCache.insert( allKeys, Reference<LocationInfo>() );
 				break;
@@ -1071,7 +1073,7 @@ Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxie
 		masterProxiesLastChange = clientInfo->get().id;
 		masterProxies.clear();
 		if( clientInfo->get().proxies.size() ) {
-			masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, clientLocality ));
+			masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ));
 			provisional = clientInfo->get().proxies[0].provisional;
 		}
 	}
@@ -1217,7 +1219,7 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( 
 		++cx->transactionKeyServerLocationRequests;
 		choose {
 			when ( wait( cx->onMasterProxiesChanged() ) ) {}
-			when ( GetKeyServerLocationsReply rep = wait( loadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(key, Optional<KeyRef>(), 100, isBackward, key.arena()), TaskPriority::DefaultPromiseEndpoint ) ) ) {
+			when ( GetKeyServerLocationsReply rep = wait( basicLoadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(key, Optional<KeyRef>(), 100, isBackward, key.arena()), TaskPriority::DefaultPromiseEndpoint ) ) ) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
 				if( info.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.After");
@@ -1256,7 +1258,7 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 		++cx->transactionKeyServerLocationRequests;
 		choose {
 			when ( wait( cx->onMasterProxiesChanged() ) ) {}
-			when ( GetKeyServerLocationsReply _rep = wait( loadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(keys.begin, keys.end, limit, reverse, keys.arena()), TaskPriority::DefaultPromiseEndpoint ) ) ) {
+			when ( GetKeyServerLocationsReply _rep = wait( basicLoadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(keys.begin, keys.end, limit, reverse, keys.arena()), TaskPriority::DefaultPromiseEndpoint ) ) ) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
 				state GetKeyServerLocationsReply rep = _rep;
 				if( info.debugID.present() )
@@ -1501,7 +1503,7 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 		loop {
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
-				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE ), cx->taskID ) ) ) {
+				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE ), cx->taskID ) ) ) {
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 
 					if (v.version >= version)
@@ -1521,7 +1523,7 @@ ACTOR Future<Version> getRawVersion( Database cx ) {
 	loop {
 		choose {
 			when ( wait( cx->onMasterProxiesChanged() ) ) {}
-			when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE ), cx->taskID ) ) ) {
+			when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE ), cx->taskID ) ) ) {
 				return v.version;
 			}
 		}
@@ -2429,7 +2431,7 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 
 	t.mutations.push_back( req.arena, MutationRef( operationType, r.begin, v ) );
 
-	if( addConflictRange )
+	if (addConflictRange && operationType != MutationRef::SetVersionstampedKey)
 		t.write_conflict_ranges.push_back( req.arena, r );
 
 	TEST(true); //NativeAPI atomic operation
@@ -2748,7 +2750,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 				reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
 			}
 		} else {
-			reply = loadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::commit, req, TaskPriority::DefaultPromiseEndpoint, true );
+			reply = basicLoadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::commit, req, TaskPriority::DefaultPromiseEndpoint, true );
 		}
 
 		choose {
@@ -2786,7 +2788,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->commitLatencies.addSample(latency);
 					cx->latencies.addSample(now() - tr->startTime);
 					if (trLogInfo)
-						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), req));
+						trLogInfo->addLog(FdbClientLogEvents::EventCommit_V2(startTime, latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), ci.version, req));
 					return Void();
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
@@ -3148,7 +3150,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 			state GetReadVersionRequest req( transactionCount, flags, debugID );
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
-				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
+				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
 					if( debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.After");
 					ASSERT( v.version > 0 );
@@ -3224,7 +3226,7 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, uint32_t flags, Re
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
 	if (trLogInfo)
-		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V2(startTime, latency, flags & GetReadVersionRequest::FLAG_PRIORITY_MASK));
+		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(startTime, latency, flags & GetReadVersionRequest::FLAG_PRIORITY_MASK, rep.version));
 	if (rep.version == 1 && rep.locked) {
 		throw proxy_memory_limit_exceeded();
 	}
@@ -3452,6 +3454,51 @@ ACTOR Future< StorageMetrics > extractMetrics( Future<std::pair<Optional<Storage
 	std::pair<Optional<StorageMetrics>, int> x = wait(fMetrics);
 	return x.first.get();
 }
+
+ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getReadHotRanges(Database cx, KeyRange keys) {
+	loop {
+		int64_t shardLimit = 100; // Shard limit here does not really matter since this function is currently only used
+		                          // to find the read-hot sub ranges within a read-hot shard.
+		vector<pair<KeyRange, Reference<LocationInfo>>> locations =
+		    wait(getKeyRangeLocations(cx, keys, shardLimit, false, &StorageServerInterface::getReadHotRanges,
+		                              TransactionInfo(TaskPriority::DataDistribution)));
+		try {
+			// TODO: how to handle this?
+			// This function is called whenever a shard becomes read-hot. But somehow the shard was splitted across more
+			// than one storage server after become read-hot and before this function is called, i.e. a race condition.
+			// Should we abort and wait the newly splitted shards to be hot again?
+			state int nLocs = locations.size();
+			// if (nLocs > 1) {
+			// 	TraceEvent("RHDDebug")
+			// 	    .detail("NumSSIs", nLocs)
+			// 	    .detail("KeysBegin", keys.begin.printable().c_str())
+			// 	    .detail("KeysEnd", keys.end.printable().c_str());
+			// }
+			state vector<Future<ReadHotSubRangeReply>> fReplies(nLocs);
+			for (int i = 0; i < nLocs; i++) {
+				ReadHotSubRangeRequest req(locations[i].first);
+				fReplies[i] = loadBalance(locations[i].second, &StorageServerInterface::getReadHotRanges, req,
+				                          TaskPriority::DataDistribution);
+			}
+
+			wait(waitForAll(fReplies));
+			Standalone<VectorRef<KeyRangeRef>> results;
+
+			for (int i = 0; i < nLocs; i++)
+				results.append(results.arena(), fReplies[i].get().readHotRanges.begin(),
+				               fReplies[i].get().readHotRanges.size());
+
+			return results;
+		} catch (Error& e) {
+			if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+				TraceEvent(SevError, "GetReadHotSubRangesError").error(e);
+				throw;
+			}
+			cx->invalidateCache(keys);
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+		}
+	}
+}
 	
 ACTOR Future< std::pair<Optional<StorageMetrics>, int> > waitStorageMetrics(
 	Database cx,
@@ -3519,6 +3566,10 @@ Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, i
 	} else {
 		return ::getStorageMetricsLargeKeyRange(cx, keys);
 	}
+}
+
+Future<Standalone<VectorRef<KeyRangeRef>>> Transaction::getReadHotRanges(KeyRange const& keys) {
+	return ::getReadHotRanges(cx, keys);
 }
 
 ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, KeyRange keys, StorageMetrics limit, StorageMetrics estimated )
@@ -3604,7 +3655,7 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 		loop {
 			choose {
 				when(wait(cx->onMasterProxiesChanged())) {}
-				when(wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::proxySnapReq, ProxySnapRequest(snapCmd, snapUID, snapUID), cx->taskID, true /*atmostOnce*/ ))) {
+				when(wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::proxySnapReq, ProxySnapRequest(snapCmd, snapUID, snapUID), cx->taskID, true /*atmostOnce*/ ))) {
 					TraceEvent("SnapCreateExit")
 						.detail("SnapCmd", snapCmd.toString())
 						.detail("UID", snapUID);
@@ -3632,7 +3683,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 			choose {
 				when(wait(cx->onMasterProxiesChanged())) {}
 				when(ExclusionSafetyCheckReply _ddCheck =
-				         wait(loadBalance(cx->getMasterProxies(false), &MasterProxyInterface::exclusionSafetyCheckReq,
+				         wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::exclusionSafetyCheckReq,
 				                          req, cx->taskID))) {
 					ddCheck = _ddCheck.safe;
 					break;

@@ -44,7 +44,7 @@ private:
 };
 
 typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
-typedef MultiInterface<MasterProxyInterface> ProxyInfo;
+typedef ModelInterface<MasterProxyInterface> ProxyInfo;
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
@@ -231,6 +231,8 @@ public:
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 	std::shared_ptr<SpecialKeySpace> specialKeySpace;
 	std::shared_ptr<ConflictingKeysImpl> cKImpl;
+	std::shared_ptr<ReadConflictRangeImpl> rCRImpl;
+	std::shared_ptr<WriteConflictRangeImpl> wCRImpl;
 };
 
 #endif

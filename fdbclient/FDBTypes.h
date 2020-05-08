@@ -268,6 +268,10 @@ struct KeyRangeRef {
 		return KeyRangeRef( begin.withPrefix(prefix), end.withPrefix(prefix) );
 	}
 
+	KeyRangeRef withPrefix(const StringRef& prefix, Arena& arena) const {
+		return KeyRangeRef(begin.withPrefix(prefix, arena), end.withPrefix(prefix, arena));
+	}
+
 	KeyRangeRef removePrefix( const StringRef& prefix ) const {
 		return KeyRangeRef( begin.removePrefix(prefix), end.removePrefix(prefix) );
 	}
@@ -282,7 +286,18 @@ struct KeyRangeRef {
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
-		serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
+		if (!ar.isDeserializing && equalsKeyAfter(begin, end)) {
+			StringRef empty;
+			serializer(ar, const_cast<KeyRef&>(end), empty);
+		} else {
+			serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
+		}
+		if (ar.isDeserializing && end == StringRef() && begin != StringRef()) {
+			ASSERT(begin[begin.size()-1] == '\x00');
+			const_cast<KeyRef&>(end) = begin;
+			const_cast<KeyRef&>(begin) = end.substr(0, end.size()-1);
+		}
+
 		if( begin > end ) {
 			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end);
 			throw inverted_range();

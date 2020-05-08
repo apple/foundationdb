@@ -437,12 +437,13 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 		.detail("ConnSet", (bool)conn);
 	ASSERT_WE_THINK(FlowTransport::transport().getLocalAddress() != self->destination);
 
+	state Future<Void> delayedHealthUpdateF;
 	state Optional<double> firstConnFailedTime = Optional<double>();
 	state int retryConnect = false;
 
 	loop {
 		try {
-			state Future<Void> delayedHealthUpdateF = Future<Void>();
+			delayedHealthUpdateF = Future<Void>();
 
 			if (!conn) {  // Always, except for the first loop with an incoming connection
 				self->outgoingConnectionIdle = true;
