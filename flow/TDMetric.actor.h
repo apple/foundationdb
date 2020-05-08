@@ -28,7 +28,6 @@
         #define FLOW_TDMETRIC_ACTOR_H
 
 #include "flow/flow.h"
-#include "flow/IndexedSet.h"
 #include "flow/network.h"
 #include "flow/Knobs.h"
 #include "flow/genericactors.actor.h"
@@ -56,9 +55,21 @@ struct MetricNameRef {
 	int expectedSize() const {
 		return type.expectedSize() + name.expectedSize();
 	}
+
+	inline int compare(MetricNameRef const& r) const {
+		int cmp;
+		if ((cmp = type.compare(r.type))) {
+			return cmp;
+		}
+		if ((cmp = name.compare(r.name))) {
+			return cmp;
+		}
+		return id.compare(r.id);
+	}
 };
 
 extern std::string reduceFilename(std::string const &filename);
+
 inline bool operator < (const MetricNameRef& l, const MetricNameRef& r ) {
 	int cmp = l.type.compare(r.type);
 	if(cmp == 0) {

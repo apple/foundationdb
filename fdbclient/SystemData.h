@@ -83,6 +83,8 @@ bool serverHasKey( ValueRef storedValue );
 
 extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
+extern const KeyRangeRef writeConflictRangeKeysRange;
+extern const KeyRangeRef readConflictRangeKeysRange;
 
 extern const KeyRef cacheKeysPrefix;
 

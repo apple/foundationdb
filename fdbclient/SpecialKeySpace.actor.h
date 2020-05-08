@@ -95,5 +95,19 @@ public:
 	                                            KeyRangeRef kr) const override;
 };
 
+class ReadConflictRangeImpl : public SpecialKeyRangeBaseImpl {
+public:
+	explicit ReadConflictRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+	                                            KeyRangeRef kr) const override;
+};
+
+class WriteConflictRangeImpl : public SpecialKeyRangeBaseImpl {
+public:
+	explicit WriteConflictRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+	                                            KeyRangeRef kr) const override;
+};
+
 #include "flow/unactorcompiler.h"
 #endif

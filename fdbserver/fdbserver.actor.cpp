@@ -54,9 +54,7 @@
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/TLSConfig.actor.h"
-#if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "versions.h"
-#endif
+#include "fdbclient/IncludeVersions.h"
 
 #include "fdbmonitor/SimpleIni.h"
 
@@ -1868,7 +1866,7 @@ int main(int argc, char* argv[]) {
 				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 				actors.push_back(restoreWorker(opts.connectionFile, opts.localities, dataFolder));
 				f = stopAfter(waitForAll(actors));
-				printf("Fast restore worker exits\n");
+				printf("Fast restore worker started\n");
 				g_network->run();
 				printf("g_network->run() done\n");
 			} else { // Call fdbd roles in conventional way

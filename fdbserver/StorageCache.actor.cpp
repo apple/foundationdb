@@ -133,7 +133,8 @@ struct FetchInjectionInfo {
 };
 
 struct StorageCacheData {
-	typedef VersionedMap<KeyRef, ValueOrClearToRef, FastAllocPTree<KeyRef>> VersionedData;
+	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
+	//typedef VersionedMap<KeyRef, ValueOrClearToRef, FastAllocPTree<KeyRef>> VersionedData;
 private:
 	// in-memory versioned struct (PTree as of now. Subject to change)
 	VersionedData versionedData;

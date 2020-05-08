@@ -3691,8 +3691,7 @@ public:
 					auto range = backupRanges[restoreIndex];
 					Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
 					// Register the request request in DB, which will be picked up by restore worker leader
-					struct RestoreRequest restoreRequest(restoreIndex, restoreTag, bcUrl, true, targetVersion, true,
-					                                     range, Key(), Key(), lockDB,
+					struct RestoreRequest restoreRequest(restoreIndex, restoreTag, bcUrl, targetVersion, range,
 					                                     deterministicRandom()->randomUniqueID());
 					tr->set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
 				}
@@ -4614,11 +4613,10 @@ public:
 	// Similar to atomicRestore, only used in simulation test.
 	// locks the database before discontinuing the backup and that same lock is then used while doing the restore.
 	// the tagname of the backup must be the same as the restore.
-	ACTOR static Future<Void> atomicParallelRestore(FileBackupAgent* backupAgent, Database cx, Key tagName,
+	static Future<Void> atomicParallelRestore(FileBackupAgent* backupAgent, Database cx, Key tagName,
 	                                                Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix,
 	                                                Key removePrefix) {
-		Version ver = wait(atomicRestore(backupAgent, cx, tagName, ranges, addPrefix, removePrefix, true));
-		return Void();
+		return success(atomicRestore(backupAgent, cx, tagName, ranges, addPrefix, removePrefix, true));
 	}
 };
 

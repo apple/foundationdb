@@ -86,31 +86,65 @@ namespace actorcompiler
         string indentation;
         StreamWriter body;
         public bool wasCalled { get; protected set; }
+        public Function overload = null;
 
         public Function()
         {
             body = new StreamWriter(new MemoryStream());
         }
 
+        public void setOverload(Function overload) {
+            this.overload = overload;
+        }
+
+        public Function popOverload() {
+            Function result = this.overload;
+            this.overload = null;
+            return result;
+        }
+
+        public void addOverload(params string[] formalParameters) {
+            setOverload(
+                new Function {
+                    name = name,
+                    returnType = returnType,
+                    endIsUnreachable = endIsUnreachable,
+                    formalParameters = formalParameters
+                }
+            );
+        }
+
         public void Indent(int change)
         {
             for(int i=0; i<change; i++) indentation += '\t';
             if (change < 0) indentation = indentation.Substring(-change);
+            if (overload != null) {
+                overload.Indent(change);
+            }
         }
 
         public void WriteLineUnindented(string s)
         {
             body.WriteLine(s);
+            if (overload != null) {
+                overload.WriteLineUnindented(s);
+            }
         }
         public void WriteLine(string line)
         {
             body.Write(indentation);
             body.WriteLine(line);
+            if (overload != null) {
+                overload.WriteLine(line);
+            }
         }
         public void WriteLine(string line, params object[] args)
         {
             body.Write(indentation);
             body.WriteLine(line, args);
+            if (overload != null) {
+                overload.WriteLine(line, args);
+            }
         }
 
         public string BodyText
@@ -754,8 +788,9 @@ namespace actorcompiler
                     Group = group, 
                     Index = this.whenCount+i,
                     Body = getFunction(cx.target.name, "when", 
-                        string.Format("{0} const& {2}{1}", ch.wait.result.type, ch.wait.result.name, ch.wait.resultIsState?"__":""), 
-                        loopDepth),
+                                           new string[] { string.Format("{0} const& {2}{1}", ch.wait.result.type, ch.wait.result.name, ch.wait.resultIsState?"__":""), loopDepth },
+                                           new string[] { string.Format("{0} && {2}{1}", ch.wait.result.type, ch.wait.result.name, ch.wait.resultIsState?"__":""), loopDepth }
+                                       ),
                     Future = string.Format("__when_expr_{0}", this.whenCount + i),
                     CallbackType = string.Format("{3}< {0}, {1}, {2} >", fullClassName, this.whenCount + i, ch.wait.result.type, ch.wait.isWaitNext ? "ActorSingleCallback" : "ActorCallback"),
                     CallbackTypeInStateClass = string.Format("{3}< {0}, {1}, {2} >", className, this.whenCount + i, ch.wait.result.type, ch.wait.isWaitNext ? "ActorSingleCallback" : "ActorCallback")
@@ -784,6 +819,7 @@ namespace actorcompiler
                 var r = ch.Body;
                 if (ch.Stmt.wait.resultIsState)
                 {
+                    Function overload = r.popOverload();
                     CompileStatement(new StateDeclarationStatement
                     {
                         FirstSourceLine = ch.Stmt.FirstSourceLine,
@@ -794,6 +830,11 @@ namespace actorcompiler
                             initializerConstructorSyntax = false 
                         }
                     }, cx.WithTarget(r));
+                    if (overload != null)
+                    {
+                        overload.WriteLine("{0} = std::move(__{0});", ch.Stmt.wait.result.name);
+                        r.setOverload(overload);
+                    }
                 }
                 if (ch.Stmt.body != null)
                 {
@@ -804,8 +845,14 @@ namespace actorcompiler
                     reachable = true;
                     if (cx.next.formalParameters.Length == 1)
                         r.WriteLine("loopDepth = {0};", cx.next.call("loopDepth"));
-                    else
+                    else {
+                        Function overload = r.popOverload();
                         r.WriteLine("loopDepth = {0};", cx.next.call(ch.Stmt.wait.result.name, "loopDepth"));
+                        if (overload != null) {
+                            overload.WriteLine("loopDepth = {0};", cx.next.call(string.Format("std::move({0})", ch.Stmt.wait.result.name), "loopDepth"));
+                            r.setOverload(overload);
+                        }
+                    }
                 }
 
                 var cbFunc = new Function { 
@@ -817,13 +864,22 @@ namespace actorcompiler
                     },
                     endIsUnreachable = true
                 };
+                cbFunc.addOverload(ch.CallbackTypeInStateClass + "*", ch.Stmt.wait.result.type + " && value");
                 functions.Add(string.Format("{0}#{1}", cbFunc.name, ch.Index), cbFunc);
                 cbFunc.Indent(codeIndent);
                 ProbeEnter(cbFunc, actor.name, ch.Index);
                 cbFunc.WriteLine("{0};", exitFunc.call());
+
+                Function _overload = cbFunc.popOverload();
                 TryCatch(cx.WithTarget(cbFunc), cx.catchFErr, cx.tryLoopDepth, () => {
                     cbFunc.WriteLine("{0};", ch.Body.call("value", "0"));
                 }, false);
+                if (_overload != null) {
+                    TryCatch(cx.WithTarget(_overload), cx.catchFErr, cx.tryLoopDepth, () => {
+                        _overload.WriteLine("{0};", ch.Body.call("std::move(value)", "0"));
+                    }, false);
+                    cbFunc.setOverload(_overload);
+                }
                 ProbeExit(cbFunc, actor.name, ch.Index);
 
                 var errFunc = new Function
@@ -916,10 +972,14 @@ namespace actorcompiler
                 },
                 FirstSourceLine = stmt.FirstSourceLine
             };
-            if (!stmt.resultIsState)
+            if (!stmt.resultIsState) {
                 cx.next.formalParameters = new string[] {
                     string.Format("{0} const& {1}", stmt.result.type, stmt.result.name), 
                     loopDepth };
+                cx.next.addOverload(
+                    string.Format("{0} && {1}", stmt.result.type, stmt.result.name),
+                    loopDepth);
+            }
             CompileStatement(equiv, cx);
         }
         void CompileStatement(CodeBlock stmt, Context cx)
@@ -1116,6 +1176,14 @@ namespace actorcompiler
                 {
                     WriteFunction(writer, func, body);
                 }
+                if (func.overload != null)
+                {
+                    string overloadBody = func.overload.BodyText;
+                    if (overloadBody.Length != 0)
+                    {
+                        WriteFunction(writer, func.overload, overloadBody);
+                    }
+                }
             }
         }
 
@@ -1133,7 +1201,7 @@ namespace actorcompiler
             writer.WriteLine(memberIndentStr + "}");
         }
 
-        Function getFunction(string baseName, string addName, params string[] formalParameters)
+        Function getFunction(string baseName, string addName, string[] formalParameters, string[] overloadFormalParameters)
         {
             string proposedName;
             if (addName == "cont" && baseName.Length>=5 && baseName.Substring(baseName.Length - 5, 4) == "cont")
@@ -1149,10 +1217,19 @@ namespace actorcompiler
                 returnType = "int",
                 formalParameters = formalParameters
             };
+            if (overloadFormalParameters != null) {
+                f.addOverload(overloadFormalParameters);
+            }
             f.Indent(codeIndent);
             functions.Add(f.name, f);
             return f;
         }
+
+        Function getFunction(string baseName, string addName, params string[] formalParameters)
+        {
+            return getFunction(baseName, addName, formalParameters, null);
+        }
+
         string[] ParameterList()
         {
             return actor.parameters.Select(p =>

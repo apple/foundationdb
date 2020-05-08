@@ -110,10 +110,19 @@ void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& v
 	std::sort(dest.begin(), dest.end());
 }
 
-const KeyRangeRef conflictingKeysRange = KeyRangeRef(LiteralStringRef("\xff\xff/transaction/conflicting_keys/"),
-                                                     LiteralStringRef("\xff\xff/transaction/conflicting_keys/\xff"));
+const KeyRangeRef conflictingKeysRange =
+    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/conflicting_keys/"),
+                LiteralStringRef("\xff\xff/transaction/conflicting_keys/\xff\xff"));
 const ValueRef conflictingKeysTrue = LiteralStringRef("1");
 const ValueRef conflictingKeysFalse = LiteralStringRef("0");
+
+const KeyRangeRef readConflictRangeKeysRange =
+    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
+                LiteralStringRef("\xff\xff/transaction/read_conflict_range/\xff\xff"));
+
+const KeyRangeRef writeConflictRangeKeysRange =
+    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
+                LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff"));
 
 // "\xff/cacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD

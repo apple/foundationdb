@@ -107,7 +107,7 @@ struct MutationRef {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		if (!ar.isDeserializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
+		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
 			StringRef empty;
 			serializer(ar, type, param2, empty);
 		} else {

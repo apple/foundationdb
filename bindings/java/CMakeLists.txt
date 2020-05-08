@@ -140,7 +140,7 @@ set_target_properties(java_workloads PROPERTIES
 target_link_libraries(java_workloads PUBLIC fdb_c ${JNI_LIBRARIES})
 target_include_directories(java_workloads PUBLIC ${JNI_INCLUDE_DIRS})
 
-set(CMAKE_JAVA_COMPILE_FLAGS "-source" "1.8" "-target" "1.8")
+set(CMAKE_JAVA_COMPILE_FLAGS "-source" "1.8" "-target" "1.8" "-XDignore.symbol.file")
 set(CMAKE_JNI_TARGET TRUE)
 
 # build a manifest file
