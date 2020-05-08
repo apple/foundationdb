@@ -92,12 +92,16 @@ public:
 	void send( T const& t ) {  // Can be called safely from another thread.  Call send or sendError at most once.
 		Promise<Void> signal;
 		tagAndForward( &promise, t, signal.getFuture() );
-		g_network->onMainThread( std::move(signal), incrementPriorityIfEven( g_network->getCurrentTask() ) );
+		g_network->onMainThread(std::move(signal), g_network->isOnMainThread()
+		                                               ? incrementPriorityIfEven(g_network->getCurrentTask())
+		                                               : TaskPriority::DefaultOnMainThread);
 	}
 	void sendError( Error const& e ) {  // Can be called safely from another thread.  Call send or sendError at most once.
 		Promise<Void> signal;
 		tagAndForwardError( &promise, e, signal.getFuture() );
-		g_network->onMainThread( std::move(signal), incrementPriorityIfEven( g_network->getCurrentTask() ) );
+		g_network->onMainThread(std::move(signal), g_network->isOnMainThread()
+		                                               ? incrementPriorityIfEven(g_network->getCurrentTask())
+		                                               : TaskPriority::DefaultOnMainThread);
 	}
 private:
 	Promise<T> promise;
