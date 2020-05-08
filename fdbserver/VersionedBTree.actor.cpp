@@ -3557,8 +3557,11 @@ private:
 	// Each call to commitSubtree() will pass most of its arguments via a this structure because the caller
 	// will need access to these parameters after commitSubtree() is done.
 	struct InternalPageSliceUpdate {
-		// The logical range for the subtree's contents.  Due to deletions, may not match the lower/upper bounds for
-		// decoding pages.
+		// The logical range for the subtree's contents.  Due to subtree clears, these boundaries may not match
+		// the lower/upper bounds needed to decode the page.
+		// Subtree clears can cause the boundaries for decoding the page to be more restrictive than the subtree's
+		// logical boundaries.  When a subtree is fully cleared, the link to it is replaced with a null link, but
+		// the key boundary remains in tact to support decoding of the previous subtree.
 		const RedwoodRecordRef* subtreeLowerBound;
 		const RedwoodRecordRef* subtreeUpperBound;
 
@@ -3566,11 +3569,14 @@ private:
 		const RedwoodRecordRef* decodeLowerBound;
 		const RedwoodRecordRef* decodeUpperBound;
 
-		// Subtree clears can cause the boundaries for decoding the page to be more restrictive than the subtree's
-		// logical boundaries When the slice is created, for a single-subtree slice these bools will indicate if the
-		// boundaries for decoding the page are the same as the subtree boundaries.
-		bool decodeUsingSubtreeLowerBound;
-		bool decodeUsingSubtreeUpperBound;
+		bool boundariesNormal() const {
+			// If the decode upper boundary is the subtree upper boundary the pointers will be the same
+			// For the lower boundary, if the pointers are not the same there is still a possibility
+			// that the keys are the same.  This happens for the first remaining subtree of an internal page
+			// after the previous first subtree was cleared.
+			return (decodeUpperBound == subtreeUpperBound) &&
+			       (decodeLowerBound == subtreeLowerBound || decodeLowerBound->sameExceptValue(*subtreeLowerBound));
+		}
 
 		// The record range of the subtree slice is cBegin to cEnd
 		// cBegin.get().getChildPage() is guaranteed to be valid
@@ -3589,7 +3595,8 @@ private:
 		// actual items in the page.
 		int skipLen;
 
-		// Members below this point are "output" members, set by function calls from commitSubtree()
+		// Members below this point are "output" members, set by function calls from commitSubtree() once it decides
+		// what is happening with this slice of the tree.
 
 		// If true, present, the contents of newLinks should replace [cBegin, cEnd)
 		bool childrenChanged;
@@ -3599,18 +3606,12 @@ private:
 		// If the last record in the range has a null link then this will be null.
 		const RedwoodRecordRef* expectedUpperBound;
 
-		// Boundary used to be different from subtree boundary but now isn't.
-		bool lowerBoundUpdated;
-		bool upperBoundUpdated;
-
 		// CommitSubtree will call one of the following three functions based on its exit path
 
 		// Subtree was cleared.
 		void cleared() {
 			childrenChanged = true;
 			expectedUpperBound = nullptr;
-			lowerBoundUpdated = false;
-			upperBoundUpdated = false;
 		}
 
 		// Page was updated in-place through edits and written to maybeNewID
@@ -3627,8 +3628,6 @@ private:
 				childrenChanged = false;
 			}
 
-			lowerBoundUpdated = false;
-			upperBoundUpdated = false;
 			// Expected upper bound remains unchanged.
 		}
 
@@ -3637,10 +3636,6 @@ private:
 			newLinks = newRecords;
 			childrenChanged = true;
 
-			// The subtree boundaries are used in writePages, so if they were different before
-			// they have now been updated.
-			lowerBoundUpdated = !decodeUsingSubtreeLowerBound;
-			upperBoundUpdated = !decodeUsingSubtreeUpperBound;
 			// If the replacement records ended on a non-null child page, then the expect upper bound is
 			// the subtree upper bound since that is what would have been used for the page(s) rebuild,
 			// otherwise it is null.
@@ -3660,10 +3655,8 @@ private:
 
 		std::string toString() const {
 			std::string s;
-			s += format(
-			    "SubtreeSlice: addr=%p Lower=%d:%d Upper=%d:%d skipLen=%d subtreeCleared=%d childrenChanged=%d\n", this,
-			    decodeUsingSubtreeUpperBound, lowerBoundUpdated, decodeUsingSubtreeUpperBound, upperBoundUpdated,
-			    skipLen, childrenChanged && newLinks.empty(), childrenChanged);
+			s += format("SubtreeSlice: addr=%p skipLen=%d subtreeCleared=%d childrenChanged=%d\n", this, skipLen,
+			            childrenChanged && newLinks.empty(), childrenChanged);
 			s += format("SubtreeLower: %s\n", subtreeLowerBound->toString(false).c_str());
 			s += format(" DecodeLower: %s\n", decodeLowerBound->toString(false).c_str());
 			s += format(" DecodeUpper: %s\n", decodeUpperBound->toString(false).c_str());
@@ -3800,10 +3793,8 @@ private:
 	ACTOR static Future<Void> commitSubtree(
 	    VersionedBTree* self, Reference<IPagerSnapshot> snapshot, MutationBuffer* mutationBuffer, BTreePageIDRef rootID,
 	    bool isLeaf,
-	    // greatest mutation boundary <= subtreeLowerBound->key
-	    MutationBuffer::const_iterator mBegin, // = mutationBuffer->upper_bound(subtreeLowerBound->key);  --mBegin;
-	    // least boundary >= subtreeLowerBound->key
-	    MutationBuffer::const_iterator mEnd, // = mutationBuffer->lower_bound(subtreeUpperBound->key);
+	    MutationBuffer::const_iterator mBegin, // greatest mutation boundary <= subtreeLowerBound->key
+	    MutationBuffer::const_iterator mEnd, // least boundary >= subtreeUpperBound->key
 	    InternalPageSliceUpdate* update) {
 
 		state std::string context;
@@ -3835,8 +3826,7 @@ private:
 		// TODO:  Decide if it is okay to update if the subtree boundaries are expanded.  It can result in
 		// records in a DeltaTree being outside its decode boundary range, which isn't actually invalid
 		// though it is awkward to reason about.
-		state bool tryToUpdate =
-		    btPage->tree().numItems > 0 && update->decodeUsingSubtreeLowerBound && update->decodeUsingSubtreeUpperBound;
+		state bool tryToUpdate = btPage->tree().numItems > 0 && update->boundariesNormal();
 
 		// If trying to update the page, we need to clone it so we don't modify the original.
 		// TODO: Refactor DeltaTree::Mirror so it can be shared between different versions of pages
@@ -4114,11 +4104,9 @@ private:
 				u.decodeLowerBound = &cursor.get();
 				if (first) {
 					u.subtreeLowerBound = update->subtreeLowerBound;
-					u.decodeUsingSubtreeLowerBound = u.decodeLowerBound->sameExceptValue(*update->subtreeLowerBound);
 					first = false;
 				} else {
 					u.subtreeLowerBound = u.decodeLowerBound;
-					u.decodeUsingSubtreeLowerBound = true;
 				}
 
 				BTreePageIDRef pageID = cursor.get().getChildPage();
@@ -4146,19 +4134,106 @@ private:
 					u.expectedUpperBound = update->decodeUpperBound;
 				}
 				u.subtreeUpperBound = cursor.valid() ? &cursor.get() : update->subtreeUpperBound;
-				u.decodeUsingSubtreeUpperBound = u.decodeUpperBound == u.subtreeUpperBound;
 				u.cEnd = cursor;
 
-				debug_printf("%s recursing to %s lower=%s upper=%s decodeLower=%s decodeUpper=%s\n", context.c_str(),
-				             toString(pageID).c_str(), u.subtreeLowerBound->toString().c_str(),
-				             u.subtreeUpperBound->toString().c_str(), u.decodeLowerBound->toString().c_str(),
-				             u.decodeUpperBound->toString().c_str());
+				u.skipLen = 0; // TODO: set this
 
 				slices.push_back(&u);
 
+				// Find the mutation buffer range that includes all changes to the range described by u
 				MutationBuffer::const_iterator mBegin = mutationBuffer->upper_bound(u.subtreeLowerBound->key);
-				--mBegin;
 				MutationBuffer::const_iterator mEnd = mutationBuffer->lower_bound(u.subtreeUpperBound->key);
+
+				// If mutation boundaries are the same, the range is fully described by (mBegin - 1).mutation()
+				bool fullyCovered = (mBegin == mEnd);
+				--mBegin;
+				
+				// If mBegin describes the entire subtree range, see if there are either no changes or if the entire
+				// range is cleared.
+				if (fullyCovered) {
+					const RangeMutation& range = mBegin.mutation();
+
+					// Check for uniform clearedness or unchangedness for the range mutation
+					KeyRef mutationBoundaryKey = mBegin.key();
+					bool uniform;
+
+					if (range.clearAfterBoundary) {
+						// If the mutation range after the boundary key is cleared, then the mutation boundary key must
+						// be cleared or must be different than the subtree lower bound key so that it doesn't matter
+						uniform = range.boundaryCleared() || mutationBoundaryKey != u.subtreeLowerBound->key;
+					} else {
+						// If the mutation range after the boundary key is unchanged, then the mutation boundary key
+						// must be also unchanged or must be different than the subtree lower bound key so that it
+						// doesn't matter
+						uniform = !range.boundaryChanged || mutationBoundaryKey != u.subtreeLowerBound->key;
+					}
+
+					// If the subtree range described by u is either uniformly changed or unchanged
+					if (uniform) {
+						// See if we can expand the subtree range to include more subtrees which are also covered by the
+						// same mutation range
+						if(cursor.valid() && mEnd.key() != cursor.get().key) {
+							cursor.seekLessThanOrEqual(mEnd.key(), update->skipLen, &cursor, 1);
+
+							// If this seek moved us ahead, to something other than cEnd, then update subtree range
+							// boundaries
+							if (cursor != u.cEnd) {
+								// If the cursor is at a record with a null child, back up one step because it is in the
+								// middle of the next logical subtree, as null child records are not subtree boundaries.
+								ASSERT(cursor.valid());
+								if (!cursor.get().value.present()) {
+									cursor.movePrev();
+								}
+
+								u.cEnd = cursor;
+								u.subtreeUpperBound = &cursor.get();
+								u.skipLen = 0; // TODO: set this
+
+								// The new decode upper bound is either cEnd or the record before it if it has no child link
+								auto c = u.cEnd;
+								c.movePrev();
+								ASSERT(c.valid());
+								if (!c.get().value.present()) {
+									u.decodeUpperBound = &c.get();
+									u.expectedUpperBound = nullptr;
+								} else {
+									u.decodeUpperBound = u.subtreeUpperBound;
+									u.expectedUpperBound = u.subtreeUpperBound;
+								}
+							}
+						}
+
+						// The subtree range is either fully cleared or unchanged.
+						if (range.clearAfterBoundary) {
+							// Cleared
+							u.cleared();
+							auto c = u.cBegin;
+							while (c != u.cEnd) {
+								const RedwoodRecordRef& rec = c.get();
+								if (rec.value.present()) {
+									if (btPage->height == 2) {
+										debug_printf("%s: freeing child page in cleared subtree range: %s\n",
+										             context.c_str(), ::toString(rec.getChildPage()).c_str());
+										self->freeBtreePage(rec.getChildPage(), writeVersion);
+									} else {
+										debug_printf("%s: queuing subtree deletion cleared subtree range: %s\n",
+										             context.c_str(), ::toString(rec.getChildPage()).c_str());
+										self->m_lazyDeleteQueue.pushFront(
+										    LazyDeleteQueueEntry{ writeVersion, rec.getChildPage() });
+									}
+								}
+								c.moveNext();
+							}
+						} else {
+							// Subtree range unchanged
+						}
+
+						debug_printf("%s: MutationBuffer covers this range in a single mutation: %s\n", context.c_str(),
+						             u.toString().c_str());
+						continue;
+					}
+				}
+
 				// If this page has height of 2 then its children are leaf nodes
 				futures.push_back(self->commitSubtree(self, snapshot, mutationBuffer, pageID, btPage->height == 2,
 				                                      mBegin, mEnd, slices.back()));
@@ -4256,13 +4331,11 @@ private:
 		state Standalone<BTreePageIDRef> rootPageID = self->m_header.root.get();
 		state InternalPageSliceUpdate all;
 		state RedwoodRecordRef rootLink = dbBegin.withPageID(rootPageID);
-		all.subtreeLowerBound = &dbBegin;
+		all.subtreeLowerBound = &rootLink;
 		all.decodeLowerBound = &rootLink;
 		all.subtreeUpperBound = &dbEnd;
 		all.decodeUpperBound = &dbEnd;
 		all.skipLen = 0;
-		all.decodeUsingSubtreeLowerBound = true;
-		all.decodeUsingSubtreeUpperBound = true;
 
 		MutationBuffer::const_iterator mBegin = mutations->upper_bound(all.subtreeLowerBound->key);
 		--mBegin;
