@@ -91,7 +91,7 @@ struct TPCCMetrics {
 			++failedCounter;
 		}
 		TraceEvent("TransactionComplete")
-		    .detail("Type", txnType)
+		    .detail("TransactionType", txnType)
 		    .detail("Latency", responseTime)
 		    .detail("Begin", txnStartTime)
 		    .detail("End", txnStartTime + responseTime)
