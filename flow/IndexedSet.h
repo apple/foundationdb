@@ -714,7 +714,7 @@ int IndexedSet<T,Metric>::insert(const std::vector<std::pair<T,Metric>>& dataVec
 			while (true) {
 				int cmp = compare(data, t->data);
 				d = cmp > 0;
-				if (!d)
+				if (d == 0)
 					blockEnd = t;
 				if (cmp == 0) {
 					Node *returnNode = t;
