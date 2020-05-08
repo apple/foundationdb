@@ -1584,8 +1584,12 @@ ACTOR Future<std::pair<ClusterConnectionString, UID>> monitorLeaderRemotelyOneGe
 
 	loop {
 		LeaderElectionRegInterface interf( request.coordinators[index] );
+		request.reply = ReplyPromise<Optional<LeaderInfo>>();
 
 		try {
+			UID requestID = deterministicRandom()->randomUniqueID();
+			TraceEvent("ElectionResultRequest").detail("RequestID", requestID).detail("Destination", request.coordinators[index].toString());
+			request.requestID = requestID;
 			ErrorOr<Optional<LeaderInfo>> leader = wait( interf.electionResult.tryGetReply( request ) );
 			if (leader.isError()) throw leader.getError();
 			if (!leader.get().present()) continue;
