@@ -81,6 +81,7 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker,
 
 		actors.add(updateHeartbeatTime(self));
 		actors.add(checkRolesLiveness(self));
+		actors.add(traceProcessMetrics(self, "RestoreMaster"));
 
 		wait(startProcessRestoreRequests(self, cx));
 	} catch (Error& e) {
@@ -315,7 +316,8 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 		TraceEvent("FastRestoreMasterDispatchVersionBatches")
 		    .detail("BatchIndex", batchIndex)
 		    .detail("BatchSize", versionBatch->size)
-		    .detail("RunningVersionBatches", self->runningVersionBatches.get());
+		    .detail("RunningVersionBatches", self->runningVersionBatches.get())
+		    .detail("VersionBatches", versionBatches.size());
 		self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
 		self->batchStatus[batchIndex] = Reference<MasterBatchStatus>(new MasterBatchStatus());
 		fBatches.push_back(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, *versionBatch));
@@ -402,6 +404,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		++paramIdx;
 	}
 	TraceEvent(files->size() != paramIdx ? SevError : SevInfo, "FastRestoreMasterPhaseLoadFiles")
+	    .detail("BatchIndex", batchIndex)
 	    .detail("Files", files->size())
 	    .detail("LoadParams", paramIdx);
 
@@ -561,6 +564,9 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
                               std::map<UID, RestoreApplierInterface> appliersInterf, int batchIndex) {
 	ASSERT(batchData->samplesSize >= 0);
+	// Sanity check: samples should not be used after freed
+	ASSERT((batchData->samplesSize > 0 && !batchData->samples.empty()) ||
+	       batchData->samplesSize == 0 && batchData->samples.empty());
 	int numAppliers = appliersInterf.size();
 	double slotSize = std::max(batchData->samplesSize / numAppliers, 1.0);
 	double cumulativeSize = slotSize;
@@ -619,6 +625,7 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 	    .detail("BatchIndex", batchIndex)
 	    .detail("SamplingSize", batchData->samplesSize)
 	    .detail("SlotSize", slotSize);
+	batchData->samples.clear();
 }
 
 ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx) {
