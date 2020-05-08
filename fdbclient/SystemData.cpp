@@ -49,14 +49,29 @@ const Value keyServersValue( Standalone<RangeResultRef> result, const std::vecto
 	std::vector<Tag> srcTag;
 	std::vector<Tag> destTag;
 
+	bool foundOldLocality = false;
 	for (const KeyValueRef kv : result) {
 		UID uid = decodeServerTagKey(kv.key);
 		if (std::find(src.begin(), src.end(), uid) != src.end()) {
 			srcTag.push_back( decodeServerTagValue(kv.value) );
+			if(srcTag.back().locality == tagLocalityUpgraded) {
+				foundOldLocality = true;
+				break;
+			}
 		}
 		if (std::find(dest.begin(), dest.end(), uid) != dest.end()) {
 			destTag.push_back( decodeServerTagValue(kv.value) );
+			if(destTag.back().locality == tagLocalityUpgraded) {
+				foundOldLocality = true;
+				break;
+			}
 		}
+	}
+
+	if(foundOldLocality || src.size() != srcTag.size() || dest.size() != destTag.size()) {
+		ASSERT_WE_THINK(foundOldLocality);
+		BinaryWriter wr(IncludeVersion()); wr << src << dest;
+		return wr.toValue();
 	}
 
 	return keyServersValue(srcTag, destTag);
@@ -106,6 +121,21 @@ void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& v
 	}
 	std::sort(src.begin(), src.end());
 	std::sort(dest.begin(), dest.end());
+	if(src.size() != srcTag.size() || dest.size() != destTag.size()) {
+		TraceEvent(SevError, "AttemptedToDecodeMissingTag");
+		for (const KeyValueRef kv : result) {
+			Tag tag = decodeServerTagValue(kv.value);
+			UID serverID = decodeServerTagKey(kv.key);
+			TraceEvent("TagUIDMap").detail("Tag", tag.toString()).detail("UID", serverID.toString());
+		}
+		for(auto& it : srcTag) {
+			TraceEvent("SrcTag").detail("Tag", it.toString());
+		}
+		for(auto& it : destTag) {
+			TraceEvent("DestTag").detail("Tag", it.toString());
+		}
+		ASSERT(false);
+	}
 }
 
 const KeyRangeRef conflictingKeysRange = KeyRangeRef(LiteralStringRef("\xff\xff/transaction/conflicting_keys/"),

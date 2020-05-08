@@ -1646,10 +1646,12 @@ ACTOR static Future<Void> rejoinServer( MasterProxyInterface proxy, ProxyCommitD
 				rep.history.push_back(std::make_pair(decodeServerTagHistoryKey(history[i].key), decodeServerTagValue(history[i].value)));
 			}
 			auto localityKey = commitData->txnStateStore->readValue(tagLocalityListKeyFor(req.dcId)).get();
+			rep.newLocality = false;
 			if( localityKey.present() ) {
-				rep.newLocality = false;
 				int8_t locality = decodeTagLocalityListValue(localityKey.get());
-				if(locality != rep.tag.locality) {
+				if(rep.tag.locality != tagLocalityUpgraded && locality != rep.tag.locality) {
+					TraceEvent(SevWarnAlways, "SSRejoinedWithChangedLocality").detail("Tag", rep.tag.toString()).detail("DcId", req.dcId).detail("NewLocality", locality);
+				} else if(locality != rep.tag.locality) {
 					uint16_t tagId = 0;
 					std::vector<uint16_t> usedTags;
 					auto tagKeys = commitData->txnStateStore->readRange(serverTagKeys).get();
@@ -1678,6 +1680,8 @@ ACTOR static Future<Void> rejoinServer( MasterProxyInterface proxy, ProxyCommitD
 					}
 					rep.newTag = Tag(locality, tagId);
 				}
+			} else if(rep.tag.locality != tagLocalityUpgraded) {
+				TraceEvent(SevWarnAlways, "SSRejoinedWithUnknownLocality").detail("Tag", rep.tag.toString()).detail("DcId", req.dcId);
 			} else {
 				rep.newLocality = true;
 				int8_t maxTagLocality = -1;
