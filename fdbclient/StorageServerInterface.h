@@ -71,6 +71,7 @@ struct StorageServerInterface {
 
 	RequestStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType;
 	RequestStream<struct WatchValueRequest> watchValue;
+	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
 	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
@@ -98,6 +99,7 @@ struct StorageServerInterface {
 				getQueuingMetrics = RequestStream<struct StorageQueuingMetricsRequest>( base.getAdjustedEndpoint(8) );
 				getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>( base.getAdjustedEndpoint(9) );
 				watchValue = RequestStream<struct WatchValueRequest>( base.getAdjustedEndpoint(10) );
+				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( base.getAdjustedEndpoint(11) );
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -125,6 +127,7 @@ struct StorageServerInterface {
 		streams.push_back(getQueuingMetrics.getReceiver());
 		streams.push_back(getKeyValueStoreType.getReceiver());
 		streams.push_back(watchValue.getReceiver());
+		streams.push_back(getReadHotRanges.getReceiver());
 		base = FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -413,6 +416,30 @@ struct SplitMetricsRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, limits, used, estimated, isLastShard, reply, arena);
+	}
+};
+
+struct ReadHotSubRangeReply {
+	constexpr static FileIdentifier file_identifier = 10424537;
+	Standalone<VectorRef<KeyRangeRef>> readHotRanges;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, readHotRanges);
+	}
+};
+struct ReadHotSubRangeRequest {
+	constexpr static FileIdentifier file_identifier = 10259266;
+	Arena arena;
+	KeyRangeRef keys;
+	ReplyPromise<ReadHotSubRangeReply> reply;
+
+	ReadHotSubRangeRequest() {}
+	ReadHotSubRangeRequest(KeyRangeRef const& keys) : keys(arena, keys) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, reply, arena);
 	}
 };
 

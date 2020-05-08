@@ -243,6 +243,26 @@ Future<Optional<Value>> SpecialKeySpace::get(Reference<ReadYourWritesTransaction
 	return getActor(this, ryw, key);
 }
 
+ReadConflictRangeImpl::ReadConflictRangeImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+
+ACTOR static Future<Standalone<RangeResultRef>> getReadConflictRangeImpl(Reference<ReadYourWritesTransaction> ryw,
+                                                                         KeyRange kr) {
+	wait(ryw->pendingReads());
+	return ryw->getReadConflictRangeIntersecting(kr);
+}
+
+Future<Standalone<RangeResultRef>> ReadConflictRangeImpl::getRange(Reference<ReadYourWritesTransaction> ryw,
+                                                                   KeyRangeRef kr) const {
+	return getReadConflictRangeImpl(ryw, kr);
+}
+
+WriteConflictRangeImpl::WriteConflictRangeImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> WriteConflictRangeImpl::getRange(Reference<ReadYourWritesTransaction> ryw,
+                                                                    KeyRangeRef kr) const {
+	return ryw->getWriteConflictRangeIntersecting(kr);
+}
+
 ConflictingKeysImpl::ConflictingKeysImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
 
 Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(Reference<ReadYourWritesTransaction> ryw,

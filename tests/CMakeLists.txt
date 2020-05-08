@@ -65,6 +65,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES RandomReadWrite.txt IGNORE)
   add_fdb_test(TEST_FILES ReadAbsent.txt IGNORE)
   add_fdb_test(TEST_FILES ReadHalfAbsent.txt IGNORE)
+  add_fdb_test(TEST_FILES fast/ReadHotDetectionCorrectness.txt)
   add_fdb_test(TEST_FILES RedwoodCorrectnessUnits.txt IGNORE)
   add_fdb_test(TEST_FILES RedwoodCorrectnessBTree.txt IGNORE)
   add_fdb_test(TEST_FILES RedwoodCorrectnessPager.txt IGNORE)
@@ -81,6 +82,7 @@ if(WITH_PYTHON)
   endif()
   add_fdb_test(TEST_FILES SlowTask.txt IGNORE)
   add_fdb_test(TEST_FILES SpecificUnitTest.txt IGNORE)
+  add_fdb_test(TEST_FILES StorageMetricsSampleTests.txt IGNORE)
   add_fdb_test(TEST_FILES StreamingWrite.txt IGNORE)
   add_fdb_test(TEST_FILES ThreadSafety.txt IGNORE)
   add_fdb_test(TEST_FILES Throttling.txt IGNORE)
@@ -166,17 +168,17 @@ if(WITH_PYTHON)
     TEST_FILES restarting/StorefrontTestRestart-1.txt
                restarting/StorefrontTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES SnapTestAttrition-1.txt
-               SnapTestAttrition-2.txt IGNORE)
+    TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
+               restarting/from_6.2.0/SnapTestAttrition-2.txt)
   add_fdb_test(
-    TEST_FILES SnapTestSimpleRestart-1.txt
-               SnapTestSimpleRestart-2.txt IGNORE)
+    TEST_FILES restarting/from_6.2.0/SnapTestSimpleRestart-1.txt
+               restarting/from_6.2.0/SnapTestSimpleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES SnapTestRestart-1.txt
-               SnapTestRestart-2.txt IGNORE)
+    TEST_FILES restarting/from_6.2.0/SnapTestRestart-1.txt
+               restarting/from_6.2.0/SnapTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES SnapCycleRestart-1.txt
-               SnapCycleRestart-2.txt IGNORE)
+    TEST_FILES restarting/from_6.2.0/SnapCycleRestart-1.txt
+               restarting/from_6.2.0/SnapCycleRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
                restarting/from_5.1.7/DrUpgradeRestart-2.txt)

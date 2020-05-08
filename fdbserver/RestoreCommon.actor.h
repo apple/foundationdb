@@ -281,22 +281,28 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 				ongoingReplies.clear();
 				ongoingRepliesIndex.clear();
 				for (int i = 0; i < cmdReplies.size(); ++i) {
-					// TraceEvent(SevDebug, "FastRestoreGetBatchReplies")
-					//     .detail("Requests", requests.size())
-					//     .detail("OutstandingReplies", oustandingReplies)
-					//     .detail("ReplyIndex", i)
-					//     .detail("ReplyReady", cmdReplies[i].isReady())
-					//     .detail("RequestNode", requests[i].first)
-					//     .detail("Request", requests[i].second.toString());
+					if (SERVER_KNOBS->FASTRESTORE_REQBATCH_LOG) {
+						TraceEvent(SevInfo, "FastRestoreGetBatchReplies")
+						    .suppressFor(1.0)
+						    .detail("Requests", requests.size())
+						    .detail("OutstandingReplies", oustandingReplies)
+						    .detail("ReplyIndex", i)
+						    .detail("ReplyIsReady", cmdReplies[i].isReady())
+						    .detail("ReplyIsError", cmdReplies[i].isError())
+						    .detail("RequestNode", requests[i].first)
+						    .detail("Request", requests[i].second.toString());
+					}
 					if (!cmdReplies[i].isReady()) { // still wait for reply
 						ongoingReplies.push_back(cmdReplies[i]);
 						ongoingRepliesIndex.push_back(i);
 					}
 				}
+				ASSERT(ongoingReplies.size() == oustandingReplies);
 				if (ongoingReplies.empty()) {
 					break;
 				} else {
-					wait(waitForAll(ongoingReplies));
+					wait(quorum(ongoingReplies, std::min((int)SERVER_KNOBS->FASTRESTORE_REQBATCH_PARALLEL,
+					                                     (int)ongoingReplies.size())));
 				}
 				// At least one reply is received; Calculate the reply duration
 				for (int j = 0; j < ongoingReplies.size(); ++j) {
@@ -352,12 +358,14 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) break;
-			fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
+			// fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
+			TraceEvent(SevWarn, "FastRestoreSendBatchRequests").error(e);
 			for (auto& request : requests) {
-				TraceEvent(SevWarn, "FastRestore")
+				TraceEvent(SevWarn, "FastRestoreSendBatchRequests")
 				    .detail("SendBatchRequests", requests.size())
 				    .detail("RequestID", request.first)
 				    .detail("Request", request.second.toString());
+				resetReply(request.second);
 			}
 		}
 	}

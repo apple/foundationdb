@@ -843,7 +843,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			double networkMetricsElapsed = networkMetrics.getDouble("Elapsed");
 
 			try {
-				double runLoopBusy = networkMetrics.getDouble("PriorityBusy1");
+				double runLoopBusy = networkMetrics.getDouble("PriorityStarvedBelow1");
 				statusObj["run_loop_busy"] = runLoopBusy / networkMetricsElapsed;
 			}
 			catch(Error &e) {
@@ -974,9 +974,9 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1
 
-		TraceEventFields md = wait(activeGens);
-		if(md.size()) {
-			int activeGenerations = md.getInt("ActiveGenerations");
+		TraceEventFields mdActiveGens = wait(activeGens);
+		if(mdActiveGens.size()) {
+			int activeGenerations = mdActiveGens.getInt("ActiveGenerations");
 			message["active_generations"] = activeGenerations;
 		}
 

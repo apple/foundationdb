@@ -231,6 +231,8 @@ public:
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 	std::shared_ptr<SpecialKeySpace> specialKeySpace;
 	std::shared_ptr<ConflictingKeysImpl> cKImpl;
+	std::shared_ptr<ReadConflictRangeImpl> rCRImpl;
+	std::shared_ptr<WriteConflictRangeImpl> wCRImpl;
 };
 
 #endif

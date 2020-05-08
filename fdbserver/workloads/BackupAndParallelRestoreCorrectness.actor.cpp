@@ -335,7 +335,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		state bool extraTasks = false;
 		state UID randomID = nondeterministicRandom()->randomUniqueID();
 		state int restoreIndex = 0;
-		state bool restoreDone = false;
 		state ReadYourWritesTransaction tr2(cx);
 
 		TraceEvent("BARW_Arguments")

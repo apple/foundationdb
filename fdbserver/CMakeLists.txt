@@ -77,6 +77,7 @@ set(FDBSERVER_SRCS
   RestoreWorker.actor.cpp
   Resolver.actor.cpp
   ResolverInterface.h
+  ServerDBInfo.actor.h
   ServerDBInfo.h
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
@@ -108,6 +109,7 @@ set(FDBSERVER_SRCS
   workloads/AsyncFileRead.actor.cpp
   workloads/AsyncFileWrite.actor.cpp
   workloads/AtomicOps.actor.cpp
+  workloads/ReadHotDetection.actor.cpp
   workloads/AtomicOpsApiCorrectness.actor.cpp
   workloads/AtomicRestore.actor.cpp
   workloads/AtomicSwitchover.actor.cpp

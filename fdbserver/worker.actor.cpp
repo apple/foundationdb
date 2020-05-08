@@ -506,6 +506,7 @@ ACTOR Future<Void> registrationClient(
 					DUMPTOKEN(recruited.getShardState);
 					DUMPTOKEN(recruited.waitMetrics);
 					DUMPTOKEN(recruited.splitMetrics);
+					DUMPTOKEN(recruited.getReadHotRanges);
 					DUMPTOKEN(recruited.getStorageMetrics);
 					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.getQueuingMetrics);
@@ -695,6 +696,7 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 		DUMPTOKEN(recruited.getShardState);
 		DUMPTOKEN(recruited.waitMetrics);
 		DUMPTOKEN(recruited.splitMetrics);
+		DUMPTOKEN(recruited.getReadHotRanges);
 		DUMPTOKEN(recruited.getStorageMetrics);
 		DUMPTOKEN(recruited.waitFailure);
 		DUMPTOKEN(recruited.getQueuingMetrics);
@@ -977,6 +979,7 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.getShardState);
 				DUMPTOKEN(recruited.waitMetrics);
 				DUMPTOKEN(recruited.splitMetrics);
+				DUMPTOKEN(recruited.getReadHotRanges);
 				DUMPTOKEN(recruited.getStorageMetrics);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.getQueuingMetrics);
@@ -1252,6 +1255,7 @@ ACTOR Future<Void> workerServer(
 					DUMPTOKEN(recruited.getShardState);
 					DUMPTOKEN(recruited.waitMetrics);
 					DUMPTOKEN(recruited.splitMetrics);
+					DUMPTOKEN(recruited.getReadHotRanges);
 					DUMPTOKEN(recruited.getStorageMetrics);
 					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.getQueuingMetrics);
@@ -1551,7 +1555,8 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 					if(!g_network->isSimulated()) {
 						throw;
 					}
-					deleteFile(lockFilePath);
+					lockFile = ErrorOr<Reference<IAsyncFile>>();
+					wait(IAsyncFileSystem::filesystem()->deleteFile(lockFilePath, true));
 				}
 			}
 		}
