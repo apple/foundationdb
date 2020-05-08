@@ -454,7 +454,7 @@ struct LeaderRegisterCollection {
 		try { 
 			// FIXME: Get worker ID here
 			startRole(Role::COORDINATOR, id, UID());
-			wait(actor); 
+			wait(actor || traceRole(Role::COORDINATOR, id));
 			endRole(Role::COORDINATOR, id, "Coordinator changed");
 		} catch (Error& err) {
 			endRole(Role::COORDINATOR, id, err.what(), err.code() == error_code_actor_cancelled, err);

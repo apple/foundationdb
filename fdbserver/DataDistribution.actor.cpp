@@ -4855,6 +4855,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
 	state ActorCollection actors(false);
 	self->addActor.send(actors.getResult());
+	self->addActor.send(traceRole(Role::DATA_DISTRIBUTOR, di.id()));
 
 	try {
 		TraceEvent("DataDistributorRunning", di.id());

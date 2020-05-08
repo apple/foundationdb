@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbserver/WorkerInterface.actor.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Smoother.h"
@@ -731,6 +732,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges;
 	self.addActor.send( monitorServerListChange(&self, dbInfo, serverChanges) );
 	self.addActor.send( trackEachStorageServer(&self, serverChanges.getFuture()) );
+	self.addActor.send( traceRole(Role::RATEKEEPER, rkInterf.id()) );
 
 	TraceEvent("RkTLogQueueSizeParameters").detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG).detail("Spring", SERVER_KNOBS->SPRING_BYTES_TLOG)
 		.detail("Rate", (SERVER_KNOBS->TARGET_BYTES_PER_TLOG - SERVER_KNOBS->SPRING_BYTES_TLOG) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0));

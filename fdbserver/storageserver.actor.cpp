@@ -3576,6 +3576,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	actors.add(metricsCore(self, ssi));
 	actors.add(logLongByteSampleRecovery(self->byteSampleRecovery));
 	actors.add(checkBehind(self));
+	actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 
 	self->coreStarted.send( Void() );
 
