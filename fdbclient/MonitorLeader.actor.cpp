@@ -160,7 +160,8 @@ ACTOR Future<Void> _resolveHostnames(ClusterConnectionString* self) {
 		fs.push_back(map(INetworkConnections::net()->resolveTCPEndpoint(hostName.host, hostName.service),
 		                 [=](std::vector<NetworkAddress> const& addresses) -> Void {
 			                 NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-			                 if (hostName.useTLS) addr.flags = NetworkAddress::FLAG_TLS;
+			                 addr.flags = 0; // Reset the parsed address to public
+			                 if (hostName.useTLS) addr.flags |= NetworkAddress::FLAG_TLS;
 			                 self->mutableCoordinators().push_back(addr);
 			                 self->mutableResolveResults().emplace(addr, hostName);
 			                 return Void();
@@ -415,8 +416,18 @@ std::string ClusterConnectionString::toString() const {
 	std::string s = key.toString();
 	s += '@';
 	for(int i=0; i<coord.size(); i++) {
-		if (i) s += ',';
-		s += coord[i].toString();
+		if (_resolveResults.find(coord[i]) == _resolveResults.end()) {
+			if (i) {
+				s += ',';
+			}
+			s += coord[i].toString();
+		}
+	}
+	for (auto const& host : hosts) {
+		if (s.find_first_of(',') != s.npos) {
+			s += ',';
+		}
+		s += host.toString();
 	}
 	return s;
 }
