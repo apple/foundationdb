@@ -609,19 +609,6 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 	}
 
-	// comparator function to check if a cache server wioth given index exists
-	class storageCachesComparator {
-		uint16_t serverIndex;
-
-	public:
-		storageCachesComparator(uint16_t index): serverIndex(index) {}
-
-		bool operator()(const std::pair<uint16_t, StorageServerInterface>& value)
-		{
-			return (value.first == serverIndex);
-		}
-	};
-
 	//Checks that the data in each shard is the same on each storage server that it resides on.  Also performs some sanity checks on the sizes of shards and storage servers.
 	//Returns false if there is a failure
 	ACTOR Future<bool> checkDataConsistency(Database cx, VectorRef<KeyValueRef> keyLocations, DatabaseConfiguration configuration, ConsistencyCheckWorkload *self)
@@ -668,13 +655,6 @@ struct ConsistencyCheckWorkload : TestWorkload
 			DeterministicRandom sharedRandom( seed == 0 ? 1 : seed );
 			sharedRandom.randomShuffle(shardOrder);
 		}
-
-		// for cacheServer reads
-		//state ServerDBInfo system = self->dbInfo->get();
-		//state MasterProxyInterface proxy = deterministicRandom()->randomChoice( system.client.proxies );
-		//auto storageCaches = system.storageCaches;
-		//int id = 0;
-		//state std::vector<std::pair<uint16_t,StorageServerInterface>>::iterator scit = find_if(system.storageCaches.begin(), system.storageCaches.end(), storageCachesComparator(id));
 
 		for(; i < ranges.size(); i += increment)
 		{
@@ -741,14 +721,6 @@ struct ConsistencyCheckWorkload : TestWorkload
 							self->testFailure("/FF/serverList changing in a quiescent database");
 					}
 
-					// Try to read from the cache server as well
-					//if (scit != system.storageCaches.end()) {
-						//TraceEvent("ConsistencyCheck_FoundSSIForCacheServer").detail("UID", scit->second.id()).detail("IsCacheServer", scit->second.isCacheServer);
-						//auto sz = storageServerInterfaces.size();
-						//storageServerInterfaces.push_back(scit->second);
-						//TraceEvent("ConsistencyCheck_VerifySSIForCacheServer").detail("Size", sz).detail("UID", storageServerInterfaces[sz].id()).detail("IsCacheServer", storageServerInterfaces[sz].isCacheServer);
-						//TraceEvent("ConsistencyCheck_UpdatedSize").detail("Size", storageServerInterfaces.size());
-					//}
 					break;
 				}
 				catch(Error &e) {
@@ -816,8 +788,6 @@ struct ConsistencyCheckWorkload : TestWorkload
 						for(j = 0; j < storageServerInterfaces.size(); j++)
 						{
 							resetReply(req);
-							//if (storageServerInterfaces[j].isCacheServer)
-							//	TraceEvent(SevDebug, "ConsistencyCheck_CacheServerInterface").detail("J", j).detail("UID", storageServerInterfaces[j].uniqueID).detail("IsCacheServer", storageServerInterfaces[j].isCacheServer);
 							keyValueFutures.push_back(storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 						}
 
