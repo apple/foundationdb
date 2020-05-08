@@ -232,7 +232,7 @@ public:
 	} counters;
 
 	explicit StorageCacheData(UID thisServerID, uint16_t index, Reference<AsyncVar<ServerDBInfo>> const& db)
-		:   versionedData(FastAllocPTree<KeyRef>{std::make_shared<int>(0)}),
+		:   /*versionedData(FastAllocPTree<KeyRef>{std::make_shared<int>(0)}), */
 			thisServerID(thisServerID), index(index), logProtocol(0), db(db),
 			cacheRangeChangeCounter(0),
 			lastTLogVersion(0), lastVersionWithData(0), peekVersion(0),
