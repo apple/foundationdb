@@ -493,6 +493,97 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bo
 Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed);
 }
+
+void DatabaseContext::registerSpecialKeySpaceModule(std::unique_ptr<SpecialKeyRangeBaseImpl> module) {
+	specialKeySpace->registerKeyRange(module->getKeyRange(), module.get());
+	specialKeySpaceModules.push_back(std::move(module));
+}
+
+ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces(Reference<ClusterConnectionFile> clusterFile);
+ACTOR Future<Optional<Value>> getJSON(Database db);
+
+struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeBaseImpl {
+	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+	                                            KeyRangeRef kr) const override {
+		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
+			Key prefix = Key(getKeyRange().begin);
+			return map(getWorkerInterfaces(ryw->getDatabase()->getConnectionFile()),
+			           [prefix = prefix, kr = KeyRange(kr)](const Standalone<RangeResultRef>& in) {
+				           Standalone<RangeResultRef> result;
+				           for (const auto& [k_, v] : in) {
+					           auto k = k_.withPrefix(prefix);
+					           if (kr.contains(k)) result.push_back_deep(result.arena(), KeyValueRef(k, v));
+				           }
+
+				           std::sort(result.begin(), result.end(), KeyValueRef::OrderByKey{});
+				           return result;
+			           });
+		} else {
+			return Standalone<RangeResultRef>();
+		}
+	}
+
+	explicit WorkerInterfacesSpecialKeyImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+};
+
+struct SingleSpecialKeyImpl : SpecialKeyRangeBaseImpl {
+	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+	                                            KeyRangeRef kr) const override {
+		return map(f(ryw), [k = k](Optional<Value> v) {
+			Standalone<RangeResultRef> result;
+			if (v.present()) {
+				result.push_back_deep(result.arena(), KeyValueRef(k, v.get()));
+			}
+			return result;
+		});
+	}
+
+	SingleSpecialKeyImpl(KeyRef k,
+	                     const std::function<Future<Optional<Value>>(Reference<ReadYourWritesTransaction>)>& f)
+	  : SpecialKeyRangeBaseImpl(singleKeyRange(k)), k(k), f(f) {}
+
+private:
+	Key k;
+	std::function<Future<Optional<Value>>(Reference<ReadYourWritesTransaction>)> f;
+};
+
+struct TransactionModule : SpecialKeyRangeBaseImpl {
+	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+	                                            KeyRangeRef kr) const override {
+		return getRange_(ryw, kr, this);
+	}
+
+	TransactionModule(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {
+		impls.emplace_back(std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
+		impls.emplace_back(std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
+		impls.emplace_back(std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
+	}
+
+private:
+	ACTOR static Future<Standalone<RangeResultRef>> getRange_(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr,
+	                                                          const TransactionModule* self) {
+		state std::vector<Future<Standalone<RangeResultRef>>> futures;
+		futures.reserve(self->impls.size());
+		for (const auto& impl : self->impls) {
+			auto implRange = impl->getKeyRange();
+			auto begin = std::max(kr.begin, implRange.begin);
+			auto end = std::min(kr.end, implRange.end);
+			if (begin < end) {
+				futures.push_back(impl->getRange(ryw, KeyRangeRef(begin, end)));
+			}
+		}
+		self = nullptr;
+		wait(waitForAll(futures));
+		Standalone<RangeResultRef> result;
+		for (const auto& f : futures) {
+			result.append(result.arena(), f.get().begin(), f.get().size());
+			result.arena().dependsOn(f.get().arena());
+		}
+		return result;
+	}
+	std::vector<std::unique_ptr<SpecialKeyRangeBaseImpl>> impls;
+};
+
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
                                  TaskPriority taskID, LocalityData const& clientLocality,
@@ -529,10 +620,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
-    specialKeySpace(std::make_shared<SpecialKeySpace>(normalKeys.begin, specialKeys.end)),
-    cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeysRange)),
-    rCRImpl(std::make_shared<ReadConflictRangeImpl>(readConflictRangeKeysRange)),
-    wCRImpl(std::make_shared<WriteConflictRangeImpl>(writeConflictRangeKeysRange)) {
+    specialKeySpace(std::make_unique<SpecialKeySpace>(normalKeys.begin, specialKeys.end)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
 
@@ -551,10 +639,50 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
+	if (apiVersionAtLeast(630)) {
+		registerSpecialKeySpaceModule(std::make_unique<TransactionModule>(
+		    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0"))));
+		registerSpecialKeySpaceModule(std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
+		    LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
+		registerSpecialKeySpaceModule(std::make_unique<SingleSpecialKeyImpl>(
+		    LiteralStringRef("\xff\xff/status/json"),
+		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
+			    if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
+				    return getJSON(ryw->getDatabase());
+			    } else {
+				    return Optional<Value>();
+			    }
+		    }));
+		registerSpecialKeySpaceModule(std::make_unique<SingleSpecialKeyImpl>(
+		    LiteralStringRef("\xff\xff/cluster_file_path"),
+		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
+			    try {
+				    if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
+					    Optional<Value> output = StringRef(ryw->getDatabase()->getConnectionFile()->getFilename());
+					    return output;
+				    }
+			    } catch (Error& e) {
+				    return e;
+			    }
+			    return Optional<Value>();
+		    }));
+
+		registerSpecialKeySpaceModule(std::make_unique<SingleSpecialKeyImpl>(
+		    LiteralStringRef("\xff\xff/connection_string"),
+		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
+			    try {
+				    if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
+					    Reference<ClusterConnectionFile> f = ryw->getDatabase()->getConnectionFile();
+					    Optional<Value> output = StringRef(f->getConnectionString().toString());
+					    return output;
+				    }
+			    } catch (Error& e) {
+				    return e;
+			    }
+			    return Optional<Value>();
+		    }));
+	}
 	throttleExpirer = recurring([this](){ expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
-	specialKeySpace->registerKeyRange(conflictingKeysRange, cKImpl.get());
-	specialKeySpace->registerKeyRange(readConflictRangeKeysRange, rCRImpl.get());
-	specialKeySpace->registerKeyRange(writeConflictRangeKeysRange, wCRImpl.get());
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),

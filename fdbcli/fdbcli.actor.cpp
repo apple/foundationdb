@@ -2755,11 +2755,14 @@ ACTOR Future<Void> addInterface( std::map<Key,std::pair<Value,ClientLeaderRegInt
 	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
 	choose {
 		when( Optional<LeaderInfo> rep = wait( brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())) ) ) {
-			StringRef ip_port = kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key;
+			StringRef ip_port =
+			    (kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key)
+			        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
 			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
 
 			if(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
-				Key full_ip_port2 = StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
+				Key full_ip_port2 =
+				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
 				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls")) ? full_ip_port2.removeSuffix(LiteralStringRef(":tls")) : full_ip_port2;
 				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
 			}
@@ -3246,7 +3249,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "kill")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
@@ -3443,12 +3450,16 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 						getTransaction(db, tr, options, intrans);
-						Standalone<RangeResultRef> kvs = wait(makeInterruptable(
-						    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
-						                             LiteralStringRef("\xff\xff\xff")),
-						                 1)));
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						for (const auto& pair : kvs) {
-							auto ip_port = pair.key.endsWith(LiteralStringRef(":tls")) ? pair.key.removeSuffix(LiteralStringRef(":tls")) : pair.key;
+							auto ip_port = (pair.key.endsWith(LiteralStringRef(":tls"))
+							                    ? pair.key.removeSuffix(LiteralStringRef(":tls"))
+							                    : pair.key)
+							                   .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
 							printf("%s\n", printable(ip_port).c_str());
 						}
 						continue;
@@ -3467,9 +3478,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 							getTransaction(db, tr, options, intrans);
 							Standalone<RangeResultRef> kvs = wait(makeInterruptable(
-							    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
-							                             LiteralStringRef("\xff\xff\xff")),
-							                 1)));
+							    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+							                             LiteralStringRef("\xff\xff/worker_interfaces0")),
+							                 CLIENT_KNOBS->TOO_MANY)));
+							ASSERT(!kvs.more);
 							char *duration_end;
 							int duration = std::strtol((const char*)tokens[3].begin(), &duration_end, 10);
 							if (!std::isspace(*duration_end)) {
@@ -3481,7 +3493,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							state std::vector<Key> all_profiler_addresses;
 							state std::vector<Future<ErrorOr<Void>>> all_profiler_responses;
 							for (const auto& pair : kvs) {
-								auto ip_port = pair.key.endsWith(LiteralStringRef(":tls")) ? pair.key.removeSuffix(LiteralStringRef(":tls")) : pair.key;
+								auto ip_port = (pair.key.endsWith(LiteralStringRef(":tls"))
+								                    ? pair.key.removeSuffix(LiteralStringRef(":tls"))
+								                    : pair.key)
+								                   .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
 								interfaces.emplace(ip_port, BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
 							}
 							if (tokens.size() == 6 && tokencmp(tokens[5], "all")) {

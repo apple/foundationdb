@@ -75,9 +75,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	double getCheckTimeout() override { return std::numeric_limits<double>::max(); }
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
-		cx->specialKeySpace = std::make_shared<SpecialKeySpace>();
+		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();
 		if (self->clientId == 0) {
 			self->ryw = Reference(new ReadYourWritesTransaction(cx));
+			self->ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 			self->ryw->setVersion(100);
 			self->ryw->clear(normalKeys);
 			// generate key ranges
@@ -269,6 +270,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			}
 			TEST(true); // Read write conflict range of committed transaction
 		}
+		try {
+			wait(success(tx->get(LiteralStringRef("\xff\xff/1314109/i_hope_this_isn't_registered"))));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_no_module_found);
+		}
 		for (int i = 0; i < self->conflictRangeSizeFactor; ++i) {
 			GetRangeLimits limit;
 			KeySelector begin;
@@ -276,7 +284,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			loop {
 				begin = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
 				end = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
-				if (begin.getKey() <= end.getKey()) break;
+				if (begin.getKey() < end.getKey()) break;
 			}
 			bool reverse = deterministicRandom()->coinflip();
 

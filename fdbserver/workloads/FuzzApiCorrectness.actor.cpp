@@ -112,6 +112,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	KeyRange conflictRange;
 	unsigned int operationId;
 	int64_t maximumTotalData;
+	bool specialKeysRelaxed;
 
 	bool success;
 
@@ -127,6 +128,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		adjacentKeys = deterministicRandom()->coinflip();
 		useSystemKeys = deterministicRandom()->coinflip();
 		initialKeyDensity = deterministicRandom()->random01(); // This fraction of keys are present before the first transaction (and after an unknown result)
+		specialKeysRelaxed = deterministicRandom()->coinflip();
 
 		// See https://github.com/apple/foundationdb/issues/2424
 		if (BUGGIFY) {
@@ -151,13 +153,14 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		maxClearSize = 1<<deterministicRandom()->randomInt(0, 20);
 		conflictRange = KeyRangeRef( LiteralStringRef("\xfe"), LiteralStringRef("\xfe\x00") );
 		TraceEvent("FuzzApiCorrectnessConfiguration")
-			.detail("Nodes", nodes)
-			.detail("InitialKeyDensity", initialKeyDensity)
-			.detail("AdjacentKeys", adjacentKeys)
-			.detail("ValueSizeMin", valueSizeRange.first)
-			.detail("ValueSizeRange", valueSizeRange.second)
-			.detail("MaxClearSize", maxClearSize)
-			.detail("UseSystemKeys", useSystemKeys);
+		    .detail("Nodes", nodes)
+		    .detail("InitialKeyDensity", initialKeyDensity)
+		    .detail("AdjacentKeys", adjacentKeys)
+		    .detail("ValueSizeMin", valueSizeRange.first)
+		    .detail("ValueSizeRange", valueSizeRange.second)
+		    .detail("MaxClearSize", maxClearSize)
+		    .detail("UseSystemKeys", useSystemKeys)
+		    .detail("SpecialKeysRelaxed", specialKeysRelaxed);
 
 		TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargePacketSent").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
 		TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargePacketReceived").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
@@ -219,6 +222,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 						}
 						if( self->useSystemKeys )
 							tr->setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
+						if (self->specialKeysRelaxed) tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 
 						int end = std::min(self->nodes, i+keysPerBatch );
 						tr->clear( KeyRangeRef( self->getKeyForIndex(i), self->getKeyForIndex(end) ) );
@@ -275,6 +279,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				tr->setOption( FDBTransactionOptions::READ_AHEAD_DISABLE );
 			if( self->useSystemKeys ) {
 				tr->setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
+			}
+			if (self->specialKeysRelaxed) {
+				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 			}
 			tr->addWriteConflictRange( self->conflictRange );
 
@@ -655,13 +662,18 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && keysel2.getKey() <= specialKeys.end;
 
 			contract = {
-				std::make_pair( error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(limit < 0) ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							((keysel1.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(keysel2.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) &&
-							!isSpecialKeyRange) ),
-				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
+				std::make_pair(error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(limit < 0)),
+				std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
+				std::make_pair(error_code_key_outside_legal_range,
+				               ExceptionContract::requiredIf(
+				                   ((keysel1.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+				                    (keysel2.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) &&
+				                   !isSpecialKeyRange)),
+				std::make_pair(error_code_special_keys_cross_module_read,
+				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
+				std::make_pair(error_code_special_keys_no_module_found,
+				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
+				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible)
 			};
 		}
 
@@ -688,13 +700,19 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && keysel2.getKey() <= specialKeys.end;
 
 			contract = {
-				std::make_pair( error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf( !limits.isReached() && !limits.isValid()) ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							((keysel1.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(keysel2.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) &&
-							!isSpecialKeyRange) ),
-				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
+				std::make_pair(error_code_range_limits_invalid,
+				               ExceptionContract::possibleButRequiredIf(!limits.isReached() && !limits.isValid())),
+				std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
+				std::make_pair(error_code_key_outside_legal_range,
+				               ExceptionContract::requiredIf(
+				                   ((keysel1.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+				                    (keysel2.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) &&
+				                   !isSpecialKeyRange)),
+				std::make_pair(error_code_special_keys_cross_module_read,
+				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
+				std::make_pair(error_code_special_keys_no_module_found,
+				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
+				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible)
 			};
 		}
 
@@ -732,14 +750,19 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			bool isSpecialKeyRange = specialKeys.contains(key1) && key2 <= specialKeys.end;
 
 			contract = {
-				std::make_pair( error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2) ),
-				std::make_pair( error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(limit < 0) ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							((key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))
-							&& !isSpecialKeyRange) ),
-				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
+				std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
+				std::make_pair(error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(limit < 0)),
+				std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
+				std::make_pair(error_code_key_outside_legal_range,
+				               ExceptionContract::requiredIf(
+				                   ((key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+				                    (key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) &&
+				                   !isSpecialKeyRange)),
+				std::make_pair(error_code_special_keys_cross_module_read,
+				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
+				std::make_pair(error_code_special_keys_no_module_found,
+				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
+				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible)
 			};
 		}
 
@@ -767,14 +790,20 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			bool isSpecialKeyRange = specialKeys.contains(key1) && key2 <= specialKeys.end;
 
 			contract = {
-				std::make_pair( error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2) ),
-				std::make_pair( error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf( !limits.isReached() && !limits.isValid()) ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							((key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) &&
-							!isSpecialKeyRange) ),
-				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
+				std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
+				std::make_pair(error_code_range_limits_invalid,
+				               ExceptionContract::possibleButRequiredIf(!limits.isReached() && !limits.isValid())),
+				std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
+				std::make_pair(error_code_key_outside_legal_range,
+				               ExceptionContract::requiredIf(
+				                   ((key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+				                    (key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) &&
+				                   !isSpecialKeyRange)),
+				std::make_pair(error_code_special_keys_cross_module_read,
+				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
+				std::make_pair(error_code_special_keys_no_module_found,
+				               ExceptionContract::possibleIf(isSpecialKeyRange && !workload->specialKeysRelaxed)),
+				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible)
 			};
 		}
 
