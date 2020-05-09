@@ -59,6 +59,8 @@ const Value keyServersValue(
 // `result` must be the full result of getting serverTagKeys
 void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& value,
 	std::vector<UID>& src, std::vector<UID>& dest, bool missingIsError = true );
+void decodeKeyServersValue( std::map<Tag, UID> const& tag_uid, const ValueRef& value,
+                            std::vector<UID>& src, std::vector<UID>& dest );
 
 //    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
 extern const KeyRangeRef storageCacheKeys;
