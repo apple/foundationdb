@@ -2,11 +2,18 @@
 Release Notes
 #############
 
-7.0.0
+6.3.0
 =====
+
+Features
+--------
+* Improved the slow task profiler to also report backtraces for periods when the run loop is saturated. `(PR #2608) <https://github.com/apple/foundationdb/pull/2608>`_
 
 Performance
 -----------
+
+* Improve GRV tail latencies, particularly as the transaction rate gets nearer the ratekeeper limit. `(PR #2735) <https://github.com/apple/foundationdb/pull/2735>`_
+* The proxies are now more responsive to changes in workload when unthrottling lower priority transactions. `(PR #2735) <https://github.com/apple/foundationdb/pull/2735>`_
 
 Fixes
 -----
@@ -17,13 +24,15 @@ Status
 
 Bindings
 --------
-* API version updated to 700. See the :ref:`API version upgrade guide <api-version-upgrade-guide-700>` for upgrade details.
+* API version updated to 630. See the :ref:`API version upgrade guide <api-version-upgrade-guide-630>` for upgrade details.
 * Java: Introduced ``keyAfter`` utility function that can be used to create the immediate next key for a given byte array. `(PR #2458) <https://github.com/apple/foundationdb/pull/2458>`_
 * C: The ``FDBKeyValue`` struct's ``key`` and ``value`` members have changed type from ``void*`` to ``uint8_t*``. `(PR #2622) <https://github.com/apple/foundationdb/pull/2622>`_
+* Deprecated ``enable_slow_task_profiling`` transaction option and replaced it with ``enable_run_loop_profiling``. `(PR #2608) <https://github.com/apple/foundationdb/pull/2608>`_
 
 Other Changes
 -------------
 * Double the number of shard locations that the client will cache locally. `(PR #2198) <https://github.com/apple/foundationdb/pull/2198>`_
+* Add an option for transactions to report conflicting keys by calling getRange with the special key prefix \xff\xff/transaction/conflicting_keys/. `(PR 2257) <https://github.com/apple/foundationdb/pull/2257>`_
 
 Earlier release notes
 ---------------------

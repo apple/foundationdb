@@ -25,7 +25,6 @@
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_H
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/LogSystem.h"
 #include "flow/actorcompiler.h" // This must be the last #include.

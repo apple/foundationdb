@@ -108,7 +108,7 @@ Opening a database
 After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     import fdb
-    fdb.api_version(700)
+    fdb.api_version(630)
     db = fdb.open()
 
 .. function:: open( cluster_file=None, event_model=None )
@@ -796,7 +796,21 @@ Most applications should use the read version that FoundationDB determines autom
 
     |infrequent| |transaction-get-versionstamp-blurb|
 
+Transaction misc functions
+--------------------------
+
+.. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
+
+    Get the estimated byte size of the given key range. Returns a :class:`FutureInt64`.
+
 .. _api-python-transaction-options:
+
+Transaction misc functions
+--------------------------
+
+.. method:: Transaction.get_approximate_size()
+
+    |transaction-get-approximate-size-blurb|. Returns a :class:`FutureInt64`.
 
 Transaction options
 -------------------
@@ -822,6 +836,8 @@ Transaction options
     |option-priority-system-immediate-blurb|
 
     .. warning:: |option-priority-system-immediate-warning|
+
+.. _api-python-option-set-causal-read-risky:
 
 .. method:: Transaction.options.set_causal_read_risky
 
@@ -962,9 +978,9 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
 
     Represents a future string object and responds to the same methods as string in Python. They may be passed to FoundationDB methods that expect a string.
 
-.. class:: FutureVersion
+.. class:: FutureInt64
 
-    Represents a future version (integer). You must call the :meth:`Future.wait()` method on this object to retrieve the version as an integer.
+    Represents a future integer. You must call the :meth:`Future.wait()` method on this object to retrieve the integer.
 
 .. class:: FutureStringArray
 

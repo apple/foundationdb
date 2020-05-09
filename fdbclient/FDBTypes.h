@@ -268,6 +268,10 @@ struct KeyRangeRef {
 		return KeyRangeRef( begin.withPrefix(prefix), end.withPrefix(prefix) );
 	}
 
+	KeyRangeRef withPrefix(const StringRef& prefix, Arena& arena) const {
+		return KeyRangeRef(begin.withPrefix(prefix, arena), end.withPrefix(prefix, arena));
+	}
+
 	KeyRangeRef removePrefix( const StringRef& prefix ) const {
 		return KeyRangeRef( begin.removePrefix(prefix), end.removePrefix(prefix) );
 	}
@@ -282,8 +286,20 @@ struct KeyRangeRef {
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
-		serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
+		if (!ar.isDeserializing && equalsKeyAfter(begin, end)) {
+			StringRef empty;
+			serializer(ar, const_cast<KeyRef&>(end), empty);
+		} else {
+			serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
+		}
+		if (ar.isDeserializing && end == StringRef() && begin != StringRef()) {
+			ASSERT(begin[begin.size()-1] == '\x00');
+			const_cast<KeyRef&>(end) = begin;
+			const_cast<KeyRef&>(begin) = end.substr(0, end.size()-1);
+		}
+
 		if( begin > end ) {
+			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end);
 			throw inverted_range();
 		};
 	}
@@ -416,7 +432,7 @@ typedef Standalone<KeyRangeRef> KeyRange;
 typedef Standalone<KeyValueRef> KeyValue;
 typedef Standalone<struct KeySelectorRef> KeySelector;
 
-enum { invalidVersion = -1, latestVersion = -2 };
+enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
 inline Key keyAfter( const KeyRef& key ) {
 	if(key == LiteralStringRef("\xff\xff"))
@@ -695,6 +711,9 @@ struct TLogVersion {
 		UNSET = 0,
 		// Everything between BEGIN and END should be densely packed, so that we
 		// can iterate over them easily.
+		// V3 was the introduction of spill by reference;
+		// V4 changed how data gets written to satellite TLogs so that we can peek from them;
+		// V5 merged reference and value spilling
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
@@ -817,6 +836,11 @@ struct LogMessageVersion {
 	explicit LogMessageVersion(Version version) : version(version), sub(0) {}
 	LogMessageVersion() : version(0), sub(0) {}
 	bool empty() const { return (version == 0) && (sub == 0); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, sub);
+	}
 };
 
 struct AddressExclusion {
@@ -994,13 +1018,14 @@ struct WorkerBackupStatus {
 	LogEpoch epoch;
 	Version version;
 	Tag tag;
+	int32_t totalTags;
 
 	WorkerBackupStatus() : epoch(0), version(invalidVersion) {}
-	WorkerBackupStatus(LogEpoch e, Version v, Tag t) : epoch(e), version(v), tag(t) {}
+	WorkerBackupStatus(LogEpoch e, Version v, Tag t, int32_t total) : epoch(e), version(v), tag(t), totalTags(total) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, epoch, version, tag);
+		serializer(ar, epoch, version, tag, totalTags);
 	}
 };
 

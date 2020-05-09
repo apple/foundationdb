@@ -595,7 +595,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		TestGet(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTest(id, workload, "TestGet") {
 			key = makeKey();
 			contract = {
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf((key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
+				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf((key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) && !specialKeys.contains(key)) ),
 				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
 				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
 			};
@@ -652,12 +652,15 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					limit = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
 
+			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && keysel2.getKey() <= specialKeys.end;
+
 			contract = {
 				std::make_pair( error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(limit < 0) ),
 				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
 				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							(keysel1.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(keysel2.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
+							((keysel1.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+							(keysel2.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) &&
+							!isSpecialKeyRange) ),
 				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
 			};
 		}
@@ -681,12 +684,16 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			keysel1 = makeKeySel();
 			keysel2 = makeKeySel();
 			limits = makeRangeLimits();
+
+			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && keysel2.getKey() <= specialKeys.end;
+
 			contract = {
 				std::make_pair( error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf( !limits.isReached() && !limits.isValid()) ),
 				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
 				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							(keysel1.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(keysel2.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
+							((keysel1.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+							(keysel2.getKey() > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) &&
+							!isSpecialKeyRange) ),
 				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
 			};
 		}
@@ -721,13 +728,17 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				else
 					limit = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
+
+			bool isSpecialKeyRange = specialKeys.contains(key1) && key2 <= specialKeys.end;
+
 			contract = {
 				std::make_pair( error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2) ),
 				std::make_pair( error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(limit < 0) ),
 				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
 				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							(key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
+							((key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+							(key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)))
+							&& !isSpecialKeyRange) ),
 				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
 			};
 		}
@@ -752,13 +763,17 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			key1 = makeKey();
 			key2 = makeKey();
 			limits = makeRangeLimits();
+
+			bool isSpecialKeyRange = specialKeys.contains(key1) && key2 <= specialKeys.end;
+
 			contract = {
 				std::make_pair( error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2) ),
 				std::make_pair( error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf( !limits.isReached() && !limits.isValid()) ),
 				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
 				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
-							(key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
-							(key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
+							((key1 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) ||
+							(key2 > (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) &&
+							!isSpecialKeyRange) ),
 				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
 			};
 		}

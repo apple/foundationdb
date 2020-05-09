@@ -139,6 +139,8 @@ public:
 	int BACKUP_COPY_TASKS;
 	int BACKUP_BLOCK_SIZE;
 	int BACKUP_TASKS_PER_AGENT;
+	int BACKUP_POLL_PROGRESS_SECONDS;
+	int64_t VERSIONS_PER_SECOND; // Copy of SERVER_KNOBS, as we can't link with it
 	int SIM_BACKUP_TASKS_PER_AGENT;
 	int BACKUP_RANGEFILE_BLOCK_SIZE;
 	int BACKUP_LOGFILE_BLOCK_SIZE;
@@ -200,7 +202,11 @@ public:
 	int CLI_CONNECT_PARALLELISM;
 	double CLI_CONNECT_TIMEOUT;
 
-	ClientKnobs(bool randomize = false);
+	// trace
+	int TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH;
+
+	ClientKnobs();
+	void initialize(bool randomize = false);
 };
 
 extern ClientKnobs const* CLIENT_KNOBS;

@@ -66,6 +66,13 @@ struct KillRegionWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> waitForStorageRecovered( KillRegionWorkload *self ) {
+		while( self->dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED ) {
+			wait( self->dbInfo->onChange() );
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> killRegion( KillRegionWorkload *self, Database cx ) {
 		ASSERT( g_network->isSimulated() );
 		if(deterministicRandom()->random01() < 0.5) {
@@ -94,10 +101,13 @@ struct KillRegionWorkload : TestWorkload {
 		TraceEvent("ForceRecovery_GotConfig").detail("Conf", conf.toString());
 
 		if(conf.usableRegions>1) {
-			//only needed if force recovery was unnecessary and we killed the secondary
-			wait( success( changeConfig( cx, g_simulator.disablePrimary + " repopulate_anti_quorum=1", true ) ) );
-			while( self->dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED ) {
-				wait( self->dbInfo->onChange() );
+			loop {
+				//only needed if force recovery was unnecessary and we killed the secondary
+				wait( success( changeConfig( cx, g_simulator.disablePrimary + " repopulate_anti_quorum=1", true ) ) );
+				choose {
+					when( wait( waitForStorageRecovered(self) ) ) { break; }
+					when( wait( delay(300.0) ) ) { }
+				}
 			}
 			wait( success( changeConfig( cx, "usable_regions=1", true ) ) );
 		}

@@ -80,6 +80,7 @@ class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<
 	ErrFunc errFunc;
 
 	virtual void fire(T const& t) { CallbackType::remove(); func(t); delete this; }
+	virtual void fire(T && t) { CallbackType::remove(); func(std::move(t)); delete this; }
 	virtual void error(Error e) { CallbackType::remove(); errFunc(e); delete this; }
 
 public:
@@ -236,6 +237,7 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	virtual double now() { return baseNetwork->now(); }
 	virtual double timer() { return baseNetwork->timer(); }
 	virtual void stop() { return baseNetwork->stop(); }
+	virtual void addStopCallback( std::function<void()> fn ) { ASSERT(false); return; }
 	virtual bool isSimulated() const { return baseNetwork->isSimulated(); }
 	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) { return baseNetwork->onMainThread(std::move(signal), taskID); }
 	bool isOnMainThread() const override { return baseNetwork->isOnMainThread(); }
@@ -1358,5 +1360,107 @@ TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 	ASSERT(deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::max() - 1,
 	                                          std::numeric_limits<int64_t>::max()) ==
 	       std::numeric_limits<int64_t>::max() - 1);
+	return Void();
+}
+
+struct Tracker {
+	int copied;
+	bool moved;
+	Tracker(int copied = 0) : moved(false), copied(copied) {}
+	Tracker(Tracker&& other) : Tracker(other.copied) {
+		ASSERT(!other.moved);
+		other.moved = true;
+	}
+	Tracker& operator=(Tracker&& other) {
+		ASSERT(!other.moved);
+		other.moved = true;
+		this->moved = false;
+		this->copied = other.copied;
+		return *this;
+	}
+	Tracker(const Tracker& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
+	Tracker& operator=(const Tracker& other) {
+		ASSERT(!other.moved);
+		this->moved = false;
+		this->copied = other.copied + 1;
+		return *this;
+	}
+	~Tracker() = default;
+
+	ACTOR static Future<Void> listen(FutureStream<Tracker> stream) {
+		Tracker movedTracker = waitNext(stream);
+		ASSERT(!movedTracker.moved);
+		ASSERT(movedTracker.copied == 0);
+		return Void();
+	}
+};
+
+TEST_CASE("/flow/flow/PromiseStream/move") {
+	state PromiseStream<Tracker> stream;
+	state Future<Void> listener;
+	{
+		// This tests the case when a callback is added before
+		// a movable value is sent
+		listener = Tracker::listen(stream.getFuture());
+		stream.send(Tracker{});
+		wait(listener);
+	}
+
+	{
+		// This tests the case when a callback is added before
+		// a unmovable value is sent
+		listener = Tracker::listen(stream.getFuture());
+		Tracker namedTracker;
+		stream.send(namedTracker);
+		wait(listener);
+	}
+	{
+		// This tests the case when no callback is added until
+		// after a movable value is sent
+		stream.send(Tracker{});
+		stream.send(Tracker{});
+		{
+			state Tracker movedTracker = waitNext(stream.getFuture());
+			ASSERT(!movedTracker.moved);
+			ASSERT(movedTracker.copied == 0);
+		}
+		{
+			Tracker movedTracker = waitNext(stream.getFuture());
+			ASSERT(!movedTracker.moved);
+			ASSERT(movedTracker.copied == 0);
+		}
+	}
+	{
+		// This tests the case when no callback is added until
+		// after an unmovable value is sent
+		Tracker namedTracker1;
+		Tracker namedTracker2;
+		stream.send(namedTracker1);
+		stream.send(namedTracker2);
+		{
+			state Tracker copiedTracker = waitNext(stream.getFuture());
+			ASSERT(!copiedTracker.moved);
+			// must copy onto queue
+			ASSERT(copiedTracker.copied == 1);
+		}
+		{
+			Tracker copiedTracker = waitNext(stream.getFuture());
+			ASSERT(!copiedTracker.moved);
+			// must copy onto queue
+			ASSERT(copiedTracker.copied == 1);
+		}
+	}
+
+	return Void();
+}
+
+TEST_CASE("/flow/flow/PromiseStream/move2") {
+	PromiseStream<Tracker> stream;
+	stream.send(Tracker{});
+	Tracker tracker = waitNext(stream.getFuture());
+	Tracker movedTracker = std::move(tracker);
+	ASSERT(tracker.moved);
+	ASSERT(!movedTracker.moved);
+	ASSERT(movedTracker.copied == 0);
 	return Void();
 }

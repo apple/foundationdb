@@ -54,6 +54,9 @@ description is not currently required but encouraged.
     <Option name="trace_clock_source" code="35"
             paramType="String" paramDescription="Trace clock source"
             description="Select clock source for trace files. now (the default) or realtime are supported." />
+    <Option name="trace_file_identifier" code="36"
+            paramType="String" paramDescription="The identifier that will be part of all trace file names"
+            description="Once provided, this string will be used to replace the port/PID in the log file names." />
     <Option name="knob" code="40"
             paramType="String" paramDescription="knob_name=knob_value"
             description="Set internal tuning or debugging knobs"/>
@@ -109,7 +112,9 @@ description is not currently required but encouraged.
     <Option name="disable_client_statistics_logging" code="70"
             description="Disables logging of client statistics, such as sampled transaction activity." />
     <Option name="enable_slow_task_profiling" code="71"
-            description="Enables debugging feature to perform slow task profiling. Requires trace logging to be enabled. WARNING: this feature is not recommended for use in production." />
+            description="Deprecated" />
+    <Option name="enable_run_loop_profiling" code="71"
+            description="Enables debugging feature to perform run loop profiling. Requires trace logging to be enabled. WARNING: this feature is not recommended for use in production." />
     <Option name="client_buggify_enable" code="80"
             description="Enable client buggify - will make requests randomly fail (intended for client testing)" />
     <Option name="client_buggify_disable" code="81"
@@ -175,7 +180,7 @@ description is not currently required but encouraged.
             description="The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock."
             defaultFor="20"/>
     <Option name="transaction_include_port_in_address" code="505"
-            description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 700, this option is enabled by default and setting this has no effect."
+            description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect."
             defaultFor="23"/>
   </Scope>
   
@@ -186,7 +191,7 @@ description is not currently required but encouraged.
             description="The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock."/>
     <Option name="causal_read_disable" code="21" />
     <Option name="include_port_in_address" code="23"
-            description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 700, this option is enabled by default and setting this has no effect." />
+            description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect." />
     <Option name="next_write_no_write_conflict_range" code="30"
             description="The next write performed on this transaction will not generate a write conflict range. As a result, other transactions which read the key(s) being modified by the next write will not conflict with this transaction. Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on." />
     <Option name="commit_on_first_proxy" code="40"
@@ -223,6 +228,8 @@ description is not currently required but encouraged.
             description="Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled to get log output." />
     <Option name="transaction_logging_max_field_length" code="405" paramType="Int" paramDescription="Maximum length of escaped key and value fields."
             description="Sets the maximum escaped length of key and value fields to be logged to the trace file via the LOG_TRANSACTION option, after which the field will be truncated. A negative value disables truncation." />
+    <Option name="server_request_tracing" code="406"
+	    description="Sets an identifier for server tracing of this transaction. When committed, this identifier triggers logging when each part of the transaction authority encounters it, which is helpful in diagnosing slowness in misbehaving clusters. The identifier is randomly generated. When there is also a debug_transaction_identifier, both IDs are logged together." />
     <Option name="timeout" code="500"
             paramType="Int" paramDescription="value in milliseconds of timeout"
             description="Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Prior to API version 610, like all other transaction options, the timeout must be reset after a call to ``onError``. If the API version is 610 or greater, the timeout is not reset after an ``onError`` call. This allows the user to specify a longer timeout on specific transactions than the default timeout specified through the ``transaction_timeout`` database option without the shorter database timeout cancelling transactions that encounter a retryable error. Note that at all API versions, it is safe and legal to set the timeout each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option."
@@ -253,6 +260,8 @@ description is not currently required but encouraged.
             hidden="true" />
     <Option name="use_provisional_proxies" code="711"
             description="This option should only be used by tools which change the database configuration." />
+    <Option name="report_conflicting_keys" code="712"
+            description="The transaction can retrieve keys that are conflicting with other transactions." />
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

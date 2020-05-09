@@ -391,6 +391,7 @@ struct SingleCallback {
 	SingleCallback<T> *next;
 
 	virtual void fire(T const&) {}
+	virtual void fire(T &&) {}
 	virtual void error(Error) {}
 	virtual void unwait() {}
 
@@ -586,7 +587,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 			if (error.isValid()) throw error;
 			throw internal_error();
 		}
-		auto copy = queue.front();
+		auto copy = std::move(queue.front());
 		queue.pop();
 		return copy;
 	}
@@ -686,6 +687,11 @@ public:
 		: sav(new SAV<T>(1, 0))
 	{
 		sav->send(presentValue);
+	}
+	Future(T&& presentValue)
+		: sav(new SAV<T>(1, 0))
+	{
+		sav->send(std::move(presentValue));
 	}
 	Future(Never)
 		: sav(new SAV<T>(1, 0))
@@ -908,6 +914,9 @@ public:
 	void send(const T& value) const {
 		queue->send(value);
 	}
+	void send(T&& value) const {
+		queue->send(std::move(value));
+	}
 	void sendError(const Error& error) const {
 		queue->sendError(error);
 	}
@@ -1006,10 +1015,13 @@ struct ActorCallback : Callback<ValueType> {
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
-	virtual void fire(ValueType const& value) {
+	virtual void fire(ValueType const& value) override {
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
-	virtual void error(Error e) {
+	virtual void fire(ValueType && value) override {
+		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
+	}
+	virtual void error(Error e) override {
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
 	}
 };

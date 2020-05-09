@@ -48,7 +48,8 @@ static const char* typeString[] = { "SetValue",
 	                                "ByteMax",
 	                                "MinV2",
 	                                "AndV2",
-	                                "CompareAndClear"};
+	                                "CompareAndClear",
+	                                "MAX_ATOMIC_OP" };
 
 struct MutationRef {
 	static const int OVERHEAD_BYTES = 12; //12 is the size of Header in MutationList entries
@@ -97,19 +98,26 @@ struct MutationRef {
 	}
 
 	std::string toString() const {
-		if (type < MutationRef::MAX_ATOMIC_OP) {
-			return format("code: %s param1: %s param2: %s", typeString[type], printable(param1).c_str(), printable(param2).c_str());
-		}
-		else {
-			return format("code: Invalid param1: %s param2: %s", printable(param1).c_str(), printable(param2).c_str());
-		}
+		return format("code: %s param1: %s param2: %s",
+		              type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "Unset", printable(param1).c_str(),
+		              printable(param2).c_str());
 	}
 
 	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, type, param1, param2);
+		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
+			StringRef empty;
+			serializer(ar, type, param2, empty);
+		} else {
+			serializer(ar, type, param1, param2);
+		}
+		if (ar.isDeserializing && type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
+			ASSERT(param1[param1.size()-1] == '\x00');
+			param2 = param1;
+			param1 = param2.substr(0, param2.size()-1);
+		}
 	}
 
 	// These masks define which mutation types have particular properties (they are used to implement isSingleKeyMutation() etc)
@@ -123,6 +131,14 @@ struct MutationRef {
 		                       (1 << CompareAndClear)
 	};
 };
+
+static inline std::string getTypeString(MutationRef::Type type) {
+	return type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "Unset";
+}
+
+static inline std::string getTypeString(uint8_t type) {
+	return type < MutationRef::MAX_ATOMIC_OP ? typeString[type] : "Unset";
+}
 
 // A 'single key mutation' is one which affects exactly the value of the key specified by its param1
 static inline bool isSingleKeyMutation(MutationRef::Type type) {
@@ -150,21 +166,28 @@ static inline bool isNonAssociativeOp(MutationRef::Type mutationType) {
 }
 
 struct CommitTransactionRef {
-	CommitTransactionRef() : read_snapshot(0) {}
-	CommitTransactionRef(Arena &a, const CommitTransactionRef &from)
-	  : read_conflict_ranges(a, from.read_conflict_ranges),
-		write_conflict_ranges(a, from.write_conflict_ranges),
-		mutations(a, from.mutations),
-		read_snapshot(from.read_snapshot) {
-	}
+	CommitTransactionRef() : read_snapshot(0), report_conflicting_keys(false) {}
+	CommitTransactionRef(Arena& a, const CommitTransactionRef& from)
+	  : read_conflict_ranges(a, from.read_conflict_ranges), write_conflict_ranges(a, from.write_conflict_ranges),
+	    mutations(a, from.mutations), read_snapshot(from.read_snapshot),
+	    report_conflicting_keys(from.report_conflicting_keys) {}
 	VectorRef< KeyRangeRef > read_conflict_ranges;
 	VectorRef< KeyRangeRef > write_conflict_ranges;
 	VectorRef< MutationRef > mutations;
 	Version read_snapshot;
+	bool report_conflicting_keys;
 
 	template <class Ar>
-	force_inline void serialize( Ar& ar ) {
-		serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
+	force_inline void serialize(Ar& ar) {
+		if constexpr (is_fb_function<Ar>) {
+			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot,
+			           report_conflicting_keys);
+		} else {
+			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
+			if (ar.protocolVersion().hasReportConflictingKeys()) {
+				serializer(ar, report_conflicting_keys);
+			}
+		}
 	}
 
 	// Convenience for internal code required to manipulate these without the Native API

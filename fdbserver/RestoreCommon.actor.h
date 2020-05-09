@@ -188,6 +188,7 @@ struct RestoreFileFR {
 	int64_t cursor; // The start block location to be restored. All blocks before cursor have been scheduled to load and
 	                // restore
 	int fileIndex; // index of backup file. Must be identical per file.
+	int partitionId = -1; // Partition ID (Log Router Tag ID) for mutation files.
 
 	Tuple pack() const {
 		return Tuple()
@@ -199,7 +200,8 @@ struct RestoreFileFR {
 		    .append(endVersion)
 		    .append(beginVersion)
 		    .append(cursor)
-		    .append(fileIndex);
+		    .append(fileIndex)
+		    .append(partitionId);
 	}
 	static RestoreFileFR unpack(Tuple const& t) {
 		RestoreFileFR r;
@@ -213,6 +215,7 @@ struct RestoreFileFR {
 		r.beginVersion = t.getInt(i++);
 		r.cursor = t.getInt(i++);
 		r.fileIndex = t.getInt(i++);
+		r.partitionId = t.getInt(i++);
 		return r;
 	}
 
@@ -225,25 +228,26 @@ struct RestoreFileFR {
 	  : version(invalidVersion), isRange(false), blockSize(0), fileSize(0), endVersion(invalidVersion),
 	    beginVersion(invalidVersion), cursor(0), fileIndex(0) {}
 
-	RestoreFileFR(Version version, std::string fileName, bool isRange, int64_t blockSize, int64_t fileSize,
-	              Version endVersion, Version beginVersion)
-	  : version(version), fileName(fileName), isRange(isRange), blockSize(blockSize), fileSize(fileSize),
-	    endVersion(endVersion), beginVersion(beginVersion), cursor(0), fileIndex(0) {}
+	explicit RestoreFileFR(const RangeFile& f)
+	  : version(f.version), fileName(f.fileName), isRange(true), blockSize(f.blockSize), fileSize(f.fileSize),
+	    endVersion(f.version), beginVersion(f.version), cursor(0), fileIndex(0) {}
+
+	explicit RestoreFileFR(const LogFile& f)
+	  : version(f.beginVersion), fileName(f.fileName), isRange(false), blockSize(f.blockSize), fileSize(f.fileSize),
+	    endVersion(f.endVersion), beginVersion(f.beginVersion), cursor(0), fileIndex(0), partitionId(f.tagId) {}
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << "version:" << std::to_string(version) << " fileName:" << fileName
-		   << " isRange:" << std::to_string(isRange) << " blockSize:" << std::to_string(blockSize)
-		   << " fileSize:" << std::to_string(fileSize) << " endVersion:" << std::to_string(endVersion)
-		   << " beginVersion:" << std::to_string(beginVersion) << " cursor:" << std::to_string(cursor)
-		   << " fileIndex:" << std::to_string(fileIndex);
+		ss << "version:" << version << " fileName:" << fileName
+		   << " isRange:" << isRange << " blockSize:" << blockSize
+		   << " fileSize:" << fileSize << " endVersion:" << endVersion
+		   << " beginVersion:" << beginVersion << " cursor:" << cursor
+		   << " fileIndex:" << fileIndex << " partitionId:" << partitionId;
 		return ss.str();
 	}
 };
 
 namespace parallelFileRestore {
-ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset,
-                                                                      int len);
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset,
                                                                     int len);
 } // namespace parallelFileRestore
@@ -277,15 +281,28 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 				ongoingReplies.clear();
 				ongoingRepliesIndex.clear();
 				for (int i = 0; i < cmdReplies.size(); ++i) {
+					if (SERVER_KNOBS->FASTRESTORE_REQBATCH_LOG) {
+						TraceEvent(SevInfo, "FastRestoreGetBatchReplies")
+						    .suppressFor(1.0)
+						    .detail("Requests", requests.size())
+						    .detail("OutstandingReplies", oustandingReplies)
+						    .detail("ReplyIndex", i)
+						    .detail("ReplyIsReady", cmdReplies[i].isReady())
+						    .detail("ReplyIsError", cmdReplies[i].isError())
+						    .detail("RequestNode", requests[i].first)
+						    .detail("Request", requests[i].second.toString());
+					}
 					if (!cmdReplies[i].isReady()) { // still wait for reply
 						ongoingReplies.push_back(cmdReplies[i]);
 						ongoingRepliesIndex.push_back(i);
 					}
 				}
+				ASSERT(ongoingReplies.size() == oustandingReplies);
 				if (ongoingReplies.empty()) {
 					break;
 				} else {
-					wait(waitForAny(ongoingReplies));
+					wait(quorum(ongoingReplies, std::min((int)SERVER_KNOBS->FASTRESTORE_REQBATCH_PARALLEL,
+					                                     (int)ongoingReplies.size())));
 				}
 				// At least one reply is received; Calculate the reply duration
 				for (int j = 0; j < ongoingReplies.size(); ++j) {
@@ -341,12 +358,14 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) break;
-			fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
+			// fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
+			TraceEvent(SevWarn, "FastRestoreSendBatchRequests").error(e);
 			for (auto& request : requests) {
-				TraceEvent(SevWarn, "FastRestore")
+				TraceEvent(SevWarn, "FastRestoreSendBatchRequests")
 				    .detail("SendBatchRequests", requests.size())
 				    .detail("RequestID", request.first)
 				    .detail("Request", request.second.toString());
+				resetReply(request.second);
 			}
 		}
 	}

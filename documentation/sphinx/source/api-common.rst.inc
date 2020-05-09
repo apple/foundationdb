@@ -150,7 +150,7 @@
 .. |atomic-versionstamps-tuple-warning-value| replace::
     At this time, versionstamped values are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped values may not be used with the Subspace and Directory layers except in those languages.
 
-.. |api-version| replace:: 700
+.. |api-version| replace:: 630
 
 .. |streaming-mode-blurb1| replace::
     When using |get-range-func| and similar interfaces, API clients can request large ranges of the database to iterate over.  Making such a request doesn't necessarily mean that the client will consume all of the data in the range - sometimes the client doesn't know how far it intends to iterate in advance.  FoundationDB tries to balance latency and bandwidth by requesting data for iteration in batches.
@@ -175,6 +175,9 @@
 
 .. |transaction-get-committed-version-blurb| replace::
     Gets the version number at which a successful commit modified the database. This must be called only after the successful (non-error) completion of a call to |commit-func| on this Transaction, or the behavior is undefined. Read-only transactions do not modify the database when committed and will have a committed version of -1. Keep in mind that a transaction which reads keys and then sets them to their current values may be optimized to a read-only transaction.
+
+.. |transaction-get-approximate-size-blurb| replace::
+    Gets the the approximate transaction size so far, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges.
 
 .. |transaction-get-versionstamp-blurb| replace::
     Returns a future which will contain the versionstamp which was used by any versionstamp operations in this transaction. This function must be called before a call to |commit-func| on this Transaction. The future will be ready only after the successful completion of a call to |commit-func| on this Transaction. Read-only transactions do not modify the database when committed and will result in the future completing with an error. Keep in mind that a transaction which reads keys and then sets them to their current values may be optimized to a read-only transaction.

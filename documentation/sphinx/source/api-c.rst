@@ -133,7 +133,7 @@ API versioning
 
 Prior to including ``fdb_c.h``, you must define the ``FDB_API_VERSION`` macro. This, together with the :func:`fdb_select_api_version()` function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is |api-version|. ::
 
-  #define FDB_API_VERSION 700
+  #define FDB_API_VERSION 630
   #include <foundationdb/fdb_c.h>
 
 .. function:: fdb_error_t fdb_select_api_version(int version)
@@ -473,6 +473,11 @@ Applications must provide error handling and an appropriate retry loop around th
 
    ``snapshot``
       |snapshot|
+
+.. function:: FDBFuture* fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length)
+   Returns an estimated byte size of the key range.
+
+   |future-return0| the estimated size of the key range given. |future-return1| call :func:`fdb_future_get_int64()` to extract the size, |future-return2|
 
 .. function:: FDBFuture* fdb_transaction_get_key(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, fdb_bool_t or_equal, int offset, fdb_bool_t snapshot)
 

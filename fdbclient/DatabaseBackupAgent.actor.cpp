@@ -1490,6 +1490,12 @@ namespace dbBackup {
 					Version bVersion = wait(srcTr->getReadVersion());
 					beginVersionKey = BinaryWriter::toValue(bVersion, Unversioned());
 
+					state Key versionKey = logUidValue.withPrefix(destUidValue).withPrefix(backupLatestVersionsPrefix);
+					Optional<Key> versionRecord = wait( srcTr->get(versionKey) );
+					if(!versionRecord.present()) {
+						srcTr->set(versionKey, beginVersionKey);
+					}
+
 					task->params[BackupAgentBase::destUid] = destUidValue;
 
 					wait(srcTr->commit());
@@ -1538,9 +1544,6 @@ namespace dbBackup {
 
 					if(v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) >= BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyFolderId], Unversioned()))
 						return Void();
-
-					Key versionKey = logUidValue.withPrefix(destUidValue).withPrefix(backupLatestVersionsPrefix);
-					srcTr2->set(versionKey, beginVersionKey);
 
 					srcTr2->set( Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceTagName).pack(task->params[BackupAgentBase::keyTagName]), logUidValue );
 					srcTr2->set( sourceStates.pack(DatabaseBackupAgent::keyFolderId), task->params[DatabaseBackupAgent::keyFolderId] );

@@ -48,6 +48,29 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply) {
+	state ReplyPromise<Void> reply = req.reply;
+	resetReply( req );
+	std::vector<Future<Void>> replies;
+	int currentStream = 0;
+	std::vector<Endpoint> broadcastEndpoints = req.broadcastInfo;
+	for(int i = 0; i < sendAmount && currentStream < broadcastEndpoints.size(); i++) {
+		std::vector<Endpoint> endpoints;
+		RequestStream<TxnStateRequest> cur(broadcastEndpoints[currentStream++]);
+		while(currentStream < broadcastEndpoints.size()*(i+1)/sendAmount) {
+			endpoints.push_back(broadcastEndpoints[currentStream++]);
+		}
+		req.broadcastInfo = endpoints;
+		replies.push_back(brokenPromiseToNever( cur.getReply( req ) ));
+		resetReply( req );
+	}
+	wait( waitForAll(replies) );
+	if(sendReply) {
+		reply.send(Void());
+	}
+	return Void();
+}
+
 struct ProxyStats {
 	CounterCollection cc;
 	Counter txnRequestIn, txnRequestOut, txnRequestErrors;
@@ -70,8 +93,34 @@ struct ProxyStats {
 
 	Future<Void> logger;
 
+	int recentRequests;
+	Deque<int> requestBuckets;
+	double lastBucketBegin;
+	double bucketInterval;
+
+	void updateRequestBuckets() {
+		while(now() - lastBucketBegin > bucketInterval) {
+			lastBucketBegin += bucketInterval;
+			recentRequests -= requestBuckets.front();
+			requestBuckets.pop_front();
+			requestBuckets.push_back(0);
+		}
+	}
+
+	void addRequest() {
+		updateRequestBuckets();
+		++recentRequests;
+		++requestBuckets.back();
+	}
+
+	int getRecentRequests() {
+		updateRequestBuckets();
+		return recentRequests*FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE-(lastBucketBegin+bucketInterval-now()));
+	}
+
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion, int64_t *commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()), txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
+	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()), bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
+	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
 	    txnRequestErrors("TxnRequestErrors", cc), txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc),
 		txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
 		txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc),
@@ -94,11 +143,88 @@ struct ProxyStats {
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
 		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
+		for(int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
+			requestBuckets.push_back(0);
+		}
 	}
 };
 
-ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, double* outTransactionRate,
-						   double* outBatchTransactionRate, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply) {
+struct TransactionRateInfo {
+	double rate;
+	double limit;
+	double budget;
+
+	bool disabled;
+
+	Smoother smoothRate;
+	Smoother smoothReleased;
+
+	TransactionRateInfo(double rate) : rate(rate), limit(0), budget(0), disabled(true), smoothRate(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW), 
+	                                   smoothReleased(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW) {}
+
+	void reset() {
+		// Determine the number of transactions that this proxy is allowed to release
+		// Roughly speaking, this is done by computing the number of transactions over some historical window that we could
+		// have started but didn't, and making that our limit. More precisely, we track a smoothed rate limit and release rate,
+		// the difference of which is the rate of additional transactions that we could have released based on that window.
+		// Then we multiply by the window size to get a number of transactions.
+		// 
+		// Limit can be negative in the event that we are releasing more transactions than we are allowed (due to the use of
+		// our budget or because of higher priority transactions).
+		double releaseRate = smoothRate.smoothTotal() - smoothReleased.smoothRate();
+		limit = SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW * releaseRate;
+	}
+
+	bool canStart(int64_t numAlreadyStarted, int64_t count) {
+		return numAlreadyStarted + count <= std::min(limit + budget, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
+	}
+
+	void updateBudget(int64_t numStartedAtPriority, bool queueEmptyAtPriority, double elapsed) {
+		// Update the budget to accumulate any extra capacity available or remove any excess that was used.
+		// The actual delta is the portion of the limit we didn't use multiplied by the fraction of the window that elapsed.
+		// 
+		// We may have exceeded our limit due to the budget or because of higher priority transactions, in which case this 
+		// delta will be negative. The delta can also be negative in the event that our limit was negative, which can happen 
+		// if we had already started more transactions in our window than our rate would have allowed.
+		//
+		// This budget has the property that when the budget is required to start transactions (because batches are big),
+		// the sum limit+budget will increase linearly from 0 to the batch size over time and decrease by the batch size
+		// upon starting a batch. In other words, this works equivalently to a model where we linearly accumulate budget over 
+		// time in the case that our batches are too big to take advantage of the window based limits.
+		budget = std::max(0.0, budget + elapsed * (limit - numStartedAtPriority) / SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW);
+
+		// If we are emptying out the queue of requests, then we don't need to carry much budget forward
+		// If we did keep accumulating budget, then our responsiveness to changes in workflow could be compromised
+		if(queueEmptyAtPriority) {
+			budget = std::min(budget, SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET);
+		}
+
+		smoothReleased.addDelta(numStartedAtPriority);
+	}
+
+	void disable() {
+		disabled = true;
+		rate = 0;
+		smoothRate.reset(0);
+	}
+
+	void setRate(double rate) {
+		ASSERT(rate >= 0 && rate != std::numeric_limits<double>::infinity() && !std::isnan(rate));
+
+		this->rate = rate;
+		if(disabled) {
+			smoothRate.reset(rate);
+			disabled = false;
+		}
+		else {
+			smoothRate.setTotal(rate);
+		}
+	}
+};
+
+
+ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, TransactionRateInfo *transactionRateInfo,
+						   TransactionRateInfo *batchTransactionRateInfo, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -127,8 +253,9 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		}
 		when ( GetRateInfoReply rep = wait(reply) ) {
 			reply = Never();
-			*outTransactionRate = rep.transactionRate;
-			*outBatchTransactionRate = rep.batchTransactionRate;
+
+			transactionRateInfo->setRate(rep.transactionRate);
+			batchTransactionRateInfo->setRate(rep.batchTransactionRate);
 			//TraceEvent("MasterProxyRate", myID).detail("Rate", rep.transactionRate).detail("BatchRate", rep.batchTransactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
 			lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
@@ -140,34 +267,14 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			}
 		}
 		when ( wait( leaseTimeout ) ) {
-			*outTransactionRate = 0;
-			*outBatchTransactionRate = 0;
-			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", "Expired");
+			transactionRateInfo->disable();
+			batchTransactionRateInfo->disable();
+			TraceEvent(SevWarn, "MasterProxyRateLeaseExpired", myID).suppressFor(5.0);
+			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", 0);
 			leaseTimeout = Never();
 		}
 	}
 }
-
-struct TransactionRateInfo {
-	double rate;
-	double limit;
-
-	TransactionRateInfo(double rate) : rate(rate), limit(0) {}
-
-	void reset(double elapsed) {
-		limit = std::min(0.0, limit) + rate * elapsed; // Adjust the limit based on the full elapsed interval in order to properly erase a deficit
-		limit = std::min(limit, rate * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MAX); // Don't allow the rate to exceed what would be allowed in the maximum batch interval
-		limit = std::min(limit, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
-	}
-
-	bool canStart(int64_t numAlreadyStarted) {
-		return numAlreadyStarted < limit;
-	}
-
-	void updateBudget(int64_t numStarted) {
-		limit -= numStarted;
-	}
-};
 
 ACTOR Future<Void> queueTransactionStartRequests(
 	Reference<AsyncVar<ServerDBInfo>> db,
@@ -182,6 +289,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 	loop choose{
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
 			//WARNING: this code is run at a high priority, so it needs to do as little work as possible
+			stats->addRequest();
 			if( stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() > SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ) {
 				++stats->txnRequestErrors;
 				//FIXME: send an error instead of giving an unreadable version when the client can support the error: req.reply.sendError(proxy_memory_limit_exceeded());
@@ -447,8 +555,10 @@ struct ResolutionRequestBuilder {
 
 		vector<int> resolversUsed;
 		for (int r = 0; r<outTr.size(); r++)
-			if (outTr[r])
+			if (outTr[r]) {
 				resolversUsed.push_back(r);
+				outTr[r]->report_conflicting_keys = trIn.report_conflicting_keys;
+			}
 		transactionResolverMap.push_back(std::move(resolversUsed));
 	}
 };
@@ -474,6 +584,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 			choose{
 				when(CommitTransactionRequest req = waitNext(in)) {
 					//WARNING: this code is run at a high priority, so it needs to do as little work as possible
+					commitData->stats.addRequest();
 					int bytes = getBytes(req);
 
 					// Drop requests if memory is under severe pressure
@@ -506,7 +617,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 					}
 
 					if((batchBytes + bytes > CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT || req.firstInBatch()) && batch.size()) {
-						out.send({ batch, batchBytes });
+						out.send({ std::move(batch), batchBytes });
 						lastBatch = now();
 						timeout = delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher);
 						batch = std::vector<CommitTransactionRequest>();
@@ -640,6 +751,7 @@ ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> rel
 	return Void();
 }
 
+// Commit one batch of transactions trs
 ACTOR Future<Void> commitBatch(
 	ProxyCommitData* self,
 	vector<CommitTransactionRequest> trs,
@@ -819,7 +931,9 @@ ACTOR Future<Void> commitBatch(
 	// Determine which transactions actually committed (conservatively) by combining results from the resolvers
 	state vector<uint8_t> committed(trs.size());
 	ASSERT(transactionResolverMap.size() == committed.size());
-	vector<int> nextTr(resolution.size());
+	// For each commitTransactionRef, it is only sent to resolvers specified in transactionResolverMap
+	// Thus, we use this nextTr to track the correct transaction index on each resolver.
+	state vector<int> nextTr(resolution.size());
 	for (int t = 0; t<trs.size(); t++) {
 		uint8_t commit = ConflictBatch::TransactionCommitted;
 		for (int r : transactionResolverMap[t])
@@ -1151,6 +1265,8 @@ ACTOR Future<Void> commitBatch(
 
 	// Send replies to clients
 	double endTime = g_network->timer();
+	// Reset all to zero, used to track the correct index of each commitTransacitonRef on each resolver
+	std::fill(nextTr.begin(), nextTr.end(), 0);
 	for (int t = 0; t < trs.size(); t++) {
 		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			ASSERT_WE_THINK(commitVersion != invalidVersion);
@@ -1160,8 +1276,26 @@ ACTOR Future<Void> commitBatch(
 			trs[t].reply.sendError(transaction_too_old());
 		}
 		else {
-			trs[t].reply.sendError(not_committed());
+			// If enable the option to report conflicting keys from resolvers, we send back all keyranges' indices
+			// through CommitID
+			if (trs[t].transaction.report_conflicting_keys) {
+				Standalone<VectorRef<int>> conflictingKRIndices;
+				for (int resolverInd : transactionResolverMap[t]) {
+					auto const& cKRs = resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]];
+					for (auto const& rCRIndex : cKRs)
+						conflictingKRIndices.push_back(conflictingKRIndices.arena(), rCRIndex);
+				}
+				// At least one keyRange index should be returned
+				ASSERT(conflictingKRIndices.size());
+				trs[t].reply.send(CommitID(invalidVersion, t, Optional<Value>(),
+				                           Optional<Standalone<VectorRef<int>>>(conflictingKRIndices)));
+			} else {
+				trs[t].reply.sendError(not_committed());
+			}
 		}
+
+		// Update corresponding transaction indices on each resolver
+		for (int resolverInd : transactionResolverMap[t]) nextTr[resolverInd]++;
 
 		// TODO: filter if pipelined with large commit
 		if(self->latencyBandConfig.present()) {
@@ -1243,6 +1377,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	rep.version = commitData->committedVersion.get();
 	rep.locked = commitData->locked;
 	rep.metadataVersion = commitData->metadataVersion;
+	rep.recentRequests = commitData->stats.getRecentRequests();
 
 	for (auto v : versions) {
 		if(v.version > rep.version) {
@@ -1306,7 +1441,7 @@ ACTOR static Future<Void> transactionStarter(
 	state vector<MasterProxyInterface> otherProxies;
 
 	state PromiseStream<double> replyTimes;
-	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate, &batchRateInfo.rate, healthMetricsReply, detailedHealthMetricsReply));
+	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply));
 	addActor.send(queueTransactionStartRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(),
 	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(),
 	                                            &commitData->stats, &batchRateInfo));
@@ -1332,8 +1467,8 @@ ACTOR static Future<Void> transactionStarter(
 
 		if(elapsed == 0) elapsed = 1e-15; // resolve a possible indeterminant multiplication with infinite transaction rate
 
-		normalRateInfo.reset(elapsed);
-		batchRateInfo.reset(elapsed);
+		normalRateInfo.reset();
+		batchRateInfo.reset();
 
 		int transactionsStarted[2] = {0,0};
 		int systemTransactionsStarted[2] = {0,0};
@@ -1360,12 +1495,11 @@ ACTOR static Future<Void> transactionStarter(
 			auto& req = transactionQueue->front();
 			int tc = req.transactionCount;
 
-			if (req.priority() < GetReadVersionRequest::PRIORITY_DEFAULT &&
-			    !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1])) {
+			if(req.priority() < GetReadVersionRequest::PRIORITY_DEFAULT && !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
 				break;
-			} else if (req.priority() < GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE &&
-			           !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1])) {
-				break;
+			}
+			else if(req.priority() < GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE && !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
+				break;	
 			}
 
 			if (req.debugID.present()) {
@@ -1402,11 +1536,15 @@ ACTOR static Future<Void> transactionStarter(
 		.detail("TransactionBudget", transactionBudget)
 		.detail("BatchTransactionBudget", batchTransactionBudget);*/
 
-		transactionCount += transactionsStarted[0] + transactionsStarted[1];
-		batchTransactionCount += batchPriTransactionsStarted[0] + batchPriTransactionsStarted[1];
+		int systemTotalStarted = systemTransactionsStarted[0] + systemTransactionsStarted[1];
+		int normalTotalStarted = defaultPriTransactionsStarted[0] + defaultPriTransactionsStarted[1];
+		int batchTotalStarted = batchPriTransactionsStarted[0] + batchPriTransactionsStarted[1];
 
-		normalRateInfo.updateBudget(transactionsStarted[0] + transactionsStarted[1]);
-		batchRateInfo.updateBudget(transactionsStarted[0] + transactionsStarted[1]);
+		transactionCount += transactionsStarted[0] + transactionsStarted[1];
+		batchTransactionCount += batchTotalStarted;
+
+		normalRateInfo.updateBudget(systemTotalStarted + normalTotalStarted, systemQueue.empty() && defaultQueue.empty(), elapsed);
+		batchRateInfo.updateBudget(systemTotalStarted + normalTotalStarted + batchTotalStarted, systemQueue.empty() && defaultQueue.empty() && batchQueue.empty(), elapsed);
 
 		if (debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.masterProxyServerCore.Broadcast");
@@ -1478,6 +1616,7 @@ ACTOR static Future<Void> readRequestServer( MasterProxyInterface proxy, Promise
 	loop {
 		GetKeyServerLocationsRequest req = waitNext(proxy.getKeyServersLocations.getFuture());
 		//WARNING: this code is run at a high priority, so it needs to do as little work as possible
+		commitData->stats.addRequest();
 		if(req.limit != CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT && //Always do data distribution requests
 		   commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() > SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE) {
 			++commitData->stats.keyServerLocationErrors;
@@ -1891,7 +2030,7 @@ ACTOR Future<Void> masterProxyServerCore(
 		when(ExclusionSafetyCheckRequest exclCheckReq = waitNext(proxy.exclusionSafetyCheckReq.getFuture())) {
 			addActor.send(proxyCheckSafeExclusion(db, exclCheckReq));
 		}
-		when(TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {
+		when(state TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {
 			state ReplyPromise<Void> reply = req.reply;
 			if(req.last) maxSequence = req.sequence + 1;
 			if (!txnSequences.count(req.sequence)) {
@@ -1907,6 +2046,7 @@ ACTOR Future<Void> masterProxyServerCore(
 					state KeyRange txnKeys = allKeys;
 					loop {
 						wait(yield());
+						Standalone<RangeResultRef> UIDtoTagMap = commitData.txnStateStore->readRange( serverTagKeys ).get();
 						Standalone<RangeResultRef> data = commitData.txnStateStore->readRange(txnKeys, SERVER_KNOBS->BUGGIFIED_ROW_LIMIT, SERVER_KNOBS->APPLY_MUTATION_BYTES).get();
 						if(!data.size()) break;
 						((KeyRangeRef&)txnKeys) = KeyRangeRef( keyAfter(data.back().key, txnKeys.arena()), txnKeys.end );
@@ -1919,7 +2059,7 @@ ACTOR Future<Void> masterProxyServerCore(
 							if( kv.key.startsWith(keyServersPrefix) ) {
 								KeyRef k = kv.key.removePrefix(keyServersPrefix);
 								if(k != allKeys.end) {
-									decodeKeyServersValue(kv.value, src, dest);
+									decodeKeyServersValue(UIDtoTagMap, kv.value, src, dest);
 									info.tags.clear();
 									info.src_info.clear();
 									info.dest_info.clear();
@@ -1958,7 +2098,7 @@ ACTOR Future<Void> masterProxyServerCore(
 					commitData.txnStateStore->enableSnapshot();
 				}
 			}
-			reply.send(Void());
+			addActor.send(broadcastTxnRequest(req, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));
 			wait(yield());
 		}
 	}

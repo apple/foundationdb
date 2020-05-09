@@ -312,8 +312,8 @@ template<class T, class F>
 std::vector<Future<std::invoke_result_t<F, T>>> mapAsync(std::vector<Future<T>> const& what, F const& actorFunc)
 {
 	std::vector<std::invoke_result_t<F, T>> ret;
-	for(auto f : what)
-		ret.push_back(mapAsync( f, actorFunc ));
+	ret.reserve(what.size());
+	for (const auto& f : what) ret.push_back(mapAsync(f, actorFunc));
 	return ret;
 }
 
@@ -371,8 +371,8 @@ template<class T, class F>
 std::vector<Future<std::invoke_result_t<F, T>>> map(std::vector<Future<T>> const& what, F const& func)
 {
 	std::vector<Future<std::invoke_result_t<F, T>>> ret;
-	for(auto f : what)
-		ret.push_back(map( f, func ));
+	ret.reserve(what.size());
+	for (const auto& f : what) ret.push_back(map(f, func));
 	return ret;
 }
 
@@ -585,6 +585,7 @@ public:
 	}
 	std::vector<K> getKeys() {
 		std::vector<K> keys;
+		keys.reserve(items.size());
 		for(auto i = items.begin(); i != items.end(); ++i)
 			keys.push_back( i->first );
 		return keys;
@@ -887,6 +888,7 @@ Future<Void> streamHelper( PromiseStream<T> output, PromiseStream<Error> errors,
 template <class T>
 Future<Void> makeStream( const std::vector<Future<T>>& futures, PromiseStream<T>& stream, PromiseStream<Error>& errors ) {
 	std::vector<Future<Void>> forwarders;
+	forwarders.reserve(futures.size());
 	for(int f=0; f<futures.size(); f++)
 		forwarders.push_back( streamHelper( stream, errors, futures[f] ) );
 	return cancelOnly(forwarders);
@@ -1016,6 +1018,7 @@ Future<std::vector<T>> getAll( std::vector<Future<T>> input ) {
 	wait( quorum( input, input.size() ) );
 
 	std::vector<T> output;
+	output.reserve(input.size());
 	for(int i=0; i<input.size(); i++)
 		output.push_back( input[i].get() );
 	return output;
@@ -1026,6 +1029,12 @@ Future<std::vector<T>> appendAll( std::vector<Future<std::vector<T>>> input ) {
 	wait( quorum( input, input.size() ) );
 
 	std::vector<T> output;
+	size_t sz = 0;
+	for (const auto& f : input) {
+		sz += f.get().size();
+	}
+	output.reserve(sz);
+
 	for(int i=0; i<input.size(); i++) {
 		auto const& r = input[i].get();
 		output.insert( output.end(), r.begin(), r.end() );
@@ -1167,10 +1176,7 @@ inline Future<Void> operator &&( Future<Void> const& lhs, Future<Void> const& rh
 		else return lhs;
 	}
 
-	std::vector<Future<Void>> v;
-	v.push_back( lhs );
-	v.push_back( rhs );
-	return waitForAll(v);
+	return waitForAll(std::vector<Future<Void>>{ lhs, rhs });
 }
 
 // error || unset -> error
@@ -1626,8 +1632,7 @@ public:
 			return futures[0];
 
 		Future<Void> f = waitForAll(futures);
-		futures = std::vector<Future<Void>>();
-		futures.push_back(f);
+		futures = std::vector<Future<Void>>{ f };
 		return f;
 	}
 

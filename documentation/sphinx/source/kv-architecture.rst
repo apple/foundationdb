@@ -38,7 +38,7 @@ The transaction logs make mutations durable to disk for fast commit latencies. T
 Resolvers
 =========
 
-The resolvers are responsible determining conflicts between transactions. A transaction conflicts if it reads a key that has been written between the transaction's read version and commit version. The resolver does this by holding the last 5 seconds of committed writes in memory, and comparing a new transaction's reads against this set of commits.
+The resolvers are responsible determining conflicts between transactions. A read-write transaction conflicts if it reads a key that has been written between the transaction's read version and commit version. The resolver does this by holding the last 5 seconds of committed writes in memory, and comparing a new transaction's reads against this set of commits.
 
 Storage Servers
 ===============

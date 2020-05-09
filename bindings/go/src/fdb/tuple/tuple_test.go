@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"flag"
+	"fmt"
 	"math/rand"
 	"os"
 	"testing"
@@ -116,5 +117,40 @@ func BenchmarkTuplePacking(b *testing.B) {
 				_ = tuple.Pack()
 			}
 		})
+	}
+}
+
+func TestTupleString(t *testing.T) {
+	testCases :=[ ]struct {
+		input    Tuple
+		expected string
+	}{
+		{
+			Tuple{[]byte("hello"), "world", 42, 0x99},
+			"(b\"hello\", \"world\", 42, 153)",
+		},
+		{
+			Tuple{nil, Tuple{"Ok", Tuple{1, 2}, "Go"}, 42, 0x99},
+			"(<nil>, (\"Ok\", (1, 2), \"Go\"), 42, 153)",
+		},
+		{
+			Tuple{"Bool", true, false},
+			"(\"Bool\", true, false)",
+		},
+		{
+			Tuple{"UUID", testUUID},
+			"(\"UUID\", UUID(1100aabb-ccdd-eeff-1100-aabbccddeeff))",
+		},
+		{
+			Tuple{"Versionstamp", Versionstamp{[10]byte{0, 0, 0, 0xaa, 0, 0xbb, 0, 0xcc, 0, 0xdd}, 620}},
+			"(\"Versionstamp\", Versionstamp(\\x00\\x00\\x00\\xaa\\x00\\xbb\\x00\\xcc\\x00\\xdd, 620))",
+		},
+	}
+
+	for _, testCase := range testCases {
+		printed := fmt.Sprint(testCase.input)
+		if printed != testCase.expected {
+			t.Fatalf("printed tuple result differs, expected %v, got %v", testCase.expected, printed)
+		}
 	}
 }

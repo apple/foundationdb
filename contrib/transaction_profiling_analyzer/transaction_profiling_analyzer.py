@@ -45,11 +45,12 @@ PROTOCOL_VERSION_5_2 = 0x0FDB00A552000001
 PROTOCOL_VERSION_6_0 = 0x0FDB00A570010001
 PROTOCOL_VERSION_6_1 = 0x0FDB00B061060001
 PROTOCOL_VERSION_6_2 = 0x0FDB00B062010001
+PROTOCOL_VERSION_6_3 = 0x0FDB00B063010001
 supported_protocol_versions = frozenset([PROTOCOL_VERSION_5_2, PROTOCOL_VERSION_6_0, PROTOCOL_VERSION_6_1,
-                                         PROTOCOL_VERSION_6_2])
+                                         PROTOCOL_VERSION_6_2, PROTOCOL_VERSION_6_3])
 
 
-fdb.api_version(600)
+fdb.api_version(520)
 
 BASIC_FORMAT = "%(asctime)s - %(levelname)-8s %(message)s"
 LOG_PATH = "transaction_profiling_analyzer.log"
@@ -180,7 +181,8 @@ class GetVersionInfo(BaseInfo):
         self.latency = bb.get_double()
         if protocol_version >= PROTOCOL_VERSION_6_2:
             self.transaction_priority_type = bb.get_int()
-
+        if protocol_version >= PROTOCOL_VERSION_6_3:
+            self.read_version = bb.get_long()	
 
 class GetInfo(BaseInfo):
     def __init__(self, bb):
@@ -204,7 +206,9 @@ class CommitInfo(BaseInfo):
         self.latency = bb.get_double()
         self.num_mutations = bb.get_int()
         self.commit_bytes = bb.get_int()
-
+    
+        if protocol_version >= PROTOCOL_VERSION_6_3:
+            self.commit_version = bb.get_long() 
         read_conflict_range = bb.get_key_range_list()
         if full_output:
             self.read_conflict_range = read_conflict_range

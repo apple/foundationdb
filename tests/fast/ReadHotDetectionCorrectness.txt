@@ -1,0 +1,3 @@
+testTitle=ReadHotDetection
+testName=ReadHotDetection
+transactionsPerSecond=1000

@@ -68,7 +68,7 @@ void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
 std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, Version begin, Version end) {
 	std::vector<LogFile> filtered;
 	for (const auto& file : files) {
-		if (file.beginVersion <= end && file.endVersion >= begin && file.tagId >= 0) {
+		if (file.beginVersion <= end && file.endVersion >= begin && file.tagId >= 0 && file.fileSize > 0) {
 			filtered.push_back(file);
 		}
 	}
@@ -76,15 +76,15 @@ std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, Vers
 
 	// Remove duplicates. This is because backup workers may store the log for
 	// old epochs successfully, but do not update the progress before another
-	// recovery happened.	As a result, next epoch will retry and creates
+	// recovery happened. As a result, next epoch will retry and creates
 	// duplicated log files.
 	std::vector<LogFile> sorted;
 	int i = 0;
 	for (int j = 1; j < filtered.size(); j++) {
-		if (!filtered[i].sameContent(filtered[j])) {
+		if (!filtered[i].isSubset(filtered[j])) {
 			sorted.push_back(filtered[i]);
-			i = j;
 		}
+		i = j;
 	}
 	if (i < filtered.size()) {
 		sorted.push_back(filtered[i]);
@@ -162,6 +162,9 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 			Version msgVersion = invalidVersion;
 
 			try {
+				// Read block header
+				if (reader.consume<int32_t>() != PARTITIONED_MLOG_VERSION) throw restore_unsupported_file_version();
+
 				while (1) {
 					// If eof reached or first key len bytes is 0xFF then end of block was reached.
 					if (reader.eof() || *reader.rptr == 0xFF) break;
@@ -370,17 +373,6 @@ struct LogFileWriter {
 		return wr.toValue();
 	}
 
-	// Return a block of contiguous padding bytes, growing if needed.
-	static Value makePadding(int size) {
-		static Value pad;
-		if (pad.size() < size) {
-			pad = makeString(size);
-			memset(mutateString(pad), '\xff', pad.size());
-		}
-
-		return pad.substr(0, size);
-	}
-
 	// Start a new block if needed, then write the key and value
 	ACTOR static Future<Void> writeKV_impl(LogFileWriter* self, Key k, Value v) {
 		// If key and value do not fit in this block, end it and start a new one
@@ -389,7 +381,7 @@ struct LogFileWriter {
 			// Write padding if needed
 			int bytesLeft = self->blockEnd - self->file->size();
 			if (bytesLeft > 0) {
-				state Value paddingFFs = makePadding(bytesLeft);
+				state Value paddingFFs = fileBackup::makePadding(bytesLeft);
 				wait(self->file->append(paddingFFs.begin(), bytesLeft));
 			}
 
