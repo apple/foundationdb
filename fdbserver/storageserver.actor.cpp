@@ -407,6 +407,8 @@ public:
 	Reference<AsyncVar<ServerDBInfo>> db;
 	Database cx;
 	ActorCollection actors;
+	Future<Void> loadBalanceDelay;
+	int sharedDelayCount;
 
 	StorageServerMetrics metrics;
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
@@ -532,7 +534,7 @@ public:
 			rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
 			durableInProgress(Void()),
 			versionLag(0), primaryLocality(tagLocalityInvalid),
-			updateEagerReads(0),
+			updateEagerReads(0), sharedDelayCount(0), loadBalanceDelay(Void()),
 			shardChangeCounter(0),
 			fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES),
 			shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0),
@@ -551,6 +553,14 @@ public:
 		addShard( ShardInfo::newNotAssigned( allKeys ) );
 
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
+	}
+
+	Future<Void> getLoadBalanceDelay() {
+		if(loadBalanceDelay.isReady() || ++sharedDelayCount > SERVER_KNOBS->MAX_SHARED_LOAD_BALANCE_DELAY) {
+			sharedDelayCount = 0;
+			loadBalanceDelay = delay(0, TaskPriority::DefaultEndpoint);
+		}
+		return loadBalanceDelay;
 	}
 	//~StorageServer() { fclose(log); }
 
@@ -844,7 +854,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
-		wait( delay(0, TaskPriority::DefaultEndpoint) );
+		wait( data->getLoadBalanceDelay() );
 
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
@@ -1373,15 +1383,15 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	TaskPriority taskType = TaskPriority::DefaultEndpoint;
 	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
-		taskType = TaskPriority::FetchKeys;
+		wait( delay(0, TaskPriority::FetchKeys) );
 	// } else if (false) {
 	// 	// Placeholder for up-prioritizing fetches for important requests
 	// 	taskType = TaskPriority::DefaultDelay;
+	} else {
+		wait( data->getLoadBalanceDelay() );
 	}
-	wait( delay(0, taskType) );
-
+	
 	try {
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
@@ -1509,7 +1519,7 @@ ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req ) {
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait( delay(0, TaskPriority::DefaultEndpoint) );
+	wait( data->getLoadBalanceDelay() );
 
 	try {
 		state Version version = wait( waitForVersion( data, req.version ) );
