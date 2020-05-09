@@ -406,6 +406,7 @@ public:
 	Key sk;
 	Reference<AsyncVar<ServerDBInfo>> db;
 	Database cx;
+	ActorCollection actors;
 
 	StorageServerMetrics metrics;
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
@@ -526,7 +527,7 @@ public:
 
 	StorageServer(IKeyValueStore* storage, Reference<AsyncVar<ServerDBInfo>> const& db, StorageServerInterface const& ssi)
 		:	instanceID(deterministicRandom()->randomUniqueID().first()),
-			storage(this, storage), db(db),
+			storage(this, storage), db(db), actors(false),
 			lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 			rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
 			durableInProgress(Void()),
@@ -772,35 +773,42 @@ updateProcessStats(StorageServer* self)
 #ifndef __INTEL_COMPILER
 #pragma region Queries
 #endif
-ACTOR Future<Version> waitForVersion( StorageServer* data, Version version ) {
-	// This could become an Actor transparently, but for now it just does the lookup
-	if (version == latestVersion)
-		version = std::max(Version(1), data->version.get());
-	if (version < data->oldestVersion.get() || version <= 0) throw transaction_too_old();
-	else if (version <= data->version.get())
-		return version;
 
-	if((data->behind || data->versionBehind) && version > data->version.get()) {
-		throw process_behind();
-	}
-
-	if(deterministicRandom()->random01() < 0.001)
-		TraceEvent("WaitForVersion1000x");
+ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version) {
 	choose {
-		when ( wait( data->version.whenAtLeast(version) ) ) {
-			//FIXME: A bunch of these can block with or without the following delay 0.
-			//wait( delay(0) );  // don't do a whole bunch of these at once
+		when(wait(data->version.whenAtLeast(version))) {
+			// FIXME: A bunch of these can block with or without the following delay 0.
+			// wait( delay(0) );  // don't do a whole bunch of these at once
 			if (version < data->oldestVersion.get()) throw transaction_too_old();  // just in case
 			return version;
 		}
-		when ( wait( delay( SERVER_KNOBS->FUTURE_VERSION_DELAY ) ) ) {
-			if(deterministicRandom()->random01() < 0.001)
+		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
+			if (deterministicRandom()->random01() < 0.001)
 				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
 					.detail("Version", version)
 					.detail("MyVersion", data->version.get())
 					.detail("ServerID", data->thisServerID);
 			throw future_version();
 		}
+	}
+}
+ 
+Future<Version> waitForVersion(StorageServer* data, Version version) {
+	try {
+		if (version == latestVersion) version = std::max(Version(1), data->version.get());
+		if (version < data->oldestVersion.get() || version <= 0)
+			throw transaction_too_old();
+		else if (version <= data->version.get())
+			return version;
+
+		if ((data->behind || data->versionBehind) && version > data->version.get()) {
+			throw process_behind();
+		}
+
+ 		if (deterministicRandom()->random01() < 0.001) TraceEvent("WaitForVersion1000x");
+		return waitForVersionActor(data, version);
+	} catch (Error& e) {
+		return Future<Version>(e);
 	}
 }
 
@@ -1352,7 +1360,7 @@ KeyRange getShardKeyRange( StorageServer* data, const KeySelectorRef& sel )
 	return i->range();
 }
 
-ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
+ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large selector offset prevents
 // all data from being read in one range read
 {
@@ -1491,7 +1499,7 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 	return Void();
 }
 
-ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
+ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req ) {
 	state int64_t resultSize = 0;
 
 	++data->counters.getKeyQueries;
@@ -3482,11 +3490,10 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 
 ACTOR Future<Void> metricsCore( StorageServer* self, StorageServerInterface ssi ) {
 	state Future<Void> doPollMetrics = Void();
-	state ActorCollection actors(false);
 
 	wait( self->byteSampleRecovery );
 
-	actors.add(traceCounters("StorageMetrics", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self->counters.cc, self->thisServerID.toString() + "/StorageMetrics"));
+	self->actors.add(traceCounters("StorageMetrics", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self->counters.cc, self->thisServerID.toString() + "/StorageMetrics"));
 
 	loop {
 		choose {
@@ -3495,7 +3502,7 @@ ACTOR Future<Void> metricsCore( StorageServer* self, StorageServerInterface ssi 
 					TEST( true );	// waitMetrics immediate wrong_shard_server()
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
-					actors.add( self->metrics.waitMetrics( req, delayJittered( SERVER_KNOBS->STORAGE_METRIC_TIMEOUT ) ) );
+					self->actors.add( self->metrics.waitMetrics( req, delayJittered( SERVER_KNOBS->STORAGE_METRIC_TIMEOUT ) ) );
 				}
 			}
 			when (SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
@@ -3522,7 +3529,6 @@ ACTOR Future<Void> metricsCore( StorageServer* self, StorageServerInterface ssi 
 				self->metrics.poll();
 				doPollMetrics = delay(SERVER_KNOBS->STORAGE_SERVER_POLL_METRICS_DELAY);
 			}
-			when(wait(actors.getResult())) {}
 		}
 	}
 }
@@ -3560,22 +3566,64 @@ ACTOR Future<Void> checkBehind( StorageServer* self ) {
 	}
 }
 
+ACTOR Future<Void> serveGetValueRequests( StorageServer* self, FutureStream<GetValueRequest> getValue ) {
+	loop {
+		GetValueRequest req = waitNext(getValue);
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
+		if( req.debugID.present() )
+			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "storageServer.received"); //.detail("TaskID", g_network->getCurrentTask());
+
+		if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
+			req.reply.send(GetValueReply());
+		else
+			self->actors.add(self->readGuard(req , getValueQ));
+	}
+}
+
+ACTOR Future<Void> serveGetKeyValuesRequests( StorageServer* self, FutureStream<GetKeyValuesRequest> getKeyValues ) {
+	loop {
+		GetKeyValuesRequest req = waitNext(getKeyValues);
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
+		self->actors.add(self->readGuard(req, getKeyValuesQ));
+	}
+}
+
+ACTOR Future<Void> serveGetKeyRequests( StorageServer* self, FutureStream<GetKeyRequest> getKey ) {
+	loop {
+		GetKeyRequest req = waitNext(getKey);
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
+		self->actors.add(self->readGuard(req , getKeyQ));
+	}
+}
+
+ACTOR Future<Void> serveWatchValueRequests( StorageServer* self, FutureStream<WatchValueRequest> watchValue ) {
+	loop {
+		WatchValueRequest req = waitNext(watchValue);
+		// TODO: fast load balancing?
+		// SOMEDAY: combine watches for the same key/value into a single watch
+		self->actors.add(self->readGuard(req, watchValueQ));
+	}
+}
+
 ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterface ssi )
 {
 	state Future<Void> doUpdate = Void();
 	state bool updateReceived = false;  // true iff the current update() actor assigned to doUpdate has already received an update from the tlog
-	state ActorCollection actors(false);
 	state double lastLoopTopTime = now();
 	state Future<Void> dbInfoChange = Void();
 	state Future<Void> checkLastUpdate = Void();
 	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
-	actors.add(updateStorage(self));
-	actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
-	actors.add(self->otherError.getFuture());
-	actors.add(metricsCore(self, ssi));
-	actors.add(logLongByteSampleRecovery(self->byteSampleRecovery));
-	actors.add(checkBehind(self));
+	self->actors.add(updateStorage(self));
+	self->actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
+	self->actors.add(self->otherError.getFuture());
+	self->actors.add(metricsCore(self, ssi));
+	self->actors.add(logLongByteSampleRecovery(self->byteSampleRecovery));
+	self->actors.add(checkBehind(self));
+	self->actors.add(serveGetValueRequests(self, ssi.getValue.getFuture()));
+	self->actors.add(serveGetKeyValuesRequests(self, ssi.getKeyValues.getFuture()));
+	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
+	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
 
 	self->coreStarted.send( Void() );
 
@@ -3632,29 +3680,6 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 					}
 				}
 			}
-			when( GetValueRequest req = waitNext(ssi.getValue.getFuture()) ) {
-				// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
-				if( req.debugID.present() )
-					g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "storageServer.received"); //.detail("TaskID", g_network->getCurrentTask());
-
-				if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
-					req.reply.send(GetValueReply());
-				else
-					actors.add(self->readGuard(req , getValueQ));
-			}
-			when( WatchValueRequest req = waitNext(ssi.watchValue.getFuture()) ) {
-				// TODO: fast load balancing?
-				// SOMEDAY: combine watches for the same key/value into a single watch
-				actors.add(self->readGuard(req, watchValueQ));
-			}
-			when (GetKeyRequest req = waitNext(ssi.getKey.getFuture())) {
-				// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
-				actors.add(self->readGuard(req , getKey));
-			}
-			when (GetKeyValuesRequest req = waitNext(ssi.getKeyValues.getFuture()) ) {
-				// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
-				actors.add(self->readGuard(req , getKeyValues));
-			}
 			when (GetShardStateRequest req = waitNext(ssi.getShardState.getFuture()) ) {
 				if (req.mode == GetShardStateRequest::NO_WAIT ) {
 					if( self->isReadable( req.keys ) )
@@ -3662,7 +3687,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 					else
 						req.reply.sendError(wrong_shard_server());
 				} else {
-					actors.add( getShardStateQ( self, req ) );
+					self->actors.add( getShardStateQ( self, req ) );
 				}
 			}
 			when (StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) {
@@ -3682,7 +3707,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 			}
-			when(wait(actors.getResult())) {}
+			when(wait(self->actors.getResult())) {}
 		}
 	}
 }
