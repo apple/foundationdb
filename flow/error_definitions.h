@@ -89,6 +89,7 @@ ERROR( master_proxy_failed, 1209, "Master terminating because a Proxy failed" )
 ERROR( master_resolver_failed, 1210, "Master terminating because a Resolver failed" )
 ERROR( server_overloaded, 1211, "Server is under too much load and cannot respond" )
 ERROR( master_backup_worker_failed, 1212, "Master terminating because a backup worker failed")
+ERROR( tag_throttled, 1213, "Transaction tag is being throttled" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -148,6 +149,9 @@ ERROR( address_in_use, 2105, "Local address in use" )
 ERROR( invalid_local_address, 2106, "Invalid local address" )
 ERROR( tls_error, 2107, "TLS error" )
 ERROR( unsupported_operation, 2108, "Operation is not supported" )
+ERROR( too_many_tags, 2109, "Too many tags set on transaction" )
+ERROR( tag_too_long, 2110, "Tag set on transaction is too long" )
+ERROR( too_many_tag_throttles, 2111, "Too many tag throttles have been created" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

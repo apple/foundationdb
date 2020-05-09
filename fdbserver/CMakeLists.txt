@@ -183,6 +183,7 @@ set(FDBSERVER_SRCS
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp
+  workloads/TagThrottleApi.actor.cpp
   workloads/TargetedKill.actor.cpp
   workloads/TaskBucketCorrectness.actor.cpp
   workloads/ThreadSafety.actor.cpp

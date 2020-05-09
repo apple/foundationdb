@@ -84,6 +84,7 @@ bool validationIsEnabled(BuggifyType type);
 #define EXPENSIVE_VALIDATION (validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
 extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "");
+extern Optional<uint64_t> parseDuration(std::string str, std::string defaultUnit = "");
 extern std::string format(const char* form, ...);
 
 // On success, returns the number of characters written. On failure, returns a negative number.
