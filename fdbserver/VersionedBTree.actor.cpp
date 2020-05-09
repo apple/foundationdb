@@ -4147,7 +4147,7 @@ private:
 				// If mutation boundaries are the same, the range is fully described by (mBegin - 1).mutation()
 				bool fullyCovered = (mBegin == mEnd);
 				--mBegin;
-				
+
 				// If mBegin describes the entire subtree range, see if there are either no changes or if the entire
 				// range is cleared.
 				if (fullyCovered) {
@@ -4172,7 +4172,7 @@ private:
 					if (uniform) {
 						// See if we can expand the subtree range to include more subtrees which are also covered by the
 						// same mutation range
-						if(cursor.valid() && mEnd.key() != cursor.get().key) {
+						if (cursor.valid() && mEnd.key() != cursor.get().key) {
 							cursor.seekLessThanOrEqual(mEnd.key(), update->skipLen, &cursor, 1);
 
 							// If this seek moved us ahead, to something other than cEnd, then update subtree range
@@ -4189,7 +4189,8 @@ private:
 								u.subtreeUpperBound = &cursor.get();
 								u.skipLen = 0; // TODO: set this
 
-								// The new decode upper bound is either cEnd or the record before it if it has no child link
+								// The new decode upper bound is either cEnd or the record before it if it has no child
+								// link
 								auto c = u.cEnd;
 								c.movePrev();
 								ASSERT(c.valid());
