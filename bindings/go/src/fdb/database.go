@@ -161,7 +161,7 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 // MustGet. ReadTransact will recover a panicked Error and either retry the
 // transaction or return the error.
 //
-// The transaction is retried if the error is or wraps an retryable Error.
+// The transaction is retried if the error is or wraps a retryable Error.
 // The error is unwrapped with the xerrors.Wrapper. See https://godoc.org/golang.org/x/xerrors#Wrapper
 // for details.
 //
