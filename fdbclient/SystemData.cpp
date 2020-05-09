@@ -83,7 +83,7 @@ const Value keyServersValue( const std::vector<Tag>& srcTag, const std::vector<T
 }
 
 void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& value,
-                            std::vector<UID>& src, std::vector<UID>& dest  ) {
+                            std::vector<UID>& src, std::vector<UID>& dest, bool missingIsError ) {
 	if (value.size() == 0) {
 		src.clear();
 		dest.clear();
@@ -121,7 +121,7 @@ void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& v
 	}
 	std::sort(src.begin(), src.end());
 	std::sort(dest.begin(), dest.end());
-	if(src.size() != srcTag.size() || dest.size() != destTag.size()) {
+	if(missingIsError && (src.size() != srcTag.size() || dest.size() != destTag.size())) {
 		TraceEvent(SevError, "AttemptedToDecodeMissingTag");
 		for (const KeyValueRef kv : result) {
 			Tag tag = decodeServerTagValue(kv.value);
