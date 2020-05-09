@@ -567,7 +567,7 @@ private:
 		for (const auto& impl : self->impls) {
 			auto implRange = impl->getKeyRange();
 			auto begin = std::max(kr.begin, implRange.begin);
-			auto end = std::min(kr.end, implrRange.end);
+			auto end = std::min(kr.end, implRange.end);
 			if (begin < end) {
 				futures.push_back(impl->getRange(ryw, KeyRangeRef(begin, end)));
 			}
