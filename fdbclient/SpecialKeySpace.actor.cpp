@@ -197,7 +197,6 @@ SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* pks, Reference<ReadYo
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
-			onModuleRead(ryw, iter->value(), lastModuleRead);
 			Standalone<RangeResultRef> pairs = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
 			result.arena().dependsOn(pairs.arena());
 			// limits handler
@@ -221,7 +220,6 @@ SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* pks, Reference<ReadYo
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
-			onModuleRead(ryw, iter->value(), lastModuleRead);
 			Standalone<RangeResultRef> pairs = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
 			result.arena().dependsOn(pairs.arena());
 			// limits handler
