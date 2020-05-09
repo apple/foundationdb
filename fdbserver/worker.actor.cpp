@@ -20,6 +20,7 @@
 
 #include <boost/lexical_cast.hpp>
 
+#include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
@@ -787,7 +788,7 @@ ACTOR Future<Void>
 traceRole(Role role, UID roleId, UID workerId)
 {
 	loop {
-		wait(delay(5.0));
+		wait(delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL));
 		TraceEvent("Role", roleId)
 			.detail("Transition", "Refresh")
 			.detail("As", role.roleName)
