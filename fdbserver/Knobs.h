@@ -551,6 +551,9 @@ public:
 	int64_t FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES; // desired size of mutation message sent from loader to appliers
 	bool FASTRESTORE_GET_RANGE_VERSIONS_EXPENSIVE; // parse each range file to get (range, version) it has?
 	int64_t FASTRESTORE_REQBATCH_PARALLEL; // number of requests to wait on for getBatchReplies()
+	bool FASTRESTORE_REQBATCH_LOG; // verbose log information for getReplyBatches
+	int FASTRESTORE_TXN_CLEAR_MAX; // threshold to start tracking each clear op in a txn
+	int FASTRESTORE_TXN_RETRY_MAX; // threshold to start output error on too many retries
 
 	ServerKnobs();
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);

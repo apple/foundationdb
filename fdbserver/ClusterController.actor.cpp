@@ -1025,7 +1025,7 @@ public:
 
 		for( auto& logSet : dbi.logSystemConfig.tLogs ) {
 			for( auto& it : logSet.tLogs ) {
-				auto tlogWorker = id_worker.find(it.interf().locality.processId());
+				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());
 				if ( tlogWorker == id_worker.end() )
 					return false;
 				if ( tlogWorker->second.priorityInfo.isExcluded )
@@ -1042,7 +1042,7 @@ public:
 			}
 
 			for( auto& it : logSet.logRouters ) {
-				auto tlogWorker = id_worker.find(it.interf().locality.processId());
+				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());
 				if ( tlogWorker == id_worker.end() )
 					return false;
 				if ( tlogWorker->second.priorityInfo.isExcluded )
@@ -1067,7 +1067,7 @@ public:
 		// Get proxy classes
 		std::vector<WorkerDetails> proxyClasses;
 		for(auto& it : dbi.client.proxies ) {
-			auto proxyWorker = id_worker.find(it.locality.processId());
+			auto proxyWorker = id_worker.find(it.processId);
 			if ( proxyWorker == id_worker.end() )
 				return false;
 			if ( proxyWorker->second.priorityInfo.isExcluded )
@@ -1260,11 +1260,11 @@ public:
 		auto& dbInfo = db.serverInfo->get();
 		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
 			for (const auto& tlog: tlogset.tLogs) {
-				if (tlog.present() && tlog.interf().locality.processId() == processId) return true;
+				if (tlog.present() && tlog.interf().filteredLocality.processId() == processId) return true;
 			}
 		}
 		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
-			if (interf.locality.processId() == processId) return true;
+			if (interf.processId == processId) return true;
 		}
 		for (const ResolverInterface& interf: dbInfo.resolvers) {
 			if (interf.locality.processId() == processId) return true;
@@ -1291,13 +1291,13 @@ public:
 		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
 			for (const auto& tlog: tlogset.tLogs) {
 				if (tlog.present()) {
-					idUsed[tlog.interf().locality.processId()]++;
+					idUsed[tlog.interf().filteredLocality.processId()]++;
 				}
 			}
 		}
 		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
-			ASSERT(interf.locality.processId().present());
-			idUsed[interf.locality.processId()]++;
+			ASSERT(interf.processId.present());
+			idUsed[interf.processId]++;
 		}
 		for (const ResolverInterface& interf: dbInfo.resolvers) {
 			ASSERT(interf.locality.processId().present());

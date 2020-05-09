@@ -22,7 +22,7 @@
 
 int64_t dl_iterate_phdr_calls = 0;
 
-#ifdef __linux__
+#if defined(__linux__) && !defined(USE_SANITIZER)
 
 #include <link.h>
 #include <mutex>

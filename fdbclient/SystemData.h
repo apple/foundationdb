@@ -58,7 +58,7 @@ const Value keyServersValue(
 	const std::vector<Tag>& destTag = std::vector<Tag>());
 // `result` must be the full result of getting serverTagKeys
 void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& value,
-	std::vector<UID>& src, std::vector<UID>& dest  );
+	std::vector<UID>& src, std::vector<UID>& dest, bool missingIsError = true );
 
 //    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
 extern const KeyRangeRef storageCacheKeys;
@@ -77,6 +77,8 @@ bool serverHasKey( ValueRef storedValue );
 
 extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
+extern const KeyRangeRef writeConflictRangeKeysRange;
+extern const KeyRangeRef readConflictRangeKeysRange;
 
 extern const KeyRef cacheKeysPrefix;
 

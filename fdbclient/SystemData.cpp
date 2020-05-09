@@ -49,14 +49,29 @@ const Value keyServersValue( Standalone<RangeResultRef> result, const std::vecto
 	std::vector<Tag> srcTag;
 	std::vector<Tag> destTag;
 
+	bool foundOldLocality = false;
 	for (const KeyValueRef kv : result) {
 		UID uid = decodeServerTagKey(kv.key);
 		if (std::find(src.begin(), src.end(), uid) != src.end()) {
 			srcTag.push_back( decodeServerTagValue(kv.value) );
+			if(srcTag.back().locality == tagLocalityUpgraded) {
+				foundOldLocality = true;
+				break;
+			}
 		}
 		if (std::find(dest.begin(), dest.end(), uid) != dest.end()) {
 			destTag.push_back( decodeServerTagValue(kv.value) );
+			if(destTag.back().locality == tagLocalityUpgraded) {
+				foundOldLocality = true;
+				break;
+			}
 		}
+	}
+
+	if(foundOldLocality || src.size() != srcTag.size() || dest.size() != destTag.size()) {
+		ASSERT_WE_THINK(foundOldLocality);
+		BinaryWriter wr(IncludeVersion()); wr << src << dest;
+		return wr.toValue();
 	}
 
 	return keyServersValue(srcTag, destTag);
@@ -68,7 +83,7 @@ const Value keyServersValue( const std::vector<Tag>& srcTag, const std::vector<T
 }
 
 void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& value,
-                            std::vector<UID>& src, std::vector<UID>& dest  ) {
+                            std::vector<UID>& src, std::vector<UID>& dest, bool missingIsError ) {
 	if (value.size() == 0) {
 		src.clear();
 		dest.clear();
@@ -106,12 +121,36 @@ void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& v
 	}
 	std::sort(src.begin(), src.end());
 	std::sort(dest.begin(), dest.end());
+	if(missingIsError && (src.size() != srcTag.size() || dest.size() != destTag.size())) {
+		TraceEvent(SevError, "AttemptedToDecodeMissingTag");
+		for (const KeyValueRef kv : result) {
+			Tag tag = decodeServerTagValue(kv.value);
+			UID serverID = decodeServerTagKey(kv.key);
+			TraceEvent("TagUIDMap").detail("Tag", tag.toString()).detail("UID", serverID.toString());
+		}
+		for(auto& it : srcTag) {
+			TraceEvent("SrcTag").detail("Tag", it.toString());
+		}
+		for(auto& it : destTag) {
+			TraceEvent("DestTag").detail("Tag", it.toString());
+		}
+		ASSERT(false);
+	}
 }
 
-const KeyRangeRef conflictingKeysRange = KeyRangeRef(LiteralStringRef("\xff\xff/transaction/conflicting_keys/"),
-                                                     LiteralStringRef("\xff\xff/transaction/conflicting_keys/\xff"));
+const KeyRangeRef conflictingKeysRange =
+    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/conflicting_keys/"),
+                LiteralStringRef("\xff\xff/transaction/conflicting_keys/\xff\xff"));
 const ValueRef conflictingKeysTrue = LiteralStringRef("1");
 const ValueRef conflictingKeysFalse = LiteralStringRef("0");
+
+const KeyRangeRef readConflictRangeKeysRange =
+    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/read_conflict_range/"),
+                LiteralStringRef("\xff\xff/transaction/read_conflict_range/\xff\xff"));
+
+const KeyRangeRef writeConflictRangeKeysRange =
+    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
+                LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff"));
 
 //    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
 const KeyRangeRef storageCacheKeys( LiteralStringRef("\xff/storageCache/"), LiteralStringRef("\xff/storageCache0") );

@@ -530,7 +530,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
     specialKeySpace(std::make_shared<SpecialKeySpace>(normalKeys.begin, specialKeys.end)),
-    cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeysRange)) {
+    cKImpl(std::make_shared<ConflictingKeysImpl>(conflictingKeysRange)),
+    rCRImpl(std::make_shared<ReadConflictRangeImpl>(readConflictRangeKeysRange)),
+    wCRImpl(std::make_shared<WriteConflictRangeImpl>(writeConflictRangeKeysRange)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
 
@@ -551,6 +553,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	throttleExpirer = recurring([this](){ expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 	specialKeySpace->registerKeyRange(conflictingKeysRange, cKImpl.get());
+	specialKeySpace->registerKeyRange(readConflictRangeKeysRange, rCRImpl.get());
+	specialKeySpace->registerKeyRange(writeConflictRangeKeysRange, wCRImpl.get());
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
@@ -2489,7 +2493,7 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 
 	t.mutations.push_back( req.arena, MutationRef( operationType, r.begin, v ) );
 
-	if( addConflictRange )
+	if (addConflictRange && operationType != MutationRef::SetVersionstampedKey)
 		t.write_conflict_ranges.push_back( req.arena, r );
 
 	TEST(true); //NativeAPI atomic operation
@@ -3116,7 +3120,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 		case FDBTransactionOptions::DEBUG_TRANSACTION_IDENTIFIER:
 			validateOptionValue(value, true);
 
-			if (value.get().size() > 100) {
+			if (value.get().size() > 100 || value.get().size() == 0) {
 				throw invalid_option_value();
 			}
 
@@ -3143,7 +3147,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 
 		case FDBTransactionOptions::LOG_TRANSACTION:
 			validateOptionValue(value, false);
-			if (trLogInfo) {
+			if (trLogInfo && !trLogInfo->identifier.empty()) {
 				trLogInfo->logTo(TransactionLogInfo::TRACE_LOG);
 			}
 			else {

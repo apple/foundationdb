@@ -268,6 +268,10 @@ struct KeyRangeRef {
 		return KeyRangeRef( begin.withPrefix(prefix), end.withPrefix(prefix) );
 	}
 
+	KeyRangeRef withPrefix(const StringRef& prefix, Arena& arena) const {
+		return KeyRangeRef(begin.withPrefix(prefix, arena), end.withPrefix(prefix, arena));
+	}
+
 	KeyRangeRef removePrefix( const StringRef& prefix ) const {
 		return KeyRangeRef( begin.removePrefix(prefix), end.removePrefix(prefix) );
 	}
