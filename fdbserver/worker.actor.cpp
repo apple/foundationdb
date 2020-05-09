@@ -818,7 +818,6 @@ ACTOR Future<Void> monitorTraceLogIssues(Reference<AsyncVar<std::set<std::string
 	state bool pingTimeout = false;
 	loop {
 		wait(delay(SERVER_KNOBS->TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS));
-		TraceEvent("CrashDebugPingActionSetupInWorker");
 		Future<Void> pingAck = pingTraceLogWriterThread();
 		try {
 			wait(timeoutError(pingAck, SERVER_KNOBS->TRACE_LOG_PING_TIMEOUT_SECONDS));
@@ -1280,7 +1279,7 @@ ACTOR Future<Void> workerServer(
 			}
 			when( InitializeMasterProxyRequest req = waitNext(interf.masterProxy.getFuture()) ) {
 				MasterProxyInterface recruited;
-				recruited.locality = locality;
+				recruited.processId = locality.processId();
 				recruited.provisional = false;
 				recruited.initEndpoints();
 

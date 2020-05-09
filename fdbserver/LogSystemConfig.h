@@ -233,7 +233,7 @@ struct LogSystemConfig {
 			if(!tLogs[i].isLocal) {
 				for( int j = 0; j < tLogs[i].tLogs.size(); j++ ) {
 					if( tLogs[i].tLogs[j].present() ) {
-						return tLogs[i].tLogs[j].interf().locality.dcId();
+						return tLogs[i].tLogs[j].interf().filteredLocality.dcId();
 					}
 				}
 			}
@@ -277,7 +277,7 @@ struct LogSystemConfig {
 		for( auto& tLogSet : tLogs ) {
 			for( auto& tLog : tLogSet.tLogs ) {
 				if( tLogSet.locality >= 0 ) {
-					if( tLog.present() && tLog.interf().locality.dcId() == dcId ) {
+					if( tLog.present() && tLog.interf().filteredLocality.dcId() == dcId ) {
 						matchingLocalities[tLogSet.locality]++;
 					} else {
 						allLocalities[tLogSet.locality]++;
@@ -290,7 +290,7 @@ struct LogSystemConfig {
 			for( auto& tLogSet : oldLog.tLogs ) {
 				for( auto& tLog : tLogSet.tLogs ) {
 					if( tLogSet.locality >= 0 ) {
-						if( tLog.present() && tLog.interf().locality.dcId() == dcId ) {
+						if( tLog.present() && tLog.interf().filteredLocality.dcId() == dcId ) {
 							matchingLocalities[tLogSet.locality]++;
 						} else {
 							allLocalities[tLogSet.locality]++;
