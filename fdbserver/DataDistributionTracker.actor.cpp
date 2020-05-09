@@ -792,7 +792,7 @@ ACTOR Future<Void> fetchShardMetricsList_impl( DataDistributionTracker* self, Ge
 			// used to control shard limit
 			int shardNum = 0;
 			// list of metrics, regenerate on loop when full range unsuccessful
-			Standalone<VectorRef<DDMetrics>> result;
+			Standalone<VectorRef<DDMetricsRef>> result;
 			Future<Void> onChange;
 			for( auto t : self->shards.intersectingRanges( req.keys ) ) {
 				auto &stats = t.value().stats;
@@ -800,7 +800,7 @@ ACTOR Future<Void> fetchShardMetricsList_impl( DataDistributionTracker* self, Ge
 					onChange = stats->onChange();
 					break;
 				}
-				result.push_back_deep(result.arena(), DDMetrics(stats->get().get().metrics.bytes, KeyRef(t.begin().toString()),
+				result.push_back_deep(result.arena(), DDMetricsRef(stats->get().get().metrics.bytes, KeyRef(t.begin().toString()),
 				                                                KeyRef(t.end().toString())));
 				++shardNum;
 				if (shardNum >= req.shardLimit) {

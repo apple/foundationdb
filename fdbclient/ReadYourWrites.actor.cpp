@@ -1195,7 +1195,7 @@ ACTOR Future<Standalone<RangeResultRef>> getDataDistributionMetricsList(Database
                                                                         KeySelector end) {
 	auto keys = KeyRangeRef(begin.getKey(), end.getKey()).removePrefix(stats_prefix);
 	try {
-		Standalone<VectorRef<DDMetrics>> intermediateResult =
+		Standalone<VectorRef<DDMetricsRef>> intermediateResult =
 		    wait(waitDataDistributionMetricsList(cx, keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT));
 		Standalone<RangeResultRef> result;
 		for (auto& i : intermediateResult) {

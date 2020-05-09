@@ -331,7 +331,7 @@ struct GetHealthMetricsRequest
 struct GetDDMetricsReply
 {
 	constexpr static FileIdentifier file_identifier = 7277713;
-	Standalone<VectorRef<DDMetrics>> storageMetricsList;
+	Standalone<VectorRef<DDMetricsRef>> storageMetricsList;
 
 	GetDDMetricsReply() {}
 

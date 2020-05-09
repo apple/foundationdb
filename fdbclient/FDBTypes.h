@@ -974,14 +974,14 @@ struct HealthMetrics {
 	}
 };
 
-struct DDMetrics {
+struct DDMetricsRef {
 	int64_t shardBytes;
 	KeyRef beginKey;
 	KeyRef endKey;
 
-	DDMetrics() : shardBytes(0) {}
-	DDMetrics(int64_t bytes, KeyRef begin, KeyRef end) : shardBytes(bytes), beginKey(begin), endKey(end) {}
-	DDMetrics(Arena& a, const DDMetrics& copyFrom)
+	DDMetricsRef() : shardBytes(0) {}
+	DDMetricsRef(int64_t bytes, KeyRef begin, KeyRef end) : shardBytes(bytes), beginKey(begin), endKey(end) {}
+	DDMetricsRef(Arena& a, const DDMetricsRef& copyFrom)
 	  : shardBytes(copyFrom.shardBytes), beginKey(a, copyFrom.beginKey), endKey(a, copyFrom.endKey) {}
 
 	template <class Ar>

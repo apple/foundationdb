@@ -69,7 +69,7 @@ struct HaltDataDistributorRequest {
 
 struct GetDataDistributorMetricsReply {
 	constexpr static FileIdentifier file_identifier = 1284337;
-	Standalone<VectorRef<DDMetrics>> storageMetricsList;
+	Standalone<VectorRef<DDMetricsRef>> storageMetricsList;
 
 	GetDataDistributorMetricsReply() {}
 
