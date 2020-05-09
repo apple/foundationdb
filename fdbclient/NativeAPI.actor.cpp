@@ -3031,7 +3031,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 		case FDBTransactionOptions::DEBUG_TRANSACTION_IDENTIFIER:
 			validateOptionValue(value, true);
 
-			if (value.get().size() > 100) {
+			if (value.get().size() > 100 || value.get().size() == 0) {
 				throw invalid_option_value();
 			}
 
@@ -3058,7 +3058,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 
 		case FDBTransactionOptions::LOG_TRANSACTION:
 			validateOptionValue(value, false);
-			if (trLogInfo) {
+			if (trLogInfo && !trLogInfo->identifier.empty()) {
 				trLogInfo->logTo(TransactionLogInfo::TRACE_LOG);
 			}
 			else {

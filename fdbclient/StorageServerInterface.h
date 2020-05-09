@@ -53,6 +53,7 @@ struct StorageServerInterface {
 
 	LocalityData locality;
 	UID uniqueID;
+	Endpoint base;
 
 	RequestStream<struct GetValueRequest> getValue;
 	RequestStream<struct GetKeyRequest> getKey;
@@ -64,13 +65,13 @@ struct StorageServerInterface {
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
 	RequestStream<struct SplitMetricsRequest> splitMetrics;
-	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct GetStorageMetricsRequest> getStorageMetrics;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct StorageQueuingMetricsRequest> getQueuingMetrics;
 
 	RequestStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType;
 	RequestStream<struct WatchValueRequest> watchValue;
+	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
 	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
@@ -84,22 +85,50 @@ struct StorageServerInterface {
 		// StorageServerInterface is persisted in the database and in the tLog's data structures, so changes here have to be
 		// versioned carefully!
 
-		if constexpr (!is_fb_function<Ar>) {
-			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics, splitMetrics,
-			           getReadHotRanges, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
-			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
+		if (ar.protocolVersion().hasSmallEndpoints()) {
+			serializer(ar, uniqueID, locality, base);
+			if( Ar::isDeserializing ) {
+				getValue = RequestStream<struct GetValueRequest>( base.getAdjustedEndpoint(0) );
+				getKey = RequestStream<struct GetKeyRequest>( base.getAdjustedEndpoint(1) );
+				getKeyValues = RequestStream<struct GetKeyValuesRequest>( base.getAdjustedEndpoint(2) );
+				getShardState = RequestStream<struct GetShardStateRequest>( base.getAdjustedEndpoint(3) );
+				waitMetrics = RequestStream<struct WaitMetricsRequest>( base.getAdjustedEndpoint(4) );
+				splitMetrics = RequestStream<struct SplitMetricsRequest>( base.getAdjustedEndpoint(5) );
+				getStorageMetrics = RequestStream<struct GetStorageMetricsRequest>( base.getAdjustedEndpoint(6) );
+				waitFailure = RequestStream<ReplyPromise<Void>>( base.getAdjustedEndpoint(7) );
+				getQueuingMetrics = RequestStream<struct StorageQueuingMetricsRequest>( base.getAdjustedEndpoint(8) );
+				getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>( base.getAdjustedEndpoint(9) );
+				watchValue = RequestStream<struct WatchValueRequest>( base.getAdjustedEndpoint(10) );
+				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( base.getAdjustedEndpoint(11) );
+			}
 		} else {
-			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics, splitMetrics,
-			           getReadHotRanges, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType,
-			           watchValue);
+			ASSERT(Ar::isDeserializing);
+			if constexpr (is_fb_function<Ar>) {
+				ASSERT(false);
+			}
+			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
+					splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
+			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
+			base = getValue.getEndpoint();
 		}
 	}
 	bool operator == (StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
 	bool operator < (StorageServerInterface const& s) const { return uniqueID < s.uniqueID; }
 	void initEndpoints() {
-		getValue.getEndpoint( TaskPriority::LoadBalancedEndpoint );
-		getKey.getEndpoint( TaskPriority::LoadBalancedEndpoint );
-		getKeyValues.getEndpoint( TaskPriority::LoadBalancedEndpoint );
+		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
+		streams.push_back(getValue.getReceiver(TaskPriority::LoadBalancedEndpoint));
+		streams.push_back(getKey.getReceiver(TaskPriority::LoadBalancedEndpoint));
+		streams.push_back(getKeyValues.getReceiver(TaskPriority::LoadBalancedEndpoint));
+		streams.push_back(getShardState.getReceiver());
+		streams.push_back(waitMetrics.getReceiver());
+		streams.push_back(splitMetrics.getReceiver());
+		streams.push_back(getStorageMetrics.getReceiver());
+		streams.push_back(waitFailure.getReceiver());
+		streams.push_back(getQueuingMetrics.getReceiver());
+		streams.push_back(getKeyValueStoreType.getReceiver());
+		streams.push_back(watchValue.getReceiver());
+		streams.push_back(getReadHotRanges.getReceiver());
+		base = FlowTransport::transport().addEndpoints(streams);
 	}
 };
 

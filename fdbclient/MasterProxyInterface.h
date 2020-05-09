@@ -38,8 +38,9 @@ struct MasterProxyInterface {
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
-	LocalityData locality;
+	Optional<Key> processId;
 	bool provisional;
+	Endpoint base;
 	RequestStream< struct CommitTransactionRequest > commit;
 	RequestStream< struct GetReadVersionRequest > getConsistentReadVersion;  // Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
 															     //   (at some point between when this request is sent and when its response is received, the latest version reported committed)
@@ -62,17 +63,34 @@ struct MasterProxyInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
-				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics, proxySnapReq, exclusionSafetyCheckReq);
+		serializer(ar, processId, provisional, base);
+		if( Archive::isDeserializing ) {
+			commit = RequestStream< struct CommitTransactionRequest >( base.getAdjustedEndpoint(0) );
+			getConsistentReadVersion = RequestStream< struct GetReadVersionRequest >( base.getAdjustedEndpoint(1) );
+			getKeyServersLocations = RequestStream< struct GetKeyServerLocationsRequest >( base.getAdjustedEndpoint(2) );
+			getStorageServerRejoinInfo = RequestStream< struct GetStorageServerRejoinInfoRequest >( base.getAdjustedEndpoint(3) );
+			waitFailure = RequestStream<ReplyPromise<Void>>( base.getAdjustedEndpoint(4) );
+			getRawCommittedVersion = RequestStream< struct GetRawCommittedVersionRequest >( base.getAdjustedEndpoint(5) );
+			txnState = RequestStream< struct TxnStateRequest >( base.getAdjustedEndpoint(6) );
+			getHealthMetrics = RequestStream< struct GetHealthMetricsRequest >( base.getAdjustedEndpoint(7) );
+			proxySnapReq = RequestStream< struct ProxySnapRequest >( base.getAdjustedEndpoint(8) );
+			exclusionSafetyCheckReq = RequestStream< struct ExclusionSafetyCheckRequest >( base.getAdjustedEndpoint(9) );
+		}
 	}
 
 	void initEndpoints() {
-		getConsistentReadVersion.getEndpoint(TaskPriority::ReadSocket);
-		getRawCommittedVersion.getEndpoint(TaskPriority::ProxyGetRawCommittedVersion);
-		commit.getEndpoint(TaskPriority::ReadSocket);
-		getStorageServerRejoinInfo.getEndpoint(TaskPriority::ProxyStorageRejoin);
-		getKeyServersLocations.getEndpoint(TaskPriority::ReadSocket); //priority lowered to TaskPriority::DefaultEndpoint on the proxy
+		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
+		streams.push_back(commit.getReceiver(TaskPriority::ReadSocket));
+		streams.push_back(getConsistentReadVersion.getReceiver(TaskPriority::ReadSocket));
+		streams.push_back(getKeyServersLocations.getReceiver(TaskPriority::ReadSocket)); //priority lowered to TaskPriority::DefaultEndpoint on the proxy
+		streams.push_back(getStorageServerRejoinInfo.getReceiver(TaskPriority::ProxyStorageRejoin));
+		streams.push_back(waitFailure.getReceiver());
+		streams.push_back(getRawCommittedVersion.getReceiver(TaskPriority::ProxyGetRawCommittedVersion));
+		streams.push_back(txnState.getReceiver());
+		streams.push_back(getHealthMetrics.getReceiver());
+		streams.push_back(proxySnapReq.getReceiver());
+		streams.push_back(exclusionSafetyCheckReq.getReceiver());
+		base = FlowTransport::transport().addEndpoints(streams);
 	}
 };
 
