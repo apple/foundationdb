@@ -270,6 +270,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			}
 			TEST(true); // Read write conflict range of committed transaction
 		}
+		try {
+			wait(success(tx->get(LiteralStringRef("\xff\xff/1314109/i_hope_this_isn't_registered"))));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_no_module_found);
+		}
 		for (int i = 0; i < self->conflictRangeSizeFactor; ++i) {
 			GetRangeLimits limit;
 			KeySelector begin;

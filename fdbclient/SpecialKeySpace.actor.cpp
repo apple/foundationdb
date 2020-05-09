@@ -96,8 +96,11 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::checkModuleFound(Speci
                                                                            GetRangeLimits limits, bool reverse) {
 	std::pair<Standalone<RangeResultRef>, Optional<SpecialKeyRangeBaseImpl*>> result =
 	    wait(SpecialKeySpace::getRangeAggregationActor(pks, ryw, begin, end, limits, reverse));
-	if (ryw && !ryw->specialKeySpaceRelaxed() && !result.second.present()) {
-		throw special_keys_no_module_found();
+	if (ryw && !ryw->specialKeySpaceRelaxed()) {
+		auto* module = result.second.orDefault(nullptr);
+		if (module == nullptr) {
+			throw special_keys_no_module_found();
+		}
 	}
 	return result.first;
 }
