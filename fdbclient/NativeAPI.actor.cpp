@@ -565,8 +565,9 @@ private:
 		state std::vector<Future<Standalone<RangeResultRef>>> futures;
 		futures.reserve(self->impls.size());
 		for (const auto& impl : self->impls) {
-			auto begin = std::max(kr.begin, impl->getKeyRange().begin);
-			auto end = std::min(kr.end, impl->getKeyRange().end);
+			auto implRange = impl->getKeyRange();
+			auto begin = std::max(kr.begin, implRange.begin);
+			auto end = std::min(kr.end, implrRange.end);
 			if (begin < end) {
 				futures.push_back(impl->getRange(ryw, KeyRangeRef(begin, end)));
 			}
