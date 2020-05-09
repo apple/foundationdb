@@ -875,17 +875,23 @@ ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version) 
  
 Future<Version> waitForVersion(StorageServer* data, Version version) {
 	try {
-		if (version == latestVersion) version = std::max(Version(1), data->version.get());
-		if (version < data->oldestVersion.get() || version <= 0)
+		if (version == latestVersion) {
+			version = std::max(Version(1), data->version.get());
+		}
+
+		if (version < data->oldestVersion.get() || version <= 0) {
 			throw transaction_too_old();
-		else if (version <= data->version.get())
+		} else if (version <= data->version.get()) {
 			return version;
+		}
 
 		if ((data->behind || data->versionBehind) && version > data->version.get()) {
 			throw process_behind();
 		}
 
- 		if (deterministicRandom()->random01() < 0.001) TraceEvent("WaitForVersion1000x");
+		if (deterministicRandom()->random01() < 0.001) {
+			TraceEvent("WaitForVersion1000x");
+		}
 		return waitForVersionActor(data, version);
 	} catch (Error& e) {
 		return Future<Version>(e);
