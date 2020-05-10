@@ -1697,8 +1697,8 @@ ACTOR Future<Void> fdbd(
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
 		if (processClass == ProcessClass::TesterClass) {
 			actors.push_back( reportErrors( monitorLeader( connFile, cc ), "ClusterController" ) );
-		} else if (processClass == ProcessClass::StorageClass && SERVER_KNOBS->DELAY_STORAGE_CANDIDACY_SECONDS) {
-			actors.push_back( reportErrors( monitorLeaderRemotelyWithDelayedCandidacy( connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController" ) );
+		//} else if (processClass == ProcessClass::StorageClass && SERVER_KNOBS->DELAY_STORAGE_CANDIDACY_SECONDS) {
+		//	actors.push_back( reportErrors( monitorLeaderRemotelyWithDelayedCandidacy( connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController" ) );
 		} else {
 			actors.push_back( reportErrors( clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
 		}
