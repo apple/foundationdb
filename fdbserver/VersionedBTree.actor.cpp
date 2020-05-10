@@ -731,10 +731,9 @@ private:
 };
 
 // Holds an index of recently used objects.
-// ObjectType must have the method
+// ObjectType must have the methods
 //   bool evictable() const;            // return true if the entry can be evicted
 //   Future<Void> onEvictable() const;  // ready when entry can be evicted
-// indicating if it is safe to evict.
 template <class IndexType, class ObjectType>
 class ObjectCache : NonCopyable {
 
@@ -850,12 +849,12 @@ public:
 		return Void();
 	}
 
-	Future<Void> clear() { return clear_impl(this); }
-
-	int count() const {
+	Future<Void> clear() {
 		ASSERT(evictionOrder.size() == cache.size());
-		return evictionOrder.size();
+		return clear_impl(this);
 	}
+
+	int count() const { return evictionOrder.size(); }
 
 private:
 	int64_t sizeLimit;
@@ -929,9 +928,10 @@ public:
 	typedef FIFOQueue<RemappedPage> RemapQueueT;
 
 	// If the file already exists, pageSize might be different than desiredPageSize
-	// Use pageCacheSizeBytes == 0 for default
-	DWALPager(int desiredPageSize, std::string filename, int64_t pageCacheSizeBytes)
-	  : desiredPageSize(desiredPageSize), filename(filename), pHeader(nullptr), pageCacheBytes(pageCacheSizeBytes) {
+	// Use pageCacheSizeBytes == 0 to use default from flow knobs
+	// If filename is empty, the pager will exist only in memory and once the cache is full writes will fail.
+	DWALPager(int desiredPageSize, std::string filename, int64_t pageCacheSizeBytes, bool memoryOnly = false)
+	  : desiredPageSize(desiredPageSize), filename(filename), pHeader(nullptr), pageCacheBytes(pageCacheSizeBytes), memoryOnly(memoryOnly) {
 		if (pageCacheBytes == 0) {
 			pageCacheBytes = g_network->isSimulated()
 			                     ? (BUGGIFY ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
@@ -961,15 +961,18 @@ public:
 		ASSERT(!self->recoverFuture.isValid());
 
 		self->remapUndoFuture = Void();
+		state bool exists = false;
 
-		int64_t flags = IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE |
-		                IAsyncFile::OPEN_LOCK;
-		state bool exists = fileExists(self->filename);
-		if (!exists) {
-			flags |= IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE;
+		if (!self->memoryOnly) {
+			int64_t flags = IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE |
+			                IAsyncFile::OPEN_LOCK;
+			exists = fileExists(self->filename);
+			if (!exists) {
+				flags |= IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE;
+			}
+
+			wait(store(self->pageFile, IAsyncFileSystem::filesystem()->open(self->filename, flags, 0644)));
 		}
-
-		wait(store(self->pageFile, IAsyncFileSystem::filesystem()->open(self->filename, flags, 0644)));
 
 		// Header page is always treated as having a page size of smallestPhysicalBlock
 		self->setPageSize(smallestPhysicalBlock);
@@ -1169,6 +1172,10 @@ public:
 		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
 		((Page*)page.getPtr())->updateChecksum(pageID);
 
+		if (memoryOnly) {
+			return Void();
+		}
+
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
 		Future<Void> f =
@@ -1269,6 +1276,8 @@ public:
 	// and before the user-chosen sized pages.
 	ACTOR static Future<Reference<IPage>> readPhysicalPage(DWALPager* self, PhysicalPageID pageID,
 	                                                       bool header = false) {
+		ASSERT(!self->memoryOnly);
+
 		if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
 			wait(delay(0, TaskPriority::DiskRead));
 		}
@@ -1480,18 +1489,24 @@ public:
 		if (g_network->getCurrentTask() > TaskPriority::DiskWrite) {
 			wait(delay(0, TaskPriority::DiskWrite));
 		}
-		wait(self->pageFile->sync());
-		debug_printf("DWALPager(%s) commit version %" PRId64 " sync 1\n", self->filename.c_str(),
-		             self->pHeader->committedVersion);
+
+		if (!self->memoryOnly) {
+			wait(self->pageFile->sync());
+			debug_printf("DWALPager(%s) commit version %" PRId64 " sync 1\n", self->filename.c_str(),
+			             self->pHeader->committedVersion);
+		}
 
 		// Update header on disk and sync again.
 		wait(self->writeHeaderPage(0, self->headerPage));
 		if (g_network->getCurrentTask() > TaskPriority::DiskWrite) {
 			wait(delay(0, TaskPriority::DiskWrite));
 		}
-		wait(self->pageFile->sync());
-		debug_printf("DWALPager(%s) commit version %" PRId64 " sync 2\n", self->filename.c_str(),
-		             self->pHeader->committedVersion);
+
+		if (!self->memoryOnly) {
+			wait(self->pageFile->sync());
+			debug_printf("DWALPager(%s) commit version %" PRId64 " sync 2\n", self->filename.c_str(),
+			             self->pHeader->committedVersion);
+		}
 
 		// Update the last committed header for use in the next commit.
 		self->updateCommittedHeader();
@@ -1545,8 +1560,10 @@ public:
 		// Unreference the file and clear
 		self->pageFile.clear();
 		if (dispose) {
-			debug_printf("DWALPager(%s) shutdown deleting file\n", self->filename.c_str());
-			wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename, true));
+			if (!self->memoryOnly) {
+				debug_printf("DWALPager(%s) shutdown deleting file\n", self->filename.c_str());
+				wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename, true));
+			}
 		}
 
 		self->closedPromise.send(Void());
@@ -1565,7 +1582,12 @@ public:
 		ASSERT(recoverFuture.isReady());
 		int64_t free;
 		int64_t total;
-		g_network->getDiskBytes(parentDirectory(filename), free, total);
+		if (memoryOnly) {
+			total = pageCacheBytes;
+			free = pageCacheBytes - ((int64_t)pageCache.count() * physicalPageSize);
+		} else {
+			g_network->getDiskBytes(parentDirectory(filename), free, total);
+		}
 		int64_t pagerSize = pHeader->pageCount * physicalPageSize;
 
 		// It is not exactly known how many pages on the delayed free list are usable as of right now.  It could be
@@ -1679,6 +1701,7 @@ private:
 	Header* pLastCommittedHeader;
 
 	std::string filename;
+	bool memoryOnly;
 
 	typedef ObjectCache<LogicalPageID, PageCacheEntry> PageCacheT;
 	PageCacheT pageCache;
@@ -4254,7 +4277,7 @@ private:
 			}
 
 			// The expected next record for the final range is checked against one of the upper boundaries passed to
-			// this commitSubtree() instance.  If change have already been made, then the subtree upper boundary is
+			// this commitSubtree() instance.  If changes have already been made, then the subtree upper boundary is
 			// passed, so in the event a different upper boundary is needed it will be added to the already-modified
 			// page.  Otherwise, the decode boundary is used which will prevent this page from being modified for the
 			// sole purpose of adding a dummy upper bound record.
@@ -6147,21 +6170,22 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state int pageSize =
 	    shortTest ? 200 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(200, 400));
 
-	// We must be able to fit at least two any two keys plus overhead in a page to prevent
-	// a situation where the tree cannot be grown upward with decreasing level size.
+	state bool pagerMemoryOnly = shortTest && (deterministicRandom()->random01() < .01);
 	state int maxKeySize = deterministicRandom()->randomInt(1, pageSize * 2);
 	state int maxValueSize = randomSize(pageSize * 25);
 	state int maxCommitSize = shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6));
-	state int mutationBytesTarget = shortTest ? 5000 : randomSize(std::min<int>(maxCommitSize * 100, 100e6));
+	state int mutationBytesTarget = shortTest ? 100000 : randomSize(std::min<int>(maxCommitSize * 100, 100e6));
 	state double clearProbability = deterministicRandom()->random01() * .1;
 	state double clearSingleKeyProbability = deterministicRandom()->random01();
 	state double clearPostSetProbability = deterministicRandom()->random01() * .1;
-	state double coldStartProbability = deterministicRandom()->random01();
+	state double coldStartProbability = pagerMemoryOnly ? 0 : deterministicRandom()->random01();
 	state double advanceOldVersionProbability = deterministicRandom()->random01();
 	state double maxDuration = 60;
-	state int cacheSizeBytes = BUGGIFY ? 0 : deterministicRandom()->randomInt(1, 5 * pageSize);
+	state int64_t cacheSizeBytes =
+	    pagerMemoryOnly ? 2e9 : (BUGGIFY ? deterministicRandom()->randomInt(1, 10 * pageSize) : 0);
 
 	printf("\n");
+	printf("pagerMemoryOnly: %d\n", pagerMemoryOnly);
 	printf("serialTest: %d\n", serialTest);
 	printf("shortTest: %d\n", shortTest);
 	printf("pageSize: %d\n", pageSize);
@@ -6174,7 +6198,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	printf("clearPostSetProbability: %f\n", clearPostSetProbability);
 	printf("coldStartProbability: %f\n", coldStartProbability);
 	printf("advanceOldVersionProbability: %f\n", advanceOldVersionProbability);
-	printf("cacheSizeBytes: %s\n", cacheSizeBytes == 0 ? "default" : format("%d", cacheSizeBytes).c_str());
+	printf("cacheSizeBytes: %s\n", cacheSizeBytes == 0 ? "default" : format("%" PRId64, cacheSizeBytes).c_str());
 	printf("\n");
 
 	printf("Deleting existing test data...\n");
@@ -6182,7 +6206,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 
 	printf("Initializing...\n");
 	state double startTime = now();
-	pager = new DWALPager(pageSize, pagerFile, cacheSizeBytes);
+	pager = new DWALPager(pageSize, pagerFile, cacheSizeBytes, pagerMemoryOnly);
 	state VersionedBTree* btree = new VersionedBTree(pager, pagerFile);
 	wait(btree->init());
 
