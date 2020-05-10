@@ -134,68 +134,58 @@ struct SidebandWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> mutator( SidebandWorkload *self, Database cx ) {
-		try {
-			state SidebandInterface checker = wait( self->fetchSideband( self, cx->clone() ) );
-			state double lastTime = now();
-			state Version commitVersion;
+		state SidebandInterface checker = wait( self->fetchSideband( self, cx->clone() ) );
+		state double lastTime = now();
+		state Version commitVersion;
 
+		loop {
+			wait( poisson( &lastTime, 1.0 / self->operationsPerSecond ) );
+			state Transaction tr(cx);
+			state uint64_t key = deterministicRandom()->randomUniqueID().hash();
+			
+			state Standalone<StringRef> messageKey(format( "Sideband/Message/%llx", key ));
 			loop {
-				wait( poisson( &lastTime, 1.0 / self->operationsPerSecond ) );
-				state Transaction tr(cx);
-				state uint64_t key = deterministicRandom()->randomUniqueID().hash();
-				
-				state Standalone<StringRef> messageKey(format( "Sideband/Message/%llx", key ));
-				loop {
-					try {
-						Optional<Value> val = wait( tr.get( messageKey ) );
-						if( val.present() ) {
-							commitVersion = tr.getReadVersion().get();
-							++self->keysUnexpectedlyPresent;
-							break;
-						}
-						tr.set( messageKey, LiteralStringRef("deadbeef") );
-						wait( tr.commit() );
-						commitVersion = tr.getCommittedVersion();
+				try {
+					Optional<Value> val = wait( tr.get( messageKey ) );
+					if( val.present() ) {
+						commitVersion = tr.getReadVersion().get();
+						++self->keysUnexpectedlyPresent;
 						break;
 					}
-					catch( Error& e ) {
-						wait( tr.onError( e ) );
-					}
+					tr.set( messageKey, LiteralStringRef("deadbeef") );
+					wait( tr.commit() );
+					commitVersion = tr.getCommittedVersion();
+					break;
 				}
-				++self->messages;
-				checker.updates.send( SidebandMessage( key, commitVersion ) );
+				catch( Error& e ) {
+					wait( tr.onError( e ) );
+				}
 			}
-		} catch(Error &e) {
-			TraceEvent(SevError, "SidebandMutatorError").error(e).backtrace();
-			throw;
+			++self->messages;
+			checker.updates.send( SidebandMessage( key, commitVersion ) );
 		}
 	}
 
 	ACTOR Future<Void> checker( SidebandWorkload *self, Database cx ) {
-		try {
+		loop {
+			state SidebandMessage message = waitNext( self->interf.updates.getFuture() );
+			state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.key));
+			state Transaction tr(cx);
 			loop {
-				state SidebandMessage message = waitNext( self->interf.updates.getFuture() );
-				state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.key));
-				state Transaction tr(cx);
-				loop {
-					try {
-						Optional<Value> val = wait( tr.get( messageKey ) );
-						if( !val.present() ) {
-							TraceEvent( SevError, "CausalConsistencyError", self->interf.id() )
-								.detail("MessageKey", messageKey.toString().c_str())
-								.detail("RemoteCommitVersion", message.commitVersion)
-								.detail("LocalReadVersion", tr.getReadVersion().get()); // will assert that ReadVersion is set
-							++self->consistencyErrors;
-						}
-						break;
-					} catch( Error& e ) {
-						wait( tr.onError(e) );
+				try {
+					Optional<Value> val = wait( tr.get( messageKey ) );
+					if( !val.present() ) {
+						TraceEvent( SevError, "CausalConsistencyError", self->interf.id() )
+							.detail("MessageKey", messageKey.toString().c_str())
+							.detail("RemoteCommitVersion", message.commitVersion)
+							.detail("LocalReadVersion", tr.getReadVersion().get()); // will assert that ReadVersion is set
+						++self->consistencyErrors;
 					}
+					break;
+				} catch( Error& e ) {
+					wait( tr.onError(e) );
 				}
 			}
-		} catch( Error &e ) {
-			TraceEvent(SevError, "SidebandCheckerError").error(e).backtrace();
-			throw;
 		}
 	}
 };
