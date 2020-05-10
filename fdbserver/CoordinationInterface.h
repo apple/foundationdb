@@ -112,6 +112,7 @@ struct GenerationRegWriteRequest {
 
 struct LeaderElectionRegInterface : ClientLeaderRegInterface {
 	RequestStream< struct CandidacyRequest > candidacy;
+	RequestStream< struct ElectionResultRequest > electionResult;
 	RequestStream< struct LeaderHeartbeatRequest > leaderHeartbeat;
 	RequestStream< struct ForwardRequest > forward;
 
@@ -133,6 +134,23 @@ struct CandidacyRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, key, myInfo, knownLeader, prevChangeID, reply);
+	}
+};
+
+struct ElectionResultRequest {
+	constexpr static FileIdentifier file_identifier = 78924329;
+	Key key;
+	vector<NetworkAddress> coordinators;
+	UID knownLeader;
+	UID requestID;
+	ReplyPromise<Optional<LeaderInfo>> reply;
+
+	ElectionResultRequest() = default;
+	ElectionResultRequest(Key key, std::vector<NetworkAddress> coordinators, UID knownLeader) : key(key), coordinators(std::move(coordinators)), knownLeader(knownLeader) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, key, coordinators, knownLeader, requestID, reply);
 	}
 };
 

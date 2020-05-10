@@ -363,6 +363,15 @@ ClientCoordinators::ClientCoordinators( Reference<ClusterConnectionFile> ccf )
 	clusterKey = cs.clusterKey();
 }
 
+ClientCoordinators::ClientCoordinators( Key clusterKey, std::vector<NetworkAddress> coordinators )
+	: clusterKey(clusterKey) {
+	for (const auto& coord : coordinators) {
+		clientLeaderServers.push_back( ClientLeaderRegInterface( coord ) );
+	}
+	ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile( ClusterConnectionString( coordinators, clusterKey ) ) );
+}
+
+
 UID WLTOKEN_CLIENTLEADERREG_GETLEADER( -1, 2 );
 UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE( -1, 3 );
 
@@ -499,6 +508,17 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 	}
 }
 
+Future<Void> monitorLeaderRemotelyInternal( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Value>> const& outSerializedLeaderInfo );
+
+template <class LeaderInterface>
+Future<Void> monitorLeaderRemotely(Reference<ClusterConnectionFile> const& connFile,
+						   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
+	LeaderDeserializer<LeaderInterface> deserializer;
+	Reference<AsyncVar<Value>> serializedInfo( new AsyncVar<Value> );
+	Future<Void> m = monitorLeaderRemotelyInternal( connFile, serializedInfo );
+	return m || deserializer( serializedInfo, outKnownLeader );
+}
+
 ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo ) {
 	state MonitorLeaderInfo info(connFile);
 	loop {
@@ -620,7 +640,7 @@ ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterC
 	}
 }
 
-ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddress> coordinators, ClientData* clientData ) {
+ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddress> coordinators, ClientData* clientData, Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo ) {
 	state vector< ClientLeaderRegInterface > clientLeaderServers;
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
@@ -659,6 +679,9 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 				ClusterControllerClientInterface res;
 				reader.deserialize(res);
 				knownLeader->set(res);
+				if (leader.get().second) {
+					leaderInfo->set(leader.get().first);
+				}
 			}
 		}
 		wait( nomineeChange.onTrigger() || allActors );

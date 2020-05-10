@@ -492,6 +492,7 @@ public:
 	double DEGRADED_WARNING_RESET_DELAY;
 	int64_t TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS;
 	double TRACE_LOG_PING_TIMEOUT_SECONDS;
+	int DELAY_STORAGE_CANDIDACY_SECONDS;  // Listen for a leader for N seconds, and if not heard, then try to become the leader.
 	double DBINFO_FAILED_DELAY;
 
 	// Test harness
