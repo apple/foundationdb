@@ -931,7 +931,8 @@ public:
 	// Use pageCacheSizeBytes == 0 to use default from flow knobs
 	// If filename is empty, the pager will exist only in memory and once the cache is full writes will fail.
 	DWALPager(int desiredPageSize, std::string filename, int64_t pageCacheSizeBytes, bool memoryOnly = false)
-	  : desiredPageSize(desiredPageSize), filename(filename), pHeader(nullptr), pageCacheBytes(pageCacheSizeBytes), memoryOnly(memoryOnly) {
+	  : desiredPageSize(desiredPageSize), filename(filename), pHeader(nullptr), pageCacheBytes(pageCacheSizeBytes),
+	    memoryOnly(memoryOnly) {
 		if (pageCacheBytes == 0) {
 			pageCacheBytes = g_network->isSimulated()
 			                     ? (BUGGIFY ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
@@ -2636,14 +2637,24 @@ public:
 		double startTime;
 
 		std::string toString(bool clearAfter = false) {
-			const char* labels[] = {
-				"set",       "clear",        "clearSingleKey",     "get",          "getRange",
-				"commit",    "pageReads",    "extPageRead",        "pagePreloads", "extPagePreloads",
-				"pageWrite", "extPageWrite", "commitSubtreeStart", "pageUpdates"
+			const char* labels[] = { "set",
+				                     "clear",
+				                     "clearSingleKey",
+				                     "get",
+				                     "getRange",
+				                     "commit",
+				                     "pageReads",
+				                     "extPageRead",
+				                     "pagePreloads",
+				                     "extPagePreloads",
+				                     "pageWrites",
+				                     "pageUpdates",
+				                     "extPageWrites",
+				                     "commitSubtreeStart" };
+			const int64_t values[] = {
+				sets,         clears,       clearSingleKey,  gets,       getRanges,   commits,       pageReads,
+				extPageReads, pagePreloads, extPagePreloads, pageWrites, pageUpdates, extPageWrites, commitSubtreeStart
 			};
-			const int64_t values[] = { sets,       clears,        clearSingleKey,     gets,         getRanges,
-				                       commits,    pageReads,     extPageReads,       pagePreloads, extPagePreloads,
-				                       pageWrites, extPageWrites, commitSubtreeStart, pageUpdates };
 
 			double elapsed = now() - startTime;
 			std::string s;
@@ -6528,35 +6539,35 @@ TEST_CASE("!/redwood/performance/set") {
 	wait(btree->init());
 
 	state int nodeCount = 1e9;
-	state int maxChangesPerVersion = 5000;
+	state int maxRecordsPerCommit = 20000;
+	state int maxKVBytesPerCommit = 20e6;
 	state int64_t kvBytesTarget = 4e9;
-	state int commitTarget = 20e6;
 	state int minKeyPrefixBytes = 25;
 	state int maxKeyPrefixBytes = 25;
-	state int minValueSize = 1000;
-	state int maxValueSize = 2000;
-	state int minConsecutiveRun = 1000;
-	state int maxConsecutiveRun = 2000;
+	state int minValueSize = 100;
+	state int maxValueSize = 500;
+	state int minConsecutiveRun = 1;
+	state int maxConsecutiveRun = 10;
 	state char firstKeyChar = 'a';
 	state char lastKeyChar = 'm';
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
 	printf("trailingIntegerIndexRange: %d\n", nodeCount);
-	printf("maxChangesPerVersion: %d\n", maxChangesPerVersion);
+	printf("maxChangesPerCommit: %d\n", maxRecordsPerCommit);
 	printf("minKeyPrefixBytes: %d\n", minKeyPrefixBytes);
 	printf("maxKeyPrefixBytes: %d\n", maxKeyPrefixBytes);
 	printf("minConsecutiveRun: %d\n", minConsecutiveRun);
 	printf("maxConsecutiveRun: %d\n", maxConsecutiveRun);
 	printf("minValueSize: %d\n", minValueSize);
 	printf("maxValueSize: %d\n", maxValueSize);
-	printf("commitTarget: %d\n", commitTarget);
+	printf("maxCommitSize: %d\n", maxKVBytesPerCommit);
 	printf("kvBytesTarget: %" PRId64 "\n", kvBytesTarget);
 	printf("KeyLexicon '%c' to '%c'\n", firstKeyChar, lastKeyChar);
 
-	state int64_t kvBytes = 0;
+	state int64_t kvBytesThisCommit = 0;
 	state int64_t kvBytesTotal = 0;
-	state int records = 0;
+	state int recordsThisCommit = 0;
 	state Future<Void> commit = Void();
 	state std::string value(maxValueSize, 'v');
 
@@ -6571,9 +6582,9 @@ TEST_CASE("!/redwood/performance/set") {
 			Version lastVer = btree->getLatestVersion();
 			state Version version = lastVer + 1;
 			btree->setWriteVersion(version);
-			int changes = deterministicRandom()->randomInt(0, maxChangesPerVersion);
+			int changesThisVersion = deterministicRandom()->randomInt(0, maxRecordsPerCommit - recordsThisCommit + 1);
 
-			while (changes > 0 && kvBytes < commitTarget) {
+			while (changesThisVersion > 0 && kvBytesThisCommit < maxKVBytesPerCommit) {
 				KeyValue kv;
 				kv.key = randomString(kv.arena(),
 				                      deterministicRandom()->randomInt(minKeyPrefixBytes + sizeof(uint32_t),
@@ -6582,7 +6593,7 @@ TEST_CASE("!/redwood/performance/set") {
 				int32_t index = deterministicRandom()->randomInt(0, nodeCount);
 				int runLength = deterministicRandom()->randomInt(minConsecutiveRun, maxConsecutiveRun + 1);
 
-				while (runLength > 0 && changes > 0) {
+				while (runLength > 0 && changesThisVersion > 0) {
 					*(uint32_t*)(kv.key.end() - sizeof(uint32_t)) = bigEndian32(index++);
 					kv.value = StringRef((uint8_t*)value.data(),
 					                     deterministicRandom()->randomInt(minValueSize, maxValueSize + 1));
@@ -6590,21 +6601,21 @@ TEST_CASE("!/redwood/performance/set") {
 					btree->set(kv);
 
 					--runLength;
-					--changes;
-					kvBytes += kv.key.size() + kv.value.size();
-					++records;
+					--changesThisVersion;
+					kvBytesThisCommit += kv.key.size() + kv.value.size();
+					++recordsThisCommit;
 				}
 			}
 
-			if (kvBytes >= commitTarget) {
+			if (kvBytesThisCommit >= maxKVBytesPerCommit || recordsThisCommit >= maxRecordsPerCommit) {
 				btree->setOldestVersion(btree->getLastCommittedVersion());
 				wait(commit);
 				printf("Cumulative %.2f MB keyValue bytes written at %.2f MB/s\n", kvBytesTotal / 1e6,
 				       kvBytesTotal / (timer() - start) / 1e6);
 
 				// Avoid capturing via this to freeze counter values
-				int recs = records;
-				int kvb = kvBytes;
+				int recs = recordsThisCommit;
+				int kvb = kvBytesThisCommit;
 
 				// Capturing invervalStart via this->intervalStart makes IDE's unhappy as they do not know about the
 				// actor state object
@@ -6613,15 +6624,15 @@ TEST_CASE("!/redwood/performance/set") {
 				commit = map(btree->commit(), [=](Void result) {
 					printf("Committed: %s\n", VersionedBTree::counts.toString(true).c_str());
 					double elapsed = timer() - *pIntervalStart;
-					printf("Committed %d kvBytes in %d records in %f seconds, %.2f MB/s\n", kvb, recs, elapsed,
+					printf("Committed %d keyValueBytes in %d records in %f seconds, %.2f MB/s\n", kvb, recs, elapsed,
 					       kvb / elapsed / 1e6);
 					*pIntervalStart = timer();
 					return Void();
 				});
 
-				kvBytesTotal += kvBytes;
-				kvBytes = 0;
-				records = 0;
+				kvBytesTotal += kvBytesThisCommit;
+				kvBytesThisCommit = 0;
+				recordsThisCommit = 0;
 			}
 		}
 
