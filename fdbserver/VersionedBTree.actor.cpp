@@ -1950,9 +1950,7 @@ struct RedwoodRecordRef {
 
 	// Find the common key prefix between two records, assuming that the first skipLen bytes are the same
 	inline int getCommonPrefixLen(const RedwoodRecordRef& other, int skipLen = 0) const {
-		int skipStart = std::min(skipLen, key.size());
-		return skipStart + commonPrefixLength(key.begin() + skipStart, other.key.begin() + skipStart,
-		                                      std::min(other.key.size(), key.size()) - skipStart);
+		return skipLen + commonPrefixLength(key, other.key, skipLen);
 	}
 
 	// Compares and orders by key, version, chunk.total, chunk.start, value
