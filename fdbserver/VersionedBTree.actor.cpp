@@ -4117,7 +4117,8 @@ private:
 			return Void();
 		} else {
 			// Internal Page
-			state std::vector<Future<Void>> futures;
+			SignalableActorCollection recursions;
+			state int recursionsCount = 0;
 			state std::vector<InternalPageSliceUpdate*> slices;
 			state Arena arena;
 
@@ -4268,13 +4269,15 @@ private:
 				}
 
 				// If this page has height of 2 then its children are leaf nodes
-				futures.push_back(self->commitSubtree(self, snapshot, mutationBuffer, pageID, btPage->height == 2,
-				                                      mBegin, mEnd, slices.back()));
+				++recursionsCount;
+				recursions.add(self->commitSubtree(self, snapshot, mutationBuffer, pageID, btPage->height == 2, mBegin,
+				                                   mEnd, slices.back()));
 			}
 
-			wait(waitForAll(futures));
-
-			debug_printf("%s Recursions done.  Processing child range updates.\n", context.c_str());
+			wait(recursions.signal());
+			debug_printf(
+			    "%s Recursions done.  Processing child range updates. level=%d children=%d slices=%d recursions=%d\n",
+			    context.c_str(), btPage->height, btPage->tree().numItems, slices.size(), recursionsCount);
 
 			state InternalPageModifier m(cursor.mirror, tryToUpdate);
 
