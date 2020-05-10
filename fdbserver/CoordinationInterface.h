@@ -142,7 +142,6 @@ struct ElectionResultRequest {
 	Key key;
 	vector<NetworkAddress> coordinators;
 	UID knownLeader;
-	UID requestID;
 	ReplyPromise<Optional<LeaderInfo>> reply;
 
 	ElectionResultRequest() = default;
@@ -150,7 +149,7 @@ struct ElectionResultRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, coordinators, knownLeader, requestID, reply);
+		serializer(ar, key, coordinators, knownLeader, reply);
 	}
 };
 

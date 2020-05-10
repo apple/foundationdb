@@ -886,7 +886,7 @@ inline bool addressExcluded( std::set<AddressExclusion> const& exclusions, Netwo
 }
 
 struct ClusterControllerPriorityInfo {
-	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessBad }; //cannot be larger than 7 because of leader election mask
+	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessNotPreferred, FitnessBad }; //cannot be larger than 7 because of leader election mask
 
 	static DCFitness calculateDCFitness(Optional<Key> const& dcId, std::vector<Optional<Key>> const& dcPriority) {
 		if(!dcPriority.size()) {
@@ -895,7 +895,7 @@ struct ClusterControllerPriorityInfo {
 			if(dcId == dcPriority[0]) {
 				return FitnessPreferred;
 			} else {
-				return FitnessUnknown;
+				return FitnessNotPreferred;
 			}
 		} else {
 			if(dcId == dcPriority[0]) {

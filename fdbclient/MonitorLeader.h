@@ -49,6 +49,14 @@ struct ClientData {
 	ClientData() : clientInfo( new AsyncVar<CachedSerialization<ClientDBInfo>>( CachedSerialization<ClientDBInfo>() ) ) {}
 };
 
+struct MonitorLeaderInfo {
+	bool hasConnected;
+	Reference<ClusterConnectionFile> intermediateConnFile;
+
+	MonitorLeaderInfo() : hasConnected(false) {}
+	explicit MonitorLeaderInfo( Reference<ClusterConnectionFile> intermediateConnFile ) : intermediateConnFile(intermediateConnFile), hasConnected(false) {}
+};
+
 // Monitors the given coordination group's leader election process and provides a best current guess
 // of the current leader.  If a leader is elected for long enough and communication with a quorum of
 // coordinators is possible, eventually outKnownLeader will be that leader's interface.
