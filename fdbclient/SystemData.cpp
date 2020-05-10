@@ -138,6 +138,57 @@ void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& v
 	}
 }
 
+void decodeKeyServersValue( std::map<Tag, UID> const& tag_uid, const ValueRef& value,
+                            std::vector<UID>& src, std::vector<UID>& dest ) {
+	static std::vector<Tag> srcTag, destTag;
+	src.clear();
+	dest.clear();
+	if (value.size() == 0) {
+		return;
+	}
+
+	BinaryReader rd(value, IncludeVersion());
+	rd.checkpoint();
+	int srcLen, destLen;
+	rd >> srcLen;
+	rd.readBytes(srcLen * sizeof(Tag));
+	rd >> destLen;
+	rd.rewind();
+
+	if (value.size() != sizeof(ProtocolVersion) + sizeof(int) + srcLen * sizeof(Tag) + sizeof(int) + destLen * sizeof(Tag)) {
+		rd >> src >> dest;
+		rd.assertEnd();
+		return;
+	}
+
+	srcTag.clear();
+	destTag.clear();
+	rd >> srcTag >> destTag;
+
+	for(auto t : srcTag) {
+		auto itr = tag_uid.find(t);
+		if(itr != tag_uid.end()) {
+			src.push_back(itr->second);
+		} else {
+			TraceEvent(SevError, "AttemptedToDecodeMissingSrcTag").detail("Tag", t.toString());
+			ASSERT(false);
+		}
+	}
+
+	for(auto t : destTag) {
+		auto itr = tag_uid.find(t);
+		if(itr != tag_uid.end()) {
+			dest.push_back(itr->second);
+		} else {
+			TraceEvent(SevError, "AttemptedToDecodeMissingDestTag").detail("Tag", t.toString());
+			ASSERT(false);
+		}
+	}
+
+	std::sort(src.begin(), src.end());
+	std::sort(dest.begin(), dest.end());
+}
+
 const KeyRangeRef conflictingKeysRange =
     KeyRangeRef(LiteralStringRef("\xff\xff/transaction/conflicting_keys/"),
                 LiteralStringRef("\xff\xff/transaction/conflicting_keys/\xff\xff"));
