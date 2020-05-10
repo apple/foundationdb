@@ -877,7 +877,8 @@ ACTOR Future<Void> workerServer(
 		ProcessClass initialClass, std::string folder, int64_t memoryLimit,
 		std::string metricsConnFile, std::string metricsPrefix,
 		Promise<Void> recoveredDiskFiles, int64_t memoryProfileThreshold,
-		std::string _coordFolder, std::string whitelistBinPaths) {
+		std::string _coordFolder, std::string whitelistBinPaths,
+		Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	state PromiseStream< ErrorInfo > errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf( new AsyncVar<Optional<DataDistributorInterface>>() );
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf( new AsyncVar<Optional<RatekeeperInterface>>() );
@@ -888,7 +889,6 @@ ACTOR Future<Void> workerServer(
 	state ActorCollection filesClosed(true);
 	state Promise<Void> stopping;
 	state WorkerCache<InitializeStorageReply> storageCache;
-	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo()) );
 	state Future<Void> metricsLogger;
 	state Reference<AsyncVar<bool>> degraded = FlowTransport::transport().getDegraded();
 	// tLogFnForOptions() can return a function that doesn't correspond with the FDB version that the
@@ -1574,52 +1574,64 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	}
 }
 
-ACTOR Future<std::pair<ClusterConnectionString, UID>> monitorLeaderRemotelyOneGeneration( Reference<ClusterConnectionFile> connFile, UID changeID, Reference<AsyncVar<Value>> result ) {
-	state ClusterConnectionString ccf = connFile->getConnectionString();
+ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> result, MonitorLeaderInfo info ) {
+	state ClusterConnectionString ccf = info.intermediateConnFile->getConnectionString();
 	state ElectionResultRequest request;
 	request.key = ccf.clusterKey();
 	request.coordinators = ccf.coordinators();
-	request.knownLeader = changeID;
 	state int index = 0;
+	state int successIndex = 0;
 
 	loop {
 		LeaderElectionRegInterface interf( request.coordinators[index] );
 		request.reply = ReplyPromise<Optional<LeaderInfo>>();
 
-		try {
-			UID requestID = deterministicRandom()->randomUniqueID();
-			TraceEvent("ElectionResultRequest").detail("RequestID", requestID).detail("Destination", request.coordinators[index].toString());
-			request.requestID = requestID;
-			ErrorOr<Optional<LeaderInfo>> leader = wait( interf.electionResult.tryGetReply( request ) );
-			if (leader.isError()) throw leader.getError();
-			if (!leader.get().present()) continue;
+		ErrorOr<Optional<LeaderInfo>> leader = wait( interf.electionResult.tryGetReply( request ) );
+		if (leader.present()) {
+			if(leader.get().present()) {
+				if( leader.get().get().forward ) {
+					info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile->getFilename(), ClusterConnectionString(leader.get().get().serializedInfo.toString())));
+					return info;
+				}
+				if(connFile != info.intermediateConnFile) {
+					if(!info.hasConnected) {
+						TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection").detail("Filename", connFile->getFilename())
+							.detail("ConnectionStringFromFile", connFile->getConnectionString().toString())
+							.detail("CurrentConnectionString", info.intermediateConnFile->getConnectionString().toString());
+					}
+					connFile->setConnectionString(info.intermediateConnFile->getConnectionString());
+					info.intermediateConnFile = connFile;
+				}
 
-			request.knownLeader = leader.get().get().changeID;
-			if( leader.get().get().forward ) {
-				return std::make_pair(ClusterConnectionString( leader.get().get().serializedInfo.toString() ), request.knownLeader);
+				info.hasConnected = true;
+				connFile->notifyConnected();
+				request.knownLeader = leader.get().get().changeID;
+
+				ClusterControllerPriorityInfo info = leader.get().get().getPriorityInfo();
+				if( leader.get().get().serializedInfo.size() && !info.isExcluded &&
+				    (info.dcFitness == ClusterControllerPriorityInfo::FitnessPrimary ||
+				     info.dcFitness == ClusterControllerPriorityInfo::FitnessPreferred ||
+				     info.dcFitness == ClusterControllerPriorityInfo::FitnessUnknown)) {
+					result->set(leader.get().get().serializedInfo);
+				} else {
+					result->set(Value());
+				}
 			}
-
-			if (leader.get().get().serializedInfo.size()) {
-				result->set(leader.get().get().serializedInfo);
+			successIndex = index;
+		} else {
+			index = (index+1) % request.coordinators.size();
+			if (index == successIndex) {
+				wait( delay( CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY ) );
 			}
-		} catch (Error& e) {
-			TraceEvent("MonitorLeaderRemotely").error(e);
-		}
-
-		index = (index+1) % request.coordinators.size();
-		if (index == 0) {
-			wait( delay( CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY ) );
 		}
 	}
 }
 
-ACTOR Future<Void> monitorLeaderRemotelyInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedInterface ) {
-	state UID changeID = UID(-1, -1);
-	state ClusterConnectionString ccs;
+ACTOR Future<Void> monitorLeaderRemotelyInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo ) {
+	state MonitorLeaderInfo info(connFile);
 	loop {
-		std::pair<ClusterConnectionString, UID> result	= wait( monitorLeaderRemotelyOneGeneration( connFile, changeID, outSerializedInterface ) );
-		std::tie(ccs, changeID) = result;
-		connFile->setConnectionString(ccs);
+		MonitorLeaderInfo _info = wait( monitorLeaderRemotelyOneGeneration( connFile, outSerializedLeaderInfo, info ) );
+		info = _info;
 	}
 }
 
@@ -1632,24 +1644,27 @@ Future<Void> monitorLeaderRemotely(Reference<ClusterConnectionFile> const& connF
 	return m || deserializer( serializedInfo, outKnownLeader );
 }
 
-ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, Future<Void> recoveredDiskFiles, LocalityData locality ) {
+ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, Future<Void> recoveredDiskFiles, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
 	state Future<Void> monitor = monitorLeaderRemotely( connFile, currentCC );
-	state Future<Void> timeout = delay( SERVER_KNOBS->DELAY_STORAGE_CANDIDACY_SECONDS );
-	state Future<Void> leader = Never();
-	state Future<Void> failed = Never();
+	state Future<Void> timeout;
 
-	loop choose {
-		when( wait(currentCC->onChange()) ) {
-			failed = IFailureMonitor::failureMonitor().onFailed( currentCC->get().get().getWorkers.getEndpoint() );
-			timeout = Never();
-		}
-		when ( wait(timeout) ) {
-			wait( clusterController( connFile, currentCC , asyncPriorityInfo, recoveredDiskFiles, locality ) );
-			return Void();
-		}
-		when ( wait(failed) ) {
-			failed = Never();
+	wait(recoveredDiskFiles);
+
+	loop {
+		if(currentCC->get().present() && dbInfo->get().clusterInterface == currentCC->get().get() && IFailureMonitor::failureMonitor().getState( currentCC->get().get().registerWorker.getEndpoint() ).isAvailable()) {
+			timeout = Future<Void>();
+		} else if(!timeout.isValid()) {
 			timeout = delay( SERVER_KNOBS->DELAY_STORAGE_CANDIDACY_SECONDS );
+		}
+		choose {
+			when( wait(currentCC->onChange()) ) {}
+			when( wait(dbInfo->onChange()) ) {}
+			when( wait(currentCC->get().present() ? IFailureMonitor::failureMonitor().onStateChanged( currentCC->get().get().registerWorker.getEndpoint() ) : Never() ) ) {}
+			when( wait(timeout.isValid() ? timeout : Never()) ) {
+				monitor.cancel();
+				wait( clusterController( connFile, currentCC , asyncPriorityInfo, recoveredDiskFiles, locality ) );
+				return Void();
+			}
 		}
 	}
 }
@@ -1693,17 +1708,18 @@ ACTOR Future<Void> fdbd(
 		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc(new AsyncVar<Optional<ClusterControllerFullInterface>>);
 		Reference<AsyncVar<Optional<ClusterInterface>>> ci(new AsyncVar<Optional<ClusterInterface>>);
 		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo(new AsyncVar<ClusterControllerPriorityInfo>(getCCPriorityInfo(fitnessFilePath, processClass)));
+		Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo()) );
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
 		if (processClass == ProcessClass::TesterClass) {
 			actors.push_back( reportErrors( monitorLeader( connFile, cc ), "ClusterController" ) );
-		//} else if (processClass == ProcessClass::StorageClass && SERVER_KNOBS->DELAY_STORAGE_CANDIDACY_SECONDS) {
-		//	actors.push_back( reportErrors( monitorLeaderRemotelyWithDelayedCandidacy( connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController" ) );
+		} else if (processClass == ProcessClass::StorageClass && SERVER_KNOBS->DELAY_STORAGE_CANDIDACY_SECONDS) {
+			actors.push_back( reportErrors( monitorLeaderRemotelyWithDelayedCandidacy( connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, dbInfo ), "ClusterController" ) );
 		} else {
 			actors.push_back( reportErrors( clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
 		}
 		actors.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
-		actors.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold, coordFolder, whitelistBinPaths), "WorkerServer", UID(), &normalWorkerErrors()) );
+		actors.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold, coordFolder, whitelistBinPaths, dbInfo), "WorkerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
 		wait( quorum(actors,1) );

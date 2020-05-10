@@ -246,7 +246,6 @@ ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<Asyn
 
 ACTOR Future<Void> remoteMonitorLeader( int* clientCount, Reference<AsyncVar<bool>> hasConnectedClients, Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader, ElectionResultRequest req ) {
 	if (currentElectedLeader->get().present() && req.knownLeader != currentElectedLeader->get().get().changeID) {
-		TraceEvent("ElectionResultQuickReply").detail("RequestID", req.requestID).detail("ChangeID", !currentElectedLeader->get().present() ? UID(-1,-1) : currentElectedLeader->get().get().changeID);
 		req.reply.send( currentElectedLeader->get() );
 		return Void();
 	}
@@ -255,15 +254,12 @@ ACTOR Future<Void> remoteMonitorLeader( int* clientCount, Reference<AsyncVar<boo
 	hasConnectedClients->set(true);
 
 	while (!currentElectedLeader->get().present() || req.knownLeader == currentElectedLeader->get().get().changeID) {
-		TraceEvent("ElectionResultWaitBefore").detail("RequestID", req.requestID).detail("ChangeID", !currentElectedLeader->get().present() ? UID(-1,-1) : currentElectedLeader->get().get().changeID);
 		choose {
-		  when (wait( yieldedFuture(currentElectedLeader->onChange()) ) ) {}
+			when (wait( yieldedFuture(currentElectedLeader->onChange()) ) ) {}
 			when (wait( delayJittered( SERVER_KNOBS->CLIENT_REGISTER_INTERVAL ) )) { break; }
 		}
-		TraceEvent("ElectionResultWaitAfter").detail("RequestID", req.requestID).detail("ChangeID", !currentElectedLeader->get().present() ? UID(-1,-1) : currentElectedLeader->get().get().changeID);
 	}
 
-	TraceEvent("ElectionResultReply").detail("RequestID", req.requestID).detail("ChangeID", !currentElectedLeader->get().present() ? UID(-1,-1) : currentElectedLeader->get().get().changeID);
 	req.reply.send( currentElectedLeader->get() );
 
 	if(--(*clientCount) == 0) {
@@ -301,7 +297,6 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
 		}
 		when ( ElectionResultRequest req = waitNext( interf.electionResult.getFuture() ) ) {
-			TraceEvent("ElectionResultRequestReceivedRegister").detail("RequestID", req.requestID);
 			if(!leaderMon.isValid()) {
 				leaderMon = monitorLeaderForProxies(req.key, req.coordinators, &clientData, currentElectedLeader);
 			}
@@ -326,7 +321,6 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			if(!nextInterval.isValid()) {
 				nextInterval = delay(0);
 			}
-			//TraceEvent("CandidacyRequest").detail("Nominee", req.myInfo.changeID );
 			availableCandidates.erase( LeaderInfo(req.prevChangeID) );
 			availableCandidates.insert( req.myInfo );
 			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
@@ -532,7 +526,6 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			}
 		}
 		when ( ElectionResultRequest req = waitNext( interf.electionResult.getFuture() ) ) {
-			TraceEvent("ElectionResultRequestReceivedServer").detail("RequestID", req.requestID);
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
 			if( forward.present() ) {
 				req.reply.send( forward.get() );

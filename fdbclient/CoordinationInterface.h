@@ -123,6 +123,14 @@ struct LeaderInfo {
 		return ((changeID.first() & ~mask) > (candidate.changeID.first() & ~mask) && !equalInternalId(candidate)) || ((changeID.first() & ~mask) < (candidate.changeID.first() & ~mask) && equalInternalId(candidate));
 	}
 
+	ClusterControllerPriorityInfo getPriorityInfo() const {
+		ClusterControllerPriorityInfo info;
+		info.processClassFitness = (changeID.first() >> 57) & 7;
+		info.isExcluded = (changeID.first() >> 60) & 1;
+		info.dcFitness = (changeID.first() >> 61) & 7;
+		return info;
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, changeID, serializedInfo, forward);

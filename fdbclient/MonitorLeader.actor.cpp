@@ -411,59 +411,50 @@ ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, Asyn
 // bool represents if the LeaderInfo is a majority answer or not.
 // This function also masks the first 7 bits of changeId of the nominees and returns the Leader with masked changeId
 Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInfo>>& nominees ) {
-	vector<LeaderInfo> maskedNominees;
-	maskedNominees.reserve(nominees.size());
-	for (auto &nominee : nominees) {
-		if (nominee.present()) {
-			maskedNominees.push_back(nominee.get());
-			maskedNominees.back().changeID = UID(maskedNominees.back().changeID.first() & LeaderInfo::mask, maskedNominees.back().changeID.second());
-		}
-	}
-
 	// If any coordinator says that the quorum is forwarded, then it is
-	for(int i=0; i<maskedNominees.size(); i++)
-		if (maskedNominees[i].forward)
-			return std::pair<LeaderInfo, bool>(maskedNominees[i], true);
+	for(int i=0; i<nominees.size(); i++)
+		if (nominees[i].present() && nominees[i].get().forward)
+			return std::pair<LeaderInfo, bool>(nominees[i].get(), true);
+	
+	vector<std::pair<UID,int>> maskedNominees;
+	maskedNominees.reserve(nominees.size());
+	for (int i =0; i < nominees.size(); i++) {
+		if (nominees[i].present()) {
+			maskedNominees.push_back(std::make_pair(UID(nominees[i].get().changeID.first() & LeaderInfo::mask, nominees[i].get().changeID.second()), i));
+		}
+	}	
 
 	if(!maskedNominees.size())
 		return Optional<std::pair<LeaderInfo, bool>>();
 
 	std::sort(maskedNominees.begin(), maskedNominees.end(),
-		[](const LeaderInfo& l, const LeaderInfo& r) { return l.changeID < r.changeID; });
+		[](const std::pair<UID,int>& l, const std::pair<UID,int>& r) { return l.first < r.first; });
 
 	int bestCount = 0;
-	LeaderInfo bestNominee;
-	LeaderInfo currentNominee;
-	int curCount = 0;
-	for (int i = 0; i < maskedNominees.size(); i++) {
-		if (currentNominee == maskedNominees[i]) {
+	int bestIdx = 0;
+	int currentIdx = 0;
+	int curCount = 1;
+	for (int i = 1; i < maskedNominees.size(); i++) {
+		if (maskedNominees[currentIdx].first == maskedNominees[i].first) {
 			curCount++;
 		}
 		else {
 			if (curCount > bestCount) {
-				bestNominee = currentNominee;
+				bestIdx = currentIdx;
 				bestCount = curCount;
 			}
-			currentNominee = maskedNominees[i];
+			currentIdx = i;
 			curCount = 1;
 		}
 	}
 	if (curCount > bestCount) {
-		bestNominee = currentNominee;
+		bestIdx = currentIdx;
 		bestCount = curCount;
 	}
 
 	bool majority = bestCount >= nominees.size() / 2 + 1;
-	return std::pair<LeaderInfo, bool>(bestNominee, majority);
+	return std::pair<LeaderInfo, bool>(nominees[maskedNominees[bestIdx].second].get(), majority);
 }
-
-struct MonitorLeaderInfo {
-	bool hasConnected;
-	Reference<ClusterConnectionFile> intermediateConnFile;
-
-	MonitorLeaderInfo() : hasConnected(false) {}
-	explicit MonitorLeaderInfo( Reference<ClusterConnectionFile> intermediateConnFile ) : intermediateConnFile(intermediateConnFile), hasConnected(false) {}
-};
 
 // Leader is the process that will be elected by coordinators as the cluster controller
 ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo, MonitorLeaderInfo info ) {
@@ -670,6 +661,7 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 				outInfo.id = deterministicRandom()->randomUniqueID();
 				outInfo.forward = leader.get().first.serializedInfo;
 				clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(outInfo));
+				leaderInfo->set(leader.get().first);
 				TraceEvent("MonitorLeaderForProxiesForwarding").detail("NewConnStr", leader.get().first.serializedInfo.toString());
 				return Void();
 			}
@@ -679,9 +671,7 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 				ClusterControllerClientInterface res;
 				reader.deserialize(res);
 				knownLeader->set(res);
-				if (leader.get().second) {
-					leaderInfo->set(leader.get().first);
-				}
+				leaderInfo->set(leader.get().first);
 			}
 		}
 		wait( nomineeChange.onTrigger() || allActors );
@@ -771,10 +761,12 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 			shrinkProxyList(ni, lastProxyUIDs, lastProxies);
 			clientInfo->set( ni );
 			successIdx = idx;
-		} else if(idx == successIdx) {
-			wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
+		} else {
+			idx = (idx+1)%addrs.size();
+			if(idx == successIdx) {
+				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
+			}
 		}
-		idx = (idx+1)%addrs.size();
 	}
 }
 
