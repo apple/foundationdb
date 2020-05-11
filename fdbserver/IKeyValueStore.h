@@ -89,8 +89,8 @@ extern IKeyValueStore* keyValueStoreSQLite( std::string const& filename, UID log
 extern IKeyValueStore* keyValueStoreRedwoodV1( std::string const& filename, UID logID);
 extern IKeyValueStore* keyValueStoreMemory(std::string const& basename, UID logID, int64_t memoryLimit,
                                            std::string ext = "fdq",
-                                           KeyValueStoreType storeType = KeyValueStoreType::MEMORY);
-extern IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery );
+                                           KeyValueStoreType storeType = KeyValueStoreType::MEMORY, ProtocolVersion compatVersion = ProtocolVersion::withNoKVMemPrefixCompressedSnapshots());
+extern IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, ProtocolVersion durableCompatVersion, bool disableSnapshot, bool replaceContent, bool exactRecovery );
 
 inline IKeyValueStore* openKVStore( KeyValueStoreType storeType, std::string const& filename, UID logID, int64_t memoryLimit, bool checkChecksums=false, bool checkIntegrity=false ) {
 	switch( storeType ) {
@@ -99,7 +99,7 @@ inline IKeyValueStore* openKVStore( KeyValueStoreType storeType, std::string con
 	case KeyValueStoreType::SSD_BTREE_V2:
 		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity);
 	case KeyValueStoreType::MEMORY:
-		return keyValueStoreMemory( filename, logID, memoryLimit );
+		return keyValueStoreMemory( filename, logID, memoryLimit, "fdq", KeyValueStoreType::MEMORY );
 	case KeyValueStoreType::SSD_REDWOOD_V1:
 		return keyValueStoreRedwoodV1( filename, logID );
 	    case KeyValueStoreType::MEMORY_RADIXTREE:

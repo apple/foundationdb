@@ -647,7 +647,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	// Recover transaction state store
 	if(self->txnStateStore) self->txnStateStore->close();
 	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, myLocality, txsPoppedVersion );
-	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false, true );
+	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, ProtocolVersion::withNoKVMemPrefixCompressedSnapshots(), false, false, true );
 
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
 	// that we may recover to, as they embed the version in user-readable data and require that no

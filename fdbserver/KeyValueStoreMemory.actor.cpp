@@ -35,7 +35,7 @@ extern bool noUnseed;
 template <typename Container>
 class KeyValueStoreMemory : public IKeyValueStore, NonCopyable {
 public:
-	KeyValueStoreMemory(IDiskQueue* log, UID id, int64_t memoryLimit, KeyValueStoreType storeType, bool disableSnapshot,
+	KeyValueStoreMemory(IDiskQueue* log, UID id, int64_t memoryLimit, KeyValueStoreType storeType, ProtocolVersion durableCompatVersion, bool disableSnapshot,
 	                    bool replaceContent, bool exactRecovery);
 
 	// IClosable
@@ -333,6 +333,7 @@ private:
 		std::vector<Arena> arenas;
 	};
 	KeyValueStoreType type;
+	ProtocolVersion durableCompatVersion;
 	UID id;
 
 	Container data;
@@ -743,7 +744,7 @@ private:
 
 					// Get the common prefix between this key and the previous one, or 0 if there was no previous one.
 					int commonPrefix;
-					if(useDelta) {
+					if(useDelta && self->durableCompatVersion.hasKVMemPrefixCompressedSnapshots()) {
 						commonPrefix = commonPrefixLength(lastSnapshotKeyA, lastSnapshotKeyB);
 					}
 					else {
@@ -819,9 +820,9 @@ private:
 
 template <typename Container>
 KeyValueStoreMemory<Container>::KeyValueStoreMemory(IDiskQueue* log, UID id, int64_t memoryLimit,
-                                                    KeyValueStoreType storeType, bool disableSnapshot,
+                                                    KeyValueStoreType storeType, ProtocolVersion durableCompatVersion, bool disableSnapshot,
                                                     bool replaceContent, bool exactRecovery)
-  : log(log), id(id), type(storeType), previousSnapshotEnd(-1), currentSnapshotEnd(-1), resetSnapshot(false),
+  : log(log), id(id), type(storeType), durableCompatVersion(durableCompatVersion), previousSnapshotEnd(-1), currentSnapshotEnd(-1), resetSnapshot(false),
     memoryLimit(memoryLimit), committedWriteBytes(0), overheadWriteBytes(0), committedDataSize(0), transactionSize(0),
     transactionIsLarge(false), disableSnapshot(disableSnapshot), replaceContent(replaceContent), snapshotCount(0),
     firstCommitWithSnapshot(true) {
@@ -836,7 +837,7 @@ KeyValueStoreMemory<Container>::KeyValueStoreMemory(IDiskQueue* log, UID id, int
 }
 
 IKeyValueStore* keyValueStoreMemory(std::string const& basename, UID logID, int64_t memoryLimit, std::string ext,
-                                    KeyValueStoreType storeType) {
+                                    KeyValueStoreType storeType, ProtocolVersion durableCompatVersion) {
 	TraceEvent("KVSMemOpening", logID)
 	    .detail("Basename", basename)
 	    .detail("MemoryLimit", memoryLimit)
@@ -844,13 +845,13 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename, UID logID, int6
 
 	IDiskQueue *log = openDiskQueue( basename, ext, logID, DiskQueueVersion::V1 );
 	if(storeType == KeyValueStoreType::MEMORY_RADIXTREE){
-		return new KeyValueStoreMemory<radix_tree>(log, logID, memoryLimit, storeType, false, false, false);
+		return new KeyValueStoreMemory<radix_tree>(log, logID, memoryLimit, storeType, durableCompatVersion, false, false, false);
 	} else {
-		return new KeyValueStoreMemory<IKeyValueContainer>(log, logID, memoryLimit, storeType, false, false, false);
+		return new KeyValueStoreMemory<IKeyValueContainer>(log, logID, memoryLimit, storeType, durableCompatVersion, false, false, false);
 	}
 }
 
-IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, bool disableSnapshot, bool replaceContent, bool exactRecovery ) {
-	return new KeyValueStoreMemory<IKeyValueContainer>(queue, logID, memoryLimit, KeyValueStoreType::MEMORY,
+IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, ProtocolVersion durableCompatVersion, bool disableSnapshot, bool replaceContent, bool exactRecovery ) {
+	return new KeyValueStoreMemory<IKeyValueContainer>(queue, logID, memoryLimit, KeyValueStoreType::MEMORY, durableCompatVersion,
 	                                                   disableSnapshot, replaceContent, exactRecovery);
 }
