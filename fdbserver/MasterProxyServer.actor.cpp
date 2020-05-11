@@ -1215,7 +1215,7 @@ ACTOR Future<Void> commitBatch(
 	computeDuration += g_network->timer() - computeStart;
 	if(computeDuration > SERVER_KNOBS->MIN_PROXY_COMPUTE && batchOperations > 0) {
 		double computePerOperation = computeDuration/batchOperations;
-		if(computePerOperation <= self->commitComputePerOperation[latencyBucket] || self->commitComputePerOperation[latencyBucket] == 0.0) {
+		if(computePerOperation <= self->commitComputePerOperation[latencyBucket]) {
 			self->commitComputePerOperation[latencyBucket] = computePerOperation;
 		} else {
 			self->commitComputePerOperation[latencyBucket] = SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE*computePerOperation + ((1.0-SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE)*self->commitComputePerOperation[latencyBucket]);
