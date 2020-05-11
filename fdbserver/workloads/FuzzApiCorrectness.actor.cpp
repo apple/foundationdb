@@ -602,9 +602,15 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		TestGet(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTest(id, workload, "TestGet") {
 			key = makeKey();
 			contract = {
-				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf((key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) && !specialKeys.contains(key)) ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::Possible ),
-				std::make_pair( error_code_accessed_unreadable, ExceptionContract::Possible )
+				std::make_pair(error_code_key_outside_legal_range,
+				               ExceptionContract::requiredIf(
+				                   (key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end)) &&
+				                   !specialKeys.contains(key))),
+				std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
+				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
+				std::make_pair(
+				    error_code_special_keys_no_module_found,
+				    ExceptionContract::possibleIf(specialKeys.contains(key) && !workload->specialKeysRelaxed)),
 			};
 		}
 
