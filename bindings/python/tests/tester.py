@@ -132,9 +132,9 @@ def test_fdb_transactional_generator(db):
         @fdb.transactional
         def function_that_yields(tr):
             yield 0
-        assert fdb.get_api_version() < 700, "Pre-7.0, a decorators may wrap a function that yield"
+        assert fdb.get_api_version() < 630, "Pre-6.3, a decorators may wrap a function that yield"
     except ValueError as e:
-        assert fdb.get_api_version() >= 700, "Post-7.0, a decorator should throw if wrapped function yields"
+        assert fdb.get_api_version() >= 630, "Post-6.3, a decorator should throw if wrapped function yields"
 
 
 def test_fdb_transactional_returns_generator(db):
@@ -145,9 +145,9 @@ def test_fdb_transactional_returns_generator(db):
         def function_that_returns(tr):
             return function_that_yields(tr)
         function_that_returns()
-        assert fdb.get_api_version() < 700, "Pre-7.0, returning a generator is allowed"
+        assert fdb.get_api_version() < 630, "Pre-6.3, returning a generator is allowed"
     except ValueError as e:
-        assert fdb.get_api_version() >= 700, "Post-7.0, returning a generator should throw"
+        assert fdb.get_api_version() >= 630, "Post-6.3, returning a generator should throw"
 
 
 def test_db_options(db):
