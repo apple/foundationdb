@@ -731,10 +731,9 @@ private:
 };
 
 // Holds an index of recently used objects.
-// ObjectType must have the method
+// ObjectType must have the methods
 //   bool evictable() const;            // return true if the entry can be evicted
 //   Future<Void> onEvictable() const;  // ready when entry can be evicted
-// indicating if it is safe to evict.
 template <class IndexType, class ObjectType>
 class ObjectCache : NonCopyable {
 
@@ -850,12 +849,12 @@ public:
 		return Void();
 	}
 
-	Future<Void> clear() { return clear_impl(this); }
-
-	int count() const {
+	Future<Void> clear() {
 		ASSERT(evictionOrder.size() == cache.size());
-		return evictionOrder.size();
+		return clear_impl(this);
 	}
+
+	int count() const { return evictionOrder.size(); }
 
 private:
 	int64_t sizeLimit;
@@ -929,9 +928,11 @@ public:
 	typedef FIFOQueue<RemappedPage> RemapQueueT;
 
 	// If the file already exists, pageSize might be different than desiredPageSize
-	// Use pageCacheSizeBytes == 0 for default
-	DWALPager(int desiredPageSize, std::string filename, int64_t pageCacheSizeBytes)
-	  : desiredPageSize(desiredPageSize), filename(filename), pHeader(nullptr), pageCacheBytes(pageCacheSizeBytes) {
+	// Use pageCacheSizeBytes == 0 to use default from flow knobs
+	// If filename is empty, the pager will exist only in memory and once the cache is full writes will fail.
+	DWALPager(int desiredPageSize, std::string filename, int64_t pageCacheSizeBytes, bool memoryOnly = false)
+	  : desiredPageSize(desiredPageSize), filename(filename), pHeader(nullptr), pageCacheBytes(pageCacheSizeBytes),
+	    memoryOnly(memoryOnly) {
 		if (pageCacheBytes == 0) {
 			pageCacheBytes = g_network->isSimulated()
 			                     ? (BUGGIFY ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
@@ -943,10 +944,10 @@ public:
 
 	void setPageSize(int size) {
 		logicalPageSize = size;
-		physicalPageSize = smallestPhysicalBlock;
-		while (logicalPageSize > physicalPageSize) {
-			physicalPageSize += smallestPhysicalBlock;
-		}
+		// Physical page size is the total size of the smallest number of physical blocks needed to store
+		// logicalPageSize bytes
+		int blocks = 1 + ((logicalPageSize - 1) / smallestPhysicalBlock);
+		physicalPageSize = blocks * smallestPhysicalBlock;
 		if (pHeader != nullptr) {
 			pHeader->pageSize = logicalPageSize;
 		}
@@ -961,15 +962,18 @@ public:
 		ASSERT(!self->recoverFuture.isValid());
 
 		self->remapUndoFuture = Void();
+		state bool exists = false;
 
-		int64_t flags = IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE |
-		                IAsyncFile::OPEN_LOCK;
-		state bool exists = fileExists(self->filename);
-		if (!exists) {
-			flags |= IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE;
+		if (!self->memoryOnly) {
+			int64_t flags = IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE |
+			                IAsyncFile::OPEN_LOCK;
+			exists = fileExists(self->filename);
+			if (!exists) {
+				flags |= IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE;
+			}
+
+			wait(store(self->pageFile, IAsyncFileSystem::filesystem()->open(self->filename, flags, 0644)));
 		}
-
-		wait(store(self->pageFile, IAsyncFileSystem::filesystem()->open(self->filename, flags, 0644)));
 
 		// Header page is always treated as having a page size of smallestPhysicalBlock
 		self->setPageSize(smallestPhysicalBlock);
@@ -1169,6 +1173,10 @@ public:
 		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
 		((Page*)page.getPtr())->updateChecksum(pageID);
 
+		if (memoryOnly) {
+			return Void();
+		}
+
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
 		Future<Void> f =
@@ -1269,6 +1277,8 @@ public:
 	// and before the user-chosen sized pages.
 	ACTOR static Future<Reference<IPage>> readPhysicalPage(DWALPager* self, PhysicalPageID pageID,
 	                                                       bool header = false) {
+		ASSERT(!self->memoryOnly);
+
 		if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
 			wait(delay(0, TaskPriority::DiskRead));
 		}
@@ -1480,18 +1490,24 @@ public:
 		if (g_network->getCurrentTask() > TaskPriority::DiskWrite) {
 			wait(delay(0, TaskPriority::DiskWrite));
 		}
-		wait(self->pageFile->sync());
-		debug_printf("DWALPager(%s) commit version %" PRId64 " sync 1\n", self->filename.c_str(),
-		             self->pHeader->committedVersion);
+
+		if (!self->memoryOnly) {
+			wait(self->pageFile->sync());
+			debug_printf("DWALPager(%s) commit version %" PRId64 " sync 1\n", self->filename.c_str(),
+			             self->pHeader->committedVersion);
+		}
 
 		// Update header on disk and sync again.
 		wait(self->writeHeaderPage(0, self->headerPage));
 		if (g_network->getCurrentTask() > TaskPriority::DiskWrite) {
 			wait(delay(0, TaskPriority::DiskWrite));
 		}
-		wait(self->pageFile->sync());
-		debug_printf("DWALPager(%s) commit version %" PRId64 " sync 2\n", self->filename.c_str(),
-		             self->pHeader->committedVersion);
+
+		if (!self->memoryOnly) {
+			wait(self->pageFile->sync());
+			debug_printf("DWALPager(%s) commit version %" PRId64 " sync 2\n", self->filename.c_str(),
+			             self->pHeader->committedVersion);
+		}
 
 		// Update the last committed header for use in the next commit.
 		self->updateCommittedHeader();
@@ -1545,8 +1561,10 @@ public:
 		// Unreference the file and clear
 		self->pageFile.clear();
 		if (dispose) {
-			debug_printf("DWALPager(%s) shutdown deleting file\n", self->filename.c_str());
-			wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename, true));
+			if (!self->memoryOnly) {
+				debug_printf("DWALPager(%s) shutdown deleting file\n", self->filename.c_str());
+				wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename, true));
+			}
 		}
 
 		self->closedPromise.send(Void());
@@ -1565,7 +1583,12 @@ public:
 		ASSERT(recoverFuture.isReady());
 		int64_t free;
 		int64_t total;
-		g_network->getDiskBytes(parentDirectory(filename), free, total);
+		if (memoryOnly) {
+			total = pageCacheBytes;
+			free = pageCacheBytes - ((int64_t)pageCache.count() * physicalPageSize);
+		} else {
+			g_network->getDiskBytes(parentDirectory(filename), free, total);
+		}
 		int64_t pagerSize = pHeader->pageCount * physicalPageSize;
 
 		// It is not exactly known how many pages on the delayed free list are usable as of right now.  It could be
@@ -1679,6 +1702,7 @@ private:
 	Header* pLastCommittedHeader;
 
 	std::string filename;
+	bool memoryOnly;
 
 	typedef ObjectCache<LogicalPageID, PageCacheEntry> PageCacheT;
 	PageCacheT pageCache;
@@ -1926,9 +1950,7 @@ struct RedwoodRecordRef {
 
 	// Find the common key prefix between two records, assuming that the first skipLen bytes are the same
 	inline int getCommonPrefixLen(const RedwoodRecordRef& other, int skipLen = 0) const {
-		int skipStart = std::min(skipLen, key.size());
-		return skipStart + commonPrefixLength(key.begin() + skipStart, other.key.begin() + skipStart,
-		                                      std::min(other.key.size(), key.size()) - skipStart);
+		return skipLen + commonPrefixLength(key, other.key, skipLen);
 	}
 
 	// Compares and orders by key, version, chunk.total, chunk.start, value
@@ -2613,14 +2635,24 @@ public:
 		double startTime;
 
 		std::string toString(bool clearAfter = false) {
-			const char* labels[] = {
-				"set",       "clear",        "clearSingleKey",     "get",          "getRange",
-				"commit",    "pageReads",    "extPageRead",        "pagePreloads", "extPagePreloads",
-				"pageWrite", "extPageWrite", "commitSubtreeStart", "pageUpdates"
+			const char* labels[] = { "set",
+				                     "clear",
+				                     "clearSingleKey",
+				                     "get",
+				                     "getRange",
+				                     "commit",
+				                     "pageReads",
+				                     "extPageRead",
+				                     "pagePreloads",
+				                     "extPagePreloads",
+				                     "pageWrites",
+				                     "pageUpdates",
+				                     "extPageWrites",
+				                     "commitSubtreeStart" };
+			const int64_t values[] = {
+				sets,         clears,       clearSingleKey,  gets,       getRanges,   commits,       pageReads,
+				extPageReads, pagePreloads, extPagePreloads, pageWrites, pageUpdates, extPageWrites, commitSubtreeStart
 			};
-			const int64_t values[] = { sets,       clears,        clearSingleKey,     gets,         getRanges,
-				                       commits,    pageReads,     extPageReads,       pagePreloads, extPagePreloads,
-				                       pageWrites, extPageWrites, commitSubtreeStart, pageUpdates };
 
 			double elapsed = now() - startTime;
 			std::string s;
@@ -3154,8 +3186,7 @@ private:
 		// This is how much space for the binary tree exists in the page, after the header
 		state int blockSize = self->m_pager->getUsablePageSize();
 		state int pageSize = blockSize - sizeof(BTreePage);
-		state float fillFactor = 0.66; // TODO: Make this a knob
-		state int pageFillTarget = pageSize * fillFactor;
+		state int pageFillTarget = pageSize * SERVER_KNOBS->REDWOOD_PAGE_REBUILD_FILL_FACTOR;
 		state int blockCount = 1;
 
 		state int kvBytes = 0;
@@ -3227,7 +3258,7 @@ private:
 
 					blockCount += newBlocks;
 					pageSize = newPageSize;
-					pageFillTarget = pageSize * fillFactor;
+					pageFillTarget = pageSize * SERVER_KNOBS->REDWOOD_PAGE_REBUILD_FILL_FACTOR;
 				}
 
 				kvBytes += keySize + valueSize;
@@ -4085,7 +4116,7 @@ private:
 			return Void();
 		} else {
 			// Internal Page
-			state std::vector<Future<Void>> futures;
+			std::vector<Future<Void>> recursions;
 			state std::vector<InternalPageSliceUpdate*> slices;
 			state Arena arena;
 
@@ -4147,7 +4178,7 @@ private:
 				// If mutation boundaries are the same, the range is fully described by (mBegin - 1).mutation()
 				bool fullyCovered = (mBegin == mEnd);
 				--mBegin;
-				
+
 				// If mBegin describes the entire subtree range, see if there are either no changes or if the entire
 				// range is cleared.
 				if (fullyCovered) {
@@ -4172,7 +4203,7 @@ private:
 					if (uniform) {
 						// See if we can expand the subtree range to include more subtrees which are also covered by the
 						// same mutation range
-						if(cursor.valid() && mEnd.key() != cursor.get().key) {
+						if (cursor.valid() && mEnd.key() != cursor.get().key) {
 							cursor.seekLessThanOrEqual(mEnd.key(), update->skipLen, &cursor, 1);
 
 							// If this seek moved us ahead, to something other than cEnd, then update subtree range
@@ -4189,7 +4220,8 @@ private:
 								u.subtreeUpperBound = &cursor.get();
 								u.skipLen = 0; // TODO: set this
 
-								// The new decode upper bound is either cEnd or the record before it if it has no child link
+								// The new decode upper bound is either cEnd or the record before it if it has no child
+								// link
 								auto c = u.cEnd;
 								c.movePrev();
 								ASSERT(c.valid());
@@ -4235,13 +4267,17 @@ private:
 				}
 
 				// If this page has height of 2 then its children are leaf nodes
-				futures.push_back(self->commitSubtree(self, snapshot, mutationBuffer, pageID, btPage->height == 2,
-				                                      mBegin, mEnd, slices.back()));
+				recursions.push_back(self->commitSubtree(self, snapshot, mutationBuffer, pageID, btPage->height == 2,
+				                                         mBegin, mEnd, slices.back()));
 			}
 
-			wait(waitForAll(futures));
+			debug_printf(
+			    "%s Recursions from internal page started. pageSize=%d level=%d children=%d slices=%d recursions=%d\n",
+			    context.c_str(), btPage->size(), btPage->height, btPage->tree().numItems, slices.size(),
+			    recursions.size());
 
-			debug_printf("%s Recursions done.  Processing child range updates.\n", context.c_str());
+			wait(waitForAll(recursions));
+			debug_printf("%s Recursions done, processing slice updates.\n", context.c_str());
 
 			state InternalPageModifier m(cursor.mirror, tryToUpdate);
 
@@ -4253,7 +4289,7 @@ private:
 			}
 
 			// The expected next record for the final range is checked against one of the upper boundaries passed to
-			// this commitSubtree() instance.  If change have already been made, then the subtree upper boundary is
+			// this commitSubtree() instance.  If changes have already been made, then the subtree upper boundary is
 			// passed, so in the event a different upper boundary is needed it will be added to the already-modified
 			// page.  Otherwise, the decode boundary is used which will prevent this page from being modified for the
 			// sole purpose of adding a dummy upper bound record.
@@ -4869,9 +4905,10 @@ VersionedBTree::Counts VersionedBTree::counts;
 
 class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
-	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID) : m_filePrefix(filePrefix) {
+	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID)
+	  : m_filePrefix(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS) {
 		// TODO: This constructor should really just take an IVersionedStore
-		IPager2* pager = new DWALPager(4096, filePrefix, 0);
+		IPager2* pager = new DWALPager(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE, filePrefix, 0);
 		m_tree = new VersionedBTree(pager, filePrefix);
 		m_init = catchError(init_impl(this));
 	}
@@ -4942,6 +4979,9 @@ public:
 
 	ACTOR static Future<Standalone<RangeResultRef>> readRange_impl(KeyValueStoreRedwoodUnversioned* self, KeyRange keys,
 	                                                               int rowLimit, int byteLimit) {
+		wait(self->m_concurrentReads.take());
+		state FlowLock::Releaser releaser(self->m_concurrentReads);
+
 		self->m_tree->counts.getRanges++;
 		state Standalone<RangeResultRef> result;
 		state int accumulatedBytes = 0;
@@ -4991,6 +5031,9 @@ public:
 
 	ACTOR static Future<Optional<Value>> readValue_impl(KeyValueStoreRedwoodUnversioned* self, Key key,
 	                                                    Optional<UID> debugID) {
+		wait(self->m_concurrentReads.take());
+		state FlowLock::Releaser releaser(self->m_concurrentReads);
+
 		self->m_tree->counts.gets++;
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 
@@ -5007,6 +5050,9 @@ public:
 
 	ACTOR static Future<Optional<Value>> readValuePrefix_impl(KeyValueStoreRedwoodUnversioned* self, Key key,
 	                                                          int maxLength, Optional<UID> debugID) {
+		wait(self->m_concurrentReads.take());
+		state FlowLock::Releaser releaser(self->m_concurrentReads);
+
 		self->m_tree->counts.gets++;
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 
@@ -5031,6 +5077,7 @@ private:
 	Future<Void> m_init;
 	Promise<Void> m_closed;
 	Promise<Void> m_error;
+	FlowLock m_concurrentReads;
 
 	template <typename T>
 	inline Future<T> catchError(Future<T> f) {
@@ -6146,21 +6193,22 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state int pageSize =
 	    shortTest ? 200 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(200, 400));
 
-	// We must be able to fit at least two any two keys plus overhead in a page to prevent
-	// a situation where the tree cannot be grown upward with decreasing level size.
+	state bool pagerMemoryOnly = shortTest && (deterministicRandom()->random01() < .01);
 	state int maxKeySize = deterministicRandom()->randomInt(1, pageSize * 2);
 	state int maxValueSize = randomSize(pageSize * 25);
 	state int maxCommitSize = shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6));
-	state int mutationBytesTarget = shortTest ? 5000 : randomSize(std::min<int>(maxCommitSize * 100, 100e6));
+	state int mutationBytesTarget = shortTest ? 100000 : randomSize(std::min<int>(maxCommitSize * 100, 100e6));
 	state double clearProbability = deterministicRandom()->random01() * .1;
 	state double clearSingleKeyProbability = deterministicRandom()->random01();
 	state double clearPostSetProbability = deterministicRandom()->random01() * .1;
-	state double coldStartProbability = deterministicRandom()->random01();
+	state double coldStartProbability = pagerMemoryOnly ? 0 : deterministicRandom()->random01();
 	state double advanceOldVersionProbability = deterministicRandom()->random01();
 	state double maxDuration = 60;
-	state int cacheSizeBytes = BUGGIFY ? 0 : deterministicRandom()->randomInt(1, 5 * pageSize);
+	state int64_t cacheSizeBytes =
+	    pagerMemoryOnly ? 2e9 : (BUGGIFY ? deterministicRandom()->randomInt(1, 10 * pageSize) : 0);
 
 	printf("\n");
+	printf("pagerMemoryOnly: %d\n", pagerMemoryOnly);
 	printf("serialTest: %d\n", serialTest);
 	printf("shortTest: %d\n", shortTest);
 	printf("pageSize: %d\n", pageSize);
@@ -6173,7 +6221,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	printf("clearPostSetProbability: %f\n", clearPostSetProbability);
 	printf("coldStartProbability: %f\n", coldStartProbability);
 	printf("advanceOldVersionProbability: %f\n", advanceOldVersionProbability);
-	printf("cacheSizeBytes: %s\n", cacheSizeBytes == 0 ? "default" : format("%d", cacheSizeBytes).c_str());
+	printf("cacheSizeBytes: %s\n", cacheSizeBytes == 0 ? "default" : format("%" PRId64, cacheSizeBytes).c_str());
 	printf("\n");
 
 	printf("Deleting existing test data...\n");
@@ -6181,7 +6229,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 
 	printf("Initializing...\n");
 	state double startTime = now();
-	pager = new DWALPager(pageSize, pagerFile, cacheSizeBytes);
+	pager = new DWALPager(pageSize, pagerFile, cacheSizeBytes, pagerMemoryOnly);
 	state VersionedBTree* btree = new VersionedBTree(pager, pagerFile);
 	wait(btree->init());
 
@@ -6503,35 +6551,35 @@ TEST_CASE("!/redwood/performance/set") {
 	wait(btree->init());
 
 	state int nodeCount = 1e9;
-	state int maxChangesPerVersion = 5000;
+	state int maxRecordsPerCommit = 20000;
+	state int maxKVBytesPerCommit = 20e6;
 	state int64_t kvBytesTarget = 4e9;
-	state int commitTarget = 20e6;
 	state int minKeyPrefixBytes = 25;
 	state int maxKeyPrefixBytes = 25;
-	state int minValueSize = 1000;
-	state int maxValueSize = 2000;
-	state int minConsecutiveRun = 1000;
-	state int maxConsecutiveRun = 2000;
+	state int minValueSize = 100;
+	state int maxValueSize = 500;
+	state int minConsecutiveRun = 1;
+	state int maxConsecutiveRun = 10;
 	state char firstKeyChar = 'a';
 	state char lastKeyChar = 'm';
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
 	printf("trailingIntegerIndexRange: %d\n", nodeCount);
-	printf("maxChangesPerVersion: %d\n", maxChangesPerVersion);
+	printf("maxChangesPerCommit: %d\n", maxRecordsPerCommit);
 	printf("minKeyPrefixBytes: %d\n", minKeyPrefixBytes);
 	printf("maxKeyPrefixBytes: %d\n", maxKeyPrefixBytes);
 	printf("minConsecutiveRun: %d\n", minConsecutiveRun);
 	printf("maxConsecutiveRun: %d\n", maxConsecutiveRun);
 	printf("minValueSize: %d\n", minValueSize);
 	printf("maxValueSize: %d\n", maxValueSize);
-	printf("commitTarget: %d\n", commitTarget);
+	printf("maxCommitSize: %d\n", maxKVBytesPerCommit);
 	printf("kvBytesTarget: %" PRId64 "\n", kvBytesTarget);
 	printf("KeyLexicon '%c' to '%c'\n", firstKeyChar, lastKeyChar);
 
-	state int64_t kvBytes = 0;
+	state int64_t kvBytesThisCommit = 0;
 	state int64_t kvBytesTotal = 0;
-	state int records = 0;
+	state int recordsThisCommit = 0;
 	state Future<Void> commit = Void();
 	state std::string value(maxValueSize, 'v');
 
@@ -6546,9 +6594,9 @@ TEST_CASE("!/redwood/performance/set") {
 			Version lastVer = btree->getLatestVersion();
 			state Version version = lastVer + 1;
 			btree->setWriteVersion(version);
-			int changes = deterministicRandom()->randomInt(0, maxChangesPerVersion);
+			int changesThisVersion = deterministicRandom()->randomInt(0, maxRecordsPerCommit - recordsThisCommit + 1);
 
-			while (changes > 0 && kvBytes < commitTarget) {
+			while (changesThisVersion > 0 && kvBytesThisCommit < maxKVBytesPerCommit) {
 				KeyValue kv;
 				kv.key = randomString(kv.arena(),
 				                      deterministicRandom()->randomInt(minKeyPrefixBytes + sizeof(uint32_t),
@@ -6557,7 +6605,7 @@ TEST_CASE("!/redwood/performance/set") {
 				int32_t index = deterministicRandom()->randomInt(0, nodeCount);
 				int runLength = deterministicRandom()->randomInt(minConsecutiveRun, maxConsecutiveRun + 1);
 
-				while (runLength > 0 && changes > 0) {
+				while (runLength > 0 && changesThisVersion > 0) {
 					*(uint32_t*)(kv.key.end() - sizeof(uint32_t)) = bigEndian32(index++);
 					kv.value = StringRef((uint8_t*)value.data(),
 					                     deterministicRandom()->randomInt(minValueSize, maxValueSize + 1));
@@ -6565,21 +6613,21 @@ TEST_CASE("!/redwood/performance/set") {
 					btree->set(kv);
 
 					--runLength;
-					--changes;
-					kvBytes += kv.key.size() + kv.value.size();
-					++records;
+					--changesThisVersion;
+					kvBytesThisCommit += kv.key.size() + kv.value.size();
+					++recordsThisCommit;
 				}
 			}
 
-			if (kvBytes >= commitTarget) {
+			if (kvBytesThisCommit >= maxKVBytesPerCommit || recordsThisCommit >= maxRecordsPerCommit) {
 				btree->setOldestVersion(btree->getLastCommittedVersion());
 				wait(commit);
 				printf("Cumulative %.2f MB keyValue bytes written at %.2f MB/s\n", kvBytesTotal / 1e6,
 				       kvBytesTotal / (timer() - start) / 1e6);
 
 				// Avoid capturing via this to freeze counter values
-				int recs = records;
-				int kvb = kvBytes;
+				int recs = recordsThisCommit;
+				int kvb = kvBytesThisCommit;
 
 				// Capturing invervalStart via this->intervalStart makes IDE's unhappy as they do not know about the
 				// actor state object
@@ -6588,15 +6636,15 @@ TEST_CASE("!/redwood/performance/set") {
 				commit = map(btree->commit(), [=](Void result) {
 					printf("Committed: %s\n", VersionedBTree::counts.toString(true).c_str());
 					double elapsed = timer() - *pIntervalStart;
-					printf("Committed %d kvBytes in %d records in %f seconds, %.2f MB/s\n", kvb, recs, elapsed,
+					printf("Committed %d keyValueBytes in %d records in %f seconds, %.2f MB/s\n", kvb, recs, elapsed,
 					       kvb / elapsed / 1e6);
 					*pIntervalStart = timer();
 					return Void();
 				});
 
-				kvBytesTotal += kvBytes;
-				kvBytes = 0;
-				records = 0;
+				kvBytesTotal += kvBytesThisCommit;
+				kvBytesThisCommit = 0;
+				recordsThisCommit = 0;
 			}
 		}
 

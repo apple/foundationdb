@@ -557,6 +557,10 @@ public:
 	int FASTRESTORE_TXN_CLEAR_MAX; // threshold to start tracking each clear op in a txn
 	int FASTRESTORE_TXN_RETRY_MAX; // threshold to start output error on too many retries
 
+	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
+	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.
+	double REDWOOD_PAGE_REBUILD_FILL_FACTOR; // When rebuilding pages, start a new page after this capacity
+
 	ServerKnobs();
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
