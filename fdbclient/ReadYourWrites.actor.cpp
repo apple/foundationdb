@@ -1032,6 +1032,15 @@ public:
 		return Void();
 	}
 
+	ACTOR static void simulateTimeoutInFlightCommit(ReadYourWritesTransaction* ryw_) {
+		state Reference<ReadYourWritesTransaction> ryw = Reference<ReadYourWritesTransaction>::addRef(ryw_);
+		ASSERT(ryw->options.timeoutInSeconds > 0);
+		if (!ryw->resetPromise.isSet()) ryw->resetPromise.sendError(transaction_timed_out());
+		wait(delay(deterministicRandom()->random01() * 5));
+		TraceEvent("ClientBuggifyInFlightCommit");
+		wait(ryw->tr.commit());
+	}
+
 	ACTOR static Future<Void> commit( ReadYourWritesTransaction *ryw ) {
 		try {
 			ryw->commitStarted = true;
@@ -1054,6 +1063,10 @@ public:
 
 				if (ryw->resetPromise.isSet())
 					throw ryw->resetPromise.getFuture().getError();
+				if (CLIENT_BUGGIFY && ryw->options.timeoutInSeconds > 0) {
+					simulateTimeoutInFlightCommit(ryw);
+					throw transaction_timed_out();
+				}
 				wait( ryw->resetPromise.getFuture() || ryw->tr.commit() );
 
 				ryw->debugLogRetries();
@@ -1074,6 +1087,10 @@ public:
 				}
 			}
 
+			if (CLIENT_BUGGIFY && ryw->options.timeoutInSeconds > 0) {
+				simulateTimeoutInFlightCommit(ryw);
+				throw transaction_timed_out();
+			}
 			wait( ryw->resetPromise.getFuture() || ryw->tr.commit() );
 
 			ryw->debugLogRetries();
@@ -1910,7 +1927,7 @@ Future<Void> ReadYourWritesTransaction::commit() {
 
 	if( resetPromise.isSet() )
 		return resetPromise.getFuture().getError();
-	
+
 	return RYWImpl::commit( this );
 }
 
