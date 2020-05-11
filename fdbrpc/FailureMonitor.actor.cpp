@@ -65,7 +65,7 @@ Future<Void> IFailureMonitor::onFailedFor(Endpoint const& endpoint, double susta
 }
 
 SimpleFailureMonitor::SimpleFailureMonitor() : endpointKnownFailed() {
-	// Mark ourselves as avaiable in FailureMonitor
+	// Mark ourselves as available in FailureMonitor
 	const auto& localAddresses = FlowTransport::transport().getLocalAddresses();
 	addressStatus[localAddresses.address] = FailureStatus(false);
 	if (localAddresses.secondaryAddress.present()) {

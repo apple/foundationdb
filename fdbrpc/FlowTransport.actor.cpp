@@ -586,7 +586,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 			if (firstConnFailedTime.present()) {
 				if (now() - firstConnFailedTime.get() > FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT) {
 					TraceEvent(SevWarnAlways, "PeerUnavailableForLongTime", conn ? conn->getDebugID() : UID())
-						.suppressFor(1.0)
+					    .suppressFor(1.0)
 					    .detail("PeerAddr", self->destination);
 					firstConnFailedTime = now() - FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT/2.0;
 				}
