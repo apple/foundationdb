@@ -110,7 +110,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		state double lastTime = now();
 		loop {
 			wait(poisson(&lastTime, 1.0 / self->transactionsPerSecond));
-			state bool reverse = deterministicRandom()->random01() < 0.5;
+			state bool reverse = deterministicRandom()->coinflip();
 			state GetRangeLimits limit = self->randomLimits();
 			state KeySelector begin = self->randomKeySelector();
 			state KeySelector end = self->randomKeySelector();
@@ -188,13 +188,12 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		} else {
 			// pick up existing keys from registered key ranges
 			KeyRangeRef randomKeyRangeRef = keys[deterministicRandom()->randomInt(0, keys.size())];
-			randomKey = deterministicRandom()->random01() < 0.5 ? randomKeyRangeRef.begin : randomKeyRangeRef.end;
+			randomKey = deterministicRandom()->coinflip() ? randomKeyRangeRef.begin : randomKeyRangeRef.end;
 		}
 		// return Key(deterministicRandom()->randomAlphaNumeric(keyBytes)).withPrefix(prefix);
 		// covers corner cases where offset points outside the key space
 		int offset = deterministicRandom()->randomInt(-keysCount.getValue() - 1, keysCount.getValue() + 2);
-		bool orEqual = deterministicRandom()->random01() < 0.5;
-		return KeySelectorRef(randomKey, orEqual, offset);
+		return KeySelectorRef(randomKey, deterministicRandom()->coinflip(), offset);
 	}
 
 	GetRangeLimits randomLimits() {
