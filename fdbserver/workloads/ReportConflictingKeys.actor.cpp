@@ -46,7 +46,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		keyPrefix = unprintable(
 		    getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("ReportConflictingKeysWorkload"))
 		        .toString());
-		keyBytes = getOption(options, LiteralStringRef("keyBytes"), 16);
+		keyBytes = getOption(options, LiteralStringRef("keyBytes"), 64);
 
 		readConflictRangeCount = getOption(options, LiteralStringRef("readConflictRangeCountPerTx"), 1);
 		writeConflictRangeCount = getOption(options, LiteralStringRef("writeConflictRangeCountPerTx"), 1);
@@ -55,7 +55,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		// each tx
 		addReadConflictRangeProb = (readConflictRangeCount - 1.0) / readConflictRangeCount;
 		addWriteConflictRangeProb = (writeConflictRangeCount - 1.0) / writeConflictRangeCount;
-		ASSERT(keyPrefix.size() + 16 <= keyBytes); // make sure the string format is valid
+		ASSERT(keyPrefix.size() + 8 <= keyBytes); // make sure the string format is valid
 		nodeCount = getOption(options, LiteralStringRef("nodeCount"), 100);
 	}
 
@@ -66,7 +66,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	Future<Void> start(const Database& cx) override { return _start(cx->clone(), this); }
 
 	ACTOR Future<Void> _start(Database cx, ReportConflictingKeysWorkload* self) {
-		if (self->clientId == 0) wait(timeout(self->conflictingClient(cx, self), self->testDuration, Void()));
+		wait(timeout(self->conflictingClient(cx, self), self->testDuration, Void()));
 		return Void();
 	}
 
@@ -88,9 +88,11 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	// Copied from tester.actor.cpp, added parameter to determine the key's length
 	Key keyForIndex(int n) {
 		double p = (double)n / nodeCount;
-		int paddingLen = keyBytes - 16 - keyPrefix.size();
-		// left padding by zero
-		return StringRef(format("%0*llx", paddingLen, *(uint64_t*)&p)).withPrefix(keyPrefix);
+		// 8 bytes for Cid_* suffix of each client
+		int paddingLen = keyBytes - 8 - keyPrefix.size();
+		// left padding by zero, each client has different prefix
+		Key prefixWithClientId = StringRef(format("Cid_%04d", clientId)).withPrefix(keyPrefix);
+		return StringRef(format("%0*llx", paddingLen, *(uint64_t*)&p)).withPrefix(prefixWithClientId);
 	}
 
 	void addRandomReadConflictRange(ReadYourWritesTransaction* tr, std::vector<KeyRange>* readConflictRanges) {
