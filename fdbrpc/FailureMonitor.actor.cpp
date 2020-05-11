@@ -64,6 +64,15 @@ Future<Void> IFailureMonitor::onFailedFor(Endpoint const& endpoint, double susta
 	return waitForContinuousFailure(this, endpoint, sustainedFailureDuration, slope);
 }
 
+SimpleFailureMonitor::SimpleFailureMonitor() : endpointKnownFailed() {
+	// Mark ourselves as avaiable in FailureMonitor
+	const auto& localAddresses = FlowTransport::transport().getLocalAddresses();
+	addressStatus[localAddresses.address] = FailureStatus(false);
+	if (localAddresses.secondaryAddress.present()) {
+		addressStatus[localAddresses.secondaryAddress.get()] = FailureStatus(false);
+	}
+}
+
 void SimpleFailureMonitor::setStatus(NetworkAddress const& address, FailureStatus const& status) {
 
 	// if (status.failed)
