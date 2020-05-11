@@ -8,8 +8,9 @@ Release Notes
 Fixes
 -----
 
-* HTTPS requests made by backup could hang indefinitely.  `(PR #3027) <https://github.com/apple/foundationdb/pull/3027>`_
-* ``fdbrestore`` prefix options required exactly a single hyphen instead of the standard two.  `(PR #3056) <https://github.com/apple/foundationdb/pull/3056>`_
+* HTTPS requests made by backup could hang indefinitely. `(PR #3027) <https://github.com/apple/foundationdb/pull/3027>`_
+* ``fdbrestore`` prefix options required exactly a single hyphen instead of the standard two. `(PR #3056) <https://github.com/apple/foundationdb/pull/3056>`_
+* Commits could stall on a newly elected proxy because of inaccurate compute estimates. `(PR #3123) <https://github.com/apple/foundationdb/pull/3123>`_
 
 6.2.20
 ======
