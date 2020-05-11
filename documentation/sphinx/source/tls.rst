@@ -128,9 +128,9 @@ Certificate file default location
 
 The default behavior when the certificate or key file is not specified is to look for a file named ``fdb.pem`` in the current working directory. If this file is not present, an attempt is made to load a file from a system-dependent location as follows:
 
-  * Linux: ``/etc/foundationdb/fdb.pem``
-  * macOS: ``/usr/local/etc/foundationdb/fdb.pem``
-  * Windows: ``C:\ProgramData\foundationdb\fdb.pem``
+* Linux: ``/etc/foundationdb/fdb.pem``
+* macOS: ``/usr/local/etc/foundationdb/fdb.pem``
+* Windows: ``C:\ProgramData\foundationdb\fdb.pem``
 
 Default Peer Verification
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -152,9 +152,9 @@ Automatic TLS certificate refresh
 
 The TLS certificate will be automatically refreshed on a configurable cadence. The server will inspect the CA, certificate, and key files in the specified locations periodically, and will begin using the new versions if following criterion were met:
 
-  * They are changed, judging by the last modified time.
-  * They are valid certificates.
-  * The key file matches the certificate file.
+* They are changed, judging by the last modified time.
+* They are valid certificates.
+* The key file matches the certificate file.
 
 The refresh rate is controlled by ``--knob_tls_cert_refresh_delay_seconds``. Setting it to 0 will disable the refresh.
 

@@ -27,7 +27,7 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include "fdbrpc/IAsyncFile.h"
-#include "rapidxml/rapidxml.hpp"
+#include "fdbclient/rapidxml/rapidxml.hpp"
 #include "flow/actorcompiler.h" // has to be last include
 
 using namespace rapidxml;
@@ -510,6 +510,7 @@ ACTOR Future<BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<BlobS
 	if (service.empty())
 		service = b->knobs.secure_connection ? "https" : "http";
 	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(b->host, service, b->knobs.secure_connection ? true : false));
+	wait(conn->connectHandshake());
 
 	TraceEvent("BlobStoreEndpointNewConnection").suppressFor(60)
 		.detail("RemoteEndpoint", conn->getPeerAddress())

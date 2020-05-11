@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "Arena.h"
 #include "boost/asio.hpp"
 
 #include "flow/network.h"
@@ -98,6 +99,15 @@ NetworkAddress NetworkAddress::parse( std::string const& s ) {
 	}
 }
 
+Optional<NetworkAddress> NetworkAddress::parseOptional(std::string const& s) {
+	try {
+		return NetworkAddress::parse(s);
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_connection_string_invalid);
+		return Optional<NetworkAddress>();
+	}
+}
+
 std::vector<NetworkAddress> NetworkAddress::parseList( std::string const& addrs ) {
 	// Split addrs on ',' and parse them individually
 	std::vector<NetworkAddress> coord;
@@ -157,6 +167,8 @@ Future<Reference<IConnection>> INetworkConnections::connect( std::string host, s
 	});
 }
 
+const std::vector<int> NetworkMetrics::starvationBins = { 1, 3500, 7000, 7500, 8500, 8900, 10500 };
+
 TEST_CASE("/flow/network/ipaddress") {
 	ASSERT(NetworkAddress::parse("[::1]:4800").toString() == "[::1]:4800");
 
@@ -200,3 +212,5 @@ TEST_CASE("/flow/network/ipaddress") {
 
 	return Void();
 }
+
+NetworkInfo::NetworkInfo() : handshakeLock( new BoundedFlowLock(FLOW_KNOBS->UNRESTRICTED_HANDSHAKE_LIMIT, FLOW_KNOBS->BOUNDED_HANDSHAKE_LIMIT) ) {}

@@ -88,6 +88,8 @@ cluster.messages                      unreachable_ratekeeper_worker         Unab
 cluster.messages                      unreachable_processes                 The cluster has some unreachable processes.
 cluster.messages                      unreadable_configuration              Unable to read database configuration.
 cluster.messages                      layer_status_incomplete               Some or all of the layers subdocument could not be read.
+cluster.messages                      primary_dc_missing                    Unable to determine primary datacenter.
+cluster.messages                      fetch_primary_dc_timeout              Fetching primary DC timed out.
 cluster.processes.<process>.messages  file_open_error                       Unable to open ‘<file>’ (<os_error>).
 cluster.processes.<process>.messages  incorrect_cluster_file_contents       Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally.
 cluster.processes.<process>.messages  io_error                              <error> occured in <subsystem>

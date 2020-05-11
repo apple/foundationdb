@@ -42,10 +42,15 @@ enum {
 	tagLocalityRemoteLog = -3,
 	tagLocalityUpgraded = -4,
 	tagLocalitySatellite = -5,
-	tagLocalityLogRouterMapped = -6,
+	tagLocalityLogRouterMapped = -6,  // used by log router to pop from TLogs
 	tagLocalityTxs = -7,
+	tagLocalityBackup = -8,  // used by backup role to pop from TLogs
 	tagLocalityInvalid = -99
 }; //The TLog and LogRouter require these number to be as compact as possible
+
+inline bool isPseudoLocality(int8_t locality) {
+	return locality == tagLocalityLogRouterMapped || locality == tagLocalityBackup;
+}
 
 #pragma pack(push, 1)
 struct Tag {
@@ -68,7 +73,7 @@ struct Tag {
 	}
 
 	template <class Ar>
-	force_inline void serialize_unversioned(Ar& ar) { 
+	force_inline void serialize_unversioned(Ar& ar) {
 		serializer(ar, locality, id);
 	}
 };
@@ -157,11 +162,11 @@ void uniquify( Collection& c ) {
 	c.resize( std::unique(c.begin(), c.end()) - c.begin() );
 }
 
-static std::string describe( const Tag item ) {
+inline std::string describe( const Tag item ) {
 	return format("%d:%d", item.locality, item.id);
 }
 
-static std::string describe( const int item ) {
+inline std::string describe( const int item ) {
 	return format("%d", item);
 }
 
@@ -171,17 +176,17 @@ static std::string describe(const std::string& s) {
 }
 
 template <class T>
-static std::string describe( Reference<T> const& item ) {
+std::string describe( Reference<T> const& item ) {
 	return item->toString();
 }
 
 template <class T>
-static std::string describe( T const& item ) {
+std::string describe( T const& item ) {
 	return item.toString();
 }
 
 template <class K, class V>
-static std::string describe( std::map<K, V> const& items, int max_items = -1 ) {
+std::string describe( std::map<K, V> const& items, int max_items = -1 ) {
 	if(!items.size())
 		return "[no items]";
 
@@ -197,7 +202,7 @@ static std::string describe( std::map<K, V> const& items, int max_items = -1 ) {
 }
 
 template <class T>
-static std::string describeList( T const& items, int max_items ) {
+std::string describeList( T const& items, int max_items ) {
 	if(!items.size())
 		return "[no items]";
 
@@ -213,12 +218,12 @@ static std::string describeList( T const& items, int max_items ) {
 }
 
 template <class T>
-static std::string describe( std::vector<T> const& items, int max_items = -1 ) {
+std::string describe( std::vector<T> const& items, int max_items = -1 ) {
 	return describeList(items, max_items);
 }
 
 template <class T>
-static std::string describe( std::set<T> const& items, int max_items = -1 ) {
+std::string describe( std::set<T> const& items, int max_items = -1 ) {
 	return describeList(items, max_items);
 }
 
@@ -263,6 +268,10 @@ struct KeyRangeRef {
 		return KeyRangeRef( begin.withPrefix(prefix), end.withPrefix(prefix) );
 	}
 
+	KeyRangeRef withPrefix(const StringRef& prefix, Arena& arena) const {
+		return KeyRangeRef(begin.withPrefix(prefix, arena), end.withPrefix(prefix, arena));
+	}
+
 	KeyRangeRef removePrefix( const StringRef& prefix ) const {
 		return KeyRangeRef( begin.removePrefix(prefix), end.removePrefix(prefix) );
 	}
@@ -277,8 +286,20 @@ struct KeyRangeRef {
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
-		serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
+		if (!ar.isDeserializing && equalsKeyAfter(begin, end)) {
+			StringRef empty;
+			serializer(ar, const_cast<KeyRef&>(end), empty);
+		} else {
+			serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
+		}
+		if (ar.isDeserializing && end == StringRef() && begin != StringRef()) {
+			ASSERT(begin[begin.size()-1] == '\x00');
+			const_cast<KeyRef&>(end) = begin;
+			const_cast<KeyRef&>(begin) = end.substr(0, end.size()-1);
+		}
+
 		if( begin > end ) {
+			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end);
 			throw inverted_range();
 		};
 	}
@@ -409,9 +430,9 @@ typedef Standalone<KeyRef> Key;
 typedef Standalone<ValueRef> Value;
 typedef Standalone<KeyRangeRef> KeyRange;
 typedef Standalone<KeyValueRef> KeyValue;
-typedef Standalone<struct KeySelectorRef> KeySelector; 
+typedef Standalone<struct KeySelectorRef> KeySelector;
 
-enum { invalidVersion = -1, latestVersion = -2 };
+enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
 inline Key keyAfter( const KeyRef& key ) {
 	if(key == LiteralStringRef("\xff\xff"))
@@ -573,7 +594,7 @@ struct KeyRangeWith : KeyRange {
 	}
 };
 template <class Val>
-static inline KeyRangeWith<Val> keyRangeWith( const KeyRangeRef& range, const Val& value ) {
+KeyRangeWith<Val> keyRangeWith( const KeyRangeRef& range, const Val& value ) {
 	return KeyRangeWith<Val>(range, value);
 }
 
@@ -648,6 +669,7 @@ struct KeyValueStoreType {
 		MEMORY,
 		SSD_BTREE_V2,
 		SSD_REDWOOD_V1,
+		MEMORY_RADIXTREE,
 		END
 	};
 
@@ -657,6 +679,7 @@ struct KeyValueStoreType {
 			this->type = END;
 	}
 	operator StoreType() const { return StoreType(type); }
+	StoreType storeType() const { return StoreType(type); }
 
 	template <class Ar>
 	void serialize(Ar& ar) { serializer(ar, type); }
@@ -667,6 +690,7 @@ struct KeyValueStoreType {
 			case SSD_BTREE_V2: return "ssd-2";
 			case SSD_REDWOOD_V1: return "ssd-redwood-experimental";
 			case MEMORY: return "memory";
+			case MEMORY_RADIXTREE: return "memory-radixtree-beta";
 			default: return "unknown";
 		}
 	}
@@ -687,6 +711,9 @@ struct TLogVersion {
 		UNSET = 0,
 		// Everything between BEGIN and END should be densely packed, so that we
 		// can iterate over them easily.
+		// V3 was the introduction of spill by reference;
+		// V4 changed how data gets written to satellite TLogs so that we can peek from them;
+		// V5 merged reference and value spilling
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
@@ -809,6 +836,11 @@ struct LogMessageVersion {
 	explicit LogMessageVersion(Version version) : version(version), sub(0) {}
 	LogMessageVersion() : version(0), sub(0) {}
 	bool empty() const { return (version == 0) && (sub == 0); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, sub);
+	}
 };
 
 struct AddressExclusion {
@@ -849,12 +881,12 @@ struct AddressExclusion {
 	}
 };
 
-static bool addressExcluded( std::set<AddressExclusion> const& exclusions, NetworkAddress const& addr ) {
+inline bool addressExcluded( std::set<AddressExclusion> const& exclusions, NetworkAddress const& addr ) {
 	return exclusions.count( AddressExclusion(addr.ip, addr.port) ) || exclusions.count( AddressExclusion(addr.ip) );
 }
 
 struct ClusterControllerPriorityInfo {
-	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessBad }; //cannot be larger than 7 because of leader election mask
+	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessNotPreferred, FitnessBad }; //cannot be larger than 7 because of leader election mask
 
 	static DCFitness calculateDCFitness(Optional<Key> const& dcId, std::vector<Optional<Key>> const& dcPriority) {
 		if(!dcPriority.size()) {
@@ -863,7 +895,7 @@ struct ClusterControllerPriorityInfo {
 			if(dcId == dcPriority[0]) {
 				return FitnessPreferred;
 			} else {
-				return FitnessUnknown;
+				return FitnessNotPreferred;
 			}
 		} else {
 			if(dcId == dcPriority[0]) {
@@ -965,5 +997,44 @@ struct HealthMetrics {
 		serializer(ar, worstStorageQueue, worstStorageDurabilityLag, worstTLogQueue, tpsLimit, batchLimited, storageStats, tLogQueue);
 	}
 };
+
+struct WorkerBackupStatus {
+	LogEpoch epoch;
+	Version version;
+	Tag tag;
+	int32_t totalTags;
+
+	WorkerBackupStatus() : epoch(0), version(invalidVersion) {}
+	WorkerBackupStatus(LogEpoch e, Version v, Tag t, int32_t total) : epoch(e), version(v), tag(t), totalTags(total) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, epoch, version, tag, totalTags);
+	}
+};
+
+enum class TransactionPriority : uint8_t {
+	BATCH,
+	DEFAULT,
+	IMMEDIATE,
+	MIN=BATCH,
+	MAX=IMMEDIATE
+};
+
+const std::array<TransactionPriority, (int)TransactionPriority::MAX+1> allTransactionPriorities = { TransactionPriority::BATCH, TransactionPriority::DEFAULT, TransactionPriority::IMMEDIATE };
+
+inline const char* transactionPriorityToString(TransactionPriority priority, bool capitalize=true) {
+	switch(priority) {
+		case TransactionPriority::BATCH:
+			return capitalize ? "Batch" : "batch";
+		case TransactionPriority::DEFAULT:
+			return capitalize ? "Default" : "default";
+		case TransactionPriority::IMMEDIATE:
+			return capitalize ? "Immediate" : "immediate";
+	}
+
+	ASSERT(false);
+	throw internal_error();
+}
 
 #endif

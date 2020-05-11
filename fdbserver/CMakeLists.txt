@@ -1,8 +1,11 @@
 set(FDBSERVER_SRCS
   ApplyMetadataMutation.h
   ApplyMetadataMutation.cpp
+  BackupInterface.h
+  BackupProgress.actor.cpp
+  BackupProgress.actor.h
+  BackupWorker.actor.cpp
   ClusterController.actor.cpp
-  ClusterRecruitmentInterface.h
   ConflictSet.h
   CoordinatedState.actor.cpp
   CoordinatedState.h
@@ -74,6 +77,7 @@ set(FDBSERVER_SRCS
   RestoreWorker.actor.cpp
   Resolver.actor.cpp
   ResolverInterface.h
+  ServerDBInfo.actor.h
   ServerDBInfo.h
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
@@ -105,6 +109,7 @@ set(FDBSERVER_SRCS
   workloads/AsyncFileRead.actor.cpp
   workloads/AsyncFileWrite.actor.cpp
   workloads/AtomicOps.actor.cpp
+  workloads/ReadHotDetection.actor.cpp
   workloads/AtomicOpsApiCorrectness.actor.cpp
   workloads/AtomicRestore.actor.cpp
   workloads/AtomicSwitchover.actor.cpp
@@ -155,6 +160,7 @@ set(FDBSERVER_SRCS
   workloads/MetricLogging.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
+  workloads/PopulateTPCC.actor.cpp
   workloads/PubSubMultiples.actor.cpp
   workloads/QueuePush.actor.cpp
   workloads/RandomClogging.actor.cpp
@@ -162,6 +168,7 @@ set(FDBSERVER_SRCS
   workloads/RandomSelector.actor.cpp
   workloads/ReadWrite.actor.cpp
   workloads/RemoveServersSafely.actor.cpp
+  workloads/ReportConflictingKeys.actor.cpp
   workloads/Rollback.actor.cpp
   workloads/RyowCorrectness.actor.cpp
   workloads/RYWDisable.actor.cpp
@@ -172,15 +179,19 @@ set(FDBSERVER_SRCS
   workloads/Sideband.actor.cpp
   workloads/SlowTaskWorkload.actor.cpp
   workloads/SnapTest.actor.cpp
+  workloads/SpecialKeySpaceCorrectness.actor.cpp
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp
+  workloads/TagThrottleApi.actor.cpp
   workloads/TargetedKill.actor.cpp
   workloads/TaskBucketCorrectness.actor.cpp
   workloads/ThreadSafety.actor.cpp
   workloads/Throttling.actor.cpp
   workloads/Throughput.actor.cpp
   workloads/TimeKeeperCorrectness.actor.cpp
+  workloads/TPCC.actor.cpp
+  workloads/TPCCWorkload.h
   workloads/DifferentClustersSameRV.actor.cpp
   workloads/UnitPerf.actor.cpp
   workloads/UnitTests.actor.cpp

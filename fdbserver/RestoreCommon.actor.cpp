@@ -23,15 +23,15 @@
 
 #include "fdbserver/RestoreCommon.actor.h"
 
+// Backup agent header
+#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupContainer.h"
+#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/MutationList.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 
-// Backup agent header
-#include "fdbclient/BackupAgent.actor.h"
-//#include "FileBackupAgent.h"
-#include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/MutationList.h"
-#include "fdbclient/BackupContainer.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Split RestoreConfigFR defined in FileBackupAgent.actor.cpp to declaration in Restore.actor.h and implementation in
@@ -292,101 +292,10 @@ std::string RestoreConfigFR::toString() {
 	return ss.str();
 }
 
-//typedef RestoreConfigFR::RestoreFile RestoreFileFR;
-
 // parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfigFR is copied
 // The implementation of parallelFileRestore is copied from FileBackupAgent.actor.cpp
 // parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfigFR is copied
 namespace parallelFileRestore {
-// Helper class for reading restore data from a buffer and throwing the right errors.
-struct StringRefReader {
-	StringRefReader(StringRef s = StringRef(), Error e = Error()) : rptr(s.begin()), end(s.end()), failure_error(e) {}
-
-	// Return remainder of data as a StringRef
-	StringRef remainder() { return StringRef(rptr, end - rptr); }
-
-	// Return a pointer to len bytes at the current read position and advance read pos
-	const uint8_t* consume(unsigned int len) {
-		if (rptr == end && len != 0) throw end_of_stream();
-		const uint8_t* p = rptr;
-		rptr += len;
-		if (rptr > end) throw failure_error;
-		return p;
-	}
-
-	// Return a T from the current read position and advance read pos
-	template <typename T>
-	const T consume() {
-		return *(const T*)consume(sizeof(T));
-	}
-
-	// Functions for consuming big endian (network byte order) integers.
-	// Consumes a big endian number, swaps it to little endian, and returns it.
-	int32_t consumeNetworkInt32() { return (int32_t)bigEndian32((uint32_t)consume<int32_t>()); }
-	uint32_t consumeNetworkUInt32() { return bigEndian32(consume<uint32_t>()); }
-
-	bool eof() { return rptr == end; }
-
-	const uint8_t *rptr, *end;
-	Error failure_error;
-};
-
-ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset,
-                                                                      int len) {
-	state Standalone<StringRef> buf = makeString(len);
-	int rLen = wait(file->read(mutateString(buf), len, offset));
-	if (rLen != len) throw restore_bad_read();
-
-	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
-	state parallelFileRestore::StringRefReader reader(buf, restore_corrupted_data());
-
-	try {
-		// Read header, currently only decoding version 1001
-		if (reader.consume<int32_t>() != 1001) throw restore_unsupported_file_version();
-
-		// Read begin key, if this fails then block was invalid.
-		uint32_t kLen = reader.consumeNetworkUInt32();
-		const uint8_t* k = reader.consume(kLen);
-		results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-
-		// Read kv pairs and end key
-		while (1) {
-			// Read a key.
-			kLen = reader.consumeNetworkUInt32();
-			k = reader.consume(kLen);
-
-			// If eof reached or first value len byte is 0xFF then a valid block end was reached.
-			if (reader.eof() || *reader.rptr == 0xFF) {
-				results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-				break;
-			}
-
-			// Read a value, which must exist or the block is invalid
-			uint32_t vLen = reader.consumeNetworkUInt32();
-			const uint8_t* v = reader.consume(vLen);
-			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
-
-			// If eof reached or first byte of next key len is 0xFF then a valid block end was reached.
-			if (reader.eof() || *reader.rptr == 0xFF) break;
-		}
-
-		// Make sure any remaining bytes in the block are 0xFF
-		for (auto b : reader.remainder())
-			if (b != 0xFF) throw restore_corrupted_data_padding();
-
-		return results;
-
-	} catch (Error& e) {
-		TraceEvent(SevWarn, "FileRestoreCorruptRangeFileBlock")
-		    .error(e)
-		    .detail("Filename", file->getFilename())
-		    .detail("BlockOffset", offset)
-		    .detail("BlockLen", len)
-		    .detail("ErrorRelativeOffset", reader.rptr - buf.begin())
-		    .detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
-		throw;
-	}
-}
 
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset,
                                                                     int len) {
@@ -395,11 +304,11 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 	if (rLen != len) throw restore_bad_read();
 
 	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
-	state parallelFileRestore::StringRefReader reader(buf, restore_corrupted_data());
+	state StringRefReader reader(buf, restore_corrupted_data());
 
 	try {
-		// Read header, currently only decoding version 2001
-		if (reader.consume<int32_t>() != 2001) throw restore_unsupported_file_version();
+		// Read header, currently only decoding version BACKUP_AGENT_MLOG_VERSION
+		if (reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION) throw restore_unsupported_file_version();
 
 		// Read k/v pairs.  Block ends either at end of last value exactly or with 0xFF as first key len byte.
 		while (1) {
@@ -422,7 +331,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 		return results;
 
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "FileRestoreCorruptLogFileBlock")
+		TraceEvent(SevError, "FileRestoreCorruptLogFileBlock")
 		    .error(e)
 		    .detail("Filename", file->getFilename())
 		    .detail("BlockOffset", offset)

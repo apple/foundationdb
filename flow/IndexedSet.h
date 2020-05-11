@@ -22,6 +22,7 @@
 #define FLOW_INDEXEDSET_H
 #pragma once
 
+#include "flow/Arena.h"
 #include "flow/Platform.h"
 #include "flow/FastAlloc.h"
 #include "flow/Trace.h"
@@ -54,6 +55,8 @@ template <class T>
 class Future;
 
 class Void;
+
+class StringRef;
 
 template <class T, class Metric>
 struct IndexedSet{
@@ -92,6 +95,10 @@ public:
 		void decrementNonEnd();
 		bool operator == ( const iterator& r ) const { return i == r.i; }
 		bool operator != ( const iterator& r ) const { return i != r.i; }
+		// following two methods are for memory storage engine(KeyValueStoreMemory class) use only
+		// in order to have same interface as radixtree
+		StringRef& getKey(uint8_t* dummyContent) const { return i->data.key; }
+		StringRef& getValue() const { return i->data.value; }
 	};
 
 	IndexedSet() : root(NULL) {};
@@ -193,7 +200,7 @@ private:
 
 	Node *root;
 
-	Metric eraseHalf( Node* start, Node* end, int eraseDir, int& heightDelta, std::vector<Node*>& toFree );
+	Metric eraseHalf(Node* start, Node* end, int eraseDir, int& heightDelta, std::vector<Node*>& toFree);
 	void erase( iterator begin, iterator end, std::vector<Node*>& toFree );
 
 	void replacePointer( Node* oldNode, Node* newNode ) {
@@ -246,6 +253,11 @@ public:
 	MapPair(MapPair&& r) BOOST_NOEXCEPT  : key(std::move(r.key)), value(std::move(r.value)) {}
 	void operator=(MapPair&& r) BOOST_NOEXCEPT { key = std::move(r.key); value = std::move(r.value); }
 
+	int compare(MapPair<Key, Value> const& r) const { return ::compare(key, r.key); }
+	template <class CompatibleWithKey>
+	int compare(CompatibleWithKey const& r) const {
+		return ::compare(key, r);
+	}
 	bool operator<(MapPair<Key,Value> const& r) const { return key < r.key; }
 	bool operator<=(MapPair<Key,Value> const& r) const { return key <= r.key; }
 	bool operator==(MapPair<Key,Value> const& r) const { return key == r.key; }
@@ -253,6 +265,11 @@ public:
 
 //private: MapPair( const MapPair& );
 };
+
+template <class Key, class Value, class CompatibleWithKey>
+inline int compare(CompatibleWithKey const& l, MapPair<Key, Value> const& r) {
+	return compare(l, r.key);
+}
 
 template <class Key, class Value>
 inline MapPair<typename std::decay<Key>::type, typename std::decay<Value>::type> mapPair(Key&& key, Value&& value) { return MapPair<typename std::decay<Key>::type, typename std::decay<Value>::type>(std::forward<Key>(key), std::forward<Value>(value)); }
@@ -608,8 +625,8 @@ typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::insert(T_&& data, 
 	int d; // direction
 	// traverse to find insert point
 	while (true){
-		d = t->data < data;
-		if (!d && !(data < t->data)) {	// t->data == data
+		int cmp = compare(data, t->data);
+		if (cmp == 0) {
 			Node *returnNode = t;
 			if(replaceExisting) {
 				t->data = std::forward<T_>(data);
@@ -627,6 +644,7 @@ typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::insert(T_&& data, 
 
 			return returnNode;
 		}
+		d = cmp > 0;
 		Node *nextT = t->child[d];
 		if (!nextT) break;
 		t = nextT;
@@ -683,7 +701,7 @@ int IndexedSet<T,Metric>::insert(const std::vector<std::pair<T,Metric>>& dataVec
 		int d = 1; // direction
 		if(blockStart == NULL || (blockEnd != NULL && data >= blockEnd->data)) {
 			blockEnd = NULL;
-			if (root == NULL){
+			if (root == NULL) {
 				root = new Node(std::move(data), metric);
 				num_inserted++;
 				blockStart = root;
@@ -693,11 +711,12 @@ int IndexedSet<T,Metric>::insert(const std::vector<std::pair<T,Metric>>& dataVec
 			Node *t = root;
 			// traverse to find insert point
 			bool foundNode = false;
-			while (true){
-				d = t->data < data;
-				if (!d)
+			while (true) {
+				int cmp = compare(data, t->data);
+				d = cmp > 0;
+				if (d == 0)
 					blockEnd = t;
-				if (!d && !(data < t->data)) {	// t->data == data
+				if (cmp == 0) {
 					Node *returnNode = t;
 					if(replaceExisting) {
 						num_inserted++;
@@ -778,7 +797,8 @@ int IndexedSet<T,Metric>::insert(const std::vector<std::pair<T,Metric>>& dataVec
 }
 
 template <class T, class Metric>
-Metric IndexedSet<T,Metric>::eraseHalf( Node* start, Node* end, int eraseDir, int& heightDelta, std::vector<Node*>& toFree ) {
+Metric IndexedSet<T, Metric>::eraseHalf(Node* start, Node* end, int eraseDir, int& heightDelta,
+                                        std::vector<Node*>& toFree) {
 	// Removes all nodes between start (inclusive) and end (exclusive) from the set, where start is equal to end or one of its descendants
 	// eraseDir 1 means erase the right half (nodes > at) of the left subtree of end.  eraseDir 0 means the left half of the right subtree
 	// toFree is extended with the roots of completely removed subtrees
@@ -854,7 +874,7 @@ void IndexedSet<T,Metric>::erase( typename IndexedSet<T,Metric>::iterator begin,
 	// Removes all nodes in the set between first and last, inclusive.
 	// toFree is extended with the roots of completely removed subtrees.
 
-	ASSERT(!end.i || (begin.i && *begin <= *end));
+	ASSERT(!end.i || (begin.i && (::compare(*begin, *end) <= 0)));
 
 	if(begin == end)
 		return;
@@ -870,8 +890,8 @@ void IndexedSet<T,Metric>::erase( typename IndexedSet<T,Metric>::iterator begin,
 	
 	// Erase all matching nodes that descend from subRoot, by first erasing descendants of subRoot->child[0] and then erasing the descendants of subRoot->child[1]
 	// subRoot is not removed from the tree at this time
-	metricDelta = metricDelta + eraseHalf( first, subRoot, 1, leftHeightDelta, toFree );
-	metricDelta = metricDelta + eraseHalf( last, subRoot, 0, rightHeightDelta, toFree );
+	metricDelta = metricDelta + eraseHalf(first, subRoot, 1, leftHeightDelta, toFree);
+	metricDelta = metricDelta + eraseHalf(last, subRoot, 0, rightHeightDelta, toFree);
 
 	// Change in the height of subRoot due to past activity, before subRoot is rebalanced. subRoot->balance already reflects changes in height to its children.
 	int heightDelta = leftHeightDelta + rightHeightDelta; 
@@ -989,10 +1009,9 @@ template <class Key>
 typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::find(const Key &key) const {
 	Node* t = root;
 	while (t){
-		int d = t->data < key;
-		if (!d && !(key < t->data)) // t->data == key
-			return iterator(t);
-		t = t->child[d];
+		int cmp = compare(key, t->data);
+		if (cmp == 0) return iterator(t);
+		t = t->child[cmp > 0];
 	}
 	return end();
 }
@@ -1003,14 +1022,15 @@ template <class Key>
 typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::lower_bound(const Key &key) const {
 	Node* t = root;
 	if (!t) return iterator();
+	bool less;
 	while (true) {
-		Node *n = t->child[ t->data < key ];
+		less = t->data < key;
+		Node* n = t->child[less];
 		if (!n) break;
 		t = n;
 	}
 
-	if (t->data < key)
-		moveIterator<1>(t);
+	if (less) moveIterator<1>(t);
 
 	return iterator(t);
 }
@@ -1021,14 +1041,15 @@ template <class Key>
 typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::upper_bound(const Key &key) const {
 	Node* t = root;
 	if (!t) return iterator();
+	bool not_less;
 	while (true) {
-		Node *n = t->child[ !(key < t->data) ];
+		not_less = !(key < t->data);
+		Node* n = t->child[not_less];
 		if (!n) break;
 		t = n;
 	}
 
-	if (!(key < t->data))
-		moveIterator<1>(t);
+	if (not_less) moveIterator<1>(t);
 
 	return iterator(t);
 }

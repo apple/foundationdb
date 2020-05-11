@@ -52,6 +52,10 @@ public:
 		}
 	}
 
+	static void stop() {
+		eio_set_max_parallel(0);
+	}
+
 	static bool should_poll() { return want_poll; }
 
 	static bool lock_fd( int fd ) {
@@ -411,7 +415,7 @@ private:
 		return data.result.get();
 	}
 
-	static volatile int32_t want_poll;
+	static std::atomic<int32_t> want_poll;
 
 	ACTOR static void poll_eio() {
 		while (eio_poll() == -1)
@@ -441,7 +445,7 @@ private:
 };
 
 #ifdef FILESYSTEM_IMPL
-volatile int32_t AsyncFileEIO::want_poll = 0;
+std::atomic<int32_t> AsyncFileEIO::want_poll = 0;
 #endif
 
 #include "flow/unactorcompiler.h"

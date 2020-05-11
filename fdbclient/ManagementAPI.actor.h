@@ -61,7 +61,8 @@ public:
 		NOT_ENOUGH_WORKERS,
 		REGION_REPLICATION_MISMATCH,
 		DCID_MISSING,
-		SUCCESS
+		LOCKED_NOT_NEW,
+		SUCCESS,
 	};
 };
 
@@ -176,6 +177,8 @@ ACTOR Future<Void> unlockDatabase( Database  cx, UID  id );
 
 ACTOR Future<Void> checkDatabaseLock( Transaction*  tr, UID  id );
 ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction>  tr, UID  id );
+
+ACTOR Future<Void> advanceVersion(Database cx, Version v);
 
 ACTOR Future<int> setDDMode( Database  cx, int  mode );
 

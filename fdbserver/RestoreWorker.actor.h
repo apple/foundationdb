@@ -52,13 +52,12 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 	Optional<RestoreLoaderInterface> loaderInterf;
 	Optional<RestoreApplierInterface> applierInterf;
 
-	uint32_t inProgressFlag = 0; // To avoid race between duplicate message delivery that invokes the same actor multiple times
-
 	UID id() const { return workerID; };
 
 	RestoreWorkerData() = default;
 
 	~RestoreWorkerData() {
+		TraceEvent("RestoreWorkerDataDeleted").detail("WorkerID", workerID.toString());
 		printf("[Exit] Worker:%s RestoreWorkerData is deleted\n", workerID.toString().c_str());
 	}
 

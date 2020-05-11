@@ -522,7 +522,8 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 	int64_t maxTLogQueueGate = 5e6, int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0, int64_t maxPoppedVersionLag = 30e6 ) {
 	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (deterministicRandom()->random01()*100), dbInfo, "QuietDatabase");
 
-	TraceEvent(("QuietDatabase" + phase + "Begin").c_str());
+	auto traceMessage = "QuietDatabase" + phase + "Begin";
+	TraceEvent(traceMessage.c_str());
 
 	//In a simulated environment, wait 5 seconds so that workers can move to their optimal locations
 	if(g_network->isSimulated())
@@ -575,14 +576,16 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 				numSuccesses = 0;
 			} else {
 				if(++numSuccesses == 3) {
-					TraceEvent(("QuietDatabase" + phase + "Done").c_str());
+					auto msg = "QuietDatabase" + phase + "Done";
+					TraceEvent(msg.c_str());
 					break;
+				} else {
+					wait(delay( g_network->isSimulated() ? 2.0 : 30.0));
 				}
-				else
-					wait(delay( 2.0 ) );
 			}
 		} catch (Error& e) {
-			if( e.code() != error_code_actor_cancelled && e.code() != error_code_attribute_not_found && e.code() != error_code_timed_out)
+			if (e.code() != error_code_actor_cancelled && e.code() != error_code_attribute_not_found &&
+			    e.code() != error_code_timed_out)
 				TraceEvent(("QuietDatabase" + phase + "Error").c_str()).error(e);
 
 			//Client invalid operation occurs if we don't get back a message from one of the servers, often corrected by retrying

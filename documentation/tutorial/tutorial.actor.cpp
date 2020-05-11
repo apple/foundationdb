@@ -24,6 +24,7 @@
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "flow/TLSConfig.actor.h"
 #include <functional>
 #include <unordered_map>
 #include <memory>
@@ -439,7 +440,7 @@ int main(int argc, char* argv[]) {
 		toRun.push_back(actor->second);
 	}
 	platformInit();
-	g_network = newNet2(false, true);
+	g_network = newNet2(TLSConfig(), false, true);
 	NetworkAddress publicAddress = NetworkAddress::parse("0.0.0.0:0");
 	if (isServer) {
 		publicAddress = NetworkAddress::parse("0.0.0.0:" + port);
