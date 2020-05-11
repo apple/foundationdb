@@ -58,7 +58,12 @@ public:
 #endif
 	}
 	void enter() {
-		while (isLocked.test_and_set(std::memory_order_acquire)) _mm_pause();
+		while (isLocked.test_and_set(std::memory_order_acquire))
+#ifndef __aarch64__
+			_mm_pause();
+#else
+			; /* spin */
+#endif
 #if VALGRIND
 		ANNOTATE_RWLOCK_ACQUIRED(this, true);
 #endif

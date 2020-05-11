@@ -1054,7 +1054,7 @@ public:
 		m->machine = &machine;
 		machine.processes.push_back(m);
 		currentlyRebootingProcesses.erase(addresses.address);
-		m->excluded = g_simulator.isExcluded(addresses.address);
+		m->excluded = g_simulator.isExcluded(NetworkAddress(ip, port, true, false));
 		m->cleared = g_simulator.isCleared(addresses.address);
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);

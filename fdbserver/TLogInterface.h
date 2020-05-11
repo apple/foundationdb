@@ -33,9 +33,11 @@ struct TLogInterface {
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
-	LocalityData locality;
+	LocalityData filteredLocality;
 	UID uniqueID;
 	UID sharedTLogID;
+	Endpoint base;
+
 	RequestStream< struct TLogPeekRequest > peekMessages;
 	RequestStream< struct TLogPopRequest > popMessages;
 
@@ -50,21 +52,30 @@ struct TLogInterface {
 	RequestStream< struct TLogSnapRequest> snapRequest;
 
 	TLogInterface() {}
-	explicit TLogInterface(const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
-	TLogInterface(UID sharedTLogID, const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
-	TLogInterface(UID uniqueID, UID sharedTLogID, const LocalityData& locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
+	explicit TLogInterface(const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), filteredLocality(locality) { sharedTLogID = uniqueID; }
+	TLogInterface(UID sharedTLogID, const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), sharedTLogID(sharedTLogID), filteredLocality(locality) {}
+	TLogInterface(UID uniqueID, UID sharedTLogID, const LocalityData& locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), filteredLocality(locality) {}
 	UID id() const { return uniqueID; }
 	UID getSharedTLogID() const { return sharedTLogID; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == ( TLogInterface const& r ) const { return id() == r.id(); }
 	NetworkAddress address() const { return peekMessages.getEndpoint().getPrimaryAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return peekMessages.getEndpoint().addresses.secondaryAddress; }
+
 	void initEndpoints() {
-		getQueuingMetrics.getEndpoint( TaskPriority::TLogQueuingMetrics );
-		popMessages.getEndpoint( TaskPriority::TLogPop );
-		peekMessages.getEndpoint( TaskPriority::TLogPeek );
-		confirmRunning.getEndpoint( TaskPriority::TLogConfirmRunning );
-		commit.getEndpoint( TaskPriority::TLogCommit );
+		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
+		streams.push_back(peekMessages.getReceiver(TaskPriority::TLogPeek));
+		streams.push_back(popMessages.getReceiver(TaskPriority::TLogPop));
+		streams.push_back(commit.getReceiver(TaskPriority::TLogCommit));
+		streams.push_back(lock.getReceiver());
+		streams.push_back(getQueuingMetrics.getReceiver(TaskPriority::TLogQueuingMetrics));
+		streams.push_back(confirmRunning.getReceiver(TaskPriority::TLogConfirmRunning));
+		streams.push_back(waitFailure.getReceiver());
+		streams.push_back(recoveryFinished.getReceiver());
+		streams.push_back(disablePopRequest.getReceiver());
+		streams.push_back(enablePopRequest.getReceiver());
+		streams.push_back(snapRequest.getReceiver());
+		base = FlowTransport::transport().addEndpoints(streams);
 	}
 
 	template <class Ar> 
@@ -72,9 +83,20 @@ struct TLogInterface {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.isDeserializing || uniqueID != UID());
 		}
-		serializer(ar, uniqueID, sharedTLogID, locality, peekMessages, popMessages
-		  , commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished
-		  , disablePopRequest, enablePopRequest, snapRequest);
+		serializer(ar, uniqueID, sharedTLogID, filteredLocality, base);
+		if( Ar::isDeserializing ) {
+			peekMessages = RequestStream< struct TLogPeekRequest >( base.getAdjustedEndpoint(0) );
+			popMessages = RequestStream< struct TLogPopRequest >( base.getAdjustedEndpoint(1) );
+			commit = RequestStream< struct TLogCommitRequest >( base.getAdjustedEndpoint(2) );
+			lock = RequestStream< ReplyPromise< struct TLogLockResult > >( base.getAdjustedEndpoint(3) );
+			getQueuingMetrics = RequestStream< struct TLogQueuingMetricsRequest >( base.getAdjustedEndpoint(4) );
+			confirmRunning = RequestStream< struct TLogConfirmRunningRequest >( base.getAdjustedEndpoint(5) );
+			waitFailure = RequestStream< ReplyPromise<Void> >( base.getAdjustedEndpoint(6) );
+			recoveryFinished = RequestStream< struct TLogRecoveryFinishedRequest >( base.getAdjustedEndpoint(7) );
+			disablePopRequest = RequestStream< struct TLogDisablePopRequest >( base.getAdjustedEndpoint(8) );
+			enablePopRequest = RequestStream< struct TLogEnablePopRequest >( base.getAdjustedEndpoint(9) );
+			snapRequest = RequestStream< struct TLogSnapRequest >( base.getAdjustedEndpoint(10) );
+		}
 	}
 };
 

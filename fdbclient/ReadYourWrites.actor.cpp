@@ -1032,6 +1032,15 @@ public:
 		return Void();
 	}
 
+	ACTOR static void simulateTimeoutInFlightCommit(ReadYourWritesTransaction* ryw_) {
+		state Reference<ReadYourWritesTransaction> ryw = Reference<ReadYourWritesTransaction>::addRef(ryw_);
+		ASSERT(ryw->options.timeoutInSeconds > 0);
+		if (!ryw->resetPromise.isSet()) ryw->resetPromise.sendError(transaction_timed_out());
+		wait(delay(deterministicRandom()->random01() * 5));
+		TraceEvent("ClientBuggifyInFlightCommit");
+		wait(ryw->tr.commit());
+	}
+
 	ACTOR static Future<Void> commit( ReadYourWritesTransaction *ryw ) {
 		try {
 			ryw->commitStarted = true;
@@ -1054,6 +1063,10 @@ public:
 
 				if (ryw->resetPromise.isSet())
 					throw ryw->resetPromise.getFuture().getError();
+				if (CLIENT_BUGGIFY && ryw->options.timeoutInSeconds > 0) {
+					simulateTimeoutInFlightCommit(ryw);
+					throw transaction_timed_out();
+				}
 				wait( ryw->resetPromise.getFuture() || ryw->tr.commit() );
 
 				ryw->debugLogRetries();
@@ -1074,6 +1087,10 @@ public:
 				}
 			}
 
+			if (CLIENT_BUGGIFY && ryw->options.timeoutInSeconds > 0) {
+				simulateTimeoutInFlightCommit(ryw);
+				throw transaction_timed_out();
+			}
 			wait( ryw->resetPromise.getFuture() || ryw->tr.commit() );
 
 			ryw->debugLogRetries();
@@ -1209,46 +1226,46 @@ ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces (Reference<ClusterC
 
 Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool snapshot ) {
 	TEST(true);
-	
-	if (key == LiteralStringRef("\xff\xff/status/json")){
-		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-			return getJSON(tr.getDatabase());
+
+	if (getDatabase()->apiVersionAtLeast(630)) {
+		if (specialKeys.contains(key)) {
+			TEST(true); // Special keys get
+			return getDatabase()->specialKeySpace->get(Reference<ReadYourWritesTransaction>::addRef(this), key);
 		}
-		else {
+	} else {
+		if (key == LiteralStringRef("\xff\xff/status/json")) {
+			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+				return getJSON(tr.getDatabase());
+			} else {
+				return Optional<Value>();
+			}
+		}
+
+		if (key == LiteralStringRef("\xff\xff/cluster_file_path")) {
+			try {
+				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+					Optional<Value> output = StringRef(tr.getDatabase()->getConnectionFile()->getFilename());
+					return output;
+				}
+			} catch (Error& e) {
+				return e;
+			}
 			return Optional<Value>();
 		}
-	} 
-	
-	if (key == LiteralStringRef("\xff\xff/cluster_file_path")) {
-		try {
-			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-				Optional<Value> output = StringRef(tr.getDatabase()->getConnectionFile()->getFilename());
-				return output;
-			}
-		}
-		catch (Error &e){ 
-			return e;
-		}
-		return Optional<Value>();
-	}
 
-	if (key == LiteralStringRef("\xff\xff/connection_string")){
-		try {
-			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-				Reference<ClusterConnectionFile> f = tr.getDatabase()->getConnectionFile();
-				Optional<Value> output = StringRef(f->getConnectionString().toString());
-				return output;
+		if (key == LiteralStringRef("\xff\xff/connection_string")) {
+			try {
+				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+					Reference<ClusterConnectionFile> f = tr.getDatabase()->getConnectionFile();
+					Optional<Value> output = StringRef(f->getConnectionString().toString());
+					return output;
+				}
+			} catch (Error& e) {
+				return e;
 			}
+			return Optional<Value>();
 		}
-		catch (Error &e){
-			return e;
-		}
-		return Optional<Value>();
 	}
-
-	// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
-	if (specialKeys.contains(key))
-		return getDatabase()->specialKeySpace->get(Reference<ReadYourWritesTransaction>::addRef(this), key);
 
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
@@ -1292,19 +1309,21 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	bool snapshot,
 	bool reverse )
 {
-	if (begin.getKey() == LiteralStringRef("\xff\xff/worker_interfaces")){
-		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-			return getWorkerInterfaces(tr.getDatabase()->getConnectionFile());
+	if (getDatabase()->apiVersionAtLeast(630)) {
+		if (specialKeys.contains(begin.getKey()) && end.getKey() <= specialKeys.end) {
+			TEST(true); // Special key space get range
+			return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin,
+			                                                end, limits, reverse);
 		}
-		else {
-			return Standalone<RangeResultRef>();
+	} else {
+		if (begin.getKey() == LiteralStringRef("\xff\xff/worker_interfaces")) {
+			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+				return getWorkerInterfaces(tr.getDatabase()->getConnectionFile());
+			} else {
+				return Standalone<RangeResultRef>();
+			}
 		}
 	}
-
-	// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
-	if (specialKeys.contains(begin.getKey()) && end.getKey() <= specialKeys.end)
-		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin, end,
-		                                                limits, reverse);
 
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
@@ -1558,6 +1577,7 @@ void ReadYourWritesTransaction::getWriteConflicts( KeyRangeMap<bool> *result ) {
 }
 
 Standalone<RangeResultRef> ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRangeRef kr) {
+	TEST(true); // Special keys read conflict range
 	ASSERT(readConflictRangeKeysRange.contains(kr));
 	ASSERT(!tr.options.checkWritesEnabled)
 	Standalone<RangeResultRef> result;
@@ -1598,6 +1618,7 @@ Standalone<RangeResultRef> ReadYourWritesTransaction::getReadConflictRangeInters
 }
 
 Standalone<RangeResultRef> ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRangeRef kr) {
+	TEST(true); // Special keys write conflict range
 	ASSERT(writeConflictRangeKeysRange.contains(kr));
 	Standalone<RangeResultRef> result;
 
@@ -1906,7 +1927,7 @@ Future<Void> ReadYourWritesTransaction::commit() {
 
 	if( resetPromise.isSet() )
 		return resetPromise.getFuture().getError();
-	
+
 	return RYWImpl::commit( this );
 }
 
@@ -1995,6 +2016,9 @@ void ReadYourWritesTransaction::setOptionImpl( FDBTransactionOptions::Option opt
 
 			options.disableUsedDuringCommitProtection = true;
 			break;
+		case FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED:
+			validateOptionValue(value, false);
+			options.specialKeySpaceRelaxed = true;
 		default:
 			break;
 	}

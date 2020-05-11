@@ -393,7 +393,7 @@ std::string format_backtrace(void **addresses, int numAddresses);
 // Avoid in production code: not atomic, not fast, not reliable in all environments
 int eraseDirectoryRecursive(std::string const& directory);
 
-bool isSse42Supported();
+bool isHwCrcSupported();
 
 } // namespace platform
 
@@ -408,20 +408,37 @@ dev_t getDeviceId(std::string path);
 #endif
 
 #ifdef __linux__
+#ifndef __aarch64__
 #include <x86intrin.h>
+#else
+#include "sse2neon.h"
+#endif
 #include <features.h>
 #include <sys/stat.h>
 #endif
 
+#if defined(__APPLE__)
 // Version of CLang bundled with XCode doesn't yet include ia32intrin.h.
-#ifdef __APPLE__
 #if !(__has_builtin(__rdtsc))
-inline static uint64_t __rdtsc() {
+inline static uint64_t timestampCounter() {
 	uint64_t lo, hi;
 	asm( "rdtsc" : "=a" (lo), "=d" (hi) );
 	return( lo | (hi << 32) );
 }
+#else
+#define timestampCounter() __rdtsc()
 #endif
+#elif defined(__aarch64__)
+// aarch64 does not have rdtsc counter
+// Use cntvct_el0 virtual counter instead
+inline static uint64_t timestampCounter() {
+    uint64_t timer;
+    asm volatile("mrs %0, cntvct_el0" : "=r"(timer));
+    return timer;
+}
+#else
+// all other platforms including Linux x86_64
+#define timestampCounter() __rdtsc()
 #endif
 
 #ifdef __FreeBSD__
@@ -445,7 +462,9 @@ inline static int64_t interlockedExchangeAdd64(volatile int64_t *a, int64_t b) {
 inline static int64_t interlockedExchange64(volatile int64_t *a, int64_t b) { return _InterlockedExchange64(a, b); }
 inline static int64_t interlockedOr64(volatile int64_t *a, int64_t b) { return _InterlockedOr64(a, b); }
 #elif defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8)
+#ifndef __aarch64__
 #include <xmmintrin.h>
+#endif
 inline static int32_t interlockedIncrement(volatile int32_t *a) { return __sync_add_and_fetch(a, 1); }
 inline static int64_t interlockedIncrement64(volatile int64_t *a) { return __sync_add_and_fetch(a, 1); }
 inline static int32_t interlockedDecrement(volatile int32_t *a) { return __sync_add_and_fetch(a, -1); }
@@ -672,6 +691,36 @@ inline void fdb_probe_actor_create(const char* name, unsigned long id) {}
 inline void fdb_probe_actor_destroy(const char* name, unsigned long id) {}
 inline void fdb_probe_actor_enter(const char* name, unsigned long id, int index) {}
 inline void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {}
+#endif
+
+// CRC32C
+#ifdef __aarch64__
+// aarch64
+#include <inttypes.h>
+static inline uint32_t hwCrc32cU8(unsigned int crc, unsigned char v) {
+    uint32_t ret;
+    asm volatile("crc32cb %w[r], %w[c], %w[v]":[r]"=r"(ret):[c]"r"(crc),[v]"r"(v));
+    return ret;
+}
+static inline uint32_t hwCrc32cU32(unsigned int crc, unsigned int v) {
+    uint32_t ret;
+    asm volatile("crc32cw %w[r], %w[c], %w[v]":[r]"=r"(ret):[c]"r"(crc),[v]"r"(v));
+    return ret;
+}
+static inline uint64_t hwCrc32cU64(uint64_t crc, uint64_t v) {
+    uint64_t ret;
+    asm volatile("crc32cx %w[r], %w[c], %x[v]":[r]"=r"(ret):[c]"r"(crc),[v]"r"(v));
+    return ret;
+}
+#else
+// Intel
+#define hwCrc32cU8(c, v) _mm_crc32_u8(c, v)
+#define hwCrc32cU32(c, v) _mm_crc32_u32(c, v)
+#define hwCrc32cU64(c, v) _mm_crc32_u64(c, v)
+#endif
+
+#ifdef __aarch64__
+#define _MM_HINT_T0 0 /* dummy -- not used */
 #endif
 
 #endif /* FLOW_PLATFORM_H */

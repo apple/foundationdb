@@ -501,7 +501,6 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 	// Register a fake master proxy (to be provided right here) to make ourselves available to clients
 	parent->provisionalProxies = vector<MasterProxyInterface>(1);
 	parent->provisionalProxies[0].provisional = true;
-	parent->provisionalProxies[0].locality = parent->myInterface.locality;
 	parent->provisionalProxies[0].initEndpoints();
 	state Future<Void> waitFailure = waitFailureServer(parent->provisionalProxies[0].waitFailure.getFuture());
 	parent->registrationTrigger.trigger();

@@ -14,6 +14,11 @@ For more details about API versions, see :ref:`api-versions`.
 API version 630
 ===============
 
+General
+-------
+
+* In previous api versions, a get range starting at ``\xff\xff/worker_interfaces`` ignored its arguments and returned keys outside the range requested. In api version 630, you can get similar behavior by reading from ``\xff\xff/worker_interfaces/`` to ``\xff\xff/worker_interfaces0`` and stripping the prefix ``\xff\xff/worker_interfaces/`` from each key in the result.
+
 C bindings
 ----------
 
