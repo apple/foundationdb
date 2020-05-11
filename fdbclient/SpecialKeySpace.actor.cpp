@@ -27,7 +27,7 @@
 // If the corresponding key is not in this special key range, it will move as far as possible to adjust the offset to 1
 // It does have overhead here since we query all keys twice in the worst case.
 // However, moving the KeySelector while handling other parameters like limits makes the code much more complex and hard
-// to maintain Separate each part to make the code easy to understand and more compact
+// to maintain; Thus, separate each part to make the code easy to understand and more compact
 ACTOR Future<Void> SpecialKeyRangeBaseImpl::normalizeKeySelectorActor(const SpecialKeyRangeBaseImpl* pkrImpl,
                                                                       Reference<ReadYourWritesTransaction> ryw,
                                                                       KeySelector* ks) {
