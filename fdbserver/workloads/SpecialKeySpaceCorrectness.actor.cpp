@@ -76,37 +76,33 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();
-		if (self->clientId == 0) {
-			self->ryw = Reference(new ReadYourWritesTransaction(cx));
-			self->ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
-			self->ryw->setVersion(100);
-			self->ryw->clear(normalKeys);
-			// generate key ranges
-			for (int i = 0; i < self->rangeCount; ++i) {
-				std::string baseKey = deterministicRandom()->randomAlphaNumeric(i + 1);
-				Key startKey(baseKey + "/");
-				Key endKey(baseKey + "/\xff");
-				self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
-				self->impls.push_back(std::make_shared<SKSCTestImpl>(KeyRangeRef(startKey, endKey)));
-				// Although there are already ranges registered, the testing range will replace them
-				cx->specialKeySpace->registerKeyRange(self->keys.back(), self->impls.back().get());
-				// generate keys in each key range
-				int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
-				self->keysCount += keysInRange;
-				for (int j = 0; j < keysInRange; ++j) {
-					self->ryw->set(Key(deterministicRandom()->randomAlphaNumeric(self->keyBytes)).withPrefix(startKey),
-					               Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
-				}
+		self->ryw = Reference(new ReadYourWritesTransaction(cx));
+		self->ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
+		self->ryw->setVersion(100);
+		self->ryw->clear(normalKeys);
+		// generate key ranges
+		for (int i = 0; i < self->rangeCount; ++i) {
+			std::string baseKey = deterministicRandom()->randomAlphaNumeric(i + 1);
+			Key startKey(baseKey + "/");
+			Key endKey(baseKey + "/\xff");
+			self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
+			self->impls.push_back(std::make_shared<SKSCTestImpl>(KeyRangeRef(startKey, endKey)));
+			// Although there are already ranges registered, the testing range will replace them
+			cx->specialKeySpace->registerKeyRange(self->keys.back(), self->impls.back().get());
+			// generate keys in each key range
+			int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
+			self->keysCount += keysInRange;
+			for (int j = 0; j < keysInRange; ++j) {
+				self->ryw->set(Key(deterministicRandom()->randomAlphaNumeric(self->keyBytes)).withPrefix(startKey),
+								Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
 			}
 		}
 		return Void();
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
-		if (self->clientId == 0) {
-			wait(timeout(self->getRangeCallActor(cx, self) && testConflictRanges(cx, /*read*/ true, self) &&
-			                 testConflictRanges(cx, /*read*/ false, self),
-			             self->testDuration, Void()));
-		}
+		wait(timeout(self->getRangeCallActor(cx, self) && testConflictRanges(cx, /*read*/ true, self) &&
+							testConflictRanges(cx, /*read*/ false, self),
+						self->testDuration, Void()));
 		return Void();
 	}
 
