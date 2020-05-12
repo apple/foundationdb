@@ -633,32 +633,32 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 	state Future<Void> watch4RestoreRequest;
 	state ReadYourWritesTransaction tr(cx);
 
-	// wait for the restoreRequestTriggerKey to be set by the client/test workload
+	// restoreRequestTriggerKey should already been set
 	loop {
 		try {
 			TraceEvent("FastRestoreMasterPhaseCollectRestoreRequestsWait");
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			// Sanity check
 			Optional<Value> numRequests = wait(tr.get(restoreRequestTriggerKey));
-			if (!numRequests.present()) {
-				watch4RestoreRequest = tr.watch(restoreRequestTriggerKey);
-				wait(tr.commit());
-				wait(watch4RestoreRequest);
-			} else {
-				Standalone<RangeResultRef> restoreRequestValues =
-				    wait(tr.getRange(restoreRequestKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!restoreRequestValues.more);
-				if (restoreRequestValues.size()) {
-					for (auto& it : restoreRequestValues) {
-						restoreRequests.push_back(restoreRequests.arena(), decodeRestoreRequestValue(it.value));
-						TraceEvent("FastRestoreMasterPhaseCollectRestoreRequests")
-						    .detail("RestoreRequest", restoreRequests.back().toString());
-					}
-				} else {
-					TraceEvent(SevWarnAlways, "FastRestoreMasterPhaseCollectRestoreRequestsEmptyRequests");
+			ASSERT(numRequests.present());
+
+			Standalone<RangeResultRef> restoreRequestValues =
+			    wait(tr.getRange(restoreRequestKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!restoreRequestValues.more);
+			if (restoreRequestValues.size()) {
+				for (auto& it : restoreRequestValues) {
+					restoreRequests.push_back(restoreRequests.arena(), decodeRestoreRequestValue(it.value));
+					TraceEvent("FastRestoreMasterPhaseCollectRestoreRequests")
+					    .detail("RestoreRequest", restoreRequests.back().toString());
 				}
 				break;
+			} else {
+				// TODO: Change this to SevError
+				TraceEvent(SevWarnAlways, "FastRestoreMasterPhaseCollectRestoreRequestsEmptyRequests");
+				wait(delay(5.0));
 			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
