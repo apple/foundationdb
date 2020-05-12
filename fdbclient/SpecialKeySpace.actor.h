@@ -75,7 +75,7 @@ public:
 	}
 	KeyRangeMap<SpecialKeyRangeBaseImpl*>& getImpls() { return impls; }
 	KeyRangeRef getKeyRange() const { return range; }
-	std::map<SpecialKeyRangeBaseImpl*, SpecialKeySpace::MODULE> getImplToModuleMap() const { return implToModule; }
+	const std::unordered_map<SpecialKeyRangeBaseImpl*, SpecialKeySpace::MODULE>& getImplToModuleMap() const { return implToModule; }
 
 private:
 	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw,
@@ -91,7 +91,7 @@ private:
 
 	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
 	KeyRange range;
-	std::map<SpecialKeyRangeBaseImpl*, SpecialKeySpace::MODULE> implToModule;
+	std::unordered_map<SpecialKeyRangeBaseImpl*, SpecialKeySpace::MODULE> implToModule;
 };
 
 // Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
