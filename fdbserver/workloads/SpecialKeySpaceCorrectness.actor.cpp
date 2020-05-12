@@ -36,7 +36,14 @@ public:
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		ASSERT(!result.more);
-		return resultFuture.getValue();
+		// To make the test more complext, instead of simply returning the k-v pairs, we reverse all the value strings
+		auto kvs = resultFuture.getValue();
+		for (int i = 0; i < kvs.size(); ++i) {
+			std::string valStr(kvs[i].value.toString());
+			std::reverse(valStr.begin(), valStr.end());
+			kvs[i].value = ValueRef(kvs.arena(), valStr);
+		}
+		return kvs;
 	}
 };
 
@@ -94,15 +101,15 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			self->keysCount += keysInRange;
 			for (int j = 0; j < keysInRange; ++j) {
 				self->ryw->set(Key(deterministicRandom()->randomAlphaNumeric(self->keyBytes)).withPrefix(startKey),
-								Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
+				               Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
 			}
 		}
 		return Void();
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		wait(timeout(self->getRangeCallActor(cx, self) && testConflictRanges(cx, /*read*/ true, self) &&
-							testConflictRanges(cx, /*read*/ false, self),
-						self->testDuration, Void()));
+		                 testConflictRanges(cx, /*read*/ false, self),
+		             self->testDuration, Void()));
 		return Void();
 	}
 
@@ -156,12 +163,22 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			return false;
 		}
 		for (int i = 0; i < res1.size(); ++i) {
-			if (res1[i] != res2[i]) {
+			if (res1[i].key != res2[i].key) {
 				TraceEvent(SevError, "TestFailure")
-				    .detail("Reason", "Elements are inconsistent")
+				    .detail("Reason", "Keys are inconsistent")
 				    .detail("Index", i)
 				    .detail("CorrectKey", printable(res1[i].key))
-				    .detail("TestKey", printable(res2[i].key))
+				    .detail("TestKey", printable(res2[i].key));
+				return false;
+			}
+			// Value strings should be reversed pairs
+			std::string valStr(res2[i].value.toString());
+			std::reverse(valStr.begin(), valStr.end());
+			Value valReversed(valStr);
+			if (res1[i].value != valReversed) {
+				TraceEvent(SevError, "TestFailure")
+				    .detail("Reason", "Values are inconsistent, CorrectValue should be the reverse of the TestValue")
+				    .detail("Index", i)
 				    .detail("CorrectValue", printable(res1[i].value))
 				    .detail("TestValue", printable(res2[i].value));
 				return false;
@@ -190,7 +207,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			KeyRangeRef randomKeyRangeRef = keys[deterministicRandom()->randomInt(0, keys.size())];
 			randomKey = deterministicRandom()->coinflip() ? randomKeyRangeRef.begin : randomKeyRangeRef.end;
 		}
-		// return Key(deterministicRandom()->randomAlphaNumeric(keyBytes)).withPrefix(prefix);
 		// covers corner cases where offset points outside the key space
 		int offset = deterministicRandom()->randomInt(-keysCount.getValue() - 1, keysCount.getValue() + 2);
 		return KeySelectorRef(randomKey, deterministicRandom()->coinflip(), offset);
