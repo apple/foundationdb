@@ -499,13 +499,14 @@ public:
 				previousBusiestTag.reset();
 			}
 
-			// TODO: report in status
-			TraceEvent("BusiestReadTag", id)
-				.detail("Elapsed", elapsed)
-				.detail("Tag", printable(busiestTag))
-				.detail("TagCount", busiestTagCount)
-				.detail("TotalSampledCount", intervalTotalSampledCount)
-				.detail("Reported", previousBusiestTag.present());
+			if(intervalStart > 0) {
+				TraceEvent("BusiestReadTag", id)
+					.detail("Elapsed", elapsed)
+					.detail("Tag", printable(busiestTag))
+					.detail("TagCount", busiestTagCount)
+					.detail("TotalSampledCount", intervalTotalSampledCount)
+					.detail("Reported", previousBusiestTag.present())
+			}
 
 			intervalCounts.clear();
 			intervalTotalSampledCount = 0;
