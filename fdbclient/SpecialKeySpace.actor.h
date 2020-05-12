@@ -41,8 +41,6 @@ public:
 
 	explicit SpecialKeyRangeBaseImpl(KeyRangeRef kr) : range(kr) {}
 	KeyRangeRef getKeyRange() const { return range; }
-	ACTOR Future<Void> normalizeKeySelectorActor(const SpecialKeyRangeBaseImpl* pkrImpl,
-	                                             Reference<ReadYourWritesTransaction> ryw, KeySelector* ks);
 
 	virtual ~SpecialKeyRangeBaseImpl() {}
 
@@ -71,17 +69,20 @@ public:
 		ASSERT(impls.rangeContaining(kr.begin) == impls.rangeContaining(kr.end) && impls[kr.begin] == nullptr);
 		impls.insert(kr, impl);
 	}
+	KeyRangeMap<SpecialKeyRangeBaseImpl*>& getImpls() { return impls; }
+	KeyRangeRef getKeyRange() const { return range; }
 
 private:
-	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw, KeyRef key);
+	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw,
+	                                              KeyRef key);
 
 	ACTOR static Future<Standalone<RangeResultRef>> checkModuleFound(SpecialKeySpace* sks,
-	                                                          Reference<ReadYourWritesTransaction> ryw,
-	                                                          KeySelector begin, KeySelector end, GetRangeLimits limits,
-	                                                          bool reverse);
-	ACTOR static Future<std::pair<Standalone<RangeResultRef>, Optional<SpecialKeyRangeBaseImpl*>>> getRangeAggregationActor(
-	    SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw, KeySelector begin, KeySelector end,
-	    GetRangeLimits limits, bool reverse);
+	                                                                 Reference<ReadYourWritesTransaction> ryw,
+	                                                                 KeySelector begin, KeySelector end,
+	                                                                 GetRangeLimits limits, bool reverse);
+	ACTOR static Future<std::pair<Standalone<RangeResultRef>, Optional<SpecialKeyRangeBaseImpl*>>>
+	getRangeAggregationActor(SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw, KeySelector begin,
+	                         KeySelector end, GetRangeLimits limits, bool reverse);
 
 	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
 	KeyRange range;
