@@ -563,7 +563,6 @@ Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInf
 ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo, MonitorLeaderInfo info ) {
 	state ClientCoordinators coordinators( info.intermediateConnFile );
 	state AsyncTrigger nomineeChange;
-	state AsyncTrigger connToCoordinatorFailed;
 	state std::vector<Optional<LeaderInfo>> nominees;
 	state Future<Void> allActors;
 
@@ -607,13 +606,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 
 			outSerializedLeaderInfo->set( leader.get().first.serializedInfo );
 		}
-		choose {
-			when(wait(nomineeChange.onTrigger() || allActors)) {}
-			when(wait(connToCoordinatorFailed.onTrigger())) {
-				info.intermediateConnFile->getMutableConnectionString().resetToUnresolved();
-				return info;
-			}
-		}
+		wait(nomineeChange.onTrigger() || allActors);
 	}
 }
 
