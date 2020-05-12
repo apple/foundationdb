@@ -407,8 +407,6 @@ public:
 	Reference<AsyncVar<ServerDBInfo>> db;
 	Database cx;
 	ActorCollection actors;
-	Future<Void> loadBalanceDelay;
-	int sharedDelayCount;
 
 	StorageServerMetrics metrics;
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
@@ -604,7 +602,7 @@ public:
 			rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
 			durableInProgress(Void()),
 			versionLag(0), primaryLocality(tagLocalityInvalid),
-			updateEagerReads(0), sharedDelayCount(0), loadBalanceDelay(Void()),
+			updateEagerReads(0),
 			shardChangeCounter(0),
 			fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES),
 			shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0),
@@ -625,13 +623,6 @@ public:
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 	}
 
-	Future<Void> getLoadBalanceDelay() {
-		if(loadBalanceDelay.isReady() || ++sharedDelayCount > SERVER_KNOBS->MAX_SHARED_LOAD_BALANCE_DELAY) {
-			sharedDelayCount = 0;
-			loadBalanceDelay = delay(0, TaskPriority::DefaultEndpoint);
-		}
-		return loadBalanceDelay;
-	}
 	//~StorageServer() { fclose(log); }
 
 	// Puts the given shard into shards.  The caller is responsible for adding shards
@@ -926,7 +917,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
-		wait( data->getLoadBalanceDelay() );
+		wait( delay(0, TaskPriority::DefaultEndpoint) );
 
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
@@ -1463,7 +1454,7 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 	// 	// Placeholder for up-prioritizing fetches for important requests
 	// 	taskType = TaskPriority::DefaultDelay;
 	} else {
-		wait( data->getLoadBalanceDelay() );
+		wait( delay(0, TaskPriority::DefaultEndpoint) );
 	}
 	
 	try {
@@ -1594,7 +1585,7 @@ ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req ) {
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait( data->getLoadBalanceDelay() );
+	wait( delay(0, TaskPriority::DefaultEndpoint) );
 
 	try {
 		state Version version = wait( waitForVersion( data, req.version ) );
