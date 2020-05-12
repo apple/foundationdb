@@ -99,9 +99,9 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, Reference<Rea
 	    sks->getImpls().rangeContaining(ks->getKey());
 	while ((ks->offset < 1 && iter != sks->getImpls().ranges().begin()) ||
 	       (ks->offset > 1 && iter != sks->getImpls().ranges().end())) {
-		onModuleRead(ryw, sks->getImplToModuleMap().at(iter->value()), *lastModuleRead);
 		if (iter->value() != nullptr) {
 			wait(moveKeySelectorOverRangeActor(iter->value(), ryw, ks));
+			onModuleRead(ryw, sks->getImplToModuleMap().at(iter->value()), *lastModuleRead);
 		}
 		ks->offset < 1 ? --iter : ++iter;
 	}
@@ -172,8 +172,8 @@ SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks, Reference<ReadYo
 	if (reverse) {
 		while (iter != ranges.begin()) {
 			--iter;
-			onModuleRead(ryw, sks->getImplToModuleMap().at(iter->value()), lastModuleRead);
 			if (iter->value() == nullptr) continue;
+			onModuleRead(ryw, sks->getImplToModuleMap().at(iter->value()), lastModuleRead);
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
@@ -195,8 +195,8 @@ SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks, Reference<ReadYo
 		}
 	} else {
 		for (iter = ranges.begin(); iter != ranges.end(); ++iter) {
-			onModuleRead(ryw, sks->getImplToModuleMap().at(iter->value()), lastModuleRead);
 			if (iter->value() == nullptr) continue;
+			onModuleRead(ryw, sks->getImplToModuleMap().at(iter->value()), lastModuleRead);
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
