@@ -50,6 +50,8 @@ protected:
 
 class SpecialKeySpace {
 public:
+	enum MODULE { TRANSACTION, WORKERINTERFACE, STATUSJSON, CLUSTERFILEPATH, CONNECTIONSTRING, TESTONLY, NOTEXIST };
+
 	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key);
 
 	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeySelector begin,
@@ -60,7 +62,7 @@ public:
 		impls = KeyRangeMap<SpecialKeyRangeBaseImpl*>(nullptr, spaceEndKey);
 		range = KeyRangeRef(spaceStartKey, spaceEndKey);
 	}
-	void registerKeyRange(const KeyRangeRef& kr, SpecialKeyRangeBaseImpl* impl) {
+	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeBaseImpl* impl) {
 		// range check
 		// TODO: add range check not to be replaced by overlapped ones
 		ASSERT(kr.begin >= range.begin && kr.end <= range.end);
@@ -68,9 +70,12 @@ public:
 		// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
 		ASSERT(impls.rangeContaining(kr.begin) == impls.rangeContaining(kr.end) && impls[kr.begin] == nullptr);
 		impls.insert(kr, impl);
+		// Set module for the range
+		implToModule[impl] = module;
 	}
 	KeyRangeMap<SpecialKeyRangeBaseImpl*>& getImpls() { return impls; }
 	KeyRangeRef getKeyRange() const { return range; }
+	std::map<SpecialKeyRangeBaseImpl*, SpecialKeySpace::MODULE> getImplToModuleMap() const { return implToModule; }
 
 private:
 	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw,
@@ -80,12 +85,13 @@ private:
 	                                                                 Reference<ReadYourWritesTransaction> ryw,
 	                                                                 KeySelector begin, KeySelector end,
 	                                                                 GetRangeLimits limits, bool reverse);
-	ACTOR static Future<std::pair<Standalone<RangeResultRef>, Optional<SpecialKeyRangeBaseImpl*>>>
+	ACTOR static Future<std::pair<Standalone<RangeResultRef>, Optional<SpecialKeySpace::MODULE>>>
 	getRangeAggregationActor(SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw, KeySelector begin,
 	                         KeySelector end, GetRangeLimits limits, bool reverse);
 
 	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
 	KeyRange range;
+	std::map<SpecialKeyRangeBaseImpl*, SpecialKeySpace::MODULE> implToModule;
 };
 
 // Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",

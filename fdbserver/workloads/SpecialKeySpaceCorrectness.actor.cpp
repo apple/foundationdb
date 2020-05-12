@@ -95,7 +95,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
 			self->impls.push_back(std::make_shared<SKSCTestImpl>(KeyRangeRef(startKey, endKey)));
 			// Although there are already ranges registered, the testing range will replace them
-			cx->specialKeySpace->registerKeyRange(self->keys.back(), self->impls.back().get());
+			cx->specialKeySpace->registerKeyRange(SpecialKeySpace::TESTONLY, self->keys.back(),
+			                                      self->impls.back().get());
 			// generate keys in each key range
 			int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
 			self->keysCount += keysInRange;
