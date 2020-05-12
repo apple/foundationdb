@@ -4899,7 +4899,7 @@ public:
 
 #include "fdbserver/art_impl.h"
 
-RedwoodRecordRef VersionedBTree::dbBegin(StringRef(), 0);
+RedwoodRecordRef VersionedBTree::dbBegin(LiteralStringRef(""));
 RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"));
 VersionedBTree::Counts VersionedBTree::counts;
 
