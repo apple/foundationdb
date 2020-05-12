@@ -467,6 +467,29 @@ struct RolesInfo {
 			obj["data_lag"] = getLagObject(versionLag);
 			obj["durability_lag"] = getLagObject(version - durableVersion);
 
+			TraceEventFields const& busiestReadTag = metrics.at("BusiestReadTag");
+			if(busiestReadTag.size()) {
+				int64_t tagCost = busiestReadTag.getInt64("TagCost");
+
+				if(tagCost > 0) {
+					JsonBuilderObject busiestReadTagObj;
+
+					int64_t totalSampledCost = busiestReadTag.getInt64("TotalSampledCost");
+					ASSERT(totalSampledCost > 0);
+
+					busiestReadTagObj["tag"] = busiestReadTag.getValue("Tag");
+					busiestReadTagObj["fractional_cost"] = (double)tagCost / totalSampledCost;
+
+					double elapsed = busiestReadTag.getDouble("Elapsed");
+					if(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
+						JsonBuilderObject estimatedCostObj;
+						estimatedCostObj["hz"] = tagCost / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE / elapsed;
+						busiestReadTagObj["estimated_cost"] = estimatedCostObj;
+					}
+
+					obj["busiest_read_tag"] = busiestReadTagObj;
+				}
+			}
 		} catch (Error& e) {
 			if(e.code() != error_code_attribute_not_found)
 				throw e;
@@ -1526,7 +1549,7 @@ static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(vector<iface>
 ACTOR static Future<vector<std::pair<StorageServerInterface, EventMap>>> getStorageServersAndMetrics(Database cx, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	vector<StorageServerInterface> servers = wait(timeoutError(getStorageServers(cx, true), 5.0));
 	vector<std::pair<StorageServerInterface, EventMap>> results = wait(
-	    getServerMetrics(servers, address_workers, std::vector<std::string>{ "StorageMetrics", "ReadLatencyMetrics" }));
+	    getServerMetrics(servers, address_workers, std::vector<std::string>{ "StorageMetrics", "ReadLatencyMetrics", "BusiestReadTag" }));
 
 	return results;
 }
