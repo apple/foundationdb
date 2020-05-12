@@ -323,6 +323,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    .detail("End", end.toString())
 					    .detail("Ryw", ryw);
 					had_error = true;
+					++self->wrongResults;
 				}
 				++correct_iter;
 				++test_iter;
@@ -338,6 +339,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("Ryw", ryw);
 				++correct_iter;
 				had_error = true;
+				++self->wrongResults;
 			}
 			while (test_iter != testResultFuture.get().end()) {
 				TraceEvent(SevError, "TestFailure")
@@ -350,6 +352,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("Ryw", ryw);
 				++test_iter;
 				had_error = true;
+				++self->wrongResults;
 			}
 			if (had_error) break;
 		}
