@@ -50,7 +50,14 @@ protected:
 
 class SpecialKeySpace {
 public:
-	enum MODULE { TRANSACTION, WORKERINTERFACE, STATUSJSON, CLUSTERFILEPATH, CONNECTIONSTRING, TESTONLY, NOTEXIST };
+	enum class MODULE {
+		TESTONLY, // only used by tests
+		TRANSACTION,
+		WORKERINTERFACE,
+		STATUSJSON,
+		CLUSTERFILEPATH,
+		CONNECTIONSTRING
+	};
 
 	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key);
 
@@ -75,7 +82,9 @@ public:
 	}
 	KeyRangeMap<SpecialKeyRangeBaseImpl*>& getImpls() { return impls; }
 	KeyRangeRef getKeyRange() const { return range; }
-	const std::unordered_map<SpecialKeyRangeBaseImpl*, SpecialKeySpace::MODULE>& getImplToModuleMap() const { return implToModule; }
+	const std::unordered_map<SpecialKeyRangeBaseImpl*, SpecialKeySpace::MODULE>& getImplToModuleMap() const {
+		return implToModule;
+	}
 
 private:
 	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw,

@@ -132,8 +132,8 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::checkModuleFound(Speci
 	std::pair<Standalone<RangeResultRef>, Optional<SpecialKeySpace::MODULE>> result =
 	    wait(SpecialKeySpace::getRangeAggregationActor(sks, ryw, begin, end, limits, reverse));
 	if (ryw && !ryw->specialKeySpaceRelaxed()) {
-		auto module = result.second.orDefault(SpecialKeySpace::NOTEXIST);
-		if (module == SpecialKeySpace::NOTEXIST) {
+		auto module = result.second;
+		if (!module.present()) {
 			throw special_keys_no_module_found();
 		}
 	}
@@ -333,9 +333,9 @@ TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	SpecialKeyRangeTestImpl pkr1(KeyRangeRef(LiteralStringRef("/cat/"), LiteralStringRef("/cat/\xff")), "small", 10);
 	SpecialKeyRangeTestImpl pkr2(KeyRangeRef(LiteralStringRef("/dog/"), LiteralStringRef("/dog/\xff")), "medium", 100);
 	SpecialKeyRangeTestImpl pkr3(KeyRangeRef(LiteralStringRef("/pig/"), LiteralStringRef("/pig/\xff")), "large", 1000);
-	sks.registerKeyRange(SpecialKeySpace::TESTONLY, pkr1.getKeyRange(), &pkr1);
-	sks.registerKeyRange(SpecialKeySpace::TESTONLY, pkr2.getKeyRange(), &pkr2);
-	sks.registerKeyRange(SpecialKeySpace::TESTONLY, pkr3.getKeyRange(), &pkr3);
+	sks.registerKeyRange(SpecialKeySpace::MODULE::TESTONLY, pkr1.getKeyRange(), &pkr1);
+	sks.registerKeyRange(SpecialKeySpace::MODULE::TESTONLY, pkr2.getKeyRange(), &pkr2);
+	sks.registerKeyRange(SpecialKeySpace::MODULE::TESTONLY, pkr3.getKeyRange(), &pkr3);
 	auto nullRef = Reference<ReadYourWritesTransaction>();
 	// get
 	{

@@ -603,12 +603,12 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	if (apiVersionAtLeast(630)) {
-		registerSpecialKeySpaceModule(SpecialKeySpace::TRANSACTION, std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
-		registerSpecialKeySpaceModule(SpecialKeySpace::TRANSACTION, std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
-		registerSpecialKeySpaceModule(SpecialKeySpace::TRANSACTION, std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
-		registerSpecialKeySpaceModule(SpecialKeySpace::WORKERINTERFACE, std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::WORKERINTERFACE, std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
 		    LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
-		registerSpecialKeySpaceModule(SpecialKeySpace::STATUSJSON, std::make_unique<SingleSpecialKeyImpl>(
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::STATUSJSON, std::make_unique<SingleSpecialKeyImpl>(
 		    LiteralStringRef("\xff\xff/status/json"),
 		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
 			    if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
@@ -617,7 +617,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 				    return Optional<Value>();
 			    }
 		    }));
-		registerSpecialKeySpaceModule(SpecialKeySpace::CLUSTERFILEPATH, std::make_unique<SingleSpecialKeyImpl>(
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::CLUSTERFILEPATH, std::make_unique<SingleSpecialKeyImpl>(
 		    LiteralStringRef("\xff\xff/cluster_file_path"),
 		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
 			    try {
@@ -631,7 +631,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 			    return Optional<Value>();
 		    }));
 
-		registerSpecialKeySpaceModule(SpecialKeySpace::CONNECTIONSTRING, std::make_unique<SingleSpecialKeyImpl>(
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::CONNECTIONSTRING, std::make_unique<SingleSpecialKeyImpl>(
 		    LiteralStringRef("\xff\xff/connection_string"),
 		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
 			    try {
