@@ -133,9 +133,9 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 				tr2.setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
 				// If READ_YOUR_WRITES_DISABLE set, it behaves like native transaction object
 				// where overlapped conflict ranges are not merged.
-				if (deterministicRandom()->random01() < 0.5)
+				if (deterministicRandom()->coinflip())
 					tr1.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-				if (deterministicRandom()->random01() < 0.5)
+				if (deterministicRandom()->coinflip())
 					tr2.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 				// We have the two tx with same grv, then commit the first
 				// If the second one is not able to commit due to conflicts, verify the returned conflicting keys
