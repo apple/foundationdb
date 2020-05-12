@@ -436,7 +436,13 @@ struct StorageServerMetrics {
 		IndexedSet<Key, int64_t>::iterator endKey =
 		    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + baseChunkSize);
 		while (endKey != byteSample.sample.end()) {
-			if (*endKey > shard.end) endKey = byteSample.sample.lower_bound(shard.end);
+			if (*endKey > shard.end) {
+				endKey = byteSample.sample.lower_bound(shard.end);
+				if (*endKey == beginKey) {
+					// No need to increment endKey since otherwise it would stuck here forever.
+					break;
+				}
+			}
 			if (*endKey == beginKey) {
 				++endKey;
 				continue;
