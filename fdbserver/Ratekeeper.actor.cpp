@@ -420,7 +420,12 @@ public:
 	}
 
 	int64_t manualThrottleCount() const {
-		return autoThrottledTags.size();
+		int64_t count = 0;
+		for(auto itr = manualThrottledTags.begin(); itr != manualThrottledTags.end(); ++itr) {
+			count += itr->second.size();
+		}
+
+		return count;
 	}
 
 	TransactionTagMap<RkTagThrottleData> autoThrottledTags;
