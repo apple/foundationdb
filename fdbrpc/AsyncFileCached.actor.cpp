@@ -109,13 +109,12 @@ Future<Void> AsyncFileCached::read_write_impl(AsyncFileCached* self,
 
 		int bytesInPage = std::min(self->pageCache->pageSize - offsetInPage, remaining);
 
-		auto w = [&]() {
-			if constexpr (writing) {
-				return p->second->write(data, bytesInPage, offsetInPage);
-			} else {
-				return p->second->read(data, bytesInPage, offsetInPage);
-			}
-		}();
+		Future<Void> w;
+		if constexpr (writing) {
+			w = p->second->write(data, bytesInPage, offsetInPage);
+		} else {
+			w = p->second->read(data, bytesInPage, offsetInPage);
+		}
 		if (!w.isReady() || w.isError())
 			actors.push_back( w );
 
