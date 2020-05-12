@@ -28,30 +28,30 @@
 // It does have overhead here since we query all keys twice in the worst case.
 // However, moving the KeySelector while handling other parameters like limits makes the code much more complex and hard
 // to maintain; Thus, separate each part to make the code easy to understand and more compact
-ACTOR Future<Void> SpecialKeyRangeBaseImpl::normalizeKeySelectorActor(const SpecialKeyRangeBaseImpl* pkrImpl,
+ACTOR Future<Void> SpecialKeyRangeBaseImpl::normalizeKeySelectorActor(const SpecialKeyRangeBaseImpl* skrImpl,
                                                                       Reference<ReadYourWritesTransaction> ryw,
                                                                       KeySelector* ks) {
 	ASSERT(!ks->orEqual); // should be removed before calling
 	ASSERT(ks->offset != 1); // never being called if KeySelector is already normalized
 
-	state Key startKey(pkrImpl->range.begin);
-	state Key endKey(pkrImpl->range.end);
+	state Key startKey(skrImpl->range.begin);
+	state Key endKey(skrImpl->range.end);
 
 	if (ks->offset < 1) {
 		// less than the given key
-		if (pkrImpl->range.contains(ks->getKey())) endKey = keyAfter(ks->getKey());
+		if (skrImpl->range.contains(ks->getKey())) endKey = keyAfter(ks->getKey());
 	} else {
 		// greater than the given key
-		if (pkrImpl->range.contains(ks->getKey())) startKey = ks->getKey();
+		if (skrImpl->range.contains(ks->getKey())) startKey = ks->getKey();
 	}
 
 	TraceEvent(SevDebug, "NormalizeKeySelector")
 	    .detail("OriginalKey", ks->getKey())
 	    .detail("OriginalOffset", ks->offset)
-	    .detail("SpecialKeyRangeStart", pkrImpl->range.begin)
-	    .detail("SpecialKeyRangeEnd", pkrImpl->range.end);
+	    .detail("SpecialKeyRangeStart", skrImpl->range.begin)
+	    .detail("SpecialKeyRangeEnd", skrImpl->range.end);
 
-	Standalone<RangeResultRef> result = wait(pkrImpl->getRange(ryw, KeyRangeRef(startKey, endKey)));
+	Standalone<RangeResultRef> result = wait(skrImpl->getRange(ryw, KeyRangeRef(startKey, endKey)));
 	if (result.size() == 0) {
 		TraceEvent("ZeroElementsIntheRange").detail("Start", startKey).detail("End", endKey);
 		return Void();
@@ -77,8 +77,8 @@ ACTOR Future<Void> SpecialKeyRangeBaseImpl::normalizeKeySelectorActor(const Spec
 	TraceEvent(SevDebug, "NormalizeKeySelector")
 	    .detail("NormalizedKey", ks->getKey())
 	    .detail("NormalizedOffset", ks->offset)
-	    .detail("SpecialKeyRangeStart", pkrImpl->range.begin)
-	    .detail("SpecialKeyRangeEnd", pkrImpl->range.end);
+	    .detail("SpecialKeyRangeStart", skrImpl->range.begin)
+	    .detail("SpecialKeyRangeEnd", skrImpl->range.end);
 	return Void();
 }
 
