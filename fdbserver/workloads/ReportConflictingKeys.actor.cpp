@@ -121,6 +121,14 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		} while (deterministicRandom()->random01() < addWriteConflictRangeProb);
 	}
 
+	void emptyConflictingKeysTest(Reference<ReadYourWritesTransaction> ryw) {
+		// This test is called when you want to make sure there is no conflictingKeys,
+		// which means you will get an empty result form getRange(\xff\xff/transaction/conflicting_keys/, \xff\xff/transaction/conflicting_keys0)
+		auto resultFuture = ryw->getRange(conflictingKeysRange, CLIENT_KNOBS->TOO_MANY);
+		auto result = resultFuture.get();
+		ASSERT(!result.more && result.size() == 0);
+	}
+
 	ACTOR Future<Void> conflictingClient(Database cx, ReportConflictingKeysWorkload* self) {
 
 		state ReadYourWritesTransaction tr1(cx);
@@ -130,6 +138,11 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 
 		loop {
 			try {
+				// set the flag for empty key range testing
+				tr1.setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
+				// tr1 should never have conflicting keys, the result should always be empty
+				self->emptyConflictingKeysTest(Reference<ReadYourWritesTransaction>::addRef(&tr1));
+
 				tr2.setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
 				// If READ_YOUR_WRITES_DISABLE set, it behaves like native transaction object
 				// where overlapped conflict ranges are not merged.
@@ -147,6 +160,8 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 				++self->commits;
 				wait(tr1.commit());
 				++self->xacts;
+				// tr1 should never have conflicting keys, test again after the commit
+				self->emptyConflictingKeysTest(Reference<ReadYourWritesTransaction>::addRef(&tr1));
 
 				state bool foundConflict = false;
 				try {
