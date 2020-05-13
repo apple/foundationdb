@@ -405,7 +405,8 @@ struct LogFileWriter {
 
 	// Adds a new mutation to an interal buffer and writes out when encountering
 	// a new commitVersion or exceeding the block size.
-	ACTOR static Future<Void> addMutation(LogFileWriter* self, Version commitVersion, MutationListRef mutations) {
+	ACTOR static Future<Void> addMutation(LogFileWriter* self, Version commitVersion,
+	                                      VectorRef<MutationRef> mutations) {
 		state Standalone<StringRef> value = BinaryWriter::toValue(mutations, IncludeVersion());
 
 		state int part = 0;
@@ -447,16 +448,16 @@ ACTOR Future<Void> convert(ConvertParams params) {
 	state LogFileWriter logFile(outFile, blockSize);
 	std::cout << "Output file: " << outFile->getFileName() << "\n";
 
-	state MutationList list;
+	state VectorRef<MutationRef> mutations;
 	state Arena arena;
 	state Version version = invalidVersion;
 	while (progress->hasMutations()) {
 		state VersionedData data = wait(progress->getNextMutation());
 
 		// emit a mutation batch to file when encounter a new version
-		if (list.totalSize() > 0 && version != data.version.version) {
-			wait(LogFileWriter::addMutation(&logFile, version, list));
-			list = MutationList();
+		if (mutations.size() > 0 && version != data.version.version) {
+			wait(LogFileWriter::addMutation(&logFile, version, mutations));
+			mutations = VectorRef<MutationRef>{};
 			arena = Arena();
 		}
 
@@ -464,11 +465,11 @@ ACTOR Future<Void> convert(ConvertParams params) {
 		MutationRef m;
 		rd >> m;
 		std::cout << data.version.toString() << " m = " << m.toString() << "\n";
-		list.push_back_deep(arena, m);
+		mutations.push_back_deep(arena, m);
 		version = data.version.version;
 	}
-	if (list.totalSize() > 0) {
-		wait(LogFileWriter::addMutation(&logFile, version, list));
+	if (mutations.size() > 0) {
+		wait(LogFileWriter::addMutation(&logFile, version, mutations));
 	}
 
 	wait(outFile->finish());

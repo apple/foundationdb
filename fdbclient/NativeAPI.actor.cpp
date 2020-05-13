@@ -199,17 +199,6 @@ void validateOptionValue(Optional<StringRef> value, bool shouldBePresent) {
 		throw invalid_option_value();
 }
 
-void dumpMutations( const MutationListRef& mutations ) {
-	for(auto m=mutations.begin(); m; ++m) {
-		switch (m->type) {
-			case MutationRef::SetValue: printf("  '%s' := '%s'\n", printable(m->param1).c_str(), printable(m->param2).c_str()); break;
-			case MutationRef::AddValue: printf("  '%s' += '%s'", printable(m->param1).c_str(), printable(m->param2).c_str()); break;
-			case MutationRef::ClearRange: printf("  Clear ['%s','%s')\n", printable(m->param1).c_str(), printable(m->param2).c_str()); break;
-			default: printf("  Unknown mutation %d('%s','%s')\n", m->type, printable(m->param1).c_str(), printable(m->param2).c_str()); break;
-		}
-	}
-}
-
 template <> void addref( DatabaseContext* ptr ) { ptr->addref(); }
 template <> void delref( DatabaseContext* ptr ) { ptr->delref(); }
 
