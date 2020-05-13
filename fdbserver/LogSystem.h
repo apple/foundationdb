@@ -892,7 +892,7 @@ struct LogPushData : NonCopyable {
 				wr << item;
 				firstLength = wr.getLength() - firstOffset;
 				*(uint32_t*)((uint8_t*)wr.getData() + firstOffset) = firstLength - sizeof(uint32_t);
-				debugMessagesAndTags("ProxyPushLocations", invalidVersion, StringRef(((uint8_t*)wr.getData() + firstOffset), firstLength)).detail("PushLocations", msg_locations);
+				DEBUG_TAGS_AND_MESSAGE("ProxyPushLocations", invalidVersion, StringRef(((uint8_t*)wr.getData() + firstOffset), firstLength)).detail("PushLocations", msg_locations);
 				first = false;
 			} else {
 				BinaryWriter& wr = messagesWriter[loc];

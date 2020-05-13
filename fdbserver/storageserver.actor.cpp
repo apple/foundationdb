@@ -961,8 +961,8 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 			v = vv;
 		}
 
-		debugMutation("ShardGetValue", version, MutationRef(MutationRef::DebugKey, req.key, v.present()?v.get():LiteralStringRef("<null>")));
-		debugMutation("ShardGetPath", version, MutationRef(MutationRef::DebugKey, req.key, path==0?LiteralStringRef("0"):path==1?LiteralStringRef("1"):LiteralStringRef("2")));
+		DEBUG_MUTATION("ShardGetValue", version, MutationRef(MutationRef::DebugKey, req.key, v.present()?v.get():LiteralStringRef("<null>")));
+		DEBUG_MUTATION("ShardGetPath", version, MutationRef(MutationRef::DebugKey, req.key, path==0?LiteralStringRef("0"):path==1?LiteralStringRef("1"):LiteralStringRef("2")));
 
 		/*
 		StorageMetrics m;
@@ -1036,7 +1036,7 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 					throw reply.error.get();
 				}
 
-				debugMutation("ShardWatchValue", latest, MutationRef(MutationRef::DebugKey, req.key, reply.value.present() ? StringRef( reply.value.get() ) : LiteralStringRef("<null>") ) );
+				DEBUG_MUTATION("ShardWatchValue", latest, MutationRef(MutationRef::DebugKey, req.key, reply.value.present() ? StringRef( reply.value.get() ) : LiteralStringRef("<null>") ) );
 
 				if( req.debugID.present() )
 					g_traceBatch.addEvent("WatchValueDebug", req.debugID.get().first(), "watchValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
@@ -2092,7 +2092,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 	wait( data->coreStarted.getFuture() && delay( 0 ) );
 
 	try {
-		debugKeyRange("fetchKeysBegin", data->version.get(), shard->keys);
+		DEBUG_KEY_RANGE("fetchKeysBegin", data->version.get(), shard->keys);
 
 		TraceEvent(SevDebug, interval.begin(), data->thisServerID)
 			.detail("KeyBegin", shard->keys.begin)
@@ -2160,8 +2160,8 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					.detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end)
 					.detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
 					.detail("Version", fetchVersion).detail("More", this_block.more);
-				debugKeyRange("fetchRange", fetchVersion, keys);
-				for(auto k = this_block.begin(); k != this_block.end(); ++k) debugMutation("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value));
+				DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys);
+				for(auto k = this_block.begin(); k != this_block.end(); ++k) DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value));
 
 				data->counters.bytesFetched += expectedSize;
 				if( fetchBlockBytes > expectedSize ) {
@@ -2308,7 +2308,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 			ASSERT( b->version >= checkv );
 			checkv = b->version;
 			for(auto& m : b->mutations)
-				debugMutation("fetchKeysFinalCommitInject", batch->changes[0].version, m);
+				DEBUG_MUTATION("fetchKeysFinalCommitInject", batch->changes[0].version, m);
 		}
 
 		shard->updates.clear();
@@ -2418,7 +2418,7 @@ void changeServerKeys( StorageServer* data, const KeyRangeRef& keys, bool nowAss
 	validate(data);
 
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
-	//debugKeyRange( nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys );
+	//DEBUG_KEY_RANGE( nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys );
 
 	bool isDifferent = false;
 	auto existingShards = data->shards.intersectingRanges(keys);
@@ -2523,7 +2523,7 @@ void changeServerKeys( StorageServer* data, const KeyRangeRef& keys, bool nowAss
 
 void rollback( StorageServer* data, Version rollbackVersion, Version nextVersion ) {
 	TEST(true); // call to shard rollback
-	debugKeyRange("Rollback", rollbackVersion, allKeys);
+	DEBUG_KEY_RANGE("Rollback", rollbackVersion, allKeys);
 
 	// We used to do a complicated dance to roll back in MVCC history.  It's much simpler, and more testable,
 	// to simply restart the storage server actor and restore from the persistent disk state, and then roll
@@ -2544,7 +2544,7 @@ void StorageServer::addMutation(Version version, MutationRef const& mutation, Ke
 		return;
 	}
 	expanded = addMutationToMutationLog(mLog, expanded);
-	debugMutation("applyMutation", version, expanded).detail("UID", thisServerID).detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
+	DEBUG_MUTATION("applyMutation", version, expanded).detail("UID", thisServerID).detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 	applyMutation( this, expanded, mLog.arena(), mutableData() );
 	//printf("\nSSUpdate: Printing versioned tree after applying mutation\n");
 	//mutableData().printTree(version);
@@ -2597,9 +2597,9 @@ public:
 				applyPrivateData( data, m );
 			}
 		} else {
-			// FIXME: enable when debugMutation is active
+			// FIXME: enable when DEBUG_MUTATION is active
 			//for(auto m = changes[c].mutations.begin(); m; ++m) {
-			//	debugMutation("SSUpdateMutation", changes[c].version, *m);
+			//	DEBUG_MUTATION("SSUpdateMutation", changes[c].version, *m);
 			//}
 
 			splitMutation(data, data->shards, m, ver);
@@ -2885,7 +2885,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 				rd >> msg;
 
 				if (ver != invalidVersion) {  // This change belongs to a version < minVersion
-					debugMutation("SSPeek", ver, msg).detail("ServerID", data->thisServerID);
+					DEBUG_MUTATION("SSPeek", ver, msg).detail("ServerID", data->thisServerID);
 					if (ver == 1) {
 						TraceEvent("SSPeekMutation", data->thisServerID);
 						// The following trace event may produce a value with special characters
@@ -2940,7 +2940,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		if(ver != invalidVersion && ver > data->version.get()) {
 			// TODO(alexmiller): Update to version tracking.
-			debugKeyRange("SSUpdate", ver, KeyRangeRef());
+			DEBUG_KEY_RANGE("SSUpdate", ver, KeyRangeRef());
 
 			data->mutableData().createNewVersion(ver);
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
@@ -3143,7 +3143,7 @@ void StorageServerDisk::writeKeyValue( KeyValueRef kv ) {
 }
 
 void StorageServerDisk::writeMutation( MutationRef mutation ) {
-	// FIXME: debugMutation(debugContext, debugVersion, *m);
+	// FIXME: DEBUG_MUTATION(debugContext, debugVersion, *m);
 	if (mutation.type == MutationRef::SetValue) {
 		storage->set( KeyValueRef(mutation.param1, mutation.param2) );
 	} else if (mutation.type == MutationRef::ClearRange) {
@@ -3154,7 +3154,7 @@ void StorageServerDisk::writeMutation( MutationRef mutation ) {
 
 void StorageServerDisk::writeMutations( MutationListRef mutations, Version debugVersion, const char* debugContext ) {
 	for(auto m = mutations.begin(); m; ++m) {
-		debugMutation(debugContext, debugVersion, *m).detail("UID", data->thisServerID);
+		DEBUG_MUTATION(debugContext, debugVersion, *m).detail("UID", data->thisServerID);
 		if (m->type == MutationRef::SetValue) {
 			storage->set( KeyValueRef(m->param1, m->param2) );
 		} else if (m->type == MutationRef::ClearRange) {
@@ -3172,7 +3172,7 @@ bool StorageServerDisk::makeVersionMutationsDurable( Version& prevStorageVersion
 		VersionUpdateRef const& v = u->second;
 		ASSERT( v.version > prevStorageVersion && v.version <= newStorageVersion );
 		// TODO(alexmiller): Update to version tracking.
-		debugKeyRange("makeVersionMutationsDurable", v.version, KeyRangeRef());
+		DEBUG_KEY_RANGE("makeVersionMutationsDurable", v.version, KeyRangeRef());
 		writeMutations(v.mutations, v.version, "makeVersionDurable");
 		for(auto m=v.mutations.begin(); m; ++m)
 			bytesLeft -= mvccStorageBytes(*m);
@@ -3359,7 +3359,7 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 			if (it->value() == invalidVersion) {
 				KeyRangeRef clearRange(it->begin(), it->end());
 				// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
-				//debugKeyRange("clearInvalidVersion", invalidVersion, clearRange);
+				//DEBUG_KEY_RANGE("clearInvalidVersion", invalidVersion, clearRange);
 				storage->clear( clearRange );
 				data->byteSampleApplyClear( clearRange, invalidVersion );
 			}

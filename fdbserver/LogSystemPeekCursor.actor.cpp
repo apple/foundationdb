@@ -91,7 +91,7 @@ void ILogSystem::ServerPeekCursor::nextMessage() {
 	}
 
 	messageAndTags.loadFromArena(&rd, &messageVersion.sub);
-	debugMessagesAndTags("ServerPeekCursor", messageVersion.version, messageAndTags.getRawMessage()).detail("CursorID", this->randomID);
+	DEBUG_TAGS_AND_MESSAGE("ServerPeekCursor", messageVersion.version, messageAndTags.getRawMessage()).detail("CursorID", this->randomID);
 	// Rewind and consume the header so that reader() starts from the message.
 	rd.rewind();
 	rd.readBytes(messageAndTags.getHeaderSize());

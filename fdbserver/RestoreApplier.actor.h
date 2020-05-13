@@ -61,7 +61,7 @@ struct StagingKey {
 	// Assume: SetVersionstampedKey and SetVersionstampedValue have been converted to set
 	void add(const MutationRef& m, LogMessageVersion newVersion) {
 		ASSERT(m.type != MutationRef::SetVersionstampedKey && m.type != MutationRef::SetVersionstampedValue);
-		debugMutation("StagingKeyAdd", newVersion.version, m)
+		DEBUG_MUTATION("StagingKeyAdd", newVersion.version, m)
 		    .detail("Version", version.toString())
 		    .detail("NewVersion", newVersion.toString())
 		    .detail("Mutation", m);
@@ -83,7 +83,7 @@ struct StagingKey {
 				ASSERT(m.param1 == m.param2);
 			}
 			if (version < newVersion) {
-				debugMutation("StagingKeyAdd", newVersion.version, m)
+				DEBUG_MUTATION("StagingKeyAdd", newVersion.version, m)
 					    .detail("Version", version.toString())
 					    .detail("NewVersion", newVersion.toString())
 					    .detail("MType", getTypeString(type))

@@ -506,7 +506,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				              nodeIDs.contents());
 				ASSERT(mvector.size() == nodeIDs.size());
 
-				{
+				if (MUTATION_TRACKING_ENABLED) {
 					TraceEvent&& e = debugMutation("RestoreLoaderDebugSplit", commitVersion.version, kvm);
 					if (e.isEnabled()) {
 						int i = 0;
@@ -520,7 +520,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				for (splitMutationIndex = 0; splitMutationIndex < mvector.size(); splitMutationIndex++) {
 					MutationRef mutation = mvector[splitMutationIndex];
 					UID applierID = nodeIDs[splitMutationIndex];
-					debugMutation("RestoreLoaderSplittedMutation", commitVersion.version, mutation)
+					DEBUG_MUTATION("RestoreLoaderSplittedMutation", commitVersion.version, mutation)
 					    .detail("Version", commitVersion.toString())
 					    .detail("Mutation", mutation);
 					// CAREFUL: The splitted mutations' lifetime is shorter than the for-loop
@@ -538,7 +538,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				UID applierID = itlow->second;
 				kvCount++;
 
-				debugMutation("RestoreLoaderSendMutation", commitVersion.version, kvm)
+				DEBUG_MUTATION("RestoreLoaderSendMutation", commitVersion.version, kvm)
 				    .detail("Applier", applierID)
 				    .detail("Version", commitVersion.toString())
 				    .detail("Mutation", kvm);

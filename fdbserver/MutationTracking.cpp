@@ -48,7 +48,7 @@ TraceEvent debugKeyRangeEnabled( const char* context, Version version, KeyRangeR
 	}
 }
 
-TraceEvent debugMessagesAndTagsEnabled( const char* context, Version version, StringRef commitBlob ) {
+TraceEvent debugTagsAndMessageEnabled( const char* context, Version version, StringRef commitBlob ) {
 	BinaryReader rdr(commitBlob, AssumeVersion(currentProtocolVersion));
 	while (!rdr.empty()) {
 		if (*(int32_t*)rdr.peekBytes(4) == VERSION_HEADER) {
@@ -90,11 +90,11 @@ TraceEvent debugMutation( const char* context, Version version, MutationRef cons
 TraceEvent debugKeyRange( const char* context, Version version, KeyRangeRef const& keys ) {
 	return debugKeyRangeEnabled( context, version, keys );
 }
-TraceEvent debugMessagesAndTags( const char* context, Version version, StringRef commitBlob ) {
-	return debugMessagesAndTagsEnabled( context, version, commitBlob );
+TraceEvent debugTagsAndMessage( const char* context, Version version, StringRef commitBlob ) {
+	return debugTagsAndMessageEnabled( context, version, commitBlob );
 }
 #else
 TraceEvent debugMutation( const char* context, Version version, MutationRef const& mutation ) { return std::move(TraceEvent()); }
 TraceEvent debugKeyRange( const char* context, Version version, KeyRangeRef const& keys ) { return std::move(TraceEvent()); }
-TraceEvent debugMessagesAndTags( const char* context, Version version, StringRef commitBlob ) { return std::move(TraceEvent()); }
+TraceEvent debugTagsAndMessage( const char* context, Version version, StringRef commitBlob ) { return std::move(TraceEvent()); }
 #endif

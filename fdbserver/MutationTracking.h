@@ -27,8 +27,14 @@
 
 #define MUTATION_TRACKING_ENABLED 0
 
+
+#define DEBUG_MUTATION(context, version, mutation) MUTATION_TRACKING_ENABLED && debugMutation(context, version, mutation)
 TraceEvent debugMutation( const char* context, Version version, MutationRef const& mutation );
+
+#define DEBUG_KEY_RANGE(context, version, keys) MUTATION_TRACKING_ENABLED && debugKeyRange(context, version, keys)
 TraceEvent debugKeyRange( const char* context, Version version, KeyRangeRef const& keys );
-TraceEvent debugMessagesAndTags( const char* context, Version version, StringRef commitBlob );
+
+#define DEBUG_TAGS_AND_MESSAGE(context, version, commitBlob) MUTATION_TRACKING_ENABLED && debugTagsAndMessage(context, version, commitBlob)
+TraceEvent debugTagsAndMessage( const char* context, Version version, StringRef commitBlob );
 
 #endif

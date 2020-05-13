@@ -749,7 +749,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 			toCommit->addTags(tags);
 			toCommit->addTypedMessage(backupMutation);
 
-//			if (debugMutation("BackupProxyCommit", commitVersion, backupMutation)) {
+//			if (DEBUG_MUTATION("BackupProxyCommit", commitVersion, backupMutation)) {
 //				TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("BackupMutation", backupMutation.toString())
 //					.detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
 //					.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData", backupMutation.param1);
@@ -1067,7 +1067,7 @@ ACTOR Future<Void> commitBatch(
 						self->singleKeyMutationEvent->log();
 					}
 
-					debugMutation("ProxyCommit", commitVersion, m).detail("Dbgid", self->dbgid).detail("To", tags).detail("Mutation", m);
+					DEBUG_MUTATION("ProxyCommit", commitVersion, m).detail("Dbgid", self->dbgid).detail("To", tags).detail("Mutation", m);
 					
 					toCommit.addTags(tags);
 					if(self->cacheInfo[m.param1]) {
@@ -1082,7 +1082,7 @@ ACTOR Future<Void> commitBatch(
 					++firstRange;
 					if (firstRange == ranges.end()) {
 						// Fast path
-						debugMutation("ProxyCommit", commitVersion, m).detail("Dbgid", self->dbgid).detail("To", ranges.begin().value().tags).detail("Mutation", m);
+						DEBUG_MUTATION("ProxyCommit", commitVersion, m).detail("Dbgid", self->dbgid).detail("To", ranges.begin().value().tags).detail("Mutation", m);
 
 						ranges.begin().value().populateTags();
 						toCommit.addTags(ranges.begin().value().tags);
@@ -1094,7 +1094,7 @@ ACTOR Future<Void> commitBatch(
 							r.value().populateTags();
 							allSources.insert(r.value().tags.begin(), r.value().tags.end());
 						}
-						debugMutation("ProxyCommit", commitVersion, m).detail("Dbgid", self->dbgid).detail("To", allSources).detail("Mutation", m);
+						DEBUG_MUTATION("ProxyCommit", commitVersion, m).detail("Dbgid", self->dbgid).detail("To", allSources).detail("Mutation", m);
 
 						toCommit.addTags(allSources);
 					}

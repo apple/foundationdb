@@ -689,7 +689,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		MutationRef m;
 		if (!message.isBackupMessage(&m)) continue;
 
-		debugMutation("addMutation", message.version.version, m)
+		DEBUG_MUTATION("addMutation", message.version.version, m)
 			    .detail("Version", message.version.toString())
 			    .detail("Mutation", m)
 			    .detail("KCV", self->minKnownCommittedVersion)
