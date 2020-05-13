@@ -22,6 +22,17 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
+	{ SpecialKeySpace::MODULE::TESTONLY, normalKeys }, // all test keys are supposed to be in normalKeys
+	{ SpecialKeySpace::MODULE::TRANSACTION,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")) },
+	{ SpecialKeySpace::MODULE::WORKERINTERFACE,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0")) },
+	{ SpecialKeySpace::MODULE::STATUSJSON, singleKeyRange(LiteralStringRef("\xff\xff/status/json")) },
+	{ SpecialKeySpace::MODULE::CONNECTIONSTRING, singleKeyRange(LiteralStringRef("\xff\xff/connection_string")) },
+	{ SpecialKeySpace::MODULE::CLUSTERFILEPATH, singleKeyRange(LiteralStringRef("\xff\xff/cluster_file_path")) }
+};
+
 // This function will move the given KeySelector as far as possible to the standard form:
 // orEqual == false && offset == 1 (Standard form)
 // If the corresponding key is not in the underlying key range, it will move over the range
@@ -135,6 +146,10 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::checkModuleFound(Speci
 		auto module = result.second;
 		if (!module.present()) {
 			throw special_keys_no_module_found();
+		} else {
+			auto boundary = sks->moduleToBoundary.at(module.get());
+			if (!boundary.contains(begin.getKey()) || end.getKey() > boundary.end)
+				throw special_keys_cross_module_read();
 		}
 	}
 	return result.first;

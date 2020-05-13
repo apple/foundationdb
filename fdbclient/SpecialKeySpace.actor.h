@@ -101,6 +101,8 @@ private:
 	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
 	KeyRange range;
 	std::unordered_map<SpecialKeyRangeBaseImpl*, SpecialKeySpace::MODULE> implToModule;
+
+	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
 };
 
 // Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
