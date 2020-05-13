@@ -656,8 +656,7 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 				}
 				break;
 			} else {
-				// TODO: Change this to SevError
-				TraceEvent(SevWarnAlways, "FastRestoreMasterPhaseCollectRestoreRequestsEmptyRequests");
+				TraceEvent(SevError, "FastRestoreMasterPhaseCollectRestoreRequestsEmptyRequests");
 				wait(delay(5.0));
 			}
 		} catch (Error& e) {
