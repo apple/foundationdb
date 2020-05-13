@@ -4,14 +4,14 @@ FROM centos:6
 # documentation, actorcompiler, and packaging tools\
 RUN yum install -y yum-utils &&\
   yum-config-manager --enable rhel-server-rhscl-7-rpms &&\
-  yum -y install centos-release-scl epel-release &&\
+  yum -y install centos-release-scl epel-release \
+    http://opensource.wandisco.com/centos/6/git/x86_64/wandisco-git-release-6-1.noarch.rpm &&\
   yum -y install devtoolset-8-8.1-1.el6 java-1.8.0-openjdk-devel \
     devtoolset-8-gcc-8.3.1 devtoolset-8-gcc-c++-8.3.1 \
     devtoolset-8-libubsan-devel devtoolset-8-valgrind-devel \
     rh-python36-python-devel rh-ruby24 golang python27 rpm-build \
     mono-core debbuild python-pip dos2unix valgrind-devel ccache \
-    distcc wget &&\
-  yum install -y http://opensource.wandisco.com/centos/6/git/x86_64/wandisco-git-release-6-1.noarch.rpm &&\
+    distcc wget git &&\
   pip install boto3==1.1.1
 
 USER root
