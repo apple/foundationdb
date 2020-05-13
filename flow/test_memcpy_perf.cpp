@@ -6,13 +6,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <sys/time.h>
 
 #include "flow/rte_memcpy.h"
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/flow.h"
 
+#if defined (__linux__) || defined (__FreeBSD__)
 extern "C" {
 	void* folly_memcpy(void* dst, const void* src, uint32_t length);
 }
@@ -351,5 +351,7 @@ TEST_CASE("performance/memcpy/rte") {
 
 	return Void();
 }
+
+#endif // defined (__linux__) || defined (__FreeBSD__)
 
 void forceLinkMemcpyPerfTests() {}

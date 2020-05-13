@@ -28,6 +28,8 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 
 #include <flow/Platform.h>
 
+#if defined (__linux__) || defined (__FreeBSD__)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -50,8 +52,9 @@ extern "C" {
 static force_inline void *
 rte_memcpy(void *dst, const void *src, size_t n);
 
-#ifdef __AVX__
-//#define RTE_MACHINE_CPUFLAG_AVX512F  -- our g++ is too old for this
+#ifdef __AVX512F__
+#define RTE_MACHINE_CPUFLAG_AVX512F
+#elif defined(__AVX__)
 #define RTE_MACHINE_CPUFLAG_AVX2
 #endif
 
@@ -904,5 +907,7 @@ rte_rdtsc(void)
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* defined (__linux__) || defined (__FreeBSD__) */
 
 #endif /* _RTE_MEMCPY_X86_64_H_ */
