@@ -2743,13 +2743,15 @@ public:
 	VersionedBTree(IPager2* pager, std::string name)
 	  : m_pager(pager), m_writeVersion(invalidVersion), m_lastCommittedVersion(invalidVersion), m_pBuffer(nullptr),
 	    m_name(name) {
+		m_lazyDeleteActor = 0;
 		m_init = init_impl(this);
 		m_latestCommit = m_init;
 	}
 
-	ACTOR static Future<int> incrementalSubtreeClear(VersionedBTree* self, bool* pStop = nullptr, int batchSize = 10,
-	                                                 unsigned int minPages = 0,
-	                                                 int maxPages = std::numeric_limits<int>::max()) {
+	ACTOR static Future<int> incrementalSubtreeClear(VersionedBTree* self) {
+		ASSERT(self->m_lazyDeleteActor.isReady());
+		self->m_lazyDeleteStop = false;
+
 		// TODO: Is it contractually okay to always to read at the latest version?
 		state Reference<IPagerSnapshot> snapshot = self->m_pager->getReadSnapshot(self->m_pager->getLatestVersion());
 		state int freedPages = 0;
@@ -2758,7 +2760,7 @@ public:
 			state std::vector<std::pair<LazyDeleteQueueEntry, Future<Reference<const IPage>>>> entries;
 
 			// Take up to batchSize pages from front of queue
-			while (entries.size() < batchSize) {
+			while (entries.size() < SERVER_KNOBS->REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES) {
 				Optional<LazyDeleteQueueEntry> q = wait(self->m_lazyDeleteQueue.pop());
 				debug_printf("LazyDelete: popped %s\n", toString(q).c_str());
 				if (!q.present()) {
@@ -2815,7 +2817,7 @@ public:
 			}
 
 			// If stop is set and we've freed the minimum number of pages required, or the maximum is exceeded, return.
-			if ((freedPages >= minPages && pStop != nullptr && *pStop) || freedPages >= maxPages) {
+			if ((freedPages >= SERVER_KNOBS->REDWOOD_LAZY_CLEAR_MIN_PAGES && self->m_lazyDeleteStop) || (freedPages >= SERVER_KNOBS->REDWOOD_LAZY_CLEAR_MAX_PAGES)) {
 				break;
 			}
 		}
@@ -2862,6 +2864,7 @@ public:
 		debug_printf("Recovered btree at version %" PRId64 ": %s\n", latest, self->m_header.toString().c_str());
 
 		self->m_lastCommittedVersion = latest;
+		self->m_lazyDeleteActor = incrementalSubtreeClear(self);
 		return Void();
 	}
 
@@ -2913,12 +2916,16 @@ public:
 		debug_printf("Clearing tree.\n");
 		self->setWriteVersion(self->getLatestVersion() + 1);
 		self->clear(KeyRangeRef(dbBegin.key, dbEnd.key));
+		wait(self->commit());
 
+		// Loop commits until the the lazy delete queue is completely processed.
 		loop {
-			state int freedPages = wait(self->incrementalSubtreeClear(self));
 			wait(self->commit());
-			// Keep looping until the last commit doesn't do anything at all
-			if (self->m_lazyDeleteQueue.numEntries == 0 && freedPages == 0) {
+
+			// If the lazy delete queue is completely processed then the last time the lazy delete actor
+			// was started it, after the last commit, it would exist immediately and do no work, so its
+			// future would be ready and its value would be 0.
+			if(self->m_lazyDeleteActor.isReady() && self->m_lazyDeleteActor.get() == 0) {
 				break;
 			}
 			self->setWriteVersion(self->getLatestVersion() + 1);
@@ -3175,6 +3182,8 @@ private:
 	};
 
 	LazyDeleteQueueT m_lazyDeleteQueue;
+	Future<int> m_lazyDeleteActor;
+	bool m_lazyDeleteStop;
 
 	// Writes entries to 1 or more pages and return a vector of boundary keys with their IPage(s)
 	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>> writePages(
@@ -4363,9 +4372,6 @@ private:
 		debug_printf("%s: Beginning commit of version %" PRId64 ", new oldest version set to %" PRId64 "\n",
 		             self->m_name.c_str(), writeVersion, self->m_newOldestVersion);
 
-		state bool lazyDeleteStop = false;
-		state Future<int> lazyDelete = incrementalSubtreeClear(self, &lazyDeleteStop);
-
 		// Get the latest version from the pager, which is what we will read at
 		state Version latestVersion = self->m_pager->getLatestVersion();
 		debug_printf("%s: pager latestVersion %" PRId64 "\n", self->m_name.c_str(), latestVersion);
@@ -4411,9 +4417,9 @@ private:
 
 		self->m_header.root.set(rootPageID, sizeof(headerSpace) - sizeof(m_header));
 
-		lazyDeleteStop = true;
-		wait(success(lazyDelete));
-		debug_printf("Lazy delete freed %u pages\n", lazyDelete.get());
+		self->m_lazyDeleteStop = true;
+		wait(success(self->m_lazyDeleteActor));
+		debug_printf("Lazy delete freed %u pages\n", self->m_lazyDeleteActor.get());
 
 		self->m_pager->setCommitVersion(writeVersion);
 
@@ -4434,8 +4440,9 @@ private:
 
 		self->m_lastCommittedVersion = writeVersion;
 		++counts.commits;
-		committed.send(Void());
+		self->m_lazyDeleteActor = incrementalSubtreeClear(self);
 
+		committed.send(Void());
 		return Void();
 	}
 
