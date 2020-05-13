@@ -44,6 +44,8 @@ set(FDBCLIENT_SRCS
   NativeAPI.actor.cpp
   NativeAPI.actor.h
   Notified.h
+  SpecialKeySpace.actor.cpp
+  SpecialKeySpace.actor.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
   RestoreWorkerInterface.actor.h
@@ -61,6 +63,8 @@ set(FDBCLIENT_SRCS
   Subspace.h
   SystemData.cpp
   SystemData.h
+  TagThrottle.actor.cpp
+  TagThrottle.h
   TaskBucket.actor.cpp
   TaskBucket.h
   ThreadSafeTransaction.actor.cpp
@@ -69,6 +73,7 @@ set(FDBCLIENT_SRCS
   Tuple.h
   VersionedMap.actor.h
   VersionedMap.h
+  VersionedMap.cpp
   WriteMap.h
   json_spirit/json_spirit_error_position.h
   json_spirit/json_spirit_reader_template.h

@@ -93,7 +93,7 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 700
+    FDB.api_version 630
     db = FDB.open
 
 .. function:: open( cluster_file=nil ) -> Database
@@ -736,7 +736,7 @@ Most applications should use the read version that FoundationDB determines autom
 
     |infrequent| |transaction-get-committed-version-blurb|
 
-.. method:: Transaction.get_verionstamp() -> String
+.. method:: Transaction.get_versionstamp() -> String
 
     |infrequent| |transaction-get-versionstamp-blurb|
 
@@ -746,6 +746,10 @@ Transaction misc functions
 .. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
 
     Get the estimated byte size of the given key range. Returns a :class:`Int64Future`.
+
+.. method:: Transaction.get_approximate_size() -> Int64Future
+
+    |transaction-get-approximate-size-blurb|. Returns a :class:`Int64Future`.
 
 Transaction options
 -------------------

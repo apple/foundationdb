@@ -33,6 +33,7 @@ typedef uint64_t DBRecoveryCount;
 struct MasterInterface {
 	constexpr static FileIdentifier file_identifier = 5979145;
 	LocalityData locality;
+	Endpoint base;
 	RequestStream< ReplyPromise<Void> > waitFailure;
 	RequestStream< struct TLogRejoinRequest > tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
@@ -40,6 +41,7 @@ struct MasterInterface {
 	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
+	NetworkAddressList addresses() const { return changeCoordinators.getEndpoint().addresses; }
 
 	UID id() const { return changeCoordinators.getEndpoint().token; }
 	template <class Archive>
@@ -47,12 +49,24 @@ struct MasterInterface {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion, notifyBackupWorkerDone);
+		serializer(ar, locality, base);
+		if( Archive::isDeserializing ) {
+			waitFailure = RequestStream< ReplyPromise<Void> >( base.getAdjustedEndpoint(0) );
+			tlogRejoin = RequestStream< struct TLogRejoinRequest >( base.getAdjustedEndpoint(1) );
+			changeCoordinators = RequestStream< struct ChangeCoordinatorsRequest >( base.getAdjustedEndpoint(2) );
+			getCommitVersion = RequestStream< struct GetCommitVersionRequest >( base.getAdjustedEndpoint(3) );
+			notifyBackupWorkerDone = RequestStream<struct BackupWorkerDoneRequest>( base.getAdjustedEndpoint(4) );
+		}
 	}
 
 	void initEndpoints() {
-		getCommitVersion.getEndpoint( TaskPriority::GetConsistentReadVersion );
-		tlogRejoin.getEndpoint( TaskPriority::MasterTLogRejoin );
+		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
+		streams.push_back(waitFailure.getReceiver());
+		streams.push_back(tlogRejoin.getReceiver(TaskPriority::MasterTLogRejoin));
+		streams.push_back(changeCoordinators.getReceiver());
+		streams.push_back(getCommitVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
+		streams.push_back(notifyBackupWorkerDone.getReceiver());
+		base = FlowTransport::transport().addEndpoints(streams);
 	}
 };
 

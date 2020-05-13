@@ -537,7 +537,7 @@ struct DDQueueData {
 
 		// FIXME: is the merge case needed
 		if( input.priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD ) {
-			wait( delay( 0.5, decrementPriority(decrementPriority(TaskPriority::DataDistribution )) ) );
+			wait( delay( 0.5, TaskPriority::DataDistributionVeryLow ) );
 		} else {
 			wait( delay( 0.0001, TaskPriority::DataDistributionLaunch ) );
 		}
@@ -546,6 +546,8 @@ struct DDQueueData {
 			servers.clear();
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			try {
+				state Standalone<RangeResultRef> UIDtoTagMap = wait( tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY ) );
+				ASSERT( !UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY );
 				Standalone<RangeResultRef> keyServersEntries  = wait(
 					tr.getRange( lastLessOrEqual( keyServersKey( input.keys.begin ) ),
 						firstGreaterOrEqual( keyServersKey( input.keys.end ) ), SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS ) );
@@ -553,7 +555,7 @@ struct DDQueueData {
 				if(keyServersEntries.size() < SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS) {
 					for( int shard = 0; shard < keyServersEntries.size(); shard++ ) {
 						vector<UID> src, dest;
-						decodeKeyServersValue( keyServersEntries[shard].value, src, dest );
+						decodeKeyServersValue( UIDtoTagMap, keyServersEntries[shard].value, src, dest );
 						ASSERT( src.size() );
 						for( int i = 0; i < src.size(); i++ ) {
 							servers.insert( src[i] );
@@ -1221,6 +1223,7 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
 	loop {
+		state Optional<Reference<IDataDistributionTeam>> randomTeam;
 		state bool moved = false;
 		state TraceEvent traceEvent("BgDDMountainChopper", self->distributorId);
 		traceEvent.suppressFor(5.0)
@@ -1256,15 +1259,15 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 			traceEvent.detail("QueuedRelocations", self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM]);
 			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(
+				Optional<Reference<IDataDistributionTeam>> _randomTeam = wait(brokenPromiseToNever(
 				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, true, false))));
-				
+				randomTeam = _randomTeam;
 				traceEvent.detail("DestTeam", printable(randomTeam.map<std::string>([](const Reference<IDataDistributionTeam>& team){
 					return team->getDesc();
 				})));
 
 				if (randomTeam.present()) {
-					state Optional<Reference<IDataDistributionTeam>> loadedTeam =
+					Optional<Reference<IDataDistributionTeam>> loadedTeam =
 						wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
 							GetTeamRequest(true, true, false, true))));
 
@@ -1318,7 +1321,9 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 	state Transaction tr(self->cx);
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
+
 	loop {
+		state Optional<Reference<IDataDistributionTeam>> randomTeam;
 		state bool moved = false;
 		state TraceEvent traceEvent("BgDDValleyFiller", self->distributorId);
 		traceEvent.suppressFor(5.0)
@@ -1354,15 +1359,15 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 			traceEvent.detail("QueuedRelocations", self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM]);
 			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(
+				Optional<Reference<IDataDistributionTeam>> _randomTeam = wait(brokenPromiseToNever(
 				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, false, true))));
-
+				randomTeam = _randomTeam;
 				traceEvent.detail("SourceTeam", printable(randomTeam.map<std::string>([](const Reference<IDataDistributionTeam>& team){
 					return team->getDesc();
 				})));
 
 				if (randomTeam.present()) {
-					state Optional<Reference<IDataDistributionTeam>> unloadedTeam = wait(brokenPromiseToNever(
+					Optional<Reference<IDataDistributionTeam>> unloadedTeam = wait(brokenPromiseToNever(
 					    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, true, true, false))));
 
 					traceEvent.detail("DestTeam", printable(unloadedTeam.map<std::string>([](const Reference<IDataDistributionTeam>& team){

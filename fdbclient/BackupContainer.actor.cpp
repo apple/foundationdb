@@ -20,6 +20,7 @@
 
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
@@ -115,6 +116,7 @@ std::string BackupDescription::toString() const {
 
 	info.append(format("URL: %s\n", url.c_str()));
 	info.append(format("Restorable: %s\n", maxRestorableVersion.present() ? "true" : "false"));
+	info.append(format("Partitioned logs: %s\n", partitioned ? "true" : "false"));
 
 	auto formatVersion = [&](Version v) {
 		std::string s;
@@ -169,6 +171,7 @@ std::string BackupDescription::toJSON() const {
 	doc.setKey("SchemaVersion", "1.0.0");
 	doc.setKey("URL", url.c_str());
 	doc.setKey("Restorable", maxRestorableVersion.present());
+	doc.setKey("Partitioned", partitioned);
 
 	auto formatVersion = [&](Version v) {
 		JsonBuilderObject doc;
@@ -243,10 +246,10 @@ std::string BackupDescription::toJSON() const {
  *       /plogs/...log,startVersion,endVersion,UID,tagID-of-N,blocksize
  *       /logs/.../log,startVersion,endVersion,UID,blockSize
  *     where ... is a multi level path which sorts lexically into version order and results in approximately 1
- *     unique folder per day containing about 5,000 files. Logs after 7.0 are stored in "plogs"
- *     directory and are partitioned according to tagIDs (0, 1, 2, ...) and the total number
- *     partitions is N. Logs before 7.0 are
- *     stored in "logs" directory and are not partitioned.
+ *     unique folder per day containing about 5,000 files. Logs after FDB 6.3 are stored in "plogs"
+ *     directory and are partitioned according to tagIDs (0, 1, 2, ...) and the total number partitions is N.
+ *     Old backup logs FDB 6.2 and earlier are stored in "logs" directory and are not partitioned.
+ *     After FDB 6.3, users can choose to use the new partitioned logs or old logs.
  *
  *
  *   BACKWARD COMPATIBILITY
@@ -422,9 +425,11 @@ public:
 	}
 
 	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of megabytes.
-	ACTOR static Future<std::vector<RangeFile>> readKeyspaceSnapshot_impl(Reference<BackupContainerFileSystem> bc, KeyspaceSnapshotFile snapshot) {
+	ACTOR static Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot_impl(
+	    Reference<BackupContainerFileSystem> bc, KeyspaceSnapshotFile snapshot) {
 		// Read the range file list for the specified version range, and then index them by fileName.
-		// This is so we can verify that each of the files listed in the manifest file are also in the container at this time.
+		// This is so we can verify that each of the files listed in the manifest file are also in the container at this
+		// time.
 		std::vector<RangeFile> files = wait(bc->listRangeFiles(snapshot.beginVersion, snapshot.endVersion));
 		state std::map<std::string, RangeFile> rangeIndex;
 		for(auto &f : files)
@@ -480,15 +485,38 @@ public:
 			throw restore_missing_data();
 		}
 
-		return results;
+		// Check key ranges for files
+		std::map<std::string, KeyRange> fileKeyRanges;
+		JSONDoc ranges = doc.subDoc("keyRanges"); // Create an empty doc if not existed
+		for (auto i : ranges.obj()) {
+			const std::string& filename = i.first;
+			JSONDoc fields(i.second);
+			std::string begin, end;
+			if (fields.tryGet("beginKey", begin) && fields.tryGet("endKey", end)) {
+				TraceEvent("ManifestFields")
+				    .detail("File", filename)
+				    .detail("Begin", printable(StringRef(begin)))
+				    .detail("End", printable(StringRef(end)));
+				fileKeyRanges.emplace(filename, KeyRange(KeyRangeRef(StringRef(begin), StringRef(end))));
+			} else {
+				TraceEvent("MalFormattedManifest").detail("Key", filename);
+				throw restore_corrupted_data();
+			}
+		}
+
+		return std::make_pair(results, fileKeyRanges);
 	}
 
-	Future<std::vector<RangeFile>> readKeyspaceSnapshot(KeyspaceSnapshotFile snapshot) {
+	Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
+	    KeyspaceSnapshotFile snapshot) {
 		return readKeyspaceSnapshot_impl(Reference<BackupContainerFileSystem>::addRef(this), snapshot);
 	}
 
-	ACTOR static Future<Void> writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem> bc, std::vector<std::string> fileNames, int64_t totalBytes) {
-		ASSERT(!fileNames.empty());
+	ACTOR static Future<Void> writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem> bc,
+	                                                         std::vector<std::string> fileNames,
+	                                                         std::vector<std::pair<Key, Key>> beginEndKeys,
+	                                                         int64_t totalBytes) {
+		ASSERT(!fileNames.empty() && fileNames.size() == beginEndKeys.size());
 
 		state Version minVer = std::numeric_limits<Version>::max();
 		state Version maxVer = 0;
@@ -519,6 +547,13 @@ public:
 		doc.create("beginVersion") = minVer;
 		doc.create("endVersion") = maxVer;
 
+		auto ranges = doc.subDoc("keyRanges");
+		for (int i = 0; i < beginEndKeys.size(); i++) {
+			auto fileDoc = ranges.subDoc(fileNames[i], /*split=*/false);
+			fileDoc.create("beginKey") = beginEndKeys[i].first.toString();
+			fileDoc.create("endKey") = beginEndKeys[i].second.toString();
+		}
+
 		wait(yield());
 		state std::string docString = json_spirit::write_string(json);
 
@@ -529,8 +564,11 @@ public:
 		return Void();
 	}
 
-	Future<Void> writeKeyspaceSnapshotFile(std::vector<std::string> fileNames, int64_t totalBytes) final {
-		return writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem>::addRef(this), fileNames, totalBytes);
+	Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
+	                                       const std::vector<std::pair<Key, Key>>& beginEndKeys,
+	                                       int64_t totalBytes) final {
+		return writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem>::addRef(this), fileNames,
+		                                      beginEndKeys, totalBytes);
 	};
 
 	// List log files, unsorted, which contain data at any version >= beginVersion and <= targetVersion.
@@ -657,18 +695,6 @@ public:
 		return dumpFileList_impl(Reference<BackupContainerFileSystem>::addRef(this), begin, end);
 	}
 
-	ACTOR static Future<bool> isPartitionedBackup_impl(Reference<BackupContainerFileSystem> bc) {
-		BackupFileList list = wait(bc->dumpFileList(0, std::numeric_limits<Version>::max()));
-		for (const auto& file : list.logs) {
-			if (file.isPartitionedLog()) return true;
-		}
-		return false;
-	}
-
-	Future<bool> isPartitionedBackup() final {
-		return isPartitionedBackup_impl(Reference<BackupContainerFileSystem>::addRef(this));
-	}
-
 	static Version resolveRelativeVersion(Optional<Version> max, Version v, const char *name, Error e) {
 		if(v == invalidVersion) {
 			TraceEvent(SevError, "BackupExpireInvalidVersion").detail(name, v);
@@ -704,7 +730,8 @@ public:
 		}
 	}
 
-	ACTOR static Future<BackupDescription> describeBackup_impl(Reference<BackupContainerFileSystem> bc, bool deepScan, Version logStartVersionOverride, bool partitioned) {
+	ACTOR static Future<BackupDescription> describeBackup_impl(Reference<BackupContainerFileSystem> bc, bool deepScan,
+	                                                           Version logStartVersionOverride) {
 		state BackupDescription desc;
 		desc.url = bc->getURL();
 
@@ -722,8 +749,7 @@ public:
 		// from which to resolve the relative version.
 		// This could be handled more efficiently without recursion but it's tricky, this will do for now.
 		if(logStartVersionOverride != invalidVersion && logStartVersionOverride < 0) {
-			BackupDescription tmp = wait(partitioned ? bc->describePartitionedBackup(false, invalidVersion)
-			                                         : bc->describeBackup(false, invalidVersion));
+			BackupDescription tmp = wait(bc->describeBackup(false, invalidVersion));
 			logStartVersionOverride = resolveRelativeVersion(tmp.maxLogEnd, logStartVersionOverride,
 			                                                 "LogStartVersionOverride", invalid_option_value());
 		}
@@ -733,10 +759,12 @@ public:
 		state Optional<Version> metaLogEnd;
 		state Optional<Version> metaExpiredEnd;
 		state Optional<Version> metaUnreliableEnd;
+		state Optional<Version> metaLogType;
 
 		std::vector<Future<Void>> metaReads;
 		metaReads.push_back(store(metaExpiredEnd, bc->expiredEndVersion().get()));
 		metaReads.push_back(store(metaUnreliableEnd, bc->unreliableEndVersion().get()));
+		metaReads.push_back(store(metaLogType, bc->logType().get()));
 
 		// Only read log begin/end versions if not doing a deep scan, otherwise scan files and recalculate them.
 		if(!deepScan) {
@@ -747,12 +775,13 @@ public:
 		wait(waitForAll(metaReads));
 
 		TraceEvent("BackupContainerDescribe2")
-			.detail("URL", bc->getURL())
-			.detail("LogStartVersionOverride", logStartVersionOverride)
-			.detail("ExpiredEndVersion", metaExpiredEnd.orDefault(invalidVersion))
-			.detail("UnreliableEndVersion", metaUnreliableEnd.orDefault(invalidVersion))
-			.detail("LogBeginVersion", metaLogBegin.orDefault(invalidVersion))
-			.detail("LogEndVersion", metaLogEnd.orDefault(invalidVersion));
+		    .detail("URL", bc->getURL())
+		    .detail("LogStartVersionOverride", logStartVersionOverride)
+		    .detail("ExpiredEndVersion", metaExpiredEnd.orDefault(invalidVersion))
+		    .detail("UnreliableEndVersion", metaUnreliableEnd.orDefault(invalidVersion))
+		    .detail("LogBeginVersion", metaLogBegin.orDefault(invalidVersion))
+		    .detail("LogEndVersion", metaLogEnd.orDefault(invalidVersion))
+		    .detail("LogType", metaLogType.orDefault(-1));
 
 		// If the logStartVersionOverride is positive (not relative) then ensure that unreliableEndVersion is equal or greater
 		if(logStartVersionOverride != invalidVersion && metaUnreliableEnd.orDefault(invalidVersion) < logStartVersionOverride) {
@@ -811,8 +840,17 @@ public:
 		}
 
 		state std::vector<LogFile> logs;
-		wait(store(logs, bc->listLogFiles(scanBegin, scanEnd, partitioned)) &&
+		state std::vector<LogFile> plogs;
+		wait(store(logs, bc->listLogFiles(scanBegin, scanEnd, false)) &&
+		     store(plogs, bc->listLogFiles(scanBegin, scanEnd, true)) &&
 		     store(desc.snapshots, bc->listKeyspaceSnapshots()));
+
+		if (plogs.size() > 0) {
+			desc.partitioned = true;
+			logs.swap(plogs);
+		} else {
+			desc.partitioned = metaLogType.present() && metaLogType.get() == PARTITIONED_MUTATION_LOG;
+		}
 
 		// List logs in version order so log continuity can be analyzed
 		std::sort(logs.begin(), logs.end());
@@ -823,11 +861,17 @@ public:
 			// If we didn't get log versions above then seed them using the first log file
 			if (!desc.contiguousLogEnd.present()) {
 				desc.minLogBegin = logs.begin()->beginVersion;
-				desc.contiguousLogEnd = logs.begin()->endVersion;
+				if (desc.partitioned) {
+					// Cannot use the first file's end version, which may not be contiguous
+					// for other partitions. Set to its beginVersion to be safe.
+					desc.contiguousLogEnd = logs.begin()->beginVersion;
+				} else {
+					desc.contiguousLogEnd = logs.begin()->endVersion;
+				}
 			}
 
-			if (partitioned) {
-				determinePartitionedLogsBeginEnd(&desc, logs);
+			if (desc.partitioned) {
+				updatePartitionedLogsContinuousEnd(&desc, logs, scanBegin, scanEnd);
 			} else {
 				Version& end = desc.contiguousLogEnd.get();
 				computeRestoreEndVersion(logs, nullptr, &end, std::numeric_limits<Version>::max());
@@ -850,6 +894,11 @@ public:
 
 				if(desc.contiguousLogEnd.present() && metaLogEnd != desc.contiguousLogEnd) {
 					updates = updates && bc->logEndVersion().set(desc.contiguousLogEnd.get());
+				}
+
+				if (!metaLogType.present()) {
+					updates = updates && bc->logType().set(desc.partitioned ? PARTITIONED_MUTATION_LOG
+					                                                        : NON_PARTITIONED_MUTATION_LOG);
 				}
 
 				wait(updates);
@@ -900,11 +949,8 @@ public:
 
 	// Uses the virtual methods to describe the backup contents
 	Future<BackupDescription> describeBackup(bool deepScan, Version logStartVersionOverride) final {
-		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this), deepScan, logStartVersionOverride, false);
-	}
-
-	Future<BackupDescription> describePartitionedBackup(bool deepScan, Version logStartVersionOverride) final {
-		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this), deepScan, logStartVersionOverride, true);
+		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this), deepScan,
+		                           logStartVersionOverride);
 	}
 
 	ACTOR static Future<Void> expireData_impl(Reference<BackupContainerFileSystem> bc, Version expireEndVersion, bool force, ExpireProgress *progress, Version restorableBeginVersion) {
@@ -1149,14 +1195,24 @@ public:
 			indices.push_back(i);
 		}
 
-		// check tag 0 is continuous and create a map of ranges to tags
-		std::map<std::pair<Version, Version>, int> tags; // range [start, end] -> tags
-		if (!isContinuous(files, tagIndices[0], begin, end, &tags)) return false;
+		// check partition 0 is continuous and create a map of ranges to tags
+		std::map<std::pair<Version, Version>, int> tags; // range [begin, end] -> tags
+		if (!isContinuous(files, tagIndices[0], begin, end, &tags)) {
+			TraceEvent(SevWarn, "BackupFileNotContinuous")
+			    .detail("Partition", 0)
+			    .detail("RangeBegin", begin)
+			    .detail("RangeEnd", end);
+			return false;
+		}
 
 		// for each range in tags, check all tags from 1 are continouous
 		for (const auto [beginEnd, count] : tags) {
 			for (int i = 1; i < count; i++) {
-				if (!isContinuous(files, tagIndices[i], beginEnd.first, beginEnd.second, nullptr)) {
+				if (!isContinuous(files, tagIndices[i], beginEnd.first, std::min(beginEnd.second - 1, end), nullptr)) {
+					TraceEvent(SevWarn, "BackupFileNotContinuous")
+					    .detail("Partition", i)
+					    .detail("RangeBegin", beginEnd.first)
+					    .detail("RangeEnd", beginEnd.second);
 					return false;
 				}
 			}
@@ -1173,7 +1229,10 @@ public:
 		std::vector<LogFile> filtered;
 		int i = 0;
 		for (int j = 1; j < logs.size(); j++) {
-			if (logs[j].isSubset(logs[i])) continue;
+			if (logs[j].isSubset(logs[i])) {
+				ASSERT(logs[j].fileSize <= logs[i].fileSize);
+				continue;
+			}
 
 			if (!logs[i].isSubset(logs[j])) {
 				filtered.push_back(logs[i]);
@@ -1184,19 +1243,34 @@ public:
 		return filtered;
 	}
 
-	// Analyze partitioned logs and set minLogBegin and contiguousLogEnd.
-	// For partitioned logs, different tags may start at different versions, so
-	// we need to find the "minLogBegin" version as well.
-	static void determinePartitionedLogsBeginEnd(BackupDescription* desc, const std::vector<LogFile>& logs) {
+	// Analyze partitioned logs and set contiguousLogEnd for "desc" if larger
+	// than the "scanBegin" version.
+	static void updatePartitionedLogsContinuousEnd(BackupDescription* desc, const std::vector<LogFile>& logs,
+	                                               const Version scanBegin, const Version scanEnd) {
 		if (logs.empty()) return;
 
-		for (const LogFile& file : logs) {
-			Version end = getPartitionedLogsContinuousEndVersion(logs, file.beginVersion);
-			if (end > file.beginVersion) {
-				// desc->minLogBegin = file.beginVersion;
+		Version snapshotBeginVersion = desc->snapshots.size() > 0 ? desc->snapshots[0].beginVersion : invalidVersion;
+		Version begin = std::max(scanBegin, desc->minLogBegin.get());
+		TraceEvent("ContinuousLogEnd")
+		    .detail("ScanBegin", scanBegin)
+		    .detail("ScanEnd", scanEnd)
+		    .detail("Begin", begin)
+		    .detail("ContiguousLogEnd", desc->contiguousLogEnd.get());
+		for (const auto& file : logs) {
+			if (file.beginVersion > begin) {
+				if (scanBegin > 0) return;
+
+				// scanBegin is 0
+				desc->minLogBegin = file.beginVersion;
+				begin = file.beginVersion;
+			}
+
+			Version ver = getPartitionedLogsContinuousEndVersion(logs, begin);
+			if (ver >= desc->contiguousLogEnd.get()) {
 				// contiguousLogEnd is not inclusive, so +1 here.
-				desc->contiguousLogEnd.get() = end + 1;
-				return;
+				desc->contiguousLogEnd.get() = ver + 1;
+				TraceEvent("UpdateContinuousLogEnd").detail("Version", ver + 1);
+				if (ver > snapshotBeginVersion) return;
 			}
 		}
 	}
@@ -1208,11 +1282,13 @@ public:
 
 		std::map<int, std::vector<int>> tagIndices; // tagId -> indices in files
 		for (int i = 0; i < logs.size(); i++) {
-			ASSERT(logs[i].tagId >= 0 && logs[i].tagId < logs[i].totalTags);
+			ASSERT(logs[i].tagId >= 0);
+			ASSERT(logs[i].tagId < logs[i].totalTags);
 			auto& indices = tagIndices[logs[i].tagId];
 			// filter out if indices.back() is subset of files[i] or vice versa
 			if (!indices.empty()) {
 				if (logs[indices.back()].isSubset(logs[i])) {
+					ASSERT(logs[indices.back()].fileSize <= logs[i].fileSize);
 					indices.back() = i;
 				} else if (!logs[i].isSubset(logs[indices.back()])) {
 					indices.push_back(i);
@@ -1222,26 +1298,32 @@ public:
 			}
 			end = std::max(end, logs[i].endVersion - 1);
 		}
+		TraceEvent("ContinuousLogEnd").detail("Begin", begin).detail("InitVersion", end);
 
-		// check tag 0 is continuous in [begin, end] and create a map of ranges to tags
-		std::map<std::pair<Version, Version>, int> tags; // range [start, end] -> tags
+		// check partition 0 is continuous in [begin, end] and create a map of ranges to partitions
+		std::map<std::pair<Version, Version>, int> tags; // range [start, end] -> partitions
 		isContinuous(logs, tagIndices[0], begin, end, &tags);
 		if (tags.empty() || end <= begin) return 0;
 		end = std::min(end, tags.rbegin()->first.second);
+		TraceEvent("ContinuousLogEnd").detail("Partition", 0).detail("EndVersion", end).detail("Begin", begin);
 
-		// for each range in tags, check all tags from 1 are continouous
+		// for each range in tags, check all partitions from 1 are continouous
 		Version lastEnd = begin;
 		for (const auto [beginEnd, count] : tags) {
-			Version tagEnd = end; // This range's minimum continous tag version
+			Version tagEnd = beginEnd.second; // This range's minimum continous partition version
 			for (int i = 1; i < count; i++) {
 				std::map<std::pair<Version, Version>, int> rangeTags;
 				isContinuous(logs, tagIndices[i], beginEnd.first, beginEnd.second, &rangeTags);
 				tagEnd = rangeTags.empty() ? 0 : std::min(tagEnd, rangeTags.rbegin()->first.second);
-				if (tagEnd == 0) return lastEnd;
+				TraceEvent("ContinuousLogEnd")
+				    .detail("Partition", i)
+				    .detail("EndVersion", tagEnd)
+				    .detail("RangeBegin", beginEnd.first)
+				    .detail("RangeEnd", beginEnd.second);
+				if (tagEnd == 0) return lastEnd == begin ? 0 : lastEnd;
 			}
 			if (tagEnd < beginEnd.second) {
-				end = tagEnd;
-				break;
+				return tagEnd;
 			}
 			lastEnd = beginEnd.second;
 		}
@@ -1249,7 +1331,31 @@ public:
 		return end;
 	}
 
-	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion, bool partitioned) {
+	ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc,
+	                                                           RangeFile file) {
+		state Reference<IAsyncFile> inFile = wait(bc->readFile(file.fileName));
+		state bool beginKeySet = false;
+		state Key beginKey;
+		state Key endKey;
+		state int64_t j = 0;
+		for (; j < file.fileSize; j += file.blockSize) {
+			int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - j);
+			Standalone<VectorRef<KeyValueRef>> blockData = wait(fileBackup::decodeRangeFileBlock(inFile, j, len));
+			if (!beginKeySet) {
+				beginKey = blockData.front().key;
+				beginKeySet = true;
+			}
+			endKey = blockData.back().key;
+		}
+		return KeyRange(KeyRangeRef(beginKey, endKey));
+	}
+
+	Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file) final {
+		ASSERT(g_network->isSimulated());
+		return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file);
+	}
+
+	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion) {
 		// Find the most recent keyrange snapshot to end at or before targetVersion
 		state Optional<KeyspaceSnapshotFile> snapshot;
 		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
@@ -1263,19 +1369,38 @@ public:
 			restorable.snapshot = snapshot.get();
 			restorable.targetVersion = targetVersion;
 
-			std::vector<RangeFile> ranges = wait(bc->readKeyspaceSnapshot(snapshot.get()));
-			restorable.ranges = ranges;
+			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
+			    wait(bc->readKeyspaceSnapshot(snapshot.get()));
+			restorable.ranges = std::move(results.first);
+			restorable.keyRanges = std::move(results.second);
+			// TODO: Reenable the sanity check after TooManyFiles error is resolved
+			if (false && g_network->isSimulated()) {
+				// Sanity check key ranges
+				state std::map<std::string, KeyRange>::iterator rit;
+				for (rit = restorable.keyRanges.begin(); rit != restorable.keyRanges.end(); rit++) {
+					auto it = std::find_if(restorable.ranges.begin(), restorable.ranges.end(),
+					                       [file = rit->first](const RangeFile f) { return f.fileName == file; });
+					ASSERT(it != restorable.ranges.end());
+					KeyRange result = wait(bc->getSnapshotFileKeyRange(*it));
+					ASSERT(rit->second.begin <= result.begin && rit->second.end >= result.end);
+				}
+			}
 
 			// No logs needed if there is a complete key space snapshot at the target version.
 			if (snapshot.get().beginVersion == snapshot.get().endVersion &&
 			    snapshot.get().endVersion == targetVersion) {
+				restorable.continuousBeginVersion = restorable.continuousEndVersion = invalidVersion;
 				return Optional<RestorableFileSet>(restorable);
 			}
 
 			// FIXME: check if there are tagged logs. for each tag, there is no version gap.
-			state std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion, partitioned));
+			state std::vector<LogFile> logs;
+			state std::vector<LogFile> plogs;
+			wait(store(logs, bc->listLogFiles(snapshot.get().beginVersion, targetVersion, false)) &&
+			     store(plogs, bc->listLogFiles(snapshot.get().beginVersion, targetVersion, true)));
 
-			if (partitioned) {
+			if (plogs.size() > 0) {
+				logs.swap(plogs);
 				// sort by tag ID so that filterDuplicates works.
 				std::sort(logs.begin(), logs.end(), [](const LogFile& a, const LogFile& b) {
 					return std::tie(a.tagId, a.beginVersion, a.endVersion) <
@@ -1289,6 +1414,8 @@ public:
 				// sort by version order again for continuous analysis
 				std::sort(restorable.logs.begin(), restorable.logs.end());
 				if (isPartitionedLogsContinuous(restorable.logs, snapshot.get().beginVersion, targetVersion)) {
+					restorable.continuousBeginVersion = snapshot.get().beginVersion;
+					restorable.continuousEndVersion = targetVersion + 1; // not inclusive
 					return Optional<RestorableFileSet>(restorable);
 				}
 				return Optional<RestorableFileSet>();
@@ -1302,6 +1429,8 @@ public:
 				Version end = logs.begin()->endVersion;
 				computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
 				if (end >= targetVersion) {
+					restorable.continuousBeginVersion = logs.begin()->beginVersion;
+					restorable.continuousEndVersion = end;
 					return Optional<RestorableFileSet>(restorable);
 				}
 			}
@@ -1311,11 +1440,7 @@ public:
 	}
 
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) final {
-		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, false);
-	}
-
-	Future<Optional<RestorableFileSet>> getPartitionedRestoreSet(Version targetVersion) final {
-		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, true);
+		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion);
 	}
 
 private:
@@ -1349,6 +1474,11 @@ public:
 	VersionProperty logEndVersion() {   return {Reference<BackupContainerFileSystem>::addRef(this), "log_end_version"}; }
 	VersionProperty expiredEndVersion() {   return {Reference<BackupContainerFileSystem>::addRef(this), "expired_end_version"}; }
 	VersionProperty unreliableEndVersion() {   return {Reference<BackupContainerFileSystem>::addRef(this), "unreliable_end_version"}; }
+
+	// Backup log types
+	const static Version NON_PARTITIONED_MUTATION_LOG = 0;
+	const static Version PARTITIONED_MUTATION_LOG = 1;
+	VersionProperty logType() { return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" }; }
 
 	ACTOR static Future<Void> writeVersionProperty(Reference<BackupContainerFileSystem> bc, std::string path, Version v) {
 		try {
@@ -1647,7 +1777,6 @@ public:
 	virtual ~BackupContainerBlobStore() {}
 
 	Future<Reference<IAsyncFile>> readFile(std::string path) final {
-		ASSERT(m_bstore->knobs.read_ahead_blocks > 0);
 		return Reference<IAsyncFile>(
 			new AsyncFileReadAheadCache(
 				Reference<IAsyncFile>(new AsyncFileBlobStoreRead(m_bstore, m_bucket, dataPath(path))),
@@ -1968,6 +2097,8 @@ ACTOR Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference
 	return found.first + (v - found.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 }
 
+namespace backup_test {
+
 int chooseFileSize(std::vector<int> &sizes) {
 	int size = 1000;
 	if(!sizes.empty()) {
@@ -2005,7 +2136,30 @@ Version nextVersion(Version v) {
 	return v + increment;
 }
 
-ACTOR Future<Void> testBackupContainer(std::string url) {
+// Write a snapshot file with only begin & end key
+ACTOR static Future<Void> testWriteSnapshotFile(Reference<IBackupFile> file, Key begin, Key end, uint32_t blockSize) {
+	ASSERT(blockSize > 3 * sizeof(uint32_t) + begin.size() + end.size());
+
+	uint32_t fileVersion = BACKUP_AGENT_SNAPSHOT_FILE_VERSION;
+	// write Header
+	wait(file->append((uint8_t*)&fileVersion, sizeof(fileVersion)));
+
+	// write begin key length and key
+	wait(file->appendStringRefWithLen(begin));
+
+	// write end key length and key
+	wait(file->appendStringRefWithLen(end));
+
+	int bytesLeft = blockSize - file->size();
+	if (bytesLeft > 0) {
+		Value paddings = fileBackup::makePadding(bytesLeft);
+		wait(file->append(paddings.begin(), bytesLeft));
+	}
+	wait(file->finish());
+	return Void();
+}
+
+ACTOR static Future<Void> testBackupContainer(std::string url) {
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
 	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url);
@@ -2023,6 +2177,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	state std::vector<Future<Void>> writes;
 	state std::map<Version, std::vector<std::string>> snapshots;
 	state std::map<Version, int64_t> snapshotSizes;
+	state std::map<Version, std::vector<std::pair<Key, Key>>> snapshotBeginEndKeys;
 	state int nRangeFiles = 0;
 	state std::map<Version, std::string> logs;
 	state Version v = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max() / 2);
@@ -2033,27 +2188,36 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	loop {
 		state Version logStart = v;
 		state int kvfiles = deterministicRandom()->randomInt(0, 3);
+		state Key begin = LiteralStringRef("");
+		state Key end = LiteralStringRef("");
+		state int blockSize = 3 * sizeof(uint32_t) + begin.size() + end.size() + 8;
 
 		while(kvfiles > 0) {
 			if(snapshots.empty()) {
 				snapshots[v] = {};
+				snapshotBeginEndKeys[v] = {};
 				snapshotSizes[v] = 0;
 				if(deterministicRandom()->coinflip()) {
 					v = nextVersion(v);
 				}
 			}
-			Reference<IBackupFile> range = wait(c->writeRangeFile(snapshots.rbegin()->first, 0, v, 10));
+			Reference<IBackupFile> range = wait(c->writeRangeFile(snapshots.rbegin()->first, 0, v, blockSize));
 			++nRangeFiles;
 			v = nextVersion(v);
 			snapshots.rbegin()->second.push_back(range->getFileName());
+			snapshotBeginEndKeys.rbegin()->second.emplace_back(begin, end);
 
 			int size = chooseFileSize(fileSizes);
 			snapshotSizes.rbegin()->second += size;
-			writes.push_back(writeAndVerifyFile(c, range, size));
+			// Write in actual range file format, instead of random data.
+			// writes.push_back(writeAndVerifyFile(c, range, size));
+			wait(testWriteSnapshotFile(range, begin, end, blockSize));
 
 			if(deterministicRandom()->random01() < .2) {
-				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second, snapshotSizes.rbegin()->second));
+				writes.push_back(c->writeKeyspaceSnapshotFile(
+				    snapshots.rbegin()->second, snapshotBeginEndKeys.rbegin()->second, snapshotSizes.rbegin()->second));
 				snapshots[v] = {};
+				snapshotBeginEndKeys[v] = {};
 				snapshotSizes[v] = 0;
 				break;
 			}
@@ -2244,3 +2408,5 @@ TEST_CASE("/backup/continuous") {
 
 	return Void();
 }
+
+} // namespace backup_test

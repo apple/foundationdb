@@ -289,6 +289,10 @@ struct KeyRangeRef {
 		return KeyRangeRef( begin.withPrefix(prefix), end.withPrefix(prefix) );
 	}
 
+	KeyRangeRef withPrefix(const StringRef& prefix, Arena& arena) const {
+		return KeyRangeRef(begin.withPrefix(prefix, arena), end.withPrefix(prefix, arena));
+	}
+
 	KeyRangeRef removePrefix( const StringRef& prefix ) const {
 		return KeyRangeRef( begin.removePrefix(prefix), end.removePrefix(prefix) );
 	}
@@ -303,8 +307,20 @@ struct KeyRangeRef {
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
-		serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
+		if (!ar.isDeserializing && equalsKeyAfter(begin, end)) {
+			StringRef empty;
+			serializer(ar, const_cast<KeyRef&>(end), empty);
+		} else {
+			serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
+		}
+		if (ar.isDeserializing && end == StringRef() && begin != StringRef()) {
+			ASSERT(begin[begin.size()-1] == '\x00');
+			const_cast<KeyRef&>(end) = begin;
+			const_cast<KeyRef&>(begin) = end.substr(0, end.size()-1);
+		}
+
 		if( begin > end ) {
+			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end);
 			throw inverted_range();
 		};
 	}
@@ -437,7 +453,7 @@ typedef Standalone<KeyRangeRef> KeyRange;
 typedef Standalone<KeyValueRef> KeyValue;
 typedef Standalone<struct KeySelectorRef> KeySelector;
 
-enum { invalidVersion = -1, latestVersion = -2 };
+enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
 inline Key keyAfter( const KeyRef& key ) {
 	if(key == LiteralStringRef("\xff\xff"))
@@ -841,6 +857,11 @@ struct LogMessageVersion {
 	explicit LogMessageVersion(Version version) : version(version), sub(0) {}
 	LogMessageVersion() : version(0), sub(0) {}
 	bool empty() const { return (version == 0) && (sub == 0); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, sub);
+	}
 };
 
 struct AddressExclusion {
@@ -886,7 +907,7 @@ inline bool addressExcluded( std::set<AddressExclusion> const& exclusions, Netwo
 }
 
 struct ClusterControllerPriorityInfo {
-	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessBad }; //cannot be larger than 7 because of leader election mask
+	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessNotPreferred, FitnessBad }; //cannot be larger than 7 because of leader election mask
 
 	static DCFitness calculateDCFitness(Optional<Key> const& dcId, std::vector<Optional<Key>> const& dcPriority) {
 		if(!dcPriority.size()) {
@@ -895,7 +916,7 @@ struct ClusterControllerPriorityInfo {
 			if(dcId == dcPriority[0]) {
 				return FitnessPreferred;
 			} else {
-				return FitnessUnknown;
+				return FitnessNotPreferred;
 			}
 		} else {
 			if(dcId == dcPriority[0]) {
@@ -1012,5 +1033,29 @@ struct WorkerBackupStatus {
 		serializer(ar, epoch, version, tag, totalTags);
 	}
 };
+
+enum class TransactionPriority : uint8_t {
+	BATCH,
+	DEFAULT,
+	IMMEDIATE,
+	MIN=BATCH,
+	MAX=IMMEDIATE
+};
+
+const std::array<TransactionPriority, (int)TransactionPriority::MAX+1> allTransactionPriorities = { TransactionPriority::BATCH, TransactionPriority::DEFAULT, TransactionPriority::IMMEDIATE };
+
+inline const char* transactionPriorityToString(TransactionPriority priority, bool capitalize=true) {
+	switch(priority) {
+		case TransactionPriority::BATCH:
+			return capitalize ? "Batch" : "batch";
+		case TransactionPriority::DEFAULT:
+			return capitalize ? "Default" : "default";
+		case TransactionPriority::IMMEDIATE:
+			return capitalize ? "Immediate" : "immediate";
+	}
+
+	ASSERT(false);
+	throw internal_error();
+}
 
 #endif

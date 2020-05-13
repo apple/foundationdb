@@ -2,6 +2,26 @@
 Release Notes
 #############
 
+6.2.21
+======
+
+Fixes
+-----
+
+* HTTPS requests made by backup could hang indefinitely. `(PR #3027) <https://github.com/apple/foundationdb/pull/3027>`_
+* ``fdbrestore`` prefix options required exactly a single hyphen instead of the standard two. `(PR #3056) <https://github.com/apple/foundationdb/pull/3056>`_
+* Commits could stall on a newly elected proxy because of inaccurate compute estimates. `(PR #3123) <https://github.com/apple/foundationdb/pull/3123>`_
+
+6.2.20
+======
+
+Fixes
+-----
+
+* In rare scenarios, clients could send corrupted data to the server. `(PR #2976) <https://github.com/apple/foundationdb/pull/2976>`_
+* Internal tools like ``fdbbackup`` are no longer tracked as clients in status (introduced in 6.2.18) `(PR #2849) <https://github.com/apple/foundationdb/pull/2849>`_
+* Changed TLS error handling to match the behavior of 6.2.15. `(PR #2993) <https://github.com/apple/foundationdb/pull/2993>`_ `(PR #2977) <https://github.com/apple/foundationdb/pull/2977>`_
+
 6.2.19
 ======
 
@@ -261,7 +281,7 @@ Bindings
 * Go: The Go bindings now require Go version 1.11 or later.
 * Go: Finalizers could run too early leading to undefined behavior. `(PR #1451) <https://github.com/apple/foundationdb/pull/1451>`_.
 * Added a transaction option to control the field length of keys and values in debug transaction logging in order to avoid truncation. `(PR #1844) <https://github.com/apple/foundationdb/pull/1844>`_.
-* Added a transaction option to control the whether ``get_addresses_for_key`` includes a port in the address. This will be deprecated in api version 700, and addresses will include ports by default. [6.2.4] `(PR #2060) <https://github.com/apple/foundationdb/pull/2060>`_.
+* Added a transaction option to control the whether ``get_addresses_for_key`` includes a port in the address. This will be deprecated in api version 630, and addresses will include ports by default. [6.2.4] `(PR #2060) <https://github.com/apple/foundationdb/pull/2060>`_.
 * Python: ``Versionstamp`` comparisons didn't work in Python 3. [6.2.4] `(PR #2089) <https://github.com/apple/foundationdb/pull/2089>`_.
 
 Features

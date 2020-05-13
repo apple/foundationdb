@@ -522,7 +522,8 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 	int64_t maxTLogQueueGate = 5e6, int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0, int64_t maxPoppedVersionLag = 30e6 ) {
 	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (deterministicRandom()->random01()*100), dbInfo, "QuietDatabase");
 
-	TraceEvent(("QuietDatabase" + phase + "Begin").c_str());
+	auto traceMessage = "QuietDatabase" + phase + "Begin";
+	TraceEvent(traceMessage.c_str());
 
 	//In a simulated environment, wait 5 seconds so that workers can move to their optimal locations
 	if(g_network->isSimulated())
@@ -575,7 +576,8 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 				numSuccesses = 0;
 			} else {
 				if(++numSuccesses == 3) {
-					TraceEvent(("QuietDatabase" + phase + "Done").c_str());
+					auto msg = "QuietDatabase" + phase + "Done";
+					TraceEvent(msg.c_str());
 					break;
 				} else {
 					wait(delay( g_network->isSimulated() ? 2.0 : 30.0));

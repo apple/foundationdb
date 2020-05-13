@@ -193,7 +193,7 @@ struct JSONDoc {
 		return v.get_value<T>();
 	}
 
-	// Ensures that a an Object exists at path and returns a JSONDoc that writes to it.
+	// Ensures that an Object exists at path and returns a JSONDoc that writes to it.
 	JSONDoc subDoc(std::string path, bool split=true) {
 		json_spirit::mValue &v = create(path, split);
 		if(v.type() != json_spirit::obj_type)

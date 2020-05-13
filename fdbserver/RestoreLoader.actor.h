@@ -82,17 +82,19 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 		CounterCollection cc;
 		Counter loadedRangeBytes, loadedLogBytes, sentBytes;
 		Counter sampledRangeBytes, sampledLogBytes;
+		Counter oldLogMutations;
 
 		Counters(LoaderBatchData* self, UID loaderInterfID, int batchIndex)
 		  : cc("LoaderBatch", loaderInterfID.toString() + ":" + std::to_string(batchIndex)),
 		    loadedRangeBytes("LoadedRangeBytes", cc), loadedLogBytes("LoadedLogBytes", cc), sentBytes("SentBytes", cc),
-		    sampledRangeBytes("SampledRangeBytes", cc), sampledLogBytes("SampledLogBytes", cc) {}
+		    sampledRangeBytes("SampledRangeBytes", cc), sampledLogBytes("SampledLogBytes", cc),
+		    oldLogMutations("OldLogMutations", cc) {}
 	} counters;
 
 	explicit LoaderBatchData(UID nodeID, int batchIndex) : counters(this, nodeID, batchIndex), vbState(LoaderVersionBatchState::NOT_INIT) {
-		pollMetrics =
-		    traceCounters("FastRestoreLoaderMetrics", nodeID, SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
-		                  &counters.cc, nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
+		pollMetrics = traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex), nodeID,
+		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
+		                            nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreLoaderMetricsCreated").detail("Node", nodeID);
 	}
 
@@ -128,6 +130,8 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	// buffered data per version batch
 	std::map<int, Reference<LoaderBatchData>> batch;
 	std::map<int, Reference<LoaderBatchStatus>> status;
+
+	KeyRangeMap<Version> rangeVersions;
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
@@ -165,7 +169,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	}
 
 	void initVersionBatch(int batchIndex) {
-		TraceEvent("FastRestore").detail("InitVersionBatchOnLoader", nodeID);
+		TraceEvent("FastRestoreLoaderInitVersionBatch", nodeID).detail("BatchIndex", batchIndex);
 		batch[batchIndex] = Reference<LoaderBatchData>(new LoaderBatchData(nodeID, batchIndex));
 		status[batchIndex] = Reference<LoaderBatchStatus>(new LoaderBatchStatus());
 	}
@@ -173,6 +177,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	void resetPerRestoreRequest() {
 		batch.clear();
 		status.clear();
+		finishedBatch = NotifiedVersion(0);
 	}
 
 	void initBackupContainer(Key url) {

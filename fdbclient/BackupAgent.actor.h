@@ -278,7 +278,7 @@ public:
 	// parallel restore
 	Future<Void> parallelRestoreFinish(Database cx, UID randomUID);
 	Future<Void> submitParallelRestore(Database cx, Key backupTag, Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                                   KeyRef bcUrl, Version targetVersion, bool lockDB, UID randomUID);
+	                                   Key bcUrl, Version targetVersion, bool lockDB, UID randomUID);
 	Future<Void> atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                   Key addPrefix, Key removePrefix);
 
@@ -361,6 +361,9 @@ public:
 	Future<Void> watchTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->watchTaskCount(tr); }
 
 	Future<bool> checkActive(Database cx) { return taskBucket->checkActive(cx); }
+
+	// If "pause" is true, pause all backups; otherwise, resume all.
+	Future<Void> changePause(Database db, bool pause);
 
 	friend class FileBackupAgentImpl;
 	static const int dataFooterSize;
@@ -502,8 +505,6 @@ Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version 
 Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr, Key logUidValue, Key destUidValue, Optional<Version> endVersion = Optional<Version>(), bool checkBackupUid = false, Version backupUid = 0);
 Key getApplyKey( Version version, Key backupUid );
 std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key);
-Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value);
-void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int64_t& mutationSize, StringRef value, StringRef addPrefix = StringRef(), StringRef removePrefix = StringRef());
 Future<Void> logError(Database cx, Key keyErrors, const std::string& message);
 Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message);
 Future<Void> checkVersion(Reference<ReadYourWritesTransaction> const& tr);
@@ -890,10 +891,6 @@ public:
 	}
 };
 
-ACTOR Future<Version> fastRestore(Database cx, Standalone<StringRef> tagName, Standalone<StringRef> url,
-                                  bool waitForComplete, long targetVersion, bool verbose, Standalone<KeyRangeRef> range,
-                                  Standalone<StringRef> addPrefix, Standalone<StringRef> removePrefix);
-
 // Helper class for reading restore data from a buffer and throwing the right errors.
 struct StringRefReader {
 	StringRefReader(StringRef s = StringRef(), Error e = Error()) : rptr(s.begin()), end(s.end()), failure_error(e) {}
@@ -930,6 +927,14 @@ struct StringRefReader {
 	const uint8_t *rptr, *end;
 	Error failure_error;
 };
+
+namespace fileBackup {
+ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset,
+                                                                      int len);
+
+// Return a block of contiguous padding bytes "\0xff" for backup files, growing if needed.
+Value makePadding(int size);
+}
 
 #include "flow/unactorcompiler.h"
 #endif

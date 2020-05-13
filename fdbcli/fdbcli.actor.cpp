@@ -30,6 +30,7 @@
 #include "fdbclient/Schemas.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/TagThrottle.h"
 
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
@@ -48,9 +49,7 @@
 #include "fdbcli/linenoise/linenoise.h"
 #endif
 
-#if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "versions.h"
-#endif
+#include "fdbclient/IncludeVersions.h"
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -522,6 +521,14 @@ void initHelp() {
 		"getrangekeys <BEGINKEY> [ENDKEY] [LIMIT]",
 		"fetch keys in a range of keys",
 		"Displays up to LIMIT keys for keys between BEGINKEY (inclusive) and ENDKEY (exclusive). If ENDKEY is omitted, then the range will include all keys starting with BEGINKEY. LIMIT defaults to 25 if omitted." ESCAPINGK);
+	helpMap["getversion"] =
+	    CommandHelp("getversion", "Fetch the current read version",
+	                "Displays the current read version of the database or currently running transaction.");
+	helpMap["advanceversion"] = CommandHelp(
+	    "advanceversion <VERSION>", "Force the cluster to recover at the specified version",
+	    "Forces the cluster to recover at the specified version. If the specified version is larger than the current "
+	    "version of the cluster, the cluster version is advanced "
+	    "to the specified version via a forced recovery.");
 	helpMap["reset"] = CommandHelp(
 		"reset",
 		"reset the current transaction",
@@ -565,6 +572,19 @@ void initHelp() {
 		"consistencycheck [on|off]",
 		"permits or prevents consistency checking",
 		"Calling this command with `on' permits consistency check processes to run and `off' will halt their checking. Calling this command with no arguments will display if consistency checking is currently allowed.\n");
+	helpMap["throttle"] = CommandHelp(
+		"throttle <on|off|enable auto|disable auto|list> [ARGS]",
+		"view and control throttled tags",
+		"Use `on' and `off' to manually throttle or unthrottle tags. Use `enable auto' or `disable auto' to enable or disable automatic tag throttling. Use `list' to print the list of throttled tags.\n"
+	);
+	helpMap["lock"] = CommandHelp(
+		"lock",
+		"lock the database with a randomly generated lockUID",
+		"Randomly generates a lockUID, prints this lockUID, and then uses the lockUID to lock the database.");
+	helpMap["unlock"] =
+	    CommandHelp("unlock <UID>", "unlock the database with the provided lockUID",
+	                "Unlocks the database with the provided lockUID. This is a potentially dangerous operation, so the "
+	                "user will be asked to enter a passphrase to confirm their intent.");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -933,7 +953,11 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 			StatusObjectReader statusObjConfig;
 			StatusArray excludedServersArr;
+			Optional<std::string> activePrimaryDC;
 
+			if (statusObjCluster.has("active_primary_dc")) {
+				activePrimaryDC = statusObjCluster["active_primary_dc"].get_str();
+			}
 			if (statusObjCluster.get("configuration", statusObjConfig)) {
 				if (statusObjConfig.has("excluded_servers"))
 					excludedServersArr = statusObjConfig.last().get_array();
@@ -989,6 +1013,73 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				if (statusObjConfig.get("log_routers", intVal))
 					outputString += format("\n  Desired Log Routers    - %d", intVal);
+
+				outputString += "\n  Usable Regions         - ";
+				if (statusObjConfig.get("usable_regions", intVal)) {
+					outputString += std::to_string(intVal);
+				} else {
+					outputString += "unknown";
+				}
+
+				StatusArray regions;
+				if (statusObjConfig.has("regions")) {
+					outputString += "\n  Regions: ";
+					regions = statusObjConfig["regions"].get_array();
+					bool isPrimary = false;
+					std::vector<std::string> regionSatelliteDCs;
+					std::string regionDC;
+					for (StatusObjectReader region : regions) {
+						for (StatusObjectReader dc : region["datacenters"].get_array()) {
+							if (!dc.has("satellite")) {
+								regionDC = dc["id"].get_str();
+								if (activePrimaryDC.present() && dc["id"].get_str() == activePrimaryDC.get()) {
+									isPrimary = true;
+								}
+							} else if (dc["satellite"].get_int() == 1) {
+								regionSatelliteDCs.push_back(dc["id"].get_str());
+							}
+						}
+						if (activePrimaryDC.present()) {
+							if (isPrimary) {
+								outputString += "\n    Primary -";
+							} else {
+								outputString += "\n    Remote -";
+							}
+						} else {
+							outputString += "\n    Region -";
+						}
+						outputString += format("\n        Datacenter                    - %s", regionDC.c_str());
+						if (regionSatelliteDCs.size() > 0) {
+							outputString += "\n        Satellite datacenters         - ";
+							for (int i = 0; i < regionSatelliteDCs.size(); i++) {
+								if (i != regionSatelliteDCs.size() - 1) {
+									outputString += format("%s, ", regionSatelliteDCs[i].c_str());
+								} else {
+									outputString += format("%s", regionSatelliteDCs[i].c_str());
+								}
+							}
+						}
+						isPrimary = false;
+						if (region.get("satellite_redundancy_mode", strVal)) {
+							outputString += format("\n        Satellite Redundancy Mode     - %s", strVal.c_str());
+						}
+						if (region.get("satellite_anti_quorum", intVal)) {
+							outputString += format("\n        Satellite Anti Quorum         - %d", intVal);
+						}
+						if (region.get("satellite_logs", intVal)) {
+							outputString += format("\n        Satellite Logs                - %d", intVal);
+						}
+						if (region.get("satellite_log_policy", strVal)) {
+							outputString += format("\n        Satellite Log Policy          - %s", strVal.c_str());
+						}
+						if (region.get("satellite_log_replicas", intVal)) {
+							outputString += format("\n        Satellite Log Replicas        - %d", intVal);
+						}
+						if (region.get("satellite_usable_dcs", intVal)) {
+							outputString += format("\n        Satellite Usable DCs          - %d", intVal);
+						}
+					}
+				}
 			}
 			catch (std::runtime_error& ) {
 				outputString = outputStringCache;
@@ -2208,36 +2299,44 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			workerPorts[addr.address.ip].insert(addr.address.port);
 
 		// Print a list of all excluded addresses that don't have a corresponding worker
-		std::vector<AddressExclusion> absentExclusions;
+		std::set<AddressExclusion> absentExclusions;
 		for(auto addr : addresses) {
 			auto worker = workerPorts.find(addr.ip);
 			if(worker == workerPorts.end())
-				absentExclusions.push_back(addr);
+				absentExclusions.insert(addr);
 			else if(addr.port > 0 && worker->second.count(addr.port) == 0)
-				absentExclusions.push_back(addr);
+				absentExclusions.insert(addr);
 		}
 
-		if(!absentExclusions.empty()) {
-			printf("\nWARNING: the following servers were not present in the cluster. Be sure that you\n"
-					"excluded the correct machines or processes before removing them from the cluster:\n");
-			for(auto addr : absentExclusions) {
+		for (auto addr : addresses) {
+			NetworkAddress _addr(addr.ip, addr.port);
+			if (absentExclusions.find(addr) != absentExclusions.end()) {
 				if(addr.port == 0)
-					printf("  %s\n", addr.ip.toString().c_str());
+					printf("  %s(Whole machine)  ---- WARNING: Missing from cluster!Be sure that you excluded the "
+					       "correct machines before removing them from the cluster!\n",
+					       addr.ip.toString().c_str());
 				else
-					printf("  %s\n", addr.toString().c_str());
-			}
-
-			printf("\n");
-		} else if (notExcludedServers.empty()) {
-			printf("\nIt is now safe to remove these machines or processes from the cluster.\n");
-		} else {
-			printf("\nWARNING: Exclusion in progress. It is not safe to remove the following machines\n"
-			       "or processes from the cluster:\n");
-			for (auto addr : notExcludedServers) {
+					printf("  %s  ---- WARNING: Missing from cluster! Be sure that you excluded the correct processes "
+					       "before removing them from the cluster!\n",
+					       addr.toString().c_str());
+			} else if (notExcludedServers.find(_addr) != notExcludedServers.end()) {
 				if (addr.port == 0)
-					printf("  %s\n", addr.ip.toString().c_str());
+					printf("  %s(Whole machine)  ---- WARNING: Exclusion in progress! It is not safe to remove this "
+					       "machine from the cluster\n",
+					       addr.ip.toString().c_str());
 				else
-					printf("  %s\n", addr.toString().c_str());
+					printf("  %s  ---- WARNING: Exclusion in progress! It is not safe to remove this process from the "
+					       "cluster\n",
+					       addr.toString().c_str());
+			} else {
+				if (addr.port == 0)
+					printf("  %s(Whole machine)  ---- Successfully excluded. It is now safe to remove this machine "
+					       "from the cluster.\n",
+					       addr.ip.toString().c_str());
+				else
+					printf(
+					    "  %s  ---- Successfully excluded. It is now safe to remove this process from the cluster.\n",
+					    addr.toString().c_str());
 			}
 		}
 
@@ -2517,11 +2616,11 @@ struct CLIOptions {
 		}
 
 		delete FLOW_KNOBS;
-		FlowKnobs* flowKnobs = new FlowKnobs(true);
+		FlowKnobs* flowKnobs = new FlowKnobs;
 		FLOW_KNOBS = flowKnobs;
 
 		delete CLIENT_KNOBS;
-		ClientKnobs* clientKnobs = new ClientKnobs(true);
+		ClientKnobs* clientKnobs = new ClientKnobs;
 		CLIENT_KNOBS = clientKnobs;
 
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
@@ -2544,6 +2643,10 @@ struct CLIOptions {
 				}
 			}
 		}
+
+		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
+		flowKnobs->initialize(true);
+		clientKnobs->initialize(true);
 	}
 
 	int processArg(CSimpleOpt& args) {
@@ -2652,11 +2755,14 @@ ACTOR Future<Void> addInterface( std::map<Key,std::pair<Value,ClientLeaderRegInt
 	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
 	choose {
 		when( Optional<LeaderInfo> rep = wait( brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())) ) ) {
-			StringRef ip_port = kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key;
+			StringRef ip_port =
+			    (kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key)
+			        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
 			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
 
 			if(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
-				Key full_ip_port2 = StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
+				Key full_ip_port2 =
+				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
 				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls")) ? full_ip_port2.removeSuffix(LiteralStringRef(":tls")) : full_ip_port2;
 				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
 			}
@@ -2758,7 +2864,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				continue;
 
 			// Don't put dangerous commands in the command history
-			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos)
+			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos &&
+			    line.find("unlock") == std::string::npos)
 				linenoise.historyAdd(line);
 		}
 
@@ -2973,6 +3080,52 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "lock")) {
+					if (tokens.size() != 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						state UID lockUID = deterministicRandom()->randomUniqueID();
+						printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
+						wait(makeInterruptable(lockDatabase(db, lockUID)));
+						printf("Database locked.\n");
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "unlock")) {
+					if ((tokens.size() != 2) || (tokens[1].size() != 32) ||
+					    !std::all_of(tokens[1].begin(), tokens[1].end(), &isxdigit)) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						state std::string passPhrase = deterministicRandom()->randomAlphaNumeric(10);
+						warn.cancel(); // don't warn while waiting on user input
+						printf("Unlocking the database is a potentially dangerous operation.\n");
+						Optional<std::string> input = wait(linenoise.read(
+						    format("Repeat the following passphrase if you would like to proceed (%s) : ",
+						           passPhrase.c_str())));
+						warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db);
+						if (input.present() && input.get() == passPhrase) {
+							UID unlockUID = UID::fromString(tokens[1].toString());
+							try {
+								wait(makeInterruptable(unlockDatabase(db, unlockUID)));
+								printf("Database unlocked.\n");
+							} catch (Error& e) {
+								if (e.code() == error_code_database_locked) {
+									printf(
+									    "Unable to unlock database. Make sure to unlock with the correct lock UID.\n");
+								}
+								throw e;
+							}
+						} else {
+							printf("ERROR: Incorrect passphrase entered.\n");
+							is_error = true;
+						}
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "setclass")) {
 					if (tokens.size() != 3 && tokens.size() != 1) {
 						printUsage(tokens[0]);
@@ -3065,10 +3218,42 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "getversion")) {
+					if (tokens.size() != 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						Version v = wait(makeInterruptable(getTransaction(db, tr, options, intrans)->getReadVersion()));
+						printf("%ld\n", v);
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "advanceversion")) {
+					if (tokens.size() != 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						Version v;
+						int n = 0;
+						if (sscanf(tokens[1].toString().c_str(), "%ld%n", &v, &n) != 1 || n != tokens[1].size()) {
+							printUsage(tokens[0]);
+							is_error = true;
+						} else {
+							wait(makeInterruptable(advanceVersion(db, v)));
+						}
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "kill")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
@@ -3265,12 +3450,16 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 						getTransaction(db, tr, options, intrans);
-						Standalone<RangeResultRef> kvs = wait(makeInterruptable(
-						    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
-						                             LiteralStringRef("\xff\xff\xff")),
-						                 1)));
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						for (const auto& pair : kvs) {
-							auto ip_port = pair.key.endsWith(LiteralStringRef(":tls")) ? pair.key.removeSuffix(LiteralStringRef(":tls")) : pair.key;
+							auto ip_port = (pair.key.endsWith(LiteralStringRef(":tls"))
+							                    ? pair.key.removeSuffix(LiteralStringRef(":tls"))
+							                    : pair.key)
+							                   .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
 							printf("%s\n", printable(ip_port).c_str());
 						}
 						continue;
@@ -3289,9 +3478,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 							getTransaction(db, tr, options, intrans);
 							Standalone<RangeResultRef> kvs = wait(makeInterruptable(
-							    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
-							                             LiteralStringRef("\xff\xff\xff")),
-							                 1)));
+							    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+							                             LiteralStringRef("\xff\xff/worker_interfaces0")),
+							                 CLIENT_KNOBS->TOO_MANY)));
+							ASSERT(!kvs.more);
 							char *duration_end;
 							int duration = std::strtol((const char*)tokens[3].begin(), &duration_end, 10);
 							if (!std::isspace(*duration_end)) {
@@ -3303,7 +3493,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							state std::vector<Key> all_profiler_addresses;
 							state std::vector<Future<ErrorOr<Void>>> all_profiler_responses;
 							for (const auto& pair : kvs) {
-								auto ip_port = pair.key.endsWith(LiteralStringRef(":tls")) ? pair.key.removeSuffix(LiteralStringRef(":tls")) : pair.key;
+								auto ip_port = (pair.key.endsWith(LiteralStringRef(":tls"))
+								                    ? pair.key.removeSuffix(LiteralStringRef(":tls"))
+								                    : pair.key)
+								                   .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
 								interfaces.emplace(ip_port, BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
 							}
 							if (tokens.size() == 6 && tokencmp(tokens[5], "all")) {
@@ -3679,6 +3872,181 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 					}
 
+					continue;
+				}
+
+				if(tokencmp(tokens[0], "throttle")) {
+					if(tokens.size() == 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+						continue;
+					}
+					else if(tokencmp(tokens[1], "list")) {
+						if(tokens.size() > 3) {
+							printf("Usage: throttle list [LIMIT]\n");
+							printf("\n");
+							printf("Lists tags that are currently throttled.\n");
+							printf("The default LIMIT is 100 tags.\n");
+							is_error = true;
+							continue;
+						}
+
+						state int throttleListLimit = 100;
+						if(tokens.size() >= 3) {
+							char *end;
+							throttleListLimit = std::strtol((const char*)tokens[2].begin(), &end, 10);
+							if ((tokens.size() > 3 && !std::isspace(*end)) || (tokens.size() == 3 && *end != '\0')) {
+								printf("ERROR: failed to parse limit `%s'.\n", printable(tokens[2]).c_str());
+								is_error = true;
+								continue;
+							}
+						}
+
+						std::vector<TagThrottleInfo> tags = wait(ThrottleApi::getThrottledTags(db, throttleListLimit));
+
+						bool anyLogged = false;
+						for(auto itr = tags.begin(); itr != tags.end(); ++itr) {
+							if(itr->expirationTime > now()) {
+								if(!anyLogged) {
+									printf("Throttled tags:\n\n");
+									printf("  Rate (txn/s) | Expiration (s) | Priority  | Type   | Tag\n");
+									printf(" --------------+----------------+-----------+--------+------------------\n");
+									
+									anyLogged = true;
+								}
+
+								printf("  %12d | %13ds | %9s | %6s | %s\n", 
+									(int)(itr->tpsRate), 
+									std::min((int)(itr->expirationTime-now()), (int)(itr->initialDuration)), 
+									transactionPriorityToString(itr->priority, false), 
+									itr->autoThrottled ? "auto" : "manual", 
+									itr->tag.toString().c_str());
+							}
+						}
+
+						if(tags.size() == throttleListLimit) {
+							printf("\nThe tag limit `%d' was reached. Use the [LIMIT] argument to view additional tags.\n", throttleListLimit);
+							printf("Usage: throttle list [LIMIT]\n");
+						}
+						if(!anyLogged) {
+							printf("There are no throttled tags\n");
+						}
+					}
+					else if(tokencmp(tokens[1], "on") && tokens.size() <=6) {	
+						if(tokens.size() < 4 || !tokencmp(tokens[2], "tag")) {
+							printf("Usage: throttle on tag <TAG> [RATE] [DURATION]\n");
+							printf("\n");
+							printf("Enables throttling for transactions with the specified tag.\n");
+							printf("An optional transactions per second rate can be specified (default 0).\n");
+							printf("An optional duration can be specified, which must include a time suffix (s, m, h, d) (default 1h).\n");
+							is_error = true;
+							continue;
+						}
+
+						double tpsRate = 0.0;
+						uint64_t duration = 3600;
+
+						if(tokens.size() >= 5) {
+							char *end;
+							tpsRate = std::strtod((const char*)tokens[4].begin(), &end);
+							if((tokens.size() > 5 && !std::isspace(*end)) || (tokens.size() == 5 && *end != '\0')) {
+								printf("ERROR: failed to parse rate `%s'.\n", printable(tokens[4]).c_str());
+								is_error = true;
+								continue;
+							}
+							if(tpsRate < 0) {
+								printf("ERROR: rate cannot be negative `%f'\n", tpsRate);
+								is_error = true;
+								continue;
+							}
+						}
+						if(tokens.size() == 6) {
+							Optional<uint64_t> parsedDuration = parseDuration(tokens[5].toString());
+							if(!parsedDuration.present()) {
+								printf("ERROR: failed to parse duration `%s'.\n", printable(tokens[5]).c_str());
+								is_error = true;
+								continue;
+							}
+							duration = parsedDuration.get();
+						}
+
+						if(duration == 0) {
+							printf("ERROR: throttle duration cannot be 0\n");
+							is_error = true;
+							continue;
+						}
+
+						TagSet tags;
+						tags.addTag(tokens[3]);
+
+						wait(ThrottleApi::throttleTags(db, tags, tpsRate, duration, false, TransactionPriority::DEFAULT));
+						printf("Tag `%s' has been throttled\n", tokens[3].toString().c_str());
+					}
+					else if(tokencmp(tokens[1], "off")) {
+						if(tokencmp(tokens[2], "tag") && tokens.size() == 4) {
+							TagSet tags;
+							tags.addTag(tokens[3]);
+							bool success = wait(ThrottleApi::unthrottleTags(db, tags, false, TransactionPriority::DEFAULT)); // TODO: Allow targeting priority and auto/manual
+							if(success) {
+								printf("Unthrottled tag `%s'\n", tokens[3].toString().c_str());
+							}
+							else {
+								printf("Tag `%s' was not throttled\n", tokens[3].toString().c_str());
+							}
+						}
+						else if(tokencmp(tokens[2], "all") && tokens.size() == 3) {
+							bool unthrottled = wait(ThrottleApi::unthrottleAll(db));
+							if(unthrottled) {
+								printf("Unthrottled all tags\n");
+							}
+							else {
+								printf("There were no tags being throttled\n");
+							}
+						}
+						else if(tokencmp(tokens[2], "auto") && tokens.size() == 3) {
+							bool unthrottled = wait(ThrottleApi::unthrottleAuto(db));
+							if(unthrottled) {
+								printf("Unthrottled all auto-throttled tags\n");
+							}
+							else {
+								printf("There were no tags being throttled\n");
+							}
+						}
+						else if(tokencmp(tokens[2], "manual") && tokens.size() == 3) {
+							bool unthrottled = wait(ThrottleApi::unthrottleManual(db));
+							if(unthrottled) {
+								printf("Unthrottled all manually throttled tags\n");
+							}
+							else {
+								printf("There were no tags being throttled\n");
+							}
+						}
+						else {
+							printf("Usage: throttle off <all|auto|manual|tag> [TAG]\n");
+							printf("\n");
+							printf("Disables throttling for the specified tag(s).\n");
+							printf("Use `all' to turn off all tag throttles, `auto' to turn off throttles created by\n");
+							printf("the cluster, and `manual' to turn off throttles created manually. Use `tag <TAG>'\n");
+							printf("to turn off throttles for a specific tag\n");
+							is_error = true;
+						}
+					}
+					else if((tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable")) && tokens.size() == 3 && tokencmp(tokens[2], "auto")) {
+						if(tokens.size() != 3 || !tokencmp(tokens[2], "auto")) {
+							printf("Usage: throttle <enable|disable> auto\n");
+							printf("\n");
+							printf("Enables or disable automatic tag throttling.\n");
+							is_error = true;
+							continue;
+						}
+						state bool autoTagThrottlingEnabled = tokencmp(tokens[1], "enable");
+						wait(ThrottleApi::enableAuto(db, autoTagThrottlingEnabled));
+						printf("Automatic tag throttling has been %s\n", autoTagThrottlingEnabled ? "enabled" : "disabled");
+					}
+					else {
+						printUsage(tokens[0]);
+						is_error = true;
+					}
 					continue;
 				}
 

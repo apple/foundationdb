@@ -31,10 +31,12 @@
 namespace detail {
 
 namespace {
-std::vector<int> mWriteToOffsetsMemoy;
+thread_local std::vector<int> gWriteToOffsetsMemory;
 }
 
-std::vector<int>* writeToOffsetsMemory = &mWriteToOffsetsMemoy;
+void swapWithThreadLocalGlobal(std::vector<int>& writeToOffsets) {
+	gWriteToOffsetsMemory.swap(writeToOffsets);
+}
 
 VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlignments) {
 	if (numMembers == 0) {
@@ -345,6 +347,16 @@ TEST_CASE("flow/FlatBuffers/vectorBool") {
 
 } // namespace unit_tests
 
+template <>
+struct string_serialized_traits<Void> : std::true_type {
+	int32_t getSize(const Void& item) const { return 0; }
+	uint32_t save(uint8_t* out, const Void& t) const { return 0; }
+	template <class Context>
+	uint32_t load(const uint8_t* data, Void& t, Context& context) {
+		return 0;
+	}
+};
+
 namespace unit_tests {
 
 struct Y1 {
@@ -488,16 +500,65 @@ TEST_CASE("/flow/FlatBuffers/Standalone") {
 // Meant to be run with valgrind or asan, to catch heap buffer overflows
 TEST_CASE("/flow/FlatBuffers/Void") {
 	Standalone<StringRef> msg = ObjectWriter::toValue(Void(), Unversioned());
-	// Manually verified to be a valid flatbuffers message. This is technically brittle since there are other valid
-	// encodings of this message, but our implementation is unlikely to change.
-	ASSERT(msg == LiteralStringRef("\x14\x00\x00\x00J\xad\x1e\x00\x00\x00\x04\x00\x04\x00\x06\x00\x08\x00\x04\x00\x06"
-	                               "\x00\x00\x00\x04\x00\x00\x00\x12\x00\x00\x00"));
 	auto buffer = std::make_unique<uint8_t[]>(msg.size()); // Make a heap allocation of precisely the right size, so
 	                                                       // that asan or valgrind will catch any overflows
 	memcpy(buffer.get(), msg.begin(), msg.size());
 	ObjectReader rd(buffer.get(), Unversioned());
 	Void x;
 	rd.deserialize(x);
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/EmptyStrings") {
+	int kSize = deterministicRandom()->randomInt(0, 100);
+	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<StringRef>(kSize), Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<StringRef> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == kSize);
+	for (const auto& x : xs) {
+		ASSERT(x.size() == 0);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/EmptyVectors") {
+	int kSize = deterministicRandom()->randomInt(0, 100);
+	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<std::vector<Void>>(kSize), Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<std::vector<Void>> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == kSize);
+	for (const auto& x : xs) {
+		ASSERT(x.size() == 0);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/EmptyVectorRefs") {
+	int kSize = deterministicRandom()->randomInt(0, 100);
+	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<VectorRef<Void>>(kSize), Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<VectorRef<Void>> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == kSize);
+	for (const auto& x : xs) {
+		ASSERT(x.size() == 0);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/EmptyPreSerVectorRefs") {
+	int kSize = deterministicRandom()->randomInt(0, 100);
+	Standalone<StringRef> msg =
+	    ObjectWriter::toValue(std::vector<VectorRef<Void, VecSerStrategy::String>>(kSize), Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<VectorRef<Void, VecSerStrategy::String>> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == kSize);
+	for (const auto& x : xs) {
+		ASSERT(x.size() == 0);
+	}
 	return Void();
 }
 

@@ -28,7 +28,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.actor.h"
 
-struct FlowReceiver : private NetworkMessageReceiver {
+struct FlowReceiver : public NetworkMessageReceiver {
 	// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
 
 	FlowReceiver() : m_isLocalEndpoint(false), m_stream(false) {
@@ -58,6 +58,12 @@ struct FlowReceiver : private NetworkMessageReceiver {
 			FlowTransport::transport().addEndpoint(endpoint, this, taskID);
 		}
 		return endpoint;
+	}
+
+	void setEndpoint(Endpoint const& e) {
+		ASSERT(!endpoint.isValid());
+		m_isLocalEndpoint = true;
+		endpoint = e;
 	}
 
 	void makeWellKnownEndpoint(Endpoint::Token token, TaskPriority taskID) {
@@ -247,6 +253,15 @@ public:
 		else
 			queue->send(value);
 	}
+
+	void send(T&& value) const {
+		if (queue->isRemoteEndpoint()) {
+			FlowTransport::transport().sendUnreliable(SerializeSource<T>(std::move(value)), getEndpoint(), true);
+		}
+		else
+			queue->send(std::move(value));
+	}
+
 	/*void sendError(const Error& error) const {
 	ASSERT( !queue->isRemoteEndpoint() );
 	queue->sendError(error);
@@ -382,6 +397,10 @@ public:
 	bool operator == (const RequestStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }
 	uint32_t size() const { return queue->size(); }
+
+	std::pair<FlowReceiver*, TaskPriority> getReceiver( TaskPriority taskID = TaskPriority::DefaultEndpoint ) {
+		return std::make_pair((FlowReceiver*)queue, taskID);
+	}
 
 private:
 	NetNotifiedQueue<T>* queue;

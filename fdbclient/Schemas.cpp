@@ -295,6 +295,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "transactions_per_second_limit":0,
          "batch_released_transactions_per_second":0,
          "released_transactions_per_second":0,
+         "batch_tags_throttled":0,
+         "tags_throttled":0,
          "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,
          "limiting_version_lag_storage_server":0,
@@ -398,7 +400,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "consistencycheck_suspendkey_fetch_timeout",
                   "consistencycheck_disabled",
                   "duplicate_mutation_streams",
-                  "duplicate_mutation_fetch_timeout"
+                  "duplicate_mutation_fetch_timeout",
+                  "primary_dc_missing",
+                  "fetch_primary_dc_timeout"
                ]
             },
             "issues":[
@@ -535,6 +539,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "data_distribution_disabled_for_ss_failures":true,
       "data_distribution_disabled_for_rebalance":true,
       "data_distribution_disabled":true,
+      "active_primary_dc":"pv",
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,

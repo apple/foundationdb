@@ -23,7 +23,6 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "flow/IndexedSet.h"
 #include "fdbrpc/FlowTransport.h" // Endpoint
 #include <unordered_map>
 
@@ -76,8 +75,8 @@ struct FailureStatus {
 	bool isFailed() const { return failed; }
 	bool isAvailable() const { return !failed; }
 
-	bool operator == (FailureStatus const& r) const { return failed == r.failed; }
-	bool operator != (FailureStatus const& r) const { return failed != r.failed; }
+	bool operator==(FailureStatus const& r) const { return failed == r.failed; }
+	bool operator!=(FailureStatus const& r) const { return failed != r.failed; }
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, failed);
@@ -87,43 +86,43 @@ struct FailureStatus {
 class IFailureMonitor {
 public:
 	// Returns the currently known status for the endpoint
-	virtual FailureStatus getState( Endpoint const& endpoint ) = 0;
+	virtual FailureStatus getState(Endpoint const& endpoint) = 0;
 
 	// Returns the currently known status for the address
-	virtual FailureStatus getState( NetworkAddress const& address ) = 0;
+	virtual FailureStatus getState(NetworkAddress const& address) = 0;
 
 	// Only use this function when the endpoint is known to be failed
-	virtual void endpointNotFound( Endpoint const& ) = 0;
+	virtual void endpointNotFound(Endpoint const&) = 0;
 
 	// The next time the known status for the endpoint changes, returns the new status.
-	virtual Future<Void> onStateChanged( Endpoint const& endpoint ) = 0;
+	virtual Future<Void> onStateChanged(Endpoint const& endpoint) = 0;
 
 	// Returns when onFailed(endpoint) || transport().onDisconnect( endpoint.getPrimaryAddress() ), but more efficiently
-	virtual Future<Void> onDisconnectOrFailure( Endpoint const& endpoint ) = 0;
+	virtual Future<Void> onDisconnectOrFailure(Endpoint const& endpoint) = 0;
 
 	// Returns true if the endpoint is failed but the address of the endpoint is not failed.
-	virtual bool onlyEndpointFailed( Endpoint const& endpoint ) = 0;
+	virtual bool onlyEndpointFailed(Endpoint const& endpoint) = 0;
 
 	// Returns true if the endpoint will never become available.
-	virtual bool permanentlyFailed( Endpoint const& endpoint ) = 0;
+	virtual bool permanentlyFailed(Endpoint const& endpoint) = 0;
 
 	// Called by FlowTransport when a connection closes and a prior request or reply might be lost
-	virtual void notifyDisconnect( NetworkAddress const& ) = 0;
+	virtual void notifyDisconnect(NetworkAddress const&) = 0;
 
 	// Called to update the failure status of network address directly when running client.
 	virtual void setStatus(NetworkAddress const& address, FailureStatus const& status) = 0;
 
 	// Returns when the known status of endpoint is next equal to status.  Returns immediately
 	//   if appropriate.
-	Future<Void> onStateEqual( Endpoint const& endpoint, FailureStatus status );
+	Future<Void> onStateEqual(Endpoint const& endpoint, FailureStatus status);
 
 	// Returns when the status of the given endpoint is next considered "failed"
-	Future<Void> onFailed( Endpoint const& endpoint ) {
-		return onStateEqual( endpoint, FailureStatus() );
-	}
+	Future<Void> onFailed(Endpoint const& endpoint) { return onStateEqual(endpoint, FailureStatus()); }
 
-	// Returns when the status of the given endpoint has continuously been "failed" for sustainedFailureDuration + (elapsedTime*sustainedFailureSlope)
-	Future<Void> onFailedFor( Endpoint const& endpoint, double sustainedFailureDuration, double sustainedFailureSlope = 0.0 );
+	// Returns when the status of the given endpoint has continuously been "failed" for sustainedFailureDuration +
+	// (elapsedTime*sustainedFailureSlope)
+	Future<Void> onFailedFor(Endpoint const& endpoint, double sustainedFailureDuration,
+	                         double sustainedFailureSlope = 0.0);
 
 	// Returns the failure monitor that the calling machine should use
 	static IFailureMonitor& failureMonitor() {
@@ -137,22 +136,23 @@ public:
 
 class SimpleFailureMonitor : public IFailureMonitor {
 public:
-	SimpleFailureMonitor() : endpointKnownFailed() { }
-	void setStatus( NetworkAddress const& address, FailureStatus const& status );
-	void endpointNotFound( Endpoint const& );
-	virtual void notifyDisconnect( NetworkAddress const& );
+	SimpleFailureMonitor() : endpointKnownFailed() {}
+	void setStatus(NetworkAddress const& address, FailureStatus const& status);
+	void endpointNotFound(Endpoint const&);
+	virtual void notifyDisconnect(NetworkAddress const&);
 
-	virtual Future<Void> onStateChanged( Endpoint const& endpoint );
-	virtual FailureStatus getState( Endpoint const& endpoint );
-	virtual FailureStatus getState( NetworkAddress const& address );
-	virtual Future<Void> onDisconnectOrFailure( Endpoint const& endpoint );
-	virtual bool onlyEndpointFailed( Endpoint const& endpoint );
-	virtual bool permanentlyFailed( Endpoint const& endpoint );
+	virtual Future<Void> onStateChanged(Endpoint const& endpoint);
+	virtual FailureStatus getState(Endpoint const& endpoint);
+	virtual FailureStatus getState(NetworkAddress const& address);
+	virtual Future<Void> onDisconnectOrFailure(Endpoint const& endpoint);
+	virtual bool onlyEndpointFailed(Endpoint const& endpoint);
+	virtual bool permanentlyFailed(Endpoint const& endpoint);
 
 	void reset();
+
 private:
-	std::unordered_map< NetworkAddress, FailureStatus > addressStatus;
-	YieldedAsyncMap< Endpoint, bool > endpointKnownFailed;
+	std::unordered_map<NetworkAddress, FailureStatus> addressStatus;
+	YieldedAsyncMap<Endpoint, bool> endpointKnownFailed;
 
 	friend class OnStateChangedActorActor;
 };

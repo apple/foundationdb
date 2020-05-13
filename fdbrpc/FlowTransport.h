@@ -23,6 +23,7 @@
 #pragma once
 
 #include <algorithm>
+#include "fdbrpc/HealthMonitor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
@@ -44,7 +45,9 @@ public:
 	}
 
 	void choosePrimaryAddress() {
-		if(addresses.secondaryAddress.present() && !g_network->getLocalAddresses().secondaryAddress.present() && (addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS())) {
+		if(addresses.secondaryAddress.present() && 
+		((!g_network->getLocalAddresses().secondaryAddress.present() && (addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS())) ||
+		(g_network->getLocalAddresses().secondaryAddress.present() && !addresses.address.isTLS()))) {
 			std::swap(addresses.address, addresses.secondaryAddress.get());
 		}
 	}
@@ -56,6 +59,16 @@ public:
 	// all addresses this endpoint listens to.
 	const NetworkAddress& getPrimaryAddress() const {
 		return addresses.address;
+	}
+
+	NetworkAddress getStableAddress() const {
+		return addresses.getTLSAddress();
+	}
+
+	Endpoint getAdjustedEndpoint( uint32_t index ) {
+		uint32_t newIndex = token.second();
+		newIndex += index;
+		return Endpoint( addresses, UID(token.first(), (token.second()&0xffffffff00000000LL) | newIndex) );
 	}
 
 	bool operator == (Endpoint const& r) const {
@@ -123,10 +136,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	double lastDataPacketSentTime;
 	int outstandingReplies;
 
-	explicit Peer(TransportData* transport, NetworkAddress const& destination)
-	  : transport(transport), destination(destination), outgoingConnectionIdle(true), lastConnectTime(0.0),
-	    reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), outstandingReplies(0),
-	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()) {}
+	explicit Peer(TransportData* transport, NetworkAddress const& destination);
 
 	void send(PacketBuffer* pb, ReliablePacket* rp, bool firstUnsent);
 
@@ -164,6 +174,9 @@ public:
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
 
+	Future<Void> onIncompatibleChanged();
+	// Returns when getIncompatiblePeers has at least one peer which is incompatible.
+
 	void addPeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is being used, even if no messages are currently being sent to the peer
 
@@ -172,6 +185,8 @@ public:
 
 	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
+
+	const Endpoint& addEndpoints( std::vector<std::pair<struct FlowReceiver*, TaskPriority>> const& streams );
 
 	void removeEndpoint( const Endpoint&, NetworkMessageReceiver* );
 	// The given local endpoint no longer delivers messages to the given receiver or uses resources
@@ -204,6 +219,8 @@ public:
 	static NetworkAddressList getGlobalLocalAddresses() { return transport().getLocalAddresses(); }
 
 	Endpoint loadedEndpoint(const UID& token);
+
+	HealthMonitor* healthMonitor();
 
 private:
 	class TransportData* self;

@@ -188,6 +188,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	bool remoteLogsWrittenToCoreState;
 	bool hasRemoteServers;
 	AsyncTrigger backupWorkerChanged;
+	std::set<UID> removedBackupWorkers; // Workers that are removed before setting them.
 
 	Optional<Version> recoverAt;
 	Optional<Version> recoveredAt;
@@ -355,7 +356,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				newState.tLogs.emplace_back(*t);
 				newState.tLogs.back().tLogLocalities.clear();
 				for (const auto& log : t->logServers) {
-					newState.tLogs.back().tLogLocalities.push_back(log->get().interf().locality);
+					newState.tLogs.back().tLogLocalities.push_back(log->get().interf().filteredLocality);
 				}
 			}
 		}
@@ -369,6 +370,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				newState.oldTLogData.emplace_back(oldData);
 				TraceEvent("BWToCore")
 				    .detail("Epoch", newState.oldTLogData.back().epoch)
+				    .detail("TotalTags", newState.oldTLogData.back().logRouterTags)
 				    .detail("BeginVersion", newState.oldTLogData.back().epochBegin)
 				    .detail("EndVersion", newState.oldTLogData.back().epochEnd);
 			}
@@ -1398,6 +1400,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		LogEpoch logsetEpoch = this->epoch;
 		oldestBackupEpoch = this->epoch;
 		for (const auto& reply : replies) {
+			if (removedBackupWorkers.count(reply.interf.id()) > 0) {
+				removedBackupWorkers.erase(reply.interf.id());
+				continue;
+			}
 			Reference<AsyncVar<OptionalInterface<BackupInterface>>> worker(new AsyncVar<OptionalInterface<BackupInterface>>(OptionalInterface<BackupInterface>(reply.interf)));
 			if (reply.backupEpoch != logsetEpoch) {
 				// find the logset from oldLogData
@@ -1407,6 +1413,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				ASSERT(logset.isValid());
 			}
 			logset->backupWorkers.push_back(worker);
+			TraceEvent("AddBackupWorker", dbgid)
+			    .detail("Epoch", logsetEpoch)
+			    .detail("BackupWorkerID", reply.interf.id());
 		}
 		TraceEvent("SetOldestBackupEpoch", dbgid).detail("Epoch", oldestBackupEpoch);
 		backupWorkerChanged.trigger();
@@ -1433,6 +1442,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 			}
 			backupWorkerChanged.trigger();
+		} else {
+			removedBackupWorkers.insert(req.workerUID);
 		}
 
 		TraceEvent("RemoveBackupWorker", dbgid)
@@ -1666,7 +1677,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		// trackRejoins listens for rejoin requests from the tLogs that we are recovering from, to learn their TLogInterfaces
 		state std::vector<LogLockInfo> lockResults;
-		state std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> allLogServers;
+		state std::vector<std::pair<Reference<AsyncVar<OptionalInterface<TLogInterface>>>,Reference<IReplicationPolicy>>> allLogServers;
 		state std::vector<Reference<LogSet>> logServers;
 		state std::vector<OldLogData> oldLogData;
 		state std::vector<std::vector<Reference<AsyncVar<bool>>>> logFailed;
@@ -1675,8 +1686,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for (const CoreTLogSet& coreSet : prevState.tLogs) {
 			logServers.emplace_back(new LogSet(coreSet));
 			std::vector<Reference<AsyncVar<bool>>> failed;
+
 			for (const auto& logVar : logServers.back()->logServers) {
-				allLogServers.push_back(logVar);
+				allLogServers.push_back(std::make_pair(logVar,coreSet.tLogPolicy));
 				failed.emplace_back(new AsyncVar<bool>());
 				failureTrackers.push_back(monitorLog(logVar, failed.back()));
 			}
@@ -1687,7 +1699,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			oldLogData.emplace_back(oldTlogData);
 
 			for (const auto& logSet : oldLogData.back().tLogs) {
-				allLogServers.insert(allLogServers.end(), logSet->logServers.begin(), logSet->logServers.end());
+				for (const auto& logVar : logSet->logServers) {
+					allLogServers.push_back(std::make_pair(logVar,logSet->tLogPolicy));
+				}
 			}
 		}
 		state Future<Void> rejoins = trackRejoins( dbgid, allLogServers, rejoinRequests );
@@ -2447,7 +2461,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return logSystem;
 	}
 
-	ACTOR static Future<Void> trackRejoins( UID dbgid, std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers, FutureStream< struct TLogRejoinRequest > rejoinRequests ) {
+	ACTOR static Future<Void> trackRejoins( UID dbgid, std::vector<std::pair<Reference<AsyncVar<OptionalInterface<TLogInterface>>>,Reference<IReplicationPolicy>>> logServers, FutureStream< struct TLogRejoinRequest > rejoinRequests ) {
 		state std::map<UID, ReplyPromise<TLogRejoinReply>> lastReply;
 
 		try {
@@ -2455,15 +2469,18 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				TLogRejoinRequest req = waitNext( rejoinRequests );
 				int pos = -1;
 				for( int i = 0; i < logServers.size(); i++ ) {
-					if( logServers[i]->get().id() == req.myInterface.id() ) {
+					if( logServers[i].first->get().id() == req.myInterface.id() ) {
 						pos = i;
 						break;
 					}
 				}
 				if ( pos != -1 ) {
 					TraceEvent("TLogJoinedMe", dbgid).detail("TLog", req.myInterface.id()).detail("Address", req.myInterface.commit.getEndpoint().getPrimaryAddress().toString());
-					if( !logServers[pos]->get().present() || req.myInterface.commit.getEndpoint() != logServers[pos]->get().interf().commit.getEndpoint())
-						logServers[pos]->setUnconditional( OptionalInterface<TLogInterface>(req.myInterface) );
+					if( !logServers[pos].first->get().present() || req.myInterface.commit.getEndpoint() != logServers[pos].first->get().interf().commit.getEndpoint()) {
+						TLogInterface interf = req.myInterface;
+						filterLocalityDataForPolicyDcAndProcess(logServers[pos].second, &interf.filteredLocality);
+						logServers[pos].first->setUnconditional( OptionalInterface<TLogInterface>(interf) );
+					}
 					lastReply[req.myInterface.id()].send(TLogRejoinReply{ false });
 					lastReply[req.myInterface.id()] = req.reply;
 				}
