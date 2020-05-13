@@ -302,7 +302,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "transactions_per_second_limit":0,
          "batch_released_transactions_per_second":0,
          "released_transactions_per_second":0,
-         "tags_throttled":{
+         "throttled_tags":{
             "auto":{
                "count":0
             },
