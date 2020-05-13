@@ -248,7 +248,7 @@ inline bool equalsKeyAfter( const KeyRef& key, const KeyRef& compareKey ) {
 }
 
 struct KeyRangeRef {
-	const KeyRef begin, end;
+	KeyRef begin, end;
 	KeyRangeRef() {}
 	KeyRangeRef( const KeyRef& begin, const KeyRef& end ) : begin(begin), end(end) {
 		if( begin > end ) {
@@ -276,26 +276,20 @@ struct KeyRangeRef {
 		return KeyRangeRef( begin.removePrefix(prefix), end.removePrefix(prefix) );
 	}
 
-	const KeyRangeRef& operator = (const KeyRangeRef& rhs) {
-		const_cast<KeyRef&>(begin) = rhs.begin;
-		const_cast<KeyRef&>(end) = rhs.end;
-		return *this;
-	}
-
 	int expectedSize() const { return begin.expectedSize() + end.expectedSize(); }
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
 		if (!ar.isDeserializing && equalsKeyAfter(begin, end)) {
 			StringRef empty;
-			serializer(ar, const_cast<KeyRef&>(end), empty);
+			serializer(ar, end, empty);
 		} else {
-			serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
+			serializer(ar, begin, end);
 		}
 		if (ar.isDeserializing && end == StringRef() && begin != StringRef()) {
 			ASSERT(begin[begin.size()-1] == '\x00');
-			const_cast<KeyRef&>(end) = begin;
-			const_cast<KeyRef&>(begin) = end.substr(0, end.size()-1);
+			end = begin;
+			begin = end.substr(0, end.size()-1);
 		}
 
 		if( begin > end ) {

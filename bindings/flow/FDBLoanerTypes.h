@@ -205,7 +205,7 @@ namespace FDB {
 	};
 
 	struct KeyRangeRef {
-		const KeyRef begin, end;
+		KeyRef begin, end;
 		KeyRangeRef() {}
 		KeyRangeRef( const KeyRef& begin, const KeyRef& end ) : begin(begin), end(end) {
 			if( begin > end ) {
@@ -224,17 +224,11 @@ namespace FDB {
 			return KeyRangeRef( begin.withPrefix(prefix), end.withPrefix(prefix) );
 		}
 
-		const KeyRangeRef& operator = (const KeyRangeRef& rhs) {
-			const_cast<KeyRef&>(begin) = rhs.begin;
-			const_cast<KeyRef&>(end) = rhs.end;
-			return *this;
-		}
-
 		int expectedSize() const { return begin.expectedSize() + end.expectedSize(); }
 
 		template <class Ar>
 		force_inline void serialize(Ar& ar) {
-			serializer(ar, const_cast<KeyRef&>(begin), const_cast<KeyRef&>(end));
+			serializer(ar, begin, end);
 			if( begin > end ) {
 				throw inverted_range();
 			};
