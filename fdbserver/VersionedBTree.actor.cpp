@@ -4123,8 +4123,10 @@ private:
 			cursor.moveFirst();
 
 			bool first = true;
+
 			while (cursor.valid()) {
 				InternalPageSliceUpdate& u = *new (arena) InternalPageSliceUpdate();
+				slices.push_back(&u);
 
 				// At this point we should never be at a null child page entry because the first entry of a page
 				// can't be null and this loop will skip over null entries that come after non-null entries.
@@ -4136,8 +4138,16 @@ private:
 				if (first) {
 					u.subtreeLowerBound = update->subtreeLowerBound;
 					first = false;
+					// mbegin is already the first mutation that could affect this subtree described by update
 				} else {
 					u.subtreeLowerBound = u.decodeLowerBound;
+					mBegin = mEnd;
+					// mBegin is either at or greater than subtreeLowerBound->key, which was the subtreeUpperBound->key
+					// for the previous subtree slice.  But we need it to be at or *before* subtreeLowerBound->key
+					// so if mBegin.key() is not exactly the subtree lower bound key then decrement it.
+					if(mBegin.key() != u.subtreeLowerBound->key) {
+						--mBegin;
+					}
 				}
 
 				BTreePageIDRef pageID = cursor.get().getChildPage();
@@ -4166,28 +4176,20 @@ private:
 				}
 				u.subtreeUpperBound = cursor.valid() ? &cursor.get() : update->subtreeUpperBound;
 				u.cEnd = cursor;
-
 				u.skipLen = 0; // TODO: set this
 
-				slices.push_back(&u);
-
 				// Find the mutation buffer range that includes all changes to the range described by u
-				MutationBuffer::const_iterator mBegin = mutationBuffer->upper_bound(u.subtreeLowerBound->key);
-				MutationBuffer::const_iterator mEnd = mutationBuffer->lower_bound(u.subtreeUpperBound->key);
+				mEnd = mutationBuffer->lower_bound(u.subtreeUpperBound->key);
 
-				// If mutation boundaries are the same, the range is fully described by (mBegin - 1).mutation()
-				bool fullyCovered = (mBegin == mEnd);
-				--mBegin;
-
-				// If mBegin describes the entire subtree range, see if there are either no changes or if the entire
-				// range is cleared.
-				if (fullyCovered) {
+				// If the mutation range described by mBegin extends to mEnd, then see if the part of that range
+				// that overlaps with u's subtree range is being fully cleared or fully unchanged.
+				auto next = mBegin;
+				++next;
+				if(next == mEnd) {
+					// Check for uniform clearedness or unchangedness for the range mutation where it overlaps u's subtree
+					const KeyRef &mutationBoundaryKey = mBegin.key();
 					const RangeMutation& range = mBegin.mutation();
-
-					// Check for uniform clearedness or unchangedness for the range mutation
-					KeyRef mutationBoundaryKey = mBegin.key();
 					bool uniform;
-
 					if (range.clearAfterBoundary) {
 						// If the mutation range after the boundary key is cleared, then the mutation boundary key must
 						// be cleared or must be different than the subtree lower bound key so that it doesn't matter
@@ -4199,11 +4201,13 @@ private:
 						uniform = !range.boundaryChanged || mutationBoundaryKey != u.subtreeLowerBound->key;
 					}
 
-					// If the subtree range described by u is either uniformly changed or unchanged
+					// If u's subtree is either all cleared or all unchanged
 					if (uniform) {
-						// See if we can expand the subtree range to include more subtrees which are also covered by the
-						// same mutation range
-						if (cursor.valid() && mEnd.key() != cursor.get().key) {
+						// We do not need to recurse to this subtree.  Next, let's see if we can embiggen u's range to
+						// include sibling subtrees also covered by (mBegin, mEnd) so we can not recurse to those, too.
+						// If the cursor is valid, u.subtreeUpperBound is the cursor's position, which is >= mEnd.key().
+						// If equal, no range expansion is possible.
+						if (cursor.valid() && mEnd.key() != u.subtreeUpperBound->key) {
 							cursor.seekLessThanOrEqual(mEnd.key(), update->skipLen, &cursor, 1);
 
 							// If this seek moved us ahead, to something other than cEnd, then update subtree range
@@ -4260,15 +4264,17 @@ private:
 							// Subtree range unchanged
 						}
 
-						debug_printf("%s: MutationBuffer covers this range in a single mutation: %s\n", context.c_str(),
+						debug_printf("%s: MutationBuffer covers this range in a single mutation, not recursing: %s\n", context.c_str(),
 						             u.toString().c_str());
+
+						// u has already been initialized with the correct result, no recursion needed, so restart the loop.
 						continue;
 					}
 				}
 
 				// If this page has height of 2 then its children are leaf nodes
 				recursions.push_back(self->commitSubtree(self, snapshot, mutationBuffer, pageID, btPage->height == 2,
-				                                         mBegin, mEnd, slices.back()));
+				                                         mBegin, mEnd, &u));
 			}
 
 			debug_printf(
