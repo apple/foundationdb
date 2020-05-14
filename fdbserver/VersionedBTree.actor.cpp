@@ -2817,7 +2817,8 @@ public:
 			}
 
 			// If stop is set and we've freed the minimum number of pages required, or the maximum is exceeded, return.
-			if ((freedPages >= SERVER_KNOBS->REDWOOD_LAZY_CLEAR_MIN_PAGES && self->m_lazyDeleteStop) || (freedPages >= SERVER_KNOBS->REDWOOD_LAZY_CLEAR_MAX_PAGES)) {
+			if ((freedPages >= SERVER_KNOBS->REDWOOD_LAZY_CLEAR_MIN_PAGES && self->m_lazyDeleteStop) ||
+			    (freedPages >= SERVER_KNOBS->REDWOOD_LAZY_CLEAR_MAX_PAGES)) {
 				break;
 			}
 		}
@@ -2925,7 +2926,7 @@ public:
 			// If the lazy delete queue is completely processed then the last time the lazy delete actor
 			// was started it, after the last commit, it would exist immediately and do no work, so its
 			// future would be ready and its value would be 0.
-			if(self->m_lazyDeleteActor.isReady() && self->m_lazyDeleteActor.get() == 0) {
+			if (self->m_lazyDeleteActor.isReady() && self->m_lazyDeleteActor.get() == 0) {
 				break;
 			}
 			self->setWriteVersion(self->getLatestVersion() + 1);
@@ -4154,7 +4155,7 @@ private:
 					// mBegin is either at or greater than subtreeLowerBound->key, which was the subtreeUpperBound->key
 					// for the previous subtree slice.  But we need it to be at or *before* subtreeLowerBound->key
 					// so if mBegin.key() is not exactly the subtree lower bound key then decrement it.
-					if(mBegin.key() != u.subtreeLowerBound->key) {
+					if (mBegin.key() != u.subtreeLowerBound->key) {
 						--mBegin;
 					}
 				}
@@ -4194,9 +4195,10 @@ private:
 				// that overlaps with u's subtree range is being fully cleared or fully unchanged.
 				auto next = mBegin;
 				++next;
-				if(next == mEnd) {
-					// Check for uniform clearedness or unchangedness for the range mutation where it overlaps u's subtree
-					const KeyRef &mutationBoundaryKey = mBegin.key();
+				if (next == mEnd) {
+					// Check for uniform clearedness or unchangedness for the range mutation where it overlaps u's
+					// subtree
+					const KeyRef& mutationBoundaryKey = mBegin.key();
 					const RangeMutation& range = mBegin.mutation();
 					bool uniform;
 					if (range.clearAfterBoundary) {
@@ -4273,17 +4275,18 @@ private:
 							// Subtree range unchanged
 						}
 
-						debug_printf("%s: MutationBuffer covers this range in a single mutation, not recursing: %s\n", context.c_str(),
-						             u.toString().c_str());
+						debug_printf("%s: MutationBuffer covers this range in a single mutation, not recursing: %s\n",
+						             context.c_str(), u.toString().c_str());
 
-						// u has already been initialized with the correct result, no recursion needed, so restart the loop.
+						// u has already been initialized with the correct result, no recursion needed, so restart the
+						// loop.
 						continue;
 					}
 				}
 
 				// If this page has height of 2 then its children are leaf nodes
-				recursions.push_back(self->commitSubtree(self, snapshot, mutationBuffer, pageID, btPage->height == 2,
-				                                         mBegin, mEnd, &u));
+				recursions.push_back(
+				    self->commitSubtree(self, snapshot, mutationBuffer, pageID, btPage->height == 2, mBegin, mEnd, &u));
 			}
 
 			debug_printf(
