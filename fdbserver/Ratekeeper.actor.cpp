@@ -548,7 +548,7 @@ ACTOR Future<Void> trackStorageServerQueueInfo( RatekeeperData* self, StorageSer
 	self->storageQueueInfo.insert( mapPair(ssi.id(), StorageQueueInfo(ssi.id(), ssi.locality) ) );
 	state Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
 	TraceEvent("RkTracking", self->id)
-		.detail("SSID", ssi.id());
+		.detail("StorageServer", ssi.id());
 	try {
 		loop {
 			ErrorOr<StorageQueuingMetricsReply> reply = wait( ssi.getQueuingMetrics.getReplyUnlessFailedFor( StorageQueuingMetricsRequest(), 0, 0 ) ); // SOMEDAY: or tryGetReply?
@@ -581,7 +581,7 @@ ACTOR Future<Void> trackStorageServerQueueInfo( RatekeeperData* self, StorageSer
 			} else {
 				if(myQueueInfo->value.valid) {
 					TraceEvent("RkStorageServerDidNotRespond", self->id)
-						.detail("SSID", ssi.id());
+						.detail("StorageServer", ssi.id());
 				}
 				myQueueInfo->value.valid = false;
 			}
@@ -599,7 +599,7 @@ ACTOR Future<Void> trackTLogQueueInfo( RatekeeperData* self, TLogInterface tli )
 	self->tlogQueueInfo.insert( mapPair(tli.id(), TLogQueueInfo(tli.id()) ) );
 	state Map<UID, TLogQueueInfo>::iterator myQueueInfo = self->tlogQueueInfo.find(tli.id());
 	TraceEvent("RkTracking", self->id)
-		.detail("TLID", tli.id());
+		.detail("TransactionLog", tli.id());
 	try {
 		loop {
 			ErrorOr<TLogQueuingMetricsReply> reply = wait( tli.getQueuingMetrics.getReplyUnlessFailedFor( TLogQueuingMetricsRequest(), 0, 0 ) );  // SOMEDAY: or tryGetReply?
@@ -624,7 +624,7 @@ ACTOR Future<Void> trackTLogQueueInfo( RatekeeperData* self, TLogInterface tli )
 			} else {
 				if(myQueueInfo->value.valid) {
 					TraceEvent("RkTLogDidNotRespond", self->id)
-						.detail("TLID", tli.id());
+						.detail("TransactionLog", tli.id());
 				}
 				myQueueInfo->value.valid = false;
 			}
