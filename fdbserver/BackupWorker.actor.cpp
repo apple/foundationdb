@@ -84,6 +84,7 @@ struct BackupData {
 	bool stopped = false;
 	bool exitEarly = false; // If the worker is on an old epoch and all backups starts a version >= the endVersion
 	AsyncVar<bool> paused; // Track if "backupPausedKey" is set.
+	Reference<FlowLock> lock;
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
@@ -231,12 +232,14 @@ struct BackupData {
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
 	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), popVersion(req.startVersion - 1),
-	    cc("BackupWorker", myId.toString()), pulledVersion(0), paused(false) {
+	    cc("BackupWorker", myId.toString()), pulledVersion(0), paused(false),
+	    lock(new FlowLock(SERVER_KNOBS->BACKUP_LOCK_BYTES)) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 
 		specialCounter(cc, "SavedVersion", [this]() { return this->savedVersion; });
 		specialCounter(cc, "MinKnownCommittedVersion", [this]() { return this->minKnownCommittedVersion; });
 		specialCounter(cc, "MsgQ", [this]() { return this->messages.size(); });
+		specialCounter(cc, "BufferedBytes", [this]() { return this->lock->activePermits(); });
 		logger = traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
 		                       "BackupWorkerMetrics");
 	}
@@ -308,6 +311,30 @@ struct BackupData {
 			info.cancelUpdater();
 		}
 		doneTrigger.trigger();
+	}
+
+	// Erases messages and updates lock with memory released.
+	void eraseMessages(int num) {
+		ASSERT(num <= messages.size());
+		if (num == 0) return;
+
+		if (messages.size() == num) {
+			messages.clear();
+			lock->release();
+			return;
+		}
+
+		// keep track of each arena and accumulate their sizes
+		int64_t bytes = 0;
+		for (int i = 0; i < num; i++) {
+			const Arena& a = messages[i].arena;
+			const Arena& b = messages[i + 1].arena;
+			if (a.impl.getPtr() != b.impl.getPtr()) {
+				bytes += a.getSize();
+			}
+		}
+		lock->release(bytes);
+		messages.erase(messages.begin(), messages.begin() + num);
 	}
 
 	void eraseMessagesAfterEndVersion() {
@@ -794,12 +821,12 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			    .detail("MsgQ", self->messages.size());
 			// save an empty file for old epochs so that log file versions are continuous
 			wait(saveMutationsToFile(self, popVersion, numMsg));
-			self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
+			self->eraseMessages(numMsg);
 		}
 
 		// If transition into NOOP mode, should clear messages
 		if (!self->pulling) {
-			self->messages.clear();
+			self->eraseMessages(self->messages.size());
 		}
 
 		if (popVersion > self->savedVersion && popVersion > self->popVersion) {
@@ -813,7 +840,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		}
 
 		if (self->allMessageSaved()) {
-			self->messages.clear();
+			self->eraseMessages(self->messages.size());
 			return Void();
 		}
 
@@ -854,6 +881,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// messages/mutations will be flushed to disk/blob in uploadData().
 		while (r->hasMessage()) {
 			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena());
+			wait(self->lock->take(TaskPriority::DefaultYield, r->arena().getSize()));
 			r->nextMessage();
 		}
 
