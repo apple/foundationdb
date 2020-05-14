@@ -3467,16 +3467,6 @@ int main(int argc, char* argv[]) {
 		std::set_new_handler( &platform::outOfMemory );
 		setMemoryQuota( memLimit );
 
-		int total = 0;
-		for(auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
-			total += i->second;
-		if (total)
-			printf("%d errors:\n", total);
-		for(auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
-			if (i->second > 0)
-				printf("  %d: %d %s\n", i->second, i->first, Error::fromCode(i->first).what());
-
-
 		Reference<ClusterConnectionFile> ccf;
 		Database db;
 		Reference<ClusterConnectionFile> sourceCcf;
