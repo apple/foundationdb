@@ -246,20 +246,13 @@ public:
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
-	void send(const T& value) const {
+	template<class U>
+	void send(U && value) const {
 		if (queue->isRemoteEndpoint()) {
-			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
+			FlowTransport::transport().sendUnreliable(SerializeSource<T>(std::forward<U>(value)), getEndpoint(), true);
 		}
 		else
-			queue->send(value);
-	}
-
-	void send(T&& value) const {
-		if (queue->isRemoteEndpoint()) {
-			FlowTransport::transport().sendUnreliable(SerializeSource<T>(std::move(value)), getEndpoint(), true);
-		}
-		else
-			queue->send(std::move(value));
+			queue->send(std::forward<U>(value));
 	}
 
 	/*void sendError(const Error& error) const {
