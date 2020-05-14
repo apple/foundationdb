@@ -52,6 +52,7 @@ private:
 	double tpsRate;
 	double expiration;
 	double lastCheck;
+	bool rateSet = false;
 
 	Smoother smoothRate;
 	Smoother smoothReleased;
@@ -68,7 +69,14 @@ public:
 	void update(ClientTagThrottleLimits const& limits) {
 		ASSERT(limits.tpsRate >= 0);
 		this->tpsRate = limits.tpsRate;
-		smoothRate.setTotal(limits.tpsRate);
+
+		if(!rateSet || expired()) {
+			rateSet = true;
+			smoothRate.reset(limits.tpsRate);
+		}
+		else {
+			smoothRate.setTotal(limits.tpsRate);
+		}
 
 		expiration = limits.expiration;
 	}
