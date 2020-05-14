@@ -683,6 +683,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		    }));
 	}
 	throttleExpirer = recurring([this](){ expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
+
+	if(BUGGIFY) {
+		DatabaseContext::debugUseTags = true;
+	}
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
@@ -2248,7 +2252,7 @@ Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version>
 	return getRange(cx, Reference<TransactionLogInfo>(), fVersion, begin, end, limits, Promise<std::pair<Key, Key>>(), true, reverse, info, tags);
 }
 
-bool DatabaseContext::debugUseTags = true;
+bool DatabaseContext::debugUseTags = false;
 const std::vector<std::string> DatabaseContext::debugTransactionTagChoices = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t" }; 
 
 void debugAddTags(Transaction *tr) {
