@@ -127,6 +127,29 @@ class Instruction:
         self.stack.push(self.index, val)
 
 
+def test_fdb_transactional_generator(db):
+    try:
+        @fdb.transactional
+        def function_that_yields(tr):
+            yield 0
+        assert fdb.get_api_version() < 630, "Pre-6.3, a decorator may wrap a function that yields"
+    except ValueError as e:
+        assert fdb.get_api_version() >= 630, "Post-6.3, a decorator should throw if wrapped function yields"
+
+
+def test_fdb_transactional_returns_generator(db):
+    try:
+        def function_that_yields(tr):
+            yield 0
+        @fdb.transactional
+        def function_that_returns(tr):
+            return function_that_yields(tr)
+        function_that_returns()
+        assert fdb.get_api_version() < 630, "Pre-6.3, returning a generator is allowed"
+    except ValueError as e:
+        assert fdb.get_api_version() >= 630, "Post-6.3, returning a generator should throw"
+
+
 def test_db_options(db):
     db.options.set_location_cache_size(100001)
     db.options.set_max_watches(100001)

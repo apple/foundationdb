@@ -141,8 +141,9 @@ private:
 
 		// Only used by auto-throttles
 		double created = now();
-		double lastUpdated = now();
+		double lastUpdated = 0;
 		double lastReduced = now();
+		bool rateSet = false;
 
 		RkTagThrottleData() : clientRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) {}
 
@@ -157,13 +158,26 @@ private:
 
 		Optional<double> updateAndGetClientRate(Optional<double> requestRate) {
 			if(limits.expiration > now()) {
-				clientRate.setTotal(getTargetRate(requestRate));
+				double targetRate = getTargetRate(requestRate);
+				if(targetRate == std::numeric_limits<double>::max()) {
+					rateSet = false;
+					return Optional<double>();
+				}
+				if(!rateSet) {
+					rateSet = true;
+					clientRate.reset(targetRate);
+				}
+				else {
+					clientRate.setTotal(targetRate);
+				}
+
 				double rate = clientRate.smoothTotal();
 				ASSERT(rate >= 0);
 				return rate;
 			}
 			else {
 				TEST(true); // Get throttle rate for expired throttle
+				rateSet = false;
 				return Optional<double>();
 			}
 		}
@@ -246,10 +260,14 @@ public:
 		throttle.limits.tpsRate = tpsRate.get();
 		throttle.limits.expiration = expiration.get();
 
-		Optional<double> clientRate = throttle.updateAndGetClientRate(getRequestRate(tag));
-		ASSERT(clientRate.present());
+		throttle.updateAndGetClientRate(getRequestRate(tag));
 
-		return tpsRate.get();
+		if(tpsRate.get() != std::numeric_limits<double>::max()) {
+			return tpsRate.get();
+		}
+		else {
+			return Optional<double>();
+		}
 	}
 
 	void manualThrottleTag(TransactionTag const& tag, TransactionPriority priority, double tpsRate, double expiration, Optional<ClientTagThrottleLimits> const& oldLimits) {

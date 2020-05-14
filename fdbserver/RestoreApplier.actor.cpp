@@ -235,8 +235,8 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			wait(waitForAll(fValues));
 			break;
 		} catch (Error& e) {
-			if (retries++ > 10) {
-				TraceEvent(SevError, "FastRestoreApplierGetAndComputeStagingKeysGetKeysStuck", applierID)
+			if (retries++ > 10) { // TODO: Can we stop retry at the first error?
+				TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysGetKeysStuck", applierID)
 				    .detail("BatchIndex", batchIndex)
 				    .detail("GetKeys", incompleteStagingKeys.size())
 				    .error(e);
