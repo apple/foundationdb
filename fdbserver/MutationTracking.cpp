@@ -26,6 +26,7 @@
 #error "You cannot use mutation tracking in a clean/release build."
 #endif
 
+// Track up to 2 keys in simulation via enabling MUTATION_TRACKING_ENABLED and setting the keys here.
 StringRef debugKey = LiteralStringRef( "" );
 StringRef debugKey2 = LiteralStringRef( "\xff\xff\xff\xff" );
 

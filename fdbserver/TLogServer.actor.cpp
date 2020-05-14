@@ -1375,7 +1375,7 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 		}
 
 		// We need the 4 byte length prefix to be a TagsAndMessage format, but that prefix is added as part of StringRef serialization.
-	  int offset = messages.getLength();
+		int offset = messages.getLength();
 		messages << it->second.toStringRef();
 		void* data = messages.getData();
 		DEBUG_TAGS_AND_MESSAGE("TLogPeek", currentVersion, StringRef((uint8_t*)data+offset, messages.getLength()-offset))
