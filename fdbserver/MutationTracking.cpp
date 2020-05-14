@@ -26,7 +26,7 @@
 #error "You cannot use mutation tracking in a clean/release build."
 #endif
 
-StringRef debugKey = LiteralStringRef( "\xff/globals/lastEpochEnd" );
+StringRef debugKey = LiteralStringRef( "" );
 StringRef debugKey2 = LiteralStringRef( "\xff\xff\xff\xff" );
 
 TraceEvent debugMutationEnabled( const char* context, Version version, MutationRef const& mutation ) {
