@@ -46,8 +46,10 @@ set(FDBSERVER_SRCS
   MasterInterface.h
   MasterProxyServer.actor.cpp
   masterserver.actor.cpp
-  MoveKeys.actor.cpp
+  MutationTracking.h
+  MutationTracking.cpp
   MoveKeys.actor.h
+  MoveKeys.actor.cpp
   networktest.actor.cpp
   NetworkTest.h
   OldTLogServer_4_6.actor.cpp

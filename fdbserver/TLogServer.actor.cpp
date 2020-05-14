@@ -31,6 +31,7 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/MutationTracking.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbserver/IDiskQueue.h"
@@ -1258,6 +1259,7 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 			block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
 		}
 
+		DEBUG_TAGS_AND_MESSAGE("TLogCommitMessages", version, msg.getRawMessage()).detail("UID", self->dbgid).detail("LogId", logData->logId);
 		block.append(block.arena(), msg.message.begin(), msg.message.size());
 		for(auto tag : msg.tags) {
 			if(logData->locality == tagLocalitySatellite) {
@@ -1372,7 +1374,12 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 			messages << VERSION_HEADER << currentVersion;
 		}
 
+		// We need the 4 byte length prefix to be a TagsAndMessage format, but that prefix is added as part of StringRef serialization.
+		int offset = messages.getLength();
 		messages << it->second.toStringRef();
+		void* data = messages.getData();
+		DEBUG_TAGS_AND_MESSAGE("TLogPeek", currentVersion, StringRef((uint8_t*)data+offset, messages.getLength()-offset))
+			.detail("LogId", self->logId).detail("PeekTag", req.tag);
 	}
 }
 
@@ -1634,6 +1641,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 				    wait(parseMessagesForTag(entry.messages, req.tag, logData->logRouterTags));
 				for (const StringRef& msg : rawMessages) {
 					messages.serializeBytes(msg);
+					DEBUG_TAGS_AND_MESSAGE("TLogPeekFromDisk", entry.version, msg).detail("UID", self->dbgid).detail("LogId", logData->logId).detail("PeekTag", req.tag);
 				}
 
 				lastRefMessageVersion = entry.version;
