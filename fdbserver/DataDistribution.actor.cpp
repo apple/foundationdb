@@ -679,8 +679,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		//  before the server_status map to which it has a pointer, is destroyed.
 		for(auto it = server_info.begin(); it != server_info.end(); ++it) {
 			it->second->tracker.cancel();
+			it->second->collection = nullptr;
 		}
-
 		teamBuilder.cancel();
 	}
 
@@ -2570,7 +2570,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 
 TCServerInfo::~TCServerInfo() {
-	if (ssVersionTooFarBehind.get()) {
+	if (collection && ssVersionTooFarBehind.get()) {
 		collection->removeLaggingStorageServer(lastKnownInterface.locality.zoneId().get());			
 	}
 }
@@ -4446,6 +4446,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 	state DatabaseConfiguration configuration;
 	state Reference<InitialDataDistribution> initData;
 	state MoveKeysLock lock;
+	state Reference<DDTeamCollection> primaryTeamCollection;
+	state Reference<DDTeamCollection> remoteTeamCollection;
 	loop {
 		try {
 			loop {
@@ -4607,10 +4609,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, configuration.storageTeamSize, &lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
-			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
+			primaryTeamCollection = Reference<DDTeamCollection>( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			if (configuration.usableRegions > 1) {
-				Reference<DDTeamCollection> remoteTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), readyToStart.getFuture() && remoteRecovered(self->dbInfo), zeroHealthyTeams[1], false, processingUnhealthy) );
+				remoteTeamCollection = Reference<DDTeamCollection>( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), readyToStart.getFuture() && remoteRecovered(self->dbInfo), zeroHealthyTeams[1], false, processingUnhealthy) );
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( remoteTeamCollection, initData, tcis[1], self->dbInfo ), "DDTeamCollectionSecondary", self->ddId, &normalDDQueueErrors() ) );
@@ -4626,6 +4628,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 		catch( Error &e ) {
 			state Error err = e;
 			self->teamCollection = nullptr;
+			primaryTeamCollection = Reference<DDTeamCollection>();
+			remoteTeamCollection = Reference<DDTeamCollection>();
 			if( e.code() != error_code_movekeys_conflict )
 				throw err;
 			bool ddEnabled = wait( isDataDistributionEnabled(cx) );

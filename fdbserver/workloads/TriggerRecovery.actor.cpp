@@ -89,13 +89,17 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Standalone<RangeResultRef> kvs = wait(tr.getRange(
-				    KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1));
+				Standalone<RangeResultRef> kvs =
+				    wait(tr.getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+				                                 LiteralStringRef("\xff\xff/worker_interfaces0")),
+				                     CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!kvs.more);
 				std::map<Key, Value> address_interface;
 				for (auto it : kvs) {
-					auto ip_port = it.key.endsWith(LiteralStringRef(":tls"))
-					                   ? it.key.removeSuffix(LiteralStringRef(":tls"))
-					                   : it.key;
+					auto ip_port =
+					    (it.key.endsWith(LiteralStringRef(":tls")) ? it.key.removeSuffix(LiteralStringRef(":tls"))
+					                                               : it.key)
+					        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
 					address_interface[ip_port] = it.value;
 				}
 				for (auto it : address_interface) {

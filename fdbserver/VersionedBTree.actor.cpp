@@ -39,6 +39,43 @@
 #include <cinttypes>
 #include <boost/intrusive/list.hpp>
 
+#define REDWOOD_DEBUG 0
+
+#define debug_printf_stream stdout
+#define debug_printf_always(...)                                                                                       \
+	{                                                                                                                  \
+		std::string prefix = format("%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__);  \
+		std::string msg = format(__VA_ARGS__);                                                                         \
+		writePrefixedLines(debug_printf_stream, prefix, msg);                                                          \
+		fflush(debug_printf_stream);                                                                                   \
+	}
+
+#define debug_printf_noop(...)
+
+#if defined(NO_INTELLISENSE)
+#if REDWOOD_DEBUG
+#define debug_printf debug_printf_always
+#else
+#define debug_printf debug_printf_noop
+#endif
+#else
+// To get error-checking on debug_printf statements in IDE
+#define debug_printf printf
+#endif
+
+#define BEACON debug_printf_always("HERE\n")
+#define TRACE                                                                                                          \
+	debug_printf_always("%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
+
+// Writes prefix:line for each line in msg to fout
+void writePrefixedLines(FILE* fout, std::string prefix, std::string msg) {
+	StringRef m = msg;
+	while (m.size() != 0) {
+		StringRef line = m.eat("\n");
+		fprintf(fout, "%s %s\n", prefix.c_str(), line.toString().c_str());
+	}
+}
+
 // Some convenience functions for debugging to stringify various structures
 // Classes can add compatibility by either specializing toString<T> or implementing
 //   std::string toString() const;
@@ -694,10 +731,9 @@ private:
 };
 
 // Holds an index of recently used objects.
-// ObjectType must have the method
+// ObjectType must have the methods
 //   bool evictable() const;            // return true if the entry can be evicted
 //   Future<Void> onEvictable() const;  // ready when entry can be evicted
-// indicating if it is safe to evict.
 template <class IndexType, class ObjectType>
 class ObjectCache : NonCopyable {
 
@@ -813,12 +849,12 @@ public:
 		return Void();
 	}
 
-	Future<Void> clear() { return clear_impl(this); }
-
-	int count() const {
+	Future<Void> clear() {
 		ASSERT(evictionOrder.size() == cache.size());
-		return evictionOrder.size();
+		return clear_impl(this);
 	}
+
+	int count() const { return evictionOrder.size(); }
 
 private:
 	int64_t sizeLimit;
@@ -892,9 +928,11 @@ public:
 	typedef FIFOQueue<RemappedPage> RemapQueueT;
 
 	// If the file already exists, pageSize might be different than desiredPageSize
-	// Use pageCacheSizeBytes == 0 for default
-	DWALPager(int desiredPageSize, std::string filename, int64_t pageCacheSizeBytes)
-	  : desiredPageSize(desiredPageSize), filename(filename), pHeader(nullptr), pageCacheBytes(pageCacheSizeBytes) {
+	// Use pageCacheSizeBytes == 0 to use default from flow knobs
+	// If filename is empty, the pager will exist only in memory and once the cache is full writes will fail.
+	DWALPager(int desiredPageSize, std::string filename, int64_t pageCacheSizeBytes, bool memoryOnly = false)
+	  : desiredPageSize(desiredPageSize), filename(filename), pHeader(nullptr), pageCacheBytes(pageCacheSizeBytes),
+	    memoryOnly(memoryOnly) {
 		if (pageCacheBytes == 0) {
 			pageCacheBytes = g_network->isSimulated()
 			                     ? (BUGGIFY ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
@@ -906,14 +944,14 @@ public:
 
 	void setPageSize(int size) {
 		logicalPageSize = size;
-		physicalPageSize = smallestPhysicalBlock;
-		while (logicalPageSize > physicalPageSize) {
-			physicalPageSize += smallestPhysicalBlock;
-		}
+		// Physical page size is the total size of the smallest number of physical blocks needed to store
+		// logicalPageSize bytes
+		int blocks = 1 + ((logicalPageSize - 1) / smallestPhysicalBlock);
+		physicalPageSize = blocks * smallestPhysicalBlock;
 		if (pHeader != nullptr) {
 			pHeader->pageSize = logicalPageSize;
 		}
-		pageCache.setSizeLimit(pageCacheBytes / physicalPageSize);
+		pageCache.setSizeLimit(1 + ((pageCacheBytes - 1) / physicalPageSize));
 	}
 
 	void updateCommittedHeader() {
@@ -924,15 +962,18 @@ public:
 		ASSERT(!self->recoverFuture.isValid());
 
 		self->remapUndoFuture = Void();
+		state bool exists = false;
 
-		int64_t flags = IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE |
-		                IAsyncFile::OPEN_LOCK;
-		state bool exists = fileExists(self->filename);
-		if (!exists) {
-			flags |= IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE;
+		if (!self->memoryOnly) {
+			int64_t flags = IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE |
+			                IAsyncFile::OPEN_LOCK;
+			exists = fileExists(self->filename);
+			if (!exists) {
+				flags |= IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE;
+			}
+
+			wait(store(self->pageFile, IAsyncFileSystem::filesystem()->open(self->filename, flags, 0644)));
 		}
-
-		wait(store(self->pageFile, IAsyncFileSystem::filesystem()->open(self->filename, flags, 0644)));
 
 		// Header page is always treated as having a page size of smallestPhysicalBlock
 		self->setPageSize(smallestPhysicalBlock);
@@ -951,7 +992,7 @@ public:
 
 		// If there are at least 2 pages then try to recover the existing file
 		if (exists && fileSize >= (self->smallestPhysicalBlock * 2)) {
-			debug_printf("DWALPager(%s) recovering using existing file\n");
+			debug_printf("DWALPager(%s) recovering using existing file\n", self->filename.c_str());
 
 			state bool recoveredHeader = false;
 
@@ -1031,7 +1072,7 @@ public:
 			// committed. A new pager will be created in its place.
 			// TODO:  Is the right behavior?
 
-			debug_printf("DWALPager(%s) creating new pager\n");
+			debug_printf("DWALPager(%s) creating new pager\n", self->filename.c_str());
 
 			self->headerPage = self->newPageBuffer();
 			self->pHeader = (Header*)self->headerPage->begin();
@@ -1131,6 +1172,10 @@ public:
 
 		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
 		((Page*)page.getPtr())->updateChecksum(pageID);
+
+		if (memoryOnly) {
+			return Void();
+		}
 
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
@@ -1232,6 +1277,8 @@ public:
 	// and before the user-chosen sized pages.
 	ACTOR static Future<Reference<IPage>> readPhysicalPage(DWALPager* self, PhysicalPageID pageID,
 	                                                       bool header = false) {
+		ASSERT(!self->memoryOnly);
+
 		if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
 			wait(delay(0, TaskPriority::DiskRead));
 		}
@@ -1443,18 +1490,24 @@ public:
 		if (g_network->getCurrentTask() > TaskPriority::DiskWrite) {
 			wait(delay(0, TaskPriority::DiskWrite));
 		}
-		wait(self->pageFile->sync());
-		debug_printf("DWALPager(%s) commit version %" PRId64 " sync 1\n", self->filename.c_str(),
-		             self->pHeader->committedVersion);
+
+		if (!self->memoryOnly) {
+			wait(self->pageFile->sync());
+			debug_printf("DWALPager(%s) commit version %" PRId64 " sync 1\n", self->filename.c_str(),
+			             self->pHeader->committedVersion);
+		}
 
 		// Update header on disk and sync again.
 		wait(self->writeHeaderPage(0, self->headerPage));
 		if (g_network->getCurrentTask() > TaskPriority::DiskWrite) {
 			wait(delay(0, TaskPriority::DiskWrite));
 		}
-		wait(self->pageFile->sync());
-		debug_printf("DWALPager(%s) commit version %" PRId64 " sync 2\n", self->filename.c_str(),
-		             self->pHeader->committedVersion);
+
+		if (!self->memoryOnly) {
+			wait(self->pageFile->sync());
+			debug_printf("DWALPager(%s) commit version %" PRId64 " sync 2\n", self->filename.c_str(),
+			             self->pHeader->committedVersion);
+		}
 
 		// Update the last committed header for use in the next commit.
 		self->updateCommittedHeader();
@@ -1508,8 +1561,10 @@ public:
 		// Unreference the file and clear
 		self->pageFile.clear();
 		if (dispose) {
-			debug_printf("DWALPager(%s) shutdown deleting file\n", self->filename.c_str());
-			wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename, true));
+			if (!self->memoryOnly) {
+				debug_printf("DWALPager(%s) shutdown deleting file\n", self->filename.c_str());
+				wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename, true));
+			}
 		}
 
 		self->closedPromise.send(Void());
@@ -1528,7 +1583,12 @@ public:
 		ASSERT(recoverFuture.isReady());
 		int64_t free;
 		int64_t total;
-		g_network->getDiskBytes(parentDirectory(filename), free, total);
+		if (memoryOnly) {
+			total = pageCacheBytes;
+			free = pageCacheBytes - ((int64_t)pageCache.count() * physicalPageSize);
+		} else {
+			g_network->getDiskBytes(parentDirectory(filename), free, total);
+		}
 		int64_t pagerSize = pHeader->pageCount * physicalPageSize;
 
 		// It is not exactly known how many pages on the delayed free list are usable as of right now.  It could be
@@ -1642,6 +1702,7 @@ private:
 	Header* pLastCommittedHeader;
 
 	std::string filename;
+	bool memoryOnly;
 
 	typedef ObjectCache<LogicalPageID, PageCacheEntry> PageCacheT;
 	PageCacheT pageCache;
@@ -1837,9 +1898,9 @@ struct SplitStringRef {
 
 // A BTree "page id" is actually a list of LogicalPageID's whose contents should be concatenated together.
 // NOTE: Uses host byte order
-typedef VectorRef<LogicalPageID> BTreePageID;
+typedef VectorRef<LogicalPageID> BTreePageIDRef;
 
-std::string toString(BTreePageID id) {
+std::string toString(BTreePageIDRef id) {
 	return std::string("BTreePageID") + toString(id.begin(), id.end());
 }
 
@@ -1861,20 +1922,20 @@ struct RedwoodRecordRef {
 	// RedwoodRecordRefs are used for both internal and leaf pages of the BTree.
 	// Boundary records in internal pages are made from leaf records.
 	// These functions make creating and working with internal page records more convenient.
-	inline BTreePageID getChildPage() const {
+	inline BTreePageIDRef getChildPage() const {
 		ASSERT(value.present());
-		return BTreePageID((LogicalPageID*)value.get().begin(), value.get().size() / sizeof(LogicalPageID));
+		return BTreePageIDRef((LogicalPageID*)value.get().begin(), value.get().size() / sizeof(LogicalPageID));
 	}
 
-	inline void setChildPage(BTreePageID id) {
+	inline void setChildPage(BTreePageIDRef id) {
 		value = ValueRef((const uint8_t*)id.begin(), id.size() * sizeof(LogicalPageID));
 	}
 
-	inline void setChildPage(Arena& arena, BTreePageID id) {
+	inline void setChildPage(Arena& arena, BTreePageIDRef id) {
 		value = ValueRef(arena, (const uint8_t*)id.begin(), id.size() * sizeof(LogicalPageID));
 	}
 
-	inline RedwoodRecordRef withPageID(BTreePageID id) const {
+	inline RedwoodRecordRef withPageID(BTreePageIDRef id) const {
 		return RedwoodRecordRef(key, version, ValueRef((const uint8_t*)id.begin(), id.size() * sizeof(LogicalPageID)));
 	}
 
@@ -1889,9 +1950,7 @@ struct RedwoodRecordRef {
 
 	// Find the common key prefix between two records, assuming that the first skipLen bytes are the same
 	inline int getCommonPrefixLen(const RedwoodRecordRef& other, int skipLen = 0) const {
-		int skipStart = std::min(skipLen, key.size());
-		return skipStart + commonPrefixLength(key.begin() + skipStart, other.key.begin() + skipStart,
-		                                      std::min(other.key.size(), key.size()) - skipStart);
+		return skipLen + commonPrefixLength(key, other.key, skipLen);
 	}
 
 	// Compares and orders by key, version, chunk.total, chunk.start, value
@@ -2348,7 +2407,7 @@ struct RedwoodRecordRef {
 
 	std::string toString(bool leaf = true) const {
 		std::string r;
-		r += format("'%s'@%" PRId64 " => ", kvformat(key).c_str(), version);
+		r += format("'%s'@%" PRId64 " => ", key.printable().c_str(), version);
 		if (value.present()) {
 			if (leaf) {
 				r += format("'%s'", kvformat(value.get()).c_str());
@@ -2386,7 +2445,8 @@ struct BTreePage {
 
 	const ValueTree& valueTree() const { return *(const ValueTree*)(this + 1); }
 
-	std::string toString(bool write, BTreePageID id, Version ver, const RedwoodRecordRef* lowerBound,
+	// TODO:  boundaries are for decoding, but upper
+	std::string toString(bool write, BTreePageIDRef id, Version ver, const RedwoodRecordRef* lowerBound,
 	                     const RedwoodRecordRef* upperBound) const {
 		std::string r;
 		r += format("BTreePage op=%s %s @%" PRId64
@@ -2395,7 +2455,8 @@ struct BTreePage {
 		            (int)kvBytes, lowerBound->toString(false).c_str(), upperBound->toString(false).c_str());
 		try {
 			if (tree().numItems > 0) {
-				// This doesn't use the cached reader for the page but it is only for debugging purposes
+				// This doesn't use the cached reader for the page because it is only for debugging purposes,
+				// a cached reader may not exist
 				BinaryTree::Mirror reader(&tree(), lowerBound, upperBound);
 				BinaryTree::Cursor c = reader.getCursor();
 
@@ -2412,16 +2473,21 @@ struct BTreePage {
 					if (tooLow || tooHigh) {
 						anyOutOfRange = true;
 						if (tooLow) {
-							r += " (too low)";
+							r += " (below decode lower bound)";
 						}
 						if (tooHigh) {
-							r += " (too high)";
+							r += " (at or above decode upper bound)";
 						}
 					}
 					r += "\n";
 
 				} while (c.moveNext());
-				ASSERT(!anyOutOfRange);
+
+				// Out of range entries are actually okay now and the result of subtree deletion followed by
+				// incremental insertions of records in the deleted range being added to an adjacent subtree
+				// which is logically expanded encompass the deleted range but still is using the original
+				// subtree boundaries as DeltaTree boundaries.
+				// ASSERT(!anyOutOfRange);
 			}
 		} catch (Error& e) {
 			debug_printf("BTreePage::toString ERROR: %s\n", e.what());
@@ -2429,6 +2495,8 @@ struct BTreePage {
 			throw;
 		}
 
+		// All appends to r end in a linefeed, remove the final one.
+		r.resize(r.size() - 1);
 		return r;
 	}
 };
@@ -2491,7 +2559,7 @@ public:
 
 	struct LazyDeleteQueueEntry {
 		Version version;
-		Standalone<BTreePageID> pageID;
+		Standalone<BTreePageIDRef> pageID;
 
 		bool operator<(const LazyDeleteQueueEntry& rhs) const { return version < rhs.version; }
 
@@ -2499,7 +2567,7 @@ public:
 			version = *(Version*)src;
 			src += sizeof(Version);
 			int count = *src++;
-			pageID = BTreePageID((LogicalPageID*)src, count);
+			pageID = BTreePageIDRef((LogicalPageID*)src, count);
 			return bytesNeeded();
 		}
 
@@ -2562,20 +2630,28 @@ public:
 		int64_t commits;
 		int64_t gets;
 		int64_t getRanges;
-		int64_t commitToPage;
-		int64_t commitToPageStart;
+		int64_t commitSubtreeStart;
 		int64_t pageUpdates;
 		double startTime;
 
 		std::string toString(bool clearAfter = false) {
-			const char* labels[] = { "set",          "clear",           "clearSingleKey", "get",
-				                     "getRange",     "commit",          "pageReads",      "extPageRead",
-				                     "pagePreloads", "extPagePreloads", "pageWrite",      "extPageWrite",
-				                     "commitPage",   "commitPageStart", "pageUpdates" };
+			const char* labels[] = { "set",
+				                     "clear",
+				                     "clearSingleKey",
+				                     "get",
+				                     "getRange",
+				                     "commit",
+				                     "pageReads",
+				                     "extPageRead",
+				                     "pagePreloads",
+				                     "extPagePreloads",
+				                     "pageWrites",
+				                     "pageUpdates",
+				                     "extPageWrites",
+				                     "commitSubtreeStart" };
 			const int64_t values[] = {
-				sets,         clears,       clearSingleKey,  gets,       getRanges,     commits,      pageReads,
-				extPageReads, pagePreloads, extPagePreloads, pageWrites, extPageWrites, commitToPage, commitToPageStart,
-				pageUpdates
+				sets,         clears,       clearSingleKey,  gets,       getRanges,   commits,       pageReads,
+				extPageReads, pagePreloads, extPagePreloads, pageWrites, pageUpdates, extPageWrites, commitSubtreeStart
 			};
 
 			double elapsed = now() - startTime;
@@ -2715,7 +2791,7 @@ public:
 				Version v = entry.version;
 				while (1) {
 					if (c.get().value.present()) {
-						BTreePageID btChildPageID = c.get().getChildPage();
+						BTreePageIDRef btChildPageID = c.get().getChildPage();
 						// If this page is height 2, then the children are leaves so free
 						if (btPage.height == 2) {
 							debug_printf("LazyDelete: freeing child %s\n", toString(btChildPageID).c_str());
@@ -2762,7 +2838,7 @@ public:
 		if (meta.size() == 0) {
 			self->m_header.formatVersion = MetaKey::FORMAT_VERSION;
 			LogicalPageID id = wait(self->m_pager->newPageID());
-			BTreePageID newRoot((LogicalPageID*)&id, 1);
+			BTreePageIDRef newRoot((LogicalPageID*)&id, 1);
 			debug_printf("new root %s\n", toString(newRoot).c_str());
 			self->m_header.root.set(newRoot, sizeof(headerSpace) - sizeof(m_header));
 			self->m_header.height = 1;
@@ -2875,139 +2951,6 @@ public:
 	Future<Void> destroyAndCheckSanity() { return destroyAndCheckSanity_impl(this); }
 
 private:
-	struct ChildLinksRef {
-		ChildLinksRef() = default;
-
-		ChildLinksRef(VectorRef<RedwoodRecordRef> children, RedwoodRecordRef upperBound)
-		  : children(children), upperBound(upperBound) {}
-
-		ChildLinksRef(const RedwoodRecordRef* child, const RedwoodRecordRef* upperBound)
-		  : children((RedwoodRecordRef*)child, 1), upperBound(*upperBound) {}
-
-		ChildLinksRef(Arena& arena, const ChildLinksRef& toCopy)
-		  : children(arena, toCopy.children), upperBound(arena, toCopy.upperBound) {}
-
-		int expectedSize() const { return children.expectedSize() + upperBound.expectedSize(); }
-
-		std::string toString() const {
-			return format("{children=%s upperbound=%s}", ::toString(children).c_str(), upperBound.toString().c_str());
-		}
-
-		VectorRef<RedwoodRecordRef> children;
-		RedwoodRecordRef upperBound;
-	};
-
-	// Utility class for building a vector of internal page entries.
-	// Entries must be added in version order.  Modified will be set to true
-	// if any entries differ from the original ones.  Additional entries will be
-	// added when necessary to reconcile differences between the upper and lower
-	// boundaries of consecutive entries.
-	struct InternalPageBuilder {
-		// Cursor must be at first entry in page
-		InternalPageBuilder(const BTreePage::BinaryTree::Cursor& c) : cursor(c), modified(false), childPageCount(0) {}
-
-	private:
-		// This must be called internally, on records whose arena has already been added to the entries arena
-		inline void addEntry(const RedwoodRecordRef& rec) {
-			if (rec.value.present()) {
-				++childPageCount;
-			}
-
-			// If no modification detected yet then check that this record is identical to the next
-			// record from the original page which is at the current cursor position.
-			if (!modified) {
-				if (cursor.valid()) {
-					if (rec != cursor.get()) {
-						debug_printf("InternalPageBuilder: Found internal page difference.  new: %s  old: %s\n",
-						             rec.toString().c_str(), cursor.get().toString().c_str());
-						modified = true;
-					} else {
-						cursor.moveNext();
-					}
-				} else {
-					debug_printf("InternalPageBuilder: Found internal page difference.  new: %s  old: <end>\n",
-					             rec.toString().c_str());
-					modified = true;
-				}
-			}
-
-			entries.push_back(entries.arena(), rec);
-		}
-
-	public:
-		// Add the child entries from newSet into entries
-		void addEntries(ChildLinksRef newSet) {
-			// If there are already entries, the last one links to a child page, and its upper bound is not the same
-			// as the first lowerBound in newSet (or newSet is empty, as the next newSet is necessarily greater)
-			// then add the upper bound of the previous set as a value-less record so that on future reads
-			// the previous child page can be decoded correctly.
-			if (!entries.empty() && entries.back().value.present() &&
-			    (newSet.children.empty() || !newSet.children.front().sameExceptValue(lastUpperBound))) {
-				debug_printf("InternalPageBuilder: Added placeholder %s\n",
-				             lastUpperBound.withoutValue().toString().c_str());
-				addEntry(lastUpperBound.withoutValue());
-			}
-
-			for (auto& child : newSet.children) {
-				debug_printf("InternalPageBuilder: Adding child entry %s\n", child.toString().c_str());
-				addEntry(child);
-			}
-
-			lastUpperBound = newSet.upperBound;
-			debug_printf("InternalPageBuilder: New upper bound: %s\n", lastUpperBound.toString().c_str());
-		}
-
-		// Finish comparison to existing data if necesary.
-		// Handle possible page upper bound changes.
-		// If modified is set (see below) and our rightmost entry has a child page and its upper bound
-		// (currently in lastUpperBound) does not match the new desired page upper bound, passed as newUpperBound,
-		// then write lastUpperBound with no value to allow correct decoding of the rightmost entry.
-		// This is only done if modified is set to avoid rewriting this page for this purpose only.
-		//
-		// After this call, lastUpperBound is internal page's upper bound.
-		void finalize(const RedwoodRecordRef& upperBound, const RedwoodRecordRef& decodeUpperBound) {
-			debug_printf(
-			    "InternalPageBuilder::end  modified=%d  upperBound=%s  decodeUpperBound=%s  lastUpperBound=%s\n",
-			    modified, upperBound.toString().c_str(), decodeUpperBound.toString().c_str(),
-			    lastUpperBound.toString().c_str());
-			modified = modified || cursor.valid();
-			debug_printf("InternalPageBuilder::end  modified=%d after cursor check\n", modified);
-
-			// If there are boundary key entries and the last one has a child page then the
-			// upper bound for this internal page must match the required upper bound for
-			// the last child entry.
-			if (!entries.empty() && entries.back().value.present()) {
-				debug_printf("InternalPageBuilder::end  last entry is not null\n");
-
-				// If the page contents were not modified so far and the upper bound required
-				// for the last child page (lastUpperBound) does not match what the page
-				// was encoded with then the page must be modified.
-				if (!modified && !lastUpperBound.sameExceptValue(decodeUpperBound)) {
-					debug_printf("InternalPageBuilder::end  modified set true because lastUpperBound does not match "
-					             "decodeUpperBound\n");
-					modified = true;
-				}
-
-				if (modified && !lastUpperBound.sameExceptValue(upperBound)) {
-					debug_printf("InternalPageBuilder::end  Modified is true but lastUpperBound does not match "
-					             "upperBound so adding placeholder\n");
-					addEntry(lastUpperBound.withoutValue());
-					lastUpperBound = upperBound;
-				}
-			}
-			debug_printf(
-			    "InternalPageBuilder::end  exit.  modified=%d  upperBound=%s  decodeUpperBound=%s  lastUpperBound=%s\n",
-			    modified, upperBound.toString().c_str(), decodeUpperBound.toString().c_str(),
-			    lastUpperBound.toString().c_str());
-		}
-
-		BTreePage::BinaryTree::Cursor cursor;
-		Standalone<VectorRef<RedwoodRecordRef>> entries;
-		RedwoodRecordRef lastUpperBound;
-		bool modified;
-		int childPageCount;
-	};
-
 	// Represents a change to a single key - set, clear, or atomic op
 	struct SingleKeyMutation {
 		// Clear
@@ -3236,15 +3179,14 @@ private:
 	// Writes entries to 1 or more pages and return a vector of boundary keys with their IPage(s)
 	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>> writePages(
 	    VersionedBTree* self, const RedwoodRecordRef* lowerBound, const RedwoodRecordRef* upperBound,
-	    VectorRef<RedwoodRecordRef> entries, int height, Version v, BTreePageID previousID) {
+	    VectorRef<RedwoodRecordRef> entries, int height, Version v, BTreePageIDRef previousID) {
 		ASSERT(entries.size() > 0);
 		state Standalone<VectorRef<RedwoodRecordRef>> records;
 
 		// This is how much space for the binary tree exists in the page, after the header
 		state int blockSize = self->m_pager->getUsablePageSize();
 		state int pageSize = blockSize - sizeof(BTreePage);
-		state float fillFactor = 0.66; // TODO: Make this a knob
-		state int pageFillTarget = pageSize * fillFactor;
+		state int pageFillTarget = pageSize * SERVER_KNOBS->REDWOOD_PAGE_REBUILD_FILL_FACTOR;
 		state int blockCount = 1;
 
 		state int kvBytes = 0;
@@ -3316,7 +3258,7 @@ private:
 
 					blockCount += newBlocks;
 					pageSize = newPageSize;
-					pageFillTarget = pageSize * fillFactor;
+					pageFillTarget = pageSize * SERVER_KNOBS->REDWOOD_PAGE_REBUILD_FILL_FACTOR;
 				}
 
 				kvBytes += keySize + valueSize;
@@ -3393,7 +3335,7 @@ private:
 
 			// Write this btree page, which is made of 1 or more pager pages.
 			state int p;
-			state BTreePageID childPageID;
+			state BTreePageIDRef childPageID;
 
 			// If we are only writing 1 page and it has the same BTreePageID size as the original then try to reuse the
 			// LogicalPageIDs in previousID and try to update them atomically.
@@ -3461,7 +3403,7 @@ private:
 		// decodability of the subtree to its left. Fortunately, this is easy to detect because the loop above would
 		// exit before i has reached the item count.
 		if (height != 1 && i != entries.size()) {
-			debug_printf("Adding dummy record to avoid writing useless page: %s\n",
+			debug_printf("Adding dummy record to avoid writing useless page containing only one null link: %s\n",
 			             pageUpperBound.toString(false).c_str());
 			records.push_back_deep(records.arena(), pageUpperBound);
 		}
@@ -3477,7 +3419,7 @@ private:
 		while (records.size() > 1) {
 			self->m_header.height = ++height;
 			Standalone<VectorRef<RedwoodRecordRef>> newRecords =
-			    wait(writePages(self, &dbBegin, &dbEnd, records, height, version, BTreePageID()));
+			    wait(writePages(self, &dbBegin, &dbEnd, records, height, version, BTreePageIDRef()));
 			debug_printf("Wrote a new root level at version %" PRId64 " height %d size %lu pages\n", version, height,
 			             newRecords.size());
 			records = newRecords;
@@ -3521,13 +3463,14 @@ private:
 		int m_size;
 	};
 
-	ACTOR static Future<Reference<const IPage>> readPage(Reference<IPagerSnapshot> snapshot, BTreePageID id,
+	ACTOR static Future<Reference<const IPage>> readPage(Reference<IPagerSnapshot> snapshot, BTreePageIDRef id,
 	                                                     const RedwoodRecordRef* lowerBound,
 	                                                     const RedwoodRecordRef* upperBound,
 	                                                     bool forLazyDelete = false) {
 		if (!forLazyDelete) {
 			debug_printf("readPage() op=read %s @%" PRId64 " lower=%s upper=%s\n", toString(id).c_str(),
-			             snapshot->getVersion(), lowerBound->toString().c_str(), upperBound->toString().c_str());
+			             snapshot->getVersion(), lowerBound->toString(false).c_str(),
+			             upperBound->toString(false).c_str());
 		} else {
 			debug_printf("readPage() op=readForDeferredClear %s @%" PRId64 " \n", toString(id).c_str(),
 			             snapshot->getVersion());
@@ -3558,7 +3501,8 @@ private:
 
 		if (!forLazyDelete && page->userData == nullptr) {
 			debug_printf("readPage() Creating Reader for %s @%" PRId64 " lower=%s upper=%s\n", toString(id).c_str(),
-			             snapshot->getVersion(), lowerBound->toString().c_str(), upperBound->toString().c_str());
+			             snapshot->getVersion(), lowerBound->toString(false).c_str(),
+			             upperBound->toString(false).c_str());
 			page->userData = new BTreePage::BinaryTree::Mirror(&pTreePage->tree(), lowerBound, upperBound);
 			page->userDataDestructor = [](void* ptr) { delete (BTreePage::BinaryTree::Mirror*)ptr; };
 		}
@@ -3571,7 +3515,7 @@ private:
 		return page;
 	}
 
-	static void preLoadPage(IPagerSnapshot* snapshot, BTreePageID id) {
+	static void preLoadPage(IPagerSnapshot* snapshot, BTreePageIDRef id) {
 		++counts.pagePreloads;
 		counts.extPagePreloads += (id.size() - 1);
 
@@ -3580,7 +3524,7 @@ private:
 		}
 	}
 
-	void freeBtreePage(BTreePageID btPageID, Version v) {
+	void freeBtreePage(BTreePageIDRef btPageID, Version v) {
 		// Free individual pages at v
 		for (LogicalPageID id : btPageID) {
 			m_pager->freePage(id, v);
@@ -3589,9 +3533,9 @@ private:
 
 	// Write new version of pageID at version v using page as its data.
 	// Attempts to reuse original id(s) in btPageID, returns BTreePageID.
-	ACTOR static Future<BTreePageID> updateBtreePage(VersionedBTree* self, BTreePageID oldID, Arena* arena,
-	                                                 Reference<IPage> page, Version writeVersion) {
-		state BTreePageID newID;
+	ACTOR static Future<BTreePageIDRef> updateBtreePage(VersionedBTree* self, BTreePageIDRef oldID, Arena* arena,
+	                                                    Reference<IPage> page, Version writeVersion) {
+		state BTreePageIDRef newID;
 		newID.resize(*arena, oldID.size());
 
 		if (oldID.size() == 1) {
@@ -3641,44 +3585,261 @@ private:
 		return newPage;
 	}
 
-	// Returns list of (version, internal page records, required upper bound)
-	// iMutationBoundary is greatest boundary <= lowerBound->key
-	// iMutationBoundaryEnd is least boundary >= upperBound->key
-	ACTOR static Future<Standalone<ChildLinksRef>> commitSubtree(
-	    VersionedBTree* self, MutationBuffer* mutationBuffer,
-	    // MutationBuffer::const_iterator iMutationBoundary, // = mutationBuffer->upper_bound(lowerBound->key);
-	    // --iMutationBoundary; MutationBuffer::const_iterator iMutationBoundaryEnd, // =
-	    // mutationBuffer->lower_bound(upperBound->key);
-	    Reference<IPagerSnapshot> snapshot, BTreePageID rootID, bool isLeaf, const RedwoodRecordRef* lowerBound,
-	    const RedwoodRecordRef* upperBound, const RedwoodRecordRef* decodeLowerBound,
-	    const RedwoodRecordRef* decodeUpperBound, int skipLen = 0) {
-		// skipLen = lowerBound->getCommonPrefixLen(*upperBound, skipLen);
+	// Each call to commitSubtree() will pass most of its arguments via a this structure because the caller
+	// will need access to these parameters after commitSubtree() is done.
+	struct InternalPageSliceUpdate {
+		// The logical range for the subtree's contents.  Due to subtree clears, these boundaries may not match
+		// the lower/upper bounds needed to decode the page.
+		// Subtree clears can cause the boundaries for decoding the page to be more restrictive than the subtree's
+		// logical boundaries.  When a subtree is fully cleared, the link to it is replaced with a null link, but
+		// the key boundary remains in tact to support decoding of the previous subtree.
+		const RedwoodRecordRef* subtreeLowerBound;
+		const RedwoodRecordRef* subtreeUpperBound;
+
+		// The lower/upper bound for decoding the root of the subtree
+		const RedwoodRecordRef* decodeLowerBound;
+		const RedwoodRecordRef* decodeUpperBound;
+
+		bool boundariesNormal() const {
+			// If the decode upper boundary is the subtree upper boundary the pointers will be the same
+			// For the lower boundary, if the pointers are not the same there is still a possibility
+			// that the keys are the same.  This happens for the first remaining subtree of an internal page
+			// after the previous first subtree was cleared.
+			return (decodeUpperBound == subtreeUpperBound) &&
+			       (decodeLowerBound == subtreeLowerBound || decodeLowerBound->sameExceptValue(*subtreeLowerBound));
+		}
+
+		// The record range of the subtree slice is cBegin to cEnd
+		// cBegin.get().getChildPage() is guaranteed to be valid
+		// cEnd can be
+		//   - the next record which also has a child page
+		//   - the next-next record which has a child page because the next record does not and
+		//     only existed to provide the correct upper bound for decoding cBegin's child page
+		//   - a later record with a valid child page, because this slice represents a range of
+		//     multiple subtrees that are either all unchanged or all cleared.
+		//   - invalid, because cBegin is the last child entry in the page or because the range
+		//     being cleared or unchanged extends to the end of the page's entries
+		BTreePage::BinaryTree::Cursor cBegin;
+		BTreePage::BinaryTree::Cursor cEnd;
+
+		// The prefix length common to the entire logical subtree.  Might be shorter than the length common to all
+		// actual items in the page.
+		int skipLen;
+
+		// Members below this point are "output" members, set by function calls from commitSubtree() once it decides
+		// what is happening with this slice of the tree.
+
+		// If true, present, the contents of newLinks should replace [cBegin, cEnd)
+		bool childrenChanged;
+		Standalone<VectorRef<RedwoodRecordRef>> newLinks;
+
+		// The upper boundary expected, if any, by the last child in either [cBegin, cEnd) or newLinks
+		// If the last record in the range has a null link then this will be null.
+		const RedwoodRecordRef* expectedUpperBound;
+
+		// CommitSubtree will call one of the following three functions based on its exit path
+
+		// Subtree was cleared.
+		void cleared() {
+			childrenChanged = true;
+			expectedUpperBound = nullptr;
+		}
+
+		// Page was updated in-place through edits and written to maybeNewID
+		void updatedInPlace(BTreePageIDRef maybeNewID) {
+			// The boundaries can't have changed, but the child page link may have.
+			if (maybeNewID != decodeLowerBound->getChildPage()) {
+				// Add page's decode lower bound to newLinks set without its child page, intially
+				newLinks.push_back_deep(newLinks.arena(), decodeLowerBound->withoutValue());
+
+				// Set the child page ID, which has already been allocated in result.arena()
+				newLinks.back().setChildPage(maybeNewID);
+				childrenChanged = true;
+			} else {
+				childrenChanged = false;
+			}
+
+			// Expected upper bound remains unchanged.
+		}
+
+		// writePages() was used to build 1 or more replacement pages.
+		void rebuilt(Standalone<VectorRef<RedwoodRecordRef>> newRecords) {
+			newLinks = newRecords;
+			childrenChanged = true;
+
+			// If the replacement records ended on a non-null child page, then the expect upper bound is
+			// the subtree upper bound since that is what would have been used for the page(s) rebuild,
+			// otherwise it is null.
+			expectedUpperBound = newLinks.back().value.present() ? subtreeUpperBound : nullptr;
+		}
+
+		// Get the first record for this range AFTER applying whatever changes were made
+		const RedwoodRecordRef* getFirstBoundary() const {
+			if (childrenChanged) {
+				if (newLinks.empty()) {
+					return nullptr;
+				}
+				return &newLinks.front();
+			}
+			return decodeLowerBound;
+		}
+
+		std::string toString() const {
+			std::string s;
+			s += format("SubtreeSlice: addr=%p skipLen=%d subtreeCleared=%d childrenChanged=%d\n", this, skipLen,
+			            childrenChanged && newLinks.empty(), childrenChanged);
+			s += format("SubtreeLower: %s\n", subtreeLowerBound->toString(false).c_str());
+			s += format(" DecodeLower: %s\n", decodeLowerBound->toString(false).c_str());
+			s += format(" DecodeUpper: %s\n", decodeUpperBound->toString(false).c_str());
+			s += format("SubtreeUpper: %s\n", subtreeUpperBound->toString(false).c_str());
+			s += format("expectedUpperBound: %s\n",
+			            expectedUpperBound ? expectedUpperBound->toString(false).c_str() : "(null)");
+			for (int i = 0; i < newLinks.size(); ++i) {
+				s += format("  %i: %s\n", i, newLinks[i].toString(false).c_str());
+			}
+			s.resize(s.size() - 1);
+			return s;
+		}
+	};
+
+	struct InternalPageModifier {
+		InternalPageModifier() {}
+		InternalPageModifier(BTreePage::BinaryTree::Mirror* m, bool updating)
+		  : m(m), updating(updating), changesMade(false) {}
+
+		bool updating;
+		BTreePage::BinaryTree::Mirror* m;
+		Standalone<VectorRef<RedwoodRecordRef>> rebuild;
+		bool changesMade;
+
+		bool empty() const {
+			if (updating) {
+				return m->tree->numItems == 0;
+			} else {
+				return rebuild.empty();
+			}
+		}
+
+		// end is the cursor position of the first record of the unvisited child link range, which
+		// is needed if the insert requires switching from update to rebuild mode.
+		void insert(BTreePage::BinaryTree::Cursor end, const VectorRef<RedwoodRecordRef>& recs) {
+			int i = 0;
+			if (updating) {
+				// TODO: insert recs in a random order to avoid new subtree being entirely right child links
+				while (i != recs.size()) {
+					const RedwoodRecordRef& rec = recs[i];
+					debug_printf("internal page (updating) insert: %s\n", rec.toString(false).c_str());
+
+					if (!m->insert(rec)) {
+						debug_printf("internal page: failed to insert %s, switching to rebuild\n",
+						             rec.toString(false).c_str());
+						// Update failed, so populate rebuild vector with everything up to but not including end, which
+						// may include items from recs that were already added.
+						auto c = end;
+						if (c.moveFirst()) {
+							rebuild.reserve(rebuild.arena(), c.mirror->tree->numItems);
+							while (c != end) {
+								debug_printf("  internal page rebuild: add %s\n", c.get().toString(false).c_str());
+								rebuild.push_back(rebuild.arena(), c.get());
+								c.moveNext();
+							}
+						}
+						updating = false;
+						break;
+					}
+					++i;
+				}
+			}
+
+			// Not updating existing page so just add recs to rebuild vector
+			if (!updating) {
+				rebuild.reserve(rebuild.arena(), rebuild.size() + recs.size());
+				while (i != recs.size()) {
+					const RedwoodRecordRef& rec = recs[i];
+					debug_printf("internal page (rebuilding) insert: %s\n", rec.toString(false).c_str());
+					rebuild.push_back(rebuild.arena(), rec);
+					++i;
+				}
+			}
+		}
+
+		void keep(BTreePage::BinaryTree::Cursor begin, BTreePage::BinaryTree::Cursor end) {
+			if (!updating) {
+				while (begin != end) {
+					debug_printf("internal page (rebuilding) keeping: %s\n", begin.get().toString(false).c_str());
+					rebuild.push_back(rebuild.arena(), begin.get());
+					begin.moveNext();
+				}
+			} else if (REDWOOD_DEBUG) {
+				while (begin != end) {
+					debug_printf("internal page (updating) keeping: %s\n", begin.get().toString(false).c_str());
+					begin.moveNext();
+				}
+			}
+		}
+
+		// This must be called for each of the InternalPageSliceUpdates in sorted order.
+		void applyUpdate(InternalPageSliceUpdate& u, const RedwoodRecordRef* nextBoundary) {
+			debug_printf("applyUpdate nextBoundary=(%p) %s  %s\n", nextBoundary,
+			             (nextBoundary != nullptr) ? nextBoundary->toString(false).c_str() : "", u.toString().c_str());
+
+			// If the children changed, replace [cBegin, cEnd) with newLinks
+			if (u.childrenChanged) {
+				if (updating) {
+					auto c = u.cBegin;
+					while (c != u.cEnd) {
+						debug_printf("internal page (updating) erasing: %s\n", c.get().toString(false).c_str());
+						c.erase();
+					}
+					// [cBegin, cEnd) is now erased, and cBegin is invalid, so cEnd represents the end
+					// of the range that comes before any part of newLinks that can't be added if there
+					// is not enough space.
+					insert(u.cEnd, u.newLinks);
+				} else {
+					// Already in rebuild mode so the cursor parameter is meaningless
+					insert({}, u.newLinks);
+				}
+
+				// cBegin has been erased so interating from the first entry forward will never see cBegin to use as an
+				// endpoint.
+				changesMade = true;
+			} else {
+				keep(u.cBegin, u.cEnd);
+			}
+
+			// If there is an expected upper boundary for the next range after u
+			if (u.expectedUpperBound != nullptr) {
+				// Then if it does not match the next boundary then insert a dummy record
+				if (nextBoundary == nullptr ||
+				    (nextBoundary != u.expectedUpperBound && !nextBoundary->sameExceptValue(*u.expectedUpperBound))) {
+					RedwoodRecordRef rec = u.expectedUpperBound->withoutValue();
+					debug_printf("applyUpdate adding dummy record %s\n", rec.toString(false).c_str());
+					insert(u.cEnd, { &rec, 1 });
+					changesMade = true;
+				}
+			}
+		}
+	};
+
+	ACTOR static Future<Void> commitSubtree(
+	    VersionedBTree* self, Reference<IPagerSnapshot> snapshot, MutationBuffer* mutationBuffer, BTreePageIDRef rootID,
+	    bool isLeaf,
+	    MutationBuffer::const_iterator mBegin, // greatest mutation boundary <= subtreeLowerBound->key
+	    MutationBuffer::const_iterator mEnd, // least boundary >= subtreeUpperBound->key
+	    InternalPageSliceUpdate* update) {
+
 		state std::string context;
 		if (REDWOOD_DEBUG) {
 			context = format("CommitSubtree(root=%s): ", toString(rootID).c_str());
 		}
-
-		state Version writeVersion = self->getLastCommittedVersion() + 1;
-		state Standalone<ChildLinksRef> result;
-
-		debug_printf("%s lower=%s upper=%s\n", context.c_str(), lowerBound->toString().c_str(),
-		             upperBound->toString().c_str());
-		debug_printf("%s decodeLower=%s decodeUpper=%s\n", context.c_str(), decodeLowerBound->toString().c_str(),
-		             decodeUpperBound->toString().c_str());
-		self->counts.commitToPageStart++;
-
-		// Find the slice of the mutation buffer that is relevant to this subtree
-		state MutationBuffer::const_iterator iMutationBoundary = mutationBuffer->upper_bound(lowerBound->key);
-		--iMutationBoundary;
-		state MutationBuffer::const_iterator iMutationBoundaryEnd = mutationBuffer->lower_bound(upperBound->key);
-
+		debug_printf("%s %s\n", context.c_str(), update->toString().c_str());
 		if (REDWOOD_DEBUG) {
 			debug_printf("%s ---------MUTATION BUFFER SLICE ---------------------\n", context.c_str());
-			auto begin = iMutationBoundary;
+			auto begin = mBegin;
 			while (1) {
 				debug_printf("%s Mutation: '%s':  %s\n", context.c_str(), printable(begin.key()).c_str(),
 				             begin.mutation().toString().c_str());
-				if (begin == iMutationBoundaryEnd) {
+				if (begin == mEnd) {
 					break;
 				}
 				++begin;
@@ -3686,97 +3847,39 @@ private:
 			debug_printf("%s -------------------------------------\n", context.c_str());
 		}
 
-		// iMutationBoundary is greatest boundary <= lowerBound->key
-		// iMutationBoundaryEnd is least boundary >= upperBound->key
-
-		// If one mutation range covers the entire subtree, then check if the entire subtree is modified,
-		// unmodified, or possibly/partially modified.
-		MutationBuffer::const_iterator iMutationBoundaryNext = iMutationBoundary;
-		++iMutationBoundaryNext;
-		if (iMutationBoundaryNext == iMutationBoundaryEnd) {
-			// Cleared means the entire range covering the subtree was cleared.  It is assumed true
-			// if the range starting after the lower mutation boundary was cleared, and then proven false
-			// below if possible.
-			bool cleared = iMutationBoundary.mutation().clearAfterBoundary;
-			// Unchanged means the entire range covering the subtree was unchanged, it is assumed to be the
-			// opposite of cleared() and then proven false below if possible.
-			bool unchanged = !cleared;
-			debug_printf("%s cleared=%d unchanged=%d\n", context.c_str(), cleared, unchanged);
-
-			// If the lower mutation boundary key is the same as the subtree lower bound then whether or not
-			// that key is being changed or cleared affects this subtree.
-			if (iMutationBoundary.key() == lowerBound->key) {
-				// If subtree will be cleared (so far) but the lower boundary key is not cleared then the subtree is not
-				// cleared
-				if (cleared && !iMutationBoundary.mutation().boundaryCleared()) {
-					cleared = false;
-					debug_printf("%s cleared=%d unchanged=%d\n", context.c_str(), cleared, unchanged);
-				}
-				// If the subtree looked unchanged (so far) but the lower boundary is is changed then the subtree is
-				// changed
-				if (unchanged && iMutationBoundary.mutation().boundaryChanged) {
-					unchanged = false;
-					debug_printf("%s cleared=%d unchanged=%d\n", context.c_str(), cleared, unchanged);
-				}
-			}
-
-			// If the higher mutation boundary key is the same as the subtree upper bound key then whether
-			// or not it is being changed or cleared affects this subtree.
-			if ((cleared || unchanged) && iMutationBoundaryEnd.key() == upperBound->key) {
-				// If the key is being changed then the records in this subtree with the same key must be removed
-				// so the subtree is definitely not unchanged, though it may be cleared to achieve the same effect.
-				if (iMutationBoundaryEnd.mutation().boundaryChanged) {
-					unchanged = false;
-					debug_printf("%s cleared=%d unchanged=%d\n", context.c_str(), cleared, unchanged);
-				} else {
-					// If the key is not being changed then the records in this subtree can't be removed so the
-					// subtree is not being cleared.
-					cleared = false;
-					debug_printf("%s cleared=%d unchanged=%d\n", context.c_str(), cleared, unchanged);
-				}
-			}
-
-			// The subtree cannot be both cleared and unchanged.
-			ASSERT(!(cleared && unchanged));
-
-			// If no changes in subtree
-			if (unchanged) {
-				result.contents() = ChildLinksRef(decodeLowerBound, decodeUpperBound);
-				debug_printf("%s no changes on this subtree, returning %s\n", context.c_str(),
-				             toString(result).c_str());
-				return result;
-			}
-
-			// If subtree is cleared
-			if (cleared) {
-				debug_printf("%s %s cleared, deleting it, returning %s\n", context.c_str(), isLeaf ? "Page" : "Subtree",
-				             toString(result).c_str());
-				if (isLeaf) {
-					self->freeBtreePage(rootID, writeVersion);
-				} else {
-					self->m_lazyDeleteQueue.pushBack(LazyDeleteQueueEntry{ writeVersion, rootID });
-				}
-				return result;
-			}
-		}
-
-		self->counts.commitToPage++;
-		state Reference<const IPage> page = wait(readPage(snapshot, rootID, decodeLowerBound, decodeUpperBound));
+		++self->counts.commitSubtreeStart;
+		state Version writeVersion = self->getLastCommittedVersion() + 1;
+		state Reference<const IPage> page =
+		    wait(readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound));
 		state BTreePage* btPage = (BTreePage*)page->begin();
 		ASSERT(isLeaf == btPage->isLeaf());
+
+		// TODO:  Decide if it is okay to update if the subtree boundaries are expanded.  It can result in
+		// records in a DeltaTree being outside its decode boundary range, which isn't actually invalid
+		// though it is awkward to reason about.
+		state bool tryToUpdate = btPage->tree().numItems > 0 && update->boundariesNormal();
+
+		// If trying to update the page, we need to clone it so we don't modify the original.
+		// TODO: Refactor DeltaTree::Mirror so it can be shared between different versions of pages
+		if (tryToUpdate) {
+			page = self->cloneForUpdate(page);
+			btPage = (BTreePage*)page->begin();
+		}
+
 		debug_printf(
 		    "%s commitSubtree(): %s\n", context.c_str(),
-		    btPage->toString(false, rootID, snapshot->getVersion(), decodeLowerBound, decodeUpperBound).c_str());
+		    btPage->toString(false, rootID, snapshot->getVersion(), update->decodeLowerBound, update->decodeUpperBound)
+		        .c_str());
 
-		state BTreePage::BinaryTree::Cursor cursor;
+		state BTreePage::BinaryTree::Cursor cursor = getCursor(page);
 
 		if (REDWOOD_DEBUG) {
 			debug_printf("%s ---------MUTATION BUFFER SLICE ---------------------\n", context.c_str());
-			auto begin = iMutationBoundary;
+			auto begin = mBegin;
 			while (1) {
 				debug_printf("%s Mutation: '%s':  %s\n", context.c_str(), printable(begin.key()).c_str(),
 				             begin.mutation().toString().c_str());
-				if (begin == iMutationBoundaryEnd) {
+				if (begin == mEnd) {
 					break;
 				}
 				++begin;
@@ -3786,23 +3889,8 @@ private:
 
 		// Leaf Page
 		if (isLeaf) {
-			// Try to update page unless it's an oversized page or empty or the boundaries have changed
-			// TODO: Caller already knows if boundaries are the same.
-			bool updating =
-			    btPage->tree().numItems > 0 && !(*decodeLowerBound != *lowerBound || *decodeUpperBound != *upperBound);
-
-			state Reference<IPage> newPage;
-			// If replacement pages are written they will be at the minimum version seen in the mutations for this leaf
+			bool updating = tryToUpdate;
 			bool changesMade = false;
-
-			// If attempting an in-place page update, clone the page and read/modify the copy
-			if (updating) {
-				newPage = self->cloneForUpdate(page);
-				cursor = getCursor(newPage);
-			} else {
-				// Otherwise read the old page
-				cursor = getCursor(page);
-			}
 
 			// Couldn't make changes in place, so now do a linear merge and build new pages.
 			state Standalone<VectorRef<RedwoodRecordRef>> merged;
@@ -3825,21 +3913,20 @@ private:
 
 			// Now, process each mutation range and merge changes with existing data.
 			bool firstMutationBoundary = true;
-			while (iMutationBoundary != iMutationBoundaryEnd) {
-				debug_printf("%s New mutation boundary: '%s': %s\n", context.c_str(),
-				             printable(iMutationBoundary.key()).c_str(),
-				             iMutationBoundary.mutation().toString().c_str());
+			while (mBegin != mEnd) {
+				debug_printf("%s New mutation boundary: '%s': %s\n", context.c_str(), printable(mBegin.key()).c_str(),
+				             mBegin.mutation().toString().c_str());
 
 				// Apply the change to the mutation buffer start boundary key only if
 				//   - there actually is a change (whether a set or a clear, old records are to be removed)
 				//   - either this is not the first boundary or it is but its key matches our lower bound key
-				bool applyBoundaryChange = iMutationBoundary.mutation().boundaryChanged &&
-				                           (!firstMutationBoundary || iMutationBoundary.key() >= lowerBound->key);
+				bool applyBoundaryChange = mBegin.mutation().boundaryChanged &&
+				                           (!firstMutationBoundary || mBegin.key() == update->subtreeLowerBound->key);
 				firstMutationBoundary = false;
 
 				// Iterate over records for the mutation boundary key, keep them unless the boundary key was changed or
 				// we are not applying it
-				while (cursor.valid() && cursor.get().key == iMutationBoundary.key()) {
+				while (cursor.valid() && cursor.get().key == mBegin.key()) {
 					// If there were no changes to the key or we're not applying it
 					if (!applyBoundaryChange) {
 						// If not updating, add to the output set, otherwise skip ahead past the records for the
@@ -3870,13 +3957,13 @@ private:
 				// Write the new record(s) for the mutation boundary start key if its value has been set
 				// Clears of this key will have been processed above by not being erased from the updated page or
 				// excluded from the merge output
-				if (applyBoundaryChange && iMutationBoundary.mutation().boundarySet()) {
-					RedwoodRecordRef rec(iMutationBoundary.key(), 0, iMutationBoundary.mutation().boundaryValue.get());
+				if (applyBoundaryChange && mBegin.mutation().boundarySet()) {
+					RedwoodRecordRef rec(mBegin.key(), 0, mBegin.mutation().boundaryValue.get());
 					changesMade = true;
 
 					// If updating, add to the page, else add to the output set
 					if (updating) {
-						if (cursor.mirror->insert(rec, skipLen, maxHeightAllowed)) {
+						if (cursor.mirror->insert(rec, update->skipLen, maxHeightAllowed)) {
 							debug_printf("%s Inserted %s [mutation, boundary start]\n", context.c_str(),
 							             rec.toString().c_str());
 						} else {
@@ -3894,18 +3981,17 @@ private:
 				}
 
 				// Before advancing the iterator, get whether or not the records in the following range must be removed
-				bool remove = iMutationBoundary.mutation().clearAfterBoundary;
+				bool remove = mBegin.mutation().clearAfterBoundary;
 				// Advance to the next boundary because we need to know the end key for the current range.
-				++iMutationBoundary;
-				if (iMutationBoundary == iMutationBoundaryEnd) {
-					skipLen = 0;
+				++mBegin;
+				if (mBegin == mEnd) {
+					update->skipLen = 0;
 				}
 
-				debug_printf("%s Mutation range end: '%s'\n", context.c_str(),
-				             printable(iMutationBoundary.key()).c_str());
+				debug_printf("%s Mutation range end: '%s'\n", context.c_str(), printable(mBegin.key()).c_str());
 
 				// Now handle the records up through but not including the next mutation boundary key
-				RedwoodRecordRef end(iMutationBoundary.key());
+				RedwoodRecordRef end(mBegin.key());
 
 				// If the records are being removed and we're not doing an in-place update
 				// OR if we ARE doing an update but the records are NOT being removed, then just skip them.
@@ -3917,12 +4003,12 @@ private:
 					}
 
 					debug_printf("%s Seeking forward to next boundary (remove=%d updating=%d) %s\n", context.c_str(),
-					             remove, updating, iMutationBoundary.key().toString().c_str());
-					cursor.seekGreaterThanOrEqual(end, skipLen);
+					             remove, updating, mBegin.key().toString().c_str());
+					cursor.seekGreaterThanOrEqual(end, update->skipLen);
 				} else {
 					// Otherwise we must visit the records.  If updating, the visit is to erase them, and if doing a
 					// linear merge than the visit is to add them to the output set.
-					while (cursor.valid() && cursor.get().compare(end, skipLen) < 0) {
+					while (cursor.valid() && cursor.get().compare(end, update->skipLen) < 0) {
 						if (updating) {
 							debug_printf("%s Erasing %s [existing, boundary start]\n", context.c_str(),
 							             cursor.get().toString().c_str());
@@ -3941,7 +4027,7 @@ private:
 			// If there are still more records, they have the same key as the end boundary
 			if (cursor.valid()) {
 				// If the end boundary is changing, we must remove the remaining records in this page
-				bool remove = iMutationBoundaryEnd.mutation().boundaryChanged;
+				bool remove = mEnd.mutation().boundaryChanged;
 				if (remove) {
 					changesMade = true;
 				}
@@ -3976,165 +4062,275 @@ private:
 			// No changes were actually made.  This could happen if the only mutations are clear ranges which do not
 			// match any records.
 			if (!changesMade) {
-				result.contents() = ChildLinksRef(decodeLowerBound, decodeUpperBound);
 				debug_printf("%s No changes were made during mutation merge, returning %s\n", context.c_str(),
-				             toString(result).c_str());
-				return result;
+				             toString(*update).c_str());
+				return Void();
 			} else {
-				debug_printf("%s Changes were made, writing.\n", context.c_str());
+				debug_printf(
+				    "%s Changes were made, writing, but subtree may still be unchanged from parent's perspective.\n",
+				    context.c_str());
 			}
 
 			writeVersion = self->getLastCommittedVersion() + 1;
 
 			if (updating) {
-				const BTreePage::BinaryTree& deltaTree = ((const BTreePage*)newPage->begin())->tree();
+				const BTreePage::BinaryTree& deltaTree = btPage->tree();
+				// If the tree is now empty, delete the page
 				if (deltaTree.numItems == 0) {
-					debug_printf("%s Page updates cleared all entries, returning %s\n", context.c_str(),
-					             toString(result).c_str());
+					update->cleared();
 					self->freeBtreePage(rootID, writeVersion);
-					return result;
+					debug_printf("%s Page updates cleared all entries, returning %s\n", context.c_str(),
+					             toString(*update).c_str());
 				} else {
 					// Otherwise update it.
-					BTreePageID newID =
-					    wait(self->updateBtreePage(self, rootID, &result.arena(), newPage, writeVersion));
+					BTreePageIDRef newID = wait(self->updateBtreePage(self, rootID, &update->newLinks.arena(),
+					                                                  page.castTo<IPage>(), writeVersion));
 
-					// Set the child page ID, which has already been allocated in result.arena()
-					RedwoodRecordRef* rec = new (result.arena()) RedwoodRecordRef(decodeLowerBound->withoutValue());
-					rec->setChildPage(newID);
-
-					result.contents() = ChildLinksRef(rec, decodeUpperBound);
-					debug_printf("%s Page updated in-place, returning %s\n", context.c_str(), toString(result).c_str());
+					update->updatedInPlace(newID);
 					++counts.pageUpdates;
-					return result;
+					debug_printf("%s Page updated in-place, returning %s\n", context.c_str(),
+					             toString(*update).c_str());
 				}
+				return Void();
 			}
 
 			// If everything in the page was deleted then this page should be deleted as of the new version
-			// Note that if a single range clear covered the entire page then we should not get this far
 			if (merged.empty()) {
-				debug_printf("%s All leaf page contents were cleared, returning %s\n", context.c_str(),
-				             toString(result).c_str());
+				update->cleared();
 				self->freeBtreePage(rootID, writeVersion);
-				return result;
+
+				debug_printf("%s All leaf page contents were cleared, returning %s\n", context.c_str(),
+				             toString(*update).c_str());
+				return Void();
 			}
 
+			// Rebuild new page(s).
 			state Standalone<VectorRef<RedwoodRecordRef>> entries =
-			    wait(writePages(self, lowerBound, upperBound, merged, btPage->height, writeVersion, rootID));
-			result.arena().dependsOn(entries.arena());
-			result.contents() = ChildLinksRef(entries, *upperBound);
-			debug_printf("%s Merge complete, returning %s\n", context.c_str(), toString(result).c_str());
-			return result;
+			    wait(writePages(self, update->subtreeLowerBound, update->subtreeUpperBound, merged, btPage->height,
+			                    writeVersion, rootID));
+
+			// Put new links into update and tell update that pages were rebuilt
+			update->rebuilt(entries);
+
+			debug_printf("%s Merge complete, returning %s\n", context.c_str(), toString(*update).c_str());
+			return Void();
 		} else {
 			// Internal Page
-			ASSERT(!isLeaf);
-			state std::vector<Future<Standalone<ChildLinksRef>>> futureChildren;
+			std::vector<Future<Void>> recursions;
+			state std::vector<InternalPageSliceUpdate*> slices;
+			state Arena arena;
 
-			cursor = getCursor(page);
 			cursor.moveFirst();
 
 			bool first = true;
 			while (cursor.valid()) {
-				// The lower bound for the first child is the lowerBound arg
-				const RedwoodRecordRef& childLowerBound = first ? *lowerBound : cursor.get();
-				first = false;
+				InternalPageSliceUpdate& u = *new (arena) InternalPageSliceUpdate();
 
 				// At this point we should never be at a null child page entry because the first entry of a page
 				// can't be null and this loop will skip over null entries that come after non-null entries.
 				ASSERT(cursor.get().value.present());
 
-				// The decode lower bound is always the key of the child link record
-				const RedwoodRecordRef& decodeChildLowerBound = cursor.get();
+				// Subtree lower boundary is this page's subtree lower bound or cursor
+				u.cBegin = cursor;
+				u.decodeLowerBound = &cursor.get();
+				if (first) {
+					u.subtreeLowerBound = update->subtreeLowerBound;
+					first = false;
+				} else {
+					u.subtreeLowerBound = u.decodeLowerBound;
+				}
 
-				BTreePageID pageID = cursor.get().getChildPage();
+				BTreePageIDRef pageID = cursor.get().getChildPage();
 				ASSERT(!pageID.empty());
 
 				// The decode upper bound is always the next key after the child link, or the decode upper bound for
 				// this page
-				const RedwoodRecordRef& decodeChildUpperBound = cursor.moveNext() ? cursor.get() : *decodeUpperBound;
-
-				// But the decode upper bound might be a placeholder record with a null child link because
-				// the subtree was previously deleted but the key needed to exist to enable decoding of the
-				// previous child page which has not since been rewritten.
-				if (cursor.valid() && !cursor.get().value.present()) {
-					// There should only be one null child link entry, followed by a present link or the end of the page
-					ASSERT(!cursor.moveNext() || cursor.get().value.present());
+				if (cursor.moveNext()) {
+					u.decodeUpperBound = &cursor.get();
+					// If cursor record has a null child page then it exists only to preserve a previous
+					// subtree boundary that is now needed for reading the subtree at cBegin.
+					if (!cursor.get().value.present()) {
+						// If the upper bound is provided by a dummy record in [cBegin, cEnd) then there is no
+						// requirement on the next subtree range or the parent page to have a specific upper boundary
+						// for decoding the subtree.
+						u.expectedUpperBound = nullptr;
+						cursor.moveNext();
+						// If there is another record after the null child record, it must have a child page value
+						ASSERT(!cursor.valid() || cursor.get().value.present());
+					} else {
+						u.expectedUpperBound = u.decodeUpperBound;
+					}
+				} else {
+					u.decodeUpperBound = update->decodeUpperBound;
+					u.expectedUpperBound = update->decodeUpperBound;
 				}
+				u.subtreeUpperBound = cursor.valid() ? &cursor.get() : update->subtreeUpperBound;
+				u.cEnd = cursor;
 
-				const RedwoodRecordRef& childUpperBound = cursor.valid() ? cursor.get() : *upperBound;
+				u.skipLen = 0; // TODO: set this
 
-				debug_printf("%s recursing to %s lower=%s upper=%s decodeLower=%s decodeUpper=%s\n", context.c_str(),
-				             toString(pageID).c_str(), childLowerBound.toString().c_str(),
-				             childUpperBound.toString().c_str(), decodeChildLowerBound.toString().c_str(),
-				             decodeChildUpperBound.toString().c_str());
+				slices.push_back(&u);
+
+				// Find the mutation buffer range that includes all changes to the range described by u
+				MutationBuffer::const_iterator mBegin = mutationBuffer->upper_bound(u.subtreeLowerBound->key);
+				MutationBuffer::const_iterator mEnd = mutationBuffer->lower_bound(u.subtreeUpperBound->key);
+
+				// If mutation boundaries are the same, the range is fully described by (mBegin - 1).mutation()
+				bool fullyCovered = (mBegin == mEnd);
+				--mBegin;
+
+				// If mBegin describes the entire subtree range, see if there are either no changes or if the entire
+				// range is cleared.
+				if (fullyCovered) {
+					const RangeMutation& range = mBegin.mutation();
+
+					// Check for uniform clearedness or unchangedness for the range mutation
+					KeyRef mutationBoundaryKey = mBegin.key();
+					bool uniform;
+
+					if (range.clearAfterBoundary) {
+						// If the mutation range after the boundary key is cleared, then the mutation boundary key must
+						// be cleared or must be different than the subtree lower bound key so that it doesn't matter
+						uniform = range.boundaryCleared() || mutationBoundaryKey != u.subtreeLowerBound->key;
+					} else {
+						// If the mutation range after the boundary key is unchanged, then the mutation boundary key
+						// must be also unchanged or must be different than the subtree lower bound key so that it
+						// doesn't matter
+						uniform = !range.boundaryChanged || mutationBoundaryKey != u.subtreeLowerBound->key;
+					}
+
+					// If the subtree range described by u is either uniformly changed or unchanged
+					if (uniform) {
+						// See if we can expand the subtree range to include more subtrees which are also covered by the
+						// same mutation range
+						if (cursor.valid() && mEnd.key() != cursor.get().key) {
+							cursor.seekLessThanOrEqual(mEnd.key(), update->skipLen, &cursor, 1);
+
+							// If this seek moved us ahead, to something other than cEnd, then update subtree range
+							// boundaries
+							if (cursor != u.cEnd) {
+								// If the cursor is at a record with a null child, back up one step because it is in the
+								// middle of the next logical subtree, as null child records are not subtree boundaries.
+								ASSERT(cursor.valid());
+								if (!cursor.get().value.present()) {
+									cursor.movePrev();
+								}
+
+								u.cEnd = cursor;
+								u.subtreeUpperBound = &cursor.get();
+								u.skipLen = 0; // TODO: set this
+
+								// The new decode upper bound is either cEnd or the record before it if it has no child
+								// link
+								auto c = u.cEnd;
+								c.movePrev();
+								ASSERT(c.valid());
+								if (!c.get().value.present()) {
+									u.decodeUpperBound = &c.get();
+									u.expectedUpperBound = nullptr;
+								} else {
+									u.decodeUpperBound = u.subtreeUpperBound;
+									u.expectedUpperBound = u.subtreeUpperBound;
+								}
+							}
+						}
+
+						// The subtree range is either fully cleared or unchanged.
+						if (range.clearAfterBoundary) {
+							// Cleared
+							u.cleared();
+							auto c = u.cBegin;
+							while (c != u.cEnd) {
+								const RedwoodRecordRef& rec = c.get();
+								if (rec.value.present()) {
+									if (btPage->height == 2) {
+										debug_printf("%s: freeing child page in cleared subtree range: %s\n",
+										             context.c_str(), ::toString(rec.getChildPage()).c_str());
+										self->freeBtreePage(rec.getChildPage(), writeVersion);
+									} else {
+										debug_printf("%s: queuing subtree deletion cleared subtree range: %s\n",
+										             context.c_str(), ::toString(rec.getChildPage()).c_str());
+										self->m_lazyDeleteQueue.pushFront(
+										    LazyDeleteQueueEntry{ writeVersion, rec.getChildPage() });
+									}
+								}
+								c.moveNext();
+							}
+						} else {
+							// Subtree range unchanged
+						}
+
+						debug_printf("%s: MutationBuffer covers this range in a single mutation: %s\n", context.c_str(),
+						             u.toString().c_str());
+						continue;
+					}
+				}
 
 				// If this page has height of 2 then its children are leaf nodes
-				futureChildren.push_back(self->commitSubtree(self, mutationBuffer, snapshot, pageID,
-				                                             btPage->height == 2, &childLowerBound, &childUpperBound,
-				                                             &decodeChildLowerBound, &decodeChildUpperBound));
+				recursions.push_back(self->commitSubtree(self, snapshot, mutationBuffer, pageID, btPage->height == 2,
+				                                         mBegin, mEnd, slices.back()));
 			}
 
-			// Waiting one at a time makes debugging easier
-			// TODO:  Is it better to use waitForAll()?
-			state int k;
-			for (k = 0; k < futureChildren.size(); ++k) {
-				wait(success(futureChildren[k]));
+			debug_printf(
+			    "%s Recursions from internal page started. pageSize=%d level=%d children=%d slices=%d recursions=%d\n",
+			    context.c_str(), btPage->size(), btPage->height, btPage->tree().numItems, slices.size(),
+			    recursions.size());
+
+			wait(waitForAll(recursions));
+			debug_printf("%s Recursions done, processing slice updates.\n", context.c_str());
+
+			state InternalPageModifier m(cursor.mirror, tryToUpdate);
+
+			// Apply the possible changes for each subtree range recursed to, except the last one.
+			// For each range, the expected next record, if any, is checked against the first boundary
+			// of the next range, if any.
+			for (int i = 0, iEnd = slices.size() - 1; i < iEnd; ++i) {
+				m.applyUpdate(*slices[i], slices[i + 1]->getFirstBoundary());
 			}
 
-			if (REDWOOD_DEBUG) {
-				debug_printf("%s Subtree update results\n", context.c_str());
-				for (int i = 0; i < futureChildren.size(); ++i) {
-					debug_printf("%s subtree result %s\n", context.c_str(), toString(futureChildren[i].get()).c_str());
-				}
-			}
-
-			// All of the things added to pageBuilder will exist in the arenas inside futureChildren or will be
-			// upperBound
-			BTreePage::BinaryTree::Cursor c = getCursor(page);
-			c.moveFirst();
-			InternalPageBuilder pageBuilder(c);
-
-			for (int i = 0; i < futureChildren.size(); ++i) {
-				ChildLinksRef c = futureChildren[i].get();
-
-				if (!c.children.empty()) {
-					pageBuilder.addEntries(c);
-				}
-			}
-
-			pageBuilder.finalize(*upperBound, *decodeUpperBound);
+			// The expected next record for the final range is checked against one of the upper boundaries passed to
+			// this commitSubtree() instance.  If changes have already been made, then the subtree upper boundary is
+			// passed, so in the event a different upper boundary is needed it will be added to the already-modified
+			// page.  Otherwise, the decode boundary is used which will prevent this page from being modified for the
+			// sole purpose of adding a dummy upper bound record.
+			debug_printf("%s Applying final child range update. changesMade=%d  Parent update is: %s\n",
+			             context.c_str(), m.changesMade, update->toString().c_str());
+			m.applyUpdate(*slices.back(), m.changesMade ? update->subtreeUpperBound : update->decodeUpperBound);
 
 			// If page contents have changed
-			if (pageBuilder.modified) {
-				// If the page now has no children
-				if (pageBuilder.childPageCount == 0) {
+			if (m.changesMade) {
+				if ((m.empty())) {
+					update->cleared();
 					debug_printf("%s All internal page children were deleted so deleting this page too, returning %s\n",
-					             context.c_str(), toString(result).c_str());
+					             context.c_str(), toString(*update).c_str());
 					self->freeBtreePage(rootID, writeVersion);
-					return result;
 				} else {
-					debug_printf("%s Internal page modified, creating replacements.\n", context.c_str());
-					debug_printf("%s newChildren=%s  lastUpperBound=%s  upperBound=%s\n", context.c_str(),
-					             toString(pageBuilder.entries).c_str(), pageBuilder.lastUpperBound.toString().c_str(),
-					             upperBound->toString().c_str());
-					debug_printf("pagebuilder entries: %s\n", ::toString(pageBuilder.entries).c_str());
+					if (m.updating) {
+						// Page was updated in place
+						BTreePageIDRef newID = wait(self->updateBtreePage(self, rootID, &update->newLinks.arena(),
+						                                                  page.castTo<IPage>(), writeVersion));
 
-					ASSERT(!pageBuilder.entries.back().value.present() ||
-					       pageBuilder.lastUpperBound.sameExceptValue(*upperBound));
+						update->updatedInPlace(newID);
+						++counts.pageUpdates;
+						debug_printf("%s Internal page updated in-place, returning %s\n", context.c_str(),
+						             toString(*update).c_str());
+					} else {
+						// Page was rebuilt, possibly split.
+						debug_printf("%s Internal page modified, creating replacements.\n", context.c_str());
 
-					Standalone<VectorRef<RedwoodRecordRef>> childEntries = wait(
-					    holdWhile(pageBuilder.entries, writePages(self, lowerBound, upperBound, pageBuilder.entries,
-					                                              btPage->height, writeVersion, rootID)));
+						Standalone<VectorRef<RedwoodRecordRef>> newChildEntries =
+						    wait(writePages(self, update->subtreeLowerBound, update->subtreeUpperBound, m.rebuild,
+						                    btPage->height, writeVersion, rootID));
+						update->rebuilt(newChildEntries);
 
-					result.arena().dependsOn(childEntries.arena());
-					result.contents() = ChildLinksRef(childEntries, *upperBound);
-					debug_printf("%s Internal modified, returning %s\n", context.c_str(), toString(result).c_str());
-					return result;
+						debug_printf("%s Internal page rebuilt, returning %s\n", context.c_str(),
+						             toString(*update).c_str());
+					}
 				}
 			} else {
-				result.contents() = ChildLinksRef(decodeLowerBound, decodeUpperBound);
-				debug_printf("%s Page has no changes, returning %s\n", context.c_str(), toString(result).c_str());
-				return result;
+				debug_printf("%s Page has no changes, returning %s\n", context.c_str(), toString(*update).c_str());
 			}
+			return Void();
 		}
 	}
 
@@ -4168,32 +4364,42 @@ private:
 		state Version latestVersion = self->m_pager->getLatestVersion();
 		debug_printf("%s: pager latestVersion %" PRId64 "\n", self->m_name.c_str(), latestVersion);
 
-		state Standalone<BTreePageID> rootPageID = self->m_header.root.get();
-		state RedwoodRecordRef lowerBound = dbBegin.withPageID(rootPageID);
-		Standalone<ChildLinksRef> newRootChildren =
-		    wait(commitSubtree(self, mutations, self->m_pager->getReadSnapshot(latestVersion), rootPageID,
-		                       self->m_header.height == 1, &lowerBound, &dbEnd, &lowerBound, &dbEnd));
-		debug_printf("CommitSubtree(root %s) returned %s\n", toString(rootPageID).c_str(),
-		             toString(newRootChildren).c_str());
+		state Standalone<BTreePageIDRef> rootPageID = self->m_header.root.get();
+		state InternalPageSliceUpdate all;
+		state RedwoodRecordRef rootLink = dbBegin.withPageID(rootPageID);
+		all.subtreeLowerBound = &rootLink;
+		all.decodeLowerBound = &rootLink;
+		all.subtreeUpperBound = &dbEnd;
+		all.decodeUpperBound = &dbEnd;
+		all.skipLen = 0;
+
+		MutationBuffer::const_iterator mBegin = mutations->upper_bound(all.subtreeLowerBound->key);
+		--mBegin;
+		MutationBuffer::const_iterator mEnd = mutations->lower_bound(all.subtreeUpperBound->key);
+
+		wait(commitSubtree(self, self->m_pager->getReadSnapshot(latestVersion), mutations, rootPageID,
+		                   self->m_header.height == 1, mBegin, mEnd, &all));
 
 		// If the old root was deleted, write a new empty tree root node and free the old roots
-		if (newRootChildren.children.empty()) {
-			debug_printf("Writing new empty root.\n");
-			LogicalPageID newRootID = wait(self->m_pager->newPageID());
-			Reference<IPage> page = self->m_pager->newPageBuffer();
-			makeEmptyRoot(page);
-			self->m_header.height = 1;
-			self->m_pager->updatePage(newRootID, page);
-			rootPageID = BTreePageID((LogicalPageID*)&newRootID, 1);
-		} else {
-			Standalone<VectorRef<RedwoodRecordRef>> newRootLevel(newRootChildren.children, newRootChildren.arena());
-			if (newRootLevel.size() == 1) {
-				rootPageID = newRootLevel.front().getChildPage();
+		if (all.childrenChanged) {
+			if (all.newLinks.empty()) {
+				debug_printf("Writing new empty root.\n");
+				LogicalPageID newRootID = wait(self->m_pager->newPageID());
+				Reference<IPage> page = self->m_pager->newPageBuffer();
+				makeEmptyRoot(page);
+				self->m_header.height = 1;
+				self->m_pager->updatePage(newRootID, page);
+				rootPageID = BTreePageIDRef((LogicalPageID*)&newRootID, 1);
 			} else {
-				// If the new root level's size is not 1 then build new root level(s)
-				Standalone<VectorRef<RedwoodRecordRef>> newRootPage =
-				    wait(buildNewRoot(self, latestVersion, newRootLevel, self->m_header.height));
-				rootPageID = newRootPage.front().getChildPage();
+				Standalone<VectorRef<RedwoodRecordRef>> newRootLevel(all.newLinks, all.newLinks.arena());
+				if (newRootLevel.size() == 1) {
+					rootPageID = newRootLevel.front().getChildPage();
+				} else {
+					// If the new root level's size is not 1 then build new root level(s)
+					Standalone<VectorRef<RedwoodRecordRef>> newRootPage =
+					    wait(buildNewRoot(self, latestVersion, newRootLevel, self->m_header.height));
+					rootPageID = newRootPage.front().getChildPage();
+				}
 			}
 		}
 
@@ -4238,13 +4444,13 @@ public:
 		// PageCursors can be shared by many InternalCursors, making InternalCursor copying low overhead
 		struct PageCursor : ReferenceCounted<PageCursor>, FastAllocated<PageCursor> {
 			Reference<PageCursor> parent;
-			BTreePageID pageID; // Only needed for debugging purposes
+			BTreePageIDRef pageID; // Only needed for debugging purposes
 			Reference<const IPage> page;
 			BTreePage::BinaryTree::Cursor cursor;
 
 			// id will normally reference memory owned by the parent, which is okay because a reference to the parent
 			// will be held in the cursor
-			PageCursor(BTreePageID id, Reference<const IPage> page, Reference<PageCursor> parent = {})
+			PageCursor(BTreePageIDRef id, Reference<const IPage> page, Reference<PageCursor> parent = {})
 			  : pageID(id), page(page), parent(parent), cursor(getCursor(page)) {}
 
 			PageCursor(const PageCursor& toCopy)
@@ -4262,7 +4468,7 @@ public:
 				BTreePage::BinaryTree::Cursor next = cursor;
 				next.moveNext();
 				const RedwoodRecordRef& rec = cursor.get();
-				BTreePageID id = rec.getChildPage();
+				BTreePageIDRef id = rec.getChildPage();
 				Future<Reference<const IPage>> child = readPage(pager, id, &rec, &next.getOrUpperBound());
 
 				// Read ahead siblings at level 2
@@ -4287,18 +4493,18 @@ public:
 
 			std::string toString() const {
 				return format("%s, %s", ::toString(pageID).c_str(),
-				              cursor.valid() ? cursor.get().toString().c_str() : "<invalid>");
+				              cursor.valid() ? cursor.get().toString(isLeaf()).c_str() : "<invalid>");
 			}
 		};
 
-		Standalone<BTreePageID> rootPageID;
+		Standalone<BTreePageIDRef> rootPageID;
 		Reference<IPagerSnapshot> pager;
 		Reference<PageCursor> pageCursor;
 
 	public:
 		InternalCursor() {}
 
-		InternalCursor(Reference<IPagerSnapshot> pager, BTreePageID root) : pager(pager), rootPageID(root) {}
+		InternalCursor(Reference<IPagerSnapshot> pager, BTreePageIDRef root) : pager(pager), rootPageID(root) {}
 
 		std::string toString() const {
 			std::string r;
@@ -4496,7 +4702,7 @@ public:
 	// KeyValueRefs returned become invalid once the cursor is moved
 	class Cursor : public IStoreCursor, public ReferenceCounted<Cursor>, public FastAllocated<Cursor>, NonCopyable {
 	public:
-		Cursor(Reference<IPagerSnapshot> pageSource, BTreePageID root, Version internalRecordVersion)
+		Cursor(Reference<IPagerSnapshot> pageSource, BTreePageIDRef root, Version internalRecordVersion)
 		  : m_version(internalRecordVersion), m_cur1(pageSource, root), m_cur2(m_cur1) {}
 
 		void addref() { ReferenceCounted<Cursor>::addref(); }
@@ -4535,7 +4741,7 @@ public:
 
 		ValueRef getValue() override { return m_kv.get().value; }
 
-		std::string toString(bool includePaths = false) const {
+		std::string toString(bool includePaths = true) const {
 			std::string r;
 			r += format("Cursor(%p) ver: %" PRId64 " ", this, m_version);
 			if (m_kv.present()) {
@@ -4699,9 +4905,10 @@ VersionedBTree::Counts VersionedBTree::counts;
 
 class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
-	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID) : m_filePrefix(filePrefix) {
+	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID)
+	  : m_filePrefix(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS) {
 		// TODO: This constructor should really just take an IVersionedStore
-		IPager2* pager = new DWALPager(4096, filePrefix, 0);
+		IPager2* pager = new DWALPager(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE, filePrefix, 0);
 		m_tree = new VersionedBTree(pager, filePrefix);
 		m_init = catchError(init_impl(this));
 	}
@@ -4772,6 +4979,9 @@ public:
 
 	ACTOR static Future<Standalone<RangeResultRef>> readRange_impl(KeyValueStoreRedwoodUnversioned* self, KeyRange keys,
 	                                                               int rowLimit, int byteLimit) {
+		wait(self->m_concurrentReads.take());
+		state FlowLock::Releaser releaser(self->m_concurrentReads);
+
 		self->m_tree->counts.getRanges++;
 		state Standalone<RangeResultRef> result;
 		state int accumulatedBytes = 0;
@@ -4821,6 +5031,9 @@ public:
 
 	ACTOR static Future<Optional<Value>> readValue_impl(KeyValueStoreRedwoodUnversioned* self, Key key,
 	                                                    Optional<UID> debugID) {
+		wait(self->m_concurrentReads.take());
+		state FlowLock::Releaser releaser(self->m_concurrentReads);
+
 		self->m_tree->counts.gets++;
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 
@@ -4837,6 +5050,9 @@ public:
 
 	ACTOR static Future<Optional<Value>> readValuePrefix_impl(KeyValueStoreRedwoodUnversioned* self, Key key,
 	                                                          int maxLength, Optional<UID> debugID) {
+		wait(self->m_concurrentReads.take());
+		state FlowLock::Releaser releaser(self->m_concurrentReads);
+
 		self->m_tree->counts.gets++;
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 
@@ -4861,6 +5077,7 @@ private:
 	Future<Void> m_init;
 	Promise<Void> m_closed;
 	Promise<Void> m_error;
+	FlowLock m_concurrentReads;
 
 	template <typename T>
 	inline Future<T> catchError(Future<T> f) {
@@ -4922,20 +5139,20 @@ ACTOR Future<int> verifyRange(VersionedBTree* btree, Key start, Key end, Version
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iLast;
 
 	state Reference<IStoreCursor> cur = btree->readAtVersion(v);
-	debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Start cur=%p\n", v, start.toHexString().c_str(),
-	             end.toHexString().c_str(), cur.getPtr());
+	debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Start cur=%p\n", v, start.printable().c_str(),
+	             end.printable().c_str(), cur.getPtr());
 
 	// Randomly use the cursor for something else first.
 	if (deterministicRandom()->coinflip()) {
 		state Key randomKey = randomKV().key;
-		debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Dummy seek to '%s'\n", v, start.toHexString().c_str(),
-		             end.toHexString().c_str(), randomKey.toString().c_str());
+		debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Dummy seek to '%s'\n", v, start.printable().c_str(),
+		             end.printable().c_str(), randomKey.toString().c_str());
 		wait(deterministicRandom()->coinflip() ? cur->findFirstEqualOrGreater(randomKey)
 		                                       : cur->findLastLessOrEqual(randomKey));
 	}
 
-	debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Actual seek\n", v, start.toHexString().c_str(),
-	             end.toHexString().c_str());
+	debug_printf("VerifyRange(@%" PRId64 ", %s, %s): Actual seek\n", v, start.printable().c_str(),
+	             end.printable().c_str());
 	wait(cur->findFirstEqualOrGreater(start));
 
 	state std::vector<KeyValue> results;
@@ -4950,7 +5167,7 @@ ACTOR Future<int> verifyRange(VersionedBTree* btree, Key start, Key end, Version
 			if (iLast->first.second <= v && iLast->second.present() &&
 			    (i == iEnd || i->first.first != iLast->first.first || i->first.second > v)) {
 				debug_printf("VerifyRange(@%" PRId64 ", %s, %s) Found key in written map: %s\n", v,
-				             start.toHexString().c_str(), end.toHexString().c_str(), iLast->first.first.c_str());
+				             start.printable().c_str(), end.printable().c_str(), iLast->first.first.c_str());
 				break;
 			}
 		}
@@ -4959,23 +5176,23 @@ ACTOR Future<int> verifyRange(VersionedBTree* btree, Key start, Key end, Version
 			++errors;
 			++*pErrorCount;
 			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v,
-			       start.toHexString().c_str(), end.toHexString().c_str(), cur->getKey().toString().c_str());
+			       start.printable().c_str(), end.printable().c_str(), cur->getKey().toString().c_str());
 			break;
 		}
 
 		if (cur->getKey() != iLast->first.first) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v,
-			       start.toHexString().c_str(), end.toHexString().c_str(), cur->getKey().toString().c_str(),
+			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' but expected '%s'\n", v,
+			       start.printable().c_str(), end.printable().c_str(), cur->getKey().toString().c_str(),
 			       iLast->first.first.c_str());
 			break;
 		}
 		if (cur->getValue() != iLast->second.get()) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v,
-			       start.toHexString().c_str(), end.toHexString().c_str(), cur->getKey().toString().c_str(),
+			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' has tree value '%s' but expected '%s'\n", v,
+			       start.printable().c_str(), end.printable().c_str(), cur->getKey().toString().c_str(),
 			       cur->getValue().toString().c_str(), iLast->second.get().c_str());
 			break;
 		}
@@ -5000,11 +5217,11 @@ ACTOR Future<int> verifyRange(VersionedBTree* btree, Key start, Key end, Version
 		++errors;
 		++*pErrorCount;
 		printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree range ended but written has @%" PRId64 " '%s'\n", v,
-		       start.toHexString().c_str(), end.toHexString().c_str(), iLast->first.second, iLast->first.first.c_str());
+		       start.printable().c_str(), end.printable().c_str(), iLast->first.second, iLast->first.first.c_str());
 	}
 
-	debug_printf("VerifyRangeReverse(@%" PRId64 ", %s, %s): start\n", v, start.toHexString().c_str(),
-	             end.toHexString().c_str());
+	debug_printf("VerifyRangeReverse(@%" PRId64 ", %s, %s): start\n", v, start.printable().c_str(),
+	             end.printable().c_str());
 
 	// Randomly use a new cursor at the same version for the reverse range read, if the version is still available for
 	// opening new cursors
@@ -5023,15 +5240,15 @@ ACTOR Future<int> verifyRange(VersionedBTree* btree, Key start, Key end, Version
 			++errors;
 			++*pErrorCount;
 			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v,
-			       start.toHexString().c_str(), end.toHexString().c_str(), cur->getKey().toString().c_str());
+			       start.printable().c_str(), end.printable().c_str(), cur->getKey().toString().c_str());
 			break;
 		}
 
 		if (cur->getKey() != r->key) {
 			++errors;
 			++*pErrorCount;
-			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v,
-			       start.toHexString().c_str(), end.toHexString().c_str(), cur->getKey().toString().c_str(),
+			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' but expected '%s'\n", v,
+			       start.printable().c_str(), end.printable().c_str(), cur->getKey().toString().c_str(),
 			       r->key.toString().c_str());
 			break;
 		}
@@ -5039,8 +5256,8 @@ ACTOR Future<int> verifyRange(VersionedBTree* btree, Key start, Key end, Version
 			++errors;
 			++*pErrorCount;
 			printf("VerifyRangeReverse(@%" PRId64
-			       ", %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n",
-			       v, start.toHexString().c_str(), end.toHexString().c_str(), cur->getKey().toString().c_str(),
+			       ", %s, %s) ERROR: Tree key '%s' has tree value '%s' but expected '%s'\n",
+			       v, start.printable().c_str(), end.printable().c_str(), cur->getKey().toString().c_str(),
 			       cur->getValue().toString().c_str(), r->value.toString().c_str());
 			break;
 		}
@@ -5053,7 +5270,7 @@ ACTOR Future<int> verifyRange(VersionedBTree* btree, Key start, Key end, Version
 		++errors;
 		++*pErrorCount;
 		printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree range ended but written has '%s'\n", v,
-		       start.toHexString().c_str(), end.toHexString().c_str(), r->key.toString().c_str());
+		       start.printable().c_str(), end.printable().c_str(), r->key.toString().c_str());
 	}
 
 	return errors;
@@ -5326,7 +5543,7 @@ TEST_CASE("!/redwood/correctness/unit/RedwoodRecordRef") {
 	// Test pageID stuff.
 	{
 		LogicalPageID ids[] = { 1, 5 };
-		BTreePageID id(ids, 2);
+		BTreePageIDRef id(ids, 2);
 		RedwoodRecordRef r;
 		r.setChildPage(id);
 		ASSERT(r.getChildPage() == id);
@@ -5976,20 +6193,22 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state int pageSize =
 	    shortTest ? 200 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(200, 400));
 
-	// We must be able to fit at least two any two keys plus overhead in a page to prevent
-	// a situation where the tree cannot be grown upward with decreasing level size.
+	state bool pagerMemoryOnly = shortTest && (deterministicRandom()->random01() < .01);
 	state int maxKeySize = deterministicRandom()->randomInt(1, pageSize * 2);
 	state int maxValueSize = randomSize(pageSize * 25);
 	state int maxCommitSize = shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6));
-	state int mutationBytesTarget = shortTest ? 5000 : randomSize(std::min<int>(maxCommitSize * 100, 100e6));
+	state int mutationBytesTarget = shortTest ? 100000 : randomSize(std::min<int>(maxCommitSize * 100, 100e6));
 	state double clearProbability = deterministicRandom()->random01() * .1;
 	state double clearSingleKeyProbability = deterministicRandom()->random01();
 	state double clearPostSetProbability = deterministicRandom()->random01() * .1;
-	state double coldStartProbability = deterministicRandom()->random01();
+	state double coldStartProbability = pagerMemoryOnly ? 0 : deterministicRandom()->random01();
 	state double advanceOldVersionProbability = deterministicRandom()->random01();
 	state double maxDuration = 60;
+	state int64_t cacheSizeBytes =
+	    pagerMemoryOnly ? 2e9 : (BUGGIFY ? deterministicRandom()->randomInt(1, 10 * pageSize) : 0);
 
 	printf("\n");
+	printf("pagerMemoryOnly: %d\n", pagerMemoryOnly);
 	printf("serialTest: %d\n", serialTest);
 	printf("shortTest: %d\n", shortTest);
 	printf("pageSize: %d\n", pageSize);
@@ -6002,6 +6221,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	printf("clearPostSetProbability: %f\n", clearPostSetProbability);
 	printf("coldStartProbability: %f\n", coldStartProbability);
 	printf("advanceOldVersionProbability: %f\n", advanceOldVersionProbability);
+	printf("cacheSizeBytes: %s\n", cacheSizeBytes == 0 ? "default" : format("%" PRId64, cacheSizeBytes).c_str());
 	printf("\n");
 
 	printf("Deleting existing test data...\n");
@@ -6009,7 +6229,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 
 	printf("Initializing...\n");
 	state double startTime = now();
-	pager = new DWALPager(pageSize, pagerFile, 0);
+	pager = new DWALPager(pageSize, pagerFile, cacheSizeBytes, pagerMemoryOnly);
 	state VersionedBTree* btree = new VersionedBTree(pager, pagerFile);
 	wait(btree->init());
 
@@ -6331,35 +6551,35 @@ TEST_CASE("!/redwood/performance/set") {
 	wait(btree->init());
 
 	state int nodeCount = 1e9;
-	state int maxChangesPerVersion = 5000;
+	state int maxRecordsPerCommit = 20000;
+	state int maxKVBytesPerCommit = 20e6;
 	state int64_t kvBytesTarget = 4e9;
-	state int commitTarget = 20e6;
 	state int minKeyPrefixBytes = 25;
 	state int maxKeyPrefixBytes = 25;
-	state int minValueSize = 1000;
-	state int maxValueSize = 2000;
-	state int minConsecutiveRun = 1000;
-	state int maxConsecutiveRun = 2000;
+	state int minValueSize = 100;
+	state int maxValueSize = 500;
+	state int minConsecutiveRun = 1;
+	state int maxConsecutiveRun = 10;
 	state char firstKeyChar = 'a';
 	state char lastKeyChar = 'm';
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
 	printf("trailingIntegerIndexRange: %d\n", nodeCount);
-	printf("maxChangesPerVersion: %d\n", maxChangesPerVersion);
+	printf("maxChangesPerCommit: %d\n", maxRecordsPerCommit);
 	printf("minKeyPrefixBytes: %d\n", minKeyPrefixBytes);
 	printf("maxKeyPrefixBytes: %d\n", maxKeyPrefixBytes);
 	printf("minConsecutiveRun: %d\n", minConsecutiveRun);
 	printf("maxConsecutiveRun: %d\n", maxConsecutiveRun);
 	printf("minValueSize: %d\n", minValueSize);
 	printf("maxValueSize: %d\n", maxValueSize);
-	printf("commitTarget: %d\n", commitTarget);
+	printf("maxCommitSize: %d\n", maxKVBytesPerCommit);
 	printf("kvBytesTarget: %" PRId64 "\n", kvBytesTarget);
 	printf("KeyLexicon '%c' to '%c'\n", firstKeyChar, lastKeyChar);
 
-	state int64_t kvBytes = 0;
+	state int64_t kvBytesThisCommit = 0;
 	state int64_t kvBytesTotal = 0;
-	state int records = 0;
+	state int recordsThisCommit = 0;
 	state Future<Void> commit = Void();
 	state std::string value(maxValueSize, 'v');
 
@@ -6374,9 +6594,9 @@ TEST_CASE("!/redwood/performance/set") {
 			Version lastVer = btree->getLatestVersion();
 			state Version version = lastVer + 1;
 			btree->setWriteVersion(version);
-			int changes = deterministicRandom()->randomInt(0, maxChangesPerVersion);
+			int changesThisVersion = deterministicRandom()->randomInt(0, maxRecordsPerCommit - recordsThisCommit + 1);
 
-			while (changes > 0 && kvBytes < commitTarget) {
+			while (changesThisVersion > 0 && kvBytesThisCommit < maxKVBytesPerCommit) {
 				KeyValue kv;
 				kv.key = randomString(kv.arena(),
 				                      deterministicRandom()->randomInt(minKeyPrefixBytes + sizeof(uint32_t),
@@ -6385,7 +6605,7 @@ TEST_CASE("!/redwood/performance/set") {
 				int32_t index = deterministicRandom()->randomInt(0, nodeCount);
 				int runLength = deterministicRandom()->randomInt(minConsecutiveRun, maxConsecutiveRun + 1);
 
-				while (runLength > 0 && changes > 0) {
+				while (runLength > 0 && changesThisVersion > 0) {
 					*(uint32_t*)(kv.key.end() - sizeof(uint32_t)) = bigEndian32(index++);
 					kv.value = StringRef((uint8_t*)value.data(),
 					                     deterministicRandom()->randomInt(minValueSize, maxValueSize + 1));
@@ -6393,21 +6613,21 @@ TEST_CASE("!/redwood/performance/set") {
 					btree->set(kv);
 
 					--runLength;
-					--changes;
-					kvBytes += kv.key.size() + kv.value.size();
-					++records;
+					--changesThisVersion;
+					kvBytesThisCommit += kv.key.size() + kv.value.size();
+					++recordsThisCommit;
 				}
 			}
 
-			if (kvBytes >= commitTarget) {
+			if (kvBytesThisCommit >= maxKVBytesPerCommit || recordsThisCommit >= maxRecordsPerCommit) {
 				btree->setOldestVersion(btree->getLastCommittedVersion());
 				wait(commit);
 				printf("Cumulative %.2f MB keyValue bytes written at %.2f MB/s\n", kvBytesTotal / 1e6,
 				       kvBytesTotal / (timer() - start) / 1e6);
 
 				// Avoid capturing via this to freeze counter values
-				int recs = records;
-				int kvb = kvBytes;
+				int recs = recordsThisCommit;
+				int kvb = kvBytesThisCommit;
 
 				// Capturing invervalStart via this->intervalStart makes IDE's unhappy as they do not know about the
 				// actor state object
@@ -6416,15 +6636,15 @@ TEST_CASE("!/redwood/performance/set") {
 				commit = map(btree->commit(), [=](Void result) {
 					printf("Committed: %s\n", VersionedBTree::counts.toString(true).c_str());
 					double elapsed = timer() - *pIntervalStart;
-					printf("Committed %d kvBytes in %d records in %f seconds, %.2f MB/s\n", kvb, recs, elapsed,
+					printf("Committed %d keyValueBytes in %d records in %f seconds, %.2f MB/s\n", kvb, recs, elapsed,
 					       kvb / elapsed / 1e6);
 					*pIntervalStart = timer();
 					return Void();
 				});
 
-				kvBytesTotal += kvBytes;
-				kvBytes = 0;
-				records = 0;
+				kvBytesTotal += kvBytesThisCommit;
+				kvBytesThisCommit = 0;
+				recordsThisCommit = 0;
 			}
 		}
 

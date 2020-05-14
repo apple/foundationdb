@@ -82,23 +82,49 @@ ACTOR Future<Void> SpecialKeyRangeBaseImpl::normalizeKeySelectorActor(const Spec
 	return Void();
 }
 
-ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationActor(
-    SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeySelector begin, KeySelector end,
-    GetRangeLimits limits, bool reverse) {
+void onModuleRead(const Reference<ReadYourWritesTransaction>& ryw, SpecialKeyRangeBaseImpl* module,
+                  Optional<SpecialKeyRangeBaseImpl*>& lastModuleRead) {
+	if (ryw && !ryw->specialKeySpaceRelaxed() && lastModuleRead.present() && lastModuleRead.get() != module) {
+		throw special_keys_cross_module_read();
+	}
+	lastModuleRead = module;
+}
+
+ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::checkModuleFound(SpecialKeySpace* pks,
+                                                                           Reference<ReadYourWritesTransaction> ryw,
+                                                                           KeySelector begin, KeySelector end,
+                                                                           GetRangeLimits limits, bool reverse) {
+	std::pair<Standalone<RangeResultRef>, Optional<SpecialKeyRangeBaseImpl*>> result =
+	    wait(SpecialKeySpace::getRangeAggregationActor(pks, ryw, begin, end, limits, reverse));
+	if (ryw && !ryw->specialKeySpaceRelaxed()) {
+		auto* module = result.second.orDefault(nullptr);
+		if (module == nullptr) {
+			throw special_keys_no_module_found();
+		}
+	}
+	return result.first;
+}
+
+ACTOR Future<std::pair<Standalone<RangeResultRef>, Optional<SpecialKeyRangeBaseImpl*>>>
+SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw,
+                                          KeySelector begin, KeySelector end, GetRangeLimits limits, bool reverse) {
 	// This function handles ranges which cover more than one keyrange and aggregates all results
 	// KeySelector, GetRangeLimits and reverse are all handled here
 	state Standalone<RangeResultRef> result;
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter;
 	state int actualBeginOffset;
 	state int actualEndOffset;
+	state Optional<SpecialKeyRangeBaseImpl*> lastModuleRead;
 
 	// make sure offset == 1
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator beginIter =
 	    pks->impls.rangeContaining(begin.getKey());
 	while ((begin.offset < 1 && beginIter != pks->impls.ranges().begin()) ||
 	       (begin.offset > 1 && beginIter != pks->impls.ranges().end())) {
-		if (beginIter->value() != nullptr)
+		onModuleRead(ryw, beginIter->value(), lastModuleRead);
+		if (beginIter->value() != nullptr) {
 			wait(beginIter->value()->normalizeKeySelectorActor(beginIter->value(), ryw, &begin));
+		}
 		begin.offset < 1 ? --beginIter : ++beginIter;
 	}
 
@@ -123,7 +149,10 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	    pks->impls.rangeContaining(end.getKey());
 	while ((end.offset < 1 && endIter != pks->impls.ranges().begin()) ||
 	       (end.offset > 1 && endIter != pks->impls.ranges().end())) {
-		if (endIter->value() != nullptr) wait(endIter->value()->normalizeKeySelectorActor(endIter->value(), ryw, &end));
+		onModuleRead(ryw, endIter->value(), lastModuleRead);
+		if (endIter->value() != nullptr) {
+			wait(endIter->value()->normalizeKeySelectorActor(endIter->value(), ryw, &end));
+		}
 		end.offset < 1 ? --endIter : ++endIter;
 	}
 
@@ -148,12 +177,12 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	// return if range inverted
 	if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
 		TEST(true);
-		return RangeResultRef(false, false);
+		return std::make_pair(RangeResultRef(false, false), lastModuleRead);
 	}
 	// If touches begin or end, return with readToBegin and readThroughEnd flags
 	if (beginIter == pks->impls.ranges().end() || endIter == pks->impls.ranges().begin()) {
 		TEST(true);
-		return result;
+		return std::make_pair(result, lastModuleRead);
 	}
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Ranges ranges =
 	    pks->impls.intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
@@ -163,6 +192,7 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	if (reverse) {
 		while (iter != ranges.begin()) {
 			--iter;
+			onModuleRead(ryw, iter->value(), lastModuleRead);
 			if (iter->value() == nullptr) continue;
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
@@ -179,12 +209,13 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 				if (limits.isReached()) {
 					result.more = true;
 					result.readToBegin = false;
-					return result;
+					return std::make_pair(result, lastModuleRead);
 				};
 			}
 		}
 	} else {
 		for (iter = ranges.begin(); iter != ranges.end(); ++iter) {
+			onModuleRead(ryw, iter->value(), lastModuleRead);
 			if (iter->value() == nullptr) continue;
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
@@ -201,12 +232,12 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 				if (limits.isReached()) {
 					result.more = true;
 					result.readThroughEnd = false;
-					return result;
+					return std::make_pair(result, lastModuleRead);
 				};
 			}
 		}
 	}
-	return result;
+	return std::make_pair(result, lastModuleRead);
 }
 
 Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourWritesTransaction> ryw,
@@ -222,7 +253,7 @@ Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourW
 	begin.removeOrEqual(begin.arena());
 	end.removeOrEqual(end.arena());
 
-	return getRangeAggregationActor(this, ryw, begin, end, limits, reverse);
+	return checkModuleFound(this, ryw, begin, end, limits, reverse);
 }
 
 ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw,

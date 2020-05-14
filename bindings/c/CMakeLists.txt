@@ -13,6 +13,8 @@ if(APPLE)
 elseif(WIN32)
   set(platform "windows")
   set(asm_file ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.g.asm)
+elseif(CMAKE_SYSTEM_NAME MATCHES "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  set(platform "linux-aarch64")
 endif()
 
 add_custom_command(OUTPUT ${asm_file} ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h

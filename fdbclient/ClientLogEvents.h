@@ -77,17 +77,22 @@ namespace FdbClientLogEvents {
 
 	// Version V2 of EventGetVersion starting at 6.2
 	struct EventGetVersion_V2 : public Event {
-		EventGetVersion_V2(double ts, double lat, uint32_t type) : Event(GET_VERSION_LATENCY, ts), latency(lat) {
-			if(type == GetReadVersionRequest::PRIORITY_DEFAULT) {
-				priorityType = PRIORITY_DEFAULT;
-			} else if (type == GetReadVersionRequest::PRIORITY_BATCH) {
-				priorityType = PRIORITY_BATCH;
-			} else if (type == GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE){
-				priorityType = PRIORITY_IMMEDIATE;
-			} else {
-				ASSERT(0);
+		EventGetVersion_V2(double ts, double lat, TransactionPriority priority) : Event(GET_VERSION_LATENCY, ts), latency(lat) {
+			switch(priority) {
+				// Unfortunately, the enum serialized here disagrees with the enum used elsewhere for the values used by each priority
+				case TransactionPriority::IMMEDIATE:
+					priorityType = PRIORITY_IMMEDIATE;
+					break;
+				case TransactionPriority::DEFAULT:
+					priorityType = PRIORITY_DEFAULT;
+					break;
+				case TransactionPriority::BATCH:
+					priorityType = PRIORITY_BATCH;
+					break;
+				default:
+					ASSERT(false);
 			}
-		 }
+		}
 		EventGetVersion_V2() { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
@@ -110,17 +115,22 @@ namespace FdbClientLogEvents {
 
 	// Version V3 of EventGetVersion starting at 6.3
 	struct EventGetVersion_V3 : public Event {
-		EventGetVersion_V3(double ts, double lat, uint32_t type, Version version) : Event(GET_VERSION_LATENCY, ts), latency(lat), readVersion(version) {
-			if(type == GetReadVersionRequest::PRIORITY_DEFAULT) {
-				priorityType = PRIORITY_DEFAULT;
-			} else if (type == GetReadVersionRequest::PRIORITY_BATCH) {
-				priorityType = PRIORITY_BATCH;
-			} else if (type == GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE){
-				priorityType = PRIORITY_IMMEDIATE;
-			} else {
-				ASSERT(0);
+		EventGetVersion_V3(double ts, double lat, TransactionPriority priority, Version version) : Event(GET_VERSION_LATENCY, ts), latency(lat), readVersion(version) {
+			switch(priority) {
+				// Unfortunately, the enum serialized here disagrees with the enum used elsewhere for the values used by each priority
+				case TransactionPriority::IMMEDIATE:
+					priorityType = PRIORITY_IMMEDIATE;
+					break;
+				case TransactionPriority::DEFAULT:
+					priorityType = PRIORITY_DEFAULT;
+					break;
+				case TransactionPriority::BATCH:
+					priorityType = PRIORITY_BATCH;
+					break;
+				default:
+					ASSERT(false);
 			}
-		 }
+		}
 		EventGetVersion_V3() { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {

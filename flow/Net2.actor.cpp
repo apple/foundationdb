@@ -1071,14 +1071,14 @@ void Net2::run() {
 		++countRunLoop;
 
 		if (runFunc) {
-			tscBegin = __rdtsc();
+			tscBegin = timestampCounter();
 			taskBegin = nnow;
 			trackAtPriority(TaskPriority::RunCycleFunction, taskBegin);
 			runFunc();
 			double taskEnd = timer_monotonic();
 			trackAtPriority(TaskPriority::RunLoop, taskEnd);
 			countLaunchTime += taskEnd - taskBegin;
-			checkForSlowTask(tscBegin, __rdtsc(), taskEnd - taskBegin, TaskPriority::RunCycleFunction);
+			checkForSlowTask(tscBegin, timestampCounter(), taskEnd - taskBegin, TaskPriority::RunCycleFunction);
 		}
 
 		double sleepTime = 0;
@@ -1108,7 +1108,7 @@ void Net2::run() {
 			}
 		}
 
-		tscBegin = __rdtsc();
+		tscBegin = timestampCounter();
 		taskBegin = timer_monotonic();
 		trackAtPriority(TaskPriority::ASIOReactor, taskBegin);
 		reactor.react();
@@ -1118,7 +1118,7 @@ void Net2::run() {
 		trackAtPriority(TaskPriority::RunLoop, now);
 
 		countReactTime += now - taskBegin;
-		checkForSlowTask(tscBegin, __rdtsc(), now - taskBegin, TaskPriority::ASIOReactor);
+		checkForSlowTask(tscBegin, timestampCounter(), now - taskBegin, TaskPriority::ASIOReactor);
 
 		if ((now-nnow) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && nondeterministicRandom()->random01() < (now-nnow)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopTop").detail("Elapsed", now - nnow);
@@ -1135,7 +1135,7 @@ void Net2::run() {
 
 		processThreadReady();
 
-		tscBegin = __rdtsc();
+		tscBegin = timestampCounter();
 		tscEnd = tscBegin + FLOW_KNOBS->TSC_YIELD_TIME;
 		taskBegin = timer_monotonic();
 		numYields = 0;
@@ -1162,7 +1162,7 @@ void Net2::run() {
 				TraceEvent(SevError, "TaskError").error(unknown_error());
 			}
 
-			double tscNow = __rdtsc();
+			double tscNow = timestampCounter();
 			double newTaskBegin = timer_monotonic();
 			if (check_yield(TaskPriority::Max, tscNow)) {
 				checkForSlowTask(tscBegin, tscNow, newTaskBegin - taskBegin, currentTaskID);
@@ -1347,7 +1347,7 @@ bool Net2::check_yield( TaskPriority taskID ) {
 		return true;
 	}
 
-	return check_yield(taskID, __rdtsc());
+	return check_yield(taskID, timestampCounter());
 }
 
 Future<class Void> Net2::yield( TaskPriority taskID ) {

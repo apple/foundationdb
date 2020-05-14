@@ -73,7 +73,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		loop {
 			try {
 				for (int i = 0; i < self->keyCount; i++) {
-					auto key = StringRef(format("testkey%08x", i));
+					Standalone<StringRef> key = StringRef(format("testkey%08x", i));
 					if (key == self->readKey) {
 						tr.set(key, largeValue);
 					} else {
