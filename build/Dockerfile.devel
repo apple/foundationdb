@@ -1,14 +1,13 @@
-FROM foundationdb/foundationdb-build:0.1.12
+FROM foundationdb/foundationdb-build:0.1.13
 
 USER root
 
 ARG FDB_ARTIFACTSURL=http://foundationdb.org
 ADD artifacts /mnt/artifacts
 
-# Install newer version of git and build tools for building via make
+# Install build tools for building via make
 RUN \
-	yum install -y http://opensource.wandisco.com/centos/6/git/x86_64/wandisco-git-release-6-1.noarch.rpm &&\
-	yum install -y git distcc-server gperf rubygems python34 libmpc-devel npm wget
+	yum install -y distcc-server gperf rubygems python34 libmpc-devel npm
 
 # Download and install llvm-10.0.0
 RUN cd / &&\
@@ -49,13 +48,13 @@ RUN cp -iv /usr/local/bin/clang++ /usr/local/bin/clang++.deref &&\
 	ldconfig &&\
 	rm -rf /mnt/artifacts
 
-LABEL version=0.11.5
-ENV DOCKER_IMAGEVER=0.11.5
+LABEL version=0.11.6
+ENV DOCKER_IMAGEVER=0.11.6
 
 ENV CLANGCC=/usr/local/bin/clang.de8a65ef
 ENV CLANGCXX=/usr/local/bin/clang++.de8a65ef
-ENV GCC80CC=/opt/rh/devtoolset-8/root/usr/bin/gcc.b4f14270
-ENV GCC80CXX=/opt/rh/devtoolset-8/root/usr/bin/g++.0bea8e1c
+ENV GCC80CC=/opt/rh/devtoolset-8/root/usr/bin/gcc.00f99754
+ENV GCC80CXX=/opt/rh/devtoolset-8/root/usr/bin/g++.12c01dd6
 ENV GCC93CC=/usr/local/bin/gcc.04edd07a
 ENV GCC93CXX=/usr/local/bin/g++.b058d8c5
 ENV CC=/usr/local/bin/clang.de8a65ef
