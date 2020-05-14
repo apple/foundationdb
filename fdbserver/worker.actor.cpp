@@ -786,14 +786,13 @@ void endRole(const Role &role, UID id, std::string reason, bool ok, Error e) {
 }
 
 ACTOR Future<Void>
-traceRole(Role role, UID roleId, UID workerId)
+traceRole(Role role, UID roleId)
 {
 	loop {
 		wait(delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL));
 		TraceEvent("Role", roleId)
 			.detail("Transition", "Refresh")
-			.detail("As", role.roleName)
-			.detail("OnWorker", workerId);
+			.detail("As", role.roleName);
 	}
 }
 

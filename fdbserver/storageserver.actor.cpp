@@ -3711,10 +3711,10 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	self->actors.add(serveGetKeyValuesRequests(self, ssi.getKeyValues.getFuture()));
 	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
-    actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
+	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 
 	self->transactionTagCounter.startNewInterval(self->thisServerID);
-	self->actors.add(recurring([this](){ self->transactionTagCounter.startNewInterval(self->thisServerID); }, SERVER_KNOBS->READ_TAG_MEASUREMENT_INTERVAL));
+	self->actors.add(recurring([&](){ self->transactionTagCounter.startNewInterval(self->thisServerID); }, SERVER_KNOBS->READ_TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send( Void() );
 
