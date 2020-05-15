@@ -45,11 +45,12 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* 
 
 	if (ks->offset < 1) {
 		// less than the given key
-		if (skrImpl->getKeyRange().contains(ks->getKey())) endKey = ks->getKey(); // TODO : add test for startKey equals endKey
+		if (skrImpl->getKeyRange().contains(ks->getKey())) endKey = ks->getKey();
 	} else {
 		// greater than the given key
 		if (skrImpl->getKeyRange().contains(ks->getKey())) startKey = ks->getKey();
 	}
+	ASSERT(startKey < endKey); // Note : startKey never equals endKey here
 
 	TraceEvent(SevDebug, "NormalizeKeySelector")
 	    .detail("OriginalKey", ks->getKey())
@@ -106,7 +107,8 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, Reference<Rea
                                              KeySelector* ks, Optional<SpecialKeySpace::MODULE>* lastModuleRead,
                                              int* actualOffset, Standalone<RangeResultRef>* result) {
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter =
-	    sks->getImpls().rangeContaining(ks->getKey());
+	    ks->offset < 1 ? sks->getImpls().rangeContainingKeyBefore(ks->getKey())
+	                   : sks->getImpls().rangeContaining(ks->getKey());
 	while ((ks->offset < 1 && iter != sks->getImpls().ranges().begin()) ||
 	       (ks->offset > 1 && iter != sks->getImpls().ranges().end())) {
 		onModuleRead(ryw, sks->getModules().rangeContaining(iter->begin())->value(), *lastModuleRead);
@@ -244,7 +246,7 @@ Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourW
 	begin.removeOrEqual(begin.arena());
 	end.removeOrEqual(end.arena());
 
-	if( begin.offset >= end.offset && begin.getKey() >= end.getKey() ) {
+	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
 		TEST(true); // range inverted
 		return Standalone<RangeResultRef>();
 	}
