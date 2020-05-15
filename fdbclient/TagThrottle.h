@@ -107,14 +107,19 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 	}
 };
 
+enum class TagThrottleType : uint8_t {
+	MANUAL,
+	AUTO
+};
+
 struct TagThrottleKey {
 	TagSet tags;
-	bool autoThrottled;
+	TagThrottleType throttleType;
 	TransactionPriority priority;
 
-	TagThrottleKey() : autoThrottled(false), priority(TransactionPriority::DEFAULT) {}
-	TagThrottleKey(TagSet tags, bool autoThrottled, TransactionPriority priority) 
-		: tags(tags), autoThrottled(autoThrottled), priority(priority) {}
+	TagThrottleKey() : throttleType(TagThrottleType::MANUAL), priority(TransactionPriority::DEFAULT) {}
+	TagThrottleKey(TagSet tags, TagThrottleType throttleType, TransactionPriority priority) 
+		: tags(tags), throttleType(throttleType), priority(priority) {}
 
 	Key toKey() const;
 	static TagThrottleKey fromKey(const KeyRef& key);
@@ -139,17 +144,17 @@ struct TagThrottleValue {
 
 struct TagThrottleInfo {
 	TransactionTag tag;
-	bool autoThrottled;
+	TagThrottleType throttleType;
 	TransactionPriority priority;
 	double tpsRate;
 	double expirationTime;
 	double initialDuration;
 
-	TagThrottleInfo(TransactionTag tag, bool autoThrottled, TransactionPriority priority, double tpsRate, double expirationTime, double initialDuration)
-		: tag(tag), autoThrottled(autoThrottled), priority(priority), tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration) {}
+	TagThrottleInfo(TransactionTag tag, TagThrottleType throttleType, TransactionPriority priority, double tpsRate, double expirationTime, double initialDuration)
+		: tag(tag), throttleType(throttleType), priority(priority), tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration) {}
 
 	TagThrottleInfo(TagThrottleKey key, TagThrottleValue value) 
-		: autoThrottled(key.autoThrottled), priority(key.priority), tpsRate(value.tpsRate), expirationTime(value.expirationTime), initialDuration(value.initialDuration) 
+		: throttleType(key.throttleType), priority(key.priority), tpsRate(value.tpsRate), expirationTime(value.expirationTime), initialDuration(value.initialDuration) 
 	{
 		ASSERT(key.tags.size() == 1); // Multiple tags per throttle is not currently supported
 		tag = *key.tags.begin();
@@ -160,13 +165,11 @@ namespace ThrottleApi {
 	Future<std::vector<TagThrottleInfo>> getThrottledTags(Database const& db, int const& limit);
 
 	Future<Void> throttleTags(Database const& db, TagSet const& tags, double const& tpsRate, double const& initialDuration, 
-	                         bool const& autoThrottled, TransactionPriority const& priority, Optional<double> const& expirationTime = Optional<double>());
+	                         TagThrottleType const& throttleType, TransactionPriority const& priority, Optional<double> const& expirationTime = Optional<double>());
 
-	Future<bool> unthrottleTags(Database const& db, TagSet const& tags, bool const& autoThrottled, TransactionPriority const& priority);
+	Future<bool> unthrottleTags(Database const& db, TagSet const& tags, Optional<TagThrottleType> const& throttleType, Optional<TransactionPriority> const& priority);
 
-	Future<bool> unthrottleManual(Database db);
-	Future<bool> unthrottleAuto(Database db);
-	Future<bool> unthrottleAll(Database db);
+	Future<bool> unthrottleAll(Database db, Optional<TagThrottleType> throttleType, Optional<TransactionPriority> priority);
 	Future<bool> expire(Database db);
 
 	Future<Void> enableAuto(Database const& db, bool const& enabled);
