@@ -529,7 +529,7 @@ struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeBaseImpl {
 struct SingleSpecialKeyImpl : SpecialKeyRangeBaseImpl {
 	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
 	                                            KeyRangeRef kr) const override {
-		if (!kr.contains(k)) return Standalone<RangeResultRef>();
+		ASSERT(kr.contains(k));
 		return map(f(ryw), [k = k](Optional<Value> v) {
 			Standalone<RangeResultRef> result;
 			if (v.present()) {
