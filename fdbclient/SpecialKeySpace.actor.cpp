@@ -45,7 +45,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* 
 
 	if (ks->offset < 1) {
 		// less than the given key
-		if (skrImpl->getKeyRange().contains(ks->getKey())) endKey = ks->getKey(); // keyAfter(ks->getKey());
+		if (skrImpl->getKeyRange().contains(ks->getKey())) endKey = ks->getKey(); // TODO : add test for startKey equals endKey
 	} else {
 		// greater than the given key
 		if (skrImpl->getKeyRange().contains(ks->getKey())) startKey = ks->getKey();
@@ -141,16 +141,11 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::checkModuleFound(Speci
                                                                            GetRangeLimits limits, bool reverse) {
 	std::pair<Standalone<RangeResultRef>, Optional<SpecialKeySpace::MODULE>> result =
 	    wait(SpecialKeySpace::getRangeAggregationActor(sks, ryw, begin, end, limits, reverse));
-	// TODO : all cross_module_read or no_module_found error is better to check at the beginning, improve this later
 	if (ryw && !ryw->specialKeySpaceRelaxed()) {
 		auto module = result.second;
 		if (!module.present()) {
 			throw special_keys_no_module_found();
-		} /*else {
-		    auto boundary = sks->moduleToBoundary.at(module.get());
-		    if (!boundary.contains(begin.getKey()) || end.getKey() < boundary.begin || end.getKey() > boundary.end)
-		        throw special_keys_cross_module_read();
-		}*/
+		}
 	}
 	return result.first;
 }
@@ -249,10 +244,10 @@ Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourW
 	begin.removeOrEqual(begin.arena());
 	end.removeOrEqual(end.arena());
 
-	// if( begin.offset >= end.offset && begin.getKey() >= end.getKey() ) {
-	// 	TEST(true); // RYW range inverted
-	// 	return Standalone<RangeResultRef>();
-	// }
+	if( begin.offset >= end.offset && begin.getKey() >= end.getKey() ) {
+		TEST(true); // range inverted
+		return Standalone<RangeResultRef>();
+	}
 
 	return checkModuleFound(this, ryw, begin, end, limits, reverse);
 }

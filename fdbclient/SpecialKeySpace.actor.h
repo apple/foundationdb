@@ -66,22 +66,26 @@ public:
 	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeySelector begin,
 	                                            KeySelector end, GetRangeLimits limits, bool reverse = false);
 
-	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool test = true) {
+	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true) {
 		// Default value is nullptr, begin of KeyRangeMap is Key()
 		impls = KeyRangeMap<SpecialKeyRangeBaseImpl*>(nullptr, spaceEndKey);
 		range = KeyRangeRef(spaceStartKey, spaceEndKey);
 		modules = KeyRangeMap<SpecialKeySpace::MODULE>(SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey);
-		if (!test) modulesBoundaryInit();
+		if (!testOnly)
+			modulesBoundaryInit(); // testOnly is used in the correctness workload
 		// TODO : Handle testonly here
 	}
+	// Initialize module boundaries, used to handle cross_module_read
 	void modulesBoundaryInit() {
 		for (const auto& pair : moduleToBoundary) {
 			ASSERT(range.contains(pair.second));
 			// Make sure the module is not overlapping with any registered modules
+			// Note: same like ranges, one module's end cannot be another module's start, relax the condition if needed
 			ASSERT(modules.rangeContaining(pair.second.begin) == modules.rangeContaining(pair.second.end) &&
 			       modules[pair.second.begin] == SpecialKeySpace::MODULE::UNKNOWN);
 			modules.insert(pair.second, pair.first);
-			impls.insert(pair.second, nullptr);
+			impls.insert(pair.second, nullptr); // Note: Due to underlying implementation, the insertion here is
+			                                    // important to make cross_module_read being handled correctly
 		}
 	}
 	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeBaseImpl* impl) {
@@ -90,10 +94,10 @@ public:
 		ASSERT(range.contains(kr));
 		// make sure the registered range is not overlapping with existing ones
 		// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
-		// ASSERT(impls.rangeContaining(kr.begin) == impls.rangeContaining(kr.end) && impls[kr.begin] == nullptr);
 		for (auto iter = impls.rangeContaining(kr.begin); true; ++iter) {
 			ASSERT(iter->value() == nullptr);
-			if (iter == impls.rangeContaining(kr.end)) break; // relax the end to be another one's start if needed
+			if (iter == impls.rangeContaining(kr.end))
+				break; // relax the condition that the end can be another range's start, if needed
 		}
 		impls.insert(kr, impl);
 		// Set module for the range
