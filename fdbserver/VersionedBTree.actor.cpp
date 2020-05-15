@@ -1530,9 +1530,9 @@ public:
 		// to the same page and skip some page writes we have to accumulate multiple versions worth of
 		// poppable entries.
 		Version lag = wait(getRemapLag(self));
-		debug_printf_always("DWALPager(%s) remapCleanup versionLag=%" PRId64 "\n", self->filename.c_str(), lag);
+		debug_printf("DWALPager(%s) remapCleanup versionLag=%" PRId64 "\n", self->filename.c_str(), lag);
 		if (lag < SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_VERSION_LAG_MIN) {
-			debug_printf_always("DWALPager(%s) not starting, lag too low\n", self->filename.c_str());
+			debug_printf("DWALPager(%s) not starting, lag too low\n", self->filename.c_str());
 			return Void();
 		}
 
@@ -1547,7 +1547,7 @@ public:
 			// Take up to batch size pages from front of queue
 			while (toPop > 0) {
 				state Optional<RemappedPage> p = wait(self->remapQueue.pop(cutoff));
-				debug_printf_always("DWALPager(%s) remapCleanup popped %s\n", self->filename.c_str(),
+				debug_printf("DWALPager(%s) remapCleanup popped %s\n", self->filename.c_str(),
 				                    ::toString(p).c_str());
 				if (!p.present()) {
 					break;
@@ -1600,7 +1600,7 @@ public:
 				if (lag <= SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX) {
 					break;
 				} else {
-					debug_printf_always("DWALPager(%s) remapCleanup refusing to stop, versionLag=%" PRId64 "\n",
+					debug_printf("DWALPager(%s) remapCleanup refusing to stop, versionLag=%" PRId64 "\n",
 					                    self->filename.c_str(), lag);
 				}
 			}
@@ -2726,11 +2726,11 @@ public:
 	// A record which is greater than the last possible record in the tree
 	static RedwoodRecordRef dbEnd;
 
-	struct LazyDeleteQueueEntry {
+	struct LazyClearQueueEntry {
 		Version version;
 		Standalone<BTreePageIDRef> pageID;
 
-		bool operator<(const LazyDeleteQueueEntry& rhs) const { return version < rhs.version; }
+		bool operator<(const LazyClearQueueEntry& rhs) const { return version < rhs.version; }
 
 		int readFromBytes(const uint8_t* src) {
 			version = *(Version*)src;
@@ -2753,7 +2753,7 @@ public:
 		std::string toString() const { return format("{%s @%" PRId64 "}", ::toString(pageID).c_str(), version); }
 	};
 
-	typedef FIFOQueue<LazyDeleteQueueEntry> LazyDeleteQueueT;
+	typedef FIFOQueue<LazyClearQueueEntry> LazyClearQueueT;
 
 #pragma pack(push, 1)
 	struct MetaKey {
@@ -2761,7 +2761,7 @@ public:
 		// This serves as the format version for the entire tree, individual pages will not be versioned
 		uint16_t formatVersion;
 		uint8_t height;
-		LazyDeleteQueueT::QueueState lazyDeleteQueue;
+		LazyClearQueueT::QueueState lazyDeleteQueue;
 		InPlaceArray<LogicalPageID> root;
 
 		KeyRef asKeyRef() const { return KeyRef((uint8_t*)this, sizeof(MetaKey) + root.extraSize()); }
@@ -2850,14 +2850,14 @@ public:
 	VersionedBTree(IPager2* pager, std::string name)
 	  : m_pager(pager), m_writeVersion(invalidVersion), m_lastCommittedVersion(invalidVersion), m_pBuffer(nullptr),
 	    m_name(name) {
-		m_lazyDeleteActor = 0;
+		m_lazyClearActor = 0;
 		m_init = init_impl(this);
 		m_latestCommit = m_init;
 	}
 
-	ACTOR static Future<int> incrementalSubtreeClear(VersionedBTree* self) {
-		ASSERT(self->m_lazyDeleteActor.isReady());
-		self->m_lazyDeleteStop = false;
+	ACTOR static Future<int> incrementalLazyClear(VersionedBTree* self) {
+		ASSERT(self->m_lazyClearActor.isReady());
+		self->m_lazyClearStop = false;
 
 		// TODO: Is it contractually okay to always to read at the latest version?
 		state Reference<IPagerSnapshot> snapshot = self->m_pager->getReadSnapshot(self->m_pager->getLatestVersion());
@@ -2865,13 +2865,13 @@ public:
 
 		loop {
 			state int toPop = SERVER_KNOBS->REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES;
-			state std::vector<std::pair<LazyDeleteQueueEntry, Future<Reference<const IPage>>>> entries;
+			state std::vector<std::pair<LazyClearQueueEntry, Future<Reference<const IPage>>>> entries;
 			entries.reserve(toPop);
 
 			// Take up to batchSize pages from front of queue
 			while (toPop > 0) {
-				Optional<LazyDeleteQueueEntry> q = wait(self->m_lazyDeleteQueue.pop());
-				debug_printf("LazyDelete: popped %s\n", toString(q).c_str());
+				Optional<LazyClearQueueEntry> q = wait(self->m_lazyClearQueue.pop());
+				debug_printf("LazyClear: popped %s\n", toString(q).c_str());
 				if (!q.present()) {
 					break;
 				}
@@ -2885,9 +2885,9 @@ public:
 			state int i;
 			for (i = 0; i < entries.size(); ++i) {
 				Reference<const IPage> p = wait(entries[i].second);
-				const LazyDeleteQueueEntry& entry = entries[i].first;
+				const LazyClearQueueEntry& entry = entries[i].first;
 				const BTreePage& btPage = *(BTreePage*)p->begin();
-				debug_printf("LazyDelete: processing %s\n", toString(entry).c_str());
+				debug_printf("LazyClear: processing %s\n", toString(entry).c_str());
 
 				// Level 1 (leaf) nodes should never be in the lazy delete queue
 				ASSERT(btPage.height > 1);
@@ -2903,15 +2903,15 @@ public:
 						BTreePageIDRef btChildPageID = c.get().getChildPage();
 						// If this page is height 2, then the children are leaves so free them directly
 						if (btPage.height == 2) {
-							debug_printf("LazyDelete: freeing child %s\n", toString(btChildPageID).c_str());
+							debug_printf("LazyClear: freeing child %s\n", toString(btChildPageID).c_str());
 							self->freeBtreePage(btChildPageID, v);
 							freedPages += btChildPageID.size();
 							g_redwoodMetrics.lazyClearFreed += 1;
 							g_redwoodMetrics.lazyClearFreedExt += btChildPageID.size() - 1;
 						} else {
 							// Otherwise, queue them for lazy delete.
-							debug_printf("LazyDelete: queuing child %s\n", toString(btChildPageID).c_str());
-							self->m_lazyDeleteQueue.pushFront(LazyDeleteQueueEntry{ v, btChildPageID });
+							debug_printf("LazyClear: queuing child %s\n", toString(btChildPageID).c_str());
+							self->m_lazyClearQueue.pushFront(LazyClearQueueEntry{ v, btChildPageID });
 							g_redwoodMetrics.lazyClearRequeued += 1;
 							g_redwoodMetrics.lazyClearRequeuedExt += btChildPageID.size() - 1;
 						}
@@ -2922,7 +2922,7 @@ public:
 				}
 
 				// Free the page, now that its children have either been freed or queued
-				debug_printf("LazyDelete: freeing queue entry %s\n", toString(entry.pageID).c_str());
+				debug_printf("LazyClear: freeing queue entry %s\n", toString(entry.pageID).c_str());
 				self->freeBtreePage(entry.pageID, v);
 				freedPages += entry.pageID.size();
 				g_redwoodMetrics.lazyClearFreed += 1;
@@ -2933,14 +2933,14 @@ public:
 			//   - the poppable items in the queue have already been exhausted
 			//   - stop flag is set and we've freed the minimum number of pages required
 			//   - maximum number of pages to free met or exceeded
-			if (toPop > 0 || (freedPages >= SERVER_KNOBS->REDWOOD_LAZY_CLEAR_MIN_PAGES && self->m_lazyDeleteStop) ||
+			if (toPop > 0 || (freedPages >= SERVER_KNOBS->REDWOOD_LAZY_CLEAR_MIN_PAGES && self->m_lazyClearStop) ||
 			    (freedPages >= SERVER_KNOBS->REDWOOD_LAZY_CLEAR_MAX_PAGES)) {
 				break;
 			}
 		}
 
-		debug_printf("LazyDelete: freed %d pages, %s has %" PRId64 " entries\n", freedPages,
-		             self->m_lazyDeleteQueue.name.c_str(), self->m_lazyDeleteQueue.numEntries);
+		debug_printf("LazyClear: freed %d pages, %s has %" PRId64 " entries\n", freedPages,
+		             self->m_lazyClearQueue.name.c_str(), self->m_lazyClearQueue.numEntries);
 		return freedPages;
 	}
 
@@ -2968,20 +2968,20 @@ public:
 			self->m_pager->setCommitVersion(latest);
 
 			LogicalPageID newQueuePage = wait(self->m_pager->newPageID());
-			self->m_lazyDeleteQueue.create(self->m_pager, newQueuePage, "LazyDeleteQueue");
-			self->m_header.lazyDeleteQueue = self->m_lazyDeleteQueue.getState();
+			self->m_lazyClearQueue.create(self->m_pager, newQueuePage, "LazyClearQueue");
+			self->m_header.lazyDeleteQueue = self->m_lazyClearQueue.getState();
 			self->m_pager->setMetaKey(self->m_header.asKeyRef());
 			wait(self->m_pager->commit());
 			debug_printf("Committed initial commit.\n");
 		} else {
 			self->m_header.fromKeyRef(meta);
-			self->m_lazyDeleteQueue.recover(self->m_pager, self->m_header.lazyDeleteQueue, "LazyDeleteQueueRecovered");
+			self->m_lazyClearQueue.recover(self->m_pager, self->m_header.lazyDeleteQueue, "LazyClearQueueRecovered");
 		}
 
 		debug_printf("Recovered btree at version %" PRId64 ": %s\n", latest, self->m_header.toString().c_str());
 
 		self->m_lastCommittedVersion = latest;
-		self->m_lazyDeleteActor = incrementalSubtreeClear(self);
+		self->m_lazyClearActor = incrementalLazyClear(self);
 		return Void();
 	}
 
@@ -3046,7 +3046,7 @@ public:
 			// If the lazy delete queue is completely processed then the last time the lazy delete actor
 			// was started it, after the last commit, it would exist immediately and do no work, so its
 			// future would be ready and its value would be 0.
-			if (self->m_lazyDeleteActor.isReady() && self->m_lazyDeleteActor.get() == 0) {
+			if (self->m_lazyClearActor.isReady() && self->m_lazyClearActor.get() == 0) {
 				break;
 			}
 			self->setWriteVersion(self->getLatestVersion() + 1);
@@ -3060,7 +3060,7 @@ public:
 
 		// The lazy delete queue should now be empty and contain only the new page to start writing to
 		// on the next commit.
-		LazyDeleteQueueT::QueueState s = self->m_lazyDeleteQueue.getState();
+		LazyClearQueueT::QueueState s = self->m_lazyClearQueue.getState();
 		ASSERT(s.numEntries == 0);
 		ASSERT(s.numPages == 1);
 
@@ -3302,9 +3302,9 @@ private:
 		MetaKey m_header;
 	};
 
-	LazyDeleteQueueT m_lazyDeleteQueue;
-	Future<int> m_lazyDeleteActor;
-	bool m_lazyDeleteStop;
+	LazyClearQueueT m_lazyClearQueue;
+	Future<int> m_lazyClearActor;
+	bool m_lazyClearStop;
 
 	// Writes entries to 1 or more pages and return a vector of boundary keys with their IPage(s)
 	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>> writePages(
@@ -3594,8 +3594,8 @@ private:
 	ACTOR static Future<Reference<const IPage>> readPage(Reference<IPagerSnapshot> snapshot, BTreePageIDRef id,
 	                                                     const RedwoodRecordRef* lowerBound,
 	                                                     const RedwoodRecordRef* upperBound,
-	                                                     bool forLazyDelete = false) {
-		if (!forLazyDelete) {
+	                                                     bool forLazyClear = false) {
+		if (!forLazyClear) {
 			debug_printf("readPage() op=read %s @%" PRId64 " lower=%s upper=%s\n", toString(id).c_str(),
 			             snapshot->getVersion(), lowerBound->toString(false).c_str(),
 			             upperBound->toString(false).c_str());
@@ -3610,14 +3610,14 @@ private:
 
 		++g_redwoodMetrics.pageReads;
 		if (id.size() == 1) {
-			Reference<const IPage> p = wait(snapshot->getPhysicalPage(id.front(), !forLazyDelete, false));
+			Reference<const IPage> p = wait(snapshot->getPhysicalPage(id.front(), !forLazyClear, false));
 			page = p;
 		} else {
 			ASSERT(!id.empty());
 			g_redwoodMetrics.extPageReads += (id.size() - 1);
 			std::vector<Future<Reference<const IPage>>> reads;
 			for (auto& pageID : id) {
-				reads.push_back(snapshot->getPhysicalPage(pageID, !forLazyDelete, false));
+				reads.push_back(snapshot->getPhysicalPage(pageID, !forLazyClear, false));
 			}
 			std::vector<Reference<const IPage>> pages = wait(getAll(reads));
 			// TODO:  Cache reconstituted super pages somehow, perhaps with help from the Pager.
@@ -3627,7 +3627,7 @@ private:
 		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
 		const BTreePage* pTreePage = (const BTreePage*)page->begin();
 
-		if (!forLazyDelete && page->userData == nullptr) {
+		if (!forLazyClear && page->userData == nullptr) {
 			debug_printf("readPage() Creating Reader for %s @%" PRId64 " lower=%s upper=%s\n", toString(id).c_str(),
 			             snapshot->getVersion(), lowerBound->toString(false).c_str(),
 			             upperBound->toString(false).c_str());
@@ -3635,7 +3635,7 @@ private:
 			page->userDataDestructor = [](void* ptr) { delete (BTreePage::BinaryTree::Mirror*)ptr; };
 		}
 
-		if (!forLazyDelete) {
+		if (!forLazyClear) {
 			debug_printf("readPage() %s\n",
 			             pTreePage->toString(false, id, snapshot->getVersion(), lowerBound, upperBound).c_str());
 		}
@@ -4382,8 +4382,8 @@ private:
 									} else {
 										debug_printf("%s: queuing subtree deletion cleared subtree range: %s\n",
 										             context.c_str(), ::toString(rec.getChildPage()).c_str());
-										self->m_lazyDeleteQueue.pushFront(
-										    LazyDeleteQueueEntry{ writeVersion, rec.getChildPage() });
+										self->m_lazyClearQueue.pushFront(
+										    LazyClearQueueEntry{ writeVersion, rec.getChildPage() });
 									}
 								}
 								c.moveNext();
@@ -4536,14 +4536,14 @@ private:
 
 		self->m_header.root.set(rootPageID, sizeof(headerSpace) - sizeof(m_header));
 
-		self->m_lazyDeleteStop = true;
-		wait(success(self->m_lazyDeleteActor));
-		debug_printf("Lazy delete freed %u pages\n", self->m_lazyDeleteActor.get());
+		self->m_lazyClearStop = true;
+		wait(success(self->m_lazyClearActor));
+		debug_printf("Lazy delete freed %u pages\n", self->m_lazyClearActor.get());
 
 		self->m_pager->setCommitVersion(writeVersion);
 
-		wait(self->m_lazyDeleteQueue.flush());
-		self->m_header.lazyDeleteQueue = self->m_lazyDeleteQueue.getState();
+		wait(self->m_lazyClearQueue.flush());
+		self->m_header.lazyDeleteQueue = self->m_lazyClearQueue.getState();
 
 		debug_printf("Setting metakey\n");
 		self->m_pager->setMetaKey(self->m_header.asKeyRef());
@@ -4559,7 +4559,7 @@ private:
 
 		self->m_lastCommittedVersion = writeVersion;
 		++g_redwoodMetrics.commits;
-		self->m_lazyDeleteActor = incrementalSubtreeClear(self);
+		self->m_lazyClearActor = incrementalLazyClear(self);
 
 		committed.send(Void());
 		return Void();
