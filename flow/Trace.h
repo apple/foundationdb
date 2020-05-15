@@ -457,7 +457,11 @@ private:
 	TraceEvent& detailfNoMetric( std::string&& key, const char* valueFormat, ... );
 	TraceEvent& detailImpl( std::string&& key, std::string&& value, bool writeEventMetricField=true );
 public:
-	TraceEvent& backtrace(const std::string& prefix = "");
+	TraceEvent& backtrace() {
+		std::string empty;
+		return backtrace(empty);
+	}
+	TraceEvent& backtrace(const std::string& prefix);
 	TraceEvent& trackLatest(const std::string& trackingKey );
 	TraceEvent& sample( double sampleRate, bool logSampleRate=true );
 
