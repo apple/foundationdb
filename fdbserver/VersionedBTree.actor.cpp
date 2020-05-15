@@ -1337,7 +1337,7 @@ public:
 		return f;
 	}
 
-	void freeUnmappedPage(LogicalPageID pageID, Version v) override {
+	void freeUnmappedPage(LogicalPageID pageID, Version v) {
 		// If v is older than the oldest version still readable then mark pageID as free as of the next commit
 		if (v < effectiveOldestVersion()) {
 			debug_printf("DWALPager(%s) op=freeNow %s @%" PRId64 " oldestVersion=%" PRId64 "\n", filename.c_str(),
