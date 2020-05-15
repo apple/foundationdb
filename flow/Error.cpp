@@ -65,8 +65,6 @@ Error::Error(int error_code)
 			crashAndDie();
 		}
 	}
-	/*if (error_code)
-		errorCounts()[error_code]++;*/
 }
 
 ErrorCodeTable& Error::errorCodeTable() {
