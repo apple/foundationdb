@@ -564,6 +564,9 @@ public:
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at once
 	int REDWOOD_LAZY_CLEAR_MIN_PAGES;  // Minimum number of pages to free before ending a lazy clear cycle, unless the queue is empty
 	int REDWOOD_LAZY_CLEAR_MAX_PAGES;  // Maximum number of pages to free before ending a lazy clear cycle, unless the queue is empty
+	int REDWOOD_REMAP_CLEANUP_BATCH_SIZE; // Number of queue entries for remap cleanup to process and potentially coalesce at once.
+	int REDWOOD_REMAP_CLEANUP_VERSION_LAG_MIN; // Number of versions between head of remap queue and oldest retained version before remap cleanup starts
+	int REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX; // Number of versions between head of remap queue and oldest retained version before remap cleanup may stop
 
 	ServerKnobs();
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);

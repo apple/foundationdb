@@ -542,6 +542,16 @@ public:
 
 	Future<Standalone<VectorRef<T>>> peekAll() { return peekAll_impl(this); }
 
+	ACTOR static Future<Optional<T>> peek_impl(FIFOQueue* self) {
+		state Cursor c;
+		c.initReadOnly(self->headReader);
+
+		Optional<T> x = wait(c.readNext());
+		return x;
+	}
+
+	Future<Optional<T>> peek() { return peek_impl(this); }
+
 	// Pop the next item on front of queue if it is <= upperBound or if upperBound is not present
 	Future<Optional<T>> pop(Optional<T> upperBound = {}) { return headReader.readNext(upperBound); }
 
@@ -881,6 +891,81 @@ Future<T> forwardError(Future<T> f, Promise<Void> target) {
 	}
 }
 
+struct RedwoodMetrics {
+	RedwoodMetrics() {
+		memset(this, 0, sizeof(RedwoodMetrics));
+		startTime = g_network ? now() : 0;
+	}
+
+	void clear() { *this = RedwoodMetrics(); }
+
+	int64_t pageReads;
+	int64_t extPageReads;
+	int64_t pagePreloads;
+	int64_t extPagePreloads;
+	int64_t setBytes;
+	int64_t pageWrites;
+	int64_t extPageWrites;
+	int64_t sets;
+	int64_t clears;
+	int64_t clearSingleKey;
+	int64_t commits;
+	int64_t gets;
+	int64_t getRanges;
+	int64_t commitSubtreeStart;
+	int64_t pageUpdates;
+	int64_t remapFree;
+	int64_t remapCopy;
+	int64_t remapCopyElided;
+	int64_t lazyClearRequeued;
+	int64_t lazyClearRequeuedExt;
+	int64_t lazyClearFreed;
+	int64_t lazyClearFreedExt;
+
+	double startTime;
+
+	std::string toString(bool clearAfter = false) {
+		std::pair<const char*, int64_t> metrics[] = {
+			{ "OpSet", sets },
+			{ "OpClear", clears },
+			{ "OpClearSingleKey", clearSingleKey },
+			{ "OpGet", gets },
+			{ "OpGetRange", getRanges },
+			{ "OpCommit", commits },
+			{ "BTreePageRead", pageReads },
+			{ "BTreePageReadExt", extPageReads },
+			{ "BTreePagePreload", pagePreloads },
+			{ "BTreePagePreloadExt", extPagePreloads },
+			{ "BTreePageWrite", pageWrites },
+			{ "BTreePageWriteExt", extPageWrites },
+			{ "BTreePageUpdate", pageUpdates },
+			{ "CommitSubtreeStart", commitSubtreeStart },
+			{ "LazyClearRequeued", lazyClearRequeued },
+			{ "LazyClearRequeuedExt", lazyClearRequeuedExt },
+			{ "LazyClearFreed", lazyClearFreed },
+			{ "LazyClearFreedExt", lazyClearFreedExt },
+			{ "RemapFree", remapFree },
+			{ "RemapCopy", remapCopy },
+			{ "RemapCopyElided", remapCopyElided },
+		};
+
+		double elapsed = now() - startTime;
+		std::string s;
+		for (auto& m : metrics) {
+			s += format("%s=%" PRId64 " (%d/s)  ", m.first, m.second, int(m.second / elapsed));
+		}
+
+		if (clearAfter) {
+			clear();
+		}
+
+		return s;
+	}
+};
+
+// Using a global for Redwood metrics because a single process shouldn't normally have multiple storage engines
+RedwoodMetrics g_redwoodMetrics;
+
 class DWALPagerSnapshot;
 
 // An implementation of IPager2 that supports atomicUpdate() of a page without forcing a change to new page ID.
@@ -910,6 +995,9 @@ public:
 	};
 
 	struct RemappedPage {
+		RemappedPage() : version(invalidVersion) {}
+		RemappedPage(Version v, LogicalPageID o, LogicalPageID n) : version(v), originalPageID(o), newPageID(n) {}
+
 		Version version;
 		LogicalPageID originalPageID;
 		LogicalPageID newPageID;
@@ -961,7 +1049,6 @@ public:
 	ACTOR static Future<Void> recover(DWALPager* self) {
 		ASSERT(!self->recoverFuture.isValid());
 
-		self->remapUndoFuture = Void();
 		state bool exists = false;
 
 		if (!self->memoryOnly) {
@@ -1067,6 +1154,7 @@ public:
 			// header)
 			self->updateCommittedHeader();
 			self->addLatestSnapshot();
+			self->remapCleanupFuture = remapCleanup(self);
 		} else {
 			// Note: If the file contains less than 2 pages but more than 0 bytes then the pager was never successfully
 			// committed. A new pager will be created in its place.
@@ -1111,6 +1199,7 @@ public:
 			// Since there is no previously committed header use the initial header for the initial commit.
 			self->updateCommittedHeader();
 
+			self->remapCleanupFuture = Void();
 			wait(self->commit());
 		}
 
@@ -1234,7 +1323,6 @@ public:
 
 	Future<LogicalPageID> atomicUpdatePage(LogicalPageID pageID, Reference<IPage> data, Version v) override {
 		debug_printf("DWALPager(%s) op=writeAtomic %s @%" PRId64 "\n", filename.c_str(), toString(pageID).c_str(), v);
-		// This pager does not support atomic update, so it always allocates and uses a new pageID
 		Future<LogicalPageID> f = map(newPageID(), [=](LogicalPageID newPageID) {
 			updatePage(newPageID, data);
 			// TODO:  Possibly limit size of remap queue since it must be recovered on cold start
@@ -1249,16 +1337,7 @@ public:
 		return f;
 	}
 
-	void freePage(LogicalPageID pageID, Version v) override {
-		// If pageID has been remapped, then it can't be freed until all existing remaps for that page have been undone,
-		// so queue it for later deletion
-		if (remappedPages.find(pageID) != remappedPages.end()) {
-			debug_printf("DWALPager(%s) op=freeRemapped %s @%" PRId64 " oldestVersion=%" PRId64 "\n", filename.c_str(),
-			             toString(pageID).c_str(), v, pLastCommittedHeader->oldestVersion);
-			remapQueue.pushBack(RemappedPage{ v, pageID, invalidLogicalPageID });
-			return;
-		}
-
+	void freeUnmappedPage(LogicalPageID pageID, Version v) override {
 		// If v is older than the oldest version still readable then mark pageID as free as of the next commit
 		if (v < effectiveOldestVersion()) {
 			debug_printf("DWALPager(%s) op=freeNow %s @%" PRId64 " oldestVersion=%" PRId64 "\n", filename.c_str(),
@@ -1270,6 +1349,19 @@ public:
 			             toString(pageID).c_str(), v, pLastCommittedHeader->oldestVersion);
 			delayedFreeList.pushBack({ v, pageID });
 		}
+	}
+
+	void freePage(LogicalPageID pageID, Version v) override {
+		// If pageID has been remapped, then it can't be freed until all existing remaps for that page have been undone,
+		// so queue it for later deletion
+		if (remappedPages.find(pageID) != remappedPages.end()) {
+			debug_printf("DWALPager(%s) op=freeRemapped %s @%" PRId64 " oldestVersion=%" PRId64 "\n", filename.c_str(),
+			             toString(pageID).c_str(), v, pLastCommittedHeader->oldestVersion);
+			remapQueue.pushBack(RemappedPage{ v, pageID, invalidLogicalPageID });
+			return;
+		}
+
+		freeUnmappedPage(pageID, v);
 	};
 
 	// Read a physical page from the page file.  Note that header pages use a page size of smallestPhysicalBlock
@@ -1393,56 +1485,134 @@ public:
 		return std::min(pLastCommittedHeader->oldestVersion, snapshots.front().version);
 	}
 
-	ACTOR static Future<Void> undoRemaps(DWALPager* self) {
+	ACTOR static Future<Void> remapCopyAndFree(DWALPager* self, RemappedPage m) {
+		debug_printf("DWALPager(%s) remapCleanup copyAndFree %s\n", self->filename.c_str(), m.toString().c_str());
+
+		// Read the data from the page that the original was mapped to
+		Reference<IPage> data = wait(self->readPage(m.newPageID, false));
+
+		// Write the data to the original page so it can be read using its original pageID
+		self->updatePage(m.originalPageID, data);
+		++g_redwoodMetrics.remapCopy;
+
+		// Remove all remaps for the original page ID up through version
+		auto i = self->remappedPages.find(m.originalPageID);
+		i->second.erase(i->second.begin(), i->second.upper_bound(m.version));
+		// If the version map for this page is now empty, erase it
+		if (i->second.empty()) {
+			self->remappedPages.erase(i);
+		}
+
+		// Now that the remap has been undone nothing will read this page so it can be freed as of the next
+		// commit.
+		self->freeUnmappedPage(m.newPageID, 0);
+		++g_redwoodMetrics.remapFree;
+
+		return Void();
+	}
+
+	ACTOR static Future<Version> getRemapLag(DWALPager* self) {
+		Optional<RemappedPage> head = wait(self->remapQueue.peek());
+		if (head.present()) {
+			return self->effectiveOldestVersion() - head.get().version;
+		}
+		return 0;
+	}
+
+	ACTOR static Future<Void> remapCleanup(DWALPager* self) {
+		self->remapCleanupStop = false;
+
+		// Cutoff is the version we can pop to
 		state RemappedPage cutoff;
 		cutoff.version = self->effectiveOldestVersion();
 
-		// TODO:  Use parallel reads
-		// TODO:  One run of this actor might write to the same original page more than once, in which case just unmap
-		// the latest
+		// Each page is only updated at most once per version, so in order to coalesce multiple updates
+		// to the same page and skip some page writes we have to accumulate multiple versions worth of
+		// poppable entries.
+		Version lag = wait(getRemapLag(self));
+		debug_printf_always("DWALPager(%s) remapCleanup versionLag=%" PRId64 "\n", self->filename.c_str(), lag);
+		if (lag < SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_VERSION_LAG_MIN) {
+			debug_printf_always("DWALPager(%s) not starting, lag too low\n", self->filename.c_str());
+			return Void();
+		}
+
 		loop {
-			if (self->remapUndoStop) {
-				break;
-			}
-			state Optional<RemappedPage> p = wait(self->remapQueue.pop(cutoff));
-			if (!p.present()) {
-				break;
-			}
-			debug_printf("DWALPager(%s) undoRemaps popped %s\n", self->filename.c_str(), p.get().toString().c_str());
+			// Pop up to the pop size limit from the queue, but only keep the latest remap queue entry per
+			// original page ID.  This will coalesce multiple remaps of the same LogicalPageID within the
+			// interval of pages being unmapped to a single page copy.
+			state int toPop = SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_BATCH_SIZE;
+			state std::unordered_map<LogicalPageID, RemappedPage> toCopy;
+			toCopy.reserve(toPop);
 
-			if (p.get().newPageID == invalidLogicalPageID) {
-				debug_printf("DWALPager(%s) undoRemaps freeing %s\n", self->filename.c_str(),
-				             p.get().toString().c_str());
-				self->freePage(p.get().originalPageID, p.get().version);
-			} else {
-				// Read the data from the page that the original was mapped to
-				Reference<IPage> data = wait(self->readPage(p.get().newPageID, false));
-
-				// Write the data to the original page so it can be read using its original pageID
-				self->updatePage(p.get().originalPageID, data);
-
-				// Remove the remap from this page, deleting the entry for the pageID if its map becomes empty
-				auto i = self->remappedPages.find(p.get().originalPageID);
-				if (i->second.size() == 1) {
-					self->remappedPages.erase(i);
-				} else {
-					i->second.erase(p.get().version);
+			// Take up to batch size pages from front of queue
+			while (toPop > 0) {
+				state Optional<RemappedPage> p = wait(self->remapQueue.pop(cutoff));
+				debug_printf_always("DWALPager(%s) remapCleanup popped %s\n", self->filename.c_str(),
+				                    ::toString(p).c_str());
+				if (!p.present()) {
+					break;
 				}
 
-				// Now that the remap has been undone nothing will read this page so it can be freed as of the next
-				// commit.
-				self->freePage(p.get().newPageID, 0);
+				// Get the existing remap entry for the original page, which could be newly initialized
+				auto& m = toCopy[p.get().originalPageID];
+				// If version is invalid then this is a newly constructed RemappedPage, so copy p.get() over it
+				if (m.version != invalidVersion) {
+					ASSERT(m.version < p.get().version);
+					ASSERT(m.newPageID != invalidLogicalPageID);
+					// We're replacing a previously popped item so we can avoid copying it over the original.
+					debug_printf("DWALPager(%s) remapCleanup elided %s\n", self->filename.c_str(), m.toString().c_str());
+					// The remapped pages entries will be cleaned up below.
+					self->freeUnmappedPage(m.newPageID, 0);
+					++g_redwoodMetrics.remapFree;
+					++g_redwoodMetrics.remapCopyElided;
+				}
+				m = p.get();
+
+				--toPop;
+			}
+
+			std::vector<Future<Void>> copies;
+
+			for (auto& e : toCopy) {
+				const RemappedPage& m = e.second;
+				// If newPageID is invalid, originalPageID page was freed at version, not remapped
+				if (m.newPageID == invalidLogicalPageID) {
+					debug_printf("DWALPager(%s) remapCleanup freeNoCopy %s\n", self->filename.c_str(),
+					             m.toString().c_str());
+					self->remappedPages.erase(m.originalPageID);
+					self->freeUnmappedPage(m.originalPageID, 0);
+					++g_redwoodMetrics.remapFree;
+				} else {
+					copies.push_back(remapCopyAndFree(self, m));
+				}
+			}
+
+			wait(waitForAll(copies));
+
+			// Stop if there was nothing more that could be popped
+			if (toPop > 0) {
+				break;
+			}
+
+			// If the stop flag is set then stop but only if the remap lag is below the maximum allowed
+			if (self->remapCleanupStop) {
+				Version lag = wait(getRemapLag(self));
+				if (lag <= SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX) {
+					break;
+				} else {
+					debug_printf_always("DWALPager(%s) remapCleanup refusing to stop, versionLag=%" PRId64 "\n",
+					                    self->filename.c_str(), lag);
+				}
 			}
 		}
 
-		debug_printf("DWALPager(%s) undoRemaps stopped, remapQueue size is %d\n", self->filename.c_str(),
-		             self->remapQueue.numEntries);
+		debug_printf("DWALPager(%s) remapCleanup stopped (stop=%d)\n", self->filename.c_str(), self->remapCleanupStop);
 		return Void();
 	}
 
 	// Flush all queues so they have no operations pending.
 	ACTOR static Future<Void> flushQueues(DWALPager* self) {
-		ASSERT(self->remapUndoFuture.isReady());
+		ASSERT(self->remapCleanupFuture.isReady());
 
 		// Flush remap queue separately, it's not involved in free page management
 		wait(self->remapQueue.flush());
@@ -1472,8 +1642,8 @@ public:
 		self->writeHeaderPage(1, self->lastCommittedHeaderPage);
 
 		// Trigger the remap eraser to stop and then wait for it.
-		self->remapUndoStop = true;
-		wait(self->remapUndoFuture);
+		self->remapCleanupStop = true;
+		wait(self->remapCleanupFuture);
 
 		wait(flushQueues(self));
 
@@ -1518,8 +1688,7 @@ public:
 		self->expireSnapshots(self->pHeader->oldestVersion);
 
 		// Start unmapping pages for expired versions
-		self->remapUndoStop = false;
-		self->remapUndoFuture = undoRemaps(self);
+		self->remapCleanupFuture = remapCleanup(self);
 
 		return Void();
 	}
@@ -1543,7 +1712,7 @@ public:
 		debug_printf("DWALPager(%s) shutdown cancel commit\n", self->filename.c_str());
 		self->commitFuture.cancel();
 		debug_printf("DWALPager(%s) shutdown cancel remap\n", self->filename.c_str());
-		self->remapUndoFuture.cancel();
+		self->remapCleanupFuture.cancel();
 
 		if (self->errorPromise.canBeSet()) {
 			debug_printf("DWALPager(%s) shutdown sending error\n", self->filename.c_str());
@@ -1601,7 +1770,7 @@ public:
 
 	ACTOR static Future<Void> getUserPageCount_cleanup(DWALPager* self) {
 		// Wait for the remap eraser to finish all of its work (not triggering stop)
-		wait(self->remapUndoFuture);
+		wait(self->remapCleanupFuture);
 
 		// Flush queues so there are no pending freelist operations
 		wait(flushQueues(self));
@@ -1712,8 +1881,8 @@ private:
 	Future<Void> commitFuture;
 	SignalableActorCollection operations;
 	Future<Void> recoverFuture;
-	Future<Void> remapUndoFuture;
-	bool remapUndoStop;
+	Future<Void> remapCleanupFuture;
+	bool remapCleanupStop;
 
 	Reference<IAsyncFile> pageFile;
 
@@ -2609,68 +2778,6 @@ public:
 	};
 #pragma pack(pop)
 
-	struct Counts {
-		Counts() {
-			memset(this, 0, sizeof(Counts));
-			startTime = g_network ? now() : 0;
-		}
-
-		void clear() { *this = Counts(); }
-
-		int64_t pageReads;
-		int64_t extPageReads;
-		int64_t pagePreloads;
-		int64_t extPagePreloads;
-		int64_t setBytes;
-		int64_t pageWrites;
-		int64_t extPageWrites;
-		int64_t sets;
-		int64_t clears;
-		int64_t clearSingleKey;
-		int64_t commits;
-		int64_t gets;
-		int64_t getRanges;
-		int64_t commitSubtreeStart;
-		int64_t pageUpdates;
-		double startTime;
-
-		std::string toString(bool clearAfter = false) {
-			const char* labels[] = { "set",
-				                     "clear",
-				                     "clearSingleKey",
-				                     "get",
-				                     "getRange",
-				                     "commit",
-				                     "pageReads",
-				                     "extPageRead",
-				                     "pagePreloads",
-				                     "extPagePreloads",
-				                     "pageWrites",
-				                     "pageUpdates",
-				                     "extPageWrites",
-				                     "commitSubtreeStart" };
-			const int64_t values[] = {
-				sets,         clears,       clearSingleKey,  gets,       getRanges,   commits,       pageReads,
-				extPageReads, pagePreloads, extPagePreloads, pageWrites, pageUpdates, extPageWrites, commitSubtreeStart
-			};
-
-			double elapsed = now() - startTime;
-			std::string s;
-			for (int i = 0; i < sizeof(values) / sizeof(int64_t); ++i) {
-				s += format("%s=%" PRId64 " (%d/s)  ", labels[i], values[i], int(values[i] / elapsed));
-			}
-
-			if (clearAfter) {
-				clear();
-			}
-
-			return s;
-		}
-	};
-
-	// Using a static for metrics because a single process shouldn't normally have multiple storage engines
-	static Counts counts;
-
 	// All async opts on the btree are based on pager reads, writes, and commits, so
 	// we can mostly forward these next few functions to the pager
 	Future<Void> getError() { return m_pager->getError(); }
@@ -2700,7 +2807,7 @@ public:
 	// setWriteVersion() A write shall not become durable until the following call to commit() begins, and shall be
 	// durable once the following call to commit() returns
 	void set(KeyValueRef keyValue) {
-		++counts.sets;
+		++g_redwoodMetrics.sets;
 		m_pBuffer->insert(keyValue.key).mutation().setBoundaryValue(m_pBuffer->copyToArena(keyValue.value));
 	}
 
@@ -2708,13 +2815,13 @@ public:
 		// Optimization for single key clears to create just one mutation boundary instead of two
 		if (clearedRange.begin.size() == clearedRange.end.size() - 1 &&
 		    clearedRange.end[clearedRange.end.size() - 1] == 0 && clearedRange.end.startsWith(clearedRange.begin)) {
-			++counts.clears;
-			++counts.clearSingleKey;
+			++g_redwoodMetrics.clears;
+			++g_redwoodMetrics.clearSingleKey;
 			m_pBuffer->insert(clearedRange.begin).mutation().clearBoundary();
 			return;
 		}
 
-		++counts.clears;
+		++g_redwoodMetrics.clears;
 		MutationBuffer::iterator iBegin = m_pBuffer->insert(clearedRange.begin);
 		MutationBuffer::iterator iEnd = m_pBuffer->insert(clearedRange.end);
 
@@ -2757,10 +2864,12 @@ public:
 		state int freedPages = 0;
 
 		loop {
+			state int toPop = SERVER_KNOBS->REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES;
 			state std::vector<std::pair<LazyDeleteQueueEntry, Future<Reference<const IPage>>>> entries;
+			entries.reserve(toPop);
 
 			// Take up to batchSize pages from front of queue
-			while (entries.size() < SERVER_KNOBS->REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES) {
+			while (toPop > 0) {
 				Optional<LazyDeleteQueueEntry> q = wait(self->m_lazyDeleteQueue.pop());
 				debug_printf("LazyDelete: popped %s\n", toString(q).c_str());
 				if (!q.present()) {
@@ -2769,10 +2878,8 @@ public:
 				// Start reading the page, without caching
 				entries.push_back(
 				    std::make_pair(q.get(), self->readPage(snapshot, q.get().pageID, nullptr, nullptr, true)));
-			}
 
-			if (entries.empty()) {
-				break;
+				--toPop;
 			}
 
 			state int i;
@@ -2794,15 +2901,19 @@ public:
 				while (1) {
 					if (c.get().value.present()) {
 						BTreePageIDRef btChildPageID = c.get().getChildPage();
-						// If this page is height 2, then the children are leaves so free
+						// If this page is height 2, then the children are leaves so free them directly
 						if (btPage.height == 2) {
 							debug_printf("LazyDelete: freeing child %s\n", toString(btChildPageID).c_str());
 							self->freeBtreePage(btChildPageID, v);
 							freedPages += btChildPageID.size();
+							g_redwoodMetrics.lazyClearFreed += 1;
+							g_redwoodMetrics.lazyClearFreedExt += btChildPageID.size() - 1;
 						} else {
 							// Otherwise, queue them for lazy delete.
 							debug_printf("LazyDelete: queuing child %s\n", toString(btChildPageID).c_str());
 							self->m_lazyDeleteQueue.pushFront(LazyDeleteQueueEntry{ v, btChildPageID });
+							g_redwoodMetrics.lazyClearRequeued += 1;
+							g_redwoodMetrics.lazyClearRequeuedExt += btChildPageID.size() - 1;
 						}
 					}
 					if (!c.moveNext()) {
@@ -2814,10 +2925,15 @@ public:
 				debug_printf("LazyDelete: freeing queue entry %s\n", toString(entry.pageID).c_str());
 				self->freeBtreePage(entry.pageID, v);
 				freedPages += entry.pageID.size();
+				g_redwoodMetrics.lazyClearFreed += 1;
+				g_redwoodMetrics.lazyClearFreedExt += entry.pageID.size() - 1;
 			}
 
-			// If stop is set and we've freed the minimum number of pages required, or the maximum is exceeded, return.
-			if ((freedPages >= SERVER_KNOBS->REDWOOD_LAZY_CLEAR_MIN_PAGES && self->m_lazyDeleteStop) ||
+			// Stop if
+			//   - the poppable items in the queue have already been exhausted
+			//   - stop flag is set and we've freed the minimum number of pages required
+			//   - maximum number of pages to free met or exceeded
+			if (toPop > 0 || (freedPages >= SERVER_KNOBS->REDWOOD_LAZY_CLEAR_MIN_PAGES && self->m_lazyDeleteStop) ||
 			    (freedPages >= SERVER_KNOBS->REDWOOD_LAZY_CLEAR_MAX_PAGES)) {
 				break;
 			}
@@ -2913,6 +3029,10 @@ public:
 
 	ACTOR static Future<Void> destroyAndCheckSanity_impl(VersionedBTree* self) {
 		ASSERT(g_network->isSimulated());
+
+		// This isn't pretty but remap cleanup is controlled by knobs and for this test we need the entire remap queue to be processed.
+		const_cast<ServerKnobs *>(SERVER_KNOBS)->REDWOOD_REMAP_CLEANUP_VERSION_LAG_MIN = 0;
+		const_cast<ServerKnobs *>(SERVER_KNOBS)->REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX = 0;
 
 		debug_printf("Clearing tree.\n");
 		self->setWriteVersion(self->getLatestVersion() + 1);
@@ -3373,10 +3493,8 @@ private:
 			wait(yield());
 
 			// Update activity counts
-			++counts.pageWrites;
-			if (pages.size() > 1) {
-				counts.extPageWrites += pages.size() - 1;
-			}
+			++g_redwoodMetrics.pageWrites;
+			g_redwoodMetrics.extPageWrites += pages.size() - 1;
 
 			debug_printf("Flushing %s  lastPage=%d  original=%s  start=%d  i=%d  count=%d  page usage: %d/%d (%.2f%%) "
 			             "bytes\nlower: %s\nupper: %s\n",
@@ -3490,13 +3608,13 @@ private:
 
 		state Reference<const IPage> page;
 
-		++counts.pageReads;
+		++g_redwoodMetrics.pageReads;
 		if (id.size() == 1) {
 			Reference<const IPage> p = wait(snapshot->getPhysicalPage(id.front(), !forLazyDelete, false));
 			page = p;
 		} else {
 			ASSERT(!id.empty());
-			counts.extPageReads += (id.size() - 1);
+			g_redwoodMetrics.extPageReads += (id.size() - 1);
 			std::vector<Future<Reference<const IPage>>> reads;
 			for (auto& pageID : id) {
 				reads.push_back(snapshot->getPhysicalPage(pageID, !forLazyDelete, false));
@@ -3526,8 +3644,8 @@ private:
 	}
 
 	static void preLoadPage(IPagerSnapshot* snapshot, BTreePageIDRef id) {
-		++counts.pagePreloads;
-		counts.extPagePreloads += (id.size() - 1);
+		++g_redwoodMetrics.pagePreloads;
+		g_redwoodMetrics.extPagePreloads += (id.size() - 1);
 
 		for (auto pageID : id) {
 			snapshot->getPhysicalPage(pageID, true, true);
@@ -3574,10 +3692,8 @@ private:
 		}
 
 		// Update activity counts
-		++counts.pageWrites;
-		if (newID.size() > 1) {
-			counts.extPageWrites += newID.size() - 1;
-		}
+		++g_redwoodMetrics.pageWrites;
+		g_redwoodMetrics.extPageWrites += newID.size() - 1;
 
 		return newID;
 	}
@@ -3657,6 +3773,8 @@ private:
 
 		// Page was updated in-place through edits and written to maybeNewID
 		void updatedInPlace(BTreePageIDRef maybeNewID) {
+			++g_redwoodMetrics.pageUpdates;
+
 			// The boundaries can't have changed, but the child page link may have.
 			if (maybeNewID != decodeLowerBound->getChildPage()) {
 				// Add page's decode lower bound to newLinks set without its child page, intially
@@ -3857,7 +3975,7 @@ private:
 			debug_printf("%s -------------------------------------\n", context.c_str());
 		}
 
-		++self->counts.commitSubtreeStart;
+		++g_redwoodMetrics.commitSubtreeStart;
 		state Version writeVersion = self->getLastCommittedVersion() + 1;
 		state Reference<const IPage> page =
 		    wait(readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound));
@@ -4097,7 +4215,6 @@ private:
 					                                                  page.castTo<IPage>(), writeVersion));
 
 					update->updatedInPlace(newID);
-					++counts.pageUpdates;
 					debug_printf("%s Page updated in-place, returning %s\n", context.c_str(),
 					             toString(*update).c_str());
 				}
@@ -4329,7 +4446,6 @@ private:
 						                                                  page.castTo<IPage>(), writeVersion));
 
 						update->updatedInPlace(newID);
-						++counts.pageUpdates;
 						debug_printf("%s Internal page updated in-place, returning %s\n", context.c_str(),
 						             toString(*update).c_str());
 					} else {
@@ -4442,7 +4558,7 @@ private:
 		self->m_mutationBuffers.erase(self->m_mutationBuffers.begin());
 
 		self->m_lastCommittedVersion = writeVersion;
-		++counts.commits;
+		++g_redwoodMetrics.commits;
 		self->m_lazyDeleteActor = incrementalSubtreeClear(self);
 
 		committed.send(Void());
@@ -4917,7 +5033,6 @@ public:
 
 RedwoodRecordRef VersionedBTree::dbBegin(StringRef(), 0);
 RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"));
-VersionedBTree::Counts VersionedBTree::counts;
 
 class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
@@ -4998,7 +5113,7 @@ public:
 		wait(self->m_concurrentReads.take());
 		state FlowLock::Releaser releaser(self->m_concurrentReads);
 
-		self->m_tree->counts.getRanges++;
+		++g_redwoodMetrics.getRanges;
 		state Standalone<RangeResultRef> result;
 		state int accumulatedBytes = 0;
 		ASSERT(byteLimit > 0);
@@ -5050,7 +5165,7 @@ public:
 		wait(self->m_concurrentReads.take());
 		state FlowLock::Releaser releaser(self->m_concurrentReads);
 
-		self->m_tree->counts.gets++;
+		++g_redwoodMetrics.gets;
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 
 		wait(cur->findEqual(key));
@@ -5069,7 +5184,7 @@ public:
 		wait(self->m_concurrentReads.take());
 		state FlowLock::Releaser releaser(self->m_concurrentReads);
 
-		self->m_tree->counts.gets++;
+		++g_redwoodMetrics.gets;
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 
 		wait(cur->findEqual(key));
@@ -6395,7 +6510,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 			}
 
 			commit = map(btree->commit(), [=](Void) {
-				printf("Committed: %s\n", VersionedBTree::counts.toString(true).c_str());
+				printf("Committed: %s\n", g_redwoodMetrics.toString(true).c_str());
 				// Notify the background verifier that version is committed and therefore readable
 				committedVersions.send(v);
 				return Void();
@@ -6549,7 +6664,7 @@ TEST_CASE("!/redwood/correctness/pager/cow") {
 
 TEST_CASE("!/redwood/performance/set") {
 	state SignalableActorCollection actors;
-	VersionedBTree::counts.clear();
+	g_redwoodMetrics.clear();
 
 	// If a test file is passed in by environment then don't write new data to it.
 	state bool reload = getenv("TESTFILE") == nullptr;
@@ -6560,7 +6675,7 @@ TEST_CASE("!/redwood/performance/set") {
 		deleteFile(pagerFile);
 	}
 
-	state int pageSize = 4096;
+	state int pageSize = SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
 	state int64_t pageCacheBytes = FLOW_KNOBS->PAGE_CACHE_4K;
 	DWALPager* pager = new DWALPager(pageSize, pagerFile, pageCacheBytes);
 	state VersionedBTree* btree = new VersionedBTree(pager, pagerFile);
@@ -6650,7 +6765,7 @@ TEST_CASE("!/redwood/performance/set") {
 				double* pIntervalStart = &intervalStart;
 
 				commit = map(btree->commit(), [=](Void result) {
-					printf("Committed: %s\n", VersionedBTree::counts.toString(true).c_str());
+					printf("Committed: %s\n", g_redwoodMetrics.toString(true).c_str());
 					double elapsed = timer() - *pIntervalStart;
 					printf("Committed %d keyValueBytes in %d records in %f seconds, %.2f MB/s\n", kvb, recs, elapsed,
 					       kvb / elapsed / 1e6);
@@ -6675,46 +6790,46 @@ TEST_CASE("!/redwood/performance/set") {
 	actors.add(randomSeeks(btree, seeks / 3, firstKeyChar, lastKeyChar));
 	actors.add(randomSeeks(btree, seeks / 3, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", VersionedBTree::counts.toString(true).c_str());
+	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
 
 	state int ops = 10000;
 
 	printf("Serial scans with adaptive readAhead...\n");
 	actors.add(randomScans(btree, ops, 50, -1, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", VersionedBTree::counts.toString(true).c_str());
+	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans with readAhead 3 pages...\n");
 	actors.add(randomScans(btree, ops, 50, 12000, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", VersionedBTree::counts.toString(true).c_str());
+	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans with readAhead 2 pages...\n");
 	actors.add(randomScans(btree, ops, 50, 8000, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", VersionedBTree::counts.toString(true).c_str());
+	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans with readAhead 1 page...\n");
 	actors.add(randomScans(btree, ops, 50, 4000, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", VersionedBTree::counts.toString(true).c_str());
+	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans...\n");
 	actors.add(randomScans(btree, ops, 50, 0, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", VersionedBTree::counts.toString(true).c_str());
+	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial seeks...\n");
 	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", VersionedBTree::counts.toString(true).c_str());
+	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Parallel seeks...\n");
 	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
 	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
 	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", VersionedBTree::counts.toString(true).c_str());
+	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
 
 	Future<Void> closedFuture = btree->onClosed();
 	btree->close();
@@ -7007,7 +7122,7 @@ Future<Void> closeKVS(IKeyValueStore* kvs) {
 
 ACTOR Future<Void> doPrefixInsertComparison(int suffixSize, int valueSize, int recordCountTarget,
                                             bool usePrefixesInOrder, KVSource source) {
-	VersionedBTree::counts.clear();
+	g_redwoodMetrics.clear();
 
 	deleteFile("test.redwood");
 	wait(delay(5));
