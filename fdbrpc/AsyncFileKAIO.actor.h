@@ -97,6 +97,7 @@ public:
 #endif
 
 	static Future<Reference<IAsyncFile>> open( std::string filename, int flags, int mode, void* ignore ) {
+		ASSERT( !FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO );
 		ASSERT( flags & OPEN_UNBUFFERED );
 
 		if (flags & OPEN_LOCK)
@@ -153,6 +154,7 @@ public:
 	}
 
 	static void init( Reference<IEventFD> ev, double ioTimeout ) {
+		ASSERT( !FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO );
 		if( !g_network->isSimulated() ) {
 			ctx.countAIOSubmit.init(LiteralStringRef("AsyncFile.CountAIOSubmit"));
 			ctx.countAIOCollect.init(LiteralStringRef("AsyncFile.CountAIOCollect"));
@@ -578,7 +580,7 @@ private:
 	static Context ctx;
 
 	explicit AsyncFileKAIO(int fd, int flags, std::string const& filename) : fd(fd), flags(flags), filename(filename), failed(false) {
-
+		ASSERT( !FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO );
 		if( !g_network->isSimulated() ) {
 			countFileLogicalWrites.init(LiteralStringRef("AsyncFile.CountFileLogicalWrites"), filename);
 			countFileLogicalReads.init( LiteralStringRef("AsyncFile.CountFileLogicalReads"), filename);

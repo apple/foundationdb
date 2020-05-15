@@ -84,6 +84,7 @@ bool validationIsEnabled(BuggifyType type);
 #define EXPENSIVE_VALIDATION (validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
 extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "");
+extern Optional<uint64_t> parseDuration(std::string str, std::string defaultUnit = "");
 extern std::string format(const char* form, ...);
 
 // On success, returns the number of characters written. On failure, returns a negative number.
@@ -240,13 +241,13 @@ class CachedSerialization {
 public:
 	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
 
-	//FIXME: this code will not work for caching a direct serialization from ObjectWriter, because it adds an ErrorOr, 
+	//FIXME: this code will not work for caching a direct serialization from ObjectWriter, because it adds an ErrorOr,
 	// we should create a separate SerializeType for direct serialization
 	enum class SerializeType { None, Binary, Object };
 
 	CachedSerialization() : cacheType(SerializeType::None) {}
 	explicit CachedSerialization(const T& data) : data(data), cacheType(SerializeType::None) {}
-	
+
 	const T& read() const { return data; }
 
 	T& mutate() {
@@ -391,6 +392,7 @@ struct SingleCallback {
 	SingleCallback<T> *next;
 
 	virtual void fire(T const&) {}
+	virtual void fire(T &&) {}
 	virtual void error(Error) {}
 	virtual void unwait() {}
 
@@ -579,13 +581,14 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 
 	bool isReady() const { return !queue.empty() || error.isValid(); }
 	bool isError() const { return queue.empty() && error.isValid(); }  // the *next* thing queued is an error
+	uint32_t size() const { return queue.size(); }
 
 	T pop() {
 		if (queue.empty()) {
 			if (error.isValid()) throw error;
 			throw internal_error();
 		}
-		auto copy = queue.front();
+		auto copy = std::move(queue.front());
 		queue.pop();
 		return copy;
 	}
@@ -685,6 +688,11 @@ public:
 		: sav(new SAV<T>(1, 0))
 	{
 		sav->send(presentValue);
+	}
+	Future(T&& presentValue)
+		: sav(new SAV<T>(1, 0))
+	{
+		sav->send(std::move(presentValue));
 	}
 	Future(Never)
 		: sav(new SAV<T>(1, 0))
@@ -907,6 +915,9 @@ public:
 	void send(const T& value) const {
 		queue->send(value);
 	}
+	void send(T&& value) const {
+		queue->send(std::move(value));
+	}
 	void sendError(const Error& error) const {
 		queue->sendError(error);
 	}
@@ -1005,10 +1016,13 @@ struct ActorCallback : Callback<ValueType> {
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
-	virtual void fire(ValueType const& value) {
+	virtual void fire(ValueType const& value) override {
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
-	virtual void error(Error e) {
+	virtual void fire(ValueType && value) override {
+		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
+	}
+	virtual void error(Error e) override {
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
 	}
 };

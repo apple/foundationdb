@@ -34,6 +34,32 @@
 #endif
 #include <functional>
 
+// Until we move to C++20, we'll need something to take the place of operator<=>.
+// This is as good a place as any, I guess.
+
+template <typename T>
+typename std::enable_if<std::is_integral<T>::value, int>::type compare(T l, T r) {
+	const int gt = l > r;
+	const int lt = l < r;
+	return gt - lt;
+	// GCC also emits branchless code for the following, but the above performs
+	// slightly better in benchmarks as of this writing.
+	// return l < r ? -1 : l == r ? 0 : 1;
+}
+
+template <typename T, typename U>
+typename std::enable_if<!std::is_integral<T>::value, int>::type compare(T const& l, U const& r) {
+	return l.compare(r);
+}
+
+template <class K, class V>
+int compare(std::pair<K, V> const& l, std::pair<K, V> const& r) {
+	if (int cmp = compare(l.first, r.first)) {
+		return cmp;
+	}
+	return compare(l.second, r.second);
+}
+
 class UID {
 	uint64_t part[2];
 public:
@@ -44,6 +70,12 @@ public:
 	std::string shortString() const;
 	bool isValid() const { return part[0] || part[1]; }
 
+	int compare(const UID& r) const {
+		if (int cmp = ::compare(part[0], r.part[0])) {
+			return cmp;
+		}
+		return ::compare(part[1], r.part[1]);
+	}
 	bool operator == ( const UID& r ) const { return part[0]==r.part[0] && part[1]==r.part[1]; }
 	bool operator != ( const UID& r ) const { return part[0]!=r.part[0] || part[1]!=r.part[1]; }
 	bool operator < ( const UID& r ) const { return part[0] < r.part[0] || (part[0] == r.part[0] && part[1] < r.part[1]); }

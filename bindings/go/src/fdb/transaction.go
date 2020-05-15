@@ -22,7 +22,7 @@
 
 package fdb
 
-// #define FDB_API_VERSION 620
+// #define FDB_API_VERSION 630
 // #include <foundationdb/fdb_c.h>
 import "C"
 
@@ -39,6 +39,7 @@ type ReadTransaction interface {
 	GetReadVersion() FutureInt64
 	GetDatabase() Database
 	Snapshot() Snapshot
+	GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64
 
 	ReadTransactor
 }
@@ -305,6 +306,28 @@ func (t Transaction) GetRange(r Range, options RangeOptions) RangeResult {
 	return t.getRange(r, options, false)
 }
 
+func (t *transaction) getEstimatedRangeSizeBytes(beginKey Key, endKey Key) FutureInt64 {
+	return &futureInt64{
+		future: newFuture(C.fdb_transaction_get_estimated_range_size_bytes(
+			t.ptr,
+			byteSliceToPtr(beginKey),
+			C.int(len(beginKey)),
+			byteSliceToPtr(endKey),
+			C.int(len(endKey)),
+		)),
+	}
+}
+
+// GetEstimatedRangeSizeBytes will get an estimate for the number of bytes
+// stored in the given range.
+func (t Transaction) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
+	beginKey, endKey := r.FDBRangeKeys()
+	return t.getEstimatedRangeSizeBytes(
+		beginKey.FDBKey(),
+		endKey.FDBKey(),
+	)
+}
+
 func (t *transaction) getReadVersion() FutureInt64 {
 	return &futureInt64{
 		future: newFuture(C.fdb_transaction_get_read_version(t.ptr)),
@@ -383,6 +406,9 @@ func (t *transaction) getApproximateSize() FutureInt64 {
 	}
 }
 
+// Returns a future that is the approximate transaction size so far in this
+// transaction, which is the summation of the estimated size of mutations,
+// read conflict ranges, and write conflict ranges.
 func (t Transaction) GetApproximateSize() FutureInt64 {
 	return t.getApproximateSize()
 }

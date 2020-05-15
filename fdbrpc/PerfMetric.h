@@ -81,30 +81,4 @@ private:
 	double value;
 };
 
-struct GlobalCounters {
-	vector<PerfIntCounter*> ints;
-	vector<PerfDoubleCounter*> doubles;
-
-	PerfDoubleCounter conflictTime;
-	PerfIntCounter conflictBatches;
-	PerfIntCounter conflictKeys;
-	PerfIntCounter conflictTransactions;
-
-	GlobalCounters() : 
-		conflictTime("Conflict detection time", doubles),
-		conflictBatches("Conflict batches", ints),
-		conflictKeys("Conflict keys", ints),
-		conflictTransactions("Conflict transactions", ints)
-	{
-	}
-	void clear() {
-		for(int i=0; i<ints.size(); i++)
-			ints[i]->clear();
-		for(int i=0; i<doubles.size(); i++)
-			doubles[i]->clear();
-	}
-};
-
-extern GlobalCounters g_counters;
-
 #endif

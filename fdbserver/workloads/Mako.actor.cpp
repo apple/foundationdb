@@ -4,15 +4,13 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/zipf.h"
-#include "fdbrpc/crc32c.h"
+#include "flow/crc32c.h"
 #include "flow/actorcompiler.h"
 
 
 
 enum {OP_GETREADVERSION, OP_GET, OP_GETRANGE, OP_SGET, OP_SGETRANGE, OP_UPDATE, OP_INSERT, OP_INSERTRANGE, OP_CLEAR, OP_SETCLEAR, OP_CLEARRANGE, OP_SETCLEARRANGE, OP_COMMIT, MAX_OP};
 enum {OP_COUNT, OP_RANGE};
-constexpr int MAXKEYVALUESIZE = 1000;
-constexpr int RANGELIMIT = 10000;
 struct MakoWorkload : TestWorkload {
 	uint64_t rowCount, seqNumLen, sampleSize, actorCountPerClient, keyBytes, maxValueBytes, minValueBytes, csSize, csCount, csPartitionSize, csStepSizeInPartition;
 	double testDuration, loadTime, warmingDelay, maxInsertRate, transactionsPerSecond, allowedLatency, periodicLoggingInterval, zipfConstant;
@@ -30,7 +28,7 @@ struct MakoWorkload : TestWorkload {
 	std::vector<ContinuousSample<double>> opLatencies;
 	// key used to store checkSum for given key range
 	std::vector<Key> csKeys;
-	// key prefix of for all generated keys 
+	// key prefix of for all generated keys
 	std::string keyPrefix;
 	int KEYPREFIXLEN;
 	const std::array<std::string, MAX_OP> opNames = {"GRV", "GET", "GETRANGE", "SGET", "SGETRANGE", "UPDATE", "INSERT", "INSERTRANGE", "CLEAR", "SETCLEAR", "CLEARRANGE", "SETCLEARRANGE", "COMMIT"};
@@ -74,13 +72,11 @@ struct MakoWorkload : TestWorkload {
 		minValueBytes = getOption( options, LiteralStringRef("minValueBytes"), maxValueBytes);
 		ASSERT(minValueBytes <= maxValueBytes);
 		// The inserted key is formatted as: fixed prefix('mako') + sequential number + padding('x')
-		// assume we want to insert 10000 rows with keyBytes set to 16, 
+		// assume we want to insert 10000 rows with keyBytes set to 16,
 		// then the key goes from 'mako00000xxxxxxx' to 'mako09999xxxxxxx'
 		seqNumLen = digits(rowCount);
 		// check keyBytes, maxValueBytes is valid
 		ASSERT(seqNumLen + KEYPREFIXLEN <= keyBytes);
-		ASSERT(keyBytes <= MAXKEYVALUESIZE);
-		ASSERT(maxValueBytes <= MAXKEYVALUESIZE);
 		// user input: a sequence of operations to be executed; e.g. "g10i5" means to do GET 10 times and Insert 5 times
 		// One operation type is defined as "<Type><Count>" or "<Type><Count>:<Range>".
 		// When Count is omitted, it's equivalent to setting it to 1.  (e.g. "g" is equivalent to "g1")
@@ -237,7 +233,7 @@ struct MakoWorkload : TestWorkload {
 	}
 
 	static void updateCSFlags(MakoWorkload* self, std::vector<bool>& flags, uint64_t startIdx, uint64_t endIdx){
-		// We deal with cases where rowCount % csCount != 0 and csPartitionSize % csSize != 0; 
+		// We deal with cases where rowCount % csCount != 0 and csPartitionSize % csSize != 0;
 		// In particular, all keys with index in range [csSize * csPartitionSize, rowCount) will not be used for checksum
 		// By the same way, for any i in range [0, csSize):
 		// keys with index in range [ i*csPartitionSize, i*csPartitionSize + csCount*csStepSizeInPartition) will not be used for checksum
@@ -250,7 +246,7 @@ struct MakoWorkload : TestWorkload {
 		// If all checksums need to be updated, just return
 		if (std::all_of(flags.begin(), flags.end(), [](bool flag){return flag;}))
 			return;
-		
+
 		if (startIdx + 1 == endIdx){
 			// single key case
 			startIdx = startIdx % self->csPartitionSize;
@@ -265,7 +261,7 @@ struct MakoWorkload : TestWorkload {
 			startIdx -= base;
 			endIdx -= base;
 			uint64_t startStepIdx = std::min(startIdx / self->csStepSizeInPartition, self->csCount - 1);
-			
+
 			// if changed range size is more than one csPartitionSize, which means every checksum needs to be updated
 			if ((endIdx - startIdx) < self->csPartitionSize){
 				uint64_t endStepIdx;
@@ -300,7 +296,7 @@ struct MakoWorkload : TestWorkload {
 			wait( delayUntil(start + elapsed));
 			TraceEvent((self->description() + "_CommitLatency").c_str()).detail("Mean", self->opLatencies[OP_COMMIT].mean()).detail("Median", self->opLatencies[OP_COMMIT].median()).detail("Percentile5", self->opLatencies[OP_COMMIT].percentile(.05)).detail("Percentile95", self->opLatencies[OP_COMMIT].percentile(.95)).detail("Count", self->opCounters[OP_COMMIT].getValue()).detail("Elapsed", elapsed);
 			TraceEvent((self->description() + "_GRVLatency").c_str()).detail("Mean", self->opLatencies[OP_GETREADVERSION].mean()).detail("Median", self->opLatencies[OP_GETREADVERSION].median()).detail("Percentile5", self->opLatencies[OP_GETREADVERSION].percentile(.05)).detail("Percentile95", self->opLatencies[OP_GETREADVERSION].percentile(.95)).detail("Count", self->opCounters[OP_GETREADVERSION].getValue());
-			
+
 			std::string ts = format("T=%04.0fs: ", elapsed);
 			self->periodicMetrics.push_back(PerfMetric(ts + "Transactions/sec", (self->xacts.getValue() - last_xacts) / self->periodicLoggingInterval, false));
 			self->periodicMetrics.push_back(PerfMetric(ts + "Operations/sec", (self->totalOps.getValue() - last_ops) / self->periodicLoggingInterval, false));
@@ -318,7 +314,7 @@ struct MakoWorkload : TestWorkload {
 			wait(bulkSetup(cx, self, self->rowCount, loadTime, self->insertionCountsToMeasure.empty(), self->warmingDelay,
 						self->maxInsertRate, self->insertionCountsToMeasure, ratesAtKeyCounts));
 
-			// This is the setup time 
+			// This is the setup time
 			self->loadTime = loadTime.getFuture().get();
 			// This is the rates of importing keys
 			self->ratesAtKeyCounts = ratesAtKeyCounts.getFuture().get();
@@ -379,10 +375,10 @@ struct MakoWorkload : TestWorkload {
 				// user-defined value: whether commit read-only ops or not; default is false
 				doCommit = self->commitGet;
 				for (i = 0; i < MAX_OP; ++i) {
-					if (i == OP_COMMIT) 
+					if (i == OP_COMMIT)
 						continue;
 					for (count = 0; count < self->operations[i][0]; ++count) {
-						range = std::min(RANGELIMIT, self->operations[i][1]);
+						range = self->operations[i][1];
 						rangeLen = digits(range);
 						// generate random key-val pair for operation
 						indBegin = self->getRandomKeyIndex(self->rowCount);
@@ -409,13 +405,13 @@ struct MakoWorkload : TestWorkload {
 						else if (i == OP_GET){
 							wait(logLatency(tr.get(rkey, false), &self->opLatencies[i]));
 						} else if (i == OP_GETRANGE){
-							wait(logLatency(tr.getRange(rkeyRangeRef, RANGELIMIT, false), &self->opLatencies[i]));
+							wait(logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, false), &self->opLatencies[i]));
 						}
 						else if (i == OP_SGET){
 							wait(logLatency(tr.get(rkey, true), &self->opLatencies[i]));
 						} else if (i == OP_SGETRANGE){
 							//do snapshot get range here
-							wait(logLatency(tr.getRange(rkeyRangeRef, RANGELIMIT, true), &self->opLatencies[i]));
+							wait(logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, true), &self->opLatencies[i]));
 						} else if (i == OP_UPDATE){
 							wait(logLatency(tr.get(rkey, false), &self->opLatencies[OP_GET]));
 							tr.set(rkey, rval);
@@ -497,7 +493,7 @@ struct MakoWorkload : TestWorkload {
 					throw;
 				else if (e.code() == error_code_not_committed)
 					++self->conflicts;
-				
+
 				wait(tr.onError(e));
 				++self->retries;
 			}
@@ -541,7 +537,7 @@ struct MakoWorkload : TestWorkload {
 		} else {
 			randomKeyIndex = deterministicRandom()->randomInt64(0, rowCount);
 		}
-		return randomKeyIndex;  
+		return randomKeyIndex;
 	}
 	void parseOperationsSpec() {
 		const char *ptr = operationsSpec.c_str();
@@ -632,8 +628,6 @@ struct MakoWorkload : TestWorkload {
 						ptr++;
 					}
 					/* set range */
-					if (num > RANGELIMIT)
-						TraceEvent(SevError, "TestFailure").detail("Reason", "RangeExceedLimit").detail("RangeLimit", RANGELIMIT).detail("Range", num);
 					operations[op][OP_RANGE] = num;
 				}
 			}
@@ -728,7 +722,7 @@ struct MakoWorkload : TestWorkload {
 	ACTOR static Future<Void> updateCSBeforeCommit(ReadYourWritesTransaction* tr, MakoWorkload* self, std::vector<bool>* flags){
 		if (!self->checksumVerification)
 			return Void();
-		
+
 		state int csIdx;
 		for (csIdx = 0; csIdx < self->csCount; ++csIdx){
 			if ((*flags)[csIdx]){

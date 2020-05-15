@@ -3,6 +3,7 @@ find_package(Threads REQUIRED)
 set(FLOW_SRCS
   ActorCollection.actor.cpp
   ActorCollection.h
+  Arena.cpp
   Arena.h
   AsioReactor.h
   CompressedInt.actor.cpp
@@ -51,6 +52,8 @@ set(FLOW_SRCS
   SystemMonitor.h
   TDMetric.actor.h
   TDMetric.cpp
+  TLSConfig.actor.cpp
+  TLSConfig.actor.h
   ThreadHelper.actor.h
   ThreadHelper.cpp
   ThreadPrimitives.cpp
@@ -58,25 +61,26 @@ set(FLOW_SRCS
   ThreadSafeQueue.h
   Trace.cpp
   Trace.h
+  TreeBenchmark.h
   UnitTest.cpp
   UnitTest.h
-  XmlTraceLogFormatter.h
   XmlTraceLogFormatter.cpp
+  XmlTraceLogFormatter.h
   actorcompiler.h
 	crc32c.h
   crc32c.cpp
   error_definitions.h
   ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h
-  flat_buffers.h
   flat_buffers.cpp
+  flat_buffers.h
   flow.cpp
   flow.h
   genericactors.actor.cpp
   genericactors.actor.h
   network.cpp
   network.h
-  serialize.h
   serialize.cpp
+  serialize.h
   stacktrace.amalgamation.cpp
   stacktrace.h
   version.cpp)
@@ -84,15 +88,20 @@ set(FLOW_SRCS
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)
 
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
-target_include_directories(flow PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 if (NOT APPLE AND NOT WIN32)
   set (FLOW_LIBS ${FLOW_LIBS} rt)
 elseif(WIN32)
   target_link_libraries(flow PUBLIC winmm.lib)
   target_link_libraries(flow PUBLIC psapi.lib)
 endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  set (FLOW_LIBS ${FLOW_LIBS} execinfo devstat)
+  find_library(EIO eio)
+  if(EIO)
+    target_link_libraries(flow PUBLIC ${EIO})
+  endif()
+endif()
 target_link_libraries(flow PRIVATE ${FLOW_LIBS})
-target_link_libraries(flow PUBLIC boost_target Threads::Threads ${CMAKE_DL_LIBS})
 if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)
 endif()
@@ -100,7 +109,11 @@ endif()
 if(NOT WITH_TLS OR OPEN_FOR_IDE)
   target_compile_definitions(flow PUBLIC TLS_DISABLED)
 else()
-  target_link_libraries(flow PUBLIC FDBLibTLS)
+  target_link_libraries(flow PUBLIC OpenSSL::SSL)
+endif()
+target_link_libraries(flow PUBLIC boost_target Threads::Threads ${CMAKE_DL_LIBS})
+if(USE_VALGRIND)
+  target_link_libraries(flow PUBLIC Valgrind)
 endif()
 
 if(APPLE)

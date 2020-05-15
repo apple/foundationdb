@@ -41,6 +41,10 @@
 #include <linux/mman.h>
 #endif
 
+#ifdef __FreeBSD__
+#include <sys/mman.h>
+#endif
+
 #define FAST_ALLOCATOR_DEBUG 0
 
 #ifdef _MSC_VER
@@ -48,8 +52,13 @@
 #pragma warning (disable: 4073)
 #pragma init_seg(lib)
 #define INIT_SEG
+#elif defined(__INTEL_COMPILER)
+// intel compiler ignored INIT_SEG for thread local variables
+#define INIT_SEG
 #elif defined(__GNUG__)
 #ifdef __linux__
+#define INIT_SEG __attribute__ ((init_priority (1000)))
+#elif defined(__FreeBSD__)
 #define INIT_SEG __attribute__ ((init_priority (1000)))
 #elif defined(__APPLE__)
 #pragma message "init_priority is not supported on this platform; will this be a problem?"
@@ -454,8 +463,10 @@ void FastAllocator<Size>::getMagazine() {
 	// FIXME: We should be able to allocate larger magazine sizes here if we
 	// detect that the underlying system supports hugepages.  Using hugepages
 	// with smaller-than-2MiB magazine sizes strands memory.  See issue #909.
-	if(FLOW_KNOBS && g_trace_depth == 0 && nondeterministicRandom()->random01() < (magazine_size * Size)/FLOW_KNOBS->FAST_ALLOC_LOGGING_BYTES) {
+	if(FLOW_KNOBS && g_allocation_tracing_disabled == 0 && nondeterministicRandom()->random01() < (magazine_size * Size)/FLOW_KNOBS->FAST_ALLOC_LOGGING_BYTES) {
+		++g_allocation_tracing_disabled;
 		TraceEvent("GetMagazineSample").detail("Size", Size).backtrace();
+		--g_allocation_tracing_disabled;
 	}
 	block = (void **)::allocate(magazine_size * Size, false);
 #endif

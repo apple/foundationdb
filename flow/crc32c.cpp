@@ -29,12 +29,14 @@
 
 #define NOMINMAX
 
+#ifndef __aarch64__
 #include <nmmintrin.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <random>
 #include <algorithm>
-#include "fdbrpc/Platform.h"
+#include "flow/Platform.h"
 #include "crc32c-generated-constants.cpp"
 
 static uint32_t append_trivial(uint32_t crc, const uint8_t * input, size_t length)
@@ -170,8 +172,9 @@ static inline uint32_t shift_crc(uint32_t shift_table[][256], uint32_t crc)
         ^ shift_table[3][crc >> 24];
 }
 
-/* Compute CRC-32C using the Intel hardware instruction. */
-#if defined(__clang__) || defined(__GNUG__)
+/* Compute CRC-32C using the hardware instruction. */
+#if (defined(__clang__) || defined(__GNUG__)) && (!defined(__aarch64__))
+/* Enable SSE CEC instructions on Intel processor */
 __attribute__((target("sse4.2")))
 #endif
 static uint32_t append_hw(uint32_t crc, const uint8_t * buf, size_t len)
@@ -191,7 +194,7 @@ static uint32_t append_hw(uint32_t crc, const uint8_t * buf, size_t len)
        to an eight-byte boundary */
     while (len && ((uintptr_t)next & 7) != 0)
     {
-        crc0 = _mm_crc32_u8(static_cast<uint32_t>(crc0), *next);
+        crc0 = hwCrc32cU8(static_cast<uint32_t>(crc0), *next);
         ++next;
         --len;
     }
@@ -208,9 +211,9 @@ static uint32_t append_hw(uint32_t crc, const uint8_t * buf, size_t len)
         end = next + LONG_SHIFT;
         do
         {
-            crc0 = _mm_crc32_u64(crc0, *reinterpret_cast<const uint64_t *>(next));
-            crc1 = _mm_crc32_u64(crc1, *reinterpret_cast<const uint64_t *>(next + LONG_SHIFT));
-            crc2 = _mm_crc32_u64(crc2, *reinterpret_cast<const uint64_t *>(next + 2 * LONG_SHIFT));
+            crc0 = hwCrc32cU64(crc0, *reinterpret_cast<const uint64_t *>(next));
+            crc1 = hwCrc32cU64(crc1, *reinterpret_cast<const uint64_t *>(next + LONG_SHIFT));
+            crc2 = hwCrc32cU64(crc2, *reinterpret_cast<const uint64_t *>(next + 2 * LONG_SHIFT));
             next += 8;
         } while (next < end);
         crc0 = shift_crc(long_shifts, static_cast<uint32_t>(crc0)) ^ crc1;
@@ -228,9 +231,9 @@ static uint32_t append_hw(uint32_t crc, const uint8_t * buf, size_t len)
         end = next + SHORT_SHIFT;
         do
         {
-            crc0 = _mm_crc32_u64(crc0, *reinterpret_cast<const uint64_t *>(next));
-            crc1 = _mm_crc32_u64(crc1, *reinterpret_cast<const uint64_t *>(next + SHORT_SHIFT));
-            crc2 = _mm_crc32_u64(crc2, *reinterpret_cast<const uint64_t *>(next + 2 * SHORT_SHIFT));
+            crc0 = hwCrc32cU64(crc0, *reinterpret_cast<const uint64_t *>(next));
+            crc1 = hwCrc32cU64(crc1, *reinterpret_cast<const uint64_t *>(next + SHORT_SHIFT));
+            crc2 = hwCrc32cU64(crc2, *reinterpret_cast<const uint64_t *>(next + 2 * SHORT_SHIFT));
             next += 8;
         } while (next < end);
         crc0 = shift_crc(short_shifts, static_cast<uint32_t>(crc0)) ^ crc1;
@@ -244,7 +247,7 @@ static uint32_t append_hw(uint32_t crc, const uint8_t * buf, size_t len)
     end = next + (len - (len & 7));
     while (next < end)
     {
-        crc0 = _mm_crc32_u64(crc0, *reinterpret_cast<const uint64_t *>(next));
+        crc0 = hwCrc32cU64(crc0, *reinterpret_cast<const uint64_t *>(next));
         next += 8;
     }
 #else
@@ -259,9 +262,9 @@ static uint32_t append_hw(uint32_t crc, const uint8_t * buf, size_t len)
         end = next + LONG_SHIFT;
         do
         {
-            crc0 = _mm_crc32_u32(crc0, *reinterpret_cast<const uint32_t *>(next));
-            crc1 = _mm_crc32_u32(crc1, *reinterpret_cast<const uint32_t *>(next + LONG_SHIFT));
-            crc2 = _mm_crc32_u32(crc2, *reinterpret_cast<const uint32_t *>(next + 2 * LONG_SHIFT));
+            crc0 = hwCrc32cU32(crc0, *reinterpret_cast<const uint32_t *>(next));
+            crc1 = hwCrc32cU32(crc1, *reinterpret_cast<const uint32_t *>(next + LONG_SHIFT));
+            crc2 = hwCrc32cU32(crc2, *reinterpret_cast<const uint32_t *>(next + 2 * LONG_SHIFT));
             next += 4;
         } while (next < end);
         crc0 = shift_crc(long_shifts, static_cast<uint32_t>(crc0)) ^ crc1;
@@ -279,9 +282,9 @@ static uint32_t append_hw(uint32_t crc, const uint8_t * buf, size_t len)
         end = next + SHORT_SHIFT;
         do
         {
-            crc0 = _mm_crc32_u32(crc0, *reinterpret_cast<const uint32_t *>(next));
-            crc1 = _mm_crc32_u32(crc1, *reinterpret_cast<const uint32_t *>(next + SHORT_SHIFT));
-            crc2 = _mm_crc32_u32(crc2, *reinterpret_cast<const uint32_t *>(next + 2 * SHORT_SHIFT));
+            crc0 = hwCrc32cU32(crc0, *reinterpret_cast<const uint32_t *>(next));
+            crc1 = hwCrc32cU32(crc1, *reinterpret_cast<const uint32_t *>(next + SHORT_SHIFT));
+            crc2 = hwCrc32cU32(crc2, *reinterpret_cast<const uint32_t *>(next + 2 * SHORT_SHIFT));
             next += 4;
         } while (next < end);
         crc0 = shift_crc(short_shifts, static_cast<uint32_t>(crc0)) ^ crc1;
@@ -295,7 +298,7 @@ static uint32_t append_hw(uint32_t crc, const uint8_t * buf, size_t len)
     end = next + (len - (len & 7));
     while (next < end)
     {
-        crc0 = _mm_crc32_u32(crc0, *reinterpret_cast<const uint32_t *>(next));
+        crc0 = hwCrc32cU32(crc0, *reinterpret_cast<const uint32_t *>(next));
         next += 4;
     }
 #endif
@@ -304,7 +307,7 @@ static uint32_t append_hw(uint32_t crc, const uint8_t * buf, size_t len)
     /* compute the crc for up to seven trailing bytes */
     while (len)
     {
-        crc0 = _mm_crc32_u8(static_cast<uint32_t>(crc0), *next);
+        crc0 = hwCrc32cU8(static_cast<uint32_t>(crc0), *next);
         ++next;
         --len;
     }
@@ -314,7 +317,7 @@ static uint32_t append_hw(uint32_t crc, const uint8_t * buf, size_t len)
 }
 
 
-static bool hw_available = platform::isSse42Supported();
+static bool hw_available = platform::isHwCrcSupported();
 
 extern "C" uint32_t crc32c_append(uint32_t crc, const uint8_t * input, size_t length)
 {

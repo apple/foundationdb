@@ -95,6 +95,7 @@ struct LogRouterData {
 
 	CounterCollection cc;
 	Future<Void> logger;
+	Reference<EventCacheHolder> eventCacheHolder;
 
 	std::vector<Reference<TagData>> tag_data; //we only store data for the remote tag locality
 
@@ -130,8 +131,11 @@ struct LogRouterData {
 			}
 		}
 
+		eventCacheHolder = Reference<EventCacheHolder>( new EventCacheHolder(dbgid.shortString() + ".PeekLocation") );
+
 		specialCounter(cc, "Version", [this](){return this->version.get(); });
 		specialCounter(cc, "MinPopped", [this](){return this->minPopped.get(); });
+		specialCounter(cc, "FetchedVersions", [this](){ return std::max<Version>(0, std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, this->version.get() - this->minPopped.get())); });
 		specialCounter(cc, "MinKnownCommittedVersion", [this](){ return this->minKnownCommittedVersion; });
 		specialCounter(cc, "PoppedVersion", [this](){ return this->poppedVersion; });
 		logger = traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LogRouterMetrics");
@@ -224,15 +228,20 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 	state std::vector<int> tags; // an optimization to avoid reallocating vector memory in every loop
 
 	loop {
-		loop choose {
-			when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
-			when(wait(dbInfoChange)) { // FIXME: does this actually happen?
-				if (self->logSystem->get()) {
-					r = self->logSystem->get()->peekLogRouter(self->dbgid, tagAt, self->routerTag);
-				} else {
-					r = Reference<ILogSystem::IPeekCursor>();
+		loop {
+			choose {
+				when(wait( r ? r->getMore(TaskPriority::TLogCommit) : Never() ) ) {
+					break;
 				}
-				dbInfoChange = self->logSystem->onChange();
+				when( wait( dbInfoChange ) ) { //FIXME: does this actually happen?
+					if( self->logSystem->get() ) {
+						r = self->logSystem->get()->peekLogRouter( self->dbgid, tagAt, self->routerTag );
+						TraceEvent("LogRouterPeekLocation", self->dbgid).detail("LogID", r->getPrimaryPeekLocation()).trackLatest(self->eventCacheHolder->trackingKey);
+					} else {
+						r = Reference<ILogSystem::IPeekCursor>();
+					}
+					dbInfoChange = self->logSystem->onChange();
+				}
 			}
 		}
 
@@ -338,7 +347,7 @@ ACTOR Future<Void> logRouterPeekMessages( LogRouterData* self, TLogPeekRequest r
 			peekId = req.sequence.get().first;
 			sequence = req.sequence.get().second;
 			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->peekTracker.find(peekId) == self->peekTracker.end()) {
-				throw timed_out();
+				throw operation_obsolete();
 			}
 			auto& trackerData = self->peekTracker[peekId];
 			if (sequence == 0 && trackerData.sequence_version.find(0) == trackerData.sequence_version.end()) {
@@ -520,7 +529,7 @@ ACTOR Future<Void> logRouterCore(
 	loop choose {
 		when( wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
-			logRouterData.allowPops = db->get().recoveryState == RecoveryState::FULLY_RECOVERED;
+			logRouterData.allowPops = db->get().recoveryState == RecoveryState::FULLY_RECOVERED && db->get().recoveryCount >= req.recoveryCount;
 			logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get(), true ));
 		}
 		when( TLogPeekRequest req = waitNext( interf.peekMessages.getFuture() ) ) {

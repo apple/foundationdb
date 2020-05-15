@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ######################################################
 #
 # FoundationDB Binding Test Script
@@ -25,7 +25,8 @@ BREAKONERROR="${BREAKONERROR:-0}"
 RUNSCRIPTS="${RUNSCRIPTS:-1}"
 RUNTESTS="${RUNTESTS:-1}"
 RANDOMTEST="${RANDOMTEST:-0}"
-BINDINGTESTS="${BINDINGTESTS:-python python3 java java_async ruby go flow}"
+# BINDINGTESTS="${BINDINGTESTS:-python python3 java java_async ruby go flow}"
+BINDINGTESTS="${BINDINGTESTS:-python python3 java java_async go flow}"
 LOGLEVEL="${LOGLEVEL:-INFO}"
 _BINDINGTESTS=(${BINDINGTESTS})
 DISABLEDTESTS=()

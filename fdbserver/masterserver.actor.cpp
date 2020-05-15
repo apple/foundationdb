@@ -33,7 +33,6 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h"  // copy constructors for ServerCoordinators class
@@ -478,13 +477,20 @@ ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILo
 
 		trigger = self->registrationTrigger.onTrigger();
 
-		TraceEvent("MasterUpdateRegistration", self->dbgid).detail("RecoveryCount", self->cstate.myDBState.recoveryCount).detail("Logs", describe(logSystem->getLogSystemConfig().tLogs));
+		auto logSystemConfig = logSystem->getLogSystemConfig();
+		TraceEvent("MasterUpdateRegistration", self->dbgid)
+		    .detail("RecoveryCount", self->cstate.myDBState.recoveryCount)
+		    .detail("OldestBackupEpoch", logSystemConfig.oldestBackupEpoch)
+		    .detail("Logs", describe(logSystemConfig.tLogs));
 
 		if (!self->cstateUpdated.isSet()) {
-			wait(sendMasterRegistration(self.getPtr(), logSystem->getLogSystemConfig(), self->provisionalProxies, self->resolvers, self->cstate.myDBState.recoveryCount, self->cstate.prevDBState.getPriorCommittedLogServers() ));
+			wait(sendMasterRegistration(self.getPtr(), logSystemConfig, self->provisionalProxies, self->resolvers,
+			                            self->cstate.myDBState.recoveryCount,
+			                            self->cstate.prevDBState.getPriorCommittedLogServers()));
 		} else {
 			updateLogsKey = updateLogsValue(self, cx);
-			wait( sendMasterRegistration( self.getPtr(), logSystem->getLogSystemConfig(), self->proxies, self->resolvers, self->cstate.myDBState.recoveryCount, vector<UID>() ) );
+			wait(sendMasterRegistration(self.getPtr(), logSystemConfig, self->proxies, self->resolvers,
+			                            self->cstate.myDBState.recoveryCount, vector<UID>()));
 		}
 	}
 }
@@ -495,7 +501,6 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 	// Register a fake master proxy (to be provided right here) to make ourselves available to clients
 	parent->provisionalProxies = vector<MasterProxyInterface>(1);
 	parent->provisionalProxies[0].provisional = true;
-	parent->provisionalProxies[0].locality = parent->myInterface.locality;
 	parent->provisionalProxies[0].initEndpoints();
 	state Future<Void> waitFailure = waitFailureServer(parent->provisionalProxies[0].waitFailure.getFuture());
 	parent->registrationTrigger.trigger();
@@ -672,8 +677,8 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	TraceEvent("MasterRecovering", self->dbgid).detail("LastEpochEnd", self->lastEpochEnd).detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
 
-	Standalone<VectorRef<KeyValueRef>> rawConf = wait( self->txnStateStore->readRange( configKeys ) );
-	self->configuration.fromKeyValues( rawConf );
+	Standalone<RangeResultRef> rawConf = wait( self->txnStateStore->readRange( configKeys ) );
+	self->configuration.fromKeyValues( rawConf.castTo<VectorRef<KeyValueRef>>() );
 	self->originalConfiguration = self->configuration;
 	self->hasConfiguration = true;
 
@@ -683,13 +688,13 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 		.detail("Conf", self->configuration.toString())
 		.trackLatest("RecoveredConfig");
 
-	Standalone<VectorRef<KeyValueRef>> rawLocalities = wait( self->txnStateStore->readRange( tagLocalityListKeys ) );
+	Standalone<RangeResultRef> rawLocalities = wait( self->txnStateStore->readRange( tagLocalityListKeys ) );
 	self->dcId_locality.clear();
 	for(auto& kv : rawLocalities) {
 		self->dcId_locality[decodeTagLocalityListKey(kv.key)] = decodeTagLocalityListValue(kv.value);
 	}
 
-	Standalone<VectorRef<KeyValueRef>> rawTags = wait( self->txnStateStore->readRange( serverTagKeys ) );
+	Standalone<RangeResultRef> rawTags = wait( self->txnStateStore->readRange( serverTagKeys ) );
 	self->allTags.clear();
 	if(self->lastEpochEnd > 0) {
 		self->allTags.push_back(cacheTag);
@@ -709,7 +714,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 		}
 	}
 
-	Standalone<VectorRef<KeyValueRef>> rawHistoryTags = wait( self->txnStateStore->readRange( serverTagHistoryKeys ) );
+	Standalone<RangeResultRef> rawHistoryTags = wait( self->txnStateStore->readRange( serverTagHistoryKeys ) );
 	for(auto& kv : rawHistoryTags) {
 		self->allTags.push_back(decodeServerTagValue( kv.value ));
 	}
@@ -732,23 +737,28 @@ ACTOR Future<Void> sendInitialCommitToResolvers( Reference<MasterData> self ) {
 	state Sequence txnSequence = 0;
 	ASSERT(self->recoveryTransactionVersion);
 
-	state Standalone<VectorRef<KeyValueRef>> data = self->txnStateStore->readRange(txnKeys, BUGGIFY ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES).get();
-	state vector<Future<Void>> txnReplies;
+	state Standalone<RangeResultRef> data = self->txnStateStore->readRange(txnKeys, BUGGIFY ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES).get();
+	state std::vector<Future<Void>> txnReplies;
 	state int64_t dataOutstanding = 0;
+
+	state std::vector<Endpoint> endpoints;
+	for(auto& it : self->proxies) {
+		endpoints.push_back(it.txnState.getEndpoint());
+	}
+
 	loop {
 		if(!data.size()) break;
 		((KeyRangeRef&)txnKeys) = KeyRangeRef( keyAfter(data.back().key, txnKeys.arena()), txnKeys.end );
-		Standalone<VectorRef<KeyValueRef>> nextData = self->txnStateStore->readRange(txnKeys, BUGGIFY ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES).get();
+		Standalone<RangeResultRef> nextData = self->txnStateStore->readRange(txnKeys, BUGGIFY ? 3 : SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES).get();
 
-		for(auto& r : self->proxies) {
-			TxnStateRequest req;
-			req.arena = data.arena();
-			req.data = data;
-			req.sequence = txnSequence;
-			req.last = !nextData.size();
-			txnReplies.push_back( brokenPromiseToNever( r.txnState.getReply( req ) ) );
-			dataOutstanding += data.arena().getSize();
-		}
+		TxnStateRequest req;
+		req.arena = data.arena();
+		req.data = data;
+		req.sequence = txnSequence;
+		req.last = !nextData.size();
+		req.broadcastInfo = endpoints;
+		txnReplies.push_back(broadcastTxnRequest(req, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, false));
+		dataOutstanding += SERVER_KNOBS->TXN_STATE_SEND_AMOUNT*data.arena().getSize();
 		data = nextData;
 		txnSequence++;
 
@@ -1172,6 +1182,10 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 			.detail("StatusCode", RecoveryStatus::fully_recovered)
 			.detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
 			.trackLatest("MasterRecoveryState");
+
+			TraceEvent("MasterRecoveryGenerations", self->dbgid)
+			.detail("ActiveGenerations", 1)
+			.trackLatest("MasterRecoveryGenerations");
 		} else if( !newState.oldTLogData.size() && self->recoveryState < RecoveryState::STORAGE_RECOVERED ) {
 			self->recoveryState = RecoveryState::STORAGE_RECOVERED;
 			TraceEvent("MasterRecoveryState", self->dbgid)
@@ -1234,8 +1248,40 @@ ACTOR Future<Void> configurationMonitor(Reference<MasterData> self, Database cx)
 	}
 }
 
+ACTOR static Future<Optional<Version>> getMinBackupVersion(Reference<MasterData> self, Database cx) {
+	loop {
+		state ReadYourWritesTransaction tr(cx);
+
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> value = wait(tr.get(backupStartedKey));
+			Optional<Version> minVersion;
+			if (value.present()) {
+				auto uidVersions = decodeBackupStartedValue(value.get());
+				TraceEvent e("GotBackupStartKey", self->dbgid);
+				int i = 1;
+				for (auto [uid, version] : uidVersions) {
+					e.detail(format("BackupID%d", i), uid).detail(format("Version%d", i), version);
+					i++;
+					minVersion = minVersion.present() ? std::min(version, minVersion.get()) : version;
+				}
+			} else {
+				TraceEvent("EmptyBackupStartKey", self->dbgid);
+			}
+			return minVersion;
+
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Database cx) {
 	ASSERT(self->backupWorkers.size() > 0);
+
+	// Avoid race between a backup worker's save progress and the reads below.
+	wait(delay(SERVER_KNOBS->SECONDS_BEFORE_RECRUIT_BACKUP_WORKER));
 
 	state LogEpoch epoch = self->cstate.myDBState.recoveryCount;
 	state Reference<BackupProgress> backupProgress(
@@ -1249,7 +1295,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 		idsTags.emplace_back(deterministicRandom()->randomUniqueID(), Tag(tagLocalityLogRouter, i));
 	}
 
-	const Version startVersion = self->logSystem->getStartVersion();
+	const Version startVersion = self->logSystem->getBackupStartVersion();
 	state int i = 0;
 	for (; i < logRouterTags; i++) {
 		const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
@@ -1257,9 +1303,10 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 		req.recruitedEpoch = epoch;
 		req.backupEpoch = epoch;
 		req.routerTag = idsTags[i].second;
+		req.totalTags = logRouterTags;
 		req.startVersion = startVersion;
 		TraceEvent("BackupRecruitment", self->dbgid)
-		    .detail("BKID", req.reqId)
+		    .detail("RequestID", req.reqId)
 		    .detail("Tag", req.routerTag.toString())
 		    .detail("Epoch", epoch)
 		    .detail("BackupEpoch", epoch)
@@ -1270,20 +1317,34 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 		                    master_backup_worker_failed()));
 	}
 
-	wait(gotProgress);
-	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> toRecruit = backupProgress->getUnfinishedBackup();
-	for (const auto& [epochVersion, tagVersions] : toRecruit) {
+	state Future<Optional<Version>> fMinVersion = getMinBackupVersion(self, cx);
+	wait(gotProgress && success(fMinVersion));
+	TraceEvent("MinBackupVersion", self->dbgid).detail("Version", fMinVersion.get().present() ? fMinVersion.get() : -1);
+
+	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit =
+	    backupProgress->getUnfinishedBackup();
+	for (const auto& [epochVersionTags, tagVersions] : toRecruit) {
+		const Version oldEpochEnd = std::get<1>(epochVersionTags);
+		if (!fMinVersion.get().present() || fMinVersion.get().get() + 1 >= oldEpochEnd) {
+			TraceEvent("SkipBackupRecruitment", self->dbgid)
+			    .detail("MinVersion", fMinVersion.get().present() ? fMinVersion.get() : -1)
+			    .detail("Epoch", epoch)
+			    .detail("OldEpoch", std::get<0>(epochVersionTags))
+			    .detail("OldEpochEnd", oldEpochEnd);
+			continue;
+		}
 		for (const auto& [tag, version] : tagVersions) {
 			const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
 			i++;
 			InitializeBackupRequest req(deterministicRandom()->randomUniqueID());
 			req.recruitedEpoch = epoch;
-			req.backupEpoch = epochVersion.first;
+			req.backupEpoch = std::get<0>(epochVersionTags);
 			req.routerTag = tag;
+			req.totalTags = std::get<2>(epochVersionTags);
 			req.startVersion = version; // savedVersion + 1
-			req.endVersion = epochVersion.second - 1;
+			req.endVersion = std::get<1>(epochVersionTags) - 1;
 			TraceEvent("BackupRecruitment", self->dbgid)
-			    .detail("BKID", req.reqId)
+			    .detail("RequestID", req.reqId)
 			    .detail("Tag", req.routerTag.toString())
 			    .detail("Epoch", epoch)
 			    .detail("BackupEpoch", req.backupEpoch)
@@ -1324,12 +1385,29 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		.detail("StatusCode", RecoveryStatus::locking_coordinated_state)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::locking_coordinated_state])
 		.detail("TLogs", self->cstate.prevDBState.tLogs.size())
+		.detail("ActiveGenerations", self->cstate.myDBState.oldTLogData.size() + 1)
 		.detail("MyRecoveryCount", self->cstate.prevDBState.recoveryCount+2)
 		.detail("ForceRecovery", self->forceRecovery)
 		.trackLatest("MasterRecoveryState");
 	//for (const auto& old : self->cstate.prevDBState.oldTLogData) {
 	//	TraceEvent("BWReadCoreState", self->dbgid).detail("Epoch", old.epoch).detail("Version", old.epochEnd);
 	//}
+
+	TraceEvent("MasterRecoveryGenerations", self->dbgid)
+		.detail("ActiveGenerations", self->cstate.myDBState.oldTLogData.size() + 1)
+		.trackLatest("MasterRecoveryGenerations");
+
+	if (self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->MAX_GENERATIONS_OVERRIDE) {
+		if (self->cstate.myDBState.oldTLogData.size() >= CLIENT_KNOBS->MAX_GENERATIONS) {
+			TraceEvent(SevError, "RecoveryStoppedTooManyOldGenerations").detail("OldGenerations", self->cstate.myDBState.oldTLogData.size())
+				.detail("Reason", "Recovery stopped because too many recoveries have happened since the last time the cluster was fully_recovered. Set --knob_max_generations_override on your server processes to a value larger than OldGenerations to resume recovery once the underlying problem has been fixed.");
+			wait(Future<Void>(Never()));
+		} else if (self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION) {
+			TraceEvent(SevError, "RecoveryDelayedTooManyOldGenerations").detail("OldGenerations", self->cstate.myDBState.oldTLogData.size())
+				.detail("Reason", "Recovery is delayed because too many recoveries have happened since the last time the cluster was fully_recovered. Set --knob_max_generations_override on your server processes to a value larger than OldGenerations to resume recovery once the underlying problem has been fixed.");
+			wait(delay(CLIENT_KNOBS->RECOVERY_DELAY_SECONDS_PER_GENERATION*(self->cstate.myDBState.oldTLogData.size() - CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION)));
+		}
+	}
 
 	state Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems( new AsyncVar<Reference<ILogSystem>> );
 	state Future<Void> recoverAndEndEpoch = ILogSystem::recoverAndEndEpoch(oldLogSystems, self->dbgid, self->cstate.prevDBState, self->myInterface.tlogRejoin.getFuture(), self->myInterface.locality, &self->forceRecovery);
@@ -1363,7 +1441,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 			when (wait( oldLogSystem ? recoverFrom(self, oldLogSystem, &seedServers, &initialConfChanges, poppedTxsVersion) : Never() )) { reg.cancel(); break; }
 			when (wait( oldLogSystems->onChange() )) {}
 			when (wait( reg )) { throw internal_error(); }
-			when (wait( recoverAndEndEpoch )) {}
+			when(wait(recoverAndEndEpoch)) { throw internal_error(); }
 		}
 	}
 
@@ -1525,7 +1603,11 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	self->addActor.send( changeCoordinators(self) );
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, true, true);
 	self->addActor.send(configurationMonitor(self, cx));
-	self->addActor.send(recruitBackupWorkers(self, cx));
+	if (self->configuration.backupWorkerEnabled) {
+		self->addActor.send(recruitBackupWorkers(self, cx));
+	} else {
+		self->logSystem->setOldestBackupEpoch(self->cstate.myDBState.recoveryCount);
+	}
 
 	wait( Future<Void>(Never()) );
 	throw internal_error();

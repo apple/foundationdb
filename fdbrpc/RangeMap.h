@@ -78,16 +78,16 @@ public:
 
 		Range range() { return Range(begin(),end()); }
 
-		Val& value() { 
+		Val& value() {
 			//ASSERT( it->key != allKeys.end );
-			return it->value; 
+			return it->value;
 		}
 
 		void operator ++() { ++it; }
 		void operator --() { it.decrementNonEnd(); }
 		bool operator ==(Iterator const& r) const { return it == r.it; }
 		bool operator !=(Iterator const& r) const { return it != r.it; }
-		
+
 		// operator* and -> return this
 		Iterator& operator*() { return *this; }
 		Iterator* operator->() { return this; }
@@ -112,6 +112,7 @@ public:
 	Val const& operator[]( const Key& k ) { return rangeContaining(k).value(); }
 
 	Ranges ranges() { return Ranges( Iterator(map.begin()), Iterator(map.lastItem()) ); }
+	// intersectingRanges returns [begin, end] where begin <= r.begin and end >= r.end
 	Ranges intersectingRanges( const Range& r ) { return Ranges(rangeContaining(r.begin), Iterator(map.lower_bound(r.end))); }
 	// containedRanges() will return all ranges that are fully contained by the passed range (note that a range fully contains itself)
 	Ranges containedRanges( const Range& r ) { 
@@ -131,10 +132,10 @@ public:
 		--i;
 		return i;
 	}
-	Iterator lastItem() { 
+	Iterator lastItem() {
 		auto i = map.lastItem();
 		i.decrementNonEnd();
-		return Iterator(i); 
+		return Iterator(i);
 	}
 	int size() const { return map.size() - 1; } // We always have one range bounded by two entries
 	Iterator randomRange() {

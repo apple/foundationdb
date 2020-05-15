@@ -190,6 +190,9 @@
                },
                "megabits_received":{
                   "hz":0.0
+               },
+               "tls_policy_failures":{
+                  "hz":0.0
                }
             },
             "run_loop_busy":0.2 // fraction of time the run loop was busy
@@ -264,6 +267,8 @@
          "transactions_per_second_limit":0,
          "batch_released_transactions_per_second":0,
          "released_transactions_per_second":0,
+         "batch_tags_throttled":0,
+         "tags_throttled":0,
          "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,
          "limiting_version_lag_storage_server":0,
@@ -364,7 +369,9 @@
                   "layer_status_incomplete",
                   "database_availability_timeout",
                   "consistencycheck_suspendkey_fetch_timeout",
-                  "consistencycheck_disabled"
+                  "consistencycheck_disabled",
+                  "primary_dc_missing",
+                  "fetch_primary_dc_timeout"
                ]
             },
             "issues":[
@@ -404,6 +411,7 @@
          },
          "required_logs":3,
          "missing_logs":"7f8d623d0cb9966e",
+         "active_generations":1,
          "description":"Recovery complete."
       },
       "workload":{
@@ -419,6 +427,16 @@
                "roughness":0.0
             },
             "read_requests":{ // measures number of incoming read requests
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "location_requests":{ // measures number of outgoing key server location responses
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "memory_errors":{ // measures number of proxy_memory_limit_exceeded errors
                "hz":0.0,
                "counter":0,
                "roughness":0.0
@@ -557,6 +575,7 @@
          "auto_proxies":3,
          "auto_resolvers":1,
          "auto_logs":3,
+         "backup_worker_enabled":1,
          "proxies":5 // this field will be absent if a value has not been explicitly set
       },
       "data":{
@@ -571,6 +590,7 @@
                   "missing_data",
                   "healing",
                   "optimizing_team_collections",
+                  "healthy_populating_region",
                   "healthy_repartitioning",
                   "healthy_removing_server",
                   "healthy_rebalancing",
@@ -605,6 +625,7 @@
                           "missing_data",
                           "healing",
                           "optimizing_team_collections",
+                          "healthy_populating_region",
                           "healthy_repartitioning",
                           "healthy_removing_server",
                           "healthy_rebalancing",
