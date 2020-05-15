@@ -1921,20 +1921,6 @@ int main(int argc, char* argv[]) {
 			cout << "  " << i->second << " " << i->first << endl;*/
 		//	cout << "  " << Actor::allActors[i]->getName() << endl;
 
-		int total = 0;
-		for(auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
-			total += i->second;
-		if (total)
-			printf("%d errors:\n", total);
-		for(auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
-			if (i->second > 0)
-				printf("  %d: %d %s\n", i->second, i->first, Error::fromCode(i->first).what());
-
-		if (&g_simulator == g_network) {
-			auto processes = g_simulator.getAllProcesses();
-			for(auto i = processes.begin(); i != processes.end(); ++i)
-				printf("%s %s: %0.3f Mclocks\n", (*i)->name, (*i)->address.toString().c_str(), (*i)->cpuTicks / 1e6);
-		}
 		if (role == Simulation) {
 			unsigned long sevErrorEventsLogged = TraceEvent::CountEventsLoggedAt(SevError);
 			if (sevErrorEventsLogged > 0) {
