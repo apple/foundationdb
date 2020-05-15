@@ -108,8 +108,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
-		wait(timeout(self->getRangeCallActor(cx, self) && testConflictRanges(cx, /*read*/ true, self) &&
-		                 testConflictRanges(cx, /*read*/ false, self),
+		wait(timeout(self->testCrossModuleRead(cx, self) && self->getRangeCallActor(cx, self) &&
+		                 testConflictRanges(cx, /*read*/ true, self) && testConflictRanges(cx, /*read*/ false, self),
 		             self->testDuration, Void()));
 		return Void();
 	}
@@ -222,6 +222,58 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		    1, keysCount.getValue() * (keyBytes + (rangeCount + 1) + valBytes + 8) + 1);
 
 		return GetRangeLimits(rowLimits, byteLimits);
+	}
+
+	ACTOR Future<Void> testCrossModuleRead(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
+		Database cx = cx_->clone();
+		state Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
+		try {
+			wait(success(tx->getRange(
+			    KeyRangeRef(LiteralStringRef("\xff\xff/transactio"), LiteralStringRef("\xff\xff/transaction0")),
+			    CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_cross_module_read);
+		}
+		try {
+			wait(success(tx->getRange(
+			    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction1")),
+			    CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_cross_module_read);
+		}
+		try {
+			wait(success(tx->getRange(
+			    KeyRangeRef(LiteralStringRef("\xff\xff/transaction"), LiteralStringRef("\xff\xff/transaction1")),
+			    CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_cross_module_read);
+		}
+		try {
+			wait(success(tx->getRange(
+			    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")),
+			    CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(true);
+		} catch (Error& e) {
+			throw;
+		}
+
+		try {
+			const KeyRef key = LiteralStringRef("\xff\xff/cluster_file_path");
+			KeySelector begin = KeySelectorRef(key, false, 0);
+			KeySelector end = KeySelectorRef(keyAfter(key), false, 1);
+			wait(success(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY))));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_cross_module_read);
+		}
+		return Void();
 	}
 
 	ACTOR static Future<Void> testConflictRanges(Database cx_, bool read, SpecialKeySpaceCorrectnessWorkload* self) {

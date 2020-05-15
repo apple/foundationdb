@@ -23,7 +23,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
-	{ SpecialKeySpace::MODULE::TESTONLY, normalKeys }, // all test keys are supposed to be in normalKeys
 	{ SpecialKeySpace::MODULE::TRANSACTION,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")) },
 	{ SpecialKeySpace::MODULE::WORKERINTERFACE,
@@ -46,7 +45,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* 
 
 	if (ks->offset < 1) {
 		// less than the given key
-		if (skrImpl->getKeyRange().contains(ks->getKey())) endKey = keyAfter(ks->getKey());
+		if (skrImpl->getKeyRange().contains(ks->getKey())) endKey = ks->getKey(); // keyAfter(ks->getKey());
 	} else {
 		// greater than the given key
 		if (skrImpl->getKeyRange().contains(ks->getKey())) startKey = ks->getKey();
@@ -60,7 +59,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* 
 
 	Standalone<RangeResultRef> result = wait(skrImpl->getRange(ryw, KeyRangeRef(startKey, endKey)));
 	if (result.size() == 0) {
-		TraceEvent("ZeroElementsIntheRange").detail("Start", startKey).detail("End", endKey);
+		TraceEvent(SevDebug, "ZeroElementsIntheRange").detail("Start", startKey).detail("End", endKey);
 		return Void();
 	}
 	// Note : KeySelector::setKey has byte limit according to the knobs, customize it if needed
@@ -110,9 +109,9 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, Reference<Rea
 	    sks->getImpls().rangeContaining(ks->getKey());
 	while ((ks->offset < 1 && iter != sks->getImpls().ranges().begin()) ||
 	       (ks->offset > 1 && iter != sks->getImpls().ranges().end())) {
+		onModuleRead(ryw, sks->getModules().rangeContaining(iter->begin())->value(), *lastModuleRead);
 		if (iter->value() != nullptr) {
 			wait(moveKeySelectorOverRangeActor(iter->value(), ryw, ks));
-			onModuleRead(ryw, sks->getImplToModuleMap().at(iter->value()), *lastModuleRead);
 		}
 		ks->offset < 1 ? --iter : ++iter;
 	}
@@ -142,15 +141,16 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::checkModuleFound(Speci
                                                                            GetRangeLimits limits, bool reverse) {
 	std::pair<Standalone<RangeResultRef>, Optional<SpecialKeySpace::MODULE>> result =
 	    wait(SpecialKeySpace::getRangeAggregationActor(sks, ryw, begin, end, limits, reverse));
+	// TODO : all cross_module_read or no_module_found error is better to check at the beginning, improve this later
 	if (ryw && !ryw->specialKeySpaceRelaxed()) {
 		auto module = result.second;
 		if (!module.present()) {
 			throw special_keys_no_module_found();
-		} else {
-			auto boundary = sks->moduleToBoundary.at(module.get());
-			if (!boundary.contains(begin.getKey()) || end.getKey() > boundary.end)
-				throw special_keys_cross_module_read();
-		}
+		} /*else {
+		    auto boundary = sks->moduleToBoundary.at(module.get());
+		    if (!boundary.contains(begin.getKey()) || end.getKey() < boundary.begin || end.getKey() > boundary.end)
+		        throw special_keys_cross_module_read();
+		}*/
 	}
 	return result.first;
 }
@@ -167,6 +167,7 @@ SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks, Reference<ReadYo
 	state Optional<SpecialKeySpace::MODULE> lastModuleRead;
 
 	wait(normalizeKeySelectorActor(sks, ryw, &begin, &lastModuleRead, &actualBeginOffset, &result));
+	// TODO : check if end the boundary of a module
 	wait(normalizeKeySelectorActor(sks, ryw, &end, &lastModuleRead, &actualEndOffset, &result));
 	// Handle all corner cases like what RYW does
 	// return if range inverted
@@ -187,8 +188,8 @@ SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks, Reference<ReadYo
 	if (reverse) {
 		while (iter != ranges.begin()) {
 			--iter;
+			onModuleRead(ryw, sks->getModules().rangeContaining(iter->begin())->value(), lastModuleRead);
 			if (iter->value() == nullptr) continue;
-			onModuleRead(ryw, sks->getImplToModuleMap().at(iter->value()), lastModuleRead);
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
@@ -210,8 +211,8 @@ SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks, Reference<ReadYo
 		}
 	} else {
 		for (iter = ranges.begin(); iter != ranges.end(); ++iter) {
+			onModuleRead(ryw, sks->getModules().rangeContaining(iter->begin())->value(), lastModuleRead);
 			if (iter->value() == nullptr) continue;
-			onModuleRead(ryw, sks->getImplToModuleMap().at(iter->value()), lastModuleRead);
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
@@ -247,6 +248,11 @@ Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourW
 	// make sure orEqual == false
 	begin.removeOrEqual(begin.arena());
 	end.removeOrEqual(end.arena());
+
+	// if( begin.offset >= end.offset && begin.getKey() >= end.getKey() ) {
+	// 	TEST(true); // RYW range inverted
+	// 	return Standalone<RangeResultRef>();
+	// }
 
 	return checkModuleFound(this, ryw, begin, end, limits, reverse);
 }

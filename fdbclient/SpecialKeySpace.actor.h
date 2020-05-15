@@ -51,6 +51,8 @@ protected:
 class SpecialKeySpace {
 public:
 	enum class MODULE {
+		UNKNOWN, // used for all unregistered range, a cross_module_read will happen if your range read contains any
+		         // UNKKNOWN module range
 		TESTONLY, // only used by tests
 		TRANSACTION,
 		WORKERINTERFACE,
@@ -64,23 +66,42 @@ public:
 	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeySelector begin,
 	                                            KeySelector end, GetRangeLimits limits, bool reverse = false);
 
-	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end) {
+	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool test = true) {
 		// Default value is nullptr, begin of KeyRangeMap is Key()
 		impls = KeyRangeMap<SpecialKeyRangeBaseImpl*>(nullptr, spaceEndKey);
 		range = KeyRangeRef(spaceStartKey, spaceEndKey);
+		modules = KeyRangeMap<SpecialKeySpace::MODULE>(SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey);
+		if (!test) modulesBoundaryInit();
+		// TODO : Handle testonly here
+	}
+	void modulesBoundaryInit() {
+		for (const auto& pair : moduleToBoundary) {
+			ASSERT(range.contains(pair.second));
+			// Make sure the module is not overlapping with any registered modules
+			ASSERT(modules.rangeContaining(pair.second.begin) == modules.rangeContaining(pair.second.end) &&
+			       modules[pair.second.begin] == SpecialKeySpace::MODULE::UNKNOWN);
+			modules.insert(pair.second, pair.first);
+			impls.insert(pair.second, nullptr);
+		}
 	}
 	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeBaseImpl* impl) {
 		// range check
 		// TODO: add range check not to be replaced by overlapped ones
-		ASSERT(kr.begin >= range.begin && kr.end <= range.end);
+		ASSERT(range.contains(kr));
 		// make sure the registered range is not overlapping with existing ones
 		// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
-		ASSERT(impls.rangeContaining(kr.begin) == impls.rangeContaining(kr.end) && impls[kr.begin] == nullptr);
+		// ASSERT(impls.rangeContaining(kr.begin) == impls.rangeContaining(kr.end) && impls[kr.begin] == nullptr);
+		for (auto iter = impls.rangeContaining(kr.begin); true; ++iter) {
+			ASSERT(iter->value() == nullptr);
+			if (iter == impls.rangeContaining(kr.end)) break; // relax the end to be another one's start if needed
+		}
 		impls.insert(kr, impl);
 		// Set module for the range
-		implToModule[impl] = module;
+		implToModule[impl] = module; // TODO : check do we really need this map
 	}
+
 	KeyRangeMap<SpecialKeyRangeBaseImpl*>& getImpls() { return impls; }
+	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return modules; }
 	KeyRangeRef getKeyRange() const { return range; }
 	const std::unordered_map<SpecialKeyRangeBaseImpl*, SpecialKeySpace::MODULE>& getImplToModuleMap() const {
 		return implToModule;
@@ -99,6 +120,7 @@ private:
 	                         KeySelector end, GetRangeLimits limits, bool reverse);
 
 	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
+	KeyRangeMap<SpecialKeySpace::MODULE> modules;
 	KeyRange range;
 	std::unordered_map<SpecialKeyRangeBaseImpl*, SpecialKeySpace::MODULE> implToModule;
 

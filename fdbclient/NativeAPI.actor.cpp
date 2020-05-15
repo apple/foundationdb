@@ -529,6 +529,7 @@ struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeBaseImpl {
 struct SingleSpecialKeyImpl : SpecialKeyRangeBaseImpl {
 	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
 	                                            KeyRangeRef kr) const override {
+		if (!kr.contains(k)) return Standalone<RangeResultRef>();
 		return map(f(ryw), [k = k](Optional<Value> v) {
 			Standalone<RangeResultRef> result;
 			if (v.present()) {
@@ -583,7 +584,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
-    specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end)) {
+    specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
 
