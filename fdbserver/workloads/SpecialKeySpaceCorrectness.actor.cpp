@@ -108,7 +108,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
-		wait(timeout(self->testCrossModuleRead(cx, self) && self->getRangeCallActor(cx, self) &&
+		wait(timeout(self->testModuleRangeReadErrors(cx, self) && self->getRangeCallActor(cx, self) &&
 		                 testConflictRanges(cx, /*read*/ true, self) && testConflictRanges(cx, /*read*/ false, self),
 		             self->testDuration, Void()));
 		return Void();
@@ -224,7 +224,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return GetRangeLimits(rowLimits, byteLimits);
 	}
 
-	ACTOR Future<Void> testCrossModuleRead(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
+	ACTOR Future<Void> testModuleRangeReadErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		Database cx = cx_->clone();
 		state Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
 		// begin key outside module range
