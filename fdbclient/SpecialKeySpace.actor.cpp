@@ -145,7 +145,7 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::checkModuleFound(Speci
 	    wait(SpecialKeySpace::getRangeAggregationActor(sks, ryw, begin, end, limits, reverse));
 	if (ryw && !ryw->specialKeySpaceRelaxed()) {
 		auto module = result.second;
-		if (!module.present()) {
+		if (!module.present() || module.get() == SpecialKeySpace::MODULE::UNKNOWN) {
 			throw special_keys_no_module_found();
 		}
 	}

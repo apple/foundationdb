@@ -282,7 +282,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			ASSERT(e.code() == error_code_special_keys_cross_module_read);
 			tx->reset();
 		}
-		// end keySelector inside module range, a tricky corner case
+		// end keySelector inside module range, *** a tricky corner case ***
 		try {
 			tx->addReadConflictRange(singleKeyRange(LiteralStringRef("testKey")));
 			KeySelector begin = KeySelectorRef(readConflictRangeKeysRange.begin, false, 1);
@@ -292,6 +292,28 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->reset();
 		} catch (Error& e) {
 			throw;
+		}
+		// No module found error case with keys
+		try {
+			wait(success(tx->getRange(
+			    KeyRangeRef(LiteralStringRef("\xff\xff/A_no_module_related_prefix"), LiteralStringRef("\xff\xff/I_am_also_not_in_any_module")),
+			    CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_no_module_found);
+			tx->reset();
+		}
+		// No module found error with KeySelectors, *** a tricky corner case ***
+		try {
+			KeySelector begin = KeySelectorRef(LiteralStringRef("\xff\xff/zzz_i_am_not_a_module"), false, 1);
+			KeySelector end = KeySelectorRef(LiteralStringRef("\xff\xff/zzz_to_be_the_final_one"), false, 2);
+			wait(success(tx->getRange(begin, end, CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_no_module_found);
+			tx->reset();
 		}
 		return Void();
 	}
