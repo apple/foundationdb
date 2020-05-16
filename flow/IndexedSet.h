@@ -131,8 +131,6 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 
 		static IteratorT begin(SetT&);
 
-		static IteratorT end(SetT&);
-
 		template <bool constIterator>
 		static IteratorImpl<isConst || constIterator> previous(SetT&, IteratorImpl<constIterator>);
 
@@ -168,8 +166,8 @@ public:
 
 	const_iterator begin() const { return ConstImpl::begin(*this); };
 	iterator begin() { return NonConstImpl::begin(*this); };
-	const_iterator end() const { return ConstImpl::end(*this); }
-	iterator end() { return NonConstImpl::end(*this); }
+	const_iterator end() const { return const_iterator{}; }
+	iterator end() { return iterator{}; }
 
 	const_iterator previous(const_iterator i) const { return ConstImpl::previous(*this, i); }
 	iterator previous(iterator i) { return NonConstImpl::previous(*this, i); }
@@ -746,13 +744,6 @@ typename IndexedSet<T, Metric>::template Impl<isConst>::IteratorT IndexedSet<T, 
 	NodeT* x = self.root;
 	while (x && x->child[0]) x = x->child[0];
 	return IteratorT{ x };
-}
-
-template <class T, class Metric>
-template <bool isConst>
-typename IndexedSet<T, Metric>::template Impl<isConst>::IteratorT IndexedSet<T, Metric>::Impl<isConst>::end(
-    IndexedSet<T, Metric>::Impl<isConst>::SetT& self) {
-	return IteratorT{};
 }
 
 template <class T, class Metric>
