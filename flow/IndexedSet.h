@@ -323,27 +323,25 @@ private:
 			newNode->parent = oldNode->parent;
 	}
 
-	// direction 0 = left, 1 = right
-	template <int direction>
-	static void moveIterator(Node* &i){
-		if (i->child[0 ^ direction]) {
-			i = i->child[0 ^ direction];
-			while (i->child[1 ^ direction]) i = i->child[1 ^ direction];
+	template <int direction, bool isConst>
+	static void _moveIterator(std::conditional_t<isConst, const Node, Node>*& node) {
+		if (node->child[0 ^ direction]) {
+			node = node->child[0 ^ direction];
+			while (node->child[1 ^ direction]) node = node->child[1 ^ direction];
 		} else {
-			while (i->parent && i->parent->child[0 ^ direction] == i) i = i->parent;
-			i = i->parent;
+			while (node->parent && node->parent->child[0 ^ direction] == node) node = node->parent;
+			node = node->parent;
 		}
 	}
 
+	// direction 0 = left, 1 = right
 	template <int direction>
-	static void moveIterator(const Node*& i) {
-		if (i->child[0 ^ direction]) {
-			i = i->child[0 ^ direction];
-			while (i->child[1 ^ direction]) i = i->child[1 ^ direction];
-		} else {
-			while (i->parent && i->parent->child[0 ^ direction] == i) i = i->parent;
-			i = i->parent;
-		}
+	static void moveIterator(Node const*& node) {
+		_moveIterator<direction, true>(node);
+	}
+	template <int direction>
+	static void moveIterator(Node*& node) {
+		_moveIterator<direction, false>(node);
 	}
 
 public: // but testonly
