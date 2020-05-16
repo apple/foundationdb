@@ -88,39 +88,39 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 
 	template <bool isConst>
 	struct IteratorImpl {
-		typename std::conditional_t<isConst, const IndexedSet::Node, IndexedSet::Node>* i;
+		typename std::conditional_t<isConst, const IndexedSet::Node, IndexedSet::Node>* node;
 
 		template <typename = std::enable_if_t<isConst>>
-		explicit IteratorImpl<isConst>(const IteratorImpl<false>& nonConstIter) : i(nonConstIter.i) {}
+		explicit IteratorImpl<isConst>(const IteratorImpl<false>& nonConstIter) : node(nonConstIter.node) {}
 
-		explicit IteratorImpl(decltype(i) n = nullptr) : i(n){};
+		explicit IteratorImpl(decltype(node) n = nullptr) : node(n){};
 
-		const T& operator*() const { return i->data; }
+		const T& operator*() const { return node->data; }
 		template <typename = std::enable_if_t<!isConst>>
 		T& operator*() {
-			return i->data;
+			return node->data;
 		}
 
-		const T* operator->() const { return &i->data; }
+		const T* operator->() const { return &node->data; }
 		template <typename = std::enable_if_t<!isConst>>
 		T* operator->() {
-			return &i->data;
+			return &node->data;
 		}
 
 		void operator++();
 		void decrementNonEnd();
 		template <bool otherIsConst>
 		bool operator==(const IteratorImpl<otherIsConst>& r) const {
-			return i == r.i;
+			return node == r.node;
 		}
 		template <bool otherIsConst>
 		bool operator!=(const IteratorImpl<otherIsConst>& r) const {
-			return i != r.i;
+			return node != r.node;
 		}
 		// following two methods are for memory storage engine(KeyValueStoreMemory class) use only
 		// in order to have same interface as radixtree
-		StringRef& getKey(uint8_t* dummyContent) const { return i->data.key; }
-		StringRef& getValue() const { return i->data.value; }
+		StringRef& getKey(uint8_t* dummyContent) const { return node->data.key; }
+		StringRef& getValue() const { return node->data.value; }
 	};
 
 	template <bool isConst>
@@ -509,13 +509,13 @@ private:
 template <class T, class Metric>
 template <bool isConst>
 void IndexedSet<T, Metric>::IteratorImpl<isConst>::operator++() {
-	moveIterator<1>(i);
+	moveIterator<1>(node);
 }
 
 template <class T, class Metric>
 template <bool isConst>
 void IndexedSet<T, Metric>::IteratorImpl<isConst>::decrementNonEnd() {
-	moveIterator<0>(i);
+	moveIterator<0>(node);
 }
 
 template <class Node>
@@ -763,7 +763,7 @@ IndexedSet<T, Metric>::Impl<isConst>::previous(IndexedSet<T, Metric>::Impl<isCon
                                                IndexedSet<T, Metric>::IteratorImpl<constIterator> iter) {
 	if (iter == self.end()) return self.lastItem();
 
-	moveIterator<0>(iter.i);
+	moveIterator<0>(iter.node);
 	return iter;
 }
 
@@ -1048,13 +1048,13 @@ void IndexedSet<T,Metric>::erase( typename IndexedSet<T,Metric>::iterator begin,
 	// Removes all nodes in the set between first and last, inclusive.
 	// toFree is extended with the roots of completely removed subtrees.
 
-	ASSERT(!end.i || (begin.i && (::compare(*begin, *end) <= 0)));
+	ASSERT(!end.node || (begin.node && (::compare(*begin, *end) <= 0)));
 
 	if(begin == end)
 		return;
-	
-	IndexedSet<T,Metric>::Node* first = begin.i;
-	IndexedSet<T,Metric>::Node* last = previous(end).i; 
+
+	IndexedSet<T, Metric>::Node* first = begin.node;
+	IndexedSet<T, Metric>::Node* last = previous(end).node;
 
 	IndexedSet<T,Metric>::Node* subRoot = ISCommonSubtreeRoot(first, last);
 
@@ -1099,7 +1099,7 @@ void IndexedSet<T,Metric>::erase(iterator toErase) {
 
 	{
 		// Find the node to erase
-		Node* t = toErase.i;
+		Node* t = toErase.node;
 		if (!t) return;
 
 		if (!t->child[0] || !t->child[1]) {
@@ -1267,20 +1267,18 @@ typename IndexedSet<T, Metric>::template Impl<isConst>::IteratorT IndexedSet<T, 
 
 template <class T, class Metric>
 Metric IndexedSet<T, Metric>::getMetric(typename IndexedSet<T, Metric>::const_iterator x) const {
-	Metric m = x.i->total;
+	Metric m = x.node->total;
 	for(int i=0; i<2; i++)
-		if (x.i->child[i]) 
-			m = m - x.i->child[i]->total;
+		if (x.i->child[i]) m = m - x.node->child[i]->total;
 	return m;
 }
 
 template <class T, class Metric>
 Metric IndexedSet<T, Metric>::sumTo(typename IndexedSet<T, Metric>::const_iterator end) const {
-	if (!end.i)
-		return root ? root->total : Metric();
+	if (!end.node) return root ? root->total : Metric();
 
-	Metric m = end.i->child[0] ? end.i->child[0]->total : Metric();
-	for (const Node* p = end.i; p->parent; p = p->parent) {
+	Metric m = end.node->child[0] ? end.node->child[0]->total : Metric();
+	for (const Node* p = end.node; p->parent; p = p->parent) {
 		if (p->parent->child[1] == p) {
 			m = m - p->total;
 			m = m + p->parent->total;
