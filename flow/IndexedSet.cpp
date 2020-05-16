@@ -31,6 +31,7 @@
 #include <cstring>
 #include <deque>
 #include <random>
+#include <type_traits>
 #include "flow/TreeBenchmark.h"
 #include "flow/UnitTest.h"
 template <class Node>
@@ -204,17 +205,24 @@ TEST_CASE("/flow/IndexedSet/strings") {
 template <typename K>
 struct IndexedSetHarness {
 	using map = IndexedSet<K, int>;
+	using const_result = typename map::const_iterator;
 	using result = typename map::iterator;
 	using key_type = K;
 
 	map s;
 
 	void insert(K const& k) { s.insert(K(k), 1); }
+	const_result find(K const& k) const { return s.find(k); }
 	result find(K const& k) { return s.find(k); }
+	const_result not_found() const { return s.end(); }
 	result not_found() { return s.end(); }
+	const_result begin() const { return s.begin(); }
 	result begin() { return s.begin(); }
+	const_result end() const { return s.end(); }
 	result end() { return s.end(); }
+	const_result lower_bound(K const& k) const { return s.lower_bound(k); }
 	result lower_bound(K const& k) { return s.lower_bound(k); }
+	result upper_bound(K const& k) const { return s.upper_bound(k); }
 	result upper_bound(K const& k) { return s.upper_bound(k); }
 	void erase(K const& k) { s.erase(k); }
 };
@@ -490,6 +498,51 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 	//double a = timer();
 	is.erase(is.begin(), is.end());
 	//a = timer() - a;
+
+	return Void();
+}
+
+TEST_CASE("/flow/IndexedSet/const_iterator") {
+	struct Key {
+		int key;
+		explicit Key(int key) : key(key) {}
+	};
+	struct Metric {
+		int metric;
+		explicit Metric(int metric) : metric(metric) {}
+	};
+	IndexedSet<int, int64_t> is;
+	for (int i = 0; i < 10; ++i) is.insert(i, 1);
+	static_assert(!std::is_const_v<decltype(is)>);
+	static_assert(!std::is_const_v<decltype(*is.begin())>);
+	static_assert(!std::is_const_v<decltype(*is.previous(is.end()))>);
+	static_assert(!std::is_const_v<decltype(*is.index(Metric{ 5 }))>);
+	static_assert(!std::is_const_v<decltype(*is.find(Key{ 5 }))>);
+	static_assert(!std::is_const_v<decltype(*is.upper_bound(Key{ 5 }))>);
+	static_assert(!std::is_const_v<decltype(*is.lower_bound(Key{ 5 }))>);
+	static_assert(!std::is_const_v<decltype(*is.lastLessOrEqual(Key{ 5 }))>);
+	static_assert(!std::is_const_v<decltype(*is.lastItem())>);
+
+	const IndexedSet<int, int64_t>& cis = is;
+	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(cis)>>);
+	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.begin())>>);
+	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.previous(cis.end()))>>);
+	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.index(Metric{ 5 }))>>);
+	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.find(Key{ 5 }))>>);
+	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.upper_bound(Key{ 5 }))>>);
+	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.lower_bound(Key{ 5 }))>>);
+	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.lastLessOrEqual(Key{ 5 }))>>);
+	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.lastItem())>>);
+
+	for (auto& val : is) {
+		static_assert(!std::is_const_v<typename std::remove_reference_t<decltype(val)>>);
+	}
+	for (const auto& val : is) {
+		static_assert(std::is_const_v<typename std::remove_reference_t<decltype(val)>>);
+	}
+	for (auto& val : cis) {
+		static_assert(std::is_const_v<typename std::remove_reference_t<decltype(val)>>);
+	}
 
 	return Void();
 }
