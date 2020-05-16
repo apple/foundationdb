@@ -85,7 +85,7 @@ public:
 
 	iterator lower_bound(const StringRef& key) { return data.lower_bound(key); }
 	iterator upper_bound(const StringRef& key) { return data.upper_bound(key); }
-	iterator previous(iterator i) const { return data.previous(i); }
+	iterator previous(iterator i) { return data.previous(i); }
 
 	void erase(iterator begin, iterator end) { data.erase(begin, end); }
 	iterator insert(const StringRef& key, const StringRef& val, bool replaceExisting = true) {

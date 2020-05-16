@@ -210,12 +210,12 @@ struct IndexedSetHarness {
 	map s;
 
 	void insert(K const& k) { s.insert(K(k), 1); }
-	result find(K const& k) const { return s.find(k); }
-	result not_found() const { return s.end(); }
-	result begin() const { return s.begin(); }
-	result end() const { return s.end(); }
-	result lower_bound(K const& k) const { return s.lower_bound(k); }
-	result upper_bound(K const& k) const { return s.upper_bound(k); }
+	result find(K const& k) { return s.find(k); }
+	result not_found() { return s.end(); }
+	result begin() { return s.begin(); }
+	result end() { return s.end(); }
+	result lower_bound(K const& k) { return s.lower_bound(k); }
+	result upper_bound(K const& k) { return s.upper_bound(k); }
 	void erase(K const& k) { s.erase(k); }
 };
 
