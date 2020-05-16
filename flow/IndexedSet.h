@@ -158,6 +158,9 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 		static IteratorT lastItem(SetT&);
 	};
 
+	using ConstImpl = Impl<true>;
+	using NonConstImpl = Impl<false>;
+
 public:
 	using iterator = IteratorImpl<false>;
 	using const_iterator = IteratorImpl<true>;
@@ -167,19 +170,19 @@ public:
 	IndexedSet(IndexedSet&& r) BOOST_NOEXCEPT : root(r.root) { r.root = NULL; }
 	IndexedSet& operator=(IndexedSet&& r) BOOST_NOEXCEPT { delete root; root = r.root; r.root = 0; return *this; }
 
-	const_iterator begin() const { return Impl<true>::begin(*this); };
-	iterator begin() { return Impl<false>::begin(*this); };
-	const_iterator end() const { return Impl<true>::end(*this); }
-	iterator end() { return Impl<false>::end(*this); }
+	const_iterator begin() const { return ConstImpl::begin(*this); };
+	iterator begin() { return NonConstImpl::begin(*this); };
+	const_iterator end() const { return ConstImpl::end(*this); }
+	iterator end() { return NonConstImpl::end(*this); }
 
-	const_iterator previous(const_iterator i) const { return Impl<true>::previous(*this, i); }
+	const_iterator previous(const_iterator i) const { return ConstImpl::previous(*this, i); }
 	template <bool constIterator>
 	IteratorImpl<constIterator> previous(IteratorImpl<constIterator> i) {
-		return Impl<false>::previous(*this, i);
+		return NonConstImpl::previous(*this, i);
 	};
 
-	const_iterator lastItem() const { return Impl<true>::lastItem(*this); }
-	iterator lastItem() { return Impl<false>::lastItem(*this); }
+	const_iterator lastItem() const { return ConstImpl::lastItem(*this); }
+	iterator lastItem() { return NonConstImpl::lastItem(*this); }
 
 	bool empty() const { return !root; }
 	void clear() { delete root; root = NULL; }
@@ -230,56 +233,56 @@ public:
 	// Returns x such that key==*x, or end()
 	template <class Key>
 	const_iterator find(const Key& key) const {
-		return Impl<true>::find(*this, key);
+		return ConstImpl::find(*this, key);
 	}
 
 	template <class Key>
 	iterator find(const Key& key) {
-		return Impl<false>::find(*this, key);
+		return NonConstImpl::find(*this, key);
 	}
 
 	// Returns the smallest x such that *x>=key, or end()
 	template <class Key>
 	const_iterator lower_bound(const Key& key) const {
-		return Impl<true>::lower_bound(*this, key);
+		return ConstImpl::lower_bound(*this, key);
 	}
 
 	template <class Key>
 	iterator lower_bound(const Key& key) {
-		return Impl<false>::lower_bound(*this, key);
+		return NonConstImpl::lower_bound(*this, key);
 	};
 
 	// Returns the smallest x such that *x>key, or end()
 	template <class Key>
 	const_iterator upper_bound(const Key& key) const {
-		return Impl<true>::upper_bound(*this, key);
+		return ConstImpl::upper_bound(*this, key);
 	}
 
 	template <class Key>
 	iterator upper_bound(const Key& key) {
-		return Impl<false>::upper_bound(*this, key);
+		return NonConstImpl::upper_bound(*this, key);
 	};
 
 	// Returns the largest x such that *x<=key, or end()
 	template <class Key>
 	const_iterator lastLessOrEqual(const Key& key) const {
-		return Impl<true>::lastLessOrEqual(*this, key);
+		return ConstImpl::lastLessOrEqual(*this, key);
 	};
 
 	template <class Key>
 	iterator lastLessOrEqual(const Key& key) {
-		return Impl<false>::lastLessOrEqual(*this, key);
+		return NonConstImpl::lastLessOrEqual(*this, key);
 	}
 
 	// Returns smallest x such that sumTo(x+1) > metric, or end()
 	template <class M>
 	const_iterator index(M const& metric) const {
-		return Impl<true>::index(*this, metric);
+		return ConstImpl::index(*this, metric);
 	};
 
 	template <class M>
 	iterator index(M const& metric) {
-		return Impl<false>::index(*this, metric);
+		return NonConstImpl::index(*this, metric);
 	}
 
 	// Return the metric inserted with item x
