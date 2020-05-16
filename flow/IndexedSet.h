@@ -159,9 +159,9 @@ public:
 	using iterator = IteratorImpl<false>;
 	using const_iterator = IteratorImpl<true>;
 
-	IndexedSet() : root(NULL) {};
+	IndexedSet() : root(nullptr){};
 	~IndexedSet() { delete root; }
-	IndexedSet(IndexedSet&& r) BOOST_NOEXCEPT : root(r.root) { r.root = NULL; }
+	IndexedSet(IndexedSet&& r) BOOST_NOEXCEPT : root(r.root) { r.root = nullptr; }
 	IndexedSet& operator=(IndexedSet&& r) BOOST_NOEXCEPT { delete root; root = r.root; r.root = 0; return *this; }
 
 	const_iterator begin() const { return ConstImpl::begin(*this); };
@@ -176,7 +176,10 @@ public:
 	iterator lastItem() { return NonConstImpl::lastItem(*this); }
 
 	bool empty() const { return !root; }
-	void clear() { delete root; root = NULL; }
+	void clear() {
+		delete root;
+		root = nullptr;
+	}
 	void swap( IndexedSet& r ) { std::swap( root, r.root ); }
 
 	// Place data in the set with the given metric.  If an item equal to data is already in the set and,
@@ -856,17 +859,17 @@ typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::insert(T_&& data, 
 template <class T, class Metric>
 int IndexedSet<T,Metric>::insert(const std::vector<std::pair<T,Metric>>& dataVector, bool replaceExisting) {
 	int num_inserted = 0;
-	Node *blockStart = NULL;
-	Node *blockEnd = NULL;
+	Node* blockStart = nullptr;
+	Node* blockEnd = nullptr;
 
 	for(int i = 0; i < dataVector.size(); ++i) {
 		Metric metric = dataVector[i].second;
 		T data = std::move(dataVector[i].first);
 
 		int d = 1; // direction
-		if(blockStart == NULL || (blockEnd != NULL && data >= blockEnd->data)) {
-			blockEnd = NULL;
-			if (root == NULL) {
+		if (blockStart == nullptr || (blockEnd != nullptr && data >= blockEnd->data)) {
+			blockEnd = nullptr;
+			if (root == nullptr) {
 				root = new Node(std::move(data), metric);
 				num_inserted++;
 				blockStart = root;
@@ -1062,7 +1065,7 @@ void IndexedSet<T,Metric>::erase( typename IndexedSet<T,Metric>::iterator begin,
 	int heightDelta = leftHeightDelta + rightHeightDelta; 
 
 	// Rebalance and update metrics for all nodes from subRoot up to the root
-	for(auto p = subRoot; p != NULL; p = p->parent) {
+	for (auto p = subRoot; p != nullptr; p = p->parent) {
 		p->total = p->total - metricDelta;
 
 		auto& pc = p->parent ? p->parent->child[p->parent->child[1]==p] : root;
