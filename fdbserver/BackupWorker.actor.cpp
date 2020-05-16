@@ -895,11 +895,11 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// messages/mutations will be flushed to disk/blob in uploadData().
 		state Arena prev;
 		while (r->hasMessage()) {
-			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena());
 			if (!sameArena(prev, r->arena())) {
 				wait(self->lock->take(TaskPriority::DefaultYield, r->arena().getSize()));
 				prev = r->arena();
 			}
+			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena());
 			r->nextMessage();
 		}
 
