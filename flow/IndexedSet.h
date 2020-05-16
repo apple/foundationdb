@@ -91,12 +91,7 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 		typename std::conditional_t<isConst, const IndexedSet::Node, IndexedSet::Node>* i;
 
 		template <typename = std::enable_if_t<isConst>>
-		IteratorImpl<isConst>(const IteratorImpl<false>& nonConstIter) : i(nonConstIter.i) {}
-		template <typename = std::enable_if_t<isConst>>
-		IteratorImpl<isConst>& operator=(const IteratorImpl<false>& nonConstIter) {
-			i = nonConstIter.i;
-			return *this;
-		}
+		explicit IteratorImpl<isConst>(const IteratorImpl<false>& nonConstIter) : i(nonConstIter.i) {}
 
 		explicit IteratorImpl(decltype(i) n = nullptr) : i(n){};
 
@@ -285,13 +280,17 @@ public:
 
 	// Return the metric inserted with item x
 	Metric getMetric(const_iterator x) const;
+	Metric getMetric(iterator x) { return sumTo(const_iterator{ x }); }
 
 	// Return the sum of getMetric(x) for begin()<=x<to
 	Metric sumTo(const_iterator to) const;
+	Metric sumTo(iterator to) { return sumTo(const_iterator{ to }); }
 
 	// Return the sum of getMetric(x) for begin<=x<end
 	Metric sumRange(const_iterator begin, const_iterator end) const { return sumTo(end) - sumTo(begin); }
-	Metric sumRange(iterator begin, iterator end) const { return sumTo(end) - sumTo(begin); }
+	Metric sumRange(iterator begin, iterator end) const {
+		return sumTo(const_iterator{ end }) - sumTo(const_iterator{ begin });
+	}
 
 	// Return the sum of getMetric(x) for all x s.t. begin <= *x && *x < end
 	template <class Key>
