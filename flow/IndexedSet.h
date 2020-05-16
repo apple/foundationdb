@@ -319,7 +319,7 @@ private:
 	}
 
 	template <int direction, bool isConst>
-	static void _moveIterator(std::conditional_t<isConst, const Node, Node>*& node) {
+	static void moveIteratorImpl(std::conditional_t<isConst, const Node, Node>*& node) {
 		if (node->child[0 ^ direction]) {
 			node = node->child[0 ^ direction];
 			while (node->child[1 ^ direction]) node = node->child[1 ^ direction];
@@ -332,11 +332,11 @@ private:
 	// direction 0 = left, 1 = right
 	template <int direction>
 	static void moveIterator(Node const*& node) {
-		_moveIterator<direction, true>(node);
+		moveIteratorImpl<direction, true>(node);
 	}
 	template <int direction>
 	static void moveIterator(Node*& node) {
-		_moveIterator<direction, false>(node);
+		moveIteratorImpl<direction, false>(node);
 	}
 
 public: // but testonly
