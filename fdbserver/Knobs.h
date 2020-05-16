@@ -567,6 +567,7 @@ public:
 	int REDWOOD_REMAP_CLEANUP_BATCH_SIZE; // Number of queue entries for remap cleanup to process and potentially coalesce at once.
 	int REDWOOD_REMAP_CLEANUP_VERSION_LAG_MIN; // Number of versions between head of remap queue and oldest retained version before remap cleanup starts
 	int REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX; // Number of versions between head of remap queue and oldest retained version before remap cleanup may stop
+	double REDWOOD_LOGGING_INTERVAL;
 
 	ServerKnobs();
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);

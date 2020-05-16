@@ -635,6 +635,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( REDWOOD_REMAP_CLEANUP_BATCH_SIZE,                     5000 );
 	init( REDWOOD_REMAP_CLEANUP_VERSION_LAG_MIN,                   4 );
 	init( REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX,                  15 );
+	init( REDWOOD_LOGGING_INTERVAL,                              5.0 );
 
 	// clang-format on
 
