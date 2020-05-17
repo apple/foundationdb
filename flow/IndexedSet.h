@@ -106,8 +106,10 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 		bool operator!=(const IteratorImpl<isConst>& r) const { return node != r.node; }
 		// following two methods are for memory storage engine(KeyValueStoreMemory class) use only
 		// in order to have same interface as radixtree
-		StringRef& getKey(uint8_t* dummyContent) const { return node->data.key; }
-		StringRef& getValue() const { return node->data.value; }
+		typename std::conditional_t<isConst, const StringRef, StringRef>& getKey(uint8_t* dummyContent) const {
+			return node->data.key;
+		}
+		typename std::conditional_t<isConst, const StringRef, StringRef>& getValue() const { return node->data.value; }
 	};
 
 	template <bool isConst>
