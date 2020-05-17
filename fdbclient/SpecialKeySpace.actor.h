@@ -41,8 +41,6 @@ public:
 
 	explicit SpecialKeyRangeBaseImpl(KeyRangeRef kr) : range(kr) {}
 	KeyRangeRef getKeyRange() const { return range; }
-	ACTOR Future<Void> normalizeKeySelectorActor(const SpecialKeyRangeBaseImpl* pkrImpl,
-	                                             Reference<ReadYourWritesTransaction> ryw, KeySelector* ks);
 
 	virtual ~SpecialKeyRangeBaseImpl() {}
 
@@ -52,39 +50,79 @@ protected:
 
 class SpecialKeySpace {
 public:
+	enum class MODULE {
+		UNKNOWN, // default value for all unregistered range
+		TESTONLY, // only used by correctness tests
+		TRANSACTION,
+		WORKERINTERFACE,
+		STATUSJSON,
+		CLUSTERFILEPATH,
+		CONNECTIONSTRING
+	};
+
 	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key);
 
 	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeySelector begin,
 	                                            KeySelector end, GetRangeLimits limits, bool reverse = false);
 
-	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end) {
+	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true) {
 		// Default value is nullptr, begin of KeyRangeMap is Key()
 		impls = KeyRangeMap<SpecialKeyRangeBaseImpl*>(nullptr, spaceEndKey);
 		range = KeyRangeRef(spaceStartKey, spaceEndKey);
+		modules = KeyRangeMap<SpecialKeySpace::MODULE>(
+		    testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey);
+		if (!testOnly) modulesBoundaryInit(); // testOnly is used in the correctness workload
 	}
-	void registerKeyRange(const KeyRangeRef& kr, SpecialKeyRangeBaseImpl* impl) {
-		// range check
-		// TODO: add range check not to be replaced by overlapped ones
-		ASSERT(kr.begin >= range.begin && kr.end <= range.end);
+	// Initialize module boundaries, used to handle cross_module_read
+	void modulesBoundaryInit() {
+		for (const auto& pair : moduleToBoundary) {
+			ASSERT(range.contains(pair.second));
+			// Make sure the module is not overlapping with any registered modules
+			// Note: same like ranges, one module's end cannot be another module's start, relax the condition if needed
+			ASSERT(modules.rangeContaining(pair.second.begin) == modules.rangeContaining(pair.second.end) &&
+			       modules[pair.second.begin] == SpecialKeySpace::MODULE::UNKNOWN);
+			modules.insert(pair.second, pair.first);
+			impls.insert(pair.second, nullptr); // Note: Due to underlying implementation, the insertion here is
+			                                    // important to make cross_module_read being handled correctly
+		}
+	}
+	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeBaseImpl* impl) {
+		// module boundary check
+		if (module == SpecialKeySpace::MODULE::TESTONLY)
+			ASSERT(normalKeys.contains(kr))
+		else
+			ASSERT(moduleToBoundary.at(module).contains(kr));
 		// make sure the registered range is not overlapping with existing ones
 		// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
-		ASSERT(impls.rangeContaining(kr.begin) == impls.rangeContaining(kr.end) && impls[kr.begin] == nullptr);
+		for (auto iter = impls.rangeContaining(kr.begin); true; ++iter) {
+			ASSERT(iter->value() == nullptr);
+			if (iter == impls.rangeContaining(kr.end))
+				break; // relax the condition that the end can be another range's start, if needed
+		}
 		impls.insert(kr, impl);
 	}
 
-private:
-	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeyRef key);
+	KeyRangeMap<SpecialKeyRangeBaseImpl*>& getImpls() { return impls; }
+	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return modules; }
+	KeyRangeRef getKeyRange() const { return range; }
 
-	ACTOR static Future<Standalone<RangeResultRef>> checkModuleFound(SpecialKeySpace* pks,
-	                                                          Reference<ReadYourWritesTransaction> ryw,
-	                                                          KeySelector begin, KeySelector end, GetRangeLimits limits,
-	                                                          bool reverse);
-	ACTOR static Future<std::pair<Standalone<RangeResultRef>, Optional<SpecialKeyRangeBaseImpl*>>> getRangeAggregationActor(
-	    SpecialKeySpace* pks, Reference<ReadYourWritesTransaction> ryw, KeySelector begin, KeySelector end,
-	    GetRangeLimits limits, bool reverse);
+private:
+	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw,
+	                                              KeyRef key);
+
+	ACTOR static Future<Standalone<RangeResultRef>> checkModuleFound(SpecialKeySpace* sks,
+	                                                                 Reference<ReadYourWritesTransaction> ryw,
+	                                                                 KeySelector begin, KeySelector end,
+	                                                                 GetRangeLimits limits, bool reverse);
+	ACTOR static Future<std::pair<Standalone<RangeResultRef>, Optional<SpecialKeySpace::MODULE>>>
+	getRangeAggregationActor(SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw, KeySelector begin,
+	                         KeySelector end, GetRangeLimits limits, bool reverse);
 
 	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
+	KeyRangeMap<SpecialKeySpace::MODULE> modules;
 	KeyRange range;
+
+	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
 };
 
 // Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",

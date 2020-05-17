@@ -688,6 +688,7 @@ private:
 
 void startRole(const Role &role, UID roleId, UID workerId, const std::map<std::string, std::string> &details = std::map<std::string, std::string>(), const std::string &origination = "Recruited");
 void endRole(const Role &role, UID id, std::string reason, bool ok = true, Error e = Error());
+ACTOR Future<Void> traceRole(Role role, UID roleId);
 
 struct ServerDBInfo;
 

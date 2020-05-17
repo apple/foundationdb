@@ -46,7 +46,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		keyPrefix = unprintable(
 		    getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("ReportConflictingKeysWorkload"))
 		        .toString());
-		keyBytes = getOption(options, LiteralStringRef("keyBytes"), 16);
+		keyBytes = getOption(options, LiteralStringRef("keyBytes"), 64);
 
 		readConflictRangeCount = getOption(options, LiteralStringRef("readConflictRangeCountPerTx"), 1);
 		writeConflictRangeCount = getOption(options, LiteralStringRef("writeConflictRangeCountPerTx"), 1);
@@ -55,7 +55,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		// each tx
 		addReadConflictRangeProb = (readConflictRangeCount - 1.0) / readConflictRangeCount;
 		addWriteConflictRangeProb = (writeConflictRangeCount - 1.0) / writeConflictRangeCount;
-		ASSERT(keyPrefix.size() + 16 <= keyBytes); // make sure the string format is valid
+		ASSERT(keyPrefix.size() + 8 <= keyBytes); // make sure the string format is valid
 		nodeCount = getOption(options, LiteralStringRef("nodeCount"), 100);
 	}
 
@@ -66,7 +66,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	Future<Void> start(const Database& cx) override { return _start(cx->clone(), this); }
 
 	ACTOR Future<Void> _start(Database cx, ReportConflictingKeysWorkload* self) {
-		if (self->clientId == 0) wait(timeout(self->conflictingClient(cx, self), self->testDuration, Void()));
+		wait(timeout(self->conflictingClient(cx, self), self->testDuration, Void()));
 		return Void();
 	}
 
@@ -88,9 +88,11 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	// Copied from tester.actor.cpp, added parameter to determine the key's length
 	Key keyForIndex(int n) {
 		double p = (double)n / nodeCount;
-		int paddingLen = keyBytes - 16 - keyPrefix.size();
-		// left padding by zero
-		return StringRef(format("%0*llx", paddingLen, *(uint64_t*)&p)).withPrefix(keyPrefix);
+		// 8 bytes for Cid_* suffix of each client
+		int paddingLen = keyBytes - 8 - keyPrefix.size();
+		// left padding by zero, each client has different prefix
+		Key prefixWithClientId = StringRef(format("Cid_%04d", clientId)).withPrefix(keyPrefix);
+		return StringRef(format("%0*llx", paddingLen, *(uint64_t*)&p)).withPrefix(prefixWithClientId);
 	}
 
 	void addRandomReadConflictRange(ReadYourWritesTransaction* tr, std::vector<KeyRange>* readConflictRanges) {
@@ -119,6 +121,14 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		} while (deterministicRandom()->random01() < addWriteConflictRangeProb);
 	}
 
+	void emptyConflictingKeysTest(Reference<ReadYourWritesTransaction> ryw) {
+		// This test is called when you want to make sure there is no conflictingKeys,
+		// which means you will get an empty result form getRange(\xff\xff/transaction/conflicting_keys/, \xff\xff/transaction/conflicting_keys0)
+		auto resultFuture = ryw->getRange(conflictingKeysRange, CLIENT_KNOBS->TOO_MANY);
+		auto result = resultFuture.get();
+		ASSERT(!result.more && result.size() == 0);
+	}
+
 	ACTOR Future<Void> conflictingClient(Database cx, ReportConflictingKeysWorkload* self) {
 
 		state ReadYourWritesTransaction tr1(cx);
@@ -128,12 +138,17 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 
 		loop {
 			try {
+				// set the flag for empty key range testing
+				tr1.setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
+				// tr1 should never have conflicting keys, the result should always be empty
+				self->emptyConflictingKeysTest(Reference<ReadYourWritesTransaction>::addRef(&tr1));
+
 				tr2.setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
 				// If READ_YOUR_WRITES_DISABLE set, it behaves like native transaction object
 				// where overlapped conflict ranges are not merged.
-				if (deterministicRandom()->random01() < 0.5)
+				if (deterministicRandom()->coinflip())
 					tr1.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-				if (deterministicRandom()->random01() < 0.5)
+				if (deterministicRandom()->coinflip())
 					tr2.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 				// We have the two tx with same grv, then commit the first
 				// If the second one is not able to commit due to conflicts, verify the returned conflicting keys
@@ -145,6 +160,8 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 				++self->commits;
 				wait(tr1.commit());
 				++self->xacts;
+				// tr1 should never have conflicting keys, test again after the commit
+				self->emptyConflictingKeysTest(Reference<ReadYourWritesTransaction>::addRef(&tr1));
 
 				state bool foundConflict = false;
 				try {

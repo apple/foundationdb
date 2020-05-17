@@ -414,6 +414,7 @@ namespace oldTLog_4_6 {
 				recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), recovery(Void())
 		{
 			startRole(Role::TRANSACTION_LOG, interf.id(), tLogData->workerID, {{"SharedTLog", tLogData->dbgid.shortString()}}, "Restored");
+			addActor.send(traceRole(Role::TRANSACTION_LOG, interf.id()));
 
 			persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
 			persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
