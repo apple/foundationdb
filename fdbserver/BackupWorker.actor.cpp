@@ -869,6 +869,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Future<Void> logSystemChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
 	state Version tagAt = std::max(self->pulledVersion.get(), std::max(self->startVersion, self->savedVersion));
+	state Arena prev;
 
 	TraceEvent("BackupWorkerPull", self->myId);
 	loop {
@@ -893,7 +894,6 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
-		state Arena prev;
 		while (r->hasMessage()) {
 			if (!sameArena(prev, r->arena())) {
 				wait(self->lock->take(TaskPriority::DefaultYield, r->arena().getSize()));
