@@ -170,6 +170,7 @@ public:
 	iterator end() { return iterator{}; }
 
 	const_iterator previous(const_iterator i) const { return ConstImpl::previous(*this, i); }
+	const_iterator previous(iterator i) const { return ConstImpl::previous(*this, const_iterator{ i }); }
 	iterator previous(iterator i) { return NonConstImpl::previous(*this, i); }
 
 	const_iterator lastItem() const { return ConstImpl::lastItem(*this); }

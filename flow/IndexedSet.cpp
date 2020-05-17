@@ -527,6 +527,7 @@ TEST_CASE("/flow/IndexedSet/const_iterator") {
 	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(cis)>>);
 	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.begin())>>);
 	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.previous(cis.end()))>>);
+	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.previous(is.end()))>>);
 	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.index(Metric{ 5 }))>>);
 	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.find(Key{ 5 }))>>);
 	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.upper_bound(Key{ 5 }))>>);
