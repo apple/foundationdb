@@ -90,33 +90,20 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 	struct IteratorImpl {
 		typename std::conditional_t<isConst, const IndexedSet::Node, IndexedSet::Node>* node;
 
-		template <typename = std::enable_if_t<isConst>>
-		explicit IteratorImpl<isConst>(const IteratorImpl<false>& nonConstIter) : node(nonConstIter.node) {}
+		explicit IteratorImpl<isConst>(const IteratorImpl<!isConst>& nonConstIter) : node(nonConstIter.node) {
+			static_assert(isConst);
+		}
 
 		explicit IteratorImpl(decltype(node) n = nullptr) : node(n){};
 
-		const T& operator*() const { return node->data; }
-		template <typename = std::enable_if_t<!isConst>>
-		T& operator*() {
-			return node->data;
-		}
+		typename std::conditional_t<isConst, const T, T>& operator*() const { return node->data; }
 
-		const T* operator->() const { return &node->data; }
-		template <typename = std::enable_if_t<!isConst>>
-		T* operator->() {
-			return &node->data;
-		}
+		typename std::conditional_t<isConst, const T, T>* operator->() const { return &node->data; }
 
 		void operator++();
 		void decrementNonEnd();
-		template <bool otherIsConst>
-		bool operator==(const IteratorImpl<otherIsConst>& r) const {
-			return node == r.node;
-		}
-		template <bool otherIsConst>
-		bool operator!=(const IteratorImpl<otherIsConst>& r) const {
-			return node != r.node;
-		}
+		bool operator==(const IteratorImpl<isConst>& r) const { return node == r.node; }
+		bool operator!=(const IteratorImpl<isConst>& r) const { return node != r.node; }
 		// following two methods are for memory storage engine(KeyValueStoreMemory class) use only
 		// in order to have same interface as radixtree
 		StringRef& getKey(uint8_t* dummyContent) const { return node->data.key; }
