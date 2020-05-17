@@ -285,11 +285,11 @@ public:
 
 	// Return the metric inserted with item x
 	Metric getMetric(const_iterator x) const;
-	Metric getMetric(iterator x) { return sumTo(const_iterator{ x }); }
+	Metric getMetric(iterator x) const { return getMetric(const_iterator{ x }); }
 
 	// Return the sum of getMetric(x) for begin()<=x<to
 	Metric sumTo(const_iterator to) const;
-	Metric sumTo(iterator to) { return sumTo(const_iterator{ to }); }
+	Metric sumTo(iterator to) const { return sumTo(const_iterator{ to }); }
 
 	// Return the sum of getMetric(x) for begin<=x<end
 	Metric sumRange(const_iterator begin, const_iterator end) const { return sumTo(end) - sumTo(begin); }
@@ -1220,7 +1220,7 @@ template <class Key>
 typename IndexedSet<T, Metric>::template Impl<isConst>::IteratorT IndexedSet<T, Metric>::Impl<isConst>::upper_bound(
     IndexedSet<T, Metric>::Impl<isConst>::SetT& self, const Key& key) {
 	NodeT* t = self.root;
-	if (!t) return IteratorT{};
+	if (!t) return self.end();
 	bool not_less;
 	while (true) {
 		not_less = !(key < t->data);
@@ -1269,7 +1269,7 @@ template <class T, class Metric>
 Metric IndexedSet<T, Metric>::getMetric(typename IndexedSet<T, Metric>::const_iterator x) const {
 	Metric m = x.node->total;
 	for(int i=0; i<2; i++)
-		if (x.i->child[i]) m = m - x.node->child[i]->total;
+		if (x.node->child[i]) m = m - x.node->child[i]->total;
 	return m;
 }
 
