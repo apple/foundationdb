@@ -6430,7 +6430,7 @@ TEST_CASE("!/redwood/performance/mutationBuffer") {
 }
 
 TEST_CASE("!/redwood/correctness/btree") {
-	g_redwoodMetricsActor = Void();  // Prevent trace event metrics from starting
+	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
 	state std::string pagerFile = "unittest_pageFile.redwood";
@@ -6784,7 +6784,7 @@ TEST_CASE("!/redwood/correctness/pager/cow") {
 TEST_CASE("!/redwood/performance/set") {
 	state SignalableActorCollection actors;
 
-	g_redwoodMetricsActor = Void();  // Prevent trace event metrics from starting
+	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
 	// If a test file is passed in by environment then don't write new data to it.
@@ -6846,7 +6846,8 @@ TEST_CASE("!/redwood/performance/set") {
 			Version lastVer = btree->getLatestVersion();
 			state Version version = lastVer + 1;
 			btree->setWriteVersion(version);
-			state int changesThisVersion = deterministicRandom()->randomInt(0, maxRecordsPerCommit - recordsThisCommit + 1);
+			state int changesThisVersion =
+			    deterministicRandom()->randomInt(0, maxRecordsPerCommit - recordsThisCommit + 1);
 
 			while (changesThisVersion > 0 && kvBytesThisCommit < maxKVBytesPerCommit) {
 				KeyValue kv;
