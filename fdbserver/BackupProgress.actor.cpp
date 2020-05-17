@@ -83,21 +83,24 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 
 		auto progressIt = progress.lower_bound(epoch);
 		if (progressIt != progress.end() && progressIt->first == epoch) {
-			if (progressIt != progress.begin()) {
-				// Previous epoch is gone, consolidate the progress.
+			std::set<Tag> toCheck = tags;
+			for (auto current = progressIt; current != progress.begin() && !toCheck.empty();) {
 				auto prev = std::prev(progressIt);
+				// Previous epoch is gone, consolidate the progress.
 				for (auto [tag, version] : prev->second) {
-					if (tags.count(tag) > 0) {
+					if (toCheck.count(tag) > 0) {
 						progressIt->second[tag] = std::max(version, progressIt->second[tag]);
+						toCheck.erase(tag);
 					}
 				}
+				current = prev;
 			}
 			updateTagVersions(&tagVersions, &tags, progressIt->second, info.epochEnd, adjustedBeginVersion, epoch);
 		} else {
 			auto rit = std::find_if(
 			    progress.rbegin(), progress.rend(),
 			    [epoch = epoch](const std::pair<LogEpoch, std::map<Tag, Version>>& p) { return p.first < epoch; });
-			if (!(rit == progress.rend())) {
+			while (!(rit == progress.rend())) {
 				// A partial recovery can result in empty epoch that copies previous
 				// epoch's version range. In this case, we should check previous
 				// epoch's savedVersion.
@@ -112,7 +115,9 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 					// ASSERT(info.logRouterTags == epochTags[rit->first]);
 
 					updateTagVersions(&tagVersions, &tags, rit->second, info.epochEnd, adjustedBeginVersion, epoch);
+					break;
 				}
+				rit++;
 			}
 		}
 
