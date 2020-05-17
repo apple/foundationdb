@@ -166,8 +166,11 @@ public:
 
 	const_iterator begin() const { return ConstImpl::begin(*this); };
 	iterator begin() { return NonConstImpl::begin(*this); };
+	const_iterator cbegin() const { return begin(); }
+
 	const_iterator end() const { return const_iterator{}; }
 	iterator end() { return iterator{}; }
+	const_iterator cend() const { return end(); }
 
 	const_iterator previous(const_iterator i) const { return ConstImpl::previous(*this, i); }
 	const_iterator previous(iterator i) const { return ConstImpl::previous(*this, const_iterator{ i }); }
@@ -406,8 +409,10 @@ public:
 	Map() {}
 	const_iterator begin() const { return set.begin(); }
 	iterator begin() { return set.begin(); }
+	const_iterator cbegin() const { return begin(); }
 	const_iterator end() const { return set.end(); }
 	iterator end() { return set.end(); }
+	const_iterator cend() const { return end(); }
 	const_iterator lastItem() const { return set.lastItem(); }
 	iterator lastItem() { return set.lastItem(); }
 	const_iterator previous(const_iterator i) const { return set.previous(i); }

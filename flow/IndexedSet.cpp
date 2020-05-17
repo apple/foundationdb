@@ -222,7 +222,7 @@ struct IndexedSetHarness {
 	result end() { return s.end(); }
 	const_result lower_bound(K const& k) const { return s.lower_bound(k); }
 	result lower_bound(K const& k) { return s.lower_bound(k); }
-	result upper_bound(K const& k) const { return s.upper_bound(k); }
+	const_result upper_bound(K const& k) const { return s.upper_bound(k); }
 	result upper_bound(K const& k) { return s.upper_bound(k); }
 	void erase(K const& k) { s.erase(k); }
 };
@@ -502,6 +502,13 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 	return Void();
 }
 
+template <class T>
+struct is_const_ref {
+	static constexpr bool value = std::is_const_v<typename std::remove_reference_t<T>>;
+};
+template <class T>
+static constexpr bool is_const_ref_v = is_const_ref<T>::value;
+
 TEST_CASE("/flow/IndexedSet/const_iterator") {
 	struct Key {
 		int key;
@@ -511,41 +518,48 @@ TEST_CASE("/flow/IndexedSet/const_iterator") {
 		int metric;
 		explicit Metric(int metric) : metric(metric) {}
 	};
+
 	IndexedSet<int, int64_t> is;
 	for (int i = 0; i < 10; ++i) is.insert(i, 1);
-	static_assert(!std::is_const_v<decltype(is)>);
-	static_assert(!std::is_const_v<decltype(*is.begin())>);
-	static_assert(!std::is_const_v<decltype(*is.previous(is.end()))>);
-	static_assert(!std::is_const_v<decltype(*is.index(Metric{ 5 }))>);
-	static_assert(!std::is_const_v<decltype(*is.find(Key{ 5 }))>);
-	static_assert(!std::is_const_v<decltype(*is.upper_bound(Key{ 5 }))>);
-	static_assert(!std::is_const_v<decltype(*is.lower_bound(Key{ 5 }))>);
-	static_assert(!std::is_const_v<decltype(*is.lastLessOrEqual(Key{ 5 }))>);
-	static_assert(!std::is_const_v<decltype(*is.lastItem())>);
+
+	IndexedSet<int, int64_t>& ncis = is;
+	static_assert(!is_const_ref_v<decltype(ncis)>);
+	static_assert(!is_const_ref_v<decltype(*ncis.begin())>);
+	static_assert(is_const_ref_v<decltype(*ncis.cbegin())>);
+	static_assert(!is_const_ref_v<decltype(*ncis.previous(ncis.end()))>);
+	static_assert(is_const_ref_v<decltype(*ncis.previous(ncis.cend()))>);
+	static_assert(!is_const_ref_v<decltype(*ncis.index(Metric{ 5 }))>);
+	static_assert(!is_const_ref_v<decltype(*ncis.find(Key{ 5 }))>);
+	static_assert(!is_const_ref_v<decltype(*ncis.upper_bound(Key{ 5 }))>);
+	static_assert(!is_const_ref_v<decltype(*ncis.lower_bound(Key{ 5 }))>);
+	static_assert(!is_const_ref_v<decltype(*ncis.lastLessOrEqual(Key{ 5 }))>);
+	static_assert(!is_const_ref_v<decltype(*ncis.lastItem())>);
 
 	const IndexedSet<int, int64_t>& cis = is;
-	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(cis)>>);
-	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.begin())>>);
-	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.previous(cis.end()))>>);
-	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.previous(is.end()))>>);
-	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.index(Metric{ 5 }))>>);
-	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.find(Key{ 5 }))>>);
-	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.upper_bound(Key{ 5 }))>>);
-	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.lower_bound(Key{ 5 }))>>);
-	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.lastLessOrEqual(Key{ 5 }))>>);
-	static_assert(std::is_const_v<typename std::remove_reference_t<decltype(*cis.lastItem())>>);
+	static_assert(is_const_ref_v<decltype(cis)>);
+	static_assert(is_const_ref_v<decltype(*cis.begin())>);
+	static_assert(is_const_ref_v<decltype(*cis.cbegin())>);
+	static_assert(is_const_ref_v<decltype(*cis.previous(cis.end()))>);
+	static_assert(is_const_ref_v<decltype(*cis.previous(cis.cend()))>);
+	static_assert(is_const_ref_v<decltype(*cis.previous(ncis.end()))>);
+	static_assert(is_const_ref_v<decltype(*cis.previous(ncis.cend()))>);
+	static_assert(is_const_ref_v<decltype(*cis.index(Metric{ 5 }))>);
+	static_assert(is_const_ref_v<decltype(*cis.find(Key{ 5 }))>);
+	static_assert(is_const_ref_v<decltype(*cis.upper_bound(Key{ 5 }))>);
+	static_assert(is_const_ref_v<decltype(*cis.lower_bound(Key{ 5 }))>);
+	static_assert(is_const_ref_v<decltype(*cis.lastLessOrEqual(Key{ 5 }))>);
+	static_assert(is_const_ref_v<decltype(*cis.lastItem())>);
 
-	for (auto& val : is) {
-		static_assert(!std::is_const_v<typename std::remove_reference_t<decltype(val)>>);
+	for (auto& val : ncis) {
+		static_assert(!is_const_ref_v<decltype(val)>);
 	}
-	for (const auto& val : is) {
-		static_assert(std::is_const_v<typename std::remove_reference_t<decltype(val)>>);
+	for (const auto& val : ncis) {
+		static_assert(is_const_ref_v<decltype(val)>);
 	}
 	for (auto& val : cis) {
-		static_assert(std::is_const_v<typename std::remove_reference_t<decltype(val)>>);
+		static_assert(is_const_ref_v<decltype(val)>);
 	}
 
 	return Void();
 }
-
 void forceLinkIndexedSetTests() {}

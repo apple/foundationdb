@@ -84,8 +84,10 @@ public:
 	iterator find(const StringRef& key) { return data.find(key); }
 	const_iterator begin() const { return data.begin(); }
 	iterator begin() { return data.begin(); }
+	const_iterator cbegin() const { return begin(); }
 	const_iterator end() const { return data.end(); }
 	iterator end() { return data.end(); }
+	const_iterator cend() const { return end(); }
 
 	const_iterator lower_bound(const StringRef& key) const { return data.lower_bound(key); }
 	iterator lower_bound(const StringRef& key) { return data.lower_bound(key); }
