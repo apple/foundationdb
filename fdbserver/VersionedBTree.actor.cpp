@@ -945,7 +945,9 @@ public:
 
 	// Get the object for i or create a new one.
 	// After a get(), the object for i is the last in evictionOrder.
-	ObjectType& get(const IndexType& index, bool noHit = false) {
+	// If noHit is set, do not consider this access to be cache hit if the object is present
+	// If noMiss is set, do not consider this access to be a cache miss if the object is not present
+	ObjectType& get(const IndexType& index, bool noHit = false, bool noMiss = false) {
 		Entry& entry = cache[index];
 
 		// If entry is linked into evictionOrder then move it to the back of the order
@@ -953,29 +955,37 @@ public:
 			if (!noHit) {
 				++entry.hits;
 				++g_redwoodMetrics.pagerCacheHit;
+
+				// Move the entry to the back of the eviction order
+				evictionOrder.erase(evictionOrder.iterator_to(entry));
+				evictionOrder.push_back(entry);
 			}
-			// Move the entry to the back of the eviction order
-			evictionOrder.erase(evictionOrder.iterator_to(entry));
-			evictionOrder.push_back(entry);
 		} else {
-			++g_redwoodMetrics.pagerCacheMiss;
+			if (!noMiss) {
+				++g_redwoodMetrics.pagerCacheMiss;
+			}
 			// Finish initializing entry
 			entry.index = index;
-			entry.hits = noHit ? 0 : 1;
+			entry.hits = 0;
 			// Insert the newly created Entry at the back of the eviction order
 			evictionOrder.push_back(entry);
 
 			// While the cache is too big, evict the oldest entry until the oldest entry can't be evicted.
 			while (cache.size() > sizeLimit) {
 				Entry& toEvict = evictionOrder.front();
+
+				// It's critical that we do not evict the item we just added because it would cause the reference
+				// returned to be invalid.  An eviction could happen with a no-hit access to a cache resident page
+				// that is currently evictable and exists in the oversized portion of the cache eviction order due
+				// to previously failed evictions.
+				if (&entry == &toEvict) {
+					debug_printf("Cannot evict target index %s\n", toString(index).c_str());
+					break;
+				}
+
 				debug_printf("Trying to evict %s to make room for %s\n", toString(toEvict.index).c_str(),
 				             toString(index).c_str());
 
-				// It's critical that we do not evict the item we just added (or the reference we return would be
-				// invalid) but since sizeLimit must be > 0, entry was just added to the end of the evictionOrder, and
-				// this loop will end if we move anything to the end of the eviction order, we can be guaraunted that
-				// entry != toEvict, so we do not need to check. If the item is not evictable then move it to the back
-				// of the eviction order and stop.
 				if (!toEvict.item.evictable()) {
 					evictionOrder.erase(evictionOrder.iterator_to(toEvict));
 					evictionOrder.push_back(toEvict);
@@ -1378,7 +1388,8 @@ public:
 
 	void updatePage(LogicalPageID pageID, Reference<IPage> data) override {
 		// Get the cache entry for this page, without counting it as a cache hit as we're replacing its contents now
-		PageCacheEntry& cacheEntry = pageCache.get(pageID, true);
+		// or as a cache miss because there is no benefit to the page already being in cache
+		PageCacheEntry& cacheEntry = pageCache.get(pageID, true, true);
 		debug_printf("DWALPager(%s) op=write %s cached=%d reading=%d writing=%d\n", filename.c_str(),
 		             toString(pageID).c_str(), cacheEntry.initialized(),
 		             cacheEntry.initialized() && cacheEntry.reading(),
@@ -1506,7 +1517,8 @@ public:
 		return readPhysicalPage(self, pageID, true);
 	}
 
-	// Reads the most recent version of pageID either committed or written using updatePage()
+	// Reads the most recent version of pageID, either previously committed or written using updatePage() in the current
+	// commit
 	Future<Reference<IPage>> readPage(LogicalPageID pageID, bool cacheable, bool noHit = false) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
