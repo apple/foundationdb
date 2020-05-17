@@ -751,39 +751,41 @@ struct RedwoodMetrics {
 	void clear() { *this = RedwoodMetrics(); }
 
 	struct Level {
-		int64_t btreePageReads;
-		int64_t btreePageReadExt;
-		int64_t btreePageWrite;
-		int64_t btreePageWriteExt;
-		int64_t btreeCommitSubtreeStart;
-		int64_t btreePageUpdate;
-		int64_t btreePageUpdateExt;
-		int64_t lazyClearRequeued;
-		int64_t lazyClearRequeuedExt;
-		int64_t lazyClearFreed;
-		int64_t lazyClearFreedExt;
+		unsigned int btreePageReads;
+		unsigned int btreePageReadExt;
+		unsigned int btreePageWrite;
+		unsigned int btreePageWriteExt;
+		unsigned int btreePageCommitStart;
+		unsigned int btreePageUpdate;
+		unsigned int btreePageUpdateExt;
+		unsigned int lazyClearRequeue;
+		unsigned int lazyClearRequeueExt;
+		unsigned int lazyClearFree;
+		unsigned int lazyClearFreeExt;
 	};
 
 	Level levels[btreeLevels];
-	int64_t opSet;
-	int64_t opClear;
-	int64_t opClearSingleKey;
-	int64_t opCommit;
-	int64_t opGet;
-	int64_t opGetRange;
-	int64_t pagerDiskWrites;
-	int64_t pagerDiskReads;
-	int64_t pagerRemapFree;
-	int64_t pagerRemapCopy;
-	int64_t pagerRemapCopyElided;
-	int64_t pagerCacheHit;
-	int64_t pagerCacheMiss;
-	int64_t pagerProbeHit;
-	int64_t pagerProbeMiss;
-	int64_t pagerEvictUnhit;
-	int64_t pagerEvictFailed;
-	int64_t btreeLeafPreload;
-	int64_t btreeLeafPreloadExt;
+	unsigned int opSet;
+	unsigned int opSetKeyBytes;
+	unsigned int opSetValueBytes;
+	unsigned int opClear;
+	unsigned int opClearKey;
+	unsigned int opCommit;
+	unsigned int opGet;
+	unsigned int opGetRange;
+	unsigned int pagerDiskWrite;
+	unsigned int pagerDiskRead;
+	unsigned int pagerRemapFree;
+	unsigned int pagerRemapCopy;
+	unsigned int pagerRemapSkip;
+	unsigned int pagerCacheHit;
+	unsigned int pagerCacheMiss;
+	unsigned int pagerProbeHit;
+	unsigned int pagerProbeMiss;
+	unsigned int pagerEvictUnhit;
+	unsigned int pagerEvictFail;
+	unsigned int btreeLeafPreload;
+	unsigned int btreeLeafPreloadExt;
 
 	double startTime;
 
@@ -796,55 +798,78 @@ struct RedwoodMetrics {
 	}
 
 	void getFields(TraceEvent* e, std::string* s = nullptr) {
-		std::pair<const char*, int64_t> metrics[] = { { "BTreeLeafPreload", btreeLeafPreload },
-			                                          { "BTreeLeafPreloadExt", btreeLeafPreloadExt },
-			                                          { "OpSet", opSet },
-			                                          { "OpClear", opClear },
-			                                          { "OpClearSingleKey", opClearSingleKey },
-			                                          { "OpGet", opGet },
-			                                          { "OpGetRange", opGetRange },
-			                                          { "OpCommit", opCommit },
-			                                          { "PagerDiskWrites", pagerDiskWrites },
-			                                          { "PagerDiskReads", pagerDiskReads },
-			                                          { "PagerRemapFree", pagerRemapFree },
-			                                          { "PagerRemapCopy", pagerRemapCopy },
-			                                          { "PagerRemapCopyElided", pagerRemapCopyElided },
-			                                          { "PagerCacheHit", pagerCacheHit },
-			                                          { "PagerCacheMiss", pagerCacheMiss },
-			                                          { "PagerProbeHit", pagerProbeHit },
-			                                          { "PagerProbeMiss", pagerProbeMiss },
-			                                          { "PagerEvictUnhit", pagerEvictUnhit },
-			                                          { "PagerEvictFailed", pagerEvictFailed } };
+		std::pair<const char*, unsigned int> metrics[] = { { "BTreePreload", btreeLeafPreload },
+			                                               { "BTreePreloadExt", btreeLeafPreloadExt },
+			                                               { "", 0 },
+			                                               { "OpSet", opSet },
+			                                               { "OpSetKeyBytes", opSetKeyBytes },
+			                                               { "OpSetValueBytes", opSetValueBytes },
+			                                               { "OpClear", opClear },
+			                                               { "OpClearKey", opClearKey },
+			                                               { "", 0 },
+			                                               { "OpGet", opGet },
+			                                               { "OpGetRange", opGetRange },
+			                                               { "OpCommit", opCommit },
+			                                               { "", 0 },
+			                                               { "PagerDiskWrite", pagerDiskWrite },
+			                                               { "PagerDiskRead", pagerDiskRead },
+			                                               { "PagerCacheHit", pagerCacheHit },
+			                                               { "PagerCacheMiss", pagerCacheMiss },
+			                                               { "", 0 },
+			                                               { "PagerProbeHit", pagerProbeHit },
+			                                               { "PagerProbeMiss", pagerProbeMiss },
+			                                               { "PagerEvictUnhit", pagerEvictUnhit },
+			                                               { "PagerEvictFail", pagerEvictFail },
+			                                               { "", 0 },
+			                                               { "PagerRemapFree", pagerRemapFree },
+			                                               { "PagerRemapCopy", pagerRemapCopy },
+			                                               { "PagerRemapSkip", pagerRemapSkip } };
 		double elapsed = now() - startTime;
 		for (auto& m : metrics) {
-			if (s != nullptr) {
-				*s += format("%s=%" PRId64 " (%d/s)  ", m.first, m.second, int(m.second / elapsed));
-			}
-			if (e != nullptr) {
-				e->detail(m.first, m.second);
+			if (*m.first == '\0') {
+				if (s != nullptr) {
+					*s += "\n";
+				}
+			} else {
+				if (s != nullptr) {
+					*s += format("%-15s %-7d %7d/s  ", m.first, m.second, int(m.second / elapsed));
+				}
+				if (e != nullptr) {
+					e->detail(m.first, m.second);
+				}
 			}
 		}
 
 		for (int i = 0; i < btreeLevels; ++i) {
 			auto& level = levels[i];
-			std::pair<const char*, int64_t> metrics[] = { { "BTreePageRead", level.btreePageReads },
-				                                          { "BTreePageReadExt", level.btreePageReadExt },
-				                                          { "BTreePageWrite", level.btreePageWrite },
-				                                          { "BTreePageWriteExt", level.btreePageWriteExt },
-				                                          { "BTreePageUpdate", level.btreePageUpdate },
-				                                          { "BTreePageUpdateExt", level.btreePageUpdateExt },
-				                                          { "BtreeCommitSubtreeStart", level.btreeCommitSubtreeStart },
-				                                          { "LazyClearRequeued", level.lazyClearRequeued },
-				                                          { "LazyClearRequeuedExt", level.lazyClearRequeuedExt },
-				                                          { "LazyClearFreed", level.lazyClearFreed },
-				                                          { "LazyClearFreedExt", level.lazyClearFreedExt } };
+			std::pair<const char*, unsigned int> metrics[] = { { "PageWrite", level.btreePageWrite },
+				                                               { "PageWriteExt", level.btreePageWriteExt },
+				                                               { "PageUpdate", level.btreePageUpdate },
+				                                               { "PageUpdateExt", level.btreePageUpdateExt },
+				                                               { "", 0 },
+				                                               { "PageRead", level.btreePageReads },
+				                                               { "PageReadExt", level.btreePageReadExt },
+				                                               { "PageCommitStart", level.btreePageCommitStart },
+				                                               { "", 0 },
+				                                               { "LazyClearInt", level.lazyClearRequeue },
+				                                               { "LazyClearIntExt", level.lazyClearRequeueExt },
+				                                               { "LazyClear", level.lazyClearFree },
+				                                               { "LazyClearExt", level.lazyClearFreeExt } };
+			if (s != nullptr) {
+				*s += format("\nLevel %d\n\t", i + 1);
+			}
 			for (auto& m : metrics) {
-				if (s != nullptr) {
-					*s +=
-					    format("\n\tLevel%d%s=%" PRId64 " (%d/s)  ", i + 1, m.first, m.second, int(m.second / elapsed));
-				}
-				if (e != nullptr) {
-					e->detail(format("Level%d%s", i + 1, m.first), m.second);
+				if (*m.first == '\0') {
+					if (s != nullptr) {
+						*s += "\n\t";
+					}
+				} else {
+					if (s != nullptr) {
+						*s += format("%-15s %7d %7d/s  ", m.first, m.second, int(m.second / elapsed));
+					}
+					if (e != nullptr) {
+						e->detail(format("L%d%s", i + 1, m.first), m.second);
+					}
 				}
 			}
 		}
@@ -864,19 +889,19 @@ struct RedwoodMetrics {
 
 // Using a global for Redwood metrics because a single process shouldn't normally have multiple storage engines
 RedwoodMetrics g_redwoodMetrics;
-Future<Void> g_redwoodMetricsActor = Void();
+Future<Void> g_redwoodMetricsActor;
 
 ACTOR Future<Void> redwoodMetricsLogger() {
-	state double start = now();
+	g_redwoodMetrics.clear();
 
 	loop {
 		wait(delay(SERVER_KNOBS->REDWOOD_LOGGING_INTERVAL));
 
 		TraceEvent e("RedwoodMetrics");
-		double current = now();
-		e.detail("Elapsed", current - start);
+		double elapsed = now() - g_redwoodMetrics.startTime;
+		e.detail("Elapsed", elapsed);
 		g_redwoodMetrics.getFields(&e);
-		start = current;
+		g_redwoodMetrics.clear();
 	}
 }
 
@@ -954,7 +979,7 @@ public:
 				if (!toEvict.item.evictable()) {
 					evictionOrder.erase(evictionOrder.iterator_to(toEvict));
 					evictionOrder.push_back(toEvict);
-					++g_redwoodMetrics.pagerEvictFailed;
+					++g_redwoodMetrics.pagerEvictFail;
 					break;
 				} else {
 					if (toEvict.hits == 0) {
@@ -1084,7 +1109,7 @@ public:
 	  : desiredPageSize(desiredPageSize), filename(filename), pHeader(nullptr), pageCacheBytes(pageCacheSizeBytes),
 	    memoryOnly(memoryOnly) {
 
-		if (g_redwoodMetricsActor.isReady()) {
+		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
 		}
 
@@ -1326,7 +1351,7 @@ public:
 		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n", filename.c_str(),
 		             (header ? "writePhysicalHeader" : "writePhysical"), toString(pageID).c_str(), page->begin());
 
-		++g_redwoodMetrics.pagerDiskWrites;
+		++g_redwoodMetrics.pagerDiskWrite;
 		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
 		((Page*)page.getPtr())->updateChecksum(pageID);
 
@@ -1438,7 +1463,7 @@ public:
 	ACTOR static Future<Reference<IPage>> readPhysicalPage(DWALPager* self, PhysicalPageID pageID,
 	                                                       bool header = false) {
 		ASSERT(!self->memoryOnly);
-		++g_redwoodMetrics.pagerDiskReads;
+		++g_redwoodMetrics.pagerDiskRead;
 
 		if (g_network->getCurrentTask() > TaskPriority::DiskRead) {
 			wait(delay(0, TaskPriority::DiskRead));
@@ -1633,7 +1658,7 @@ public:
 					// The remapped pages entries will be cleaned up below.
 					self->freeUnmappedPage(m.newPageID, 0);
 					++g_redwoodMetrics.pagerRemapFree;
-					++g_redwoodMetrics.pagerRemapCopyElided;
+					++g_redwoodMetrics.pagerRemapSkip;
 				}
 				m = p.get();
 
@@ -2877,6 +2902,8 @@ public:
 	// durable once the following call to commit() returns
 	void set(KeyValueRef keyValue) {
 		++g_redwoodMetrics.opSet;
+		++g_redwoodMetrics.opSetKeyBytes += keyValue.key.size();
+		++g_redwoodMetrics.opSetValueBytes += keyValue.value.size();
 		m_pBuffer->insert(keyValue.key).mutation().setBoundaryValue(m_pBuffer->copyToArena(keyValue.value));
 	}
 
@@ -2885,7 +2912,7 @@ public:
 		if (clearedRange.begin.size() == clearedRange.end.size() - 1 &&
 		    clearedRange.end[clearedRange.end.size() - 1] == 0 && clearedRange.end.startsWith(clearedRange.begin)) {
 			++g_redwoodMetrics.opClear;
-			++g_redwoodMetrics.opClearSingleKey;
+			++g_redwoodMetrics.opClearKey;
 			m_pBuffer->insert(clearedRange.begin).mutation().clearBoundary();
 			return;
 		}
@@ -2977,14 +3004,14 @@ public:
 							debug_printf("LazyClear: freeing child %s\n", toString(btChildPageID).c_str());
 							self->freeBtreePage(btChildPageID, v);
 							freedPages += btChildPageID.size();
-							metrics.lazyClearFreed += 1;
-							metrics.lazyClearFreedExt += (btChildPageID.size() - 1);
+							metrics.lazyClearFree += 1;
+							metrics.lazyClearFreeExt += (btChildPageID.size() - 1);
 						} else {
 							// Otherwise, queue them for lazy delete.
 							debug_printf("LazyClear: queuing child %s\n", toString(btChildPageID).c_str());
 							self->m_lazyClearQueue.pushFront(LazyClearQueueEntry{ v, btChildPageID });
-							metrics.lazyClearRequeued += 1;
-							metrics.lazyClearRequeuedExt += (btChildPageID.size() - 1);
+							metrics.lazyClearRequeue += 1;
+							metrics.lazyClearRequeueExt += (btChildPageID.size() - 1);
 						}
 					}
 					if (!c.moveNext()) {
@@ -2996,8 +3023,8 @@ public:
 				debug_printf("LazyClear: freeing queue entry %s\n", toString(entry.pageID).c_str());
 				self->freeBtreePage(entry.pageID, v);
 				freedPages += entry.pageID.size();
-				metrics.lazyClearFreed += 1;
-				metrics.lazyClearFreedExt += entry.pageID.size() - 1;
+				metrics.lazyClearFree += 1;
+				metrics.lazyClearFreeExt += entry.pageID.size() - 1;
 			}
 
 			// Stop if
@@ -4056,7 +4083,7 @@ private:
 		    wait(readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound));
 		state BTreePage* btPage = (BTreePage*)page->begin();
 		ASSERT(isLeaf == btPage->isLeaf());
-		g_redwoodMetrics.level(btPage->height).btreeCommitSubtreeStart += 1;
+		g_redwoodMetrics.level(btPage->height).btreePageCommitStart += 1;
 
 		// TODO:  Decide if it is okay to update if the subtree boundaries are expanded.  It can result in
 		// records in a DeltaTree being outside its decode boundary range, which isn't actually invalid
@@ -6391,6 +6418,9 @@ TEST_CASE("!/redwood/performance/mutationBuffer") {
 }
 
 TEST_CASE("!/redwood/correctness/btree") {
+	g_redwoodMetricsActor = Void();  // Prevent trace event metrics from starting
+	g_redwoodMetrics.clear();
+
 	state std::string pagerFile = "unittest_pageFile.redwood";
 	IPager2* pager;
 
@@ -6436,6 +6466,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 
 	printf("Initializing...\n");
 	state double startTime = now();
+
 	pager = new DWALPager(pageSize, pagerFile, cacheSizeBytes, pagerMemoryOnly);
 	state VersionedBTree* btree = new VersionedBTree(pager, pagerFile);
 	wait(btree->init());
@@ -6586,7 +6617,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 			}
 
 			commit = map(btree->commit(), [=](Void) {
-				printf("Committed: %s\n", g_redwoodMetrics.toString(true).c_str());
+				printf("Committed:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 				// Notify the background verifier that version is committed and therefore readable
 				committedVersions.send(v);
 				return Void();
@@ -6740,6 +6771,8 @@ TEST_CASE("!/redwood/correctness/pager/cow") {
 
 TEST_CASE("!/redwood/performance/set") {
 	state SignalableActorCollection actors;
+
+	g_redwoodMetricsActor = Void();  // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
 	// If a test file is passed in by environment then don't write new data to it.
@@ -6801,7 +6834,7 @@ TEST_CASE("!/redwood/performance/set") {
 			Version lastVer = btree->getLatestVersion();
 			state Version version = lastVer + 1;
 			btree->setWriteVersion(version);
-			int changesThisVersion = deterministicRandom()->randomInt(0, maxRecordsPerCommit - recordsThisCommit + 1);
+			state int changesThisVersion = deterministicRandom()->randomInt(0, maxRecordsPerCommit - recordsThisCommit + 1);
 
 			while (changesThisVersion > 0 && kvBytesThisCommit < maxKVBytesPerCommit) {
 				KeyValue kv;
@@ -6824,6 +6857,8 @@ TEST_CASE("!/redwood/performance/set") {
 					kvBytesThisCommit += kv.key.size() + kv.value.size();
 					++recordsThisCommit;
 				}
+
+				wait(yield());
 			}
 
 			if (kvBytesThisCommit >= maxKVBytesPerCommit || recordsThisCommit >= maxRecordsPerCommit) {
@@ -6841,7 +6876,7 @@ TEST_CASE("!/redwood/performance/set") {
 				double* pIntervalStart = &intervalStart;
 
 				commit = map(btree->commit(), [=](Void result) {
-					printf("Committed: %s\n", g_redwoodMetrics.toString(true).c_str());
+					printf("Committed:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 					double elapsed = timer() - *pIntervalStart;
 					printf("Committed %d keyValueBytes in %d records in %f seconds, %.2f MB/s\n", kvb, recs, elapsed,
 					       kvb / elapsed / 1e6);
@@ -6866,46 +6901,46 @@ TEST_CASE("!/redwood/performance/set") {
 	actors.add(randomSeeks(btree, seeks / 3, firstKeyChar, lastKeyChar));
 	actors.add(randomSeeks(btree, seeks / 3, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
+	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	state int ops = 10000;
 
 	printf("Serial scans with adaptive readAhead...\n");
 	actors.add(randomScans(btree, ops, 50, -1, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
+	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans with readAhead 3 pages...\n");
 	actors.add(randomScans(btree, ops, 50, 12000, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
+	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans with readAhead 2 pages...\n");
 	actors.add(randomScans(btree, ops, 50, 8000, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
+	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans with readAhead 1 page...\n");
 	actors.add(randomScans(btree, ops, 50, 4000, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
+	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial scans...\n");
 	actors.add(randomScans(btree, ops, 50, 0, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
+	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Serial seeks...\n");
 	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
+	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	printf("Parallel seeks...\n");
 	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
 	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
 	actors.add(randomSeeks(btree, ops, firstKeyChar, lastKeyChar));
 	wait(actors.signalAndReset());
-	printf("Stats: %s\n", g_redwoodMetrics.toString(true).c_str());
+	printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 	Future<Void> closedFuture = btree->onClosed();
 	btree->close();
@@ -7198,7 +7233,6 @@ Future<Void> closeKVS(IKeyValueStore* kvs) {
 
 ACTOR Future<Void> doPrefixInsertComparison(int suffixSize, int valueSize, int recordCountTarget,
                                             bool usePrefixesInOrder, KVSource source) {
-	g_redwoodMetrics.clear();
 
 	deleteFile("test.redwood");
 	wait(delay(5));
