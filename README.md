@@ -28,11 +28,9 @@ Developers interested in using FoundationDB can get started by downloading and i
 Developers on an OS for which there is no binary package, or who would like
 to start hacking on the code, can get started by compiling from source.
 
-The official docker image for building is `foundationdb/foundationdb-build`. It has all dependencies installed. Use `-DBOOST_ROOT=/opt/boost_1_72_0/` in your cmake command. To build outside the official docker image you'll need at least these dependencies:
+The official docker image for building is `foundationdb/foundationdb-build`. It has all dependencies installed. To build outside the official docker image you'll need at least these dependencies:
 
 1. Install cmake Version 3.13 or higher [CMake](https://cmake.org/)
-1. Download version 1.72 of [Boost](https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2)
-1. Unpack boost (you don't need to compile it)
 1. Install [Mono](http://www.mono-project.com/download/stable/)
 1. Install [Ninja](https://ninja-build.org/) (optional, but recommended)
 
@@ -46,7 +44,7 @@ Once you have your dependencies, you can run cmake and then build:
 1. Create a build directory (you can have the build directory anywhere you
    like). There is currently a directory in the source tree called build, but you should not use it. See [#3098](https://github.com/apple/foundationdb/issues/3098)
 1. `cd <PATH_TO_BUILD_DIRECTORY>`
-1. `cmake -G Ninja -DBOOST_ROOT=<PATH_TO_BOOST> <PATH_TO_FOUNDATIONDB_DIRECTORY>`
+1. `cmake -G Ninja <PATH_TO_FOUNDATIONDB_DIRECTORY>`
 1. `ninja`
 
 ### Language Bindings
