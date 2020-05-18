@@ -45,7 +45,7 @@ Once you have your dependencies, you can run cmake and then build:
    like). There is currently a directory in the source tree called build, but you should not use it. See [#3098](https://github.com/apple/foundationdb/issues/3098)
 1. `cd <PATH_TO_BUILD_DIRECTORY>`
 1. `cmake -G Ninja <PATH_TO_FOUNDATIONDB_DIRECTORY>`
-1. `ninja`
+1. `ninja # If this crashes it probably ran out of memory. Try ninja -j1`
 
 ### Language Bindings
 
