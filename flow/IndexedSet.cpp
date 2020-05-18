@@ -503,11 +503,7 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 }
 
 template <class T>
-struct is_const_ref {
-	static constexpr bool value = std::is_const_v<typename std::remove_reference_t<T>>;
-};
-template <class T>
-static constexpr bool is_const_ref_v = is_const_ref<T>::value;
+static constexpr bool is_const_ref_v = std::is_const_v<typename std::remove_reference_t<T>>;
 
 TEST_CASE("/flow/IndexedSet/const_iterator") {
 	struct Key {
