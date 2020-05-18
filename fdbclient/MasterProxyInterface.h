@@ -66,7 +66,7 @@ struct MasterProxyInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, processId, provisional, base);
+		serializer(ar, processId, provisional, base, getDDMetrics); // TODO : solve this
 		if( Archive::isDeserializing ) {
 			commit = RequestStream< struct CommitTransactionRequest >( base.getAdjustedEndpoint(0) );
 			getConsistentReadVersion = RequestStream< struct GetReadVersionRequest >( base.getAdjustedEndpoint(1) );
@@ -78,7 +78,7 @@ struct MasterProxyInterface {
 			getHealthMetrics = RequestStream< struct GetHealthMetricsRequest >( base.getAdjustedEndpoint(7) );
 			proxySnapReq = RequestStream< struct ProxySnapRequest >( base.getAdjustedEndpoint(8) );
 			exclusionSafetyCheckReq = RequestStream< struct ExclusionSafetyCheckRequest >( base.getAdjustedEndpoint(9) );
-			getDDMetrics = RequestStream< struct GetDDMetricsRequest >( base.getAdjustedEndpoint(10) );
+			// getDDMetrics = RequestStream< struct GetDDMetricsRequest >( base.getAdjustedEndpoint(10) );
 		}
 	}
 

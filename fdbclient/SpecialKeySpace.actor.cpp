@@ -29,7 +29,8 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	  KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0")) },
 	{ SpecialKeySpace::MODULE::STATUSJSON, singleKeyRange(LiteralStringRef("\xff\xff/status/json")) },
 	{ SpecialKeySpace::MODULE::CONNECTIONSTRING, singleKeyRange(LiteralStringRef("\xff\xff/connection_string")) },
-	{ SpecialKeySpace::MODULE::CLUSTERFILEPATH, singleKeyRange(LiteralStringRef("\xff\xff/cluster_file_path")) }
+	{ SpecialKeySpace::MODULE::CLUSTERFILEPATH, singleKeyRange(LiteralStringRef("\xff\xff/cluster_file_path")) },
+	{ SpecialKeySpace::MODULE::METRICS, KeyRangeRef(LiteralStringRef("\xff\xff/metrics/"), LiteralStringRef("\xff\xff/metrics0")) }
 };
 
 // This function will move the given KeySelector as far as possible to the standard form:
@@ -312,6 +313,32 @@ Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(Reference<ReadY
 			result.push_back(result.arena(), KeyValueRef(endIter->begin(), endIter->value()));
 	}
 	return result;
+}
+
+ACTOR Future<Standalone<RangeResultRef>> ddStatsGetRangeActor(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr) {
+	try {
+		auto keys = kr.removePrefix(ddStatsRange.begin);
+		Standalone<VectorRef<DDMetricsRef>> resultWithoutPrefix =
+		    wait(waitDataDistributionMetricsList(ryw->getDatabase(), keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT));
+		Standalone<RangeResultRef> result;
+		for (const auto& ddMetricsRef : resultWithoutPrefix) {
+			KeyRef beginKey = ddMetricsRef.beginKey.withPrefix(ddStatsRange.begin, result.arena());
+			KeyRef endKey = ddMetricsRef.endKey.withPrefix(ddStatsRange.begin, result.arena());
+			ValueRef bytes(result.arena(), std::to_string(ddMetricsRef.shardBytes));
+			ValueRef zeroBytes(result.arena(), std::to_string(0));
+			result.push_back(result.arena(), KeyValueRef(beginKey, bytes));
+			result.push_back(result.arena(), KeyValueRef(endKey, zeroBytes));
+		}
+		return result;
+	} catch (Error& e) {
+		throw;
+	}
+}
+
+DDStatsRangeImpl::DDStatsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr) const {
+	return ddStatsGetRangeActor(ryw, kr);
 }
 
 class SpecialKeyRangeTestImpl : public SpecialKeyRangeBaseImpl {

@@ -1224,32 +1224,6 @@ ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces (Reference<ClusterC
 	}
 }
 
-ACTOR Future<Standalone<RangeResultRef>> getDataDistributionMetricsList(Database cx,
-                                                                        Reference<ClusterConnectionFile> clusterFile,
-                                                                        StringRef stats_prefix, KeySelector begin,
-                                                                        KeySelector end) {
-	auto keys = KeyRangeRef(begin.getKey(), end.getKey()).removePrefix(stats_prefix);
-	try {
-		Standalone<VectorRef<DDMetricsRef>> intermediateResult =
-		    wait(waitDataDistributionMetricsList(cx, keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT));
-		Standalone<RangeResultRef> result;
-		for (auto& i : intermediateResult) {
-			json_spirit::mObject jsonObj;
-			jsonObj["Begin"] = i.beginKey.toString();
-			jsonObj["End"] = i.endKey.toString();
-			jsonObj["ShardBytes"] = i.shardBytes;
-
-			std::string jsonStr =
-			    json_spirit::write_string(json_spirit::mValue(jsonObj), json_spirit::Output_options::raw_utf8);
-			KeyValueRef kv(KeyRef(stats_prefix.toString() + i.beginKey.toString()), ValueRef(jsonStr));
-			result.push_back_deep(result.arena(), kv);
-		}
-		return result;
-	} catch (Error& e) {
-		throw;
-	}
-}
-
 Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool snapshot ) {
 	TEST(true);
 
@@ -1336,21 +1310,6 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	bool reverse )
 {
 	if (getDatabase()->apiVersionAtLeast(630)) {
-		StringRef stats_prefix = LiteralStringRef("\xff\xff/dd_stats/");
-		if (begin.getKey().startsWith(stats_prefix) &&
-			end.getKey().startsWith(stats_prefix)) {
-			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-				try {
-					return getDataDistributionMetricsList(tr.getDatabase(), tr.getDatabase()->getConnectionFile(),
-														stats_prefix, begin, end);
-				} catch( Error &e ) {
-					return e;
-				}
-			}
-			else {
-				return Standalone<RangeResultRef>();
-			}
-		}
 		if (specialKeys.contains(begin.getKey()) && end.getKey() <= specialKeys.end) {
 			TEST(true); // Special key space get range
 			return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin,
@@ -1365,11 +1324,6 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 			}
 		}
 	}
-	
-	// special key space are only allowed to query if both begin and end are in \xff\xff, \xff\xff\xff
-	if (specialKeys.contains(begin.getKey()) && end.getKey() <= specialKeys.end)
-		return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin, end,
-		                                                limits, reverse);
 
 	if(checkUsedDuringCommit()) {
 		return used_during_commit();
