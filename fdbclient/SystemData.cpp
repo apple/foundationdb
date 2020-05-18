@@ -49,14 +49,29 @@ const Value keyServersValue( Standalone<RangeResultRef> result, const std::vecto
 	std::vector<Tag> srcTag;
 	std::vector<Tag> destTag;
 
+	bool foundOldLocality = false;
 	for (const KeyValueRef kv : result) {
 		UID uid = decodeServerTagKey(kv.key);
 		if (std::find(src.begin(), src.end(), uid) != src.end()) {
 			srcTag.push_back( decodeServerTagValue(kv.value) );
+			if(srcTag.back().locality == tagLocalityUpgraded) {
+				foundOldLocality = true;
+				break;
+			}
 		}
 		if (std::find(dest.begin(), dest.end(), uid) != dest.end()) {
 			destTag.push_back( decodeServerTagValue(kv.value) );
+			if(destTag.back().locality == tagLocalityUpgraded) {
+				foundOldLocality = true;
+				break;
+			}
 		}
+	}
+
+	if(foundOldLocality || src.size() != srcTag.size() || dest.size() != destTag.size()) {
+		ASSERT_WE_THINK(foundOldLocality);
+		BinaryWriter wr(IncludeVersion()); wr << src << dest;
+		return wr.toValue();
 	}
 
 	return keyServersValue(srcTag, destTag);
@@ -68,7 +83,7 @@ const Value keyServersValue( const std::vector<Tag>& srcTag, const std::vector<T
 }
 
 void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& value,
-                            std::vector<UID>& src, std::vector<UID>& dest  ) {
+                            std::vector<UID>& src, std::vector<UID>& dest, bool missingIsError ) {
 	if (value.size() == 0) {
 		src.clear();
 		dest.clear();
@@ -104,6 +119,72 @@ void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& v
 			dest.push_back( decodeServerTagKey(kv.key) );
 		}
 	}
+	std::sort(src.begin(), src.end());
+	std::sort(dest.begin(), dest.end());
+	if(missingIsError && (src.size() != srcTag.size() || dest.size() != destTag.size())) {
+		TraceEvent(SevError, "AttemptedToDecodeMissingTag");
+		for (const KeyValueRef kv : result) {
+			Tag tag = decodeServerTagValue(kv.value);
+			UID serverID = decodeServerTagKey(kv.key);
+			TraceEvent("TagUIDMap").detail("Tag", tag.toString()).detail("UID", serverID.toString());
+		}
+		for(auto& it : srcTag) {
+			TraceEvent("SrcTag").detail("Tag", it.toString());
+		}
+		for(auto& it : destTag) {
+			TraceEvent("DestTag").detail("Tag", it.toString());
+		}
+		ASSERT(false);
+	}
+}
+
+void decodeKeyServersValue( std::map<Tag, UID> const& tag_uid, const ValueRef& value,
+                            std::vector<UID>& src, std::vector<UID>& dest ) {
+	static std::vector<Tag> srcTag, destTag;
+	src.clear();
+	dest.clear();
+	if (value.size() == 0) {
+		return;
+	}
+
+	BinaryReader rd(value, IncludeVersion());
+	rd.checkpoint();
+	int srcLen, destLen;
+	rd >> srcLen;
+	rd.readBytes(srcLen * sizeof(Tag));
+	rd >> destLen;
+	rd.rewind();
+
+	if (value.size() != sizeof(ProtocolVersion) + sizeof(int) + srcLen * sizeof(Tag) + sizeof(int) + destLen * sizeof(Tag)) {
+		rd >> src >> dest;
+		rd.assertEnd();
+		return;
+	}
+
+	srcTag.clear();
+	destTag.clear();
+	rd >> srcTag >> destTag;
+
+	for(auto t : srcTag) {
+		auto itr = tag_uid.find(t);
+		if(itr != tag_uid.end()) {
+			src.push_back(itr->second);
+		} else {
+			TraceEvent(SevError, "AttemptedToDecodeMissingSrcTag").detail("Tag", t.toString());
+			ASSERT(false);
+		}
+	}
+
+	for(auto t : destTag) {
+		auto itr = tag_uid.find(t);
+		if(itr != tag_uid.end()) {
+			dest.push_back(itr->second);
+		} else {
+			TraceEvent(SevError, "AttemptedToDecodeMissingDestTag").detail("Tag", t.toString());
+			ASSERT(false);
+		}
+	}
+
 	std::sort(src.begin(), src.end());
 	std::sort(dest.begin(), dest.end());
 }
@@ -626,6 +707,17 @@ const KeyRef moveKeysLockWriteKey = LiteralStringRef("\xff/moveKeysLock/Write");
 
 const KeyRef dataDistributionModeKey = LiteralStringRef("\xff/dataDistributionMode");
 const UID dataDistributionModeLock = UID(6345,3425);
+
+// Keys to view and control tag throttling
+const KeyRangeRef tagThrottleKeys = KeyRangeRef(
+	LiteralStringRef("\xff\x02/throttledTags/tag/"),
+	LiteralStringRef("\xff\x02/throttledTags/tag0"));
+const KeyRef tagThrottleKeysPrefix = tagThrottleKeys.begin;
+const KeyRef tagThrottleAutoKeysPrefix = LiteralStringRef("\xff\x02/throttledTags/tag/\x01");
+const KeyRef tagThrottleSignalKey = LiteralStringRef("\xff\x02/throttledTags/signal");
+const KeyRef tagThrottleAutoEnabledKey = LiteralStringRef("\xff\x02/throttledTags/autoThrottlingEnabled");
+const KeyRef tagThrottleLimitKey = LiteralStringRef("\xff\x02/throttledTags/manualThrottleLimit");
+const KeyRef tagThrottleCountKey = LiteralStringRef("\xff\x02/throttledTags/manualThrottleCount");
 
 // Client status info prefix
 const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"), LiteralStringRef("\xff\x02/fdbClientInfo0"));

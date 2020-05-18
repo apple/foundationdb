@@ -52,8 +52,12 @@ static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int c
 	return cl;
 }
 
-static int commonPrefixLength(StringRef a, StringRef b) {
+static inline int commonPrefixLength(const StringRef& a, const StringRef& b) {
 	return commonPrefixLength(a.begin(), b.begin(), std::min(a.size(), b.size()));
+}
+
+static inline int commonPrefixLength(const StringRef& a, const StringRef& b, int skipLen) {
+	return commonPrefixLength(a.begin() + skipLen, b.begin() + skipLen, std::min(a.size(), b.size()) - skipLen);
 }
 
 // This appears to be the fastest version
@@ -367,9 +371,10 @@ public:
 
 		const T* upperBound() const { return upper; }
 
+		DeltaTree* tree;
+
 	private:
 		Arena arena;
-		DeltaTree* tree;
 		DecodedNode* root;
 		const T* lower;
 		const T* upper;
@@ -470,7 +475,8 @@ public:
 			newNode->prev = prev;
 			newNode->next = next;
 
-			ASSERT(deltaSize == k.writeDelta(raw->delta(tree->largeNodes), *base, commonPrefix));
+			int written = k.writeDelta(raw->delta(tree->largeNodes), *base, commonPrefix);
+			ASSERT(deltaSize == written);
 			raw->delta(tree->largeNodes).setPrefixSource(basePrev);
 
 			// Initialize node's item from the delta (instead of copying into arena) to avoid unnecessary arena space

@@ -525,11 +525,12 @@ ACTOR Future<Void> logRouterCore(
 
 	addActor.send( pullAsyncData(&logRouterData) );
 	addActor.send( cleanupPeekTrackers(&logRouterData) );
+	addActor.send( traceRole(Role::LOG_ROUTER, interf.id()) );
 
 	loop choose {
 		when( wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
-			logRouterData.allowPops = db->get().recoveryState == RecoveryState::FULLY_RECOVERED;
+			logRouterData.allowPops = db->get().recoveryState == RecoveryState::FULLY_RECOVERED && db->get().recoveryCount >= req.recoveryCount;
 			logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get(), true ));
 		}
 		when( TLogPeekRequest req = waitNext( interf.peekMessages.getFuture() ) ) {

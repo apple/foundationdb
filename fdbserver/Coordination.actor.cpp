@@ -40,13 +40,15 @@ struct GenerationRegVal {
 	}
 };
 
+// The order of UIDs here must match the order in which makeWellKnownEndpoint is called.
 // UID WLTOKEN_CLIENTLEADERREG_GETLEADER( -1, 2 ); // from fdbclient/MonitorLeader.actor.cpp
 // UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE( -1, 3 ); // from fdbclient/MonitorLeader.actor.cpp
 UID WLTOKEN_LEADERELECTIONREG_CANDIDACY( -1, 4 );
-UID WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT( -1, 5 );
-UID WLTOKEN_LEADERELECTIONREG_FORWARD( -1, 6 );
-UID WLTOKEN_GENERATIONREG_READ( -1, 7 );
-UID WLTOKEN_GENERATIONREG_WRITE( -1, 8 );
+UID WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT( -1, 5 );
+UID WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT( -1, 6 );
+UID WLTOKEN_LEADERELECTIONREG_FORWARD( -1, 7 );
+UID WLTOKEN_GENERATIONREG_READ( -1, 8 );
+UID WLTOKEN_GENERATIONREG_WRITE( -1, 9 );
 
 
 GenerationRegInterface::GenerationRegInterface( NetworkAddress remote )
@@ -64,6 +66,7 @@ GenerationRegInterface::GenerationRegInterface( INetwork* local )
 LeaderElectionRegInterface::LeaderElectionRegInterface(NetworkAddress remote)
 	: ClientLeaderRegInterface(remote),
 	  candidacy( Endpoint({remote}, WLTOKEN_LEADERELECTIONREG_CANDIDACY) ),
+    electionResult( Endpoint({remote}, WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT) ),
 	  leaderHeartbeat( Endpoint({remote}, WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT) ),
 	  forward( Endpoint({remote}, WLTOKEN_LEADERELECTIONREG_FORWARD) )
 {
@@ -73,6 +76,7 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local)
 	: ClientLeaderRegInterface(local)
 {
 	candidacy.makeWellKnownEndpoint( WLTOKEN_LEADERELECTIONREG_CANDIDACY, TaskPriority::Coordination );
+	electionResult.makeWellKnownEndpoint( WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT, TaskPriority::Coordination );
 	leaderHeartbeat.makeWellKnownEndpoint( WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT, TaskPriority::Coordination );
 	forward.makeWellKnownEndpoint( WLTOKEN_LEADERELECTIONREG_FORWARD, TaskPriority::Coordination );
 }
@@ -240,6 +244,31 @@ ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<Asyn
 	return Void();
 }
 
+ACTOR Future<Void> remoteMonitorLeader( int* clientCount, Reference<AsyncVar<bool>> hasConnectedClients, Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader, ElectionResultRequest req ) {
+	if (currentElectedLeader->get().present() && req.knownLeader != currentElectedLeader->get().get().changeID) {
+		req.reply.send( currentElectedLeader->get() );
+		return Void();
+	}
+
+	++(*clientCount);
+	hasConnectedClients->set(true);
+
+	while (!currentElectedLeader->get().present() || req.knownLeader == currentElectedLeader->get().get().changeID) {
+		choose {
+			when (wait( yieldedFuture(currentElectedLeader->onChange()) ) ) {}
+			when (wait( delayJittered( SERVER_KNOBS->CLIENT_REGISTER_INTERVAL ) )) { break; }
+		}
+	}
+
+	req.reply.send( currentElectedLeader->get() );
+
+	if(--(*clientCount) == 0) {
+		hasConnectedClients->set(false);
+	}
+
+	return Void();
+}
+
 // This actor implements a *single* leader-election register (essentially, it ignores
 // the .key member of each request).  It returns any time the leader election is in the
 // default state, so that only active registers consume memory.
@@ -257,13 +286,21 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	state Reference<AsyncVar<bool>> hasConnectedClients = Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) );
 	state ActorCollection actors(false);
 	state Future<Void> leaderMon;
+	state AsyncVar<Value> leaderInterface;
+	state Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader = Reference<AsyncVar<Optional<LeaderInfo>>>( new AsyncVar<Optional<LeaderInfo>>() );
 
 	loop choose {
 		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {
 			if(!leaderMon.isValid()) {
-				leaderMon = monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData);
+				leaderMon = monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
 			}
 			actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
+		}
+		when ( ElectionResultRequest req = waitNext( interf.electionResult.getFuture() ) ) {
+			if(!leaderMon.isValid()) {
+				leaderMon = monitorLeaderForProxies(req.key, req.coordinators, &clientData, currentElectedLeader);
+			}
+			actors.add( remoteMonitorLeader( &clientCount, hasConnectedClients, currentElectedLeader, req ) );
 		}
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
 			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
@@ -284,7 +321,6 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			if(!nextInterval.isValid()) {
 				nextInterval = delay(0);
 			}
-			//TraceEvent("CandidacyRequest").detail("Nominee", req.myInfo.changeID );
 			availableCandidates.erase( LeaderInfo(req.prevChangeID) );
 			availableCandidates.insert( req.myInfo );
 			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
@@ -454,7 +490,7 @@ struct LeaderRegisterCollection {
 		try { 
 			// FIXME: Get worker ID here
 			startRole(Role::COORDINATOR, id, UID());
-			wait(actor); 
+			wait(actor || traceRole(Role::COORDINATOR, id));
 			endRole(Role::COORDINATOR, id, "Coordinator changed");
 		} catch (Error& err) {
 			endRole(Role::COORDINATOR, id, err.what(), err.code() == error_code_actor_cancelled, err);
@@ -487,6 +523,14 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 				req.reply.send( CachedSerialization<ClientDBInfo>(info) );
 			} else {
 				regs.getInterface(req.clusterKey, id).openDatabase.send( req );
+			}
+		}
+		when ( ElectionResultRequest req = waitNext( interf.electionResult.getFuture() ) ) {
+			Optional<LeaderInfo> forward = regs.getForward(req.key);
+			if( forward.present() ) {
+				req.reply.send( forward.get() );
+			} else {
+				regs.getInterface(req.key, id).electionResult.send( req );
 			}
 		}
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
