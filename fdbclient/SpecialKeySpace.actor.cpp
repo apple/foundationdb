@@ -165,7 +165,6 @@ SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks, Reference<ReadYo
 	state Optional<SpecialKeySpace::MODULE> lastModuleRead;
 
 	wait(normalizeKeySelectorActor(sks, ryw, &begin, &lastModuleRead, &actualBeginOffset, &result));
-	// TODO : check if end the boundary of a module
 	wait(normalizeKeySelectorActor(sks, ryw, &end, &lastModuleRead, &actualEndOffset, &result));
 	// Handle all corner cases like what RYW does
 	// return if range inverted
