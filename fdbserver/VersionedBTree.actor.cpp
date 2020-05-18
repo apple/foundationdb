@@ -2259,6 +2259,7 @@ struct RedwoodRecordRef {
 	Version version;
 
 	int expectedSize() const { return key.expectedSize() + value.expectedSize(); }
+	int kvBytes() const { return expectedSize(); }
 
 	class Reader {
 	public:
@@ -2863,7 +2864,7 @@ public:
 
 #pragma pack(push, 1)
 	struct MetaKey {
-		static constexpr int FORMAT_VERSION = 7;
+		static constexpr int FORMAT_VERSION = 8;
 		// This serves as the format version for the entire tree, individual pages will not be versioned
 		uint16_t formatVersion;
 		uint8_t height;
@@ -3464,13 +3465,10 @@ private:
 				// overhead for the delta size must be assumed.
 				int deltaSize = entry.deltaSize(base, skip, true);
 
-				int keySize = entry.key.size();
-				int valueSize = entry.value.present() ? entry.value.get().size() : 0;
-
 				int nodeSize = BTreePage::BinaryTree::Node::headerSize(largeTree) + deltaSize;
 				debug_printf("Adding %3d of %3lu (i=%3d) klen %4d  vlen %5d  nodeSize %5d  deltaSize %5d  page usage: "
 				             "%d/%d (%.2f%%)  record=%s\n",
-				             i + 1, entries.size(), i, keySize, valueSize, nodeSize, deltaSize, compressedBytes,
+				             i + 1, entries.size(), i, entry.key.size(), entry.value.orDefault(StringRef()).size(), nodeSize, deltaSize, compressedBytes,
 				             pageSize, (float)compressedBytes / pageSize * 100, entry.toString(height == 1).c_str());
 
 				// While the node doesn't fit, expand the page.
@@ -3502,7 +3500,7 @@ private:
 					pageFillTarget = pageSize * SERVER_KNOBS->REDWOOD_PAGE_REBUILD_FILL_FACTOR;
 				}
 
-				kvBytes += keySize + valueSize;
+				kvBytes += entry.kvBytes();
 				compressedBytes += nodeSize;
 				++i;
 			}
@@ -3947,10 +3945,11 @@ private:
 
 	struct InternalPageModifier {
 		InternalPageModifier() {}
-		InternalPageModifier(BTreePage::BinaryTree::Mirror* m, bool updating)
-		  : m(m), updating(updating), changesMade(false) {}
+		InternalPageModifier(BTreePage *p, BTreePage::BinaryTree::Mirror* m, bool updating)
+		  : btPage(p), m(m), updating(updating), changesMade(false) {}
 
 		bool updating;
+		BTreePage *btPage;
 		BTreePage::BinaryTree::Mirror* m;
 		Standalone<VectorRef<RedwoodRecordRef>> rebuild;
 		bool changesMade;
@@ -3990,6 +3989,7 @@ private:
 						updating = false;
 						break;
 					}
+					btPage->kvBytes += rec.kvBytes();
 					++i;
 				}
 			}
@@ -4032,6 +4032,7 @@ private:
 					auto c = u.cBegin;
 					while (c != u.cEnd) {
 						debug_printf("internal page (updating) erasing: %s\n", c.get().toString(false).c_str());
+						btPage->kvBytes -= c.get().kvBytes();
 						c.erase();
 					}
 					// [cBegin, cEnd) is now erased, and cBegin is invalid, so cEnd represents the end
@@ -4186,6 +4187,7 @@ private:
 						if (updating) {
 							debug_printf("%s Erasing %s [existing, boundary start]\n", context.c_str(),
 							             cursor.get().toString().c_str());
+							btPage->kvBytes -= cursor.get().kvBytes();
 							cursor.erase();
 						} else {
 							debug_printf("%s Skipped %s [existing, boundary start]\n", context.c_str(),
@@ -4207,6 +4209,7 @@ private:
 					// If updating, add to the page, else add to the output set
 					if (updating) {
 						if (cursor.mirror->insert(rec, update->skipLen, maxHeightAllowed)) {
+							btPage->kvBytes += rec.kvBytes();
 							debug_printf("%s Inserted %s [mutation, boundary start]\n", context.c_str(),
 							             rec.toString().c_str());
 						} else {
@@ -4255,6 +4258,7 @@ private:
 						if (updating) {
 							debug_printf("%s Erasing %s [existing, boundary start]\n", context.c_str(),
 							             cursor.get().toString().c_str());
+							btPage->kvBytes -= cursor.get().kvBytes();
 							cursor.erase();
 							changesMade = true;
 						} else {
@@ -4289,6 +4293,7 @@ private:
 							debug_printf(
 							    "%s Erasing %s and beyond [existing, matches changed upper mutation boundary]\n",
 							    context.c_str(), cursor.get().toString().c_str());
+							btPage->kvBytes -= cursor.get().kvBytes();
 							cursor.erase();
 						} else {
 							merged.push_back(merged.arena(), cursor.get());
@@ -4529,7 +4534,7 @@ private:
 			wait(waitForAll(recursions));
 			debug_printf("%s Recursions done, processing slice updates.\n", context.c_str());
 
-			state InternalPageModifier m(cursor.mirror, tryToUpdate);
+			state InternalPageModifier m(btPage, cursor.mirror, tryToUpdate);
 
 			// Apply the possible changes for each subtree range recursed to, except the last one.
 			// For each range, the expected next record, if any, is checked against the first boundary
