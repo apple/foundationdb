@@ -80,7 +80,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 				ASSERT(result[i].key.startsWith(ddStatsRange.begin));
 				totalBytes += std::stoi(result[i].value.toString());
 				ASSERT(result[i+1].key.startsWith(ddStatsRange.begin));
-				ASSERT(std::stoi(result[i+1].value.toString()) == 0);
+				ASSERT(result[i+1].value == ddStatsZeroBytes);
 			}
 			self->avgBytes = totalBytes / self->numShards;
 		} catch (Error& e) {

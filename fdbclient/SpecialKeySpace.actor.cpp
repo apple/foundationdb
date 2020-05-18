@@ -325,9 +325,8 @@ ACTOR Future<Standalone<RangeResultRef>> ddStatsGetRangeActor(Reference<ReadYour
 			KeyRef beginKey = ddMetricsRef.beginKey.withPrefix(ddStatsRange.begin, result.arena());
 			KeyRef endKey = ddMetricsRef.endKey.withPrefix(ddStatsRange.begin, result.arena());
 			ValueRef bytes(result.arena(), std::to_string(ddMetricsRef.shardBytes));
-			ValueRef zeroBytes(result.arena(), std::to_string(0));
 			result.push_back(result.arena(), KeyValueRef(beginKey, bytes));
-			result.push_back(result.arena(), KeyValueRef(endKey, zeroBytes));
+			result.push_back(result.arena(), KeyValueRef(endKey, ddStatsZeroBytes));
 		}
 		return result;
 	} catch (Error& e) {
