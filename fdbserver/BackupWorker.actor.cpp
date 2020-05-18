@@ -391,7 +391,7 @@ struct BackupData {
 
 	ACTOR static Future<Version> _getMinKnownCommittedVersion(BackupData* self) {
 		loop {
-			GetReadVersionRequest request(1, GetReadVersionRequest::PRIORITY_DEFAULT |
+			GetReadVersionRequest request(1, TransactionPriority::DEFAULT,
 			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
 				when(wait(self->cx->onMasterProxiesChanged())) {}
@@ -689,13 +689,11 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		MutationRef m;
 		if (!message.isBackupMessage(&m)) continue;
 
-		if (debugMutation("addMutation", message.version.version, m)) {
-			TraceEvent("BackupWorkerDebug", self->myId)
+		DEBUG_MUTATION("addMutation", message.version.version, m)
 			    .detail("Version", message.version.toString())
-			    .detail("Mutation", m.toString())
+			    .detail("Mutation", m)
 			    .detail("KCV", self->minKnownCommittedVersion)
 			    .detail("SavedVersion", self->savedVersion);
-		}
 
 		std::vector<Future<Void>> adds;
 		if (m.type != MutationRef::Type::ClearRange) {

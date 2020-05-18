@@ -8,6 +8,7 @@ env_set(ALLOC_INSTRUMENTATION OFF BOOL "Instrument alloc")
 env_set(WITH_UNDODB OFF BOOL "Use rr or undodb")
 env_set(USE_ASAN OFF BOOL "Compile with address sanitizer")
 env_set(USE_UBSAN OFF BOOL "Compile with undefined behavior sanitizer")
+env_set(USE_TSAN OFF BOOL "Compile with thread sanitizer")
 env_set(FDB_RELEASE OFF BOOL "This is a building of a final release")
 env_set(USE_CCACHE OFF BOOL "Use ccache for compilation if available")
 env_set(RELATIVE_DEBUG_PATHS OFF BOOL "Use relative file paths in debug info")
@@ -81,6 +82,7 @@ include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
 set(CMAKE_REQUIRED_LIBRARIES c)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_C_STANDARD 11)
 
 if(WIN32)
   # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
@@ -162,6 +164,15 @@ else()
     set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fsanitize=undefined")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=undefined")
     set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS}    -fsanitize=undefined ${CMAKE_THREAD_LIBS_INIT}")
+  endif()
+
+  if(USE_TSAN)
+    add_compile_options(
+      -fsanitize=thread
+      -DUSE_SANITIZER)
+    set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fsanitize=thread")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=thread")
+    set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS}    -fsanitize=thread ${CMAKE_THREAD_LIBS_INIT}")
   endif()
 
   if(PORTABLE_BINARY)
@@ -249,6 +260,12 @@ else()
       -fno-builtin-calloc
       -fno-builtin-realloc
       -fno-builtin-free)
+  endif()
+
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+    # Graviton or later
+    # https://github.com/aws/aws-graviton-gettting-started
+    add_compile_options(-march=armv8-a+crc+simd)
   endif()
 
   # Check whether we can use dtrace probes

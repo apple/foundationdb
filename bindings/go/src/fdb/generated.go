@@ -88,11 +88,18 @@ func (o NetworkOptions) SetTraceFormat(param string) error {
 	return o.setOpt(34, []byte(param))
 }
 
-// Select clock source for trace files. now (default) or realtime are supported.
+// Select clock source for trace files. now (the default) or realtime are supported.
 //
 // Parameter: Trace clock source
 func (o NetworkOptions) SetTraceClockSource(param string) error {
 	return o.setOpt(35, []byte(param))
+}
+
+// Once provided, this string will be used to replace the port/PID in the log file names.
+//
+// Parameter: The identifier that will be part of all trace file names
+func (o NetworkOptions) SetTraceFileIdentifier(param string) error {
+	return o.setOpt(36, []byte(param))
 }
 
 // Set internal tuning or debugging knobs
@@ -223,8 +230,13 @@ func (o NetworkOptions) SetDisableClientStatisticsLogging() error {
 	return o.setOpt(70, nil)
 }
 
-// Enables debugging feature to perform slow task profiling. Requires trace logging to be enabled. WARNING: this feature is not recommended for use in production.
+// Deprecated
 func (o NetworkOptions) SetEnableSlowTaskProfiling() error {
+	return o.setOpt(71, nil)
+}
+
+// Enables debugging feature to perform run loop profiling. Requires trace logging to be enabled. WARNING: this feature is not recommended for use in production.
+func (o NetworkOptions) SetEnableRunLoopProfiling() error {
 	return o.setOpt(71, nil)
 }
 
@@ -441,6 +453,11 @@ func (o TransactionOptions) SetTransactionLoggingMaxFieldLength(param int64) err
 	return o.setOpt(405, int64ToBytes(param))
 }
 
+// Sets an identifier for server tracing of this transaction. When committed, this identifier triggers logging when each part of the transaction authority encounters it, which is helpful in diagnosing slowness in misbehaving clusters. The identifier is randomly generated. When there is also a debug_transaction_identifier, both IDs are logged together.
+func (o TransactionOptions) SetServerRequestTracing() error {
+	return o.setOpt(406, nil)
+}
+
 // Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Prior to API version 610, like all other transaction options, the timeout must be reset after a call to ``onError``. If the API version is 610 or greater, the timeout is not reset after an ``onError`` call. This allows the user to specify a longer timeout on specific transactions than the default timeout specified through the ``transaction_timeout`` database option without the shorter database timeout cancelling transactions that encounter a retryable error. Note that at all API versions, it is safe and legal to set the timeout each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
 //
 // Parameter: value in milliseconds of timeout
@@ -497,6 +514,11 @@ func (o TransactionOptions) SetReadLockAware() error {
 // This option should only be used by tools which change the database configuration.
 func (o TransactionOptions) SetUseProvisionalProxies() error {
 	return o.setOpt(711, nil)
+}
+
+// The transaction can retrieve keys that are conflicting with other transactions.
+func (o TransactionOptions) SetReportConflictingKeys() error {
+	return o.setOpt(712, nil)
 }
 
 type StreamingMode int
@@ -636,15 +658,15 @@ type ErrorPredicate int
 
 const (
 
-	// Returns ``true`` if the error indicates the operations in the
-	// transactions should be retried because of transient error.
+	// Returns ``true`` if the error indicates the operations in the transactions
+	// should be retried because of transient error.
 	ErrorPredicateRetryable ErrorPredicate = 50000
 
-	// Returns ``true`` if the error indicates the transaction may have
-	// succeeded, though not in a way the system can verify.
+	// Returns ``true`` if the error indicates the transaction may have succeeded,
+	// though not in a way the system can verify.
 	ErrorPredicateMaybeCommitted ErrorPredicate = 50001
 
-	// Returns ``true`` if the error indicates the transaction has not
-	// committed, though in a way that can be retried.
+	// Returns ``true`` if the error indicates the transaction has not committed,
+	// though in a way that can be retried.
 	ErrorPredicateRetryableNotCommitted ErrorPredicate = 50002
 )

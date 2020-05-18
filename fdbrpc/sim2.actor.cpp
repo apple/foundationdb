@@ -1054,7 +1054,7 @@ public:
 		m->machine = &machine;
 		machine.processes.push_back(m);
 		currentlyRebootingProcesses.erase(addresses.address);
-		m->excluded = g_simulator.isExcluded(addresses.address);
+		m->excluded = g_simulator.isExcluded(NetworkAddress(ip, port, true, false));
 		m->cleared = g_simulator.isCleared(addresses.address);
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);
@@ -1661,15 +1661,8 @@ public:
 
 			this->currentProcess = t.machine;
 			try {
-				//auto before = getCPUTicks();
 				t.action.send(Void());
 				ASSERT( this->currentProcess == t.machine );
-				/*auto elapsed = getCPUTicks() - before;
-				currentProcess->cpuTicks += elapsed;
-				if (deterministicRandom()->random01() < 0.01){
-					TraceEvent("TaskDuration").detail("CpuTicks", currentProcess->cpuTicks);
-					currentProcess->cpuTicks = 0;
-				}*/
 			} catch (Error& e) {
 				TraceEvent(SevError, "UnhandledSimulationEventError").error(e, true);
 				killProcess(t.machine, KillInstantly);

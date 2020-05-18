@@ -108,6 +108,13 @@ struct struct_like_traits<Tag> : std::true_type {
 	}
 };
 
+template<>
+struct Traceable<Tag> : std::true_type {
+	static std::string toString(const Tag& value) {
+		return value.toString();
+	}
+};
+
 static const Tag invalidTag {tagLocalitySpecial, 0};
 static const Tag txsTag {tagLocalitySpecial, 1};
 static const Tag cacheTag {tagLocalitySpecial, 2};
@@ -222,10 +229,24 @@ std::string describe( std::vector<T> const& items, int max_items = -1 ) {
 	return describeList(items, max_items);
 }
 
+template<typename T>
+struct Traceable<std::vector<T>> : std::true_type {
+	static std::string toString(const std::vector<T>& value) {
+		return describe(value);
+	}
+};
+
 template <class T>
 std::string describe( std::set<T> const& items, int max_items = -1 ) {
 	return describeList(items, max_items);
 }
+
+template<typename T>
+struct Traceable<std::set<T>> : std::true_type {
+	static std::string toString(const std::set<T>& value) {
+		return describe(value);
+	}
+};
 
 std::string printable( const StringRef& val );
 std::string printable( const std::string& val );
@@ -266,6 +287,10 @@ struct KeyRangeRef {
 
 	Standalone<KeyRangeRef> withPrefix( const StringRef& prefix ) const {
 		return KeyRangeRef( begin.withPrefix(prefix), end.withPrefix(prefix) );
+	}
+
+	KeyRangeRef withPrefix(const StringRef& prefix, Arena& arena) const {
+		return KeyRangeRef(begin.withPrefix(prefix, arena), end.withPrefix(prefix, arena));
 	}
 
 	KeyRangeRef removePrefix( const StringRef& prefix ) const {
@@ -882,7 +907,7 @@ inline bool addressExcluded( std::set<AddressExclusion> const& exclusions, Netwo
 }
 
 struct ClusterControllerPriorityInfo {
-	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessBad }; //cannot be larger than 7 because of leader election mask
+	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessNotPreferred, FitnessBad }; //cannot be larger than 7 because of leader election mask
 
 	static DCFitness calculateDCFitness(Optional<Key> const& dcId, std::vector<Optional<Key>> const& dcPriority) {
 		if(!dcPriority.size()) {
@@ -891,7 +916,7 @@ struct ClusterControllerPriorityInfo {
 			if(dcId == dcPriority[0]) {
 				return FitnessPreferred;
 			} else {
-				return FitnessUnknown;
+				return FitnessNotPreferred;
 			}
 		} else {
 			if(dcId == dcPriority[0]) {
@@ -1008,5 +1033,29 @@ struct WorkerBackupStatus {
 		serializer(ar, epoch, version, tag, totalTags);
 	}
 };
+
+enum class TransactionPriority : uint8_t {
+	BATCH,
+	DEFAULT,
+	IMMEDIATE,
+	MIN=BATCH,
+	MAX=IMMEDIATE
+};
+
+const std::array<TransactionPriority, (int)TransactionPriority::MAX+1> allTransactionPriorities = { TransactionPriority::BATCH, TransactionPriority::DEFAULT, TransactionPriority::IMMEDIATE };
+
+inline const char* transactionPriorityToString(TransactionPriority priority, bool capitalize=true) {
+	switch(priority) {
+		case TransactionPriority::BATCH:
+			return capitalize ? "Batch" : "batch";
+		case TransactionPriority::DEFAULT:
+			return capitalize ? "Default" : "default";
+		case TransactionPriority::IMMEDIATE:
+			return capitalize ? "Immediate" : "immediate";
+	}
+
+	ASSERT(false);
+	throw internal_error();
+}
 
 #endif

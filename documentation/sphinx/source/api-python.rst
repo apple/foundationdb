@@ -837,6 +837,8 @@ Transaction options
 
     .. warning:: |option-priority-system-immediate-warning|
 
+.. _api-python-option-set-causal-read-risky:
+
 .. method:: Transaction.options.set_causal_read_risky
 
     |option-causal-read-risky-blurb|

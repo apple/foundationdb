@@ -23,7 +23,6 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "flow/IndexedSet.h"
 #include "fdbrpc/FlowTransport.h" // Endpoint
 #include <unordered_map>
 
@@ -137,7 +136,7 @@ public:
 
 class SimpleFailureMonitor : public IFailureMonitor {
 public:
-	SimpleFailureMonitor() : endpointKnownFailed() {}
+	SimpleFailureMonitor();
 	void setStatus(NetworkAddress const& address, FailureStatus const& status);
 	void endpointNotFound(Endpoint const&);
 	virtual void notifyDisconnect(NetworkAddress const&);

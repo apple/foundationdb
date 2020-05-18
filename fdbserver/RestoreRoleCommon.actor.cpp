@@ -57,6 +57,9 @@ ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req,
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("Role", getRoleStr(self->role))
 	    .detail("VersionBatchNotifiedVersion", self->versionBatchId.get());
+	// Loader destroy batchData once the batch finishes and self->finishedBatch.set(req.batchIndex);
+	ASSERT(self->finishedBatch.get() < req.batchIndex);
+
 	// batchId is continuous. (req.batchIndex-1) is the id of the just finished batch.
 	wait(self->versionBatchId.whenAtLeast(req.batchIndex - 1));
 
@@ -110,7 +113,8 @@ ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatch
 		}
 		if (memory < memoryThresholdBytes || self->finishedBatch.get() + 1 == actorBatchIndex) {
 			if (memory >= memoryThresholdBytes) {
-				TraceEvent(SevWarn, "FastRestoreMemoryUsageAboveThreshold")
+				TraceEvent(SevWarn, "FastRestoreMemoryUsageAboveThreshold", self->id())
+				    .detail("Role", getRoleStr(self->role))
 				    .detail("BatchIndex", actorBatchIndex)
 				    .detail("FinishedBatch", self->finishedBatch.get())
 				    .detail("Actor", name)
@@ -119,10 +123,12 @@ ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatch
 			self->delayedActors--;
 			break;
 		} else {
-			TraceEvent(SevDebug, "FastRestoreMemoryUsageAboveThresholdWait")
+			TraceEvent(SevInfo, "FastRestoreMemoryUsageAboveThresholdWait", self->id())
+			    .detail("Role", getRoleStr(self->role))
 			    .detail("BatchIndex", actorBatchIndex)
 			    .detail("Actor", name)
 			    .detail("CurrentMemory", memory);
+			// TODO: Set FASTRESTORE_WAIT_FOR_MEMORY_LATENCY to a large value. It should be able to avoided
 			wait(delay(SERVER_KNOBS->FASTRESTORE_WAIT_FOR_MEMORY_LATENCY) || self->checkMemory.onTrigger());
 		}
 	}

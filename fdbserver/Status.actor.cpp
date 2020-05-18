@@ -974,9 +974,9 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1
 
-		TraceEventFields md = wait(activeGens);
-		if(md.size()) {
-			int activeGenerations = md.getInt("ActiveGenerations");
+		TraceEventFields mdActiveGens = wait(activeGens);
+		if(mdActiveGens.size()) {
+			int activeGenerations = mdActiveGens.getInt("ActiveGenerations");
 			message["active_generations"] = activeGenerations;
 		}
 
@@ -1689,6 +1689,8 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		double batchTpsLimit = batchRatekeeper.getDouble("TPSLimit");
 		double transPerSec = ratekeeper.getDouble("ReleasedTPS");
 		double batchTransPerSec = ratekeeper.getDouble("ReleasedBatchTPS");
+		int throttledTags = ratekeeper.getInt("TagsThrottled");
+		int batchThrottledTags = batchRatekeeper.getInt("TagsThrottled");
 		int ssCount = ratekeeper.getInt("StorageServers");
 		int tlogCount = ratekeeper.getInt("TLogs");
 		int64_t worstFreeSpaceStorageServer = ratekeeper.getInt64("WorstFreeSpaceStorageServer");
@@ -1719,6 +1721,8 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		(*qos)["batch_transactions_per_second_limit"] = batchTpsLimit;
 		(*qos)["released_transactions_per_second"] = transPerSec;
 		(*qos)["batch_released_transactions_per_second"] = batchTransPerSec;
+		(*qos)["tags_throttled"] = throttledTags;
+		(*qos)["batch_tags_throttled"] = batchThrottledTags;
 
 		JsonBuilderObject perfLimit = getPerfLimit(ratekeeper, transPerSec, tpsLimit);
 		if(!perfLimit.empty()) {

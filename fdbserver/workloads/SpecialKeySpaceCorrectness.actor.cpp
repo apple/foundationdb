@@ -42,7 +42,7 @@ public:
 
 struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
-	int actorCount, minKeysPerRange, maxKeysPerRange, rangeCount, keyBytes, valBytes;
+	int actorCount, minKeysPerRange, maxKeysPerRange, rangeCount, keyBytes, valBytes, conflictRangeSizeFactor;
 	double testDuration, absoluteRandomProb, transactionsPerSecond;
 	PerfIntCounter wrongResults, keysCount;
 	Reference<ReadYourWritesTransaction> ryw; // used to store all populated data
@@ -60,6 +60,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 100.0);
 		actorCount = getOption(options, LiteralStringRef("actorCount"), 1);
 		absoluteRandomProb = getOption(options, LiteralStringRef("absoluteRandomProb"), 0.5);
+		// Controls the relative size of read/write conflict ranges and the number of random getranges
+		conflictRangeSizeFactor = getOption(options, LiteralStringRef("conflictRangeSizeFactor"), 10);
+		ASSERT(conflictRangeSizeFactor >= 1);
 	}
 
 	virtual std::string description() { return "SpecialKeySpaceCorrectness"; }
@@ -72,8 +75,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	double getCheckTimeout() override { return std::numeric_limits<double>::max(); }
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
+		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();
 		if (self->clientId == 0) {
 			self->ryw = Reference(new ReadYourWritesTransaction(cx));
+			self->ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 			self->ryw->setVersion(100);
 			self->ryw->clear(normalKeys);
 			// generate key ranges
@@ -97,7 +102,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
-		if (self->clientId == 0) wait(timeout(self->getRangeCallActor(cx, self), self->testDuration, Void()));
+		if (self->clientId == 0) {
+			wait(timeout(self->getRangeCallActor(cx, self) && testConflictRanges(cx, /*read*/ true, self) &&
+			                 testConflictRanges(cx, /*read*/ false, self),
+			             self->testDuration, Void()));
+		}
 		return Void();
 	}
 
@@ -161,6 +170,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("TestValue", printable(res2[i].value));
 				return false;
 			}
+			TEST(true); // Special key space keys equal
 		}
 		return true;
 	}
@@ -200,6 +210,138 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		    1, keysCount.getValue() * (keyBytes + (rangeCount + 1) + valBytes + 8) + 1);
 
 		return GetRangeLimits(rowLimits, byteLimits);
+	}
+
+	ACTOR static Future<Void> testConflictRanges(Database cx_, bool read, SpecialKeySpaceCorrectnessWorkload* self) {
+		state StringRef prefix = read ? readConflictRangeKeysRange.begin : writeConflictRangeKeysRange.begin;
+		TEST(read); // test read conflict range special key implementation
+		TEST(!read); // test write conflict range special key implementation
+		// Get a default special key range instance
+		Database cx = cx_->clone();
+		state Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> referenceTx = Reference(new ReadYourWritesTransaction(cx));
+		state bool ryw = deterministicRandom()->coinflip();
+		if (!ryw) {
+			tx->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+		}
+		referenceTx->setVersion(100); // Prevent this from doing a GRV or committing
+		referenceTx->clear(normalKeys);
+		referenceTx->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		int numKeys = deterministicRandom()->randomInt(1, self->conflictRangeSizeFactor) * 4;
+		state std::vector<std::string> keys; // Must all be distinct
+		keys.resize(numKeys);
+		int lastKey = 0;
+		for (auto& key : keys) {
+			key = std::to_string(lastKey++);
+		}
+		if (deterministicRandom()->coinflip()) {
+			// Include beginning of keyspace
+			keys.push_back("");
+		}
+		if (deterministicRandom()->coinflip()) {
+			// Include end of keyspace
+			keys.push_back("\xff");
+		}
+		std::mt19937 g(deterministicRandom()->randomUInt32());
+		std::shuffle(keys.begin(), keys.end(), g);
+		// First half of the keys will be ranges, the other keys will mix in some read boundaries that aren't range
+		// boundaries
+		std::sort(keys.begin(), keys.begin() + keys.size() / 2);
+		for (auto iter = keys.begin(); iter + 1 < keys.begin() + keys.size() / 2; iter += 2) {
+			Standalone<KeyRangeRef> range = KeyRangeRef(*iter, *(iter + 1));
+			if (read) {
+				tx->addReadConflictRange(range);
+				// Add it twice so that we can observe the de-duplication that should get done
+				tx->addReadConflictRange(range);
+			} else {
+				tx->addWriteConflictRange(range);
+				tx->addWriteConflictRange(range);
+			}
+			// TODO test that fails if we don't wait on tx->pendingReads()
+			referenceTx->set(range.begin, LiteralStringRef("1"));
+			referenceTx->set(range.end, LiteralStringRef("0"));
+		}
+		if (!read && deterministicRandom()->coinflip()) {
+			try {
+				wait(tx->commit());
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) throw;
+				return Void();
+			}
+			TEST(true); // Read write conflict range of committed transaction
+		}
+		try {
+			wait(success(tx->get(LiteralStringRef("\xff\xff/1314109/i_hope_this_isn't_registered"))));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_no_module_found);
+		}
+		for (int i = 0; i < self->conflictRangeSizeFactor; ++i) {
+			GetRangeLimits limit;
+			KeySelector begin;
+			KeySelector end;
+			loop {
+				begin = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
+				end = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
+				if (begin.getKey() < end.getKey()) break;
+			}
+			bool reverse = deterministicRandom()->coinflip();
+
+			auto correctResultFuture = referenceTx->getRange(begin, end, limit, false, reverse);
+			ASSERT(correctResultFuture.isReady());
+			begin.setKey(begin.getKey().withPrefix(prefix, begin.arena()));
+			end.setKey(end.getKey().withPrefix(prefix, begin.arena()));
+			auto testResultFuture = tx->getRange(begin, end, limit, false, reverse);
+			ASSERT(testResultFuture.isReady());
+			auto correct_iter = correctResultFuture.get().begin();
+			auto test_iter = testResultFuture.get().begin();
+			bool had_error = false;
+			while (correct_iter != correctResultFuture.get().end() && test_iter != testResultFuture.get().end()) {
+				if (correct_iter->key != test_iter->key.removePrefix(prefix) ||
+				    correct_iter->value != test_iter->value) {
+					TraceEvent(SevError, "TestFailure")
+					    .detail("Reason", "Mismatched keys")
+					    .detail("ConflictType", read ? "read" : "write")
+					    .detail("CorrectKey", correct_iter->key)
+					    .detail("TestKey", test_iter->key)
+					    .detail("CorrectValue", correct_iter->value)
+					    .detail("TestValue", test_iter->value)
+					    .detail("Begin", begin.toString())
+					    .detail("End", end.toString())
+					    .detail("Ryw", ryw);
+					had_error = true;
+				}
+				++correct_iter;
+				++test_iter;
+			}
+			while (correct_iter != correctResultFuture.get().end()) {
+				TraceEvent(SevError, "TestFailure")
+				    .detail("Reason", "Extra correct key")
+				    .detail("ConflictType", read ? "read" : "write")
+				    .detail("CorrectKey", correct_iter->key)
+				    .detail("CorrectValue", correct_iter->value)
+				    .detail("Begin", begin.toString())
+				    .detail("End", end.toString())
+				    .detail("Ryw", ryw);
+				++correct_iter;
+				had_error = true;
+			}
+			while (test_iter != testResultFuture.get().end()) {
+				TraceEvent(SevError, "TestFailure")
+				    .detail("Reason", "Extra test key")
+				    .detail("ConflictType", read ? "read" : "write")
+				    .detail("TestKey", test_iter->key)
+				    .detail("TestValue", test_iter->value)
+				    .detail("Begin", begin.toString())
+				    .detail("End", end.toString())
+				    .detail("Ryw", ryw);
+				++test_iter;
+				had_error = true;
+			}
+			if (had_error) break;
+		}
+		return Void();
 	}
 };
 

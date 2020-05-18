@@ -724,6 +724,7 @@ TraceEvent::TraceEvent(TraceEvent &&ev) {
 	tmpEventMetric = ev.tmpEventMetric;
 	trackingKey = ev.trackingKey;
 	type = ev.type;
+	timeIndex = ev.timeIndex;
 
 	ev.initialized = true;
 	ev.enabled = false;
@@ -744,6 +745,7 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 	tmpEventMetric = ev.tmpEventMetric;
 	trackingKey = ev.trackingKey;
 	type = ev.type;
+	timeIndex = ev.timeIndex;
 
 	ev.initialized = true;
 	ev.enabled = false;
@@ -994,7 +996,7 @@ TraceEvent& TraceEvent::suppressFor( double duration, bool logSuppressedEventCou
 				}
 			}
 			else {
-				TraceEvent(SevWarnAlways, "SuppressionFromNonNetworkThread").detail("Type", type);
+				TraceEvent(SevWarnAlways, "SuppressionFromNonNetworkThread").detail("Event", type);
 				detail("__InvalidSuppression__", ""); // Choosing a detail name that is unlikely to collide with other names
 			}
 		}

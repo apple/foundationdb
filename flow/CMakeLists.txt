@@ -63,6 +63,7 @@ set(FLOW_SRCS
   ThreadSafeQueue.h
   Trace.cpp
   Trace.h
+  TreeBenchmark.h
   UnitTest.cpp
   UnitTest.h
   XmlTraceLogFormatter.cpp

@@ -26,6 +26,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
+#include "fdbserver/MutationTracking.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -67,7 +68,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 	state Future<Void> exitRole = Never();
 	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
-	actors.add(traceProcessMetrics(self, "Loader"));
+	actors.add(traceProcessMetrics(self, "RestoreLoader"));
 
 	loop {
 		state std::string requestTypeStr = "[Init]";
@@ -336,6 +337,8 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	    .detail("NotProcessed", !paramExist)
 	    .detail("Processed", isReady)
 	    .detail("CurrentMemory", getSystemStatistics().processMemory);
+	// Loader destroy batchData once the batch finishes and self->finishedBatch.set(req.batchIndex);
+	ASSERT(self->finishedBatch.get() < req.batchIndex);
 
 	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 
@@ -376,6 +379,8 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("UseRangeFile", req.useRangeFile)
 	    .detail("LoaderSendStatus", batchStatus->toString());
+	// Loader destroy batchData once the batch finishes and self->finishedBatch.set(req.batchIndex);
+	ASSERT(self->finishedBatch.get() < req.batchIndex);
 
 	// Ensure each file is sent exactly once by using batchStatus->sendAllLogs and batchStatus->sendAllRanges
 	if (!req.useRangeFile) {
@@ -501,23 +506,23 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				              nodeIDs.contents());
 				ASSERT(mvector.size() == nodeIDs.size());
 
-				if (debugMutation("RestoreLoader", commitVersion.version, kvm)) {
-					TraceEvent e("DebugSplit");
-					int i = 0;
-					for (auto& [key, uid] : *pRangeToApplier) {
-						e.detail(format("Range%d", i).c_str(), printable(key))
-						    .detail(format("UID%d", i).c_str(), uid.toString());
-						i++;
+				if (MUTATION_TRACKING_ENABLED) {
+					TraceEvent&& e = debugMutation("RestoreLoaderDebugSplit", commitVersion.version, kvm);
+					if (e.isEnabled()) {
+						int i = 0;
+						for (auto& [key, uid] : *pRangeToApplier) {
+							e.detail(format("Range%d", i).c_str(), printable(key))
+									.detail(format("UID%d", i).c_str(), uid.toString());
+							i++;
+						}
 					}
 				}
 				for (splitMutationIndex = 0; splitMutationIndex < mvector.size(); splitMutationIndex++) {
 					MutationRef mutation = mvector[splitMutationIndex];
 					UID applierID = nodeIDs[splitMutationIndex];
-					if (debugMutation("RestoreLoader", commitVersion.version, mutation)) {
-						TraceEvent("SplittedMutation")
-						    .detail("Version", commitVersion.toString())
-						    .detail("Mutation", mutation.toString());
-					}
+					DEBUG_MUTATION("RestoreLoaderSplittedMutation", commitVersion.version, mutation)
+					    .detail("Version", commitVersion.toString())
+					    .detail("Mutation", mutation);
 					// CAREFUL: The splitted mutations' lifetime is shorter than the for-loop
 					// Must use deep copy for splitted mutations
 					applierVersionedMutationsBuffer[applierID].push_back_deep(
@@ -533,12 +538,10 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				UID applierID = itlow->second;
 				kvCount++;
 
-				if (debugMutation("RestoreLoader", commitVersion.version, kvm)) {
-					TraceEvent("SendMutation")
-					    .detail("Applier", applierID)
-					    .detail("Version", commitVersion.toString())
-					    .detail("Mutation", kvm.toString());
-				}
+				DEBUG_MUTATION("RestoreLoaderSendMutation", commitVersion.version, kvm)
+				    .detail("Applier", applierID)
+				    .detail("Version", commitVersion.toString())
+				    .detail("Mutation", kvm);
 				// kvm data is saved in pkvOps in batchData, so shallow copy is ok here.
 				applierVersionedMutationsBuffer[applierID].push_back(applierVersionedMutationsBuffer[applierID].arena(),
 				                                                     VersionedMutation(kvm, commitVersion));
@@ -945,6 +948,9 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 	wait(self->finishedBatch.whenAtLeast(req.batchIndex - 1));
 	if (self->finishedBatch.get() == req.batchIndex - 1) {
 		self->finishedBatch.set(req.batchIndex);
+		// Clean up batchData
+		self->batch.erase(req.batchIndex);
+		self->status.erase(req.batchIndex);
 	}
 	if (self->delayedActors > 0) {
 		self->checkMemory.trigger();
