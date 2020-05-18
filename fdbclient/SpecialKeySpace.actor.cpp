@@ -30,7 +30,8 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	{ SpecialKeySpace::MODULE::STATUSJSON, singleKeyRange(LiteralStringRef("\xff\xff/status/json")) },
 	{ SpecialKeySpace::MODULE::CONNECTIONSTRING, singleKeyRange(LiteralStringRef("\xff\xff/connection_string")) },
 	{ SpecialKeySpace::MODULE::CLUSTERFILEPATH, singleKeyRange(LiteralStringRef("\xff\xff/cluster_file_path")) },
-	{ SpecialKeySpace::MODULE::METRICS, KeyRangeRef(LiteralStringRef("\xff\xff/metrics/"), LiteralStringRef("\xff\xff/metrics0")) }
+	{ SpecialKeySpace::MODULE::METRICS,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/metrics/"), LiteralStringRef("\xff\xff/metrics0")) }
 };
 
 // This function will move the given KeySelector as far as possible to the standard form:
@@ -314,7 +315,8 @@ Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(Reference<ReadY
 	return result;
 }
 
-ACTOR Future<Standalone<RangeResultRef>> ddStatsGetRangeActor(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr) {
+ACTOR Future<Standalone<RangeResultRef>> ddStatsGetRangeActor(Reference<ReadYourWritesTransaction> ryw,
+                                                              KeyRangeRef kr) {
 	try {
 		auto keys = kr.removePrefix(ddStatsRange.begin);
 		Standalone<VectorRef<DDMetricsRef>> resultWithoutPrefix =
@@ -335,7 +337,8 @@ ACTOR Future<Standalone<RangeResultRef>> ddStatsGetRangeActor(Reference<ReadYour
 
 DDStatsRangeImpl::DDStatsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
 
-Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr) const {
+Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(Reference<ReadYourWritesTransaction> ryw,
+                                                              KeyRangeRef kr) const {
 	return ddStatsGetRangeActor(ryw, kr);
 }
 
