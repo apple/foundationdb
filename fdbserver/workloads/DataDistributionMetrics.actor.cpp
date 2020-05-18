@@ -68,7 +68,6 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		}
 		Reference<ReadYourWritesTransaction> tr =
 		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
-		// ReadYourWritesTransaction tr(cx); // TODO : Debug if we use this one, delref(RYW) will throw error
 		try {
 			Standalone<RangeResultRef> result = wait(tr->getRange(ddStatsRange, 100));
 			ASSERT(result.size() % 2 == 0);
@@ -77,7 +76,6 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 			if (self->numShards < 1) return false;
 			int64_t totalBytes = 0;
 			for (int i = 0; i < result.size(); i += 2) {
-				// totalBytes += readJSONStrictly(kv.value.toString()).get_obj()["ShardBytes"].get_int64();
 				ASSERT(result[i].key.startsWith(ddStatsRange.begin));
 				totalBytes += std::stoi(result[i].value.toString());
 				ASSERT(result[i + 1].key.startsWith(ddStatsRange.begin));
