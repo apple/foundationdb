@@ -28,25 +28,25 @@ Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInf
 
 ACTOR Future<Void> submitCandidacy(Key key, LeaderElectionRegInterface coord, LeaderInfo myInfo, UID prevChangeID,
                                    AsyncTrigger* nomineeChanged, Optional<LeaderInfo>* leaderInfo,
-                                   Optional<Hostname> hostname = Optional<Hostname>()) {
+                                   Optional<Hostname> hostname = Optional<Hostname>(),
+                                   Reference<ClusterConnectionFile> connFile = Reference<ClusterConnectionFile>()) {
 	state Optional<LeaderInfo> li;
 	loop {
 		if (hostname.present()) {
 			ErrorOr<Optional<LeaderInfo>> rep = wait(coord.candidacy.tryGetReply(
 			    CandidacyRequest(key, myInfo, leaderInfo->present() ? leaderInfo->get().changeID : UID(), prevChangeID),
 			    TaskPriority::CoordinationReply));
-			if (rep.isError() && rep.getError().code() == error_code_connection_failed) {
+			if (rep.isError() && (rep.getError().code() == error_code_connection_failed ||
+			                      rep.getError().code() == error_code_request_maybe_delivered)) {
 				// connecting to nominee failed, most likely due to timeout.
 				// re-resolve this single hostname
-				NetworkAddress newAddr = wait(
-				    map(INetworkConnections::net()->resolveTCPEndpoint(hostname.get().host, hostname.get().service),
-				        [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
-					        NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-					        if (hostname.get().useTLS) addr.flags = NetworkAddress::FLAG_TLS;
-					        return addr;
-				        }));
-				coord = LeaderElectionRegInterface(newAddr);
-				continue;
+				if (connFile.isValid()) {
+					TraceEvent("CoordnitorChangedSubmitCandadicy")
+					    .detail("Hostname", hostname.get().toString())
+					    .detail("OldAddr", coord.candidacy.getEndpoint().getPrimaryAddress().toString());
+					connFile->getMutableConnectionString().resetToUnresolved();
+					throw coordinators_changed();
+				}
 			} else if (rep.present()) {
 				li = rep.get();
 			}
@@ -145,7 +145,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators, Valu
 				hn = r->second;
 			}
 			cand.push_back(submitCandidacy(coordinators.clusterKey, coordinators.leaderElectionServers[i], myInfo,
-			                               prevChangeID, &nomineeChanged, &nominees[i], hn));
+			                               prevChangeID, &nomineeChanged, &nominees[i], hn, connFile));
 		}
 		candidacies = waitForAll(cand);
 
