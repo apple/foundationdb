@@ -870,21 +870,21 @@ struct RedwoodMetrics {
 				{ "LazyClearExt", level.lazyClearFreeExt },
 				{ "", 0 },
 				{ "-BldAvgCount", level.pageBuild ? level.buildItemCount / level.pageBuild : 0 },
-				{ "-BldAvgFillPct", level.pageBuild ? level.buildFillPct / level.pageBuild * 100 : 0},
-				{ "-BldAvgStoredPct", level.pageBuild ? level.buildStoredPct / level.pageBuild * 100 : 0},
+				{ "-BldAvgFillPct", level.pageBuild ? level.buildFillPct / level.pageBuild * 100 : 0 },
+				{ "-BldAvgStoredPct", level.pageBuild ? level.buildStoredPct / level.pageBuild * 100 : 0 },
 				{ "", 0 },
-				{ "-ModAvgCount", level.pageModify ? level.modifyItemCount / level.pageModify : 0},
-				{ "-ModAvgFillPct", level.pageModify ? level.modifyFillPct / level.pageModify * 100 : 0},
-				{ "-ModAvgStoredPct", level.pageModify ? level.modifyStoredPct / level.pageModify * 100 : 0}
+				{ "-ModAvgCount", level.pageModify ? level.modifyItemCount / level.pageModify : 0 },
+				{ "-ModAvgFillPct", level.pageModify ? level.modifyFillPct / level.pageModify * 100 : 0 },
+				{ "-ModAvgStoredPct", level.pageModify ? level.modifyStoredPct / level.pageModify * 100 : 0 }
 			};
 
 			if (s != nullptr) {
 				*s += format("\nLevel %d\n\t", i + 1);
 			}
 			for (auto& m : metrics) {
-				const char *name = m.first;
+				const char* name = m.first;
 				bool rate = elapsed != 0;
-				if(*name == '-') {
+				if (*name == '-') {
 					++name;
 					rate = false;
 				}
