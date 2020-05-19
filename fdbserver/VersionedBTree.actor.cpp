@@ -754,23 +754,23 @@ struct RedwoodMetrics {
 	}
 
 	struct Level {
-		unsigned int btreePageReads;
-		unsigned int btreePageReadExt;
-		unsigned int btreePageWrite;
-		unsigned int btreePageWriteExt;
-		unsigned int btreePageCommitStart;
-		unsigned int btreePageModify;
-		unsigned int btreePageModifyExt;
+		unsigned int pageRead;
+		unsigned int pageReadExt;
+		unsigned int pageBuild;
+		unsigned int pageBuildExt;
+		unsigned int pageCommitStart;
+		unsigned int pageModify;
+		unsigned int pageModifyExt;
 		unsigned int lazyClearRequeue;
 		unsigned int lazyClearRequeueExt;
 		unsigned int lazyClearFree;
 		unsigned int lazyClearFreeExt;
-		double writeRecPct;
-		double writeFillPct;
-		unsigned int writeItemCount;
-		double updateRecPct;
-		double updateFillPct;
-		unsigned int updateItemCount;
+		double buildStoredPct;
+		double buildFillPct;
+		unsigned int buildItemCount;
+		double modifyStoredPct;
+		double modifyFillPct;
+		unsigned int modifyItemCount;
 	};
 
 	Level levels[btreeLevels];
@@ -855,27 +855,27 @@ struct RedwoodMetrics {
 		for (int i = 0; i < btreeLevels; ++i) {
 			auto& level = levels[i];
 			std::pair<const char*, unsigned int> metrics[] = {
-				{ "PageWrite", level.btreePageWrite },
-				{ "PageWriteExt", level.btreePageWriteExt },
-				{ "PageModify", level.btreePageModify },
-				{ "PageModifyExt", level.btreePageModifyExt },
+				{ "PageBuild", level.pageBuild },
+				{ "PageBuildExt", level.pageBuildExt },
+				{ "PageModify", level.pageModify },
+				{ "PageModifyExt", level.pageModifyExt },
 				{ "", 0 },
-				{ "PageRead", level.btreePageReads },
-				{ "PageReadExt", level.btreePageReadExt },
-				{ "PageCommitStart", level.btreePageCommitStart },
+				{ "PageRead", level.pageRead },
+				{ "PageReadExt", level.pageReadExt },
+				{ "PageCommitStart", level.pageCommitStart },
 				{ "", 0 },
 				{ "LazyClearInt", level.lazyClearRequeue },
 				{ "LazyClearIntExt", level.lazyClearRequeueExt },
 				{ "LazyClear", level.lazyClearFree },
 				{ "LazyClearExt", level.lazyClearFreeExt },
 				{ "", 0 },
-				{ "-WriteAvgCount", level.btreePageWrite ? level.writeItemCount / level.btreePageWrite : 0 },
-				{ "-WriteAvgFillPct", level.btreePageWrite ? level.writeFillPct / level.btreePageWrite * 100 : 0},
-				{ "-WriteAvgRecPct", level.btreePageWrite ? level.writeRecPct / level.btreePageWrite * 100 : 0},
+				{ "-BldAvgCount", level.pageBuild ? level.buildItemCount / level.pageBuild : 0 },
+				{ "-BldAvgFillPct", level.pageBuild ? level.buildFillPct / level.pageBuild * 100 : 0},
+				{ "-BldAvgStoredPct", level.pageBuild ? level.buildStoredPct / level.pageBuild * 100 : 0},
 				{ "", 0 },
-				{ "-ModAvgCount", level.btreePageModify ? level.updateItemCount / level.btreePageModify : 0},
-				{ "-ModAvgFillPct", level.btreePageModify ? level.updateFillPct / level.btreePageModify * 100 : 0},
-				{ "-ModAvgRecPct", level.btreePageModify ? level.updateRecPct / level.btreePageModify * 100 : 0}
+				{ "-ModAvgCount", level.pageModify ? level.modifyItemCount / level.pageModify : 0},
+				{ "-ModAvgFillPct", level.pageModify ? level.modifyFillPct / level.pageModify * 100 : 0},
+				{ "-ModAvgStoredPct", level.pageModify ? level.modifyStoredPct / level.pageModify * 100 : 0}
 			};
 
 			if (s != nullptr) {
@@ -3591,11 +3591,11 @@ private:
 			}
 
 			auto& metrics = g_redwoodMetrics.level(btPage->height);
-			metrics.btreePageWrite += 1;
-			metrics.btreePageWriteExt += blockCount - 1;
-			metrics.writeFillPct += (double)written / capacity;
-			metrics.writeRecPct += (double)btPage->kvBytes / capacity;
-			metrics.writeItemCount += btPage->tree().numItems;
+			metrics.pageBuild += 1;
+			metrics.pageBuildExt += blockCount - 1;
+			metrics.buildFillPct += (double)written / capacity;
+			metrics.buildStoredPct += (double)btPage->kvBytes / capacity;
+			metrics.buildItemCount += btPage->tree().numItems;
 
 			// Create chunked pages
 			// TODO: Avoid copying page bytes, but this is not trivial due to how pager checksums are currently handled.
@@ -3770,8 +3770,8 @@ private:
 		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
 		const BTreePage* pTreePage = (const BTreePage*)page->begin();
 		auto& metrics = g_redwoodMetrics.level(pTreePage->height);
-		metrics.btreePageReads += 1;
-		metrics.btreePageReadExt += (id.size() - 1);
+		metrics.pageRead += 1;
+		metrics.pageReadExt += (id.size() - 1);
 
 		if (!forLazyClear && page->userData == nullptr) {
 			debug_printf("readPage() Creating Reader for %s @%" PRId64 " lower=%s upper=%s\n", toString(id).c_str(),
@@ -3839,8 +3839,8 @@ private:
 
 		// Update activity counts
 		auto& metrics = g_redwoodMetrics.level(((const BTreePage*)page->begin())->height);
-		metrics.btreePageWrite += 1;
-		metrics.btreePageWriteExt += (newID.size() - 1);
+		metrics.pageBuild += 1;
+		metrics.pageBuildExt += (newID.size() - 1);
 
 		return newID;
 	}
@@ -3921,11 +3921,11 @@ private:
 		// Page was updated in-place through edits and written to maybeNewID
 		void updatedInPlace(BTreePageIDRef maybeNewID, BTreePage* btPage, int capacity) {
 			auto& metrics = g_redwoodMetrics.level(btPage->height);
-			metrics.btreePageModify += 1;
-			metrics.btreePageModify += (maybeNewID.size() - 1);
-			metrics.updateFillPct += (double)btPage->size() / capacity;
-			metrics.updateRecPct += (double)btPage->kvBytes / capacity;
-			metrics.updateItemCount += btPage->tree().numItems;
+			metrics.pageModify += 1;
+			metrics.pageModify += (maybeNewID.size() - 1);
+			metrics.modifyFillPct += (double)btPage->size() / capacity;
+			metrics.modifyStoredPct += (double)btPage->kvBytes / capacity;
+			metrics.modifyItemCount += btPage->tree().numItems;
 
 			// The boundaries can't have changed, but the child page link may have.
 			if (maybeNewID != decodeLowerBound->getChildPage()) {
@@ -4135,7 +4135,7 @@ private:
 		    wait(readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound));
 		state BTreePage* btPage = (BTreePage*)page->begin();
 		ASSERT(isLeaf == btPage->isLeaf());
-		g_redwoodMetrics.level(btPage->height).btreePageCommitStart += 1;
+		g_redwoodMetrics.level(btPage->height).pageCommitStart += 1;
 
 		// TODO:  Decide if it is okay to update if the subtree boundaries are expanded.  It can result in
 		// records in a DeltaTree being outside its decode boundary range, which isn't actually invalid
