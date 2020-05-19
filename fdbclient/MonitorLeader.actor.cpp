@@ -467,25 +467,25 @@ ClientLeaderRegInterface::ClientLeaderRegInterface( INetwork* local ) {
 // This function contacts a coordinator coord to ask if the worker is considered as a leader (i.e., if the worker
 // is a nominee)
 ACTOR Future<Void> monitorNominee(Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange,
-                                  Optional<LeaderInfo>* info, Optional<Hostname> hostname = Optional<Hostname>()) {
+                                  Optional<LeaderInfo>* info, Optional<Hostname> hostname = Optional<Hostname>(),
+                                  Reference<ClusterConnectionFile> connFile = Reference<ClusterConnectionFile>()) {
 	state Optional<LeaderInfo> li;
 	loop {
 		if (hostname.present()) {
 			state ErrorOr<Optional<LeaderInfo>> rep =
 			    wait(coord.getLeader.tryGetReply(GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
 			                                     TaskPriority::CoordinationReply));
-			if (rep.isError() && rep.getError().code() == error_code_connection_failed) {
+			if (rep.isError() && (rep.getError().code() == error_code_connection_failed ||
+			                      rep.getError().code() == error_code_request_maybe_delivered)) {
 				// connecting to nominee failed, most likely due to timeout.
 				// re-resolve this single hostname
-				NetworkAddress newAddr = wait(
-				    map(INetworkConnections::net()->resolveTCPEndpoint(hostname.get().host, hostname.get().service),
-				        [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
-					        NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-					        if (hostname.get().useTLS) addr.flags = NetworkAddress::FLAG_TLS;
-					        return addr;
-				        }));
-				coord = ClientLeaderRegInterface(newAddr);
-				continue;
+				if (connFile.isValid()) {
+					TraceEvent("CoordnitorChangedMonitorNominee")
+					    .detail("Hostname", hostname.get().toString())
+					    .detail("OldAddr", coord.getLeader.getEndpoint().getPrimaryAddress().toString());
+					connFile->getMutableConnectionString().resetToUnresolved();
+					throw coordinators_changed();
+				}
 			} else if (rep.present()) {
 				li = rep.get();
 			}
@@ -578,7 +578,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 			hn = r->second;
 		}
 		actors.push_back(monitorNominee(coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange,
-		                                &nominees[i], hn));
+		                                &nominees[i], hn, connFile));
 	}
 	allActors = waitForAll(actors);
 
@@ -624,11 +624,15 @@ Future<Void> monitorLeaderRemotely(Reference<ClusterConnectionFile> const& connF
 ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo ) {
 	state MonitorLeaderInfo info(connFile);
 	loop {
-		if (info.intermediateConnFile->hasUnresolvedHostnames()) {
-			wait(info.intermediateConnFile->resolveHostnames());
+		try {
+			if (info.intermediateConnFile->hasUnresolvedHostnames()) {
+				wait(info.intermediateConnFile->resolveHostnames());
+			}
+			MonitorLeaderInfo _info = wait(monitorLeaderOneGeneration(connFile, outSerializedLeaderInfo, info));
+			info = _info;
+		} catch (Error& e) {
+			if (e.code() != error_code_coordinators_changed) throw;
 		}
-		MonitorLeaderInfo _info = wait( monitorLeaderOneGeneration( connFile, outSerializedLeaderInfo, info ) );
-		info = _info;
 	}
 }
 
