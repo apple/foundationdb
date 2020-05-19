@@ -85,7 +85,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 		if (progressIt != progress.end() && progressIt->first == epoch) {
 			std::set<Tag> toCheck = tags;
 			for (auto current = progressIt; current != progress.begin() && !toCheck.empty();) {
-				auto prev = std::prev(progressIt);
+				auto prev = std::prev(current);
 				// Previous epoch is gone, consolidate the progress.
 				for (auto [tag, version] : prev->second) {
 					if (toCheck.count(tag) > 0) {
