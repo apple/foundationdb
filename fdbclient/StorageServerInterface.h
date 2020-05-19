@@ -87,17 +87,17 @@ struct StorageServerInterface {
 		if (ar.protocolVersion().hasSmallEndpoints()) {
 			serializer(ar, uniqueID, locality, getValue);
 			if( Ar::isDeserializing ) {
-				getKey = RequestStream<struct GetKeyRequest>( base.getAdjustedEndpoint(1) );
-				getKeyValues = RequestStream<struct GetKeyValuesRequest>( base.getAdjustedEndpoint(2) );
-				getShardState = RequestStream<struct GetShardStateRequest>( base.getAdjustedEndpoint(3) );
-				waitMetrics = RequestStream<struct WaitMetricsRequest>( base.getAdjustedEndpoint(4) );
-				splitMetrics = RequestStream<struct SplitMetricsRequest>( base.getAdjustedEndpoint(5) );
-				getStorageMetrics = RequestStream<struct GetStorageMetricsRequest>( base.getAdjustedEndpoint(6) );
-				waitFailure = RequestStream<ReplyPromise<Void>>( base.getAdjustedEndpoint(7) );
-				getQueuingMetrics = RequestStream<struct StorageQueuingMetricsRequest>( base.getAdjustedEndpoint(8) );
-				getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>( base.getAdjustedEndpoint(9) );
-				watchValue = RequestStream<struct WatchValueRequest>( base.getAdjustedEndpoint(10) );
-				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( base.getAdjustedEndpoint(11) );
+				getKey = RequestStream<struct GetKeyRequest>( getValue.getEndpoint().getAdjustedEndpoint(1) );
+				getKeyValues = RequestStream<struct GetKeyValuesRequest>( getValue.getEndpoint().getAdjustedEndpoint(2) );
+				getShardState = RequestStream<struct GetShardStateRequest>( getValue.getEndpoint().getAdjustedEndpoint(3) );
+				waitMetrics = RequestStream<struct WaitMetricsRequest>( getValue.getEndpoint().getAdjustedEndpoint(4) );
+				splitMetrics = RequestStream<struct SplitMetricsRequest>( getValue.getEndpoint().getAdjustedEndpoint(5) );
+				getStorageMetrics = RequestStream<struct GetStorageMetricsRequest>( getValue.getEndpoint().getAdjustedEndpoint(6) );
+				waitFailure = RequestStream<ReplyPromise<Void>>( getValue.getEndpoint().getAdjustedEndpoint(7) );
+				getQueuingMetrics = RequestStream<struct StorageQueuingMetricsRequest>( getValue.getEndpoint().getAdjustedEndpoint(8) );
+				getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>( getValue.getEndpoint().getAdjustedEndpoint(9) );
+				watchValue = RequestStream<struct WatchValueRequest>( getValue.getEndpoint().getAdjustedEndpoint(10) );
+				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( getValue.getEndpoint().getAdjustedEndpoint(11) );
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
