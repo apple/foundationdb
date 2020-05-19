@@ -399,9 +399,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
 				try {
+					// Note the "partitionedLog" must be false, because we change
+					// the configuration to disable backup workers before restore.
 					extraBackup = backupAgent.submitBackup(
 					    cx, LiteralStringRef("file://simfdb/backups/"), deterministicRandom()->randomInt(0, 100),
-					    self->backupTag.toString(), self->backupRanges, true, self->usePartitionedLogs);
+					    self->backupTag.toString(), self->backupRanges, true, false);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)
