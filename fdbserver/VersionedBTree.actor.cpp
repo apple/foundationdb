@@ -3837,11 +3837,6 @@ private:
 			}
 		}
 
-		// Update activity counts
-		auto& metrics = g_redwoodMetrics.level(((const BTreePage*)page->begin())->height);
-		metrics.pageBuild += 1;
-		metrics.pageBuildExt += (newID.size() - 1);
-
 		return newID;
 	}
 
