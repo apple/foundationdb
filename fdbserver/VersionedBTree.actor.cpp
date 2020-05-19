@@ -743,12 +743,15 @@ private:
 struct RedwoodMetrics {
 	static constexpr int btreeLevels = 5;
 
-	RedwoodMetrics() {
+	RedwoodMetrics() { clear(); }
+
+	void clear() {
 		memset(this, 0, sizeof(RedwoodMetrics));
+		for (auto& level : levels) {
+			level = {};
+		}
 		startTime = g_network ? now() : 0;
 	}
-
-	void clear() { *this = RedwoodMetrics(); }
 
 	struct Level {
 		unsigned int btreePageReads;
@@ -756,15 +759,22 @@ struct RedwoodMetrics {
 		unsigned int btreePageWrite;
 		unsigned int btreePageWriteExt;
 		unsigned int btreePageCommitStart;
-		unsigned int btreePageUpdate;
-		unsigned int btreePageUpdateExt;
+		unsigned int btreePageModify;
+		unsigned int btreePageModifyExt;
 		unsigned int lazyClearRequeue;
 		unsigned int lazyClearRequeueExt;
 		unsigned int lazyClearFree;
 		unsigned int lazyClearFreeExt;
+		double writeRecPct;
+		double writeFillPct;
+		unsigned int writeItemCount;
+		double updateRecPct;
+		double updateFillPct;
+		unsigned int updateItemCount;
 	};
 
 	Level levels[btreeLevels];
+
 	unsigned int opSet;
 	unsigned int opSetKeyBytes;
 	unsigned int opSetValueBytes;
@@ -797,6 +807,8 @@ struct RedwoodMetrics {
 		return levels[level - 1];
 	}
 
+	// This will populate a trace event and/or a string with Redwood metrics.  The string is a
+	// reasonably well formatted page of information
 	void getFields(TraceEvent* e, std::string* s = nullptr) {
 		std::pair<const char*, unsigned int> metrics[] = { { "BTreePreload", btreeLeafPreload },
 			                                               { "BTreePreloadExt", btreeLeafPreloadExt },
@@ -832,7 +844,7 @@ struct RedwoodMetrics {
 				}
 			} else {
 				if (s != nullptr) {
-					*s += format("%-15s %-7d %7d/s  ", m.first, m.second, int(m.second / elapsed));
+					*s += format("%-15s %-8u %8u/s  ", m.first, m.second, int(m.second / elapsed));
 				}
 				if (e != nullptr) {
 					e->detail(m.first, m.second);
@@ -842,33 +854,51 @@ struct RedwoodMetrics {
 
 		for (int i = 0; i < btreeLevels; ++i) {
 			auto& level = levels[i];
-			std::pair<const char*, unsigned int> metrics[] = { { "PageWrite", level.btreePageWrite },
-				                                               { "PageWriteExt", level.btreePageWriteExt },
-				                                               { "PageUpdate", level.btreePageUpdate },
-				                                               { "PageUpdateExt", level.btreePageUpdateExt },
-				                                               { "", 0 },
-				                                               { "PageRead", level.btreePageReads },
-				                                               { "PageReadExt", level.btreePageReadExt },
-				                                               { "PageCommitStart", level.btreePageCommitStart },
-				                                               { "", 0 },
-				                                               { "LazyClearInt", level.lazyClearRequeue },
-				                                               { "LazyClearIntExt", level.lazyClearRequeueExt },
-				                                               { "LazyClear", level.lazyClearFree },
-				                                               { "LazyClearExt", level.lazyClearFreeExt } };
+			std::pair<const char*, unsigned int> metrics[] = {
+				{ "PageWrite", level.btreePageWrite },
+				{ "PageWriteExt", level.btreePageWriteExt },
+				{ "PageModify", level.btreePageModify },
+				{ "PageModifyExt", level.btreePageModifyExt },
+				{ "", 0 },
+				{ "PageRead", level.btreePageReads },
+				{ "PageReadExt", level.btreePageReadExt },
+				{ "PageCommitStart", level.btreePageCommitStart },
+				{ "", 0 },
+				{ "LazyClearInt", level.lazyClearRequeue },
+				{ "LazyClearIntExt", level.lazyClearRequeueExt },
+				{ "LazyClear", level.lazyClearFree },
+				{ "LazyClearExt", level.lazyClearFreeExt },
+				{ "", 0 },
+				{ "-WriteAvgCount", level.btreePageWrite ? level.writeItemCount / level.btreePageWrite : 0 },
+				{ "-WriteAvgFillPct", level.btreePageWrite ? level.writeFillPct / level.btreePageWrite * 100 : 0},
+				{ "-WriteAvgRecPct", level.btreePageWrite ? level.writeRecPct / level.btreePageWrite * 100 : 0},
+				{ "", 0 },
+				{ "-ModAvgCount", level.btreePageModify ? level.updateItemCount / level.btreePageModify : 0},
+				{ "-ModAvgFillPct", level.btreePageModify ? level.updateFillPct / level.btreePageModify * 100 : 0},
+				{ "-ModAvgRecPct", level.btreePageModify ? level.updateRecPct / level.btreePageModify * 100 : 0}
+			};
+
 			if (s != nullptr) {
 				*s += format("\nLevel %d\n\t", i + 1);
 			}
 			for (auto& m : metrics) {
-				if (*m.first == '\0') {
+				const char *name = m.first;
+				bool rate = elapsed != 0;
+				if(*name == '-') {
+					++name;
+					rate = false;
+				}
+
+				if (*name == '\0') {
 					if (s != nullptr) {
 						*s += "\n\t";
 					}
 				} else {
 					if (s != nullptr) {
-						*s += format("%-15s %7d %7d/s  ", m.first, m.second, int(m.second / elapsed));
+						*s += format("%-15s %8u %8u/s  ", name, m.second, rate ? int(m.second / elapsed) : 0);
 					}
 					if (e != nullptr) {
-						e->detail(format("L%d%s", i + 1, m.first), m.second);
+						e->detail(format("L%d%s", i + 1, name), m.second);
 					}
 				}
 			}
@@ -888,7 +918,7 @@ struct RedwoodMetrics {
 };
 
 // Using a global for Redwood metrics because a single process shouldn't normally have multiple storage engines
-RedwoodMetrics g_redwoodMetrics;
+RedwoodMetrics g_redwoodMetrics = {};
 Future<Void> g_redwoodMetricsActor;
 
 ACTOR Future<Void> redwoodMetricsLogger() {
@@ -2709,8 +2739,8 @@ struct BTreePage {
 #pragma pack(pop)
 
 	int size() const {
-		const BinaryTree* t = &tree();
-		return (uint8_t*)t - (uint8_t*)this + t->size();
+		auto& t = tree();
+		return (uint8_t*)&t - (uint8_t*)this + t.size();
 	}
 
 	bool isLeaf() const { return height == 1; }
@@ -3058,6 +3088,7 @@ public:
 	ACTOR static Future<Void> init_impl(VersionedBTree* self) {
 		wait(self->m_pager->init());
 
+		self->m_blockSize = self->m_pager->getUsablePageSize();
 		state Version latest = self->m_pager->getLatestVersion();
 		self->m_newOldestVersion = self->m_pager->getOldestVersion();
 
@@ -3407,6 +3438,7 @@ private:
 	Future<Void> m_latestCommit;
 	Future<Void> m_init;
 	std::string m_name;
+	int m_blockSize;
 
 	// MetaKey changes size so allocate space for it to expand into
 	union {
@@ -3426,7 +3458,7 @@ private:
 		state Standalone<VectorRef<RedwoodRecordRef>> records;
 
 		// This is how much space for the binary tree exists in the page, after the header
-		state int blockSize = self->m_pager->getUsablePageSize();
+		state int blockSize = self->m_blockSize;
 		state int pageSize = blockSize - sizeof(BTreePage);
 		state int pageFillTarget = pageSize * SERVER_KNOBS->REDWOOD_PAGE_REBUILD_FILL_FACTOR;
 		state int blockCount = 1;
@@ -3468,8 +3500,9 @@ private:
 				int nodeSize = BTreePage::BinaryTree::Node::headerSize(largeTree) + deltaSize;
 				debug_printf("Adding %3d of %3lu (i=%3d) klen %4d  vlen %5d  nodeSize %5d  deltaSize %5d  page usage: "
 				             "%d/%d (%.2f%%)  record=%s\n",
-				             i + 1, entries.size(), i, entry.key.size(), entry.value.orDefault(StringRef()).size(), nodeSize, deltaSize, compressedBytes,
-				             pageSize, (float)compressedBytes / pageSize * 100, entry.toString(height == 1).c_str());
+				             i + 1, entries.size(), i, entry.key.size(), entry.value.orDefault(StringRef()).size(),
+				             nodeSize, deltaSize, compressedBytes, pageSize, (float)compressedBytes / pageSize * 100,
+				             entry.toString(height == 1).c_str());
 
 				// While the node doesn't fit, expand the page.
 				// This is a loop because if the page size moves into "large" range for DeltaTree
@@ -3528,14 +3561,14 @@ private:
 			state std::vector<Reference<IPage>> pages;
 			BTreePage* btPage;
 
+			int capacity = blockSize * blockCount;
 			if (blockCount == 1) {
 				Reference<IPage> page = self->m_pager->newPageBuffer();
 				btPage = (BTreePage*)page->mutate();
 				pages.push_back(std::move(page));
 			} else {
 				ASSERT(blockCount > 1);
-				int size = blockSize * blockCount;
-				btPage = (BTreePage*)new uint8_t[size];
+				btPage = (BTreePage*)new uint8_t[capacity];
 			}
 
 			btPage->height = height;
@@ -3560,6 +3593,9 @@ private:
 			auto& metrics = g_redwoodMetrics.level(btPage->height);
 			metrics.btreePageWrite += 1;
 			metrics.btreePageWriteExt += blockCount - 1;
+			metrics.writeFillPct += (double)written / capacity;
+			metrics.writeRecPct += (double)btPage->kvBytes / capacity;
+			metrics.writeItemCount += btPage->tree().numItems;
 
 			// Create chunked pages
 			// TODO: Avoid copying page bytes, but this is not trivial due to how pager checksums are currently handled.
@@ -3883,10 +3919,13 @@ private:
 		}
 
 		// Page was updated in-place through edits and written to maybeNewID
-		void updatedInPlace(BTreePageIDRef maybeNewID, unsigned int level) {
-			auto& metrics = g_redwoodMetrics.level(level);
-			metrics.btreePageUpdate += 1;
-			metrics.btreePageUpdate += (maybeNewID.size() - 1);
+		void updatedInPlace(BTreePageIDRef maybeNewID, BTreePage* btPage, int capacity) {
+			auto& metrics = g_redwoodMetrics.level(btPage->height);
+			metrics.btreePageModify += 1;
+			metrics.btreePageModify += (maybeNewID.size() - 1);
+			metrics.updateFillPct += (double)btPage->size() / capacity;
+			metrics.updateRecPct += (double)btPage->kvBytes / capacity;
+			metrics.updateItemCount += btPage->tree().numItems;
 
 			// The boundaries can't have changed, but the child page link may have.
 			if (maybeNewID != decodeLowerBound->getChildPage()) {
@@ -3945,11 +3984,11 @@ private:
 
 	struct InternalPageModifier {
 		InternalPageModifier() {}
-		InternalPageModifier(BTreePage *p, BTreePage::BinaryTree::Mirror* m, bool updating)
+		InternalPageModifier(BTreePage* p, BTreePage::BinaryTree::Mirror* m, bool updating)
 		  : btPage(p), m(m), updating(updating), changesMade(false) {}
 
 		bool updating;
-		BTreePage *btPage;
+		BTreePage* btPage;
 		BTreePage::BinaryTree::Mirror* m;
 		Standalone<VectorRef<RedwoodRecordRef>> rebuild;
 		bool changesMade;
@@ -4334,7 +4373,7 @@ private:
 					BTreePageIDRef newID = wait(self->updateBtreePage(self, rootID, &update->newLinks.arena(),
 					                                                  page.castTo<IPage>(), writeVersion));
 
-					update->updatedInPlace(newID, btPage->height);
+					update->updatedInPlace(newID, btPage, newID.size() * self->m_blockSize);
 					debug_printf("%s Page updated in-place, returning %s\n", context.c_str(),
 					             toString(*update).c_str());
 				}
@@ -4565,7 +4604,7 @@ private:
 						BTreePageIDRef newID = wait(self->updateBtreePage(self, rootID, &update->newLinks.arena(),
 						                                                  page.castTo<IPage>(), writeVersion));
 
-						update->updatedInPlace(newID, btPage->height);
+						update->updatedInPlace(newID, btPage, newID.size() * self->m_blockSize);
 						debug_printf("%s Internal page updated in-place, returning %s\n", context.c_str(),
 						             toString(*update).c_str());
 					} else {
