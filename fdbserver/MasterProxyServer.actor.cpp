@@ -1962,6 +1962,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	state GetHealthMetricsReply detailedHealthMetricsReply;
 
 	addActor.send( waitFailureServer(proxy.waitFailure.getFuture()) );
+	addActor.send( traceRole(Role::MASTER_PROXY, proxy.id()) );
 
 	//TraceEvent("ProxyInit1", proxy.id());
 

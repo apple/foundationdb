@@ -136,7 +136,7 @@ public:
 
 class SimpleFailureMonitor : public IFailureMonitor {
 public:
-	SimpleFailureMonitor() : endpointKnownFailed() {}
+	SimpleFailureMonitor();
 	void setStatus(NetworkAddress const& address, FailureStatus const& status);
 	void endpointNotFound(Endpoint const&);
 	virtual void notifyDisconnect(NetworkAddress const&);
