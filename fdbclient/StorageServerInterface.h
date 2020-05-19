@@ -85,25 +85,7 @@ struct StorageServerInterface {
 		// versioned carefully!
 
 		if (ar.protocolVersion().hasSmallEndpoints()) {
-			serializer(ar, uniqueID, locality, getValue);
-			if( Ar::isDeserializing ) {
-				NetworkAddressList addresses = getValue.getEndpoint().addresses;
-				uint64_t first = getValue.getEndpoint().token.first();
-				uint64_t second = getValue.getEndpoint().token.second() & 0xffffffff00000000LL;
-				uint32_t newIndex = getValue.getEndpoint().token.second();
-
-				getKey = RequestStream<struct GetKeyRequest>( Endpoint( addresses, UID(first, second | ++newIndex) ) );
-				getKeyValues = RequestStream<struct GetKeyValuesRequest>( Endpoint( addresses, UID(first, second | ++newIndex) ) );
-				getShardState = RequestStream<struct GetShardStateRequest>( Endpoint( addresses, UID(first, second | ++newIndex) ) );
-				waitMetrics = RequestStream<struct WaitMetricsRequest>( Endpoint( addresses, UID(first, second | ++newIndex) ) );
-				splitMetrics = RequestStream<struct SplitMetricsRequest>( Endpoint( addresses, UID(first, second | ++newIndex) ) );
-				getStorageMetrics = RequestStream<struct GetStorageMetricsRequest>( Endpoint( addresses, UID(first, second | ++newIndex) ) );
-				waitFailure = RequestStream<ReplyPromise<Void>>( Endpoint( addresses, UID(first, second | ++newIndex) ) );
-				getQueuingMetrics = RequestStream<struct StorageQueuingMetricsRequest>( Endpoint( addresses, UID(first, second | ++newIndex) ) );
-				getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>( Endpoint( addresses, UID(first, second | ++newIndex) ) );
-				watchValue = RequestStream<struct WatchValueRequest>( Endpoint( addresses, UID(first, second | ++newIndex) ) );
-				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( Endpoint( addresses, UID(first, second | ++newIndex) ) );
-			}
+			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics, splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType, watchValue, getReadHotRanges);
 		} else {
 			ASSERT(Ar::isDeserializing);
 			if constexpr (is_fb_function<Ar>) {
