@@ -1001,16 +1001,15 @@ struct HealthMetrics {
 struct DDMetricsRef {
 	int64_t shardBytes;
 	KeyRef beginKey;
-	KeyRef endKey;
 
 	DDMetricsRef() : shardBytes(0) {}
-	DDMetricsRef(int64_t bytes, KeyRef begin, KeyRef end) : shardBytes(bytes), beginKey(begin), endKey(end) {}
+	DDMetricsRef(int64_t bytes, KeyRef begin) : shardBytes(bytes), beginKey(begin) {}
 	DDMetricsRef(Arena& a, const DDMetricsRef& copyFrom)
-	  : shardBytes(copyFrom.shardBytes), beginKey(a, copyFrom.beginKey), endKey(a, copyFrom.endKey) {}
+	  : shardBytes(copyFrom.shardBytes), beginKey(a, copyFrom.beginKey) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, shardBytes, beginKey, endKey);
+		serializer(ar, shardBytes, beginKey);
 	}
 };
 

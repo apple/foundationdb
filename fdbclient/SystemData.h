@@ -82,7 +82,6 @@ extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
 extern const KeyRangeRef writeConflictRangeKeysRange;
 extern const KeyRangeRef readConflictRangeKeysRange;
 extern const KeyRangeRef ddStatsRange;
-extern const ValueRef ddStatsZeroBytes;
 
 extern const KeyRef cacheKeysPrefix;
 

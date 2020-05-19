@@ -70,16 +70,13 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 		try {
 			Standalone<RangeResultRef> result = wait(tr->getRange(ddStatsRange, 100));
-			ASSERT(result.size() % 2 == 0);
 			ASSERT(!result.more);
-			self->numShards = result.size() / 2;
+			self->numShards = result.size();
 			if (self->numShards < 1) return false;
 			int64_t totalBytes = 0;
-			for (int i = 0; i < result.size(); i += 2) {
+			for (int i = 0; i < result.size(); ++i) {
 				ASSERT(result[i].key.startsWith(ddStatsRange.begin));
 				totalBytes += std::stoi(result[i].value.toString());
-				ASSERT(result[i + 1].key.startsWith(ddStatsRange.begin));
-				ASSERT(result[i + 1].value == ddStatsZeroBytes);
 			}
 			self->avgBytes = totalBytes / self->numShards;
 		} catch (Error& e) {

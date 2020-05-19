@@ -828,8 +828,7 @@ ACTOR Future<Void> fetchShardMetricsList_impl( DataDistributionTracker* self, Ge
 					onChange = stats->onChange();
 					break;
 				}
-				result.push_back_deep(result.arena(), DDMetricsRef(stats->get().get().metrics.bytes, KeyRef(t.begin().toString()),
-				                                                KeyRef(t.end().toString())));
+				result.push_back_deep(result.arena(), DDMetricsRef(stats->get().get().metrics.bytes, KeyRef(t.begin().toString())));
 				++shardNum;
 				if (shardNum >= req.shardLimit) {
 					break;
