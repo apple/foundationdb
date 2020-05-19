@@ -514,17 +514,6 @@ def has_dateparser():
         logger.warn("Can't find dateparser so disabling human date parsing")
         return False
 
-def wait_for_shard_addresses(ranges, shard_finder, key_idx, addr_idx):
-    for index in range(len(ranges)):
-        item = ranges[index]
-        if item[addr_idx] is not None:
-            while True:
-                try:
-                    ranges[index] = item[0:addr_idx] + ([a.decode('ascii') for a in item[addr_idx].wait()],) + item[addr_idx+1:]
-                    break
-                except fdb.FDBError as e:
-                    ranges[index] = item[0:addr_idx] + (shard_finder.get_addresses_for_key(item[key_idx]),) + item[addr_idx+1:]
-
 class ReadCounter(object):
     def __init__(self):
         from sortedcontainers import SortedDict
@@ -569,7 +558,7 @@ class ReadCounter(object):
             for (count, (start, end)) in count_pairs:
                 results.append((start, end, count, shard_finder.get_addresses_for_key(start)))
 
-            wait_for_shard_addresses(results, shard_finder, 0, 3)
+            shard_finder.wait_for_shard_addresses(results, 0, 3)
 
             if filter_addresses:
                 filter_addresses = set(filter_addresses)
@@ -625,7 +614,7 @@ class ReadCounter(object):
         if count_this_range > 0:
             add_boundary(this_range_start_key, last_end, opened_this_range, count_this_range)
 
-        wait_for_shard_addresses(output_range_counts, shard_finder, 0, 5)
+        shard_finder.wait_for_shard_addresses(output_range_counts, 0, 5)
         return output_range_counts
 
 
@@ -653,7 +642,6 @@ class ShardFinder(object):
             self.tr.options.set_include_port_in_address()
 
     @staticmethod
-    @fdb.transactional
     def _get_addresses_for_key(tr, key):
         return fdb.locality.get_addresses_for_key(tr, key)
 
@@ -690,6 +678,16 @@ class ShardFinder(object):
 
         return self.shard_cache[shard]
 
+    def wait_for_shard_addresses(self, ranges, key_idx, addr_idx):
+        for index in range(len(ranges)):
+            item = ranges[index]
+            if item[addr_idx] is not None:
+                while True:
+                    try:
+                        ranges[index] = item[0:addr_idx] + ([a.decode('ascii') for a in item[addr_idx].wait()],) + item[addr_idx+1:]
+                        break
+                    except fdb.FDBError as e:
+                        ranges[index] = item[0:addr_idx] + (self.get_addresses_for_key(item[key_idx]),) + item[addr_idx+1:]
 
 class WriteCounter(object):
     mutation_types_to_consider = frozenset([MutationType.SET_VALUE, MutationType.ADD_VALUE])
@@ -733,7 +731,7 @@ class WriteCounter(object):
         if count_this_range > 0:
             add_boundary(start_key, k, count_this_range)
 
-        wait_for_shard_addresses(output_range_counts, shard_finder, 0, 5)
+        shard_finder.wait_for_shard_addresses(output_range_counts, 0, 5)
         return output_range_counts
 
     def get_total_writes(self):
@@ -749,7 +747,7 @@ class WriteCounter(object):
             for (count, key) in count_pairs:
                 results.append((key, None, count, shard_finder.get_addresses_for_key(key)))
 
-            wait_for_shard_addresses(results, shard_finder, 0, 3)
+            shard_finder.wait_for_shard_addresses(results, 0, 3)
 
             if filter_addresses:
                 filter_addresses = set(filter_addresses)
