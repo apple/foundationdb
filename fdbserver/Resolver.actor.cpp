@@ -315,6 +315,7 @@ ACTOR Future<Void> resolverCore(
 	state ActorCollection actors(false);
 	state Future<Void> doPollMetrics = self->resolverCount > 1 ? Void() : Future<Void>(Never());
 	actors.add( waitFailureServer(resolver.waitFailure.getFuture()) );
+	actors.add( traceRole(Role::RESOLVER, resolver.id()) );
 
 	TraceEvent("ResolverInit", resolver.id()).detail("RecoveryCount", initReq.recoveryCount);
 	loop choose {

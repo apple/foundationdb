@@ -52,6 +52,7 @@ private:
 	double tpsRate;
 	double expiration;
 	double lastCheck;
+	bool rateSet = false;
 
 	Smoother smoothRate;
 	Smoother smoothReleased;
@@ -68,7 +69,14 @@ public:
 	void update(ClientTagThrottleLimits const& limits) {
 		ASSERT(limits.tpsRate >= 0);
 		this->tpsRate = limits.tpsRate;
-		smoothRate.setTotal(limits.tpsRate);
+
+		if(!rateSet || expired()) {
+			rateSet = true;
+			smoothRate.reset(limits.tpsRate);
+		}
+		else {
+			smoothRate.setTotal(limits.tpsRate);
+		}
 
 		expiration = limits.expiration;
 	}
@@ -309,7 +317,7 @@ public:
 
 	std::vector<std::unique_ptr<SpecialKeyRangeBaseImpl>> specialKeySpaceModules;
 	std::unique_ptr<SpecialKeySpace> specialKeySpace;
-	void registerSpecialKeySpaceModule(std::unique_ptr<SpecialKeyRangeBaseImpl> module);
+	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, std::unique_ptr<SpecialKeyRangeBaseImpl> impl);
 
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices; 

@@ -21,6 +21,7 @@
 #include <tuple>
 #include <boost/lexical_cast.hpp>
 
+#include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
@@ -42,6 +43,7 @@
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/Trace.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -789,6 +791,17 @@ void endRole(const Role &role, UID id, std::string reason, bool ok, Error e) {
 	}
 }
 
+ACTOR Future<Void>
+traceRole(Role role, UID roleId)
+{
+	loop {
+		wait(delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL));
+		TraceEvent("Role", roleId)
+			.detail("Transition", "Refresh")
+			.detail("As", role.roleName);
+	}
+}
+
 ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, StringRef snapFolder) {
 	state ExecCmdValueString snapArg(snapReq.snapPayload);
 	try {
@@ -1046,6 +1059,7 @@ ACTOR Future<Void> workerServer(
 		details["DataFolder"] = folder;
 		details["StoresPresent"] = format("%d", stores.size());
 		startRole( Role::WORKER, interf.id(), interf.id(), details );
+		errorForwarders.add(traceRole(Role::WORKER, interf.id()));
 
 		wait(waitForAll(recoveries));
 		recoveredDiskFiles.send(Void());

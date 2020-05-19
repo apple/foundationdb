@@ -42,6 +42,7 @@
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/MutationTracking.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/StorageMetrics.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -407,8 +408,6 @@ public:
 	Reference<AsyncVar<ServerDBInfo>> db;
 	Database cx;
 	ActorCollection actors;
-	Future<Void> loadBalanceDelay;
-	int sharedDelayCount;
 
 	StorageServerMetrics metrics;
 	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
@@ -455,12 +454,11 @@ public:
 	struct TransactionTagCounter {
 		struct TagInfo {
 			TransactionTag tag;
-			int64_t count;
+			double rate;
 			double fractionalBusyness;
-			double elapsed;
 
-			TagInfo(TransactionTag const& tag, int64_t count, int64_t totalCount, double elapsed) 
-			  : tag(tag), count(count), fractionalBusyness((double)count/totalCount), elapsed(elapsed) {}
+			TagInfo(TransactionTag const& tag, double rate, double fractionalBusyness) 
+			  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
 		};
 
 		TransactionTagMap<int64_t> intervalCounts;
@@ -494,20 +492,21 @@ public:
 
 		void startNewInterval(UID id) {
 			double elapsed = now() - intervalStart;
-			if(intervalStart > 0 && busiestTagCount >= SERVER_KNOBS->MIN_TAG_PAGES_READ_RATE * elapsed) {
-				previousBusiestTag = TagInfo(busiestTag, busiestTagCount, intervalTotalSampledCount, elapsed);
-			}
-			else {
-				previousBusiestTag.reset();
-			}
+			previousBusiestTag.reset();
+			if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
+				double rate = busiestTagCount / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE / elapsed;
+				if(rate > SERVER_KNOBS->MIN_TAG_PAGES_READ_RATE) {
+					previousBusiestTag = TagInfo(busiestTag, rate, (double)busiestTagCount / intervalTotalSampledCount);
+				}
 
-			// TODO: report in status
-			TraceEvent("BusiestReadTag", id)
-				.detail("Elapsed", elapsed)
-				.detail("Tag", printable(busiestTag))
-				.detail("TagCount", busiestTagCount)
-				.detail("TotalSampledCount", intervalTotalSampledCount)
-				.detail("Reported", previousBusiestTag.present());
+				TraceEvent("BusiestReadTag", id)
+					.detail("Elapsed", elapsed)
+					.detail("Tag", printable(busiestTag))
+					.detail("TagCost", busiestTagCount)
+					.detail("TotalSampledCost", intervalTotalSampledCount)
+					.detail("Reported", previousBusiestTag.present())
+					.trackLatest(id.toString() + "/BusiestReadTag");
+			} 
 
 			intervalCounts.clear();
 			intervalTotalSampledCount = 0;
@@ -604,7 +603,7 @@ public:
 			rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
 			durableInProgress(Void()),
 			versionLag(0), primaryLocality(tagLocalityInvalid),
-			updateEagerReads(0), sharedDelayCount(0), loadBalanceDelay(Void()),
+			updateEagerReads(0),
 			shardChangeCounter(0),
 			fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES),
 			shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0),
@@ -625,13 +624,6 @@ public:
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 	}
 
-	Future<Void> getLoadBalanceDelay() {
-		if(loadBalanceDelay.isReady() || ++sharedDelayCount > SERVER_KNOBS->MAX_SHARED_LOAD_BALANCE_DELAY) {
-			sharedDelayCount = 0;
-			loadBalanceDelay = delay(0, TaskPriority::DefaultEndpoint);
-		}
-		return loadBalanceDelay;
-	}
 	//~StorageServer() { fclose(log); }
 
 	// Puts the given shard into shards.  The caller is responsible for adding shards
@@ -926,7 +918,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
-		wait( data->getLoadBalanceDelay() );
+		wait( delay(0, TaskPriority::DefaultEndpoint) );
 
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
@@ -960,8 +952,8 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 			v = vv;
 		}
 
-		debugMutation("ShardGetValue", version, MutationRef(MutationRef::DebugKey, req.key, v.present()?v.get():LiteralStringRef("<null>")));
-		debugMutation("ShardGetPath", version, MutationRef(MutationRef::DebugKey, req.key, path==0?LiteralStringRef("0"):path==1?LiteralStringRef("1"):LiteralStringRef("2")));
+		DEBUG_MUTATION("ShardGetValue", version, MutationRef(MutationRef::DebugKey, req.key, v.present()?v.get():LiteralStringRef("<null>")));
+		DEBUG_MUTATION("ShardGetPath", version, MutationRef(MutationRef::DebugKey, req.key, path==0?LiteralStringRef("0"):path==1?LiteralStringRef("1"):LiteralStringRef("2")));
 
 		/*
 		StorageMetrics m;
@@ -1035,7 +1027,7 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 					throw reply.error.get();
 				}
 
-				debugMutation("ShardWatchValue", latest, MutationRef(MutationRef::DebugKey, req.key, reply.value.present() ? StringRef( reply.value.get() ) : LiteralStringRef("<null>") ) );
+				DEBUG_MUTATION("ShardWatchValue", latest, MutationRef(MutationRef::DebugKey, req.key, reply.value.present() ? StringRef( reply.value.get() ) : LiteralStringRef("<null>") ) );
 
 				if( req.debugID.present() )
 					g_traceBatch.addEvent("WatchValueDebug", req.debugID.get().first(), "watchValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
@@ -1463,7 +1455,7 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 	// 	// Placeholder for up-prioritizing fetches for important requests
 	// 	taskType = TaskPriority::DefaultDelay;
 	} else {
-		wait( data->getLoadBalanceDelay() );
+		wait( delay(0, TaskPriority::DefaultEndpoint) );
 	}
 	
 	try {
@@ -1594,7 +1586,7 @@ ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req ) {
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait( data->getLoadBalanceDelay() );
+	wait( delay(0, TaskPriority::DefaultEndpoint) );
 
 	try {
 		state Version version = wait( waitForVersion( data, req.version ) );
@@ -1664,7 +1656,7 @@ void getQueuingMetrics( StorageServer* self, StorageQueuingMetricsRequest const&
 	Optional<StorageServer::TransactionTagCounter::TagInfo> busiestTag = self->transactionTagCounter.getBusiestTag();
 	reply.busiestTag = busiestTag.map<TransactionTag>([](StorageServer::TransactionTagCounter::TagInfo tagInfo) { return tagInfo.tag; });
 	reply.busiestTagFractionalBusyness = busiestTag.present() ? busiestTag.get().fractionalBusyness : 0.0;
-	reply.busiestTagRate = busiestTag.present() ? busiestTag.get().count / busiestTag.get().elapsed : 0.0;
+	reply.busiestTagRate = busiestTag.present() ? busiestTag.get().rate : 0.0;
 
 	req.reply.send( reply );
 }
@@ -2091,7 +2083,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 	wait( data->coreStarted.getFuture() && delay( 0 ) );
 
 	try {
-		debugKeyRange("fetchKeysBegin", data->version.get(), shard->keys);
+		DEBUG_KEY_RANGE("fetchKeysBegin", data->version.get(), shard->keys);
 
 		TraceEvent(SevDebug, interval.begin(), data->thisServerID)
 			.detail("KeyBegin", shard->keys.begin)
@@ -2159,8 +2151,8 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					.detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end)
 					.detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
 					.detail("Version", fetchVersion).detail("More", this_block.more);
-				debugKeyRange("fetchRange", fetchVersion, keys);
-				for(auto k = this_block.begin(); k != this_block.end(); ++k) debugMutation("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value));
+				DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys);
+				for(auto k = this_block.begin(); k != this_block.end(); ++k) DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value));
 
 				data->counters.bytesFetched += expectedSize;
 				if( fetchBlockBytes > expectedSize ) {
@@ -2307,7 +2299,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 			ASSERT( b->version >= checkv );
 			checkv = b->version;
 			for(auto& m : b->mutations)
-				debugMutation("fetchKeysFinalCommitInject", batch->changes[0].version, m);
+				DEBUG_MUTATION("fetchKeysFinalCommitInject", batch->changes[0].version, m);
 		}
 
 		shard->updates.clear();
@@ -2416,7 +2408,8 @@ void changeServerKeys( StorageServer* data, const KeyRangeRef& keys, bool nowAss
 	//	.detail("Context", changeServerKeysContextName[(int)context]);
 	validate(data);
 
-	debugKeyRange( nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys );
+	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
+	//DEBUG_KEY_RANGE( nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys );
 
 	bool isDifferent = false;
 	auto existingShards = data->shards.intersectingRanges(keys);
@@ -2521,7 +2514,7 @@ void changeServerKeys( StorageServer* data, const KeyRangeRef& keys, bool nowAss
 
 void rollback( StorageServer* data, Version rollbackVersion, Version nextVersion ) {
 	TEST(true); // call to shard rollback
-	debugKeyRange("Rollback", rollbackVersion, allKeys);
+	DEBUG_KEY_RANGE("Rollback", rollbackVersion, allKeys);
 
 	// We used to do a complicated dance to roll back in MVCC history.  It's much simpler, and more testable,
 	// to simply restart the storage server actor and restore from the persistent disk state, and then roll
@@ -2542,18 +2535,7 @@ void StorageServer::addMutation(Version version, MutationRef const& mutation, Ke
 		return;
 	}
 	expanded = addMutationToMutationLog(mLog, expanded);
-	if (debugMutation("expandedMutation", version, expanded)) {
-		const char* type =
-			mutation.type == MutationRef::SetValue ? "SetValue" :
-			mutation.type == MutationRef::ClearRange ? "ClearRange" :
-			mutation.type == MutationRef::DebugKeyRange ? "DebugKeyRange" :
-			mutation.type == MutationRef::DebugKey ? "DebugKey" :
-			"UnknownMutation";
-		printf("DEBUGMUTATION:\t%.6f\t%s\t%s\t%" PRId64 "\t%s\t%s\t%s\n", now(), g_network->getLocalAddress().toString().c_str(), "originalMutation", version, type, printable(mutation.param1).c_str(), printable(mutation.param2).c_str());
-		printf("  shard: %s - %s\n", printable(shard.begin).c_str(), printable(shard.end).c_str());
-		if (mutation.type == MutationRef::ClearRange && mutation.param2 != shard.end)
-			printf("  eager: %s\n", printable( eagerReads->getKeyEnd( mutation.param2 ) ).c_str() );
-	}
+	DEBUG_MUTATION("applyMutation", version, expanded).detail("UID", thisServerID).detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 	applyMutation( this, expanded, mLog.arena(), mutableData() );
 	//printf("\nSSUpdate: Printing versioned tree after applying mutation\n");
 	//mutableData().printTree(version);
@@ -2606,9 +2588,9 @@ public:
 				applyPrivateData( data, m );
 			}
 		} else {
-			// FIXME: enable when debugMutation is active
+			// FIXME: enable when DEBUG_MUTATION is active
 			//for(auto m = changes[c].mutations.begin(); m; ++m) {
-			//	debugMutation("SSUpdateMutation", changes[c].version, *m);
+			//	DEBUG_MUTATION("SSUpdateMutation", changes[c].version, *m);
 			//}
 
 			splitMutation(data, data->shards, m, ver);
@@ -2894,7 +2876,8 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 				rd >> msg;
 
 				if (ver != invalidVersion) {  // This change belongs to a version < minVersion
-					if (debugMutation("SSPeek", ver, msg) || ver == 1) {
+					DEBUG_MUTATION("SSPeek", ver, msg).detail("ServerID", data->thisServerID);
+					if (ver == 1) {
 						TraceEvent("SSPeekMutation", data->thisServerID);
 						// The following trace event may produce a value with special characters
 						//TraceEvent("SSPeekMutation", data->thisServerID).detail("Mutation", msg.toString()).detail("Version", cloneCursor2->version().toString());
@@ -2947,7 +2930,8 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		}
 
 		if(ver != invalidVersion && ver > data->version.get()) {
-			debugKeyRange("SSUpdate", ver, allKeys);
+			// TODO(alexmiller): Update to version tracking.
+			DEBUG_KEY_RANGE("SSUpdate", ver, KeyRangeRef());
 
 			data->mutableData().createNewVersion(ver);
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
@@ -3150,7 +3134,7 @@ void StorageServerDisk::writeKeyValue( KeyValueRef kv ) {
 }
 
 void StorageServerDisk::writeMutation( MutationRef mutation ) {
-	// FIXME: debugMutation(debugContext, debugVersion, *m);
+	// FIXME: DEBUG_MUTATION(debugContext, debugVersion, *m);
 	if (mutation.type == MutationRef::SetValue) {
 		storage->set( KeyValueRef(mutation.param1, mutation.param2) );
 	} else if (mutation.type == MutationRef::ClearRange) {
@@ -3161,7 +3145,7 @@ void StorageServerDisk::writeMutation( MutationRef mutation ) {
 
 void StorageServerDisk::writeMutations( MutationListRef mutations, Version debugVersion, const char* debugContext ) {
 	for(auto m = mutations.begin(); m; ++m) {
-		debugMutation(debugContext, debugVersion, *m);
+		DEBUG_MUTATION(debugContext, debugVersion, *m).detail("UID", data->thisServerID);
 		if (m->type == MutationRef::SetValue) {
 			storage->set( KeyValueRef(m->param1, m->param2) );
 		} else if (m->type == MutationRef::ClearRange) {
@@ -3178,7 +3162,8 @@ bool StorageServerDisk::makeVersionMutationsDurable( Version& prevStorageVersion
 	if (u != data->getMutationLog().end() && u->first <= newStorageVersion) {
 		VersionUpdateRef const& v = u->second;
 		ASSERT( v.version > prevStorageVersion && v.version <= newStorageVersion );
-		debugKeyRange("makeVersionMutationsDurable", v.version, allKeys);
+		// TODO(alexmiller): Update to version tracking.
+		DEBUG_KEY_RANGE("makeVersionMutationsDurable", v.version, KeyRangeRef());
 		writeMutations(v.mutations, v.version, "makeVersionDurable");
 		for(auto m=v.mutations.begin(); m; ++m)
 			bytesLeft -= mvccStorageBytes(*m);
@@ -3364,7 +3349,8 @@ ACTOR Future<bool> restoreDurableState( StorageServer* data, IKeyValueStore* sto
 		for(auto it = data->newestAvailableVersion.ranges().begin(); it != data->newestAvailableVersion.ranges().end(); ++it) {
 			if (it->value() == invalidVersion) {
 				KeyRangeRef clearRange(it->begin(), it->end());
-				debugKeyRange("clearInvalidVersion", invalidVersion, clearRange);
+				// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
+				//DEBUG_KEY_RANGE("clearInvalidVersion", invalidVersion, clearRange);
 				storage->clear( clearRange );
 				data->byteSampleApplyClear( clearRange, invalidVersion );
 			}
@@ -3720,9 +3706,10 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	self->actors.add(serveGetKeyValuesRequests(self, ssi.getKeyValues.getFuture()));
 	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
+	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 
 	self->transactionTagCounter.startNewInterval(self->thisServerID);
-	self->actors.add(recurring([this](){ self->transactionTagCounter.startNewInterval(self->thisServerID); }, SERVER_KNOBS->READ_TAG_MEASUREMENT_INTERVAL));
+	self->actors.add(recurring([&](){ self->transactionTagCounter.startNewInterval(self->thisServerID); }, SERVER_KNOBS->READ_TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send( Void() );
 

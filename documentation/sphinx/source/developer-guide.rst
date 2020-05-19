@@ -469,7 +469,6 @@ In some situations, you may want to explicitly control the number of key-value p
 
   LIMIT = 100 # adjust according to data characteristics
 
-  @fdb.transactional
   def get_range_limited(tr, begin, end):
       keys_found = True
       while keys_found:
