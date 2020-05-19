@@ -454,12 +454,11 @@ public:
 	struct TransactionTagCounter {
 		struct TagInfo {
 			TransactionTag tag;
-			int64_t count;
+			double rate;
 			double fractionalBusyness;
-			double elapsed;
 
-			TagInfo(TransactionTag const& tag, int64_t count, int64_t totalCount, double elapsed) 
-			  : tag(tag), count(count), fractionalBusyness((double)count/totalCount), elapsed(elapsed) {}
+			TagInfo(TransactionTag const& tag, double rate, double fractionalBusyness) 
+			  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
 		};
 
 		TransactionTagMap<int64_t> intervalCounts;
@@ -493,20 +492,21 @@ public:
 
 		void startNewInterval(UID id) {
 			double elapsed = now() - intervalStart;
-			if(intervalStart > 0 && busiestTagCount >= SERVER_KNOBS->MIN_TAG_PAGES_READ_RATE * elapsed) {
-				previousBusiestTag = TagInfo(busiestTag, busiestTagCount, intervalTotalSampledCount, elapsed);
-			}
-			else {
-				previousBusiestTag.reset();
-			}
+			previousBusiestTag.reset();
+			if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
+				double rate = busiestTagCount / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE / elapsed;
+				if(rate > SERVER_KNOBS->MIN_TAG_PAGES_READ_RATE) {
+					previousBusiestTag = TagInfo(busiestTag, rate, (double)busiestTagCount / intervalTotalSampledCount);
+				}
 
-			// TODO: report in status
-			TraceEvent("BusiestReadTag", id)
-				.detail("Elapsed", elapsed)
-				.detail("Tag", printable(busiestTag))
-				.detail("TagCount", busiestTagCount)
-				.detail("TotalSampledCount", intervalTotalSampledCount)
-				.detail("Reported", previousBusiestTag.present());
+				TraceEvent("BusiestReadTag", id)
+					.detail("Elapsed", elapsed)
+					.detail("Tag", printable(busiestTag))
+					.detail("TagCost", busiestTagCount)
+					.detail("TotalSampledCost", intervalTotalSampledCount)
+					.detail("Reported", previousBusiestTag.present())
+					.trackLatest(id.toString() + "/BusiestReadTag");
+			} 
 
 			intervalCounts.clear();
 			intervalTotalSampledCount = 0;
@@ -1656,7 +1656,7 @@ void getQueuingMetrics( StorageServer* self, StorageQueuingMetricsRequest const&
 	Optional<StorageServer::TransactionTagCounter::TagInfo> busiestTag = self->transactionTagCounter.getBusiestTag();
 	reply.busiestTag = busiestTag.map<TransactionTag>([](StorageServer::TransactionTagCounter::TagInfo tagInfo) { return tagInfo.tag; });
 	reply.busiestTagFractionalBusyness = busiestTag.present() ? busiestTag.get().fractionalBusyness : 0.0;
-	reply.busiestTagRate = busiestTag.present() ? busiestTag.get().count / busiestTag.get().elapsed : 0.0;
+	reply.busiestTagRate = busiestTag.present() ? busiestTag.get().rate : 0.0;
 
 	req.reply.send( reply );
 }
@@ -3706,9 +3706,10 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	self->actors.add(serveGetKeyValuesRequests(self, ssi.getKeyValues.getFuture()));
 	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
+	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 
 	self->transactionTagCounter.startNewInterval(self->thisServerID);
-	self->actors.add(recurring([this](){ self->transactionTagCounter.startNewInterval(self->thisServerID); }, SERVER_KNOBS->READ_TAG_MEASUREMENT_INTERVAL));
+	self->actors.add(recurring([&](){ self->transactionTagCounter.startNewInterval(self->thisServerID); }, SERVER_KNOBS->READ_TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send( Void() );
 
