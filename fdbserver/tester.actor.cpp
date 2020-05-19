@@ -518,7 +518,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 			fprintf(stderr, "ERROR: The workload could not be created.\n");
 			throw test_specification_invalid();
 		}
-		Future<Void> test = runWorkloadAsync(cx, workIface, workload, work.databasePingDelay);
+		Future<Void> test = runWorkloadAsync(cx, workIface, workload, work.databasePingDelay) || traceRole(Role::TESTER, workIface.id());
 		work.reply.send(workIface);
 		replied = true;
 

@@ -557,6 +557,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			logRouterPopToVersion(0), locality(tagLocalityInvalid), execOpCommitInProgress(false)
 	{
 		startRole(Role::TRANSACTION_LOG, interf.id(), tLogData->workerID, {{"SharedTLog", tLogData->dbgid.shortString()}}, context);
+		addActor.send(traceRole(Role::TRANSACTION_LOG, interf.id()));
 
 		persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
 		persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
@@ -2922,6 +2923,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 
 		self.sharedActors.send( commitQueue(&self) );
 		self.sharedActors.send( updateStorageLoop(&self) );
+		self.sharedActors.send( traceRole(Role::SHARED_TRANSACTION_LOG, tlogId) );
 		state Future<Void> activeSharedChange = Void();
 
 		loop {
