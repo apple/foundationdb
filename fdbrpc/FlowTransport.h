@@ -68,7 +68,7 @@ public:
 	Endpoint getAdjustedEndpoint( uint32_t index ) {
 		uint32_t newIndex = token.second();
 		newIndex += index;
-		return Endpoint( addresses, UID(token.first(), (token.second()&0xffffffff00000000LL) | newIndex) );
+		return Endpoint( addresses, UID(token.first()+(2*newIndex), (token.second()&0xffffffff00000000LL) | newIndex) );
 	}
 
 	bool operator == (Endpoint const& r) const {
