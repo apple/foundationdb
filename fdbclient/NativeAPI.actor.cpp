@@ -3348,18 +3348,20 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
-					auto &priorityThrottledTags = cx->throttledTags[priority];
-					for(auto& tag : tags) {
-						auto itr = v.tagThrottleInfo.find(tag.first);
-						if(itr == v.tagThrottleInfo.end()) {
-							TEST(true); // Removing client throttle
-							priorityThrottledTags.erase(tag.first);
-						}
-						else {
-							TEST(true); // Setting client throttle
-							auto result = priorityThrottledTags.try_emplace(tag.first, itr->second);
-							if(!result.second) {
-								result.first->second.update(itr->second);
+					if(tags.size() != 0) {
+						auto &priorityThrottledTags = cx->throttledTags[priority];
+						for(auto& tag : tags) {
+							auto itr = v.tagThrottleInfo.find(tag.first);
+							if(itr == v.tagThrottleInfo.end()) {
+								TEST(true); // Removing client throttle
+								priorityThrottledTags.erase(tag.first);
+							}
+							else {
+								TEST(true); // Setting client throttle
+								auto result = priorityThrottledTags.try_emplace(tag.first, itr->second);
+								if(!result.second) {
+									result.first->second.update(itr->second);
+								}
 							}
 						}
 					}
@@ -3431,11 +3433,11 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 
 			Future<Void> batch = incrementalBroadcastWithError(
 			    getConsistentReadVersion(cx, count, priority, flags, std::move(tags), std::move(debugID)),
-			    std::vector<Promise<GetReadVersionReply>>(requests), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
+			    std::move(requests), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 
 			tags.clear();
 			debugID = Optional<UID>();
-			requests = std::vector< Promise<GetReadVersionReply> >();
+			requests.clear();
 			addActor.send(batch);
 			timeout = Future<Void>();
 		}
@@ -3469,25 +3471,27 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, TransactionPriorit
 			ASSERT(false);
 	}
 
-	auto &priorityThrottledTags = cx->throttledTags[priority];
-	for(auto &tag : tags) {
-		auto itr = priorityThrottledTags.find(tag);
-		if(itr != priorityThrottledTags.end()) {
-			if(itr->second.expired()) {
-				priorityThrottledTags.erase(itr);
-			}
-			else if(itr->second.throttleDuration() > 0) {
-				TEST(true); // Throttling transaction after getting read version
-				++cx->transactionReadVersionsThrottled;
-				throw tag_throttled();
+	if(tags.size() != 0) {
+		auto &priorityThrottledTags = cx->throttledTags[priority];
+		for(auto &tag : tags) {
+			auto itr = priorityThrottledTags.find(tag);
+			if(itr != priorityThrottledTags.end()) {
+				if(itr->second.expired()) {
+					priorityThrottledTags.erase(itr);
+				}
+				else if(itr->second.throttleDuration() > 0) {
+					TEST(true); // throttling transaction after getting read version
+					++cx->transactionReadVersionsThrottled;
+					throw tag_throttled();
+				}
 			}
 		}
-	}
 
-	for(auto &tag : tags) {
-		auto itr = priorityThrottledTags.find(tag);
-		if(itr != priorityThrottledTags.end()) {
-			itr->second.addReleased(1);
+		for(auto &tag : tags) {
+			auto itr = priorityThrottledTags.find(tag);
+			if(itr != priorityThrottledTags.end()) {
+				itr->second.addReleased(1);
+			}
 		}
 	}
 
@@ -3521,9 +3525,10 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 				ASSERT(false);
 		}
 
-		double maxThrottleDelay = 0.0;
-		bool canRecheck = false;
 		if(options.tags.size() != 0) {
+			double maxThrottleDelay = 0.0;
+			bool canRecheck = false;
+
 			auto &priorityThrottledTags = cx->throttledTags[options.priority];
 			for(auto &tag : options.tags) {
 				auto itr = priorityThrottledTags.find(tag);
