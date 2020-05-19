@@ -635,17 +635,6 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	@Override
-	protected void finalize() throws Throwable {
-		try {
-			checkUnclosed("Transaction");
-			close();
-		}
-		finally {
-			super.finalize();
-		}
-	}
-
-	@Override
 	protected void closeInternal(long cPtr) {
 		if(transactionOwner) {
 			Transaction_dispose(cPtr);

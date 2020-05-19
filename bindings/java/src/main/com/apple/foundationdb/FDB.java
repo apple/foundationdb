@@ -84,7 +84,6 @@ public class FDB {
 	private final int apiVersion;
 	private volatile boolean netStarted = false;
 	private volatile boolean netStopped = false;
-	volatile boolean warnOnUnclosed = true;
 	private boolean useShutdownHook = true;
 	private Thread shutdownHook;
 	private final Semaphore netRunning = new Semaphore(1);
@@ -208,14 +207,12 @@ public class FDB {
 	}
 
 	/**
-	 * Enables or disables the stderr warning that is printed whenever an object with FoundationDB
-	 *  native resources is garbage collected without being closed. By default, this feature is enabled.
+	 * @deprecated This function no longer has any effect.
 	 *
-	 * @param warnOnUnclosed Whether the warning should be printed for unclosed objects
+	 * @param warnOnUnclosed unused
 	 */
-	public void setUnclosedWarning(boolean warnOnUnclosed) {
-		this.warnOnUnclosed = warnOnUnclosed;
-	}
+	@Deprecated
+	public void setUnclosedWarning(boolean warnOnUnclosed) {}
 
 	/**
 	 * Returns the API version that was selected by the {@link #selectAPIVersion(int) selectAPIVersion()}
