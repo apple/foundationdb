@@ -53,7 +53,6 @@ struct StorageServerInterface {
 
 	LocalityData locality;
 	UID uniqueID;
-	Endpoint base;
 
 	RequestStream<struct GetValueRequest> getValue;
 	RequestStream<struct GetKeyRequest> getKey;
@@ -86,21 +85,7 @@ struct StorageServerInterface {
 		// versioned carefully!
 
 		if (ar.protocolVersion().hasSmallEndpoints()) {
-			serializer(ar, uniqueID, locality, base);
-			if( Ar::isDeserializing ) {
-				getValue = RequestStream<struct GetValueRequest>( base.getAdjustedEndpoint(0) );
-				getKey = RequestStream<struct GetKeyRequest>( base.getAdjustedEndpoint(1) );
-				getKeyValues = RequestStream<struct GetKeyValuesRequest>( base.getAdjustedEndpoint(2) );
-				getShardState = RequestStream<struct GetShardStateRequest>( base.getAdjustedEndpoint(3) );
-				waitMetrics = RequestStream<struct WaitMetricsRequest>( base.getAdjustedEndpoint(4) );
-				splitMetrics = RequestStream<struct SplitMetricsRequest>( base.getAdjustedEndpoint(5) );
-				getStorageMetrics = RequestStream<struct GetStorageMetricsRequest>( base.getAdjustedEndpoint(6) );
-				waitFailure = RequestStream<ReplyPromise<Void>>( base.getAdjustedEndpoint(7) );
-				getQueuingMetrics = RequestStream<struct StorageQueuingMetricsRequest>( base.getAdjustedEndpoint(8) );
-				getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>( base.getAdjustedEndpoint(9) );
-				watchValue = RequestStream<struct WatchValueRequest>( base.getAdjustedEndpoint(10) );
-				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( base.getAdjustedEndpoint(11) );
-			}
+			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics, splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType, watchValue, getReadHotRanges);
 		} else {
 			ASSERT(Ar::isDeserializing);
 			if constexpr (is_fb_function<Ar>) {
@@ -109,7 +94,6 @@ struct StorageServerInterface {
 			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 					splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
-			base = getValue.getEndpoint();
 		}
 	}
 	bool operator == (StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
@@ -128,7 +112,6 @@ struct StorageServerInterface {
 		streams.push_back(getKeyValueStoreType.getReceiver());
 		streams.push_back(watchValue.getReceiver());
 		streams.push_back(getReadHotRanges.getReceiver());
-		base = FlowTransport::transport().addEndpoints(streams);
 	}
 };
 
