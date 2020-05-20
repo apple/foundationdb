@@ -36,8 +36,7 @@
 class SpecialKeyRangeBaseImpl {
 public:
 	// Each derived class only needs to implement this simple version of getRange
-	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
-	                                                    KeyRangeRef kr) const = 0;
+	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
 
 	explicit SpecialKeyRangeBaseImpl(KeyRangeRef kr) : range(kr) {}
 	KeyRangeRef getKeyRange() const { return range; }
@@ -61,10 +60,10 @@ public:
 		WORKERINTERFACE,
 	};
 
-	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key);
+	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key);
 
-	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeySelector begin,
-	                                            KeySelector end, GetRangeLimits limits, bool reverse = false);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end,
+	                                            GetRangeLimits limits, bool reverse = false);
 
 	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true) {
 		// Default value is nullptr, begin of KeyRangeMap is Key()
@@ -108,16 +107,15 @@ public:
 	KeyRangeRef getKeyRange() const { return range; }
 
 private:
-	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw,
-	                                              KeyRef key);
+	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
 
 	ACTOR static Future<Standalone<RangeResultRef>> checkModuleFound(SpecialKeySpace* sks,
-	                                                                 Reference<ReadYourWritesTransaction> ryw,
-	                                                                 KeySelector begin, KeySelector end,
-	                                                                 GetRangeLimits limits, bool reverse);
+	                                                                 ReadYourWritesTransaction* ryw, KeySelector begin,
+	                                                                 KeySelector end, GetRangeLimits limits,
+	                                                                 bool reverse);
 	ACTOR static Future<std::pair<Standalone<RangeResultRef>, Optional<SpecialKeySpace::MODULE>>>
-	getRangeAggregationActor(SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw, KeySelector begin,
-	                         KeySelector end, GetRangeLimits limits, bool reverse);
+	getRangeAggregationActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end,
+	                         GetRangeLimits limits, bool reverse);
 
 	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
 	KeyRangeMap<SpecialKeySpace::MODULE> modules;
@@ -135,22 +133,19 @@ private:
 class ConflictingKeysImpl : public SpecialKeyRangeBaseImpl {
 public:
 	explicit ConflictingKeysImpl(KeyRangeRef kr);
-	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
-	                                            KeyRangeRef kr) const override;
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
 class ReadConflictRangeImpl : public SpecialKeyRangeBaseImpl {
 public:
 	explicit ReadConflictRangeImpl(KeyRangeRef kr);
-	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
-	                                            KeyRangeRef kr) const override;
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
 class WriteConflictRangeImpl : public SpecialKeyRangeBaseImpl {
 public:
 	explicit WriteConflictRangeImpl(KeyRangeRef kr);
-	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
-	                                            KeyRangeRef kr) const override;
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
 class DDStatsRangeImpl : public SpecialKeyRangeBaseImpl {

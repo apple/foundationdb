@@ -37,8 +37,8 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 // This function will move the given KeySelector as far as possible to the standard form:
 // orEqual == false && offset == 1 (Standard form)
 // If the corresponding key is not in the underlying key range, it will move over the range
-ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* skrImpl,
-                                                 Reference<ReadYourWritesTransaction> ryw, KeySelector* ks) {
+ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* skrImpl, ReadYourWritesTransaction* ryw,
+                                                 KeySelector* ks) {
 	ASSERT(!ks->orEqual); // should be removed before calling
 	ASSERT(ks->offset != 1); // never being called if KeySelector is already normalized
 
@@ -91,7 +91,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* 
 	return Void();
 }
 
-void onModuleRead(const Reference<ReadYourWritesTransaction>& ryw, SpecialKeySpace::MODULE module,
+void onModuleRead(ReadYourWritesTransaction* ryw, SpecialKeySpace::MODULE module,
                   Optional<SpecialKeySpace::MODULE>& lastModuleRead) {
 	if (ryw && !ryw->specialKeySpaceRelaxed() && lastModuleRead.present() && lastModuleRead.get() != module) {
 		throw special_keys_cross_module_read();
@@ -105,9 +105,9 @@ void onModuleRead(const Reference<ReadYourWritesTransaction>& ryw, SpecialKeySpa
 // It does have overhead here since we query all keys twice in the worst case.
 // However, moving the KeySelector while handling other parameters like limits makes the code much more complex and hard
 // to maintain; Thus, separate each part to make the code easy to understand and more compact
-ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw,
-                                             KeySelector* ks, Optional<SpecialKeySpace::MODULE>* lastModuleRead,
-                                             int* actualOffset, Standalone<RangeResultRef>* result) {
+ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeySelector* ks,
+                                             Optional<SpecialKeySpace::MODULE>* lastModuleRead, int* actualOffset,
+                                             Standalone<RangeResultRef>* result) {
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter =
 	    ks->offset < 1 ? sks->getImpls().rangeContainingKeyBefore(ks->getKey())
 	                   : sks->getImpls().rangeContaining(ks->getKey());
@@ -140,23 +140,27 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, Reference<Rea
 }
 
 ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::checkModuleFound(SpecialKeySpace* sks,
-                                                                           Reference<ReadYourWritesTransaction> ryw,
+                                                                           ReadYourWritesTransaction* ryw,
                                                                            KeySelector begin, KeySelector end,
                                                                            GetRangeLimits limits, bool reverse) {
-	std::pair<Standalone<RangeResultRef>, Optional<SpecialKeySpace::MODULE>> result =
-	    wait(SpecialKeySpace::getRangeAggregationActor(sks, ryw, begin, end, limits, reverse));
-	if (ryw && !ryw->specialKeySpaceRelaxed()) {
-		auto module = result.second;
-		if (!module.present() || module.get() == SpecialKeySpace::MODULE::UNKNOWN) {
-			throw special_keys_no_module_found();
+	choose {
+		when(std::pair<Standalone<RangeResultRef>, Optional<SpecialKeySpace::MODULE>> result =
+		         wait(SpecialKeySpace::getRangeAggregationActor(sks, ryw, begin, end, limits, reverse))) {
+			if (ryw && !ryw->specialKeySpaceRelaxed()) {
+				auto module = result.second;
+				if (!module.present() || module.get() == SpecialKeySpace::MODULE::UNKNOWN) {
+					throw special_keys_no_module_found();
+				}
+			}
+			return result.first;
 		}
+		when(wait(ryw ? ryw->resetFuture() : Never())) { throw internal_error(); }
 	}
-	return result.first;
 }
 
 ACTOR Future<std::pair<Standalone<RangeResultRef>, Optional<SpecialKeySpace::MODULE>>>
-SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw,
-                                          KeySelector begin, KeySelector end, GetRangeLimits limits, bool reverse) {
+SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeySelector begin,
+                                          KeySelector end, GetRangeLimits limits, bool reverse) {
 	// This function handles ranges which cover more than one keyrange and aggregates all results
 	// KeySelector, GetRangeLimits and reverse are all handled here
 	state Standalone<RangeResultRef> result;
@@ -234,9 +238,8 @@ SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks, Reference<ReadYo
 	return std::make_pair(result, lastModuleRead);
 }
 
-Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourWritesTransaction> ryw,
-                                                             KeySelector begin, KeySelector end, GetRangeLimits limits,
-                                                             bool reverse) {
+Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw, KeySelector begin,
+                                                             KeySelector end, GetRangeLimits limits, bool reverse) {
 	// validate limits here
 	if (!limits.isValid()) return range_limits_invalid();
 	if (limits.isReached()) {
@@ -255,7 +258,7 @@ Future<Standalone<RangeResultRef>> SpecialKeySpace::getRange(Reference<ReadYourW
 	return checkModuleFound(this, ryw, begin, end, limits, reverse);
 }
 
-ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* sks, Reference<ReadYourWritesTransaction> ryw,
+ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw,
                                                         KeyRef key) {
 	// use getRange to workaround this
 	Standalone<RangeResultRef> result =
@@ -269,34 +272,32 @@ ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* sks, Re
 	}
 }
 
-Future<Optional<Value>> SpecialKeySpace::get(Reference<ReadYourWritesTransaction> ryw, const Key& key) {
+Future<Optional<Value>> SpecialKeySpace::get(ReadYourWritesTransaction* ryw, const Key& key) {
 	return getActor(this, ryw, key);
 }
 
 ReadConflictRangeImpl::ReadConflictRangeImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
 
-ACTOR static Future<Standalone<RangeResultRef>> getReadConflictRangeImpl(Reference<ReadYourWritesTransaction> ryw,
-                                                                         KeyRange kr) {
+ACTOR static Future<Standalone<RangeResultRef>> getReadConflictRangeImpl(ReadYourWritesTransaction* ryw, KeyRange kr) {
 	wait(ryw->pendingReads());
 	return ryw->getReadConflictRangeIntersecting(kr);
 }
 
-Future<Standalone<RangeResultRef>> ReadConflictRangeImpl::getRange(Reference<ReadYourWritesTransaction> ryw,
+Future<Standalone<RangeResultRef>> ReadConflictRangeImpl::getRange(ReadYourWritesTransaction* ryw,
                                                                    KeyRangeRef kr) const {
 	return getReadConflictRangeImpl(ryw, kr);
 }
 
 WriteConflictRangeImpl::WriteConflictRangeImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
 
-Future<Standalone<RangeResultRef>> WriteConflictRangeImpl::getRange(Reference<ReadYourWritesTransaction> ryw,
+Future<Standalone<RangeResultRef>> WriteConflictRangeImpl::getRange(ReadYourWritesTransaction* ryw,
                                                                     KeyRangeRef kr) const {
 	return ryw->getWriteConflictRangeIntersecting(kr);
 }
 
 ConflictingKeysImpl::ConflictingKeysImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
 
-Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(Reference<ReadYourWritesTransaction> ryw,
-                                                                 KeyRangeRef kr) const {
+Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 	Standalone<RangeResultRef> result;
 	if (ryw->getTransactionInfo().conflictingKeys) {
 		auto krMapPtr = ryw->getTransactionInfo().conflictingKeys.get();
@@ -361,8 +362,7 @@ public:
 
 	Key getKeyForIndex(int idx) { return Key(prefix + format("%010d", idx)).withPrefix(range.begin); }
 	int getSize() { return size; }
-	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
-	                                            KeyRangeRef kr) const override {
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
 		int startIndex = 0, endIndex = size;
 		while (startIndex < size && kvs[startIndex].key < kr.begin) ++startIndex;
 		while (endIndex > startIndex && kvs[endIndex - 1].key >= kr.end) --endIndex;
@@ -386,14 +386,13 @@ TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	sks.registerKeyRange(SpecialKeySpace::MODULE::TESTONLY, pkr1.getKeyRange(), &pkr1);
 	sks.registerKeyRange(SpecialKeySpace::MODULE::TESTONLY, pkr2.getKeyRange(), &pkr2);
 	sks.registerKeyRange(SpecialKeySpace::MODULE::TESTONLY, pkr3.getKeyRange(), &pkr3);
-	auto nullRef = Reference<ReadYourWritesTransaction>();
 	// get
 	{
-		auto resultFuture = sks.get(nullRef, LiteralStringRef("/cat/small0000000009"));
+		auto resultFuture = sks.get(nullptr, LiteralStringRef("/cat/small0000000009"));
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue().get();
 		ASSERT(result == pkr1.getKeyValueForIndex(9).value);
-		auto emptyFuture = sks.get(nullRef, LiteralStringRef("/cat/small0000000010"));
+		auto emptyFuture = sks.get(nullptr, LiteralStringRef("/cat/small0000000010"));
 		ASSERT(emptyFuture.isReady());
 		auto emptyResult = emptyFuture.getValue();
 		ASSERT(!emptyResult.present());
@@ -402,7 +401,7 @@ TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	{
 		KeySelector start = KeySelectorRef(LiteralStringRef("/elepant"), false, -9);
 		KeySelector end = KeySelectorRef(LiteralStringRef("/frog"), false, +11);
-		auto resultFuture = sks.getRange(nullRef, start, end, GetRangeLimits());
+		auto resultFuture = sks.getRange(nullptr, start, end, GetRangeLimits());
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		ASSERT(result.size() == 20);
@@ -413,7 +412,7 @@ TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	{
 		KeySelector start = KeySelectorRef(pkr3.getKeyForIndex(999), true, -1110);
 		KeySelector end = KeySelectorRef(pkr1.getKeyForIndex(0), false, +1112);
-		auto resultFuture = sks.getRange(nullRef, start, end, GetRangeLimits());
+		auto resultFuture = sks.getRange(nullptr, start, end, GetRangeLimits());
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		ASSERT(result.size() == 1110);
@@ -424,7 +423,7 @@ TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	{
 		KeySelector start = KeySelectorRef(pkr2.getKeyForIndex(0), true, 0);
 		KeySelector end = KeySelectorRef(pkr3.getKeyForIndex(0), false, 0);
-		auto resultFuture = sks.getRange(nullRef, start, end, GetRangeLimits(2));
+		auto resultFuture = sks.getRange(nullptr, start, end, GetRangeLimits(2));
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		ASSERT(result.size() == 2);
@@ -435,7 +434,7 @@ TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	{
 		KeySelector start = KeySelectorRef(pkr2.getKeyForIndex(0), true, 0);
 		KeySelector end = KeySelectorRef(pkr3.getKeyForIndex(0), false, 0);
-		auto resultFuture = sks.getRange(nullRef, start, end, GetRangeLimits(10, 100));
+		auto resultFuture = sks.getRange(nullptr, start, end, GetRangeLimits(10, 100));
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		int bytes = 0;
@@ -447,7 +446,7 @@ TEST_CASE("/fdbclient/SpecialKeySpace/Unittest") {
 	{
 		KeySelector start = KeySelectorRef(pkr2.getKeyForIndex(0), true, 0);
 		KeySelector end = KeySelectorRef(pkr3.getKeyForIndex(999), true, +1);
-		auto resultFuture = sks.getRange(nullRef, start, end, GetRangeLimits(1100), true);
+		auto resultFuture = sks.getRange(nullptr, start, end, GetRangeLimits(1100), true);
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		for (int i = 0; i < pkr3.getSize(); ++i) ASSERT(result[i] == pkr3.getKeyValueForIndex(pkr3.getSize() - 1 - i));

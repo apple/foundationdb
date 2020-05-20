@@ -20,7 +20,7 @@ Consequently, the special-key-space framework wants to integrate all client func
 If your feature is exposing information to clients and the results are easily formatted as key-value pairs, then you can use special-key-space to implement your client function.
 
 ## How
-If you choose to use, you need to implement a function class that inherits from `SpecialKeyRangeBaseImpl`, which has an abstract method `Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr)`.
+If you choose to use, you need to implement a function class that inherits from `SpecialKeyRangeBaseImpl`, which has an abstract method `Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr)`.
 This method can be treated as a callback, whose implementation details are determined by the developer.
 Once you fill out the method, register the function class to the corresponding key range.
 Below is a detailed example.
@@ -38,7 +38,7 @@ public:
         CountryToCapitalCity[LiteralStringRef("China")] = LiteralStringRef("Beijing");
     }
     // Implement the getRange interface
-    Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+    Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw,
                                             KeyRangeRef kr) const override {
         
         Standalone<RangeResultRef> result;
