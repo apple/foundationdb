@@ -78,7 +78,7 @@ public:
 		return !(*this == r);
 	}
 	bool operator < (Endpoint const& r) const {
-		return token < r.token || (token == r.token && getPrimaryAddress() < r.getPrimaryAddress());
+		return addresses.address < r.addresses.address || (addresses.address == r.addresses.address && token < r.token);
 	}
 
 	template <class Ar>
