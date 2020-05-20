@@ -54,7 +54,7 @@
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/TLSConfig.actor.h"
-#include "fdbclient/IncludeVersions.h"
+#include "fdbclient/versions.h"
 
 #include "fdbmonitor/SimpleIni.h"
 

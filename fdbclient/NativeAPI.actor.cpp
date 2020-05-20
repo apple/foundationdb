@@ -49,7 +49,7 @@
 #include "flow/TLSConfig.actor.h"
 #include "flow/UnitTest.h"
 
-#include "fdbclient/IncludeVersions.h"
+#include "fdbclient/versions.h"
 
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
