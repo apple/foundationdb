@@ -140,8 +140,6 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 		// Get EventType and timestamp
 		FdbClientLogEvents::Event event;
 		reader >> event;
-		double timeStamp;
-		reader >> timeStamp;
 		switch (event.type)
 		{
 		case FdbClientLogEvents::GET_VERSION_LATENCY:
