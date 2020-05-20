@@ -2423,11 +2423,11 @@ Reference<ReadYourWritesTransaction> getTransaction(Database db, Reference<ReadY
 	return tr;
 }
 
-std::string new_completion(const char *base, const char *name) {
+std::string newCompletion(const char *base, const char *name) {
 	return format("%s%s ", base, name);
 }
 
-void comp_generator(const char* text, bool help, std::vector<std::string>& lc) {
+void compGenerator(const char* text, bool help, std::vector<std::string>& lc) {
 	std::map<std::string, CommandHelp>::const_iterator iter;
 	int len = strlen(text);
 
@@ -2438,7 +2438,7 @@ void comp_generator(const char* text, bool help, std::vector<std::string>& lc) {
 	for (auto iter = helpMap.begin(); iter != helpMap.end(); ++iter) {
 		const char* name = (*iter).first.c_str();
 		if (!strncmp(name, text, len)) {
-			lc.push_back( new_completion(help ? "help " : "", name) );
+			lc.push_back( newCompletion(help ? "help " : "", name) );
 		}
 	}
 
@@ -2447,31 +2447,31 @@ void comp_generator(const char* text, bool help, std::vector<std::string>& lc) {
 			const char* name = *he;
 			he++;
 			if (!strncmp(name, text, len))
-				lc.push_back( new_completion("help ", name) );
+				lc.push_back( newCompletion("help ", name) );
 		}
 	}
 }
 
-void cmd_generator(const char* text, std::vector<std::string>& lc) {
-	comp_generator(text, false, lc);
+void cmdGenerator(const char* text, std::vector<std::string>& lc) {
+	compGenerator(text, false, lc);
 }
 
-void help_generator(const char* text, std::vector<std::string>& lc) {
-	comp_generator(text, true, lc);
+void helpGenerator(const char* text, std::vector<std::string>& lc) {
+	compGenerator(text, true, lc);
 }
 
-void option_generator(const char* text, const char *line, std::vector<std::string>& lc) {
+void optionGenerator(const char* text, const char *line, std::vector<std::string>& lc) {
 	int len = strlen(text);
 
 	for (auto iter = validOptions.begin(); iter != validOptions.end(); ++iter) {
 		const char* name = (*iter).c_str();
 		if (!strncmp(name, text, len)) {
-			lc.push_back( new_completion(line, name) );
+			lc.push_back( newCompletion(line, name) );
 		}
 	}
 }
 
-void array_generator(const char* text, const char *line, const char** options, std::vector<std::string>& lc) {
+void arrayGenerator(const char* text, const char *line, const char** options, std::vector<std::string>& lc) {
 	const char** iter = options;
 	int len = strlen(text);
 
@@ -2479,32 +2479,51 @@ void array_generator(const char* text, const char *line, const char** options, s
 		const char* name = *iter;
 		iter++;
 		if (!strncmp(name, text, len)) {
-			lc.push_back( new_completion(line, name) );
+			lc.push_back( newCompletion(line, name) );
 		}
 	}
 }
 
-void onoff_generator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {"on", "off", NULL};
-	array_generator(text, line, opts, lc);
+void onOffGenerator(const char* text, const char *line, std::vector<std::string>& lc) {
+	const char* opts[] = {"on", "off", nullptr};
+	arrayGenerator(text, line, opts, lc);
 }
 
-void configure_generator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "memory-radixtree-beta", "proxies=", "logs=", "resolvers=", NULL};
-	array_generator(text, line, opts, lc);
+void configureGenerator(const char* text, const char *line, std::vector<std::string>& lc) {
+	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "memory-radixtree-beta", "proxies=", "logs=", "resolvers=", nullptr};
+	arrayGenerator(text, line, opts, lc);
 }
 
-void status_generator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {"minimal", "details", "json", NULL};
-	array_generator(text, line, opts, lc);
+void statusGenerator(const char* text, const char *line, std::vector<std::string>& lc) {
+	const char* opts[] = {"minimal", "details", "json", nullptr};
+	arrayGenerator(text, line, opts, lc);
 }
 
-void kill_generator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {"all", "list", NULL};
-	array_generator(text, line, opts, lc);
+void killGenerator(const char* text, const char *line, std::vector<std::string>& lc) {
+	const char* opts[] = {"all", "list", nullptr};
+	arrayGenerator(text, line, opts, lc);
 }
 
-void fdbcli_comp_cmd(std::string const& text, std::vector<std::string>& lc) {
+void throttleGenerator(const char* text, const char *line, std::vector<std::string>& lc, std::vector<StringRef> const& tokens) {
+	if(tokens.size() == 1) {
+		const char* opts[] = { "on tag", "off", "enable auto", "disable auto", "list", nullptr };
+		arrayGenerator(text, line, opts, lc);
+	}
+	else if(tokens.size() == 2 && tokencmp(tokens[1], "on")) {
+		const char* opts[] = { "tag", nullptr };
+		arrayGenerator(text, line, opts, lc);
+	}
+	else if(tokens.size() == 2 && tokencmp(tokens[1], "off")) {
+		const char* opts[] = { "all", "auto", "manual", "tag", nullptr };
+		arrayGenerator(text, line, opts, lc);
+	}
+	else if(tokens.size() == 2 && tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable")) {
+		const char* opts[] = { "auto", nullptr };
+		arrayGenerator(text, line, opts, lc);
+	}
+}
+
+void fdbcliCompCmd(std::string const& text, std::vector<std::string>& lc) {
 	bool err, partial;
 	std::string whole_line = text;
 	auto parsed = parseLine(whole_line, err, partial);
@@ -2531,37 +2550,75 @@ void fdbcli_comp_cmd(std::string const& text, std::vector<std::string>& lc) {
 	// printf("final text (%d tokens): `%s' & `%s'\n", count, base_input.c_str(), ntext.c_str());
 
 	if (!count) {
-		cmd_generator(ntext.c_str(), lc);
+		cmdGenerator(ntext.c_str(), lc);
 		return;
 	}
 
 	if (tokencmp(tokens[0], "help") && count == 1) {
-		help_generator(ntext.c_str(), lc);
+		helpGenerator(ntext.c_str(), lc);
 		return;
 	}
 
 	if (tokencmp(tokens[0], "option")) {
 		if (count == 1)
-			onoff_generator(ntext.c_str(), base_input.c_str(), lc);
+			onOffGenerator(ntext.c_str(), base_input.c_str(), lc);
 		if (count == 2)
-			option_generator(ntext.c_str(), base_input.c_str(), lc);
+			optionGenerator(ntext.c_str(), base_input.c_str(), lc);
 	}
 
 	if (tokencmp(tokens[0], "writemode") && count == 1) {
-		onoff_generator(ntext.c_str(), base_input.c_str(), lc);
+		onOffGenerator(ntext.c_str(), base_input.c_str(), lc);
 	}
 
 	if (tokencmp(tokens[0], "configure")) {
-		configure_generator(ntext.c_str(), base_input.c_str(), lc);
+		configureGenerator(ntext.c_str(), base_input.c_str(), lc);
 	}
 
 	if (tokencmp(tokens[0], "status") && count == 1) {
-		status_generator(ntext.c_str(), base_input.c_str(), lc);
+		statusGenerator(ntext.c_str(), base_input.c_str(), lc);
 	}
 
 	if (tokencmp(tokens[0], "kill") && count == 1) {
-		kill_generator(ntext.c_str(), base_input.c_str(), lc);
+		killGenerator(ntext.c_str(), base_input.c_str(), lc);
 	}
+
+	if (tokencmp(tokens[0], "throttle")) {
+		throttleGenerator(ntext.c_str(), base_input.c_str(), lc, tokens);
+	}
+}
+
+std::vector<const char*> throttleHintGenerator(std::vector<StringRef> const& tokens, bool inArgument) {
+	if(tokens.size() == 1) {
+		return { "<on|off|enable auto|disable auto|list>", "[ARGS]" };
+	}
+	else if(tokencmp(tokens[1], "on")) {
+		std::vector<const char*> opts = { "tag", "<TAG>", "[RATE]", "[DURATION]" };
+		if(tokens.size() == 2) {
+			return opts;
+		}
+		else if(((tokens.size() == 3 && inArgument) || tokencmp(tokens[2], "tag")) && tokens.size() < 6) {
+			return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+		}
+	}
+	else if(tokencmp(tokens[1], "off")) {
+		if(tokens.size() == 2) {
+			return { "<all|auto|manual|tag>", "[ARGS]" };
+		}
+		else if(tokens.size() == 3 && tokencmp(tokens[2], "tag")) {
+			return { "<TAG>" };
+		}
+		else if(tokens.size() == 3 && inArgument) {
+			return { "[ARGS]" };
+		}
+	}
+	else if((tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable")) && tokens.size() == 2) {
+		return { "auto" };
+	}
+	else if(tokens.size() == 2 && inArgument) {
+		return { "[ARGS]" };
+	}
+
+	return std::vector<const char*>();
 }
 
 void LogCommand(std::string line, UID randomID, std::string errMsg) {
@@ -4077,7 +4134,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 ACTOR Future<int> runCli(CLIOptions opt) {
 	state LineNoise linenoise(
 		[](std::string const& line, std::vector<std::string>& completions) {
-			fdbcli_comp_cmd(line, completions);
+			fdbcliCompCmd(line, completions);
 		},
 		[enabled=opt.cliHints](std::string const& line)->LineNoise::Hint {
 			if (!enabled) {
@@ -4098,18 +4155,32 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 			// being entered.
 			if (error && line.back() != '\\') return LineNoise::Hint(std::string(" {malformed escape sequence}"), 90, false);
 
-			auto iter = helpMap.find(command.toString());
-			if (iter != helpMap.end()) {
-				std::string helpLine = iter->second.usage;
-				std::vector<std::vector<StringRef>> parsedHelp = parseLine(helpLine, error, partial);
-				std::string hintLine = (*(line.end() - 1) == ' ' ? "" : " ");
-				for (int i = finishedParameters; i < parsedHelp.back().size(); i++) {
-					hintLine = hintLine + parsedHelp.back()[i].toString() + " ";
+			bool inArgument = *(line.end() - 1) != ' ';
+			std::string hintLine = inArgument ? " " : "";
+			if(tokencmp(command, "throttle")) {
+				std::vector<const char*> hintItems = throttleHintGenerator(parsed.back(), inArgument);
+				if(hintItems.empty()) {
+					return LineNoise::Hint();
 				}
-				return LineNoise::Hint(hintLine, 90, false);
-			} else {
-				return LineNoise::Hint();
+				for(auto item : hintItems) {
+					hintLine = hintLine + item + " ";
+				}
 			}
+			else {
+				auto iter = helpMap.find(command.toString());
+				if(iter != helpMap.end()) {
+					std::string helpLine = iter->second.usage;
+					std::vector<std::vector<StringRef>> parsedHelp = parseLine(helpLine, error, partial);
+					for (int i = finishedParameters; i < parsedHelp.back().size(); i++) {
+						hintLine = hintLine + parsedHelp.back()[i].toString() + " ";
+					}
+				}
+				else {
+					return LineNoise::Hint();
+				}
+			}
+
+			return LineNoise::Hint(hintLine, 90, false);
 		},
 		1000,
 		false);
