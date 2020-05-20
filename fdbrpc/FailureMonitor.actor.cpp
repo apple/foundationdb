@@ -113,7 +113,7 @@ void SimpleFailureMonitor::endpointNotFound(Endpoint const& endpoint) {
 	    .detail("Address", endpoint.getPrimaryAddress())
 	    .detail("Token", endpoint.token);
 	failedEndpoints.insert(endpoint);
-	endpointKnownFailed.set(endpoint, true);
+	endpointKnownFailed.trigger(endpoint);
 }
 
 void SimpleFailureMonitor::notifyDisconnect(NetworkAddress const& address) {
