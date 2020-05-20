@@ -73,7 +73,7 @@ class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
 		void operator()() { Thread::dispatch(action); action = NULL; }
 		~ActionWrapper() { if (action) { action->cancel(); } }
 	private:
-		void operator=(ActionWrapper const&);
+		ActionWrapper &operator=(ActionWrapper const&);
 	};
 public:
 	ThreadPool() : dontstop(ios), mode(Run) {}

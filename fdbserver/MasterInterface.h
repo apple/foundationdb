@@ -33,7 +33,6 @@ typedef uint64_t DBRecoveryCount;
 struct MasterInterface {
 	constexpr static FileIdentifier file_identifier = 5979145;
 	LocalityData locality;
-	Endpoint base;
 	RequestStream< ReplyPromise<Void> > waitFailure;
 	RequestStream< struct TLogRejoinRequest > tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
@@ -49,13 +48,12 @@ struct MasterInterface {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, locality, base);
+		serializer(ar, locality, waitFailure);
 		if( Archive::isDeserializing ) {
-			waitFailure = RequestStream< ReplyPromise<Void> >( base.getAdjustedEndpoint(0) );
-			tlogRejoin = RequestStream< struct TLogRejoinRequest >( base.getAdjustedEndpoint(1) );
-			changeCoordinators = RequestStream< struct ChangeCoordinatorsRequest >( base.getAdjustedEndpoint(2) );
-			getCommitVersion = RequestStream< struct GetCommitVersionRequest >( base.getAdjustedEndpoint(3) );
-			notifyBackupWorkerDone = RequestStream<struct BackupWorkerDoneRequest>( base.getAdjustedEndpoint(4) );
+			tlogRejoin = RequestStream< struct TLogRejoinRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(1) );
+			changeCoordinators = RequestStream< struct ChangeCoordinatorsRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(2) );
+			getCommitVersion = RequestStream< struct GetCommitVersionRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(3) );
+			notifyBackupWorkerDone = RequestStream<struct BackupWorkerDoneRequest>( waitFailure.getEndpoint().getAdjustedEndpoint(4) );
 		}
 	}
 
@@ -66,7 +64,7 @@ struct MasterInterface {
 		streams.push_back(changeCoordinators.getReceiver());
 		streams.push_back(getCommitVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
 		streams.push_back(notifyBackupWorkerDone.getReceiver());
-		base = FlowTransport::transport().addEndpoints(streams);
+		FlowTransport::transport().addEndpoints(streams);
 	}
 };
 

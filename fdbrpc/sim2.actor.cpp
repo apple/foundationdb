@@ -85,17 +85,6 @@ void ISimulator::displayWorkers() const
 	return;
 }
 
-namespace std {
-template<>
-class hash<Endpoint> {
-public:
-	size_t operator()(const Endpoint &s) const
-	{
-		return crc32c_append(0, (const uint8_t*)&s, sizeof(s));
-	}
-};
-}
-
 const UID TOKEN_ENDPOINT_NOT_FOUND(-1, -1);
 
 ISimulator* g_pSimulator = 0;
