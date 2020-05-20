@@ -78,7 +78,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 			state int64_t totalBytes = 0;
 			for (int i = 0; i < result.size(); ++i) {
 				ASSERT(result[i].key.startsWith(ddStatsRange.begin));
-				totalBytes += std::stoi(result[i].value.toString());
+				totalBytes += readJSONStrictly(result[i].value.toString()).get_obj()["ShardBytes"].get_int64();
 			}
 			self->avgBytes = totalBytes / self->numShards;
 			// fetch data-distribution stats for a smalller range
