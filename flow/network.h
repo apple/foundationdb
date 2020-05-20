@@ -237,13 +237,13 @@ struct NetworkAddress {
 
 	size_t hash() const {
 		size_t result = 0;
-		if (na.ip.isV6()) {
-			uint16_t* ptr = (uint16_t*)na.ip.toV6().data();
+		if (ip.isV6()) {
+			uint16_t* ptr = (uint16_t*)ip.toV6().data();
 			result = ((size_t)ptr[5] << 32) | ((size_t)ptr[6] << 16) | ptr[7];
 		} else {
-			result = na.ip.toV4();
+			result = ip.toV4();
 		}
-		return (result << 16) + na.port;
+		return (result << 16) + port;
 	}
 
 	static NetworkAddress parse(std::string const&); // May throw connection_string_invalid
