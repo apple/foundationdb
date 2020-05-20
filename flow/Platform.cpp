@@ -160,6 +160,8 @@
 
 #endif
 
+#include "flow/actorcompiler.h"  // This must be the last #include.
+
 std::string removeWhitespace(const std::string &t)
 {
 	static const std::string ws(" \t\r");
@@ -2349,14 +2351,135 @@ std::string getUserHomeDirectory() {
 #endif
 }
 
+
+#ifdef _WIN32
+#define FILE_ATTRIBUTE_DATA DWORD
+
+bool acceptFile( FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name, std::string const& extension ) {
+	return !(fileAttributes & FILE_ATTRIBUTE_DIRECTORY) && StringRef(name).endsWith(extension);
+}
+
+bool acceptDirectory( FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name, std::string const& extension ) {
+	return (fileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
+ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string extension,
+											 bool directoryOnly, bool async) {
+	INJECT_FAULT( platform_error, "findFiles" );
+	state vector<std::string> result;
+	state int64_t tsc_begin = __rdtsc();
+
+
+	state WIN32_FIND_DATA fd;
+	state HANDLE h = FindFirstFile( (directory + "/*" + extension).c_str(), &fd );
+	if (h == INVALID_HANDLE_VALUE) {
+		if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) {
+			TraceEvent(SevError, "FindFirstFile").detail("Directory", directory).detail("Extension", extension).GetLastError();
+			throw platform_error();
+		}
+	} else {
+		loop {
+			std::string name = fd.cFileName;
+			if ((directoryOnly && acceptDirectory(fd.dwFileAttributes, name, extension)) ||
+				(!directoryOnly && acceptFile(fd.dwFileAttributes, name, extension))) {
+				result.push_back( name );
+			}
+			if (!FindNextFile( h, &fd ))
+				break;
+			if (async && __rdtsc() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME) {
+				wait( yield() );
+				tsc_begin = __rdtsc();
+			}
+
+		}
+		if (GetLastError() != ERROR_NO_MORE_FILES) {
+			TraceEvent(SevError, "FindNextFile").detail("Directory", directory).detail("Extension", extension).GetLastError();
+			FindClose(h);
+			throw platform_error();
+		}
+		FindClose(h);
+	}
+	std::sort(result.begin(), result.end());
+	return result;
+}
+
+#elif (defined(__linux__) || defined(__APPLE__))
+#define FILE_ATTRIBUTE_DATA mode_t
+
+bool acceptFile( FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name, std::string const& extension ) {
+	return S_ISREG(fileAttributes) && StringRef(name).endsWith(extension);
+}
+
+bool acceptDirectory( FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name, std::string const& extension ) {
+	return S_ISDIR(fileAttributes);
+}
+
+ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string extension,
+											 bool directoryOnly, bool async) {
+	INJECT_FAULT( platform_error, "findFiles" );
+	state vector<std::string> result;
+	state int64_t tsc_begin = __rdtsc();
+
+	state DIR *dip = NULL;
+
+	if ((dip = opendir(directory.c_str())) != NULL) {
+		loop {
+			struct dirent *dit;
+			dit = readdir(dip);
+			if (dit == NULL) {
+				break;
+			}
+			std::string name(dit->d_name);
+			struct stat buf;
+			if (stat(joinPath(directory, name).c_str(), &buf)) {
+				bool isError = errno != ENOENT;
+				TraceEvent(isError ? SevError : SevWarn, "StatFailed")
+					.detail("Directory", directory)
+					.detail("Extension", extension)
+					.detail("Name", name)
+					.GetLastError();
+				if( isError )
+					throw platform_error();
+				else
+					continue;
+			}
+
+			if ((directoryOnly && acceptDirectory(buf.st_mode, name, extension)) ||
+				(!directoryOnly && acceptFile(buf.st_mode, name, extension))) {
+				result.push_back( name );
+			}
+			if (async && __rdtsc() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME) {
+				wait( yield() );
+				tsc_begin = __rdtsc();
+			}
+		}
+
+		closedir(dip);
+	}
+	std::sort(result.begin(), result.end());
+	return result;
+}
+
+#else
+	#error Port me!
+#endif
+
 namespace platform {
 
 std::vector<std::string> listFiles( std::string const& directory, std::string const& extension ) {
 	return findFiles( directory, extension, false /* directoryOnly */, false ).get();
 }
 
+Future<vector<std::string>> listFilesAsync( std::string const& directory, std::string const& extension ) {
+	return findFiles( directory, extension, false /* directoryOnly */, true );
+}
+
 std::vector<std::string> listDirectories( std::string const& directory ) {
 	return findFiles( directory, "", true /* directoryOnly */, false ).get();
+}
+
+Future<vector<std::string>> listDirectoriesAsync( std::string const& directory ) {
+	return findFiles( directory, "", true /* directoryOnly */, true );
 }
 
 void findFilesRecursively(std::string path, std::vector<std::string> &out) {
@@ -2372,6 +2495,22 @@ void findFilesRecursively(std::string path, std::vector<std::string> &out) {
 			findFilesRecursively(joinPath(path, dir), out);
 	}
 }
+
+ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, vector<std::string> *out) {
+	// Add files to output, prefixing path
+	state vector<std::string> files = wait(listFilesAsync(path));
+	for(auto const &f : files)
+		out->push_back(joinPath(path, f));
+
+	// Recurse for directories
+	state vector<std::string> directories = wait(listDirectoriesAsync(path));
+	for(auto const &dir : directories) {
+		if(dir != "." && dir != "..")
+			wait(findFilesRecursivelyAsync(joinPath(path, dir), out));
+	}
+    return Void();
+}
+
 
 } // namespace platform
 
