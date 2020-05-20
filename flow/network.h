@@ -235,6 +235,17 @@ struct NetworkAddress {
 	bool isTLS() const { return (flags & FLAG_TLS) != 0; }
 	bool isV6() const { return ip.isV6(); }
 
+	size_t hash() const {
+		size_t result = 0;
+		if (ip.isV6()) {
+			uint16_t* ptr = (uint16_t*)ip.toV6().data();
+			result = ((size_t)ptr[5] << 32) | ((size_t)ptr[6] << 16) | ptr[7];
+		} else {
+			result = ip.toV4();
+		}
+		return (result << 16) + port;
+	}
+
 	static NetworkAddress parse(std::string const&); // May throw connection_string_invalid
 	static Optional<NetworkAddress> parseOptional(std::string const&);
 	static std::vector<NetworkAddress> parseList( std::string const& );
@@ -270,14 +281,7 @@ namespace std
 	{
 		size_t operator()(const NetworkAddress& na) const
 		{
-			size_t result = 0;
-			if (na.ip.isV6()) {
-				uint16_t* ptr = (uint16_t*)na.ip.toV6().data();
-				result = ((size_t)ptr[5] << 32) | ((size_t)ptr[6] << 16) | ptr[7];
-			} else {
-				result = na.ip.toV4();
-			}
-			return (result << 16) + na.port;
+			return na.hash();
 		}
 	};
 }

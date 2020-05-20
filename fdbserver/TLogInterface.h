@@ -36,7 +36,6 @@ struct TLogInterface {
 	LocalityData filteredLocality;
 	UID uniqueID;
 	UID sharedTLogID;
-	Endpoint base;
 
 	RequestStream< struct TLogPeekRequest > peekMessages;
 	RequestStream< struct TLogPopRequest > popMessages;
@@ -75,7 +74,7 @@ struct TLogInterface {
 		streams.push_back(disablePopRequest.getReceiver());
 		streams.push_back(enablePopRequest.getReceiver());
 		streams.push_back(snapRequest.getReceiver());
-		base = FlowTransport::transport().addEndpoints(streams);
+		FlowTransport::transport().addEndpoints(streams);
 	}
 
 	template <class Ar> 
@@ -83,19 +82,18 @@ struct TLogInterface {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.isDeserializing || uniqueID != UID());
 		}
-		serializer(ar, uniqueID, sharedTLogID, filteredLocality, base);
+		serializer(ar, uniqueID, sharedTLogID, filteredLocality, peekMessages);
 		if( Ar::isDeserializing ) {
-			peekMessages = RequestStream< struct TLogPeekRequest >( base.getAdjustedEndpoint(0) );
-			popMessages = RequestStream< struct TLogPopRequest >( base.getAdjustedEndpoint(1) );
-			commit = RequestStream< struct TLogCommitRequest >( base.getAdjustedEndpoint(2) );
-			lock = RequestStream< ReplyPromise< struct TLogLockResult > >( base.getAdjustedEndpoint(3) );
-			getQueuingMetrics = RequestStream< struct TLogQueuingMetricsRequest >( base.getAdjustedEndpoint(4) );
-			confirmRunning = RequestStream< struct TLogConfirmRunningRequest >( base.getAdjustedEndpoint(5) );
-			waitFailure = RequestStream< ReplyPromise<Void> >( base.getAdjustedEndpoint(6) );
-			recoveryFinished = RequestStream< struct TLogRecoveryFinishedRequest >( base.getAdjustedEndpoint(7) );
-			disablePopRequest = RequestStream< struct TLogDisablePopRequest >( base.getAdjustedEndpoint(8) );
-			enablePopRequest = RequestStream< struct TLogEnablePopRequest >( base.getAdjustedEndpoint(9) );
-			snapRequest = RequestStream< struct TLogSnapRequest >( base.getAdjustedEndpoint(10) );
+			popMessages = RequestStream< struct TLogPopRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(1) );
+			commit = RequestStream< struct TLogCommitRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(2) );
+			lock = RequestStream< ReplyPromise< struct TLogLockResult > >( peekMessages.getEndpoint().getAdjustedEndpoint(3) );
+			getQueuingMetrics = RequestStream< struct TLogQueuingMetricsRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(4) );
+			confirmRunning = RequestStream< struct TLogConfirmRunningRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(5) );
+			waitFailure = RequestStream< ReplyPromise<Void> >( peekMessages.getEndpoint().getAdjustedEndpoint(6) );
+			recoveryFinished = RequestStream< struct TLogRecoveryFinishedRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(7) );
+			disablePopRequest = RequestStream< struct TLogDisablePopRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(8) );
+			enablePopRequest = RequestStream< struct TLogEnablePopRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(9) );
+			snapRequest = RequestStream< struct TLogSnapRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(10) );
 		}
 	}
 };
