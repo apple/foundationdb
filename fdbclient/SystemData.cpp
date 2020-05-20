@@ -203,8 +203,8 @@ const KeyRangeRef writeConflictRangeKeysRange =
     KeyRangeRef(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
                 LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff"));
 
-const KeyRangeRef ddStatsRange =
-    KeyRangeRef(LiteralStringRef("\xff\xff/metrics/data_distribution_stats/"), LiteralStringRef("\xff\xff/metrics/data_distribution_stats/\xff\xff"));
+const KeyRangeRef ddStatsRange = KeyRangeRef(LiteralStringRef("\xff\xff/metrics/data_distribution_stats/"),
+                                             LiteralStringRef("\xff\xff/metrics/data_distribution_stats/\xff\xff"));
 
 //    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
 const KeyRangeRef storageCacheKeys( LiteralStringRef("\xff/storageCache/"), LiteralStringRef("\xff/storageCache0") );

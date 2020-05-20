@@ -85,7 +85,8 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 			state int idx = deterministicRandom()->randomInt(0, result.size());
 			Standalone<RangeResultRef> res = wait(tr->getRange(
 			    KeyRangeRef(result[idx].key, idx + 1 < result.size() ? result[idx + 1].key : normalKeys.end), 100));
-			ASSERT(res.size() == 1 && res[0] == result[idx]); // If the data distribtion stats is not changing, then this is fine
+			ASSERT(res.size() == 1 &&
+			       res[0] == result[idx]); // If the data distribtion stats is not changing, then this is fine
 		} catch (Error& e) {
 			TraceEvent(SevError, "FailedToRetrieveDDMetrics").detail("Error", e.what());
 			return false;

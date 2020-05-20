@@ -822,7 +822,7 @@ ACTOR Future<Void> fetchShardMetricsList_impl( DataDistributionTracker* self, Ge
 			// list of metrics, regenerate on loop when full range unsuccessful
 			Standalone<VectorRef<DDMetricsRef>> result;
 			Future<Void> onChange;
-			for( auto t : self->shards.containedRanges( req.keys ) ) {
+			for (auto t : self->shards.containedRanges(req.keys)) {
 				auto &stats = t.value().stats;
 				if( !stats->get().present() ) {
 					onChange = stats->onChange();
