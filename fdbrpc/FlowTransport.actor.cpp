@@ -124,7 +124,7 @@ const Endpoint& EndpointMap::insert( NetworkAddressList localAddresses, std::vec
 	UID base = deterministicRandom()->randomUniqueID();
 	for(uint64_t i=0; i<streams.size(); i++) {
 		int index = adjacentStart+i;
-		uint64_t first = (base.first()+(i<<56)) | TOKEN_STREAM_FLAG;
+		uint64_t first = (base.first()+(i<<32)) | TOKEN_STREAM_FLAG;
 		streams[i].first->setEndpoint( Endpoint( localAddresses, UID( first, (base.second()&0xffffffff00000000LL) | index) ) );
 		data[index].token() = Endpoint::Token( first, (base.second()&0xffffffff00000000LL) | static_cast<uint32_t>(streams[i].second) );
 		data[index].receiver = (NetworkMessageReceiver*) streams[i].first;
