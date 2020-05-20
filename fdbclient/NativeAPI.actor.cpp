@@ -1518,7 +1518,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			cx->readLatencies.addSample(latency);
 			if (trLogInfo) {
 				int valueSize = reply.value.present() ? reply.value.get().size() : 0;
-				trLogInfo->addLog(FdbClientLogEvents::EventGet(startTimeD, latency, valueSize, key));
+				trLogInfo->addLog(FdbClientLogEvents::EventGet(startTimeD, cx->clientLocality.dcId(), latency, valueSize, key));
 			}
 			cx->getValueCompleted->latency = timer_int() - startTime;
 			cx->getValueCompleted->log();
@@ -1550,7 +1550,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else {
 				if (trLogInfo)
-					trLogInfo->addLog(FdbClientLogEvents::EventGetError(startTimeD, static_cast<int>(e.code()), key));
+					trLogInfo->addLog(FdbClientLogEvents::EventGetError(startTimeD, cx->clientLocality.dcId(), static_cast<int>(e.code()), key));
 				throw e;
 			}
 		}
@@ -1955,7 +1955,7 @@ void getRangeFinished(Database cx, Reference<TransactionLogInfo> trLogInfo, doub
 	cx->transactionKeysRead += result.size();
 	
 	if( trLogInfo ) {
-		trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, now()-startTime, bytes, begin.getKey(), end.getKey()));
+		trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, cx->clientLocality.dcId(), now()-startTime, bytes, begin.getKey(), end.getKey()));
 	}
 
 	if( !snapshot ) {
@@ -2195,7 +2195,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 				} else {
 					if (trLogInfo)
-						trLogInfo->addLog(FdbClientLogEvents::EventGetRangeError(startTime, static_cast<int>(e.code()), begin.getKey(), end.getKey()));
+						trLogInfo->addLog(FdbClientLogEvents::EventGetRangeError(startTime, cx->clientLocality.dcId(), static_cast<int>(e.code()), begin.getKey(), end.getKey()));
 
 					throw e;
 				}
@@ -2975,7 +2975,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->commitLatencies.addSample(latency);
 					cx->latencies.addSample(now() - tr->startTime);
 					if (trLogInfo)
-						trLogInfo->addLog(FdbClientLogEvents::EventCommit_V2(startTime, latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), ci.version, req));
+						trLogInfo->addLog(FdbClientLogEvents::EventCommit_V2(startTime, cx->clientLocality.dcId(), latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), ci.version, req));
 					return Void();
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
@@ -3038,7 +3038,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trLogInfo)
-				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
+				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, cx->clientLocality.dcId(), static_cast<int>(e.code()), req));
 			throw;
 		}
 	}
@@ -3449,7 +3449,7 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, TransactionPriorit
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
 	if (trLogInfo)
-		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(startTime, latency, priority, rep.version));
+		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(startTime, cx->clientLocality.dcId(), latency, priority, rep.version));
 	if (rep.version == 1 && rep.locked) {
 		throw proxy_memory_limit_exceeded();
 	}
