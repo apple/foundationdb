@@ -34,14 +34,17 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+#define SevDebugMemory SevVerbose
+
 struct VersionedMessage {
 	LogMessageVersion version;
 	StringRef message;
 	VectorRef<Tag> tags;
 	Arena arena; // Keep a reference to the memory containing the message
+	size_t bytes; // arena's size when inserted, which can grow afterwards
 
 	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
-	  : version(v), message(m), tags(t), arena(a) {}
+	  : version(v), message(m), tags(t), arena(a), bytes(a.getSize()) {}
 	const Version getVersion() const { return version.version; }
 	const uint32_t getSubVersion() const { return version.sub; }
 
@@ -324,6 +327,7 @@ struct BackupData {
 
 		if (messages.size() == num) {
 			messages.clear();
+			TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId).detail("ReleaseAll", lock->activePermits());
 			lock->release(lock->activePermits());
 			return;
 		}
@@ -334,7 +338,10 @@ struct BackupData {
 			const Arena& a = messages[i].arena;
 			const Arena& b = messages[i + 1].arena;
 			if (!sameArena(a, b)) {
-				bytes += a.getSize();
+				bytes += messages[i].bytes;
+				TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId)
+				    .detail("Release", messages[i].bytes)
+				    .detail("Arena", (void*)a.impl.getPtr());
 			}
 		}
 		lock->release(bytes);
@@ -896,6 +903,11 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// messages/mutations will be flushed to disk/blob in uploadData().
 		while (r->hasMessage()) {
 			if (!sameArena(prev, r->arena())) {
+				TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
+				    .detail("Take", r->arena().getSize())
+				    .detail("Arena", (void*)r->arena().impl.getPtr())
+				    .detail("Current", self->lock->activePermits());
+
 				wait(self->lock->take(TaskPriority::DefaultYield, r->arena().getSize()));
 				prev = r->arena();
 			}
