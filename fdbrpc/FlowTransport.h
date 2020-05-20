@@ -103,6 +103,18 @@ public:
 };
 #pragma pack(pop)
 
+namespace std
+{
+	template <>
+	struct hash<Endpoint>
+	{
+		size_t operator()(const Endpoint& ep) const
+		{
+			return  ep.token.hash() + ep.addresses.address.hash();
+		}
+	};
+}
+
 class ArenaObjectReader;
 class NetworkMessageReceiver {
 public:
