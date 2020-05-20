@@ -738,7 +738,7 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& k
 		locationCache.insert( KeyRangeRef(begin, end), Reference<LocationInfo>() );
 	}
 	locationCache.insert( keys, loc );
-	return std::move(loc);
+	return loc;
 }
 
 void DatabaseContext::invalidateCache( const KeyRef& key, bool isBackward ) {
@@ -2449,7 +2449,7 @@ ACTOR Future< Key > getKeyAndConflictRange(
 			conflictRange.send( std::make_pair( rep, k.orEqual ? keyAfter( k.getKey() ) : Key(k.getKey(), k.arena()) ) );
 		else
 			conflictRange.send( std::make_pair( k.orEqual ? keyAfter( k.getKey() ) : Key(k.getKey(), k.arena()), keyAfter( rep ) ) );
-		return std::move(rep);
+		return rep;
 	} catch( Error&e ) {
 		conflictRange.send(std::make_pair(Key(), Key()));
 		throw;
