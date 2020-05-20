@@ -2707,7 +2707,13 @@ extern uint8_t *g_extra_memory;
 int main(int argc, char* argv[]) {
 	platformInit();
 
-	int	status = FDB_EXIT_SUCCESS;
+	int status = FDB_EXIT_SUCCESS;
+
+	std::string commandLine;
+	for(int a=0; a<argc; a++) {
+		if (a) commandLine += ' ';
+		commandLine += argv[a];
+	}
 
 	try {
 #ifdef ALLOC_INSTRUMENTATION
@@ -3362,12 +3368,6 @@ int main(int argc, char* argv[]) {
 		{
 			delete args;
 			args = NULL;
-		}
-
-		std::string commandLine;
-		for(int a=0; a<argc; a++) {
-			if (a) commandLine += ' ';
-			commandLine += argv[a];
 		}
 
 		delete FLOW_KNOBS;
