@@ -192,7 +192,7 @@ public:
 	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
 
-	const Endpoint& addEndpoints( std::vector<std::pair<struct FlowReceiver*, TaskPriority>> const& streams );
+	void addEndpoints( std::vector<std::pair<struct FlowReceiver*, TaskPriority>> const& streams );
 
 	void removeEndpoint( const Endpoint&, NetworkMessageReceiver* );
 	// The given local endpoint no longer delivers messages to the given receiver or uses resources

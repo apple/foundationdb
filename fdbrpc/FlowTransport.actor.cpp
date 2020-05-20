@@ -1277,8 +1277,8 @@ void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* rec
 	self->endpoints.insert( receiver, endpoint.token, taskID );
 }
 
-const Endpoint& FlowTransport::addEndpoints( std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams ) {
-	return self->endpoints.insert( self->localAddresses, streams );
+void FlowTransport::addEndpoints( std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams ) {
+	self->endpoints.insert( self->localAddresses, streams );
 }
 
 void FlowTransport::removeEndpoint( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {

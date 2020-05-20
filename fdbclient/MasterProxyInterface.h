@@ -40,7 +40,6 @@ struct MasterProxyInterface {
 
 	Optional<Key> processId;
 	bool provisional;
-	Endpoint base;
 	RequestStream< struct CommitTransactionRequest > commit;
 	RequestStream< struct GetReadVersionRequest > getConsistentReadVersion;  // Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
 															     //   (at some point between when this request is sent and when its response is received, the latest version reported committed)
@@ -63,18 +62,17 @@ struct MasterProxyInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, processId, provisional, base);
+		serializer(ar, processId, provisional, commit);
 		if( Archive::isDeserializing ) {
-			commit = RequestStream< struct CommitTransactionRequest >( base.getAdjustedEndpoint(0) );
-			getConsistentReadVersion = RequestStream< struct GetReadVersionRequest >( base.getAdjustedEndpoint(1) );
-			getKeyServersLocations = RequestStream< struct GetKeyServerLocationsRequest >( base.getAdjustedEndpoint(2) );
-			getStorageServerRejoinInfo = RequestStream< struct GetStorageServerRejoinInfoRequest >( base.getAdjustedEndpoint(3) );
-			waitFailure = RequestStream<ReplyPromise<Void>>( base.getAdjustedEndpoint(4) );
-			getRawCommittedVersion = RequestStream< struct GetRawCommittedVersionRequest >( base.getAdjustedEndpoint(5) );
-			txnState = RequestStream< struct TxnStateRequest >( base.getAdjustedEndpoint(6) );
-			getHealthMetrics = RequestStream< struct GetHealthMetricsRequest >( base.getAdjustedEndpoint(7) );
-			proxySnapReq = RequestStream< struct ProxySnapRequest >( base.getAdjustedEndpoint(8) );
-			exclusionSafetyCheckReq = RequestStream< struct ExclusionSafetyCheckRequest >( base.getAdjustedEndpoint(9) );
+			getConsistentReadVersion = RequestStream< struct GetReadVersionRequest >( commit.getEndpoint().getAdjustedEndpoint(1) );
+			getKeyServersLocations = RequestStream< struct GetKeyServerLocationsRequest >( commit.getEndpoint().getAdjustedEndpoint(2) );
+			getStorageServerRejoinInfo = RequestStream< struct GetStorageServerRejoinInfoRequest >( commit.getEndpoint().getAdjustedEndpoint(3) );
+			waitFailure = RequestStream<ReplyPromise<Void>>( commit.getEndpoint().getAdjustedEndpoint(4) );
+			getRawCommittedVersion = RequestStream< struct GetRawCommittedVersionRequest >( commit.getEndpoint().getAdjustedEndpoint(5) );
+			txnState = RequestStream< struct TxnStateRequest >( commit.getEndpoint().getAdjustedEndpoint(6) );
+			getHealthMetrics = RequestStream< struct GetHealthMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(7) );
+			proxySnapReq = RequestStream< struct ProxySnapRequest >( commit.getEndpoint().getAdjustedEndpoint(8) );
+			exclusionSafetyCheckReq = RequestStream< struct ExclusionSafetyCheckRequest >( commit.getEndpoint().getAdjustedEndpoint(9) );
 		}
 	}
 
@@ -90,7 +88,7 @@ struct MasterProxyInterface {
 		streams.push_back(getHealthMetrics.getReceiver());
 		streams.push_back(proxySnapReq.getReceiver());
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
-		base = FlowTransport::transport().addEndpoints(streams);
+		FlowTransport::transport().addEndpoints(streams);
 	}
 };
 
