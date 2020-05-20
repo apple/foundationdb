@@ -138,11 +138,11 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 
 	while (!reader.empty()) {
 		// Get EventType and timestamp
-		FdbClientLogEvents::EventType event;
+		FdbClientLogEvents::Event event;
 		reader >> event;
 		double timeStamp;
 		reader >> timeStamp;
-		switch (event)
+		switch (event.type)
 		{
 		case FdbClientLogEvents::GET_VERSION_LATENCY:
 			parser->parseGetVersion(reader);
@@ -166,7 +166,7 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 			parser->parseErrorCommit(reader);
 			break;
 		default:
-			TraceEvent(SevError, "ClientTransactionProfilingUnknownEvent").detail("EventType", event);
+			TraceEvent(SevError, "ClientTransactionProfilingUnknownEvent").detail("EventType", event.type);
 			return false;
 		}
 	}
