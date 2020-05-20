@@ -593,9 +593,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_RESTORE_TIMESTAMP,            "--timestamp",         SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_RESTORECONTAINER,"-r",               SO_REQ_SEP },
-	{ OPT_PREFIX_ADD,      "-add_prefix",      SO_REQ_SEP },  // TODO:  Remove in 6.3
 	{ OPT_PREFIX_ADD,      "--add_prefix",     SO_REQ_SEP },
-	{ OPT_PREFIX_REMOVE,   "-remove_prefix",   SO_REQ_SEP },  // TODO:  Remove in 6.3
 	{ OPT_PREFIX_REMOVE,   "--remove_prefix",  SO_REQ_SEP },
 	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
