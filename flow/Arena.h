@@ -380,6 +380,11 @@ public:
 	}
 #else
 	Standalone( const T& t, const Arena& arena ) : Arena( arena ), T( t ) {}
+	Standalone(const Standalone<T>&) = default;
+	Standalone<T>& operator=(const Standalone<T>&) = default;
+	Standalone(Standalone<T>&&) = default;
+	Standalone<T>& operator=(Standalone<T>&&) = default;
+	~Standalone() = default;
 #endif
 
 	template <class U> Standalone<U> castTo() const {
