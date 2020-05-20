@@ -68,23 +68,17 @@ public:
 	Endpoint getAdjustedEndpoint( uint32_t index ) {
 		uint32_t newIndex = token.second();
 		newIndex += index;
-		return Endpoint( addresses, UID(token.first()+(2*index), (token.second()&0xffffffff00000000LL) | newIndex) );
+		return Endpoint( addresses, UID(token.first()+(uint64_t(index)<<32), (token.second()&0xffffffff00000000LL) | newIndex) );
 	}
 
 	bool operator == (Endpoint const& r) const {
-		return getPrimaryAddress() == r.getPrimaryAddress() && token == r.token;
+		return token == r.token && getPrimaryAddress() == r.getPrimaryAddress();
 	}
 	bool operator != (Endpoint const& r) const {
 		return !(*this == r);
 	}
-
 	bool operator < (Endpoint const& r) const {
-		const NetworkAddress& left = getPrimaryAddress();
-		const NetworkAddress& right = r.getPrimaryAddress();
-		if (left != right)
-			return left < right;
-		else
-			return token < r.token;
+		return token < r.token || (token == r.token && getPrimaryAddress() < r.getPrimaryAddress());
 	}
 
 	template <class Ar>
