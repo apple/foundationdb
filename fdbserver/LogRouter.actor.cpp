@@ -525,6 +525,7 @@ ACTOR Future<Void> logRouterCore(
 
 	addActor.send( pullAsyncData(&logRouterData) );
 	addActor.send( cleanupPeekTrackers(&logRouterData) );
+	addActor.send( traceRole(Role::LOG_ROUTER, interf.id()) );
 
 	loop choose {
 		when( wait( dbInfoChange ) ) {
