@@ -85,7 +85,15 @@ include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
 set(CMAKE_REQUIRED_LIBRARIES c)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+include(CheckIncludeFile)
+CHECK_INCLUDE_FILE("stdatomic.h" HAS_C11_ATOMICS)
+if (NOT HAS_C11_ATOMICS)
+  message(FATAL_ERROR "C compiler does not support c11 atomics")
+endif()
 
 if(WIN32)
   # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
