@@ -83,7 +83,12 @@ ASSERT(
 ## Module
 We introduce this `module` concept after a [discussion](https://forums.foundationdb.org/t/versioning-of-special-key-space/2068) on cross module read on special-key-space. By default, range reads cover more than one module will not be allowed with `special_keys_cross_module_read` errors. In addition, range reads touch no modules will come with `special_keys_no_module_found` errors. The motivation here is to avoid unexpected blocking or errors happen in a wide-scope range read. In particular, you write code `getRange("A", "Z")` when all registered calls between `[A, Z)` happen locally, thus your code does not have any error-handling. However, if in the future, anyone register a new call in `[A, Z)` and sometimes throw errors like `time_out()`, then your original code is broken. The `module` is like a top-level directory where inside the module, calls are homogeneous. So we allow cross range read inside each module by default but cross module reads are forbidden. Right now, there are two modules available to use:
 
-- TRANSACTION : `\xff\xff/transaction/, \xff\xff/transaction0`, all transaction related information like *read_conflict_range*, *write_conflict_range*, *conflicting_keys*.(All happen locally)
+- TRANSACTION : `\xff\xff/transaction/, \xff\xff/transaction0`, all transaction related information like *read_conflict_range*, *write_conflict_range*, *conflicting_keys*.(All happen locally). Right now we have:
+  - `\xff\xff/transaction/conflicting_keys/, \xff\xff/transaction/conflicting_keys0` : conflicting keys that caused conflicts
+  - `\xff\xff/transaction/read_conflict_range/, \xff\xff/transaction/read_conflict_range0` : read conflict ranges of the transaction
+  - `\xff\xff/transaction/write_conflict_range/, \xff\xff/transaction/write_conflict_range0` : write conflict ranges of the transaction
+- METRICS: `\xff\xff/metrics/, \xff\xff/metrics0`, all metrics like data-distribution metrics or healthy metrics are planned to put here. All need to call the rpc, so time_out error s may happen. Right now we have:
+  - `\xff\xff/metrics/data_distribution_stats, \xff\xff/metrics/data_distribution_stats` : stats info about data-distribution
 - WORKERINTERFACE : `\xff\xff/worker_interfaces/, \xff\xff/worker_interfaces0`, which is compatible with previous implementation, thus should not be used to add new functions.
 
 In addition, all singleKeyRanges are formatted as modules and cannot be used again. In particular, you should call `get` not `getRange` on these keys. Below are existing ones:
