@@ -782,7 +782,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 						TransactionTag tag = *tagKey.tags.begin();
 						Optional<ClientTagThrottleLimits> oldLimits = self->throttledTags.getManualTagThrottleLimits(tag, tagKey.priority);
 
-						if(tagKey.autoThrottled) {
+						if(tagKey.throttleType == TagThrottleType::AUTO) {
 							updatedTagThrottles.autoThrottleTag(self->id, tag, 0, tagValue.tpsRate, tagValue.expirationTime);
 						}
 						else {
@@ -819,7 +819,7 @@ void tryAutoThrottleTag(RatekeeperData *self, StorageQueueInfo const& ss, RkTagT
 			TagSet tags;
 			tags.addTag(ss.busiestTag.get());
 
-			self->addActor.send(ThrottleApi::throttleTags(self->db, tags, clientRate.get(), SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION, true, TransactionPriority::DEFAULT, now() + SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION));
+			self->addActor.send(ThrottleApi::throttleTags(self->db, tags, clientRate.get(), SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION, TagThrottleType::AUTO, TransactionPriority::DEFAULT, now() + SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION));
 		}
 	}
 }

@@ -185,7 +185,7 @@ class GetVersionInfo(BaseInfo):
             self.read_version = bb.get_long()	
 
 class GetInfo(BaseInfo):
-    def __init__(self, bb):
+    def __init__(self, bb, protocol_version):
         super().__init__(bb.get_double())
         self.latency = bb.get_double()
         self.value_size = bb.get_int()
@@ -193,7 +193,7 @@ class GetInfo(BaseInfo):
 
 
 class GetRangeInfo(BaseInfo):
-    def __init__(self, bb):
+    def __init__(self, bb, protocol_version):
         super().__init__(bb.get_double())
         self.latency = bb.get_double()
         self.range_size = bb.get_int()
@@ -201,7 +201,7 @@ class GetRangeInfo(BaseInfo):
 
 
 class CommitInfo(BaseInfo):
-    def __init__(self, bb, full_output=True):
+    def __init__(self, bb, protocol_version, full_output=True):
         super().__init__(bb.get_double())
         self.latency = bb.get_double()
         self.num_mutations = bb.get_int()
@@ -223,21 +223,21 @@ class CommitInfo(BaseInfo):
 
 
 class ErrorGetInfo(BaseInfo):
-    def __init__(self, bb):
+    def __init__(self, bb, protocol_version):
         super().__init__(bb.get_double())
         self.error_code = bb.get_int()
         self.key = bb.get_bytes_with_length()
 
 
 class ErrorGetRangeInfo(BaseInfo):
-    def __init__(self, bb):
+    def __init__(self, bb, protocol_version):
         super().__init__(bb.get_double())
         self.error_code = bb.get_int()
         self.key_range = bb.get_key_range()
 
 
 class ErrorCommitInfo(BaseInfo):
-    def __init__(self, bb, full_output=True):
+    def __init__(self, bb, protocol_version, full_output=True):
         super().__init__(bb.get_double())
         self.error_code = bb.get_int()
 
@@ -280,33 +280,33 @@ class ClientTransactionInfo:
                 if (not type_filter or "get_version" in type_filter):
                     self.get_version = get_version
             elif event == 1:
-                get = GetInfo(bb)
+                get = GetInfo(bb, protocol_version)
                 if (not type_filter or "get" in type_filter):
                     # because of the crappy json serializtion using __dict__ we have to set the list here otherwise
                     # it doesn't print
                     if not self.gets: self.gets = []
                     self.gets.append(get)
             elif event == 2:
-                get_range = GetRangeInfo(bb)
+                get_range = GetRangeInfo(bb, protocol_version)
                 if (not type_filter or "get_range" in type_filter):
                     if not self.get_ranges: self.get_ranges = []
                     self.get_ranges.append(get_range)
             elif event == 3:
-                commit = CommitInfo(bb, full_output=full_output)
+                commit = CommitInfo(bb, protocol_version, full_output=full_output)
                 if (not type_filter or "commit" in type_filter):
                     self.commit = commit
             elif event == 4:
-                error_get = ErrorGetInfo(bb)
+                error_get = ErrorGetInfo(bb, protocol_version)
                 if (not type_filter or "error_gets" in type_filter):
                     if not self.error_gets: self.error_gets = []
                     self.error_gets.append(error_get)
             elif event == 5:
-                error_get_range = ErrorGetRangeInfo(bb)
+                error_get_range = ErrorGetRangeInfo(bb, protocol_version)
                 if (not type_filter or "error_get_range" in type_filter):
                     if not self.error_get_ranges: self.error_get_ranges = []
                     self.error_get_ranges.append(error_get_range)
             elif event == 6:
-                error_commit = ErrorCommitInfo(bb, full_output=full_output)
+                error_commit = ErrorCommitInfo(bb, protocol_version, full_output=full_output)
                 if (not type_filter or "error_commit" in type_filter):
                     if not self.error_commits: self.error_commits = []
                     self.error_commits.append(error_commit)

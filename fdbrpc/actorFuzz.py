@@ -449,7 +449,7 @@ for actor in actors:
 
 print("std::pair<int,int> actorFuzzTests() {\n\tint testsOK = 0;", file=outputFile)
 for actor in actors:
-    print('\ttestsOK += testFuzzActor( &%s, "%s", (vector<int>(),%s) );' % (actor.name, actor.name, ','.join(str(e) for e in actor.ecx.output)),
+    print('\ttestsOK += testFuzzActor( &%s, "%s", {%s} );' % (actor.name, actor.name, ','.join(str(e) for e in actor.ecx.output)),
           file=outputFile)
 print("\treturn std::make_pair(testsOK, %d);\n}" % len(actors), file=outputFile)
 print('#endif // WIN32\n', file=outputFile)
