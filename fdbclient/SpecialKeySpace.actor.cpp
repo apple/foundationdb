@@ -323,7 +323,7 @@ ACTOR Future<Standalone<RangeResultRef>> ddStatsGetRangeActor(Reference<ReadYour
 		    wait(waitDataDistributionMetricsList(ryw->getDatabase(), keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT));
 		Standalone<RangeResultRef> result;
 		for (const auto& ddMetricsRef : resultWithoutPrefix) {
-			// each begin key is the previous end key, so we only encode the begin key in the result
+			// each begin key is the previous end key, thus we only encode the begin key in the result
 			KeyRef beginKey = ddMetricsRef.beginKey.withPrefix(ddStatsRange.begin, result.arena());
 			ValueRef bytes(result.arena(), std::to_string(ddMetricsRef.shardBytes));
 			result.push_back(result.arena(), KeyValueRef(beginKey, bytes));
