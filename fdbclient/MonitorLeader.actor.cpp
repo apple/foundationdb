@@ -382,9 +382,8 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 	return Void();
 }
 
-ClusterConnectionString::ClusterConnectionString( vector<NetworkAddress> servers, Key key )
-	: coord(servers)
-{
+ClusterConnectionString::ClusterConnectionString(vector<NetworkAddress> servers, Key key)
+  : hasUnresolvedHostnames(false), coord(servers) {
 	parseKey(key.toString());
 }
 
