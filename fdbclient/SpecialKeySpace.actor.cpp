@@ -316,8 +316,7 @@ Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(ReadYourWritesT
 	return result;
 }
 
-ACTOR Future<Standalone<RangeResultRef>> ddStatsGetRangeActor(Reference<ReadYourWritesTransaction> ryw,
-                                                              KeyRangeRef kr) {
+ACTOR Future<Standalone<RangeResultRef>> ddStatsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	try {
 		auto keys = kr.removePrefix(ddStatsRange.begin);
 		Standalone<VectorRef<DDMetricsRef>> resultWithoutPrefix =
@@ -342,8 +341,7 @@ ACTOR Future<Standalone<RangeResultRef>> ddStatsGetRangeActor(Reference<ReadYour
 
 DDStatsRangeImpl::DDStatsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
 
-Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(Reference<ReadYourWritesTransaction> ryw,
-                                                              KeyRangeRef kr) const {
+Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 	return ddStatsGetRangeActor(ryw, kr);
 }
 
