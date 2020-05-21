@@ -435,14 +435,6 @@ inline static uint64_t __rdtsc() {
 #endif
 
 #ifdef _WIN32
-#define FILE_ATTRIBUTE_DATA DWORD
-#elif (defined(__linux__) || defined(__APPLE__))
-#define FILE_ATTRIBUTE_DATA mode_t
-#else
-#error Port me!
-#endif
-
-#ifdef _WIN32
 #include <intrin.h>
 inline static int32_t interlockedIncrement(volatile int32_t *a) { return _InterlockedIncrement((long*)a); }
 inline static int64_t interlockedIncrement64(volatile int64_t *a) { return _InterlockedIncrement64(a); }

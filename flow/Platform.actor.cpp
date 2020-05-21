@@ -1,5 +1,5 @@
 /*
- * Platform.cpp
+ * Platform.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -2498,7 +2498,7 @@ void findFilesRecursively(std::string path, std::vector<std::string> &out) {
 
 ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, vector<std::string> *out) {
 	// Add files to output, prefixing path
-	state vector<std::string> files = wait(listFilesAsync(path));
+	state vector<std::string> files = wait(listFilesAsync(path, ""));
 	for(auto const &f : files)
 		out->push_back(joinPath(path, f));
 
@@ -2508,12 +2508,11 @@ ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, vector<std::strin
 		if(dir != "." && dir != "..")
 			wait(findFilesRecursivelyAsync(joinPath(path, dir), out));
 	}
-    return Void();
+	return Void();
 }
 
 
 } // namespace platform
-
 
 void threadSleep( double seconds ) {
 #ifdef _WIN32
@@ -2997,12 +2996,14 @@ ImageInfo getImageInfo(const void *symbol) {
 #ifdef __linux__
 		imageInfo.offset = (void*)linkMap->l_addr;
 		if(imageFile.length() >= 3 && imageFile.rfind(".so") == imageFile.length()-3) {
+			imageInfo.symbolFileName = imageFile + "-debug";
+		}
 #else
 		imageInfo.offset = info.dli_fbase;
 		if(imageFile.length() >= 6 && imageFile.rfind(".dylib") == imageFile.length()-6) {
-#endif
 			imageInfo.symbolFileName = imageFile + "-debug";
 		}
+#endif
 		else {
 			imageInfo.symbolFileName = imageFile + ".debug";
 		}
@@ -3610,6 +3611,31 @@ int testPathFunction2(const char *name, std::function<std::string(std::string, b
 	return r ? 0 : 1;
 }
 
+#ifndef _WIN32
+void platformSpecificDirectoryOpsTests(const std::string &cwd, int &errors) {
+	// Create some symlinks and test resolution (or non-resolution) of them
+	ASSERT(symlink("one/two", "simfdb/backups/four") == 0);
+	ASSERT(symlink("../backups/four", "simfdb/backups/five") == 0);
+
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/four/../two", true, true, joinPath(cwd, "simfdb/backups/one/two"));
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", true, true, joinPath(cwd, "simfdb/backups/one/two"));
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", true, false, joinPath(cwd, "simfdb/backups/one/two"));
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three", true, true, platform_error());
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three", true, false, joinPath(cwd, "simfdb/backups/one/three"));
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three/../four", true, false, joinPath(cwd, "simfdb/backups/one/four"));
+
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/four/../two", true, true, joinPath(cwd, "simfdb/backups/one/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", true, true, joinPath(cwd, "simfdb/backups/one/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", true, false, joinPath(cwd, "simfdb/backups/one/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three", true, true, platform_error());
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three", true, false, joinPath(cwd, "simfdb/backups/one/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three/../four", true, false, joinPath(cwd, "simfdb/backups/one/"));
+}
+#else
+void platformSpecificDirectoryOpsTests(int &errors) {
+}
+#endif
+
 TEST_CASE("/flow/Platform/directoryOps") {
 	int errors = 0;
 
@@ -3642,27 +3668,7 @@ TEST_CASE("/flow/Platform/directoryOps") {
 	// Creating this directory in backups avoids some sanity checks
 	platform::createDirectory("simfdb/backups/one/two/three");
 	std::string cwd = platform::getWorkingDirectory();
-
-#ifndef _WIN32
-	// Create some symlinks and test resolution (or non-resolution) of them
-	ASSERT(symlink("one/two", "simfdb/backups/four") == 0);
-	ASSERT(symlink("../backups/four", "simfdb/backups/five") == 0);
-
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/four/../two", true, true, joinPath(cwd, "simfdb/backups/one/two"));
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", true, true, joinPath(cwd, "simfdb/backups/one/two"));
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", true, false, joinPath(cwd, "simfdb/backups/one/two"));
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three", true, true, platform_error());
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three", true, false, joinPath(cwd, "simfdb/backups/one/three"));
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three/../four", true, false, joinPath(cwd, "simfdb/backups/one/four"));
-
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/four/../two", true, true, joinPath(cwd, "simfdb/backups/one/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", true, true, joinPath(cwd, "simfdb/backups/one/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", true, false, joinPath(cwd, "simfdb/backups/one/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three", true, true, platform_error());
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three", true, false, joinPath(cwd, "simfdb/backups/one/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three/../four", true, false, joinPath(cwd, "simfdb/backups/one/"));
-#endif
-
+	platformSpecificDirectoryOpsTests(cwd, errors);
 	errors += testPathFunction2("abspath", abspath, "/", false, false, "/");
 	errors += testPathFunction2("abspath", abspath, "/foo//bar//baz/.././", false, false, "/foo/bar");
 	errors += testPathFunction2("abspath", abspath, "/", true, false, "/");

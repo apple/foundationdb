@@ -32,14 +32,13 @@
 #include <vector>
 #include <dirent.h>
 
-
-
 #include "flow/flow.h"
 #include "flow/Platform.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
                                  //
 using std::vector;
 
+namespace platform {
 // e.g. extension==".fdb", returns filenames relative to directory
 Future<vector<std::string>> listFilesAsync( std::string const& directory, std::string const& extension = "");
 
@@ -47,10 +46,7 @@ Future<vector<std::string>> listFilesAsync( std::string const& directory, std::s
 Future<vector<std::string>> listDirectoriesAsync( std::string const& directory );
 
 ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, vector<std::string> *out);
-
-ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string extension,
-		bool directoryOnly, bool async);
-
+}
 
 #include "flow/unactorcompiler.h"
 #endif
