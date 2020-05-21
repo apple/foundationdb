@@ -5,7 +5,11 @@ add_flow_target(EXECUTABLE NAME fdbbackup SRCS ${FDBBACKUP_SRCS})
 target_link_libraries(fdbbackup PRIVATE fdbclient)
 
 if(NOT OPEN_FOR_IDE)
-  fdb_install(TARGETS fdbbackup DESTINATION bin COMPONENT clients)
+  if(GENERATE_DEBUG_PACKAGES)
+    fdb_install(TARGETS fdbbackup DESTINATION bin COMPONENT clients)
+  else()
+    fdb_install(FILES ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients)
+  endif()
   install_symlink(
     COMPONENT clients
     FILE_DIR bin
