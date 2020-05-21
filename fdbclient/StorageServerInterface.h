@@ -317,6 +317,8 @@ struct GetShardStateRequest {
 struct StorageMetrics {
 	constexpr static FileIdentifier file_identifier = 13622226;
 	int64_t bytes = 0;				// total storage
+	// FIXME: currently, neither of bytesPerKSecond or iosPerKSecond are actually used in DataDistribution calculations.
+	// This may change in the future, but this comment is left here to avoid any confusion for the time being.
 	int64_t bytesPerKSecond = 0;	// network bandwidth (average over 10s)
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;

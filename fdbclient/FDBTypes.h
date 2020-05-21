@@ -998,6 +998,21 @@ struct HealthMetrics {
 	}
 };
 
+struct DDMetricsRef {
+	int64_t shardBytes;
+	KeyRef beginKey;
+
+	DDMetricsRef() : shardBytes(0) {}
+	DDMetricsRef(int64_t bytes, KeyRef begin) : shardBytes(bytes), beginKey(begin) {}
+	DDMetricsRef(Arena& a, const DDMetricsRef& copyFrom)
+	  : shardBytes(copyFrom.shardBytes), beginKey(a, copyFrom.beginKey) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, shardBytes, beginKey);
+	}
+};
+
 struct WorkerBackupStatus {
 	LogEpoch epoch;
 	Version version;

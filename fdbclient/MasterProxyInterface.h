@@ -55,6 +55,7 @@ struct MasterProxyInterface {
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
 	RequestStream< struct ProxySnapRequest > proxySnapReq;
 	RequestStream< struct ExclusionSafetyCheckRequest > exclusionSafetyCheckReq;
+	RequestStream< struct GetDDMetricsRequest > getDDMetrics;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -75,6 +76,7 @@ struct MasterProxyInterface {
 			getHealthMetrics = RequestStream< struct GetHealthMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(7) );
 			proxySnapReq = RequestStream< struct ProxySnapRequest >( commit.getEndpoint().getAdjustedEndpoint(8) );
 			exclusionSafetyCheckReq = RequestStream< struct ExclusionSafetyCheckRequest >( commit.getEndpoint().getAdjustedEndpoint(9) );
+			getDDMetrics = RequestStream< struct GetDDMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(10) );
 		}
 	}
 
@@ -90,6 +92,7 @@ struct MasterProxyInterface {
 		streams.push_back(getHealthMetrics.getReceiver());
 		streams.push_back(proxySnapReq.getReceiver());
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
+		streams.push_back(getDDMetrics.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -387,6 +390,34 @@ struct GetHealthMetricsRequest
 	{
 		serializer(ar, reply, detailed);
 	}
+};
+
+struct GetDDMetricsReply
+{
+	constexpr static FileIdentifier file_identifier = 7277713;
+	Standalone<VectorRef<DDMetricsRef>> storageMetricsList;
+
+	GetDDMetricsReply() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, storageMetricsList);
+	}
+};
+
+struct GetDDMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 14536812;
+	KeyRange keys;
+	int shardLimit;
+	ReplyPromise<struct GetDDMetricsReply> reply;
+
+	GetDDMetricsRequest() {}
+	explicit GetDDMetricsRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
+
+	template<class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, shardLimit, reply);
+  }
 };
 
 struct ProxySnapRequest

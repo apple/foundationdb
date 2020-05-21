@@ -607,6 +607,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::METRICS,
+		                              std::make_unique<DDStatsRangeImpl>(ddStatsRange));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::WORKERINTERFACE, std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
 		    LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::STATUSJSON, std::make_unique<SingleSpecialKeyImpl>(
@@ -3855,6 +3857,25 @@ Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, i
 		return extractMetrics(::waitStorageMetrics(cx, keys, StorageMetrics(), m, StorageMetrics(), shardLimit, -1));
 	} else {
 		return ::getStorageMetricsLargeKeyRange(cx, keys);
+	}
+}
+
+ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
+                                                                               int shardLimit) {
+	state Future<Void> clientTimeout = delay(5.0);
+	loop {
+		choose {
+			when(wait(cx->onMasterProxiesChanged())) {}
+			when(ErrorOr<GetDDMetricsReply> rep =
+			         wait(errorOr(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics,
+			                                  GetDDMetricsRequest(keys, shardLimit))))) {
+				if (rep.isError()) {
+					throw rep.getError();
+				}
+				return rep.get().storageMetricsList;
+			}
+			when(wait(clientTimeout)) { throw timed_out(); }
+		}
 	}
 }
 
