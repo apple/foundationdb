@@ -1022,6 +1022,7 @@ struct WorkerBackupStatus {
 	WorkerBackupStatus() : epoch(0), version(invalidVersion) {}
 	WorkerBackupStatus(LogEpoch e, Version v, Tag t, int32_t total) : epoch(e), version(v), tag(t), totalTags(total) {}
 
+	//To change this serialization, ProtocolVersion::BackupProgressValue must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, epoch, version, tag, totalTags);

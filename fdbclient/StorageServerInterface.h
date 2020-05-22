@@ -82,8 +82,8 @@ struct StorageServerInterface {
 	std::string toString() const { return id().shortString(); }
 	template <class Ar>
 	void serialize(Ar& ar) {
-		// StorageServerInterface is persisted in the database and in the tLog's data structures, so changes here have to be
-		// versioned carefully!
+		// StorageServerInterface is persisted in the database, so changes here have to be versioned carefully!
+		//To change this serialization, ProtocolVersion::ServerListValue must be updated, and downgrades need to be considered
 
 		if (ar.protocolVersion().hasSmallEndpoints()) {
 			serializer(ar, uniqueID, locality, getValue);

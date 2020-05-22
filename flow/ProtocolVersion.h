@@ -25,7 +25,7 @@
 	struct x {                                                                                                         \
 		static constexpr uint64_t protocolVersion = v;                                                                 \
 	};                                                                                                                 \
-	constexpr bool has##x() const { return this->version() > x ::protocolVersion; }                                   \
+	constexpr bool has##x() const { return this->version() >= x ::protocolVersion; }                                   \
 	static constexpr ProtocolVersion with##x() { return ProtocolVersion(x ::protocolVersion); }
 
 // ProtocolVersion wraps a uint64_t to make it type safe. It will know about the current versions.
@@ -89,6 +89,27 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061070000LL, PseudoLocalities);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061070000LL, ShardedTxsTags);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, TLog62);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, GenerationRegVal);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, MovableCoordinatedStateV2);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, KeyServerValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, LogsValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, ServerTagValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, TagLocalityListValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, DatacenterReplicasValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, ProcessClassValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, WorkerListValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, BackupStartValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, LogRangeEncodeValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, HealthyZoneValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, ServerListValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, StorageCacheValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreStatusValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreRequestValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreRequestDoneVersionValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreRequestTriggerValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreWorkerInterfaceValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, BackupProgressValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, KeyServerValueV2);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063000000LL, UnifiedTLogSpilling);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, BackupWorker);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, ReportConflictingKeys);
