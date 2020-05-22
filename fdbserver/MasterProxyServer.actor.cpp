@@ -499,6 +499,7 @@ struct ResolutionRequestBuilder {
 	vector<ResolveTransactionBatchRequest> requests;
 	vector<vector<int>> transactionResolverMap;
 	vector<CommitTransactionRef*> outTr;
+	std::vector<std::vector<std::vector<int>>> txReadConflictRangeIndexMap; // Used to report conflicting keys, the format is [CommitTransactionRef_Index][Resolver_Index][Read_Conflict_Range_Index_on_Resolver] -> read_conflict_range's original index in the commitTransactionRef
 
 	ResolutionRequestBuilder( ProxyCommitData* self, Version version, Version prevVersion, Version lastReceivedVersion) : self(self), requests(self->resolvers.size()) {
 		for(auto& req : requests) {
@@ -537,7 +538,9 @@ struct ResolutionRequestBuilder {
 				getOutTransaction(0, trIn.read_snapshot).mutations.push_back(requests[0].arena, m);
 			}
 		}
-		for(auto& r : trIn.read_conflict_ranges) {
+		std::vector<std::vector<int>> rCRIndexMap(requests.size()); // [resolver_index][read_conflict_range_index_on_the_resolver] -> read_conflict_range's original index
+		for(int idx = 0; idx < trIn.read_conflict_ranges.size(); ++idx) {
+			const auto& r = trIn.read_conflict_ranges[idx];
 			auto ranges = self->keyResolvers.intersectingRanges( r );
 			std::set<int> resolvers;
 			for(auto &ir : ranges) {
@@ -549,9 +552,12 @@ struct ResolutionRequestBuilder {
 				}
 			}
 			ASSERT(resolvers.size());
-			for(int resolver : resolvers)
+			for(int resolver : resolvers) {
 				getOutTransaction( resolver, trIn.read_snapshot ).read_conflict_ranges.push_back( requests[resolver].arena, r );
+				rCRIndexMap[resolver].push_back(idx);
+			}
 		}
+		txReadConflictRangeIndexMap.push_back(std::move(rCRIndexMap));
 		for(auto& r : trIn.write_conflict_ranges) {
 			auto ranges = self->keyResolvers.intersectingRanges( r );
 			std::set<int> resolvers;
@@ -866,6 +872,7 @@ ACTOR Future<Void> commitBatch(
 	}
 
 	state vector<vector<int>> transactionResolverMap = std::move( requests.transactionResolverMap );
+	state std::vector<std::vector<std::vector<int>>> txReadConflictRangeIndexMap = std::move(requests.txReadConflictRangeIndexMap); // used for reporting conflicting keys
 	state Future<Void> releaseFuture = releaseResolvingAfter(self, releaseDelay, localBatchNumber);
 
 	/////// Phase 2: Resolution (waiting on the network; pipelined)
@@ -1295,9 +1302,9 @@ ACTOR Future<Void> commitBatch(
 			if (trs[t].transaction.report_conflicting_keys) {
 				Standalone<VectorRef<int>> conflictingKRIndices;
 				for (int resolverInd : transactionResolverMap[t]) {
-					auto const& cKRs = resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]];
+					auto const& cKRs = resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]]; // nextTr[resolverInd] -> index of this trs[t] on the resolver
 					for (auto const& rCRIndex : cKRs)
-						conflictingKRIndices.push_back(conflictingKRIndices.arena(), rCRIndex);
+						conflictingKRIndices.push_back(conflictingKRIndices.arena(), txReadConflictRangeIndexMap[t][resolverInd][rCRIndex]); // read_conflict_range can change when sent to resolvers, mapping the index from resolver-side to original index in commitTransactionRef
 				}
 				// At least one keyRange index should be returned
 				ASSERT(conflictingKRIndices.size());
