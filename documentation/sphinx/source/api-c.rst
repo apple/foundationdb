@@ -195,7 +195,7 @@ The FoundationDB client library performs most tasks on a singleton thread (which
 
    Must be called after :func:`fdb_setup_network()` before any asynchronous functions in this API can be expected to complete. Unless your program is entirely event-driven based on results of asynchronous functions in this API and has no event loop of its own, you will want to invoke this function on an auxiliary thread (which it is your responsibility to create).
 
-   This function will not return until :func:`fdb_stop_network()` is called by you or a serious error occurs. You must not invoke :func:`fdb_run_network()` concurrently or reentrantly while it is already running.
+   This function will not return until :func:`fdb_stop_network()` is called by you or a serious error occurs. It is not possible to run more than one network thread, and the network thread cannot be restarted once it has been stopped. This means that once ``fdb_run_network`` has been called, it is not legal to call it again for the lifetime of the running program.
 
 .. function:: fdb_error_t fdb_stop_network()
 
