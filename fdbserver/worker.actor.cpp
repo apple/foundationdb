@@ -253,6 +253,7 @@ std::pair<KeyValueStoreType, std::string> bTreeV2Suffix = std::make_pair(KeyValu
 std::pair<KeyValueStoreType, std::string> memorySuffix = std::make_pair( KeyValueStoreType::MEMORY,         "-0.fdq" );
 std::pair<KeyValueStoreType, std::string> memoryRTSuffix = std::make_pair( KeyValueStoreType::MEMORY_RADIXTREE, "-0.fdr" );
 std::pair<KeyValueStoreType, std::string> redwoodSuffix = std::make_pair( KeyValueStoreType::SSD_REDWOOD_V1,   ".redwood" );
+std::pair<KeyValueStoreType, std::string> rocksdbSuffix = std::make_pair( KeyValueStoreType::SSD_ROCKSDB_V1,   ".rocksdb" );
 
 std::string validationFilename = "_validate";
 
@@ -264,6 +265,8 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 	else if( storeType == KeyValueStoreType::MEMORY || storeType == KeyValueStoreType::MEMORY_RADIXTREE )
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
 	else if ( storeType == KeyValueStoreType::SSD_REDWOOD_V1 )
+		return joinPath(folder, sample_filename);
+	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
 		return joinPath(folder, sample_filename);
 	UNREACHABLE();
 }
@@ -277,6 +280,8 @@ std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std
 		return joinPath( folder, prefix + id.toString() + "-" );
 	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
 		return joinPath(folder, prefix + id.toString() + ".redwood");
+	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
+		return joinPath(folder, prefix + id.toString() + ".rocksdb");
 
 	UNREACHABLE();
 }
@@ -422,8 +427,10 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	result.insert( result.end(), result2.begin(), result2.end() );
 	auto result3 = getDiskStores( folder, redwoodSuffix.second, redwoodSuffix.first);
 	result.insert( result.end(), result3.begin(), result3.end() );
-    auto result4 = getDiskStores( folder, memoryRTSuffix.second, memoryRTSuffix.first );
-    result.insert( result.end(), result4.begin(), result4.end() );
+	auto result4 = getDiskStores( folder, memoryRTSuffix.second, memoryRTSuffix.first );
+	result.insert( result.end(), result4.begin(), result4.end() );
+	auto result5 = getDiskStores( folder, rocksdbSuffix.second, rocksdbSuffix.first);
+	result.insert( result.end(), result3.begin(), result3.end() );
 	return result;
 }
 
@@ -1077,7 +1084,7 @@ ACTOR Future<Void> workerServer(
 						notUpdated = interf.updateServerDBInfo.getEndpoint();
 					}
 					else if(localInfo.infoGeneration > dbInfo->get().infoGeneration || dbInfo->get().clusterInterface != ccInterface->get().get()) {
-						
+
 						TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
 						.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
 						.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
@@ -1346,7 +1353,7 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN( recruited.getQueuingMetrics );
 				DUMPTOKEN( recruited.confirmRunning );
 
-				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(), 
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(),
 						logRouter( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
@@ -1385,6 +1392,9 @@ ACTOR Future<Void> workerServer(
 						}
 						else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
 							included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
+						}
+						else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
+							included = fileExists(joinPath(d.filename, "CURRENT")) && fileExists(joinPath(d.filename, "IDENTITY"));
 						} else if (d.storeType == KeyValueStoreType::MEMORY) {
 							included = fileExists(d.filename + "1.fdq");
 						} else {
