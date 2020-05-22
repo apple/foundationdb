@@ -312,8 +312,6 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          },
          "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,
-         "limiting_version_lag_storage_server":0,
-         "worst_version_lag_storage_server":0,
          "limiting_data_lag_storage_server":{
             "versions":0,
             "seconds":0.0

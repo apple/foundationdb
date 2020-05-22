@@ -46,6 +46,11 @@ const KeyRef keyServersKey( const KeyRef& k, Arena& arena ) {
 	return k.withPrefix( keyServersPrefix, arena );
 }
 const Value keyServersValue( Standalone<RangeResultRef> result, const std::vector<UID>& src, const std::vector<UID>& dest ) {
+	if(!CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS) {
+		BinaryWriter wr(IncludeVersion()); wr << src << dest;
+		return wr.toValue();
+	}
+	
 	std::vector<Tag> srcTag;
 	std::vector<Tag> destTag;
 
@@ -202,6 +207,9 @@ const KeyRangeRef readConflictRangeKeysRange =
 const KeyRangeRef writeConflictRangeKeysRange =
     KeyRangeRef(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
                 LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff"));
+
+const KeyRangeRef ddStatsRange = KeyRangeRef(LiteralStringRef("\xff\xff/metrics/data_distribution_stats/"),
+                                             LiteralStringRef("\xff\xff/metrics/data_distribution_stats/\xff\xff"));
 
 //    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
 const KeyRangeRef storageCacheKeys( LiteralStringRef("\xff/storageCache/"), LiteralStringRef("\xff/storageCache0") );

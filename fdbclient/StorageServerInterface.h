@@ -54,7 +54,6 @@ struct StorageServerInterface {
 
 	LocalityData locality;
 	UID uniqueID;
-	Endpoint base;
 
 	RequestStream<struct GetValueRequest> getValue;
 	RequestStream<struct GetKeyRequest> getKey;
@@ -87,20 +86,19 @@ struct StorageServerInterface {
 		// versioned carefully!
 
 		if (ar.protocolVersion().hasSmallEndpoints()) {
-			serializer(ar, uniqueID, locality, base);
+			serializer(ar, uniqueID, locality, getValue);
 			if( Ar::isDeserializing ) {
-				getValue = RequestStream<struct GetValueRequest>( base.getAdjustedEndpoint(0) );
-				getKey = RequestStream<struct GetKeyRequest>( base.getAdjustedEndpoint(1) );
-				getKeyValues = RequestStream<struct GetKeyValuesRequest>( base.getAdjustedEndpoint(2) );
-				getShardState = RequestStream<struct GetShardStateRequest>( base.getAdjustedEndpoint(3) );
-				waitMetrics = RequestStream<struct WaitMetricsRequest>( base.getAdjustedEndpoint(4) );
-				splitMetrics = RequestStream<struct SplitMetricsRequest>( base.getAdjustedEndpoint(5) );
-				getStorageMetrics = RequestStream<struct GetStorageMetricsRequest>( base.getAdjustedEndpoint(6) );
-				waitFailure = RequestStream<ReplyPromise<Void>>( base.getAdjustedEndpoint(7) );
-				getQueuingMetrics = RequestStream<struct StorageQueuingMetricsRequest>( base.getAdjustedEndpoint(8) );
-				getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>( base.getAdjustedEndpoint(9) );
-				watchValue = RequestStream<struct WatchValueRequest>( base.getAdjustedEndpoint(10) );
-				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( base.getAdjustedEndpoint(11) );
+				getKey = RequestStream<struct GetKeyRequest>( getValue.getEndpoint().getAdjustedEndpoint(1) );
+				getKeyValues = RequestStream<struct GetKeyValuesRequest>( getValue.getEndpoint().getAdjustedEndpoint(2) );
+				getShardState = RequestStream<struct GetShardStateRequest>( getValue.getEndpoint().getAdjustedEndpoint(3) );
+				waitMetrics = RequestStream<struct WaitMetricsRequest>( getValue.getEndpoint().getAdjustedEndpoint(4) );
+				splitMetrics = RequestStream<struct SplitMetricsRequest>( getValue.getEndpoint().getAdjustedEndpoint(5) );
+				getStorageMetrics = RequestStream<struct GetStorageMetricsRequest>( getValue.getEndpoint().getAdjustedEndpoint(6) );
+				waitFailure = RequestStream<ReplyPromise<Void>>( getValue.getEndpoint().getAdjustedEndpoint(7) );
+				getQueuingMetrics = RequestStream<struct StorageQueuingMetricsRequest>( getValue.getEndpoint().getAdjustedEndpoint(8) );
+				getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>( getValue.getEndpoint().getAdjustedEndpoint(9) );
+				watchValue = RequestStream<struct WatchValueRequest>( getValue.getEndpoint().getAdjustedEndpoint(10) );
+				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( getValue.getEndpoint().getAdjustedEndpoint(11) );
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -110,7 +108,6 @@ struct StorageServerInterface {
 			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 					splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
-			base = getValue.getEndpoint();
 		}
 	}
 	bool operator == (StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
@@ -129,7 +126,7 @@ struct StorageServerInterface {
 		streams.push_back(getKeyValueStoreType.getReceiver());
 		streams.push_back(watchValue.getReceiver());
 		streams.push_back(getReadHotRanges.getReceiver());
-		base = FlowTransport::transport().addEndpoints(streams);
+		FlowTransport::transport().addEndpoints(streams);
 	}
 };
 
@@ -320,6 +317,8 @@ struct GetShardStateRequest {
 struct StorageMetrics {
 	constexpr static FileIdentifier file_identifier = 13622226;
 	int64_t bytes = 0;				// total storage
+	// FIXME: currently, neither of bytesPerKSecond or iosPerKSecond are actually used in DataDistribution calculations.
+	// This may change in the future, but this comment is left here to avoid any confusion for the time being.
 	int64_t bytesPerKSecond = 0;	// network bandwidth (average over 10s)
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;

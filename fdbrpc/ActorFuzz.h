@@ -24,14 +24,6 @@
 
 using std::vector;
 
-inline vector<int>& operator , (vector<int>& v, int a) {
-	v.push_back(a);
-	return v;
-}
-
-inline vector<int>& operator , (vector<int> const& v, int a) {
-	return (const_cast<vector<int>&>(v), a);
-}
 inline void throw_operation_failed() { throw operation_failed(); }
 
 // This is in dsltest.actor.cpp:

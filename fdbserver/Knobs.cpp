@@ -387,7 +387,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( BACKUP_TIMEOUT,                                        0.4 );
 	init( BACKUP_NOOP_POP_DELAY,                                 5.0 );
 	init( BACKUP_FILE_BLOCK_BYTES,                       1024 * 1024 );
-	init( BACKUP_UPLOAD_DELAY,                                  10.0 ); if( randomize && BUGGIFY ) BACKUP_UPLOAD_DELAY = deterministicRandom()->random01() * 20; // TODO: Increase delay range
+	init( BACKUP_LOCK_BYTES,                                     3e9 ); if(randomize && BUGGIFY) BACKUP_LOCK_BYTES = deterministicRandom()->randomInt(1024, 4096) * 1024;
+	init( BACKUP_UPLOAD_DELAY,                                  10.0 ); if(randomize && BUGGIFY) BACKUP_UPLOAD_DELAY = deterministicRandom()->random01() * 60;
 
 	//Cluster Controller
 	init( CLUSTER_CONTROLLER_LOGGING_DELAY,                      5.0 );
@@ -629,6 +630,13 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( REDWOOD_DEFAULT_PAGE_SIZE,                            4096 );
 	init( REDWOOD_KVSTORE_CONCURRENT_READS,                       64 );
 	init( REDWOOD_PAGE_REBUILD_FILL_FACTOR,                     0.66 );
+	init( REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES,                    10 );
+	init( REDWOOD_LAZY_CLEAR_MIN_PAGES,                            0 );
+	init( REDWOOD_LAZY_CLEAR_MAX_PAGES,                          1e6 );
+	init( REDWOOD_REMAP_CLEANUP_BATCH_SIZE,                     5000 );
+	init( REDWOOD_REMAP_CLEANUP_VERSION_LAG_MIN,                   4 );
+	init( REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX,                  15 );
+	init( REDWOOD_LOGGING_INTERVAL,                              5.0 );
 
 	// clang-format on
 
