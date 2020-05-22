@@ -129,9 +129,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::Slice key;
 			rocksdb::Slice value;
 			rocksdb::WriteOptions options;
-			explicit SetAction(KeyValueRef kv)
-				: key(toSlice(kv.key)), value(toSlice(kv.value))
-			{}
+			// Keep the Arena block alive until we're done writing.
+			Optional<Reference<struct ArenaBlock>> arenaRef;
+			explicit SetAction(KeyValueRef kv, const Arena* a)
+			  : key(toSlice(kv.key)), value(toSlice(kv.value)),
+			    arenaRef(a ? makeOptional(a->impl) : Optional<Reference<struct ArenaBlock>>()) {
+				options.sync = true;
+			}
 
 			double getTimeEstimate() override { return SERVER_KNOBS->SET_TIME_ESTIMATE; }
 		};
@@ -155,7 +159,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CommitAction& a) {
-			auto s = db->Write(rocksdb::WriteOptions{}, writeBatch.get());
+			rocksdb::WriteOptions options;
+			options.sync = true;
+			auto s = db->Write(options, writeBatch.get());
 			if (s.ok()) {
 				writeBatch.reset(new rocksdb::WriteBatch{});
 				s = db->FlushWAL(true);
@@ -186,6 +192,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		explicit Reader(DB& db)
 			: db(db)
 		{
+			readOptions.tailing = true;
 			readOptions.total_order_seek = true;
 		}
 
@@ -343,9 +350,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
-	void set(KeyValueRef kv, const Arena*) override {
-		writeThread->post(new Writer::SetAction(kv));
-	}
+	void set(KeyValueRef kv, const Arena* a) override { writeThread->post(new Writer::SetAction(kv, a)); }
 
 	void clear(KeyRangeRef keyRange, const Arena*) override {
 		writeThread->post(new Writer::ClearAction(keyRange));

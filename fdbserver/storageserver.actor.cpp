@@ -456,7 +456,7 @@ public:
 			double rate;
 			double fractionalBusyness;
 
-			TagInfo(TransactionTag const& tag, double rate, double fractionalBusyness) 
+			TagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
 			  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
 		};
 
@@ -505,7 +505,7 @@ public:
 					.detail("TotalSampledCost", intervalTotalSampledCount)
 					.detail("Reported", previousBusiestTag.present())
 					.trackLatest(id.toString() + "/BusiestReadTag");
-			} 
+			}
 
 			intervalCounts.clear();
 			intervalTotalSampledCount = 0;
@@ -863,7 +863,7 @@ ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version) 
 		}
 	}
 }
- 
+
 Future<Version> waitForVersion(StorageServer* data, Version version) {
 	if (version == latestVersion) {
 		version = std::max(Version(1), data->version.get());
@@ -1456,7 +1456,7 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 	} else {
 		wait( delay(0, TaskPriority::DefaultEndpoint) );
 	}
-	
+
 	try {
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
@@ -2925,7 +2925,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		if(ver != invalidVersion) {
 			data->lastVersionWithData = ver;
-		} 
+		}
 		ver = cloneCursor2->version().version - 1;
 
 		if(injectedChanges) data->lastVersionWithData = ver;
@@ -3091,11 +3091,14 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 #endif
 
 void StorageServerDisk::makeNewStorageServerDurable() {
+	Arena a;
 	storage->set( persistFormat );
-	storage->set( KeyValueRef(persistID, BinaryWriter::toValue(data->thisServerID, Unversioned())) );
-	storage->set( KeyValueRef(persistVersion, BinaryWriter::toValue(data->version.get(), Unversioned())) );
-	storage->set( KeyValueRef(persistShardAssignedKeys.begin.toString(), LiteralStringRef("0")) );
-	storage->set( KeyValueRef(persistShardAvailableKeys.begin.toString(), LiteralStringRef("0")) );
+	const auto serverID = BinaryWriter::toValue(data->thisServerID, Unversioned());
+	storage->set(KeyValueRef(persistID, serverID), &serverID.arena());
+	const auto version = BinaryWriter::toValue(data->version.get(), Unversioned());
+	storage->set(KeyValueRef(persistVersion, version), &version.arena());
+	storage->set(KeyValueRef(KeyRef(a, persistShardAssignedKeys.begin), LiteralStringRef("0")), &a);
+	storage->set(KeyValueRef(KeyRef(a, persistShardAvailableKeys.begin), LiteralStringRef("0")), &a);
 }
 
 void setAvailableStatus( StorageServer* self, KeyRangeRef keys, bool available ) {
@@ -4106,4 +4109,3 @@ void versionedMapTest() {
 	printf("Memory used: %f MB\n",
 		 (after - before)/ 1e6);
 }
-
