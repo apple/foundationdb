@@ -503,8 +503,7 @@ ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces(Reference<ClusterCo
 ACTOR Future<Optional<Value>> getJSON(Database db);
 
 struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeBaseImpl {
-	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
-	                                            KeyRangeRef kr) const override {
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
 		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
 			Key prefix = Key(getKeyRange().begin);
 			return map(getWorkerInterfaces(ryw->getDatabase()->getConnectionFile()),
@@ -527,8 +526,7 @@ struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeBaseImpl {
 };
 
 struct SingleSpecialKeyImpl : SpecialKeyRangeBaseImpl {
-	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
-	                                            KeyRangeRef kr) const override {
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
 		ASSERT(kr.contains(k));
 		return map(f(ryw), [k = k](Optional<Value> v) {
 			Standalone<RangeResultRef> result;
@@ -539,13 +537,12 @@ struct SingleSpecialKeyImpl : SpecialKeyRangeBaseImpl {
 		});
 	}
 
-	SingleSpecialKeyImpl(KeyRef k,
-	                     const std::function<Future<Optional<Value>>(Reference<ReadYourWritesTransaction>)>& f)
+	SingleSpecialKeyImpl(KeyRef k, const std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)>& f)
 	  : SpecialKeyRangeBaseImpl(singleKeyRange(k)), k(k), f(f) {}
 
 private:
 	Key k;
-	std::function<Future<Optional<Value>>(Reference<ReadYourWritesTransaction>)> f;
+	std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)> f;
 };
 
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
@@ -611,43 +608,49 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		                              std::make_unique<DDStatsRangeImpl>(ddStatsRange));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::WORKERINTERFACE, std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
 		    LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::STATUSJSON, std::make_unique<SingleSpecialKeyImpl>(
-		    LiteralStringRef("\xff\xff/status/json"),
-		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
-			    if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
-				    return getJSON(ryw->getDatabase());
-			    } else {
-				    return Optional<Value>();
-			    }
-		    }));
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::CLUSTERFILEPATH, std::make_unique<SingleSpecialKeyImpl>(
-		    LiteralStringRef("\xff\xff/cluster_file_path"),
-		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
-			    try {
-				    if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
-					    Optional<Value> output = StringRef(ryw->getDatabase()->getConnectionFile()->getFilename());
-					    return output;
-				    }
-			    } catch (Error& e) {
-				    return e;
-			    }
-			    return Optional<Value>();
-		    }));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::STATUSJSON,
+		    std::make_unique<SingleSpecialKeyImpl>(LiteralStringRef("\xff\xff/status/json"),
+		                                           [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			                                           if (ryw->getDatabase().getPtr() &&
+			                                               ryw->getDatabase()->getConnectionFile()) {
+				                                           return getJSON(ryw->getDatabase());
+			                                           } else {
+				                                           return Optional<Value>();
+			                                           }
+		                                           }));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::CLUSTERFILEPATH,
+		    std::make_unique<SingleSpecialKeyImpl>(
+		        LiteralStringRef("\xff\xff/cluster_file_path"),
+		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			        try {
+				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
+					        Optional<Value> output = StringRef(ryw->getDatabase()->getConnectionFile()->getFilename());
+					        return output;
+				        }
+			        } catch (Error& e) {
+				        return e;
+			        }
+			        return Optional<Value>();
+		        }));
 
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::CONNECTIONSTRING, std::make_unique<SingleSpecialKeyImpl>(
-		    LiteralStringRef("\xff\xff/connection_string"),
-		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
-			    try {
-				    if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
-					    Reference<ClusterConnectionFile> f = ryw->getDatabase()->getConnectionFile();
-					    Optional<Value> output = StringRef(f->getConnectionString().toString());
-					    return output;
-				    }
-			    } catch (Error& e) {
-				    return e;
-			    }
-			    return Optional<Value>();
-		    }));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::CONNECTIONSTRING,
+		    std::make_unique<SingleSpecialKeyImpl>(
+		        LiteralStringRef("\xff\xff/connection_string"),
+		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			        try {
+				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
+					        Reference<ClusterConnectionFile> f = ryw->getDatabase()->getConnectionFile();
+					        Optional<Value> output = StringRef(f->getConnectionString().toString());
+					        return output;
+				        }
+			        } catch (Error& e) {
+				        return e;
+			        }
+			        return Optional<Value>();
+		        }));
 	}
 	throttleExpirer = recurring([this](){ expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 
