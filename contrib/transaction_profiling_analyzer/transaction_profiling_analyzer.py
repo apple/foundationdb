@@ -171,22 +171,23 @@ class Mutation(object):
 
 
 class BaseInfo(object):
-    def __init__(self, start_timestamp):
-        self.start_timestamp = start_timestamp
-
+    def __init__(self, bb, protocol_version):
+        self.start_timestamp = bb.get_double()
+        if protocol_version >= PROTOCOL_VERSION_6_3:
+            self.dc_id = bb.get_bytes_with_length()
 
 class GetVersionInfo(BaseInfo):
     def __init__(self, bb, protocol_version):
-        super().__init__(bb.get_double())
+        super().__init__(bb, protocol_version)
         self.latency = bb.get_double()
         if protocol_version >= PROTOCOL_VERSION_6_2:
             self.transaction_priority_type = bb.get_int()
         if protocol_version >= PROTOCOL_VERSION_6_3:
-            self.read_version = bb.get_long()	
+            self.read_version = bb.get_long()
 
 class GetInfo(BaseInfo):
     def __init__(self, bb, protocol_version):
-        super().__init__(bb.get_double())
+        super().__init__(bb, protocol_version)
         self.latency = bb.get_double()
         self.value_size = bb.get_int()
         self.key = bb.get_bytes_with_length()
@@ -194,7 +195,7 @@ class GetInfo(BaseInfo):
 
 class GetRangeInfo(BaseInfo):
     def __init__(self, bb, protocol_version):
-        super().__init__(bb.get_double())
+        super().__init__(bb, protocol_version)
         self.latency = bb.get_double()
         self.range_size = bb.get_int()
         self.key_range = bb.get_key_range()
@@ -202,13 +203,13 @@ class GetRangeInfo(BaseInfo):
 
 class CommitInfo(BaseInfo):
     def __init__(self, bb, protocol_version, full_output=True):
-        super().__init__(bb.get_double())
+        super().__init__(bb, protocol_version)
         self.latency = bb.get_double()
         self.num_mutations = bb.get_int()
         self.commit_bytes = bb.get_int()
-    
+
         if protocol_version >= PROTOCOL_VERSION_6_3:
-            self.commit_version = bb.get_long() 
+            self.commit_version = bb.get_long()
         read_conflict_range = bb.get_key_range_list()
         if full_output:
             self.read_conflict_range = read_conflict_range
@@ -224,21 +225,21 @@ class CommitInfo(BaseInfo):
 
 class ErrorGetInfo(BaseInfo):
     def __init__(self, bb, protocol_version):
-        super().__init__(bb.get_double())
+        super().__init__(bb, protocol_version)
         self.error_code = bb.get_int()
         self.key = bb.get_bytes_with_length()
 
 
 class ErrorGetRangeInfo(BaseInfo):
     def __init__(self, bb, protocol_version):
-        super().__init__(bb.get_double())
+        super().__init__(bb, protocol_version)
         self.error_code = bb.get_int()
         self.key_range = bb.get_key_range()
 
 
 class ErrorCommitInfo(BaseInfo):
     def __init__(self, bb, protocol_version, full_output=True):
-        super().__init__(bb.get_double())
+        super().__init__(bb, protocol_version)
         self.error_code = bb.get_int()
 
         read_conflict_range = bb.get_key_range_list()
@@ -828,4 +829,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
