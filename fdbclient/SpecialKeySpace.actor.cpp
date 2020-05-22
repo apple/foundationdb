@@ -29,7 +29,9 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	  KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0")) },
 	{ SpecialKeySpace::MODULE::STATUSJSON, singleKeyRange(LiteralStringRef("\xff\xff/status/json")) },
 	{ SpecialKeySpace::MODULE::CONNECTIONSTRING, singleKeyRange(LiteralStringRef("\xff\xff/connection_string")) },
-	{ SpecialKeySpace::MODULE::CLUSTERFILEPATH, singleKeyRange(LiteralStringRef("\xff\xff/cluster_file_path")) }
+	{ SpecialKeySpace::MODULE::CLUSTERFILEPATH, singleKeyRange(LiteralStringRef("\xff\xff/cluster_file_path")) },
+	{ SpecialKeySpace::MODULE::METRICS,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/metrics/"), LiteralStringRef("\xff\xff/metrics0")) }
 };
 
 // This function will move the given KeySelector as far as possible to the standard form:
@@ -164,7 +166,6 @@ SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks, Reference<ReadYo
 	state Optional<SpecialKeySpace::MODULE> lastModuleRead;
 
 	wait(normalizeKeySelectorActor(sks, ryw, &begin, &lastModuleRead, &actualBeginOffset, &result));
-	// TODO : check if end the boundary of a module
 	wait(normalizeKeySelectorActor(sks, ryw, &end, &lastModuleRead, &actualEndOffset, &result));
 	// Handle all corner cases like what RYW does
 	// return if range inverted
@@ -312,6 +313,37 @@ Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(Reference<ReadY
 			result.push_back(result.arena(), KeyValueRef(endIter->begin(), endIter->value()));
 	}
 	return result;
+}
+
+ACTOR Future<Standalone<RangeResultRef>> ddStatsGetRangeActor(Reference<ReadYourWritesTransaction> ryw,
+                                                              KeyRangeRef kr) {
+	try {
+		auto keys = kr.removePrefix(ddStatsRange.begin);
+		Standalone<VectorRef<DDMetricsRef>> resultWithoutPrefix =
+		    wait(waitDataDistributionMetricsList(ryw->getDatabase(), keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT));
+		Standalone<RangeResultRef> result;
+		for (const auto& ddMetricsRef : resultWithoutPrefix) {
+			// each begin key is the previous end key, thus we only encode the begin key in the result
+			KeyRef beginKey = ddMetricsRef.beginKey.withPrefix(ddStatsRange.begin, result.arena());
+			// Use json string encoded in utf-8 to encode the values, easy for adding more fields in the future
+			json_spirit::mObject statsObj;
+			statsObj["ShardBytes"] = ddMetricsRef.shardBytes;
+			std::string statsString =
+			    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
+			ValueRef bytes(result.arena(), statsString);
+			result.push_back(result.arena(), KeyValueRef(beginKey, bytes));
+		}
+		return result;
+	} catch (Error& e) {
+		throw;
+	}
+}
+
+DDStatsRangeImpl::DDStatsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(Reference<ReadYourWritesTransaction> ryw,
+                                                              KeyRangeRef kr) const {
+	return ddStatsGetRangeActor(ryw, kr);
 }
 
 class SpecialKeyRangeTestImpl : public SpecialKeyRangeBaseImpl {

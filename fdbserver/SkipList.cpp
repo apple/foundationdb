@@ -728,7 +728,7 @@ StringRef setK(Arena& arena, int i) {
 #include "fdbserver/ConflictSet.h"
 
 struct ConflictSet {
-	ConflictSet() : oldestVersion(0) {}
+	ConflictSet() : oldestVersion(0), removalKey(makeString(0)) {}
 	~ConflictSet() {}
 
 	SkipList versionHistory;

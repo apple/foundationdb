@@ -49,7 +49,7 @@
 #include "flow/TLSConfig.actor.h"
 #include "flow/UnitTest.h"
 
-#include "fdbclient/IncludeVersions.h"
+#include "fdbclient/versions.h"
 
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -607,6 +607,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::METRICS,
+		                              std::make_unique<DDStatsRangeImpl>(ddStatsRange));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::WORKERINTERFACE, std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
 		    LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::STATUSJSON, std::make_unique<SingleSpecialKeyImpl>(
@@ -738,7 +740,7 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& k
 		locationCache.insert( KeyRangeRef(begin, end), Reference<LocationInfo>() );
 	}
 	locationCache.insert( keys, loc );
-	return std::move(loc);
+	return loc;
 }
 
 void DatabaseContext::invalidateCache( const KeyRef& key, bool isBackward ) {
@@ -1518,7 +1520,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			cx->readLatencies.addSample(latency);
 			if (trLogInfo) {
 				int valueSize = reply.value.present() ? reply.value.get().size() : 0;
-				trLogInfo->addLog(FdbClientLogEvents::EventGet(startTimeD, latency, valueSize, key));
+				trLogInfo->addLog(FdbClientLogEvents::EventGet(startTimeD, cx->clientLocality.dcId(), latency, valueSize, key));
 			}
 			cx->getValueCompleted->latency = timer_int() - startTime;
 			cx->getValueCompleted->log();
@@ -1550,7 +1552,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else {
 				if (trLogInfo)
-					trLogInfo->addLog(FdbClientLogEvents::EventGetError(startTimeD, static_cast<int>(e.code()), key));
+					trLogInfo->addLog(FdbClientLogEvents::EventGetError(startTimeD, cx->clientLocality.dcId(), static_cast<int>(e.code()), key));
 				throw e;
 			}
 		}
@@ -1955,7 +1957,7 @@ void getRangeFinished(Database cx, Reference<TransactionLogInfo> trLogInfo, doub
 	cx->transactionKeysRead += result.size();
 	
 	if( trLogInfo ) {
-		trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, now()-startTime, bytes, begin.getKey(), end.getKey()));
+		trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, cx->clientLocality.dcId(), now()-startTime, bytes, begin.getKey(), end.getKey()));
 	}
 
 	if( !snapshot ) {
@@ -2195,7 +2197,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 				} else {
 					if (trLogInfo)
-						trLogInfo->addLog(FdbClientLogEvents::EventGetRangeError(startTime, static_cast<int>(e.code()), begin.getKey(), end.getKey()));
+						trLogInfo->addLog(FdbClientLogEvents::EventGetRangeError(startTime, cx->clientLocality.dcId(), static_cast<int>(e.code()), begin.getKey(), end.getKey()));
 
 					throw e;
 				}
@@ -2449,7 +2451,7 @@ ACTOR Future< Key > getKeyAndConflictRange(
 			conflictRange.send( std::make_pair( rep, k.orEqual ? keyAfter( k.getKey() ) : Key(k.getKey(), k.arena()) ) );
 		else
 			conflictRange.send( std::make_pair( k.orEqual ? keyAfter( k.getKey() ) : Key(k.getKey(), k.arena()), keyAfter( rep ) ) );
-		return std::move(rep);
+		return rep;
 	} catch( Error&e ) {
 		conflictRange.send(std::make_pair(Key(), Key()));
 		throw;
@@ -2975,7 +2977,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->commitLatencies.addSample(latency);
 					cx->latencies.addSample(now() - tr->startTime);
 					if (trLogInfo)
-						trLogInfo->addLog(FdbClientLogEvents::EventCommit_V2(startTime, latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), ci.version, req));
+						trLogInfo->addLog(FdbClientLogEvents::EventCommit_V2(startTime, cx->clientLocality.dcId(), latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), ci.version, req));
 					return Void();
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
@@ -3038,7 +3040,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trLogInfo)
-				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
+				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, cx->clientLocality.dcId(), static_cast<int>(e.code()), req));
 			throw;
 		}
 	}
@@ -3449,7 +3451,7 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, TransactionPriorit
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
 	if (trLogInfo)
-		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(startTime, latency, priority, rep.version));
+		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(startTime, cx->clientLocality.dcId(), latency, priority, rep.version));
 	if (rep.version == 1 && rep.locked) {
 		throw proxy_memory_limit_exceeded();
 	}
@@ -3855,6 +3857,25 @@ Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, i
 		return extractMetrics(::waitStorageMetrics(cx, keys, StorageMetrics(), m, StorageMetrics(), shardLimit, -1));
 	} else {
 		return ::getStorageMetricsLargeKeyRange(cx, keys);
+	}
+}
+
+ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
+                                                                               int shardLimit) {
+	state Future<Void> clientTimeout = delay(5.0);
+	loop {
+		choose {
+			when(wait(cx->onMasterProxiesChanged())) {}
+			when(ErrorOr<GetDDMetricsReply> rep =
+			         wait(errorOr(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics,
+			                                  GetDDMetricsRequest(keys, shardLimit))))) {
+				if (rep.isError()) {
+					throw rep.getError();
+				}
+				return rep.get().storageMetricsList;
+			}
+			when(wait(clientTimeout)) { throw timed_out(); }
+		}
 	}
 }
 

@@ -51,13 +51,14 @@ protected:
 class SpecialKeySpace {
 public:
 	enum class MODULE {
-		UNKNOWN, // default value for all unregistered range
-		TESTONLY, // only used by correctness tests
-		TRANSACTION,
-		WORKERINTERFACE,
-		STATUSJSON,
 		CLUSTERFILEPATH,
-		CONNECTIONSTRING
+		CONNECTIONSTRING,
+		METRICS, // data-distribution metrics
+		TESTONLY, // only used by correctness tests
+		TRANSACTION, // transaction related info, conflicting keys, read/write conflict range
+		STATUSJSON,
+		UNKNOWN, // default value for all unregistered range
+		WORKERINTERFACE,
 	};
 
 	Future<Optional<Value>> get(Reference<ReadYourWritesTransaction> ryw, const Key& key);
@@ -148,6 +149,13 @@ public:
 class WriteConflictRangeImpl : public SpecialKeyRangeBaseImpl {
 public:
 	explicit WriteConflictRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+	                                            KeyRangeRef kr) const override;
+};
+
+class DDStatsRangeImpl : public SpecialKeyRangeBaseImpl {
+public:
+	explicit DDStatsRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
 	                                            KeyRangeRef kr) const override;
 };

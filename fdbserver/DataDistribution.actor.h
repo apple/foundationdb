@@ -107,6 +107,15 @@ struct GetMetricsRequest {
 	GetMetricsRequest( KeyRange const& keys ) : keys(keys) {}
 };
 
+struct GetMetricsListRequest {
+	KeyRange keys;
+	int shardLimit;
+	Promise<Standalone<VectorRef<DDMetricsRef>>> reply;
+
+	GetMetricsListRequest() {}
+	GetMetricsListRequest( KeyRange const& keys, const int shardLimit ) : keys(keys), shardLimit(shardLimit) {}
+};
+
 struct TeamCollectionInterface {
 	PromiseStream< GetTeamRequest > getTeam;
 };
@@ -203,6 +212,7 @@ Future<Void> dataDistributionTracker(
 	PromiseStream<RelocateShard> const& output,
 	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 	PromiseStream<GetMetricsRequest> const& getShardMetrics,
+	PromiseStream<GetMetricsListRequest> const& getShardMetricsList,
 	FutureStream<Promise<int64_t>> const& getAverageShardBytes,
 	Promise<Void> const& readyToStart,
 	Reference<AsyncVar<bool>> const& zeroHealthyTeams,

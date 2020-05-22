@@ -179,7 +179,7 @@ public:
 	int64_t DD_SS_FAILURE_VERSIONLAG; // Allowed SS version lag from the current read version before marking it as failed.
 	int64_t DD_SS_ALLOWED_VERSIONLAG; // SS will be marked as healthy if it's version lag goes below this value.
 	double DD_SS_STUCK_TIME_LIMIT; // If a storage server is not getting new versions for this amount of time, then it becomes undesired.
-	
+
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
 	double TR_REMOVE_MACHINE_TEAM_DELAY; // wait for the specified time before try to remove next machine team
@@ -313,6 +313,7 @@ public:
 	double BACKUP_TIMEOUT;  // master's reaction time for backup failure
 	double BACKUP_NOOP_POP_DELAY;
 	int BACKUP_FILE_BLOCK_BYTES;
+	int64_t BACKUP_LOCK_BYTES;
 	double BACKUP_UPLOAD_DELAY;
 
 	//Cluster Controller
@@ -561,6 +562,13 @@ public:
 	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.
 	double REDWOOD_PAGE_REBUILD_FILL_FACTOR; // When rebuilding pages, start a new page after this capacity
+	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at once
+	int REDWOOD_LAZY_CLEAR_MIN_PAGES;  // Minimum number of pages to free before ending a lazy clear cycle, unless the queue is empty
+	int REDWOOD_LAZY_CLEAR_MAX_PAGES;  // Maximum number of pages to free before ending a lazy clear cycle, unless the queue is empty
+	int REDWOOD_REMAP_CLEANUP_BATCH_SIZE; // Number of queue entries for remap cleanup to process and potentially coalesce at once.
+	int REDWOOD_REMAP_CLEANUP_VERSION_LAG_MIN; // Number of versions between head of remap queue and oldest retained version before remap cleanup starts
+	int REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX; // Number of versions between head of remap queue and oldest retained version before remap cleanup may stop
+	double REDWOOD_LOGGING_INTERVAL;
 
 	ServerKnobs();
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);

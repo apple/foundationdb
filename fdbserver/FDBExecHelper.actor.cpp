@@ -7,7 +7,7 @@
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-#include "fdbclient/IncludeVersions.h"
+#include "fdbclient/versions.h"
 #include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 

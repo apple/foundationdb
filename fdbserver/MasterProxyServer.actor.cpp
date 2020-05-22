@@ -1756,6 +1756,25 @@ ACTOR Future<Void> healthMetricsRequestServer(MasterProxyInterface proxy, GetHea
 	}
 }
 
+ACTOR Future<Void> ddMetricsRequestServer(MasterProxyInterface proxy, Reference<AsyncVar<ServerDBInfo>> db)
+{
+	loop {
+		choose {
+			when(state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture()))
+			{
+				ErrorOr<GetDataDistributorMetricsReply> reply = wait(errorOr(db->get().distributor.get().dataDistributorMetrics.getReply(GetDataDistributorMetricsRequest(req.keys, req.shardLimit))));
+				if ( reply.isError() ) {
+					req.reply.sendError(reply.getError());
+				} else {
+					GetDDMetricsReply newReply;
+					newReply.storageMetricsList = reply.get().storageMetricsList;
+					req.reply.send(newReply);
+				}
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 	loop {
 		wait(delay(0)); //allow this actor to be cancelled if we are removed after db changes.
@@ -1996,6 +2015,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	addActor.send(readRequestServer(proxy, addActor, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
+	addActor.send(ddMetricsRequestServer(proxy, db));
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));
