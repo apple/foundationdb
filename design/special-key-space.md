@@ -88,7 +88,7 @@ We introduce this `module` concept after a [discussion](https://forums.foundatio
   - `\xff\xff/transaction/read_conflict_range/, \xff\xff/transaction/read_conflict_range0` : read conflict ranges of the transaction
   - `\xff\xff/transaction/write_conflict_range/, \xff\xff/transaction/write_conflict_range0` : write conflict ranges of the transaction
 - METRICS: `\xff\xff/metrics/, \xff\xff/metrics0`, all metrics like data-distribution metrics or healthy metrics are planned to put here. All need to call the rpc, so time_out error s may happen. Right now we have:
-  - `\xff\xff/metrics/data_distribution_stats, \xff\xff/metrics/data_distribution_stats` : stats info about data-distribution
+  - `\xff\xff/metrics/data_distribution_stats/, \xff\xff/metrics/data_distribution_stats0` : stats info about data-distribution
 - WORKERINTERFACE : `\xff\xff/worker_interfaces/, \xff\xff/worker_interfaces0`, which is compatible with previous implementation, thus should not be used to add new functions.
 
 In addition, all singleKeyRanges are formatted as modules and cannot be used again. In particular, you should call `get` not `getRange` on these keys. Below are existing ones:
