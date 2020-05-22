@@ -28,8 +28,7 @@
 class SKSCTestImpl : public SpecialKeyRangeBaseImpl {
 public:
 	explicit SKSCTestImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
-	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
-	                                                    KeyRangeRef kr) const {
+	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 		ASSERT(range.contains(kr));
 		auto resultFuture = ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY);
 		// all keys are written to RYW, since GRV is set, the read should happen locally
@@ -108,10 +107,23 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
+		testRywLifetime(cx);
 		wait(timeout(self->testModuleRangeReadErrors(cx, self) && self->getRangeCallActor(cx, self) &&
 		                 testConflictRanges(cx, /*read*/ true, self) && testConflictRanges(cx, /*read*/ false, self),
 		             self->testDuration, Void()));
 		return Void();
+	}
+
+	// This would be a unit test except we need a Database to create an ryw transaction
+	static void testRywLifetime(Database cx) {
+		Future<Void> f;
+		{
+			ReadYourWritesTransaction ryw{ cx->clone() };
+			f = success(ryw.get(LiteralStringRef("\xff\xff/status/json")));
+			TEST(!f.isReady());
+		}
+		ASSERT(f.isError());
+		ASSERT(f.getError().code() == error_code_transaction_cancelled);
 	}
 
 	ACTOR Future<Void> getRangeCallActor(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
@@ -125,7 +137,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			auto correctResultFuture = self->ryw->getRange(begin, end, limit, false, reverse);
 			ASSERT(correctResultFuture.isReady());
 			auto correctResult = correctResultFuture.getValue();
-			auto testResultFuture = cx->specialKeySpace->getRange(self->ryw, begin, end, limit, reverse);
+			auto testResultFuture = cx->specialKeySpace->getRange(self->ryw.getPtr(), begin, end, limit, reverse);
 			ASSERT(testResultFuture.isReady());
 			auto testResult = testResultFuture.getValue();
 
