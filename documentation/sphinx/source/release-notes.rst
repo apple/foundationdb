@@ -9,10 +9,10 @@ Features
 --------
 
 * Added the ability to set arbitrary tags on transactions. Tags can be specifically throttled using ``fdbcli``, and certain types of tags can be automatically throttled by ratekeeper. `(PR #2942) <https://github.com/apple/foundationdb/pull/2942>`_
-* Add an option for transactions to report conflicting keys by calling getRange with the special key prefix \xff\xff/transaction/conflicting_keys/. `(PR 2257) <https://github.com/apple/foundationdb/pull/2257>`_
+* Add an option for transactions to report conflicting keys by calling ``getRange`` with the special key prefix ``\xff\xff/transaction/conflicting_keys/``. `(PR 2257) <https://github.com/apple/foundationdb/pull/2257>`_
 * Added the ``exclude failed`` command to ``fdbcli``. This command designates that a process is dead and will never come back, so the transaction logs can forget about mutations sent to that process. `(PR #1955) <https://github.com/apple/foundationdb/pull/1955>`_
-* A new fast restore system that can restore a database to a point in time from backup files. It is a Spark-like parallel processing framework that processes backup data asynchronously, in parallel and in pipeline. It is built in FDB and battle-tested in simulation. `(Fast Restore Project) <https://github.com/apple/foundationdb/projects/7>`_
-* Added backup workers for pulling mutations from transaction logs and uploading them to blob storage. Switching from the previous backup implementation will double a cluster's maximum write bandwidth `(PR #1625) <https://github.com/apple/foundationdb/pull/1625>`_ `(PR #2588) <https://github.com/apple/foundationdb/pull/2588>`_ `(PR #2642) <https://github.com/apple/foundationdb/pull/2642>`_ 
+* A new fast restore system that can restore a database to a point in time from backup files. It is a Spark-like parallel processing framework that processes backup data asynchronously, in parallel and in pipeline. `(Fast Restore Project) <https://github.com/apple/foundationdb/projects/7>`_
+* Added backup workers for pulling mutations from transaction logs and uploading them to blob storage. Switching from the previous backup implementation will double a cluster's maximum write bandwidth. `(PR #1625) <https://github.com/apple/foundationdb/pull/1625>`_ `(PR #2588) <https://github.com/apple/foundationdb/pull/2588>`_ `(PR #2642) <https://github.com/apple/foundationdb/pull/2642>`_ 
 * Added a new API in all bindings that can be used to query the estimated byte size of a given range. `(PR #2537) <https://github.com/apple/foundationdb/pull/2537>`_
 * Added the ``lock`` and ``unlock`` commands to ``fdbcli`` which lock or unlock a cluster. `(PR #2890) <https://github.com/apple/foundationdb/pull/2890>`_
 * Add a framework which helps to add client functions using special keys (keys within ``[\xff\xff, \xff\xff\xff)``). `(PR #2662) <https://github.com/apple/foundationdb/pull/2662>`_
@@ -32,7 +32,7 @@ Performance
 * Replaced most uses of hashlittle2 with crc32 for better performance.  `(PR #2538) <https://github.com/apple/foundationdb/pull/2538>`_
 * Significantly reduced the serialized size of conflict ranges and single key clears. `(PR #2513) <https://github.com/apple/foundationdb/pull/2513>`_
 * Improved range read performance when the reads overlap recently cleared key ranges. `(PR #2028) <https://github.com/apple/foundationdb/pull/2028>`_
-* Reduced the number of comparisons used by various map implementations `(PR #2882) <https://github.com/apple/foundationdb/pull/2882>`_
+* Reduced the number of comparisons used by various map implementations. `(PR #2882) <https://github.com/apple/foundationdb/pull/2882>`_
 * Reduced the serialized size of empty strings. `(PR #3063) <https://github.com/apple/foundationdb/pull/3063>`_
 * Reduced the serialized size of various interfaces by 10x. `(PR #3068) <https://github.com/apple/foundationdb/pull/3068>`_
 
@@ -40,8 +40,8 @@ Reliability
 -----------
 
 * Connections that disconnect frequently are not immediately marked available. `(PR #2932) <https://github.com/apple/foundationdb/pull/2932>`_
-* The data distributor will consider storage server that are continually lagging behind as if they were failed. `(PR #2917) <https://github.com/apple/foundationdb/pull/2917>`_
-* Changing the storage engine type of a cluster will no longer cause the cluster out of memory. Instead, the cluster will gracefully remove the old storage engine and add new storage engines one by one. `(PR #1985) <https://github.com/apple/foundationdb/pull/1985>`_
+* The data distributor will consider storage servers that are continually lagging behind as if they were failed. `(PR #2917) <https://github.com/apple/foundationdb/pull/2917>`_
+* Changing the storage engine type of a cluster will no longer cause the cluster to run out of memory. Instead, the cluster will gracefully migrate storage server processes to the new storage engine one by one. `(PR #1985) <https://github.com/apple/foundationdb/pull/1985>`_
 * Batch priority transactions which are being throttled by ratekeeper will get a ``batch_transaction_throttled`` error instead of hanging indefinitely.  `(PR #2608) <https://github.com/apple/foundationdb/pull/2608>`_
 * Avoid using too much memory on the transaction logs when multiple types of transaction logs exist in the same process. `(PR #2213) <https://github.com/apple/foundationdb/pull/2213>`_
 
@@ -49,12 +49,12 @@ Fixes
 -----
 
 * The ``SetVersionstampedKey`` atomic operation no longer conflicts with versions smaller than the current read version of the transaction. `(PR #2557) <https://github.com/apple/foundationdb/pull/2557>`_
-* Ratekeeper would measure durability lag a few seconds higher than reality `(PR #2499) <https://github.com/apple/foundationdb/pull/2499>`_
+* Ratekeeper would measure durability lag a few seconds higher than reality. `(PR #2499) <https://github.com/apple/foundationdb/pull/2499>`_
 * In very rare scenarios, the data distributor process could get stuck in an infinite loop. `(PR #2228) <https://github.com/apple/foundationdb/pull/2228>`_
 * If the number of configured transaction logs were reduced at the exact same time a change to the system keyspace took place, it was possible for the transaction state store to become corrupted. `(PR #3051) <https://github.com/apple/foundationdb/pull/3051>`_
 * Fix multiple data races between threads on the client. `(PR #3026) <https://github.com/apple/foundationdb/pull/3026>`_
 * Transaction logs configured to spill by reference had an unintended delay between each spilled batch. `(PR #3153) <https://github.com/apple/foundationdb/pull/3153>`_
-* Added guards to honor DISABLE_POSIX_KERNEL_AIO  `(PR #2888) <https://github.com/apple/foundationdb/pull/2888>`_
+* Added guards to honor ``DISABLE_POSIX_KERNEL_AIO``. `(PR #2888) <https://github.com/apple/foundationdb/pull/2888>`_
 
 Status
 ------
@@ -62,7 +62,7 @@ Status
 * A process's ``memory.available_bytes`` can no longer exceed the memory limit of the process. For purposes of this statistic, processes on the same machine will be allocated memory proportionally based on the size of their memory limits. `(PR #3174) <https://github.com/apple/foundationdb/pull/3174>`_
 * Replaced ``cluster.database_locked`` status field with ``cluster.database_lock_state``, which contains two subfields: ``locked`` (boolean) and ``lock_uid`` (which contains the database lock uid if the database is locked). `(PR #2058) <https://github.com/apple/foundationdb/pull/2058>`_
 * Removed fields ``worst_version_lag_storage_server`` and ``limiting_version_lag_storage_server`` from the ``cluster.qos`` section. The ``worst_data_lag_storage_server`` and ``limiting_data_lag_storage_server`` objects can be used instead. `(PR #3196) <https://github.com/apple/foundationdb/pull/3196>`_
-* Now if a process is unable to flush trace logs to disk, the problem will be reported via the output of ``status`` command inside ``fdbcli``. `(PR #2605) <https://github.com/apple/foundationdb/pull/2605>`_ `(PR #2820) <https://github.com/apple/foundationdb/pull/2820>`_
+* If a process is unable to flush trace logs to disk, the problem will now be reported via the output of ``status`` command inside ``fdbcli``. `(PR #2605) <https://github.com/apple/foundationdb/pull/2605>`_ `(PR #2820) <https://github.com/apple/foundationdb/pull/2820>`_
 
 Bindings
 --------
