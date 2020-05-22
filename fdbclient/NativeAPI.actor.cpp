@@ -1170,8 +1170,13 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 }
 
 void runNetwork() {
-	if(!g_network)
+	if(!g_network) {
 		throw network_not_setup();
+	}
+
+	if(!g_network->checkRunnable()) {
+		throw network_cannot_be_restarted();
+	}
 
 	if(networkOptions.traceDirectory.present() && networkOptions.runLoopProfilingEnabled) {
 		setupRunLoopProfiler();
