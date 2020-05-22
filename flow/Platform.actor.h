@@ -30,7 +30,6 @@
 #include <stdlib.h>
 #include <string>
 #include <vector>
-#include <dirent.h>
 
 #include "flow/flow.h"
 #include "flow/Platform.h"
