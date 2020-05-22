@@ -36,6 +36,7 @@
 #include <set>
 #include <type_traits>
 #include <sstream>
+#include <utility>
 
 // TrackIt is a zero-size class for tracking constructions, destructions, and assignments of instances
 // of a class.  Just inherit TrackIt<T> from T to enable tracking of construction and destruction of
@@ -312,6 +313,18 @@ private:
 	typename std::aligned_storage< sizeof(T), __alignof(T) >::type value;
 	bool valid;
 };
+
+// Copied from absl::make_optional
+//
+// Deduces the type parameter for `Optional<T>`.
+//
+// Allows us to write:
+//
+// Optional<int> = makeOptional(1);
+template <typename T>
+constexpr Optional<typename std::decay<T>::type> makeOptional(T&& v) {
+  return Optional<typename std::decay<T>::type>(std::forward<T>(v));
+}
 
 template<class T>
 struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
