@@ -159,7 +159,7 @@ endif()
 function(stage_correctness_package)
   set(oneValueArgs OUT_DIR CONTEXT)
   cmake_parse_arguments(STAGE "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
-  file(MAKE_DIRECTORY ${STAGE_OUT_DIR})
+  file(MAKE_DIRECTORY ${STAGE_OUT_DIR}/bin)
   string(LENGTH "${CMAKE_SOURCE_DIR}/tests/" base_length)
   foreach(test IN LISTS TEST_NAMES)
     if(("${TEST_TYPE_${test}}" STREQUAL "simulation") AND
