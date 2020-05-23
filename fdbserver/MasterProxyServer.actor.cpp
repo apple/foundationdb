@@ -700,7 +700,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 	for (; logRangeMutation != logRangeMutations->end(); ++logRangeMutation)
 	{
 		//FIXME: this is re-implementing the serialize function of MutationListRef in order to have a yield
-		valueWriter = BinaryWriter(IncludeVersion());
+		valueWriter = BinaryWriter(IncludeVersion(ProtocolVersion::withBackupMutations()));
 		valueWriter << logRangeMutation->second.totalSize();
 
 		state MutationListRef::Blob* blobIter = logRangeMutation->second.blob_begin;

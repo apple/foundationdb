@@ -307,7 +307,7 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 				}
 			} else {
 				// Workers compete to be the leader
-				tr.set(restoreLeaderKey, BinaryWriter::toValue(myWorkerInterf, IncludeVersion()));
+				tr.set(restoreLeaderKey, restoreWorkerInterfaceValue(myWorkerInterf, IncludeVersion(ProtocolVersion::withRestoreWorkerInterfaceValue())));
 				leaderInterf = myWorkerInterf;
 			}
 			wait(tr.commit());

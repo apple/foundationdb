@@ -918,6 +918,7 @@ struct ClusterControllerPriorityInfo {
 	                                  ClusterControllerPriorityInfo::FitnessUnknown) {}
 	ClusterControllerPriorityInfo(uint8_t processClassFitness, bool isExcluded, uint8_t dcFitness) : processClassFitness(processClassFitness), isExcluded(isExcluded), dcFitness(dcFitness) {}
 
+	//To change this serialization, ProtocolVersion::ClusterControllerPriorityInfo must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, processClassFitness, isExcluded, dcFitness);
