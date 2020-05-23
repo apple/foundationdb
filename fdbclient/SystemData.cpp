@@ -1015,7 +1015,7 @@ const StringRef ignoreSSFailuresZoneString = LiteralStringRef("IgnoreSSFailures"
 const KeyRef rebalanceDDIgnoreKey = LiteralStringRef("\xff\x02/rebalanceDDIgnored");
 
 const Value healthyZoneValue( StringRef const& zoneId, Version version ) {
-	BinaryWriter wr(IncludeVersion(IncludeVersion(ProtocolVersion::withHealthyZoneValue()));
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withHealthyZoneValue()));
 	wr << zoneId;
 	wr << version;
 	return wr.toValue();
