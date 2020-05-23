@@ -644,25 +644,11 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	}
 };
 
-void TLogQueue::push( T const& qe, Reference<LogData> logData ) {
-	BinaryWriter wr( Unversioned() );  // outer framing is not versioned
-	wr << uint32_t(0);
-	IncludeVersion(ProtocolVersion::withTLogQueueEntryRef()).write(wr);  // payload is versioned
-	wr << qe;
-	wr << uint8_t(1);
-	*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);
-	const IDiskQueue::location startloc = queue->getNextPushLocation();
-	// FIXME: push shouldn't return anything.  We should call getNextPushLocation() again.
-	const IDiskQueue::location endloc = queue->push( wr.toValue() );
-	//TraceEvent("TLogQueueVersionWritten", dbgid).detail("Size", wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t)).detail("Loc", loc);
-	logData->versionLocation[qe.version] = std::make_pair(startloc, endloc);
-}
-
 template <class T>
 void TLogQueue::push( T const& qe, Reference<LogData> logData ) {
 	BinaryWriter wr( Unversioned() );  // outer framing is not versioned
 	wr << uint32_t(0);
-	IncludeVersion().write(wr);  // payload is versioned
+	IncludeVersion(ProtocolVersion::withTLogQueueEntryRef()).write(wr);  // payload is versioned
 	wr << qe;
 	wr << uint8_t(1);
 	*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);
