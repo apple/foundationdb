@@ -700,16 +700,18 @@ inline bool operator >= ( const StringRef& lhs, const StringRef& rhs ) { return 
 
 // This trait is used by VectorRef to determine if deep copy constructor should recursively
 // call deep copies of each element.
-// TODO: There should be an easier way to identify the difference between
-// flow_ref and non-flow_ref types.
+//
+// TODO: There should be an easier way to identify the difference between flow_ref and non-flow_ref types.
+// std::is_trivially_copyable does not work because some flow_ref types are trivially copyable
+// and some non-flow_ref types are not trivially copyable.
 template <typename T>
-struct non_flow_ref : std::is_fundamental<T> {};
+struct flow_ref : std::integral_constant<bool, !std::is_fundamental_v<T>> {};
 
 template <>
-struct non_flow_ref<UID> : std::integral_constant<bool, true> {};
+struct flow_ref<UID> : std::integral_constant<bool, false> {};
 
 template <class A, class B>
-struct non_flow_ref<std::pair<A, B>> : std::integral_constant<bool, true> {};
+struct flow_ref<std::pair<A, B>> : std::integral_constant<bool, false> {};
 
 template<class T>
 struct string_serialized_traits : std::false_type {
@@ -800,9 +802,9 @@ public:
 		return *this;
 	}
 
-	// Arena constructor for non-Ref types, identified by non_flow_ref
+	// Arena constructor for non-Ref types, identified by !flow_ref
 	template <class T2 = T, VecSerStrategy S>
-	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<non_flow_ref<T2>::value, int>::type = 0)
+	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<!flow_ref<T2>::value, int>::type = 0)
 	  : VPS(toCopy), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()),
 	    m_capacity(toCopy.size()) {
 		if (m_size > 0) {
@@ -812,7 +814,7 @@ public:
 
 	// Arena constructor for Ref types, which must have an Arena constructor
 	template <class T2 = T, VecSerStrategy S>
-	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<!non_flow_ref<T2>::value, int>::type = 0)
+	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<flow_ref<T2>::value, int>::type = 0)
 	  : VPS(), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
 		for (int i = 0; i < m_size; i++) {
 			auto ptr = new (&data[i]) T(p, toCopy[i]);
@@ -942,15 +944,15 @@ public:
 		if (size > m_capacity) reallocate(p, size);
 	}
 
-	// expectedSize() for non-Ref types, identified by non_flow_ref
+	// expectedSize() for non-Ref types, identified by !flow_ref
 	template <class T2 = T>
-	typename std::enable_if<non_flow_ref<T2>::value, size_t>::type expectedSize() const {
+	typename std::enable_if<!flow_ref<T2>::value, size_t>::type expectedSize() const {
 		return sizeof(T) * m_size;
 	}
 
 	// expectedSize() for Ref types, which must in turn have expectedSize() implemented.
 	template <class T2 = T>
-	typename std::enable_if<!non_flow_ref<T2>::value, size_t>::type expectedSize() const {
+	typename std::enable_if<flow_ref<T2>::value, size_t>::type expectedSize() const {
 		size_t t = sizeof(T) * m_size;
 		for (int i = 0; i < m_size; i++) t += data[i].expectedSize();
 		return t;

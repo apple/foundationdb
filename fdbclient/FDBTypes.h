@@ -80,7 +80,7 @@ struct Tag {
 };
 
 template <>
-struct non_flow_ref<Tag> : std::integral_constant<bool, true> {};
+struct flow_ref<Tag> : std::integral_constant<bool, false> {};
 
 #pragma pack(pop)
 
