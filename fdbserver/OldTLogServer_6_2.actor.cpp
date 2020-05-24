@@ -633,7 +633,7 @@ template <class T>
 void TLogQueue::push( T const& qe, Reference<LogData> logData ) {
 	BinaryWriter wr( Unversioned() );  // outer framing is not versioned
 	wr << uint32_t(0);
-	IncludeVersion().write(wr);  // payload is versioned
+	IncludeVersion(ProtocolVersion::withTLogQueueEntryRef()).write(wr);  // payload is versioned
 	wr << qe;
 	wr << uint8_t(1);
 	*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);

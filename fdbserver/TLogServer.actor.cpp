@@ -59,6 +59,7 @@ struct TLogQueueEntryRef {
 	  : version(from.version), knownCommittedVersion(from.knownCommittedVersion), id(from.id), messages(a, from.messages) {
 	}
 
+	//To change this serialization, ProtocolVersion::TLogQueueEntryRef must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, version, messages, knownCommittedVersion, id);
@@ -647,7 +648,7 @@ template <class T>
 void TLogQueue::push( T const& qe, Reference<LogData> logData ) {
 	BinaryWriter wr( Unversioned() );  // outer framing is not versioned
 	wr << uint32_t(0);
-	IncludeVersion().write(wr);  // payload is versioned
+	IncludeVersion(ProtocolVersion::withTLogQueueEntryRef()).write(wr);  // payload is versioned
 	wr << qe;
 	wr << uint8_t(1);
 	*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);

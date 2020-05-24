@@ -136,6 +136,7 @@ struct TagThrottleValue {
 
 	static TagThrottleValue fromValue(const ValueRef& value);
 
+	//To change this serialization, ProtocolVersion::TagThrottleValue must be updated, and downgrades need to be considered
 	template<class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, tpsRate, expirationTime, initialDuration);

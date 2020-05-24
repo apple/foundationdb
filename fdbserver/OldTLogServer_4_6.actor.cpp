@@ -131,7 +131,7 @@ namespace oldTLog_4_6 {
 		void push( TLogQueueEntryRef const& qe ) {
 			BinaryWriter wr( Unversioned() );  // outer framing is not versioned
 			wr << uint32_t(0);
-			IncludeVersion().write(wr);  // payload is versioned
+			IncludeVersion(ProtocolVersion::withTLogQueueEntryRef()).write(wr);  // payload is versioned
 			wr << qe;
 			wr << uint8_t(1);
 			*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);
