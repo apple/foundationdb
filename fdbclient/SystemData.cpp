@@ -47,11 +47,7 @@ const KeyRef keyServersKey( const KeyRef& k, Arena& arena ) {
 }
 const Value keyServersValue( Standalone<RangeResultRef> result, const std::vector<UID>& src, const std::vector<UID>& dest ) {
 	if(!CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS) {
-<<<<<<< HEAD
 		BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValue())); wr << src << dest;
-=======
-		BinaryWriter wr(IncludeVersion()); wr << src << dest;
->>>>>>> master
 		return wr.toValue();
 	}
 	
