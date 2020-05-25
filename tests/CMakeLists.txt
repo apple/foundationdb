@@ -79,7 +79,7 @@ if(WITH_PYTHON)
   if (NOT USE_UBSAN) # TODO re-enable in UBSAN after https://github.com/apple/foundationdb/issues/2410 is resolved
     add_fdb_test(TEST_FILES SimpleExternalTest.txt)
   else()
-    message(WARNING "Python not found, won't configure ctest")
+    add_fdb_test(TEST_FILES SimpleExternalTest.txt IGNORE)
   endif()
   add_fdb_test(TEST_FILES SlowTask.txt IGNORE)
   add_fdb_test(TEST_FILES SpecificUnitTest.txt IGNORE)

@@ -247,7 +247,10 @@ struct BackupData {
 		specialCounter(cc, "MinKnownCommittedVersion", [this]() { return this->minKnownCommittedVersion; });
 		specialCounter(cc, "MsgQ", [this]() { return this->messages.size(); });
 		specialCounter(cc, "BufferedBytes", [this]() { return this->lock->activePermits(); });
+<<<<<<< HEAD
 		specialCounter(cc, "AvailableBytes", [this]() { return this->lock->available(); });
+=======
+>>>>>>> master
 		logger = traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
 		                       "BackupWorkerMetrics");
 	}
@@ -734,13 +737,11 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		MutationRef m;
 		if (!message.isBackupMessage(&m)) continue;
 
-		if (debugMutation("addMutation", message.version.version, m)) {
-			TraceEvent("BackupWorkerDebug", self->myId)
+		DEBUG_MUTATION("addMutation", message.version.version, m)
 			    .detail("Version", message.version.toString())
-			    .detail("Mutation", m.toString())
+			    .detail("Mutation", m)
 			    .detail("KCV", self->minKnownCommittedVersion)
 			    .detail("SavedVersion", self->savedVersion);
-		}
 
 		std::vector<Future<Void>> adds;
 		if (m.type != MutationRef::Type::ClearRange) {
@@ -847,7 +848,11 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		}
 
 		// If transition into NOOP mode, should clear messages
+<<<<<<< HEAD
 		if (!self->pulling && self->backupEpoch == self->recruitedEpoch) {
+=======
+		if (!self->pulling) {
+>>>>>>> master
 			self->eraseMessages(self->messages.size());
 		}
 

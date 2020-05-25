@@ -28,8 +28,13 @@
 #include <stdint.h>
 #include <time.h>
 
+<<<<<<< HEAD
 #include "..\flow\SimpleOpt.h"
 #include "..\fdbmonitor\SimpleIni.h"
+=======
+#include "flow/SimpleOpt.h"
+#include "fdbmonitor/SimpleIni.h"
+>>>>>>> master
 #include "fdbclient/versions.h"
 
 // For PathFileExists
