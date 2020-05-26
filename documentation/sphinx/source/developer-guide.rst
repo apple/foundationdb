@@ -756,6 +756,33 @@ If you only need to detect the *fact* of a change, and your response doesn't dep
 
 .. _developer-guide-peformance-considerations:
 
+
+Special keys
+=====================
+
+Keys starting with the bytes ``\xff\xff`` are called "special" keys, and they are materialized when read. :doc:`\\xff\\xff/status/json <mr-status>` is an example of a special key.
+As of api version 630, additional features have been exposed as special keys and are available to read as ranges instead of just individual keys. Additionally, the special keys are now organized into "modules".
+
+Modules
+-------
+
+A module is loosely defined as a key range where a user can expect similar behavior from reading any key in that range.
+By default, users will see a ``special_keys_no_module_found`` error if they read from a range not contained in a module.
+This is likely to be an error since the read would logically always return an empty set of keys and can't be interesting (maybe it was a typo?).
+Users will also (by default) see a ``special_keys_cross_module_read`` error if their read spans a module boundary.
+This is also potentially an error, since the user may be surprised by seeing the behavior of multiple modules in the same read.
+Users may opt out of these restrictions by setting the ``special_key_space_relaxed`` transaction option.
+
+Each special key that existed before api version 630 is its own module. These are
+
+#. ``\xff\xff/cluster_file_path`` Path to this database's cluster file
+#. ``\xff\xff/connection_string`` The desired contents of the cluster file. Should only be different if the client does not have permission to write to the cluster file.
+#. ``\xff\xff/status/json`` See :doc:`Machine-readable status <mr-status>`
+
+Prior to api version 630, it was also possible to read a range starting at
+``\xff\xff/worker_interfaces``. This is mostly an implentation detail of fdbcli,
+but it's available in api version 630 as a module with prefix ``\xff\xff/worker_interfaces/``.
+
 Performance considerations
 ==========================
 
