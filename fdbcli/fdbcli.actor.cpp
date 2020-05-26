@@ -2523,7 +2523,7 @@ void throttleGenerator(const char* text, const char *line, std::vector<std::stri
 		const char* opts[] = { "all", "auto", "manual", "tag", "default", "immediate", "batch", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	}
-	else if(tokens.size() == 2 && tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable")) {
+	else if(tokens.size() == 2 && (tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable"))) {
 		const char* opts[] = { "auto", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	}

@@ -247,6 +247,7 @@ struct BackupData {
 		specialCounter(cc, "MinKnownCommittedVersion", [this]() { return this->minKnownCommittedVersion; });
 		specialCounter(cc, "MsgQ", [this]() { return this->messages.size(); });
 		specialCounter(cc, "BufferedBytes", [this]() { return this->lock->activePermits(); });
+		specialCounter(cc, "AvailableBytes", [this]() { return this->lock->available(); });
 		logger = traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
 		                       "BackupWorkerMetrics");
 	}
@@ -844,7 +845,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		}
 
 		// If transition into NOOP mode, should clear messages
-		if (!self->pulling) {
+		if (!self->pulling && self->backupEpoch == self->recruitedEpoch) {
 			self->eraseMessages(self->messages.size());
 		}
 

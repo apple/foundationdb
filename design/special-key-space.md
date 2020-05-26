@@ -20,7 +20,7 @@ Consequently, the special-key-space framework wants to integrate all client func
 If your feature is exposing information to clients and the results are easily formatted as key-value pairs, then you can use special-key-space to implement your client function.
 
 ## How
-If you choose to use, you need to implement a function class that inherits from `SpecialKeyRangeBaseImpl`, which has an abstract method `Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr)`.
+If you choose to use, you need to implement a function class that inherits from `SpecialKeyRangeBaseImpl`, which has an abstract method `Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr)`.
 This method can be treated as a callback, whose implementation details are determined by the developer.
 Once you fill out the method, register the function class to the corresponding key range.
 Below is a detailed example.
@@ -38,7 +38,7 @@ public:
         CountryToCapitalCity[LiteralStringRef("China")] = LiteralStringRef("Beijing");
     }
     // Implement the getRange interface
-    Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
+    Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw,
                                             KeyRangeRef kr) const override {
         
         Standalone<RangeResultRef> result;
@@ -88,7 +88,7 @@ We introduce this `module` concept after a [discussion](https://forums.foundatio
   - `\xff\xff/transaction/read_conflict_range/, \xff\xff/transaction/read_conflict_range0` : read conflict ranges of the transaction
   - `\xff\xff/transaction/write_conflict_range/, \xff\xff/transaction/write_conflict_range0` : write conflict ranges of the transaction
 - METRICS: `\xff\xff/metrics/, \xff\xff/metrics0`, all metrics like data-distribution metrics or healthy metrics are planned to put here. All need to call the rpc, so time_out error s may happen. Right now we have:
-  - `\xff\xff/metrics/data_distribution_stats, \xff\xff/metrics/data_distribution_stats` : stats info about data-distribution
+  - `\xff\xff/metrics/data_distribution_stats/, \xff\xff/metrics/data_distribution_stats0` : stats info about data-distribution
 - WORKERINTERFACE : `\xff\xff/worker_interfaces/, \xff\xff/worker_interfaces0`, which is compatible with previous implementation, thus should not be used to add new functions.
 
 In addition, all singleKeyRanges are formatted as modules and cannot be used again. In particular, you should call `get` not `getRange` on these keys. Below are existing ones:

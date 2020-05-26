@@ -93,6 +93,7 @@ struct RestoreWorkerInterface {
 		interfID = deterministicRandom()->randomUniqueID();
 	}
 
+	//To change this serialization, ProtocolVersion::RestoreWorkerInterfaceValue must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, interfID, heartbeat, recruitRole, terminateWorker);
@@ -551,6 +552,7 @@ struct RestoreRequest {
 	                        const KeyRange& range, const UID& randomUid)
 	  : index(index), tagName(tagName), url(url), targetVersion(targetVersion), range(range), randomUid(randomUid) {}
 
+	//To change this serialization, ProtocolVersion::RestoreRequestValue must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, index, tagName, url, targetVersion, range, randomUid, reply);

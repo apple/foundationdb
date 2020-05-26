@@ -171,7 +171,7 @@ namespace ThrottleApi {
 		ASSERT(initialDuration > 0);
 
 		TagThrottleValue throttle(tpsRate, expirationTime.present() ? expirationTime.get() : 0, initialDuration);
-		BinaryWriter wr(IncludeVersion());
+		BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValue()));
 		wr << throttle;
 		state Value value = wr.toValue();
 
