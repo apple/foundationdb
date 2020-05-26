@@ -241,7 +241,8 @@ else()
       -Wno-delete-non-virtual-dtor
       -Wno-undefined-var-template
       -Wno-tautological-pointer-compare
-      -Wno-format)
+      -Wno-format
+      -Woverloaded-virtual)
     if (USE_CCACHE)
       add_compile_options(
         -Wno-register
