@@ -1755,6 +1755,26 @@ ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> tr, U
 	return Void();
 }
 
+ACTOR Future<Void> advanceVersion(Database cx, Version v) {
+	state Transaction tr(cx);
+	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			Version rv = wait(tr.getReadVersion());
+			if (rv <= v) {
+				tr.set(minRequiredCommitVersionKey, BinaryWriter::toValue(v + 1, Unversioned()));
+				wait(tr.commit());
+			} else {
+				printf("Current read version is %ld\n", rv);
+				return Void();
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> forceRecovery( Reference<ClusterConnectionFile> clusterFile, Key dcId ) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);

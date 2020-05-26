@@ -518,6 +518,14 @@ void initHelp() {
 		"getrangekeys <BEGINKEY> [ENDKEY] [LIMIT]",
 		"fetch keys in a range of keys",
 		"Displays up to LIMIT keys for keys between BEGINKEY (inclusive) and ENDKEY (exclusive). If ENDKEY is omitted, then the range will include all keys starting with BEGINKEY. LIMIT defaults to 25 if omitted." ESCAPINGK);
+	helpMap["getversion"] =
+	    CommandHelp("getversion", "Fetch the current read version",
+	                "Displays the current read version of the database or currently running transaction.");
+	helpMap["advanceversion"] = CommandHelp(
+	    "advanceversion <VERSION>", "Force the cluster to recover at the specified version",
+	    "Forces the cluster to recover at the specified version. If the specified version is larger than the current "
+	    "version of the cluster, the cluster version is advanced "
+	    "to the specified version via a forced recovery.");
 	helpMap["reset"] = CommandHelp(
 		"reset",
 		"reset the current transaction",
@@ -561,6 +569,14 @@ void initHelp() {
 		"consistencycheck [on|off]",
 		"permits or prevents consistency checking",
 		"Calling this command with `on' permits consistency check processes to run and `off' will halt their checking. Calling this command with no arguments will display if consistency checking is currently allowed.\n");
+	helpMap["lock"] = CommandHelp(
+		"lock",
+		"lock the database with a randomly generated lockUID",
+		"Randomly generates a lockUID, prints this lockUID, and then uses the lockUID to lock the database.");
+	helpMap["unlock"] =
+	    CommandHelp("unlock <UID>", "unlock the database with the provided lockUID",
+	                "Unlocks the database with the provided lockUID. This is a potentially dangerous operation, so the "
+	                "user will be asked to enter a passphrase to confirm their intent.");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -2719,7 +2735,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				continue;
 
 			// Don't put dangerous commands in the command history
-			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos)
+			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos &&
+			    line.find("unlock") == std::string::npos)
 				linenoise.historyAdd(line);
 		}
 
@@ -2934,6 +2951,52 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "lock")) {
+					if (tokens.size() != 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						state UID lockUID = deterministicRandom()->randomUniqueID();
+						printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
+						wait(makeInterruptable(lockDatabase(db, lockUID)));
+						printf("Database locked.\n");
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "unlock")) {
+					if ((tokens.size() != 2) || (tokens[1].size() != 32) ||
+					    !std::all_of(tokens[1].begin(), tokens[1].end(), &isxdigit)) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						state std::string passPhrase = deterministicRandom()->randomAlphaNumeric(10);
+						warn.cancel(); // don't warn while waiting on user input
+						printf("Unlocking the database is a potentially dangerous operation.\n");
+						Optional<std::string> input = wait(linenoise.read(
+						    format("Repeat the following passphrase if you would like to proceed (%s) : ",
+						           passPhrase.c_str())));
+						warn = checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db);
+						if (input.present() && input.get() == passPhrase) {
+							UID unlockUID = UID::fromString(tokens[1].toString());
+							try {
+								wait(makeInterruptable(unlockDatabase(db, unlockUID)));
+								printf("Database unlocked.\n");
+							} catch (Error& e) {
+								if (e.code() == error_code_database_locked) {
+									printf(
+									    "Unable to unlock database. Make sure to unlock with the correct lock UID.\n");
+								}
+								throw e;
+							}
+						} else {
+							printf("ERROR: Incorrect passphrase entered.\n");
+							is_error = true;
+						}
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "setclass")) {
 					if (tokens.size() != 3 && tokens.size() != 1) {
 						printUsage(tokens[0]);
@@ -3022,6 +3085,34 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								   printable(v.get()).c_str());
 						else
 							printf("`%s': not found\n", printable(tokens[1]).c_str());
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "getversion")) {
+					if (tokens.size() != 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						Version v = wait(makeInterruptable(getTransaction(db, tr, options, intrans)->getReadVersion()));
+						printf("%ld\n", v);
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "advanceversion")) {
+					if (tokens.size() != 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						Version v;
+						int n = 0;
+						if (sscanf(tokens[1].toString().c_str(), "%ld%n", &v, &n) != 1 || n != tokens[1].size()) {
+							printUsage(tokens[0]);
+							is_error = true;
+						} else {
+							wait(makeInterruptable(advanceVersion(db, v)));
+						}
 					}
 					continue;
 				}
