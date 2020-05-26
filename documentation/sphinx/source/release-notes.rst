@@ -42,7 +42,7 @@ Reliability
 * Connections that disconnect frequently are not immediately marked available. `(PR #2932) <https://github.com/apple/foundationdb/pull/2932>`_
 * The data distributor will consider storage servers that are continually lagging behind as if they were failed. `(PR #2917) <https://github.com/apple/foundationdb/pull/2917>`_
 * Changing the storage engine type of a cluster will no longer cause the cluster to run out of memory. Instead, the cluster will gracefully migrate storage server processes to the new storage engine one by one. `(PR #1985) <https://github.com/apple/foundationdb/pull/1985>`_
-* Batch priority transactions which are being throttled by ratekeeper will get a ``batch_transaction_throttled`` error instead of hanging indefinitely.  `(PR #2608) <https://github.com/apple/foundationdb/pull/2608>`_
+* Batch priority transactions which are being throttled by ratekeeper will get a ``batch_transaction_throttled`` error instead of hanging indefinitely.  `(PR #1868) <https://github.com/apple/foundationdb/pull/1868>`_
 * Avoid using too much memory on the transaction logs when multiple types of transaction logs exist in the same process. `(PR #2213) <https://github.com/apple/foundationdb/pull/2213>`_
 
 Fixes
