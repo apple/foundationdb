@@ -188,9 +188,15 @@ function(stage_correctness_package)
       # SUBSTRING will fail
       set(src_dir "${src_dir}/")
       string(SUBSTRING ${src_dir} ${dir_len} -1 dest_dir)
-      string(SUBSTRING ${file} ${dir_len} -1 out_file)
-      list(APPEND external_files ${STAGE_OUT_DIR}/${out_file})
-      file(COPY ${file} DESTINATION ${STAGE_OUT_DIR}/${dest_dir})
+      string(SUBSTRING ${file} ${dir_len} -1 rel_out_file)
+	  set(out_file ${STAGE_OUT_DIR}/${rel_out_file})
+      list(APPEND external_files ${out_file})
+	  add_custom_command(
+        OUTPUT ${out_file}
+		DEPENDS ${file}
+		COMMAND ${CMAKE_COMMAND} -E copy ${file} ${out_file}
+		COMMENT "Copying ${STAGE_CONTEXT} external file ${file}"
+		)
     endforeach()
   endforeach()
   list(APPEND package_files ${STAGE_OUT_DIR}/bin/fdbserver
