@@ -766,7 +766,7 @@ As of api version 630, additional features have been exposed as special keys and
 Modules
 -------
 
-A module is loosely defined as a key range where a user can expect similar behavior from reading any key in that range.
+A module is loosely defined as a key range in the special key space where a user can expect similar behavior from reading any key in that range.
 By default, users will see a ``special_keys_no_module_found`` error if they read from a range not contained in a module.
 This is likely to be an error since the read would always return an empty set of keys and can't be interesting (maybe it was a typo?).
 Users will also (by default) see a ``special_keys_cross_module_read`` error if their read spans a module boundary.
@@ -838,7 +838,7 @@ Caveats
 
 #. ``\xff\xff/transaction/read_conflict_range/`` The conflict range for a read is sometimes not known until that read completes (e.g. range reads with limits, key selectors). When you read from these special keys, the returned future first blocks until all pending reads are complete so it can give an accurate response.
 #. ``\xff\xff/transaction/write_conflict_range/`` The conflict range range for a ``set_versionstamped_key`` atomic op is not known until commit time. You'll get an approximate range (the actual range will be a subset of the approximate range) until the precise range is known.
-#. ``\xff\xff/transaction/conflicting_keys/`` Since using this feature costs server resources, it's disabled by default. You must opt in by setting the ``report_conflicting_keys`` transaction option.
+#. ``\xff\xff/transaction/conflicting_keys/`` Since using this feature costs server (i.e., proxy and resolver) resources, it's disabled by default. You must opt in by setting the ``report_conflicting_keys`` transaction option.
 
 Metrics module
 --------------
