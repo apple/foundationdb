@@ -494,13 +494,13 @@ void initHelp() {
 		"permit previously-excluded servers to rejoin the database",
 		"If `all' is specified, the excluded servers list is cleared.\n\nFor each IP address or IP:port pair in <ADDRESS>*, removes any matching exclusions from the excluded servers list. (A specified IP will match all IP:* exclusion entries)");
 	helpMap["setclass"] = CommandHelp(
-		"setclass <ADDRESS> <unset|storage|transaction|default>",
+		"setclass [<ADDRESS> <CLASS>]",
 		"change the class of a process",
-		"If no address and class are specified, lists the classes of all servers.\n\nSetting the class to `default' resets the process class to the class specified on the command line.");
+		"If no address and class are specified, lists the classes of all servers.\n\nSetting the class to `default' resets the process class to the class specified on the command line. The available classes are `unset', `storage', `transaction', `resolution', `proxy', `master', `test', `unset', `stateless', `log', `router', `cluster_controller', `fast_restore', `data_distributor', `coordinator', `ratekeeper', `storage_cache', `backup', and `default'.");
 	helpMap["status"] = CommandHelp(
 		"status [minimal|details|json]",
 		"get the status of a FoundationDB cluster",
-		"If the cluster is down, this command will print a diagnostic which may be useful in figuring out what is wrong. If the cluster is running, this command will print cluster statistics.\n\nSpecifying 'minimal' will provide a minimal description of the status of your database.\n\nSpecifying 'details' will provide load information for individual workers.\n\nSpecifying 'json' will provide status information in a machine readable JSON format.");
+		"If the cluster is down, this command will print a diagnostic which may be useful in figuring out what is wrong. If the cluster is running, this command will print cluster statistics.\n\nSpecifying `minimal' will provide a minimal description of the status of your database.\n\nSpecifying `details' will provide load information for individual workers.\n\nSpecifying `json' will provide status information in a machine readable JSON format.");
 	helpMap["exit"] = CommandHelp("exit", "exit the CLI", "");
 	helpMap["quit"] = CommandHelp();
 	helpMap["waitconnected"] = CommandHelp();
@@ -3562,7 +3562,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 						if (tokencmp(tokens[2], "run")) {
 							if (tokens.size() < 6) {
-								printf("ERROR: Usage: profile flow run <duration in seconds> <filename> <hosts>\n");
+								printf("ERROR: Usage: profile flow run <DURATION_IN_SECONDS> <FILENAME> <PROCESS>*\n");
 								is_error = true;
 								continue;
 							}
@@ -3629,7 +3629,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					}
 					if (tokencmp(tokens[1], "heap")) {
 						if (tokens.size() != 3) {
-							printf("ERROR: Usage: profile heap host\n");
+							printf("ERROR: Usage: profile heap <PROCESS>\n");
 							is_error = true;
 							continue;
 						}
