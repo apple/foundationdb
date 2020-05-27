@@ -41,25 +41,21 @@ public:
 	Deque() : arr(0), begin(0), end(0), mask(-1) {}
 
 	// TODO: iterator construction, other constructors
-	Deque(Deque const& r) : arr(nullptr), begin(0), end(r.size()), mask(r.mask) {
+	Deque(Deque const& r) : arr(0), begin(0), end(r.size()), mask(r.mask) {
 		if (r.capacity() > 0) {
 			arr = (T*)aligned_alloc(std::max(__alignof(T), sizeof(void*)), capacity() * sizeof(T));
 			ASSERT(arr != nullptr);
 		}
 		ASSERT(capacity() >= end || end == 0);
-		if (r.end >= r.begin) {
-			std::copy(r.arr + r.begin, r.arr + r.begin + r.size(), arr);
-		} else {
-			auto partOneSize = r.capacity() - r.begin; 
-			std::copy(r.arr + r.begin, r.arr + r.begin + partOneSize, arr);
-			std::copy(r.arr, r.arr + r.end, arr + partOneSize);
-		}
+		for (uint32_t i=0; i<end; i++)
+			new (&arr[i]) T(r[i]);
+		// FIXME: Specialization for POD types using memcpy?
 	}
 
 	void operator=(Deque const& r) {
 		cleanup();
 
-		arr = nullptr;
+		arr = 0;
 		begin = 0;
 		end = r.size();
 		mask = r.mask;
@@ -68,17 +64,13 @@ public:
 			ASSERT(arr != nullptr);
 		}
 		ASSERT(capacity() >= end || end == 0);
-		if (r.end >= r.begin) {
-			std::copy(r.arr + r.begin, r.arr + r.begin + r.size(), arr);
-		} else {
-			auto partOneSize = r.capacity() - r.begin;
-			std::copy(r.arr + r.begin, r.arr + r.begin + partOneSize, arr);
-			std::copy(r.arr, r.arr + r.end, arr + partOneSize);
-		}
+		for (uint32_t i=0; i<end; i++)
+			new (&arr[i]) T(r[i]);
+		// FIXME: Specialization for POD types using memcpy?
 	}
 
 	Deque(Deque&& r) BOOST_NOEXCEPT : begin(r.begin), end(r.end), mask(r.mask), arr(r.arr) {
-		r.arr = nullptr;
+		r.arr = 0;
 		r.begin = r.end = 0;
 		r.mask = -1;
 	}
@@ -90,8 +82,8 @@ public:
 		end = r.end;
 		mask = r.mask;
 		arr = r.arr;
-
-		r.arr = nullptr;
+		
+		r.arr = 0;
 		r.begin = r.end = 0;
 		r.mask = -1;
 	}
