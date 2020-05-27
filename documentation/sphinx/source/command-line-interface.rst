@@ -263,7 +263,7 @@ With no arguments, ``kill`` populates the list of processes that can be killed. 
 
 Displays all known processes. This is only useful when the database is unresponsive.
 
-``kill <ADDRESS>*``
+``kill <ADDRESS...>``
 
 Attempts to kill all specified processes. Each address should include the IP and port of the process being targeted.
 
@@ -313,7 +313,7 @@ Reads or sets parameters of client transaction sampling. Use ``get`` to list the
 
 Lists the processes that can be profiled using the ``flow`` and ``heap`` subcommands.
 
-``profile flow run <DURATION> <FILENAME> <PROCESS>*``
+``profile flow run <DURATION> <FILENAME> <PROCESS...>``
 
 Enables flow profiling on the specifed processes for ``DURATION`` seconds. Profiling output will be stored at the specified filename relative to the fdbserver process's trace log directory. To profile all processes, use ``all`` for the ``PROCESS`` parameter.
 

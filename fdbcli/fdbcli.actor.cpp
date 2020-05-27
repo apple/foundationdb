@@ -481,18 +481,18 @@ void initHelp() {
 		"change cluster coordinators or description",
 		"If 'auto' is specified, coordinator addresses will be choosen automatically to support the configured redundancy level. (If the current set of coordinators are healthy and already support the redundancy level, nothing will be changed.)\n\nOtherwise, sets the coordinators to the list of IP:port pairs specified by <ADDRESS>+. An fdbserver process must be running on each of the specified addresses.\n\ne.g. coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000\n\nIf 'description=desc' is specified then the description field in the cluster\nfile is changed to desc, which must match [A-Za-z0-9_]+.");
 	helpMap["exclude"] =
-	    CommandHelp("exclude [FORCE] [failed] [no_wait] <ADDRESS>*", "exclude servers from the database",
+	    CommandHelp("exclude [FORCE] [failed] [no_wait] <ADDRESS...>", "exclude servers from the database",
 	                "If no addresses are specified, lists the set of excluded servers.\n\nFor each IP address or "
-	                "IP:port pair in <ADDRESS>*, adds the address to the set of excluded servers then waits until all "
+	                "IP:port pair in <ADDRESS...>, adds the address to the set of excluded servers then waits until all "
 	                "database state has been safely moved away from the specified servers. If 'no_wait' is set, the "
 	                "command returns \nimmediately without checking if the exclusions have completed successfully.\n"
 	                "If 'FORCE' is set, the command does not perform safety checks before excluding.\n"
 	                "If 'failed' is set, the transaction log queue is dropped pre-emptively before waiting\n"
 	                "for data movement to finish and the server cannot be included again.");
 	helpMap["include"] = CommandHelp(
-		"include all|<ADDRESS>*",
+		"include all|<ADDRESS...>",
 		"permit previously-excluded servers to rejoin the database",
-		"If `all' is specified, the excluded servers list is cleared.\n\nFor each IP address or IP:port pair in <ADDRESS>*, removes any matching exclusions from the excluded servers list. (A specified IP will match all IP:* exclusion entries)");
+		"If `all' is specified, the excluded servers list is cleared.\n\nFor each IP address or IP:port pair in <ADDRESS...>, removes any matching exclusions from the excluded servers list. (A specified IP will match all IP:* exclusion entries)");
 	helpMap["setclass"] = CommandHelp(
 		"setclass [<ADDRESS> <CLASS>]",
 		"change the class of a process",
@@ -553,9 +553,9 @@ void initHelp() {
 		"enables or disables sets and clears",
 		"Setting or clearing keys from the CLI is not recommended.");
 	helpMap["kill"] = CommandHelp(
-		"kill all|list|<ADDRESS>*",
+		"kill all|list|<ADDRESS...>",
 		"attempts to kill one or more processes in the cluster",
-		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS>*, attempt to kill the specified process.");
+		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS ...>, attempt to kill the specified process.");
 	helpMap["profile"] = CommandHelp(
 		"profile <client|list|flow|heap> <action> <ARGS>",
 		"namespace for all the profiling-related commands.",
@@ -1835,42 +1835,42 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 		break;
 	case ConfigurationResult::DATABASE_UNAVAILABLE:
 		printf("ERROR: The database is unavailable\n");
-		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
 		printf("ERROR: All storage servers must be in one of the known regions\n");
-		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
 		printf("ERROR: When usable_regions > 1, all regions with priority >= 0 must be fully replicated before changing the configuration\n");
-		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
 		printf("ERROR: When changing usable_regions, only one region can have priority >= 0\n");
-		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
 		printf("ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
-		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::NOT_ENOUGH_WORKERS:
 		printf("ERROR: Not enough processes exist to support the specified configuration\n");
-		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::REGION_REPLICATION_MISMATCH:
 		printf("ERROR: `three_datacenter' replication is incompatible with region configuration\n");
-		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::DCID_MISSING:
 		printf("ERROR: `No storage servers in one of the specified regions\n");
-		printf("Type `configure FORCE <TOKEN>*' to configure without this check\n");
+		printf("Type `configure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::SUCCESS:
@@ -1997,12 +1997,12 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 		break;
 	case ConfigurationResult::REGION_REPLICATION_MISMATCH:
 		printf("ERROR: `three_datacenter' replication is incompatible with region configuration\n");
-		printf("Type `fileconfigure FORCE <TOKEN>*' to configure without this check\n");
+		printf("Type `fileconfigure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::DCID_MISSING:
 		printf("ERROR: `No storage servers in one of the specified regions\n");
-		printf("Type `fileconfigure FORCE <TOKEN>*' to configure without this check\n");
+		printf("Type `fileconfigure FORCE <TOKEN...>' to configure without this check\n");
 		ret=true;
 		break;
 	case ConfigurationResult::SUCCESS:
@@ -2191,7 +2191,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 					    "Please check that this exclusion does not bring down an entire storage team.\n"
 					    "Please also ensure that the exclusion will keep a majority of coordinators alive.\n"
 					    "You may add more storage processes or coordinators to make the operation safe.\n"
-					    "Type `exclude FORCE failed <ADDRESS>*' to exclude without performing safety checks.\n";
+					    "Type `exclude FORCE failed <ADDRESS...>' to exclude without performing safety checks.\n";
 					printf("%s", errorStr.c_str());
 					return true;
 				}
@@ -2200,7 +2200,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 			state std::string errorString = "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
 											"Please try the exclude again in 30 seconds.\n"
-										    "Type `exclude FORCE <ADDRESS>*' to exclude without checking free space.\n";
+										    "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space.\n";
 
 			StatusObjectReader statusObj(status);
 
@@ -2276,7 +2276,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 			if( ssExcludedCount==ssTotalCount || (1-worstFreeSpaceRatio)*ssTotalCount/(ssTotalCount-ssExcludedCount) > 0.9 ) {
 				printf("ERROR: This exclude may cause the total free space in the cluster to drop below 10%%.\n"
-					   "Type `exclude FORCE <ADDRESS>*' to exclude without checking free space.\n");
+					   "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space.\n");
 				return true;
 			}
 		}
@@ -3562,7 +3562,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 						if (tokencmp(tokens[2], "run")) {
 							if (tokens.size() < 6) {
-								printf("ERROR: Usage: profile flow run <DURATION_IN_SECONDS> <FILENAME> <PROCESS>*\n");
+								printf("ERROR: Usage: profile flow run <DURATION_IN_SECONDS> <FILENAME> <PROCESS...>\n");
 								is_error = true;
 								continue;
 							}
