@@ -12,6 +12,12 @@ Fixes
 * ``fdbrestore`` prefix options required exactly a single hyphen instead of the standard two. `(PR #3056) <https://github.com/apple/foundationdb/pull/3056>`_
 * Commits could stall on a newly elected proxy because of inaccurate compute estimates. `(PR #3123) <https://github.com/apple/foundationdb/pull/3123>`_
 
+Features
+--------
+* Added the ``getversion`` command to ``fdbcli`` which returns the current read version of the cluster.  `(PR #2882) <https://github.com/apple/foundationdb/pull/2882>`_
+* Added the ``advanceversion`` command to ``fdbcli`` which increases the current version of a cluster.  `(PR #2965) <https://github.com/apple/foundationdb/pull/2965>`_
+* Added the ``lock`` and ``unlock`` commands to ``fdbcli`` which lock or unlock a cluster. `(PR #2890) <https://github.com/apple/foundationdb/pull/2890>`_
+
 6.2.20
 ======
 
