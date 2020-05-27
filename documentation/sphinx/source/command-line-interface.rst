@@ -158,7 +158,7 @@ force_recovery_with_data_loss
 
 The ``force_recovery_with_data_loss`` command will recover a multi-region database to the specified datacenter. Its syntax is ``force_recovery_with_data_loss <DCID>``. It will likely result in the loss of the most recently committed mutations and is intended to be used if the primary datacenter has been lost. 
 
-This command will change the region configuration to have a positive priority for the chosen ``DCID`` and a negative priority for all other ``DCIDs``. It will also set ``usable_regions`` to 1. If the database has already recovered, this command does nothing.
+This command will change the :ref:`region configuration <configuration-configuring-regions>` to have a positive priority for the chosen ``DCID`` and a negative priority for all other ``DCIDs``. It will also set ``usable_regions`` to 1. If the database has already recovered, this command does nothing.
 
 get
 ---
@@ -305,17 +305,29 @@ profile
 
 The ``profile`` command is used to control various profiling actions.
 
+client
+^^^^^^
+
 ``profile client <get|set>``
 
 Reads or sets parameters of client transaction sampling. Use ``get`` to list the current parameters, and ``set <RATE|default> <SIZE|default>`` to set them. ``RATE`` is the fraction of transactions to be sampled, and ``SIZE`` is the amount (in bytes) of sampled data to store in the database.
+
+list
+^^^^
 
 ``profile list``
 
 Lists the processes that can be profiled using the ``flow`` and ``heap`` subcommands.
 
+flow
+^^^^
+
 ``profile flow run <DURATION> <FILENAME> <PROCESS...>``
 
 Enables flow profiling on the specifed processes for ``DURATION`` seconds. Profiling output will be stored at the specified filename relative to the fdbserver process's trace log directory. To profile all processes, use ``all`` for the ``PROCESS`` parameter.
+
+heap
+^^^^
 
 ``profile heap <PROCESS>``
 
