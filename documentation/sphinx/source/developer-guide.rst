@@ -834,7 +834,7 @@ The namespaces for sets of keys are
 #. ``\xff\xff/transaction/conflicting_keys/`` If this transaction failed due to a conflict, it must be the case that some transaction attempted [#conflicting_keys]_ to commit with a write conflict range that intersects this transaction's read conflict range. This is the subset of your read conflict range that actually intersected a write conflict from another transaction.
 
 Caveats
--------
+~~~~~~~
 
 #. ``\xff\xff/transaction/read_conflict_range/`` The conflict range for a read is sometimes not known until that read completes (e.g. range reads with limits, key selectors). When you read from these special keys, the returned future first blocks until all pending reads are complete so it can give an accurate response.
 #. ``\xff\xff/transaction/write_conflict_range/`` The conflict range range for a ``set_versionstamped_key`` atomic op is not known until commit time. You'll get an approximate range (the actual range will be a subset of the approximate range) until the precise range is known.
@@ -843,11 +843,11 @@ Caveats
 Metrics module
 --------------
 
-Reads in the metrics module are not transactional and may require an rpc to complete.
+Reads in the metrics module are not transactional and may require rpcs to complete.
 
 The key ``\xff\xff/metrics/data_distribution_stats/<begin>`` represent stats about the shard that begins at ``<begin>``. The value is a json object with a "ShardBytes" field. More fields may be added in the future.
 
-A user can see stats about the data distribution like so::
+A user can see stats about data distribution like so::
 
   >>> for k, v in db.get_range_startswith('\xff\xff/metrics/data_distribution_stats/'):
   ...     print(k, v)
@@ -1068,4 +1068,4 @@ If you see one of those errors, the best way of action is to fail the client.
 
 At a first glance this looks very similar to an ``commit_unknown_result``. However, these errors lack the one guarantee ``commit_unknown_result`` still gives to the user: if the commit has already been sent to the database, the transaction could get committed at a later point in time. This means that if you retry the transaction, your new transaction might race with the old transaction. While this technically doesn't violate any consistency guarantees, abandoning a transaction means that there are no causality guaranatees.
 
-.. [#conflicting_keys] In practice it probably committed successfully, but if you're running multiple resolvers then it's possible that a transaction can cause another transaction to without committing successfully.
+.. [#conflicting_keys] In practice it probably committed successfully, but if you're running multiple resolvers then it's possible that a transaction can cause another transaction to abort without committing successfully.
