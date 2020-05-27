@@ -768,15 +768,15 @@ Modules
 
 A module is loosely defined as a key range in the special key space where a user can expect similar behavior from reading any key in that range.
 By default, users will see a ``special_keys_no_module_found`` error if they read from a range not contained in a module.
-This is likely to be an error since the read would always return an empty set of keys and can't be interesting (maybe it was a typo?).
+The error indicates the read would always return an empty set of keys if it proceeded. This could be caused by typo in the keys to read.
 Users will also (by default) see a ``special_keys_cross_module_read`` error if their read spans a module boundary.
-This is also potentially an error, since the user may be surprised by seeing the behavior of multiple modules in the same read.
+The error is to save the user from the surprise of seeing the behavior of multiple modules in the same read.
 Users may opt out of these restrictions by setting the ``special_key_space_relaxed`` transaction option.
 
 Each special key that existed before api version 630 is its own module. These are
 
-#. ``\xff\xff/cluster_file_path`` Path to this database's cluster file
-#. ``\xff\xff/connection_string`` The desired contents of the cluster file. Should only be different if the client does not have permission to write to the cluster file.
+#. ``\xff\xff/cluster_file_path`` See :ref:`cluster file client access <cluster-file-client-access>`
+#. ``\xff\xff/cluster_file_path`` See :ref:`cluster file client access <cluster-file-client-access>`
 #. ``\xff\xff/status/json`` See :doc:`Machine-readable status <mr-status>`
 
 Prior to api version 630, it was also possible to read a range starting at
