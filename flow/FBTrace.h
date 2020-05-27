@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "fdbclient/FDBTypes.h"
 #include "flow/FileIdentifier.h"
 #include "flow/FastRef.h"
 #include "flow/ObjectSerializer.h"
@@ -132,12 +133,12 @@ public:
 		READER_GETVALUEPREFIX_AFTER = 11
 	};
 
-	uint64_t id;
+	TransactionID id;
 	double time;
 	int32_t location;
 
 	GetValueDebugTrace() {}
-	GetValueDebugTrace(uint64_t debugID, double t, codeLocation loc) : id(debugID), time(t), location(loc) {}
+	GetValueDebugTrace(TransactionID id, codeLocation loc, double time = g_network->now()) : id(id), time(time), location(loc) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id, time, location);
@@ -155,12 +156,12 @@ public:
 		NATIVEAPI_WATCHVALUE_AFTER_READ = 5
 	};
 
-	uint64_t id;
+	TransactionID id;
 	double time;
 	int32_t location;
 
 	WatchValueDebugTrace() {}
-	WatchValueDebugTrace(uint64_t debugID, double t, codeLocation loc) : id(debugID), time(t), location(loc) {}
+	WatchValueDebugTrace(TransactionID id, double t, codeLocation loc) : id(id), time(t), location(loc) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id, time, location);
@@ -194,12 +195,12 @@ public:
 		TLOG_TLOGCOMMIT_AFTER = 20
 	};
 
-	uint64_t id;
+	TransactionID id;
 	double time;
 	int32_t location;
 
 	CommitDebugTrace() {}
-	CommitDebugTrace(uint64_t debugID, double t, codeLocation loc) : id(debugID), time(t), location(loc) {}
+	CommitDebugTrace(TransactionID id, double t, codeLocation loc) : id(id), time(t), location(loc) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id, time, location);
@@ -247,12 +248,12 @@ public:
 		READWRITE_RANDOMREADWRITECLIENT_AFTER = 35
 	};
 
-	uint64_t id;
+	TransactionID id;
 	double time;
 	int32_t location;
 
 	TransactionDebugTrace() {}
-	TransactionDebugTrace(uint64_t debugID, double t, codeLocation loc) : id(debugID), time(t), location(loc) {}
+	TransactionDebugTrace(TransactionID id, double t, codeLocation loc) : id(id), time(t), location(loc) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id, time, location);

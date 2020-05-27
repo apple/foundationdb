@@ -43,6 +43,7 @@
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
@@ -1531,10 +1532,12 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 				}
 				choose {
 					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
-					when(GetValueReply _reply =
-							wait(loadBalance(ssi.second, &StorageServerInterface::getValue,
-											GetValueRequest(key, ver, cx->sampleReadTags() ? tags : Optional<TagSet>(), getValueID), TaskPriority::DefaultPromiseEndpoint, false,
-											cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
+					when(GetValueReply _reply = wait(
+					         loadBalance(ssi.second, &StorageServerInterface::getValue,
+					                     GetValueRequest(key, ver, cx->sampleReadTags() ? tags : Optional<TagSet>(),
+					                                     info.id, getValueID),
+					                     TaskPriority::DefaultPromiseEndpoint, false,
+					                     cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 						reply = _reply;
 					}
 				}
@@ -2774,6 +2777,7 @@ void Transaction::reset() {
 
 void Transaction::fullReset() {
 	reset();
+	info.id = deterministicRandom()->randomUniqueID();
 	backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
 }
 

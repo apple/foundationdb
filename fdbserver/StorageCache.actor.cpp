@@ -251,8 +251,8 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 		if( req.debugID.present() ) {
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
 			//FIXME
-			fbTrace<GetValueDebugTrace>(req.debugID.get().first(), now(), GetValueDebugTrace::STORAGECACHE_GETVALUE_DO_READ);
 		}
+		fbTrace<GetValueDebugTrace>(req.txnID, now(), GetValueDebugTrace::STORAGECACHE_GETVALUE_DO_READ);
 
 		state Optional<Value> v;
 		state Version version = wait( waitForVersion( data, req.version ) );

@@ -21,6 +21,7 @@
 #include <cinttypes>
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
+#include "flow/FBTrace.h"
 #include "flow/IndexedSet.h"
 #include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
@@ -922,11 +923,13 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
+		fbTrace<GetValueDebugTrace>(req.txnID, GetValueDebugTrace::STORAGESERVER_GETVALUE_DO_READ);
 
 		state Optional<Value> v;
 		state Version version = wait( waitForVersion( data, req.version ) );
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
+		fbTrace<GetValueDebugTrace>(req.txnID, GetValueDebugTrace::STORAGESERVER_GETVALUE_AFTER_VERSION);
 
 		state uint64_t changeCounter = data->shardChangeCounter;
 
@@ -981,6 +984,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
+		fbTrace<GetValueDebugTrace>(req.txnID, req.txnID, GetValueDebugTrace::STORAGESERVER_GETVALUE_AFTER_READ);
 
 		GetValueReply reply(v);
 		reply.penalty = data->getPenalty();
@@ -1018,7 +1022,7 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 			try {
 				state Version latest = data->data().latestVersion;
 				state Future<Void> watchFuture = data->watches.onChange(req.key);
-				GetValueRequest getReq( req.key, latest, req.tags, req.debugID );
+				GetValueRequest getReq( req.key, latest, req.tags, req.txnID, req.debugID );
 				state Future<Void> getValue = getValueQ( data, getReq ); //we are relying on the delay zero at the top of getValueQ, if removed we need one here
 				GetValueReply reply = wait( getReq.reply.getFuture() );
 				//TraceEvent("WatcherCheckValue").detail("Key",  req.key  ).detail("Value",  req.value  ).detail("CurrentValue",  v  ).detail("Ver", latest);
@@ -3708,7 +3712,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
 
 	self->transactionTagCounter.startNewInterval(self->thisServerID);
-	self->actors.add(recurring([this](){ self->transactionTagCounter.startNewInterval(self->thisServerID); }, SERVER_KNOBS->READ_TAG_MEASUREMENT_INTERVAL));
+	self->actors.add(recurring([&](){ self->transactionTagCounter.startNewInterval(self->thisServerID); }, SERVER_KNOBS->READ_TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send( Void() );
 

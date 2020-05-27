@@ -35,6 +35,7 @@ typedef uint64_t Sequence;
 typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
+typedef UID TransactionID;
 
 enum {
 	tagLocalitySpecial = -1,

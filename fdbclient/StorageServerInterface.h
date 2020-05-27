@@ -175,15 +175,16 @@ struct GetValueRequest : TimedRequest {
 	Key key;
 	Version version;
 	Optional<TagSet> tags;
+	TransactionID txnID;
 	Optional<UID> debugID;
 	ReplyPromise<GetValueReply> reply;
 
 	GetValueRequest(){}
-	GetValueRequest(const Key& key, Version ver, Optional<TagSet> tags, Optional<UID> debugID) : key(key), version(ver), tags(tags), debugID(debugID) {}
+	GetValueRequest(const Key& key, Version ver, Optional<TagSet> tags, TransactionID txnID, Optional<UID> debugID) : key(key), version(ver), tags(tags), debugID(debugID) {}
 	
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		serializer(ar, key, version, tags, debugID, reply);
+		serializer(ar, key, version, tags, debugID, reply, txnID);
 	}
 };
 
@@ -206,13 +207,16 @@ struct WatchValueRequest {
 	Optional<Value> value;
 	Version version;
 	Optional<TagSet> tags;
+	TransactionID txnID;
 	Optional<UID> debugID;
 	ReplyPromise<WatchValueReply> reply;
 
 	WatchValueRequest(){}
-	WatchValueRequest(const Key& key, Optional<Value> value, Version ver, Optional<TagSet> tags, Optional<UID> debugID) : key(key), value(value), version(ver), tags(tags), debugID(debugID) {}
-	
-	template <class Ar> 
+	WatchValueRequest(const Key& key, Optional<Value> value, Version ver, Optional<TagSet> tags, TransactionID txnID,
+	                  Optional<UID> debugID)
+	  : key(key), value(value), version(ver), tags(tags), txnID(txnID), debugID(debugID) {}
+
+	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, key, value, version, tags, debugID, reply);
 	}

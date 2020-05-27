@@ -22,6 +22,7 @@
 #include "flow/Trace.h"
 #include "flow/FBTrace.h"
 #include "flow/FileTraceLogWriter.h"
+#include "flow/Knobs.h"
 #include "flow/XmlTraceLogFormatter.h"
 #include "flow/JsonTraceLogFormatter.h"
 #include "flow/flow.h"
@@ -295,6 +296,9 @@ public:
 		                                                              formatter->getExtension(), maxLogsSize,
 		                                                              [this]() { barriers->triggerAll(); }, issues));
 
+		if (FLOW_KNOBS->FBTRACES_ENABLED) {
+			FBTraceImpl::open(directory, processName, basename, rs, maxLogsSize);
+		}
 		if ( g_network->isSimulated() )
 			writer = Reference<IThreadPool>(new DummyThreadPool());
 		else
