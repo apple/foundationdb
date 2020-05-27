@@ -279,7 +279,9 @@ The ``lock`` command locks the database with a randomly generated lockUID.
 maintenance
 -----------
 
-The ``maintenance`` command marks a particular zone ID (i.e. fault domain) as being under maintenance. A zone that is under maintenance will not have data moved away from it even if processes in that zone fail. This is useful when the amount of time that the processes in a fault domain are expected to be absent is reasonably short. The syntax for this command is ``maintenance [on|off] [ZONEID] [SECONDS]``.
+The ``maintenance`` command marks a particular zone ID (i.e. fault domain) as being under maintenance. Its syntax is ``maintenance [on|off] [ZONEID] [SECONDS]``. 
+
+A zone that is under maintenance will not have data moved away from it even if processes in that zone fail. In particular, this means the cluster will not attempt to heal the replication factor as a result of failures in the maintenance zone. This is useful when the amount of time that the processes in a fault domain are expected to be absent is reasonably short and you don't want to move data to and from the affected processes. 
 
 Running this command with no arguments will display the state of any current maintenance.
 
