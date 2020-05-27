@@ -69,7 +69,7 @@ ERROR( serialization_failed, 1044, "Failed to deserialize an object" )
 ERROR( connection_unreferenced, 1048, "No peer references for connection" )
 ERROR( connection_idle, 1049, "Connection closed after idle timeout" )
 ERROR( disk_adapter_reset, 1050, "The disk queue adpater reset" )
-ERROR(batch_transaction_throttled, 1051, "Batch GRV request rate limit exceeded")
+ERROR( batch_transaction_throttled, 1051, "Batch GRV request rate limit exceeded")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
