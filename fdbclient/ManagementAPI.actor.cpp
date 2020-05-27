@@ -84,7 +84,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 
 			StatusObject regionObj;
 			regionObj["regions"] = mv;
-			out[p+key] = BinaryWriter::toValue(regionObj, IncludeVersion()).toString();
+			out[p+key] = BinaryWriter::toValue(regionObj, IncludeVersion(ProtocolVersion::withRegionConfiguration())).toString();
 		}
 
 		return out;
@@ -174,11 +174,11 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		out[p+"log_replicas"] = log_replicas;
 		out[p+"log_anti_quorum"] = "0";
 
-		BinaryWriter policyWriter(IncludeVersion());
+		BinaryWriter policyWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, storagePolicy);
 		out[p+"storage_replication_policy"] = policyWriter.toValue().toString();
 
-		policyWriter = BinaryWriter(IncludeVersion());
+		policyWriter = BinaryWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, tLogPolicy);
 		out[p+"log_replication_policy"] = policyWriter.toValue().toString();
 		return out;
@@ -214,7 +214,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	if (remoteRedundancySpecified) {
 		out[p+"remote_log_replicas"] = remote_log_replicas;
 
-		BinaryWriter policyWriter(IncludeVersion());
+		BinaryWriter policyWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, remoteTLogPolicy);
 		out[p+"remote_log_policy"] = policyWriter.toValue().toString();
 		return out;
@@ -244,7 +244,7 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 	if(!outConf.count(p + "storage_replication_policy") && outConf.count(p + "storage_replicas")) {
 		int storageCount = stoi(outConf[p + "storage_replicas"]);
 		Reference<IReplicationPolicy> storagePolicy = Reference<IReplicationPolicy>(new PolicyAcross(storageCount, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-		BinaryWriter policyWriter(IncludeVersion());
+		BinaryWriter policyWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, storagePolicy);
 		outConf[p+"storage_replication_policy"] = policyWriter.toValue().toString();
 	}
@@ -252,7 +252,7 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 	if(!outConf.count(p + "log_replication_policy") && outConf.count(p + "log_replicas")) {
 		int logCount = stoi(outConf[p + "log_replicas"]);
 		Reference<IReplicationPolicy> logPolicy = Reference<IReplicationPolicy>(new PolicyAcross(logCount, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-		BinaryWriter policyWriter(IncludeVersion());
+		BinaryWriter policyWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, logPolicy);
 		outConf[p+"log_replication_policy"] = policyWriter.toValue().toString();
 	}

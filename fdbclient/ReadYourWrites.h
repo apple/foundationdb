@@ -124,6 +124,8 @@ public:
 
 	// Wait for all reads that are currently pending to complete
 	Future<Void> pendingReads() { return resetPromise.getFuture() || reading; }
+	// Throws before the lifetime of this transaction ends
+	Future<Void> resetFuture() { return resetPromise.getFuture(); }
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods
 	Error deferredError;
