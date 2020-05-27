@@ -94,7 +94,7 @@ Other Changes
 * Double the number of shard locations that the client will cache locally. `(PR #2198) <https://github.com/apple/foundationdb/pull/2198>`_
 * Replaced the ``-add_prefix`` and ``-remove_prefix`` options with ``--add_prefix`` and ``--remove_prefix`` in ``fdbrestore`` `(PR 3206) <https://github.com/apple/foundationdb/pull/3206>`_
 * Data distribution metrics can now be read using the special keyspace ``\xff\xff/metrics/data_distribution_stats``. `(PR #2547) <https://github.com/apple/foundationdb/pull/2547>`_
-* The ``\xff\xff/worker_interfaces/`` keyspace now begins at a key which includes a trailing `/` (previously `\xff\xff/worker_interfaces`). Range reads to this range now respect the end key passed into the range and include the keyspace prefix in the resulting keys. `(PR #3095) <https://github.com/apple/foundationdb/pull/3095>`_
+* The ``\xff\xff/worker_interfaces/`` keyspace now begins at a key which includes a trailing ``/`` (previously ``\xff\xff/worker_interfaces``). Range reads to this range now respect the end key passed into the range and include the keyspace prefix in the resulting keys. `(PR #3095) <https://github.com/apple/foundationdb/pull/3095>`_
 * Added FreeBSD support. `(PR #2634) <https://github.com/apple/foundationdb/pull/2634>`_
 * Updated boost to 1.72.  `(PR #2684) <https://github.com/apple/foundationdb/pull/2684>`_
 
