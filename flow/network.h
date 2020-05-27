@@ -525,6 +525,9 @@ public:
 	virtual bool isAddressOnThisHost( NetworkAddress const& addr ) = 0;
 	// Returns true if it is reasonably certain that a connection to the given address would be a fast loopback connection
 
+	// If the network has not been run and this function has not been previously called, returns true. Otherwise, returns false.
+	virtual bool checkRunnable() = 0;
+
 	// Shorthand for transport().getLocalAddress()
 	static NetworkAddress getLocalAddress()
 	{
