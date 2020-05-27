@@ -77,7 +77,7 @@ Bindings
 * Golang: Added ``Subspace.PackWithVersionstamp`` that can be used to pack a ``Tuple`` that contains a versionstamp. `(PR #2243) <https://github.com/apple/foundationdb/pull/2243>`_
 * Golang: Implement ``Stringer`` interface for ``Tuple``, ``Subspace``, ``UUID``, and ``Versionstamp``. `(PR #3032) <https://github.com/apple/foundationdb/pull/3032>`_
 * C: The ``FDBKeyValue`` struct's ``key`` and ``value`` members have changed type from ``void*`` to ``uint8_t*``. `(PR #2622) <https://github.com/apple/foundationdb/pull/2622>`_
-* Deprecated ``enable_slow_task_profiling`` transaction option and replaced it with ``enable_run_loop_profiling``. `(PR #2608) <https://github.com/apple/foundationdb/pull/2608>`_
+* Deprecated ``enable_slow_task_profiling`` network option and replaced it with ``enable_run_loop_profiling``. `(PR #2608) <https://github.com/apple/foundationdb/pull/2608>`_
 
 Other Changes
 -------------
@@ -93,7 +93,8 @@ Other Changes
 * Improved the slow task profiler to also report backtraces for periods when the run loop is saturated. `(PR #2608) <https://github.com/apple/foundationdb/pull/2608>`_
 * Double the number of shard locations that the client will cache locally. `(PR #2198) <https://github.com/apple/foundationdb/pull/2198>`_
 * Replaced the ``-add_prefix`` and ``-remove_prefix`` options with ``--add_prefix`` and ``--remove_prefix`` in ``fdbrestore`` `(PR 3206) <https://github.com/apple/foundationdb/pull/3206>`_
-* Data distribution metrics can now be read using the special key-space ``\xff\xff/metrics/data_distribution_stats``. `(PR #2547) <https://github.com/apple/foundationdb/pull/2547>`_
+* Data distribution metrics can now be read using the special keyspace ``\xff\xff/metrics/data_distribution_stats``. `(PR #2547) <https://github.com/apple/foundationdb/pull/2547>`_
+* The ``\xff\xff/worker_interfaces/`` keyspace now begins at a key which includes a trailing ``/`` (previously ``\xff\xff/worker_interfaces``). Range reads to this range now respect the end key passed into the range and include the keyspace prefix in the resulting keys. `(PR #3095) <https://github.com/apple/foundationdb/pull/3095>`_
 * Added FreeBSD support. `(PR #2634) <https://github.com/apple/foundationdb/pull/2634>`_
 * Updated boost to 1.72.  `(PR #2684) <https://github.com/apple/foundationdb/pull/2684>`_
 
