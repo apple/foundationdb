@@ -78,12 +78,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	struct Writer : IThreadPoolReceiver {
 		DB& db;
 		UID id;
-		std::unique_ptr<rocksdb::WriteBatch> writeBatch;
-		rocksdb::WriteOptions writeOptions;
 
-		explicit Writer(DB& db, UID id)
-			: db(db), id(id), writeBatch(new rocksdb::WriteBatch{})
-		{}
+		explicit Writer(DB& db, UID id) : db(db), id(id) {}
 
 		~Writer() {
 			if (db) {
@@ -125,47 +121,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		}
 
-		struct SetAction : TypedAction<Writer, SetAction> {
-			rocksdb::Slice key;
-			rocksdb::Slice value;
-			rocksdb::WriteOptions options;
-			// Keep the Arena block alive until we're done writing.
-			Optional<Reference<struct ArenaBlock>> arenaRef;
-			explicit SetAction(KeyValueRef kv, const Arena* a)
-			  : key(toSlice(kv.key)), value(toSlice(kv.value)),
-			    arenaRef(a ? makeOptional(a->impl) : Optional<Reference<struct ArenaBlock>>()) {
-				options.sync = true;
-			}
-
-			double getTimeEstimate() override { return SERVER_KNOBS->SET_TIME_ESTIMATE; }
-		};
-		void action(SetAction& a) {
-			writeBatch->Put(db->DefaultColumnFamily(), a.key, a.value);
-		}
-
-		struct ClearAction : TypedAction<Writer, ClearAction> {
-			rocksdb::Slice begin, end;
-			explicit ClearAction(KeyRangeRef range)
-				: begin(toSlice(range.begin)), end(toSlice(range.end))
-			{}
-			double getTimeEstimate() override { return SERVER_KNOBS->CLEAR_TIME_ESTIMATE; }
-		};
-		void action(ClearAction& a) {
-			writeBatch->DeleteRange(db->DefaultColumnFamily(), a.begin, a.end);
-		}
-
 		struct CommitAction : TypedAction<Writer, CommitAction> {
+			std::unique_ptr<rocksdb::WriteBatch> batchToCommit;
 			ThreadReturnPromise<Void> done;
 			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CommitAction& a) {
 			rocksdb::WriteOptions options;
 			options.sync = true;
-			auto s = db->Write(options, writeBatch.get());
-			if (s.ok()) {
-				writeBatch.reset(new rocksdb::WriteBatch{});
-				s = db->FlushWAL(true);
-			}
+			auto s = db->Write(options, a.batchToCommit.get());
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Commit");
 				a.done.sendError(statusToError(s));
@@ -296,6 +260,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	unsigned nReaders = 2;
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
+	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id)
 		: path(path)
@@ -350,14 +315,24 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
-	void set(KeyValueRef kv, const Arena* a) override { writeThread->post(new Writer::SetAction(kv, a)); }
+	void set(KeyValueRef kv, const Arena*) override {
+		if (writeBatch == nullptr) {
+			writeBatch.reset(new rocksdb::WriteBatch());
+		}
+		writeBatch->Put(toSlice(kv.key), toSlice(kv.value));
+	}
 
 	void clear(KeyRangeRef keyRange, const Arena*) override {
-		writeThread->post(new Writer::ClearAction(keyRange));
+		if (writeBatch == nullptr) {
+			writeBatch.reset(new rocksdb::WriteBatch());
+		}
+
+		writeBatch->DeleteRange(toSlice(keyRange.begin), toSlice(keyRange.end));
 	}
 
 	Future<Void> commit(bool) override {
 		auto a = new Writer::CommitAction();
+		a->batchToCommit = std::move(writeBatch);
 		auto res = a->done.getFuture();
 		writeThread->post(a);
 		return res;
