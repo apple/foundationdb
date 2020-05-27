@@ -3632,7 +3632,7 @@ void platformSpecificDirectoryOpsTests(const std::string &cwd, int &errors) {
 	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three/../four", true, false, joinPath(cwd, "simfdb/backups/one/"));
 }
 #else
-void platformSpecificDirectoryOpsTests(int &errors) {
+void platformSpecificDirectoryOpsTests(const std::string &cwd, int &errors) {
 }
 #endif
 
