@@ -860,6 +860,10 @@ public:
 		return emptyConfig;
 	}
 
+	virtual bool checkRunnable() {
+		return net2->checkRunnable();
+	}
+
 	virtual void stop() {
 		isStopped = true;
 	}

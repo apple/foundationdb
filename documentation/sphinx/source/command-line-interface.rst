@@ -30,6 +30,11 @@ Commands within ``fdbcli``
 
 The following commands can be issued from within ``fdbcli`` at the internal ``fdb>`` prompt:
 
+advanceversion
+--------------
+
+Forces the cluster to recover at the specified version. If the specified version is larger than the current version of the cluster, the cluster version is advanced to the specified version via a forced recovery.
+
 begin
 -----
 
@@ -101,15 +106,6 @@ Set the process using ``configure [proxies|resolvers|logs]=<N>``, where ``<N>`` 
 
 For recommendations on appropriate values for process types in large clusters, see :ref:`guidelines-process-class-config`.
 
-fileconfigure
--------------
-
-The ``fileconfigure`` command is alternative to the ``configure`` command which changes the configuration of the database based on a json document. The command loads a JSON document from the provided file, and change the database configuration to match the contents of the JSON document.
-
-The format should be the same as the value of the ``configuration`` entry in status JSON without ``excluded_servers`` or ``coordinators_count``. Its syntax is ``fileconfigure [new] <FILENAME>``.
-
-"The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one.
-
 coordinators
 ------------
 
@@ -141,6 +137,16 @@ exit
 
 The ``exit`` command exits ``fdbcli``.
 
+fileconfigure
+-------------
+
+The ``fileconfigure`` command is alternative to the ``configure`` command which changes the configuration of the database based on a json document. The command loads a JSON document from the provided file, and change the database configuration to match the contents of the JSON document.
+
+The format should be the same as the value of the ``configuration`` entry in status JSON without ``excluded_servers`` or ``coordinators_count``. Its syntax is ``fileconfigure [new] <FILENAME>``.
+
+"The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one.
+
+
 get
 ---
 
@@ -166,11 +172,6 @@ getversion
 ----------
 
 The ``getversion`` command fetches the current read version of the cluster or currently running transaction.
-
-advanceversion
---------------
-
-Forces the cluster to recover at the specified version. If the specified version is larger than the current version of the cluster, the cluster version is advanced to the specified version via a forced recovery.
 
 help
 ----
