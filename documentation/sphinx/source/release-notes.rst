@@ -67,7 +67,7 @@ Status
 Bindings
 --------
 
-* API version updated to 630. See the :ref:`API version upgrade guide <api-version-upgrade-guide-630>` for upgrade details.
+* API version updated to 700. See the :ref:`API version upgrade guide <api-version-upgrade-guide-700>` for upgrade details.
 * Python: The ``@fdb.transactional`` decorator will now throw an error if the decorated function returns a generator. `(PR #1724) <https://github.com/apple/foundationdb/pull/1724>`_
 * Java: Add caching for various JNI objects to improve performance. `(PR #2809) <https://github.com/apple/foundationdb/pull/2809>`_
 * Java: Optimize byte array comparisons in ``ByteArrayUtil``. `(PR #2823) <https://github.com/apple/foundationdb/pull/2823>`_
