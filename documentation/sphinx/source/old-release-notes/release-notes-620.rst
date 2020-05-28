@@ -2,6 +2,32 @@
 Release Notes
 #############
 
+6.2.21
+======
+
+Fixes
+-----
+
+* HTTPS requests made by backup could hang indefinitely. `(PR #3027) <https://github.com/apple/foundationdb/pull/3027>`_
+* ``fdbrestore`` prefix options required exactly a single hyphen instead of the standard two. `(PR #3056) <https://github.com/apple/foundationdb/pull/3056>`_
+* Commits could stall on a newly elected proxy because of inaccurate compute estimates. `(PR #3123) <https://github.com/apple/foundationdb/pull/3123>`_
+
+Features
+--------
+* Added the ``getversion`` command to ``fdbcli`` which returns the current read version of the cluster.  `(PR #2882) <https://github.com/apple/foundationdb/pull/2882>`_
+* Added the ``advanceversion`` command to ``fdbcli`` which increases the current version of a cluster.  `(PR #2965) <https://github.com/apple/foundationdb/pull/2965>`_
+* Added the ``lock`` and ``unlock`` commands to ``fdbcli`` which lock or unlock a cluster. `(PR #2890) <https://github.com/apple/foundationdb/pull/2890>`_
+
+6.2.20
+======
+
+Fixes
+-----
+
+* In rare scenarios, clients could send corrupted data to the server. `(PR #2976) <https://github.com/apple/foundationdb/pull/2976>`_
+* Internal tools like ``fdbbackup`` are no longer tracked as clients in status (introduced in 6.2.18) `(PR #2849) <https://github.com/apple/foundationdb/pull/2849>`_
+* Changed TLS error handling to match the behavior of 6.2.15. `(PR #2993) <https://github.com/apple/foundationdb/pull/2993>`_ `(PR #2977) <https://github.com/apple/foundationdb/pull/2977>`_
+
 6.2.19
 ======
 

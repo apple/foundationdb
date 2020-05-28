@@ -36,6 +36,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
+#include "fdbserver/MutationTracking.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 
@@ -60,19 +61,17 @@ struct StagingKey {
 	// Assume: SetVersionstampedKey and SetVersionstampedValue have been converted to set
 	void add(const MutationRef& m, LogMessageVersion newVersion) {
 		ASSERT(m.type != MutationRef::SetVersionstampedKey && m.type != MutationRef::SetVersionstampedValue);
-		if (debugMutation("StagingKeyAdd", newVersion.version, m)) {
-			TraceEvent("StagingKeyAdd")
-			    .detail("Version", version.toString())
-			    .detail("NewVersion", newVersion.toString())
-			    .detail("Mutation", m.toString());
-		}
+		DEBUG_MUTATION("StagingKeyAdd", newVersion.version, m)
+		    .detail("Version", version.toString())
+		    .detail("NewVersion", newVersion.toString())
+		    .detail("Mutation", m);
 		if (version == newVersion) {
 			// This could happen because the same mutation can be present in
 			// overlapping mutation logs, because new TLogs can copy mutations
 			// from old generation TLogs (or backup worker is recruited without
 			// knowning previously saved progress).
 			ASSERT(type == m.type && key == m.param1 && val == m.param2);
-			TraceEvent("SameVersion").detail("Version", version.toString()).detail("Mutation", m.toString());
+			TraceEvent("SameVersion").detail("Version", version.toString()).detail("Mutation", m);
 			return;
 		}
 
@@ -84,15 +83,13 @@ struct StagingKey {
 				ASSERT(m.param1 == m.param2);
 			}
 			if (version < newVersion) {
-				if (debugMutation("StagingKeyAdd", newVersion.version, m)) {
-					TraceEvent("StagingKeyAdd")
+				DEBUG_MUTATION("StagingKeyAdd", newVersion.version, m)
 					    .detail("Version", version.toString())
 					    .detail("NewVersion", newVersion.toString())
 					    .detail("MType", getTypeString(type))
 					    .detail("Key", key)
 					    .detail("Val", val)
 					    .detail("NewMutation", m.toString());
-				}
 				key = m.param1;
 				val = m.param2;
 				type = (MutationRef::Type)m.type;
@@ -108,8 +105,8 @@ struct StagingKey {
 				TraceEvent("SameVersion")
 				    .detail("Version", version.toString())
 				    .detail("NewVersion", newVersion.toString())
-				    .detail("OldMutation", it->second.toString())
-				    .detail("NewMutation", m.toString());
+				    .detail("OldMutation", it->second)
+				    .detail("NewMutation", m);
 				ASSERT(it->second.type == m.type && it->second.param1 == m.param1 && it->second.param2 == m.param2);
 			}
 		}
@@ -117,8 +114,9 @@ struct StagingKey {
 
 	// Precompute the final value of the key.
 	// TODO: Look at the last LogMessageVersion, if it set or clear, we can ignore the rest of versions.
-	void precomputeResult(const char* context) {
-		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult")
+	void precomputeResult(const char* context, UID applierID, int batchIndex) {
+		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult", applierID)
+		    .detail("BatchIndex", batchIndex)
 		    .detail("Context", context)
 		    .detail("Version", version.toString())
 		    .detail("Key", key)
@@ -136,7 +134,9 @@ struct StagingKey {
 			MutationRef m = lb->second;
 			if (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) {
 				if (std::tie(type, key, val) != std::tie(m.type, m.param1, m.param2)) {
-					TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnhandledSituation")
+					TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnhandledSituation", applierID)
+					    .detail("BatchIndex", batchIndex)
+					    .detail("Context", context)
 					    .detail("BufferedType", getTypeString(type))
 					    .detail("PendingType", getTypeString(m.type))
 					    .detail("BufferedVal", val.toString())
@@ -167,11 +167,15 @@ struct StagingKey {
 				type = MutationRef::SetValue; // Precomputed result should be set to DB.
 			} else if (mutation.type == MutationRef::SetValue || mutation.type == MutationRef::ClearRange) {
 				type = MutationRef::SetValue; // Precomputed result should be set to DB.
-				TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnexpectedSet")
+				TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnexpectedSet", applierID)
+				    .detail("BatchIndex", batchIndex)
+				    .detail("Context", context)
 				    .detail("MutationType", getTypeString(mutation.type))
 				    .detail("Version", lb->first.toString());
 			} else {
-				TraceEvent(SevWarnAlways, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation")
+				TraceEvent(SevWarnAlways, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation", applierID)
+				    .detail("BatchIndex", batchIndex)
+				    .detail("Context", context)
 				    .detail("MutationType", getTypeString(mutation.type))
 				    .detail("Version", lb->first.toString());
 			}
@@ -218,7 +222,8 @@ public:
 	static const int INIT = 1;
 	static const int RECEIVE_MUTATIONS = 2;
 	static const int WRITE_TO_DB = 3;
-	static const int INVALID = 4;
+	static const int DONE = 4;
+	static const int INVALID = 5;
 
 	explicit ApplierVersionBatchState(int newState) {
 		vbState = newState;

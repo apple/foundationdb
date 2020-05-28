@@ -71,7 +71,7 @@ struct ExtStringRef {
 
 	int size() const { return base.size() + extra_zero_bytes; }
 
-	int cmp(ExtStringRef const& rhs) const {
+	int compare(ExtStringRef const& rhs) const {
 		int cbl = std::min(base.size(), rhs.base.size());
 		if (cbl > 0) {
 			int c = memcmp(base.begin(), rhs.base.begin(), cbl);
@@ -82,7 +82,7 @@ struct ExtStringRef {
 			if (base[i]) return 1;
 		for(int i=cbl; i<rhs.base.size(); i++)
 			if (rhs.base[i]) return -1;
-		return size() - rhs.size();
+		return ::compare(size(), rhs.size());
 	}
 
 	bool startsWith( const ExtStringRef& s ) const { 
@@ -114,13 +114,21 @@ private:
 	int extra_zero_bytes;
 };
 inline bool operator == (const ExtStringRef& lhs, const ExtStringRef& rhs ) {
-	return lhs.size() == rhs.size() && !lhs.cmp(rhs);
+	return lhs.size() == rhs.size() && !lhs.compare(rhs);
 }
 inline bool operator != (const ExtStringRef& lhs, const ExtStringRef& rhs ) { return !(lhs==rhs); }
-inline bool operator < ( const ExtStringRef& lhs, const ExtStringRef& rhs ) { return lhs.cmp(rhs)<0; }
-inline bool operator > ( const ExtStringRef& lhs, const ExtStringRef& rhs ) { return lhs.cmp(rhs)>0; }
-inline bool operator <= ( const ExtStringRef& lhs, const ExtStringRef& rhs ) { return lhs.cmp(rhs)<=0; }
-inline bool operator >= ( const ExtStringRef& lhs, const ExtStringRef& rhs ) { return lhs.cmp(rhs)>=0; }
+inline bool operator<(const ExtStringRef& lhs, const ExtStringRef& rhs) {
+	return lhs.compare(rhs) < 0;
+}
+inline bool operator>(const ExtStringRef& lhs, const ExtStringRef& rhs) {
+	return lhs.compare(rhs) > 0;
+}
+inline bool operator<=(const ExtStringRef& lhs, const ExtStringRef& rhs) {
+	return lhs.compare(rhs) <= 0;
+}
+inline bool operator>=(const ExtStringRef& lhs, const ExtStringRef& rhs) {
+	return lhs.compare(rhs) >= 0;
+}
 
 template<>
 struct Traceable<ExtStringRef> : std::true_type {
@@ -152,25 +160,10 @@ private:
 		{
 			values.push_back( arena, kv );
 		}
+		int compare(Entry const& r) const { return ::compare(beginKey, r.beginKey); }
 		bool operator < (Entry const& r) const {
 			return beginKey < r.beginKey;
 		}
-		bool operator < (StringRef const& r) const {
-			return beginKey < r;
-		}
-		bool operator <= (Entry const& r) const {
-			return beginKey <= r.beginKey;
-		}
-		bool operator <= (StringRef const& r) const {
-			return beginKey <= r;
-		}
-		bool operator == (Entry const& r) const {
-			return beginKey == r.beginKey;
-		}
-		bool operator == (StringRef const& r) const {
-			return beginKey == r;
-		}
-
 		int segments() const { return 2*(values.size()+1); }
 	};
 

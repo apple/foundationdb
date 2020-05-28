@@ -619,26 +619,6 @@ struct EventLogRequest {
 	}
 };
 
-struct DebugEntryRef {
-	double time;
-	NetworkAddress address;
-	StringRef context;
-	Version version;
-	MutationRef mutation;
-	DebugEntryRef() {}
-	DebugEntryRef( const char* c, Version v, MutationRef const& m ) : context((const uint8_t*)c,strlen(c)), version(v), mutation(m), time(now()), address( g_network->getLocalAddress() ) {}
-	DebugEntryRef( Arena& a, DebugEntryRef const& d ) : time(d.time), address(d.address), context(d.context), version(d.version), mutation(a, d.mutation) {}
-
-	size_t expectedSize() const {
-		return context.expectedSize() + mutation.expectedSize();
-	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, time, address, context, version, mutation);
-	}
-};
-
 struct DiskStoreRequest {
 	constexpr static FileIdentifier file_identifier = 1986262;
 	bool includePartialStores;
@@ -688,6 +668,7 @@ private:
 
 void startRole(const Role &role, UID roleId, UID workerId, const std::map<std::string, std::string> &details = std::map<std::string, std::string>(), const std::string &origination = "Recruited");
 void endRole(const Role &role, UID id, std::string reason, bool ok = true, Error e = Error());
+ACTOR Future<Void> traceRole(Role role, UID roleId);
 
 struct ServerDBInfo;
 

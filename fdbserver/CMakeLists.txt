@@ -46,8 +46,10 @@ set(FDBSERVER_SRCS
   MasterInterface.h
   MasterProxyServer.actor.cpp
   masterserver.actor.cpp
-  MoveKeys.actor.cpp
+  MutationTracking.h
+  MutationTracking.cpp
   MoveKeys.actor.h
+  MoveKeys.actor.cpp
   networktest.actor.cpp
   NetworkTest.h
   OldTLogServer_4_6.actor.cpp
@@ -77,6 +79,7 @@ set(FDBSERVER_SRCS
   RestoreWorker.actor.cpp
   Resolver.actor.cpp
   ResolverInterface.h
+  ServerDBInfo.actor.h
   ServerDBInfo.h
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
@@ -131,6 +134,7 @@ set(FDBSERVER_SRCS
   workloads/ConsistencyCheck.actor.cpp
   workloads/CpuProfiler.actor.cpp
   workloads/Cycle.actor.cpp
+  workloads/DataDistributionMetrics.actor.cpp
   workloads/DDBalance.actor.cpp
   workloads/DDMetrics.actor.cpp
   workloads/DDMetricsExclude.actor.cpp
@@ -182,6 +186,7 @@ set(FDBSERVER_SRCS
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp
+  workloads/TagThrottleApi.actor.cpp
   workloads/TargetedKill.actor.cpp
   workloads/TaskBucketCorrectness.actor.cpp
   workloads/ThreadSafety.actor.cpp
@@ -231,4 +236,8 @@ if (GPERFTOOLS_FOUND)
   target_link_libraries(fdbserver PRIVATE gperftools)
 endif()
 
-fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)
+if(GENERATE_DEBUG_PACKAGES)
+  fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)
+else()
+  fdb_install(FILES ${CMAKE_BINARY_DIR}/packages/bin/fdbserver sbin COMPONENT server)
+endif()

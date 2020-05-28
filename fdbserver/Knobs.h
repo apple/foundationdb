@@ -179,7 +179,7 @@ public:
 	int64_t DD_SS_FAILURE_VERSIONLAG; // Allowed SS version lag from the current read version before marking it as failed.
 	int64_t DD_SS_ALLOWED_VERSIONLAG; // SS will be marked as healthy if it's version lag goes below this value.
 	double DD_SS_STUCK_TIME_LIMIT; // If a storage server is not getting new versions for this amount of time, then it becomes undesired.
-	
+
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
 	double TR_REMOVE_MACHINE_TEAM_DELAY; // wait for the specified time before try to remove next machine team
@@ -313,6 +313,7 @@ public:
 	double BACKUP_TIMEOUT;  // master's reaction time for backup failure
 	double BACKUP_NOOP_POP_DELAY;
 	int BACKUP_FILE_BLOCK_BYTES;
+	int64_t BACKUP_LOCK_BYTES;
 	double BACKUP_UPLOAD_DELAY;
 
 	//Cluster Controller
@@ -381,6 +382,7 @@ public:
 
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER;
 	int64_t SPRING_BYTES_STORAGE_SERVER;
+	int64_t AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES;
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER_BATCH;
 	int64_t SPRING_BYTES_STORAGE_SERVER_BATCH;
 
@@ -393,8 +395,18 @@ public:
 	int64_t TLOG_RECOVER_MEMORY_LIMIT;
 	double TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 
-	// disk snapshot
-	double SNAP_CREATE_MAX_TIMEOUT;
+	int64_t MAX_MANUAL_THROTTLED_TRANSACTION_TAGS;
+	int64_t MAX_AUTO_THROTTLED_TRANSACTION_TAGS;
+	double MIN_TAG_COST;
+	double AUTO_THROTTLE_TARGET_TAG_BUSYNESS;
+	double AUTO_THROTTLE_RAMP_TAG_BUSYNESS;
+	double AUTO_TAG_THROTTLE_RAMP_UP_TIME;
+	double AUTO_TAG_THROTTLE_DURATION;
+	double TAG_THROTTLE_PUSH_INTERVAL;
+	double AUTO_TAG_THROTTLE_START_AGGREGATION_TIME;
+	double AUTO_TAG_THROTTLE_UPDATE_FREQUENCY;
+	double TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL;
+	bool AUTO_TAG_THROTTLING_ENABLED;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -410,6 +422,7 @@ public:
 	int MAX_TPS_HISTORY_SAMPLES;
 	int NEEDED_TPS_HISTORY_SAMPLES;
 	int64_t TARGET_DURABILITY_LAG_VERSIONS;
+	int64_t AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS;
 	int64_t TARGET_DURABILITY_LAG_VERSIONS_BATCH;
 	int64_t DURABILITY_LAG_UNLIMITED_THRESHOLD;
 	double INITIAL_DURABILITY_LAG_MULTIPLIER;
@@ -417,6 +430,9 @@ public:
 	double DURABILITY_LAG_INCREASE_RATE;
 
 	double STORAGE_SERVER_LIST_FETCH_TIMEOUT;
+
+	// disk snapshot
+	double SNAP_CREATE_MAX_TIMEOUT;
 
 	//Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;
@@ -460,6 +476,10 @@ public:
 	int BEHIND_CHECK_COUNT;
 	int64_t BEHIND_CHECK_VERSIONS;
 	double WAIT_METRICS_WRONG_SHARD_CHANCE;
+	int64_t MIN_TAG_PAGES_READ_RATE;
+	double READ_TAG_MEASUREMENT_INTERVAL;
+	int64_t OPERATION_COST_BYTE_FACTOR;
+	bool PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS;
 
 	//Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -473,6 +493,8 @@ public:
 	double DEGRADED_WARNING_RESET_DELAY;
 	int64_t TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS;
 	double TRACE_LOG_PING_TIMEOUT_SECONDS;
+	double MIN_DELAY_STORAGE_CANDIDACY_SECONDS;  // Listen for a leader for N seconds, and if not heard, then try to become the leader.
+	double MAX_DELAY_STORAGE_CANDIDACY_SECONDS;
 	double DBINFO_FAILED_DELAY;
 
 	// Test harness
@@ -533,6 +555,20 @@ public:
 	int64_t FASTRESTORE_LOADER_SEND_MUTATION_MSG_BYTES; // desired size of mutation message sent from loader to appliers
 	bool FASTRESTORE_GET_RANGE_VERSIONS_EXPENSIVE; // parse each range file to get (range, version) it has?
 	int64_t FASTRESTORE_REQBATCH_PARALLEL; // number of requests to wait on for getBatchReplies()
+	bool FASTRESTORE_REQBATCH_LOG; // verbose log information for getReplyBatches
+	int FASTRESTORE_TXN_CLEAR_MAX; // threshold to start tracking each clear op in a txn
+	int FASTRESTORE_TXN_RETRY_MAX; // threshold to start output error on too many retries
+
+	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
+	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.
+	double REDWOOD_PAGE_REBUILD_FILL_FACTOR; // When rebuilding pages, start a new page after this capacity
+	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at once
+	int REDWOOD_LAZY_CLEAR_MIN_PAGES;  // Minimum number of pages to free before ending a lazy clear cycle, unless the queue is empty
+	int REDWOOD_LAZY_CLEAR_MAX_PAGES;  // Maximum number of pages to free before ending a lazy clear cycle, unless the queue is empty
+	int REDWOOD_REMAP_CLEANUP_BATCH_SIZE; // Number of queue entries for remap cleanup to process and potentially coalesce at once.
+	int REDWOOD_REMAP_CLEANUP_VERSION_LAG_MIN; // Number of versions between head of remap queue and oldest retained version before remap cleanup starts
+	int REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX; // Number of versions between head of remap queue and oldest retained version before remap cleanup may stop
+	double REDWOOD_LOGGING_INTERVAL;
 
 	ServerKnobs();
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);

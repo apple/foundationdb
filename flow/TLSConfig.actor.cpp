@@ -287,7 +287,7 @@ ACTOR static Future<Void> readEntireFile( std::string filename, std::string* des
 		throw file_too_large();
 	}
 	destination->resize(filesize);
-	wait(success(file->read(const_cast<char*>(destination->c_str()), filesize, 0)));
+	wait(success(file->read(&destination[0], filesize, 0)));
 	return Void();
 }
 

@@ -31,6 +31,7 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/MutationTracking.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbserver/IDiskQueue.h"
@@ -59,6 +60,7 @@ struct TLogQueueEntryRef {
 	  : version(from.version), knownCommittedVersion(from.knownCommittedVersion), id(from.id), messages(a, from.messages) {
 	}
 
+	//To change this serialization, ProtocolVersion::TLogQueueEntryRef must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, version, messages, knownCommittedVersion, id);
@@ -556,6 +558,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			logRouterPopToVersion(0), locality(tagLocalityInvalid), execOpCommitInProgress(false)
 	{
 		startRole(Role::TRANSACTION_LOG, interf.id(), tLogData->workerID, {{"SharedTLog", tLogData->dbgid.shortString()}}, context);
+		addActor.send(traceRole(Role::TRANSACTION_LOG, interf.id()));
 
 		persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
 		persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
@@ -646,7 +649,7 @@ template <class T>
 void TLogQueue::push( T const& qe, Reference<LogData> logData ) {
 	BinaryWriter wr( Unversioned() );  // outer framing is not versioned
 	wr << uint32_t(0);
-	IncludeVersion().write(wr);  // payload is versioned
+	IncludeVersion(ProtocolVersion::withTLogQueueEntryRef()).write(wr);  // payload is versioned
 	wr << qe;
 	wr << uint8_t(1);
 	*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);
@@ -1197,7 +1200,7 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 			commitLockReleaser.release();
 		}
 
-		if( totalSize < SERVER_KNOBS->UPDATE_STORAGE_BYTE_LIMIT ) {
+		if( totalSize < SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT ) {
 			wait( delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL, TaskPriority::UpdateStorage) );
 		}
 		else {
@@ -1258,6 +1261,7 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 			block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
 		}
 
+		DEBUG_TAGS_AND_MESSAGE("TLogCommitMessages", version, msg.getRawMessage()).detail("UID", self->dbgid).detail("LogId", logData->logId);
 		block.append(block.arena(), msg.message.begin(), msg.message.size());
 		for(auto tag : msg.tags) {
 			if(logData->locality == tagLocalitySatellite) {
@@ -1372,7 +1376,12 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 			messages << VERSION_HEADER << currentVersion;
 		}
 
+		// We need the 4 byte length prefix to be a TagsAndMessage format, but that prefix is added as part of StringRef serialization.
+		int offset = messages.getLength();
 		messages << it->second.toStringRef();
+		void* data = messages.getData();
+		DEBUG_TAGS_AND_MESSAGE("TLogPeek", currentVersion, StringRef((uint8_t*)data+offset, messages.getLength()-offset))
+			.detail("LogId", self->logId).detail("PeekTag", req.tag);
 	}
 }
 
@@ -1634,6 +1643,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 				    wait(parseMessagesForTag(entry.messages, req.tag, logData->logRouterTags));
 				for (const StringRef& msg : rawMessages) {
 					messages.serializeBytes(msg);
+					DEBUG_TAGS_AND_MESSAGE("TLogPeekFromDisk", entry.version, msg).detail("UID", self->dbgid).detail("LogId", logData->logId).detail("PeekTag", req.tag);
 				}
 
 				lastRefMessageVersion = entry.version;
@@ -2914,6 +2924,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 
 		self.sharedActors.send( commitQueue(&self) );
 		self.sharedActors.send( updateStorageLoop(&self) );
+		self.sharedActors.send( traceRole(Role::SHARED_TRANSACTION_LOG, tlogId) );
 		state Future<Void> activeSharedChange = Void();
 
 		loop {

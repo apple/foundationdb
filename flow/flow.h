@@ -84,6 +84,7 @@ bool validationIsEnabled(BuggifyType type);
 #define EXPENSIVE_VALIDATION (validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
 extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "");
+extern Optional<uint64_t> parseDuration(std::string str, std::string defaultUnit = "");
 extern std::string format(const char* form, ...);
 
 // On success, returns the number of characters written. On failure, returns a negative number.
@@ -391,6 +392,7 @@ struct SingleCallback {
 	SingleCallback<T> *next;
 
 	virtual void fire(T const&) {}
+	virtual void fire(T &&) {}
 	virtual void error(Error) {}
 	virtual void unwait() {}
 
@@ -558,10 +560,8 @@ public:
 		cb->insertChain(this);
 	}
 
-	virtual void unwait() {
-		delFutureRef();
-	}
-	virtual void fire() { ASSERT(false); }
+	virtual void unwait() override { delFutureRef(); }
+	virtual void fire(T const&) override { ASSERT(false); }
 };
 
 template <class T>
@@ -642,10 +642,9 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		ASSERT(SingleCallback<T>::next == this);
 		cb->insert(this);
 	}
-	virtual void unwait() {
-		delFutureRef();
-	}
-	virtual void fire() { ASSERT(false); }
+	virtual void unwait() override { delFutureRef(); }
+	virtual void fire(T const&) override { ASSERT(false); }
+	virtual void fire(T&&) override { ASSERT(false); }
 };
 
 
@@ -1004,20 +1003,19 @@ struct Actor<void> {
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
-	virtual void fire(ValueType const& value) {
-		static_cast<ActorType*>(this)->a_callback_fire(this, value);
-	}
-	virtual void error(Error e) {
-		static_cast<ActorType*>(this)->a_callback_error(this, e);
-	}
+	virtual void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
+	virtual void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
-	virtual void fire(ValueType const& value) {
+	virtual void fire(ValueType const& value) override {
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
-	virtual void error(Error e) {
+	virtual void fire(ValueType && value) override {
+		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
+	}
+	virtual void error(Error e) override {
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
 	}
 };

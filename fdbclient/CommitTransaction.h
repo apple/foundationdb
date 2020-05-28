@@ -107,7 +107,7 @@ struct MutationRef {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		if (!ar.isDeserializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
+		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
 			StringRef empty;
 			serializer(ar, type, param2, empty);
 		} else {
@@ -130,6 +130,13 @@ struct MutationRef {
 		                       (1 << SetVersionstampedKey) | (1 << SetVersionstampedValue) | (1 << MinV2) |
 		                       (1 << CompareAndClear)
 	};
+};
+
+template<>
+struct Traceable<MutationRef> : std::true_type {
+	static std::string toString(MutationRef const& value) {
+		return value.toString();
+	}
 };
 
 static inline std::string getTypeString(MutationRef::Type type) {
@@ -205,8 +212,5 @@ struct CommitTransactionRef {
 		return read_conflict_ranges.expectedSize() + write_conflict_ranges.expectedSize() + mutations.expectedSize();
 	}
 };
-
-bool debugMutation( const char* context, Version version, MutationRef const& m );
-bool debugKeyRange( const char* context, Version version, KeyRangeRef const& keyRange );
 
 #endif

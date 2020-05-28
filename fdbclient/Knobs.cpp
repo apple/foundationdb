@@ -92,6 +92,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( STORAGE_METRICS_TOO_MANY_SHARDS_DELAY,  15.0 );
 	init( AGGREGATE_HEALTH_METRICS_MAX_STALENESS,  0.5 );
 	init( DETAILED_HEALTH_METRICS_MAX_STALENESS,   5.0 );
+	init( TAG_ENCODE_KEY_SERVERS,                false ); if( randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = true;
 
 	//KeyRangeMap
 	init( KRM_GET_RANGE_LIMIT,                     1e5 ); if( randomize && BUGGIFY ) KRM_GET_RANGE_LIMIT = 10;
@@ -220,6 +221,15 @@ void ClientKnobs::initialize(bool randomize) {
 
 	// trace
 	init( TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH,      50 );
+
+	// transaction tags
+	init( MAX_TAGS_PER_TRANSACTION,                   5 );
+	init( MAX_TRANSACTION_TAG_LENGTH,                16 );
+	init( READ_TAG_SAMPLE_RATE,                    0.01 ); if( randomize && BUGGIFY ) READ_TAG_SAMPLE_RATE = 1.0; // Communicated to clients from cluster
+	init( TAG_THROTTLE_SMOOTHING_WINDOW,            2.0 );
+	init( TAG_THROTTLE_RECHECK_INTERVAL,            5.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_RECHECK_INTERVAL = 0.0;
+	init( TAG_THROTTLE_EXPIRATION_INTERVAL,        60.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_EXPIRATION_INTERVAL = 1.0;
+
 	// clang-format on
 }
 

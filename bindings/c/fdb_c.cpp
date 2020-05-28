@@ -78,7 +78,7 @@ fdb_bool_t fdb_error_predicate( int predicate_test, fdb_error_t code ) {
 		return code == error_code_not_committed || code == error_code_transaction_too_old ||
 		       code == error_code_future_version || code == error_code_database_locked ||
 		       code == error_code_proxy_memory_limit_exceeded || code == error_code_batch_transaction_throttled ||
-		       code == error_code_process_behind;
+		       code == error_code_process_behind || code == error_code_tag_throttled;
 	}
 	return false;
 }
@@ -449,7 +449,7 @@ FDBFuture* fdb_transaction_get_range_impl(
 
 	/* _ITERATOR mode maps to one of the known streaming modes
 	   depending on iteration */
-	static const int mode_bytes_array[] = {CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED, 256, 1000, 4096, 80000};
+	const int mode_bytes_array[] = { CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED, 256, 1000, 4096, 80000 };
 
 	/* The progression used for FDB_STREAMING_MODE_ITERATOR.
 	   Goes from small -> medium -> large.  Then 1.5 * previous until serial. */

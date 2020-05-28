@@ -78,7 +78,9 @@
 #include <ftw.h>
 #include <pwd.h>
 #include <sched.h>
+#ifndef __aarch64__
 #include <cpuid.h>
+#endif
 
 /* Needed for disk capacity */
 #include <sys/statvfs.h>
@@ -2916,12 +2918,14 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	return __eraseDirectoryRecurseiveCount;
 }
 
-bool isSse42Supported()
+bool isHwCrcSupported()
 {
 #if defined(_WIN32)
 	int info[4];
 	__cpuid(info, 1);
 	return (info[2] & (1 << 20)) != 0;
+#elif defined(__aarch64__)
+	return true; /* force to use crc instructions */
 #elif defined(__unixish__)
 	uint32_t eax, ebx, ecx, edx, level = 1, count = 0;
 	__cpuid_count(level, count, eax, ebx, ecx, edx);

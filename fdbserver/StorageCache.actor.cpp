@@ -26,6 +26,7 @@
 #include "fdbclient/Atomic.h"
 #include "fdbclient/Notified.h"
 #include "fdbserver/LogSystem.h"
+#include "fdbserver/MutationTracking.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -267,8 +268,8 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 			path = 1;
 		}
 
-		//debugMutation("CacheGetValue", version, MutationRef(MutationRef::DebugKey, req.key, v.present()?v.get():LiteralStringRef("<null>")));
-		//debugMutation("CacheGetPath", version, MutationRef(MutationRef::DebugKey, req.key, path==0?LiteralStringRef("0"):path==1?LiteralStringRef("1"):LiteralStringRef("2")));
+		//DEBUG_MUTATION("CacheGetValue", version, MutationRef(MutationRef::DebugKey, req.key, v.present()?v.get():LiteralStringRef("<null>")));
+		//DEBUG_MUTATION("CacheGetPath", version, MutationRef(MutationRef::DebugKey, req.key, path==0?LiteralStringRef("0"):path==1?LiteralStringRef("1"):LiteralStringRef("2")));
 
 		if (v.present()) {
 			++data->counters.rowsQueried;
@@ -710,22 +711,10 @@ void StorageCacheData::addMutation(KeyRangeRef const& cachedKeyRange, Version ve
 		return;
 	}
 	expanded = addMutationToMutationLog(mLog, expanded);
-	if (debugMutation("expandedMutation", version, expanded)) {
-		const char* type =
-			mutation.type == MutationRef::SetValue ? "SetValue" :
-			mutation.type == MutationRef::ClearRange ? "ClearRange" :
-			mutation.type == MutationRef::DebugKeyRange ? "DebugKeyRange" :
-			mutation.type == MutationRef::DebugKey ? "DebugKey" :
-			"UnknownMutation";
-		printf("DEBUGMUTATION:\t%.6f\t%s\t%s\t%s\t%s\t%s\n",
-			   now(), g_network->getLocalAddress().toString().c_str(), "originalMutation",
-			   type, printable(mutation.param1).c_str(), printable(mutation.param2).c_str());
-		printf("  Cached Key-range: %s - %s\n", printable(cachedKeyRange.begin).c_str(), printable(cachedKeyRange.end).c_str());
-	}
+	DEBUG_MUTATION("expandedMutation", version, expanded).detail("Begin", cachedKeyRange.begin).detail("End", cachedKeyRange.end);
 	applyMutation( this, expanded, mLog.arena(), mutableData() );
 	printf("\nSCUpdate: Printing versioned tree after applying mutation\n");
 	mutableData().printTree(version);
-
 }
 
 // Helper class for updating the storage cache (i.e. applying mutations)
@@ -742,15 +731,11 @@ public:
 			data->mutableData().createNewVersion(ver);
 		}
 
+		DEBUG_MUTATION("SCUpdateMutation", ver, m);
 		if (m.param1.startsWith( systemKeys.end )) {
 			//TraceEvent("PrivateData", data->thisServerID).detail("Mutation", m.toString()).detail("Version", ver);
 			applyPrivateCacheData( data, m );
 		} else {
-			// FIXME: enable when debugMutation is active
-			//for(auto m = changes[c].mutations.begin(); m; ++m) {
-			//	debugMutation("SCUpdateMutation", changes[c].version, *m);
-			//}
-
 			splitMutation(data, data->cachedRangeMap, m, ver);
 		}
 
@@ -768,7 +753,7 @@ private:
 	//that this cache server is responsible for
 	// TODO Revisit during failure handling. Might we loose some private mutations?
 	void applyPrivateCacheData( StorageCacheData* data, MutationRef const& m ) {
-		TraceEvent(SevDebug, "SCPrivateCacheMutation", data->thisServerID).detail("Mutation", m.toString());
+		TraceEvent(SevDebug, "SCPrivateCacheMutation", data->thisServerID).detail("Mutation", m);
 
 		if (processedCacheStartKey) {
 			// we expect changes in pairs, [begin,end). This mutation is for end key of the range
@@ -914,7 +899,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 		}
 
 		if(ver != invalidVersion && ver > data->version.get()) {
-			debugKeyRange("SCUpdate", ver, allKeys);
+			DEBUG_KEY_RANGE("SCUpdate", ver, allKeys);
 
 			data->mutableData().createNewVersion(ver);
 
@@ -968,6 +953,7 @@ ACTOR Future<Void> storageCache(StorageServerInterface ssi, uint16_t id, Referen
 
 	// pullAsyncData actor pulls mutations from the TLog and also applies them.
 	actors.add(pullAsyncData(&self));
+	actors.add(traceRole(Role::STORAGE_CACHE, ssi.id()));
 
 	loop {
 		++self.counters.loops;

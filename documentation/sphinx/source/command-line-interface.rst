@@ -30,6 +30,11 @@ Commands within ``fdbcli``
 
 The following commands can be issued from within ``fdbcli`` at the internal ``fdb>`` prompt:
 
+advanceversion
+--------------
+
+Forces the cluster to recover at the specified version. If the specified version is larger than the current version of the cluster, the cluster version is advanced to the specified version via a forced recovery.
+
 begin
 -----
 
@@ -101,15 +106,6 @@ Set the process using ``configure [proxies|resolvers|logs]=<N>``, where ``<N>`` 
 
 For recommendations on appropriate values for process types in large clusters, see :ref:`guidelines-process-class-config`.
 
-fileconfigure
--------------
-
-The ``fileconfigure`` command is alternative to the ``configure`` command which changes the configuration of the database based on a json document. The command loads a JSON document from the provided file, and change the database configuration to match the contents of the JSON document.
-
-The format should be the same as the value of the ``configuration`` entry in status JSON without ``excluded_servers`` or ``coordinators_count``. Its syntax is ``fileconfigure [new] <FILENAME>``.
-
-"The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one.
-
 coordinators
 ------------
 
@@ -141,6 +137,16 @@ exit
 
 The ``exit`` command exits ``fdbcli``.
 
+fileconfigure
+-------------
+
+The ``fileconfigure`` command is alternative to the ``configure`` command which changes the configuration of the database based on a json document. The command loads a JSON document from the provided file, and change the database configuration to match the contents of the JSON document.
+
+The format should be the same as the value of the ``configuration`` entry in status JSON without ``excluded_servers`` or ``coordinators_count``. Its syntax is ``fileconfigure [new] <FILENAME>``.
+
+"The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one.
+
+
 get
 ---
 
@@ -166,11 +172,6 @@ getversion
 ----------
 
 The ``getversion`` command fetches the current read version of the cluster or currently running transaction.
-
-advanceversion
---------------
-
-Forces the cluster to recover at the specified version. If the specified version is larger than the current version of the cluster, the cluster version is advanced to the specified version via a forced recovery.
 
 help
 ----
@@ -299,6 +300,82 @@ status json
 ^^^^^^^^^^^
 
 ``status json`` will provide the cluster status in its JSON format. For a detailed description of this format, see :doc:`mr-status`.
+
+.. _cli-throttle:
+
+throttle
+--------
+
+The throttle command is used to inspect and modify the list of throttled transaction tags in the cluster. For more information, see :doc:`transaction-tagging`. The throttle command has the following subcommands:
+
+on
+^^
+
+``throttle on tag <TAG> [RATE] [DURATION] [PRIORITY]``
+
+Enables throttling for the specified transaction tag.
+
+``TAG`` - the tag being throttled. This argument is required.
+
+``RATE`` - the number of transactions that may be started per second. Defaults to 0.
+
+``DURATION`` - the duration that the throttle should remain in effect, which must include a time suffix (``s`` - seconds, ``m`` - minutes, ``h`` - hours, ``d`` - days). Defaults to ``1h``.
+
+``PRIORITY`` - the maximum priority that the throttle will apply to. Choices are ``default``, ``batch``, and ``immediate``. Defaults to ``default``.
+
+off
+^^^
+
+``throttle off [all|auto|manual] [tag <TAG>] [PRIORITY]``
+
+Disables throttling for all transaction tag throttles that match the specified filtering criteria. At least one filter must be specified, and filters can be given in any order.
+
+``all`` - affects all throttles (auto and manual).
+
+``auto`` - only throttles automatically created by the cluster will be affected.
+
+``manual`` - only throttles created manually will be affected (this is the default).
+
+``tag`` - only the specified tag will be affected.
+
+``PRIORITY`` - the priority of the throttle to disable. Choices are ``default``, ``batch``, and ``immediate``. Defaults to ``default``.
+
+For example, to disable all throttles, run::
+
+> throttle off all
+
+To disable all manually created batch priority throttles, run::
+
+> throttle off batch
+
+To disable auto throttles at batch priority on the tag ``foo``, run::
+
+> throttle off auto tag foo batch
+
+enable
+^^^^^^
+
+``throttle enable auto``
+
+Enables cluster auto-throttling for busy transaction tags.
+
+disable
+^^^^^^^
+
+``throttle disable auto``
+
+Disables cluster auto-throttling for busy transaction tags. This does not disable any currently active throttles. To do so, run the following command after disabling auto-throttling::
+
+> throttle off auto
+
+list
+^^^^
+
+``throttle list [LIMIT]``
+
+Prints a list of currently active transaction tag throttles.
+
+``LIMIT`` - The number of throttles to print. Defaults to 100.
 
 unlock
 ------

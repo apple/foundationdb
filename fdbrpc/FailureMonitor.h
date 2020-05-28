@@ -23,9 +23,9 @@
 #pragma once
 
 #include "flow/flow.h"
-#include "flow/IndexedSet.h"
 #include "fdbrpc/FlowTransport.h" // Endpoint
 #include <unordered_map>
+#include <unordered_set>
 
 using std::vector;
 
@@ -137,7 +137,7 @@ public:
 
 class SimpleFailureMonitor : public IFailureMonitor {
 public:
-	SimpleFailureMonitor() : endpointKnownFailed() {}
+	SimpleFailureMonitor();
 	void setStatus(NetworkAddress const& address, FailureStatus const& status);
 	void endpointNotFound(Endpoint const&);
 	virtual void notifyDisconnect(NetworkAddress const&);
@@ -154,6 +154,7 @@ public:
 private:
 	std::unordered_map<NetworkAddress, FailureStatus> addressStatus;
 	YieldedAsyncMap<Endpoint, bool> endpointKnownFailed;
+	std::unordered_set<Endpoint> failedEndpoints;
 
 	friend class OnStateChangedActorActor;
 };

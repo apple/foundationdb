@@ -38,6 +38,7 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MasterInterface.h"
+#include "fdbserver/MutationTracking.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
@@ -224,7 +225,8 @@ struct TransactionRateInfo {
 
 
 ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, TransactionRateInfo *transactionRateInfo,
-						   TransactionRateInfo *batchTransactionRateInfo, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply) {
+						   TransactionRateInfo *batchTransactionRateInfo, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply,
+						   TransactionTagMap<uint64_t>* transactionTagCounter, PrioritizedTransactionTagMap<ClientTagThrottleLimits>* throttledTags) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -248,7 +250,8 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		when ( wait( nextRequestTimer ) ) {
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
-			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, detailed)));
+			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter, detailed)));
+			transactionTagCounter->clear();
 			expectingDetailedReply = detailed;
 		}
 		when ( GetRateInfoReply rep = wait(reply) ) {
@@ -264,6 +267,12 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			if (expectingDetailedReply) {
 				detailedHealthMetricsReply->update(rep.healthMetrics, true, true);
 				lastDetailedReply = now();
+			}
+
+			// Replace our throttles with what was sent by ratekeeper. Because we do this,
+			// we are not required to expire tags out of the map
+			if(rep.throttledTags.present()) {
+				*throttledTags = std::move(rep.throttledTags.get());
 			}
 		}
 		when ( wait( leaseTimeout ) ) {
@@ -284,7 +293,8 @@ ACTOR Future<Void> queueTransactionStartRequests(
 	FutureStream<GetReadVersionRequest> readVersionRequests,
 	PromiseStream<Void> GRVTimer, double *lastGRVTime,
 	double *GRVBatchTime, FutureStream<double> replyTimes,
-	ProxyStats* stats, TransactionRateInfo* batchRateInfo) 
+	ProxyStats* stats, TransactionRateInfo* batchRateInfo,
+	TransactionTagMap<uint64_t>* transactionTagCounter) 
 {
 	loop choose{
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
@@ -299,6 +309,11 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				req.reply.send(rep);
 				TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceeded").suppressFor(60);
 			} else {
+				// TODO: check whether this is reasonable to do in the fast path
+				for(auto tag : req.tags) {
+					(*transactionTagCounter)[tag.first] += tag.second;
+				}
+
 				if (req.debugID.present())
 					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterProxyServer.queueTransactionStartRequests.Before");
 
@@ -308,10 +323,10 @@ ACTOR Future<Void> queueTransactionStartRequests(
 
 				++stats->txnRequestIn;
 				stats->txnStartIn += req.transactionCount;
-				if (req.priority() >= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
+				if (req.priority >= TransactionPriority::IMMEDIATE) {
 					stats->txnSystemPriorityStartIn += req.transactionCount;
 					systemQueue->push_back(req);
-				} else if (req.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
+				} else if (req.priority >= TransactionPriority::DEFAULT) {
 					stats->txnDefaultPriorityStartIn += req.transactionCount;
 					defaultQueue->push_back(req);
 				} else {
@@ -485,6 +500,10 @@ struct ResolutionRequestBuilder {
 	vector<ResolveTransactionBatchRequest> requests;
 	vector<vector<int>> transactionResolverMap;
 	vector<CommitTransactionRef*> outTr;
+	std::vector<std::vector<std::vector<int>>>
+	    txReadConflictRangeIndexMap; // Used to report conflicting keys, the format is
+	                                 // [CommitTransactionRef_Index][Resolver_Index][Read_Conflict_Range_Index_on_Resolver]
+	                                 // -> read_conflict_range's original index in the commitTransactionRef
 
 	ResolutionRequestBuilder( ProxyCommitData* self, Version version, Version prevVersion, Version lastReceivedVersion) : self(self), requests(self->resolvers.size()) {
 		for(auto& req : requests) {
@@ -523,7 +542,11 @@ struct ResolutionRequestBuilder {
 				getOutTransaction(0, trIn.read_snapshot).mutations.push_back(requests[0].arena, m);
 			}
 		}
-		for(auto& r : trIn.read_conflict_ranges) {
+		std::vector<std::vector<int>> rCRIndexMap(
+		    requests.size()); // [resolver_index][read_conflict_range_index_on_the_resolver]
+		                      // -> read_conflict_range's original index
+		for (int idx = 0; idx < trIn.read_conflict_ranges.size(); ++idx) {
+			const auto& r = trIn.read_conflict_ranges[idx];
 			auto ranges = self->keyResolvers.intersectingRanges( r );
 			std::set<int> resolvers;
 			for(auto &ir : ranges) {
@@ -535,9 +558,12 @@ struct ResolutionRequestBuilder {
 				}
 			}
 			ASSERT(resolvers.size());
-			for(int resolver : resolvers)
+			for (int resolver : resolvers) {
 				getOutTransaction( resolver, trIn.read_snapshot ).read_conflict_ranges.push_back( requests[resolver].arena, r );
+				rCRIndexMap[resolver].push_back(idx);
+			}
 		}
+		txReadConflictRangeIndexMap.push_back(std::move(rCRIndexMap));
 		for(auto& r : trIn.write_conflict_ranges) {
 			auto ranges = self->keyResolvers.intersectingRanges( r );
 			std::set<int> resolvers;
@@ -675,7 +701,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 	for (; logRangeMutation != logRangeMutations->end(); ++logRangeMutation)
 	{
 		//FIXME: this is re-implementing the serialize function of MutationListRef in order to have a yield
-		valueWriter = BinaryWriter(IncludeVersion());
+		valueWriter = BinaryWriter(IncludeVersion(ProtocolVersion::withBackupMutations()));
 		valueWriter << logRangeMutation->second.totalSize();
 
 		state MutationListRef::Blob* blobIter = logRangeMutation->second.blob_begin;
@@ -734,7 +760,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 			toCommit->addTags(tags);
 			toCommit->addTypedMessage(backupMutation);
 
-//			if (debugMutation("BackupProxyCommit", commitVersion, backupMutation)) {
+//			if (DEBUG_MUTATION("BackupProxyCommit", commitVersion, backupMutation)) {
 //				TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("BackupMutation", backupMutation.toString())
 //					.detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
 //					.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData", backupMutation.param1);
@@ -852,6 +878,8 @@ ACTOR Future<Void> commitBatch(
 	}
 
 	state vector<vector<int>> transactionResolverMap = std::move( requests.transactionResolverMap );
+	state std::vector<std::vector<std::vector<int>>> txReadConflictRangeIndexMap =
+	    std::move(requests.txReadConflictRangeIndexMap); // used to report conflicting keys
 	state Future<Void> releaseFuture = releaseResolvingAfter(self, releaseDelay, localBatchNumber);
 
 	/////// Phase 2: Resolution (waiting on the network; pipelined)
@@ -1052,8 +1080,7 @@ ACTOR Future<Void> commitBatch(
 						self->singleKeyMutationEvent->log();
 					}
 
-					if (debugMutation("ProxyCommit", commitVersion, m))
-						TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("Mutation", m.toString()).detail("Version", commitVersion);
+					DEBUG_MUTATION("ProxyCommit", commitVersion, m).detail("Dbgid", self->dbgid).detail("To", tags).detail("Mutation", m);
 					
 					toCommit.addTags(tags);
 					if(self->cacheInfo[m.param1]) {
@@ -1068,8 +1095,7 @@ ACTOR Future<Void> commitBatch(
 					++firstRange;
 					if (firstRange == ranges.end()) {
 						// Fast path
-						if (debugMutation("ProxyCommit", commitVersion, m))
-							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(ranges.begin().value().tags)).detail("Mutation", m.toString()).detail("Version", commitVersion);
+						DEBUG_MUTATION("ProxyCommit", commitVersion, m).detail("Dbgid", self->dbgid).detail("To", ranges.begin().value().tags).detail("Mutation", m);
 
 						ranges.begin().value().populateTags();
 						toCommit.addTags(ranges.begin().value().tags);
@@ -1081,8 +1107,7 @@ ACTOR Future<Void> commitBatch(
 							r.value().populateTags();
 							allSources.insert(r.value().tags.begin(), r.value().tags.end());
 						}
-						if (debugMutation("ProxyCommit", commitVersion, m))
-							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(allSources)).detail("Mutation", m.toString()).detail("Version", commitVersion);
+						DEBUG_MUTATION("ProxyCommit", commitVersion, m).detail("Dbgid", self->dbgid).detail("To", allSources).detail("Mutation", m);
 
 						toCommit.addTags(allSources);
 					}
@@ -1150,7 +1175,7 @@ ACTOR Future<Void> commitBatch(
 					wait(yield());
 					break; 
 				}
-				when(GetReadVersionReply v = wait(self->getConsistentReadVersion.getReply(GetReadVersionRequest(0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE | GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
+				when(GetReadVersionReply v = wait(self->getConsistentReadVersion.getReply(GetReadVersionRequest(0, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
 					if(v.version > self->committedVersion.get()) {
 						self->locked = v.locked;
 						self->metadataVersion = v.metadataVersion;
@@ -1201,7 +1226,7 @@ ACTOR Future<Void> commitBatch(
 	computeDuration += g_network->timer() - computeStart;
 	if(computeDuration > SERVER_KNOBS->MIN_PROXY_COMPUTE && batchOperations > 0) {
 		double computePerOperation = computeDuration/batchOperations;
-		if(computePerOperation <= self->commitComputePerOperation[latencyBucket] || self->commitComputePerOperation[latencyBucket] == 0.0) {
+		if(computePerOperation <= self->commitComputePerOperation[latencyBucket]) {
 			self->commitComputePerOperation[latencyBucket] = computePerOperation;
 		} else {
 			self->commitComputePerOperation[latencyBucket] = SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE*computePerOperation + ((1.0-SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE)*self->commitComputePerOperation[latencyBucket]);
@@ -1281,9 +1306,15 @@ ACTOR Future<Void> commitBatch(
 			if (trs[t].transaction.report_conflicting_keys) {
 				Standalone<VectorRef<int>> conflictingKRIndices;
 				for (int resolverInd : transactionResolverMap[t]) {
-					auto const& cKRs = resolution[resolverInd].conflictingKeyRangeMap[nextTr[resolverInd]];
+					auto const& cKRs =
+					    resolution[resolverInd]
+					        .conflictingKeyRangeMap[nextTr[resolverInd]]; // nextTr[resolverInd] -> index of this trs[t]
+					                                                      // on the resolver
 					for (auto const& rCRIndex : cKRs)
-						conflictingKRIndices.push_back(conflictingKRIndices.arena(), rCRIndex);
+						// read_conflict_range can change when sent to resolvers, mapping the index from resolver-side
+						// to original index in commitTransactionRef
+						conflictingKRIndices.push_back(conflictingKRIndices.arena(),
+						                               txReadConflictRangeIndexMap[t][resolverInd][rCRIndex]);
 				}
 				// At least one keyRange index should be returned
 				ASSERT(conflictingKRIndices.size());
@@ -1350,7 +1381,8 @@ ACTOR Future<Void> updateLastCommit(ProxyCommitData* self, Optional<UID> debugID
 	return Void();
 }
 
-ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commitData, uint32_t flags, vector<MasterProxyInterface> *otherProxies, Optional<UID> debugID, int transactionCount, int systemTransactionCount, int defaultPriTransactionCount, int batchPriTransactionCount)
+ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commitData, uint32_t flags, vector<MasterProxyInterface> *otherProxies, Optional<UID> debugID, 
+                                                          int transactionCount, int systemTransactionCount, int defaultPriTransactionCount, int batchPriTransactionCount)
 {
 	// Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
 	// (1) The version returned is the committedVersion of some proxy at some point before the request returns, so it is committed.
@@ -1398,21 +1430,46 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 }
 
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests,
-                                  ProxyStats* stats, Version minKnownCommittedVersion) {
-	GetReadVersionReply reply = wait(replyFuture);
+                                  ProxyStats* stats, Version minKnownCommittedVersion, PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags) {
+	GetReadVersionReply _reply = wait(replyFuture);
+	GetReadVersionReply reply = _reply;
+	Version replyVersion = reply.version;
+
 	double end = g_network->timer();
 	for(GetReadVersionRequest const& request : requests) {
-		if(request.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
+		if(request.priority >= TransactionPriority::DEFAULT) {
 			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
 		}
+
 		if (request.flags & GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION) {
 			// Only backup worker may infrequently use this flag.
-			GetReadVersionReply minKCVReply = reply;
-			minKCVReply.version = minKnownCommittedVersion;
-			request.reply.send(minKCVReply);
-		} else {
-			request.reply.send(reply);
+			reply.version = minKnownCommittedVersion;
+		} 
+		else {
+			reply.version = replyVersion;
 		}
+
+		reply.tagThrottleInfo.clear();
+
+		if(!request.tags.empty()) {
+			auto& priorityThrottledTags = throttledTags[request.priority];
+			for(auto tag : request.tags) {
+				auto tagItr = priorityThrottledTags.find(tag.first);
+				if(tagItr != priorityThrottledTags.end()) {
+					if(tagItr->second.expiration > now()) {
+						TEST(true); // Proxy returning tag throttle
+						reply.tagThrottleInfo[tag.first] = tagItr->second;
+					}
+					else {
+						// This isn't required, but we might as well
+						TEST(true); // Proxy expiring tag throttle
+						priorityThrottledTags.erase(tagItr);
+					}
+				}
+			}
+		}
+
+		request.reply.send(reply);
 		++stats->txnRequestOut;
 	}
 
@@ -1440,11 +1497,15 @@ ACTOR static Future<Void> transactionStarter(
 	state Deque<GetReadVersionRequest> batchQueue;
 	state vector<MasterProxyInterface> otherProxies;
 
+	state TransactionTagMap<uint64_t> transactionTagCounter;
+	state PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags;
+
 	state PromiseStream<double> replyTimes;
-	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply));
+
+	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags));
 	addActor.send(queueTransactionStartRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(),
-	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(),
-	                                            &commitData->stats, &batchRateInfo));
+	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats, &batchRateInfo,
+	                                            &transactionTagCounter));
 
 	// Get a list of the other proxies that go together with us
 	while (std::find(db->get().client.proxies.begin(), db->get().client.proxies.end(), proxy) == db->get().client.proxies.end())
@@ -1495,10 +1556,10 @@ ACTOR static Future<Void> transactionStarter(
 			auto& req = transactionQueue->front();
 			int tc = req.transactionCount;
 
-			if(req.priority() < GetReadVersionRequest::PRIORITY_DEFAULT && !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
+			if(req.priority < TransactionPriority::DEFAULT && !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
 				break;
 			}
-			else if(req.priority() < GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE && !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
+			else if(req.priority < TransactionPriority::IMMEDIATE && !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
 				break;	
 			}
 
@@ -1508,9 +1569,9 @@ ACTOR static Future<Void> transactionStarter(
 			}
 
 			transactionsStarted[req.flags&1] += tc;
-			if (req.priority() >= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE)
+			if (req.priority >= TransactionPriority::IMMEDIATE)
 				systemTransactionsStarted[req.flags & 1] += tc;
-			else if (req.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT)
+			else if (req.priority >= TransactionPriority::DEFAULT)
 				defaultPriTransactionsStarted[req.flags & 1] += tc;
 			else
 				batchPriTransactionsStarted[req.flags & 1] += tc;
@@ -1554,7 +1615,7 @@ ACTOR static Future<Void> transactionStarter(
 			if (start[i].size()) {
 				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(commitData, i, &otherProxies, debugID, transactionsStarted[i], systemTransactionsStarted[i], defaultPriTransactionsStarted[i], batchPriTransactionsStarted[i]);
 				addActor.send(sendGrvReplies(readVersionReply, start[i], &commitData->stats,
-				                             commitData->minKnownCommittedVersion));
+				                             commitData->minKnownCommittedVersion, throttledTags));
 
 				// for now, base dynamic batching on the time for normal requests (not read_risky)
 				if (i == 0) {
@@ -1646,10 +1707,12 @@ ACTOR static Future<Void> rejoinServer( MasterProxyInterface proxy, ProxyCommitD
 				rep.history.push_back(std::make_pair(decodeServerTagHistoryKey(history[i].key), decodeServerTagValue(history[i].value)));
 			}
 			auto localityKey = commitData->txnStateStore->readValue(tagLocalityListKeyFor(req.dcId)).get();
+			rep.newLocality = false;
 			if( localityKey.present() ) {
-				rep.newLocality = false;
 				int8_t locality = decodeTagLocalityListValue(localityKey.get());
-				if(locality != rep.tag.locality) {
+				if(rep.tag.locality != tagLocalityUpgraded && locality != rep.tag.locality) {
+					TraceEvent(SevWarnAlways, "SSRejoinedWithChangedLocality").detail("Tag", rep.tag.toString()).detail("DcId", req.dcId).detail("NewLocality", locality);
+				} else if(locality != rep.tag.locality) {
 					uint16_t tagId = 0;
 					std::vector<uint16_t> usedTags;
 					auto tagKeys = commitData->txnStateStore->readRange(serverTagKeys).get();
@@ -1678,6 +1741,8 @@ ACTOR static Future<Void> rejoinServer( MasterProxyInterface proxy, ProxyCommitD
 					}
 					rep.newTag = Tag(locality, tagId);
 				}
+			} else if(rep.tag.locality != tagLocalityUpgraded) {
+				TraceEvent(SevWarnAlways, "SSRejoinedWithUnknownLocality").detail("Tag", rep.tag.toString()).detail("DcId", req.dcId);
 			} else {
 				rep.newLocality = true;
 				int8_t maxTagLocality = -1;
@@ -1705,6 +1770,25 @@ ACTOR Future<Void> healthMetricsRequestServer(MasterProxyInterface proxy, GetHea
 					req.reply.send(*detailedHealthMetricsReply);
 				else
 					req.reply.send(*healthMetricsReply);
+			}
+		}
+	}
+}
+
+ACTOR Future<Void> ddMetricsRequestServer(MasterProxyInterface proxy, Reference<AsyncVar<ServerDBInfo>> db)
+{
+	loop {
+		choose {
+			when(state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture()))
+			{
+				ErrorOr<GetDataDistributorMetricsReply> reply = wait(errorOr(db->get().distributor.get().dataDistributorMetrics.getReply(GetDataDistributorMetricsRequest(req.keys, req.shardLimit))));
+				if ( reply.isError() ) {
+					req.reply.sendError(reply.getError());
+				} else {
+					GetDDMetricsReply newReply;
+					newReply.storageMetricsList = reply.get().storageMetricsList;
+					req.reply.send(newReply);
+				}
 			}
 		}
 	}
@@ -1914,6 +1998,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	state GetHealthMetricsReply detailedHealthMetricsReply;
 
 	addActor.send( waitFailureServer(proxy.waitFailure.getFuture()) );
+	addActor.send( traceRole(Role::MASTER_PROXY, proxy.id()) );
 
 	//TraceEvent("ProxyInit1", proxy.id());
 
@@ -1949,6 +2034,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	addActor.send(readRequestServer(proxy, addActor, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
+	addActor.send(ddMetricsRequestServer(proxy, db));
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));
@@ -2024,9 +2110,13 @@ ACTOR Future<Void> masterProxyServerCore(
 
 				if(txnSequences.size() == maxSequence) {
 					state KeyRange txnKeys = allKeys;
+					Standalone<RangeResultRef> UIDtoTagMap = commitData.txnStateStore->readRange( serverTagKeys ).get();
+					state std::map<Tag, UID> tag_uid;
+					for (const KeyValueRef kv : UIDtoTagMap) {
+						tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
+					}
 					loop {
 						wait(yield());
-						Standalone<RangeResultRef> UIDtoTagMap = commitData.txnStateStore->readRange( serverTagKeys ).get();
 						Standalone<RangeResultRef> data = commitData.txnStateStore->readRange(txnKeys, SERVER_KNOBS->BUGGIFIED_ROW_LIMIT, SERVER_KNOBS->APPLY_MUTATION_BYTES).get();
 						if(!data.size()) break;
 						((KeyRangeRef&)txnKeys) = KeyRangeRef( keyAfter(data.back().key, txnKeys.arena()), txnKeys.end );
@@ -2039,7 +2129,7 @@ ACTOR Future<Void> masterProxyServerCore(
 							if( kv.key.startsWith(keyServersPrefix) ) {
 								KeyRef k = kv.key.removePrefix(keyServersPrefix);
 								if(k != allKeys.end) {
-									decodeKeyServersValue(UIDtoTagMap, kv.value, src, dest);
+									decodeKeyServersValue(tag_uid, kv.value, src, dest);
 									info.tags.clear();
 									info.src_info.clear();
 									info.dest_info.clear();

@@ -121,6 +121,13 @@
                   },
                   "commit_latency_bands":{
                      "$map_key=upperBoundOfBand": 1
+                  },
+                  "busiest_read_tag":{
+                     "tag": "",
+                     "fractional_cost": 0.0,
+                     "estimated_cost":{
+                        "hz":0.0
+                     }
                   }
                }
             ],
@@ -267,10 +274,16 @@
          "transactions_per_second_limit":0,
          "batch_released_transactions_per_second":0,
          "released_transactions_per_second":0,
+         "throttled_tags":{
+            "auto":{
+               "count":0
+            },
+            "manual":{
+               "count":0
+            }
+         },
          "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,
-         "limiting_version_lag_storage_server":0,
-         "worst_version_lag_storage_server":0,
          "limiting_data_lag_storage_server":{
             "versions":0,
             "seconds":0.0

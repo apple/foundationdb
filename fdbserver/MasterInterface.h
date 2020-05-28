@@ -48,12 +48,23 @@ struct MasterInterface {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion, notifyBackupWorkerDone);
+		serializer(ar, locality, waitFailure);
+		if( Archive::isDeserializing ) {
+			tlogRejoin = RequestStream< struct TLogRejoinRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(1) );
+			changeCoordinators = RequestStream< struct ChangeCoordinatorsRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(2) );
+			getCommitVersion = RequestStream< struct GetCommitVersionRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(3) );
+			notifyBackupWorkerDone = RequestStream<struct BackupWorkerDoneRequest>( waitFailure.getEndpoint().getAdjustedEndpoint(4) );
+		}
 	}
 
 	void initEndpoints() {
-		getCommitVersion.getEndpoint( TaskPriority::GetConsistentReadVersion );
-		tlogRejoin.getEndpoint( TaskPriority::MasterTLogRejoin );
+		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
+		streams.push_back(waitFailure.getReceiver());
+		streams.push_back(tlogRejoin.getReceiver(TaskPriority::MasterTLogRejoin));
+		streams.push_back(changeCoordinators.getReceiver());
+		streams.push_back(getCommitVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
+		streams.push_back(notifyBackupWorkerDone.getReceiver());
+		FlowTransport::transport().addEndpoints(streams);
 	}
 };
 
