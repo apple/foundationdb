@@ -331,6 +331,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Void> commit(bool) override {
+		// If there is nothing to write, don't write.
+		if (writeBatch == nullptr) {
+			return Void();
+		}
 		auto a = new Writer::CommitAction();
 		a->batchToCommit = std::move(writeBatch);
 		auto res = a->done.getFuture();
