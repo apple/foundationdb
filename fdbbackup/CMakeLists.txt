@@ -21,7 +21,7 @@ if(NOT OPEN_FOR_IDE)
     fdb_install(TARGETS fdbbackup DESTINATION bin COMPONENT clients)
   else()
     add_custom_target(prepare_fdbbackup_install ALL DEPENDS strip_only_fdbbackup)
-    fdb_install(FILES ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients)
+    fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbbackup DESTINATION bin COMPONENT clients)
   endif()
   install_symlink(
     COMPONENT clients
