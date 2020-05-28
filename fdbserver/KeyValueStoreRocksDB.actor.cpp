@@ -183,7 +183,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (s.ok()) {
 				a.result.send(Value(toStringRef(value)));
 			} else {
-				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValue");
+				if (!s.IsNotFound()) {
+					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValue");
+				}
 				a.result.send(Optional<Value>());
 			}
 		}
