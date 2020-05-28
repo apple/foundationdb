@@ -139,7 +139,7 @@ Accessing cluster file information from a client
 Any client connected to FoundationDB can access information about its cluster file directly from the database:
 
 * To get the path to the cluster file, read the key ``\xFF\xFF/cluster_file_path``.
-* To get the contents of the cluster file, read the key ``\xFF\xFF/connection_string``.
+* To get the desired contents of the cluster file, read the key ``\xFF\xFF/connection_string``. Make sure the client can write to the cluster file and keep it up to date.
 
 .. _ipv6-support:
 
