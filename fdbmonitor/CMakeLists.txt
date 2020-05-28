@@ -14,7 +14,7 @@ if(GENERATE_DEBUG_PACKAGES)
   fdb_install(TARGETS fdbmonitor DESTINATION fdbmonitor COMPONENT server)
 else()
   add_custom_target(prepare_fdbmonitor_install ALL DEPENDS strip_only_fdbmonitor)
-  fdb_install(FILES ${CMAKE_BINARY_DIR}/packages/bin/fdbmonitor DESTINATION fdbmonitor COMPONENT server)
+  fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbmonitor DESTINATION fdbmonitor COMPONENT server)
 endif()
 
 # Create a local sandbox for quick manual testing without simulator
