@@ -42,6 +42,8 @@ FoundationDB may return the following error codes from API functions. If you nee
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | proxy_memory_limit_exceeded                   | 1042| Proxy commit memory limit exceeded                                             |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| batch_transaction_throttled                   | 1051| Batch GRV request rate limit exceeded                                          |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | operation_cancelled                           | 1101| Asynchronous operation cancelled                                               |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | future_released                               | 1102| Future has been released                                                       |
@@ -112,6 +114,8 @@ FoundationDB may return the following error codes from API functions. If you nee
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | transaction_read_only                         | 2023| Attempted to commit a transaction specified as read-only                       |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| network_cannot_be_restarted                   | 2025| Network can only be started once                                               |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | incompatible_protocol_version                 | 2100| Incompatible protocol version                                                  |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | transaction_too_large                         | 2101| Transaction exceeds byte limit                                                 |
@@ -135,6 +139,12 @@ FoundationDB may return the following error codes from API functions. If you nee
 | tag_too_long                                  | 2110| Tag set on transaction is too long                                             |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | too_many_tag_throttles                        | 2111| Too many tag throttles have been created                                       |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| special_keys_cross_module_read                | 2112| Special key space range read crosses modules.                                  |
+|                                               |     | Refer to the ``SPECIAL_KEY_SPACE_RELAXED`` transaction option for more details.|
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| special_keys_no_module_found                  | 2113| Special key space range read does not intersect a module.                      |
+|                                               |     | Refer to the ``SPECIAL_KEY_SPACE_RELAXED`` transaction option for more details.|
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | api_version_unset                             | 2200| API version is not set                                                         |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+

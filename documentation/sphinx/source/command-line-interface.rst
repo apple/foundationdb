@@ -106,6 +106,13 @@ Set the process using ``configure [proxies|resolvers|logs]=<N>``, where ``<N>`` 
 
 For recommendations on appropriate values for process types in large clusters, see :ref:`guidelines-process-class-config`.
 
+consistencycheck
+----------------
+
+The ``consistencycheck`` command enables or disables consistency checking. Its syntax is ``consistencycheck [on|off]``. Calling it with ``on`` enables consistency checking, and ``off`` disables it. Calling it with no arguments displays whether consistency checking is currently enabled.
+
+You must be running an ``fdbserver`` process with the ``consistencycheck`` role to perform consistency checking.
+
 coordinators
 ------------
 
@@ -146,6 +153,12 @@ The format should be the same as the value of the ``configuration`` entry in sta
 
 "The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one.
 
+force_recovery_with_data_loss
+-----------------------------
+
+The ``force_recovery_with_data_loss`` command will recover a multi-region database to the specified datacenter. Its syntax is ``force_recovery_with_data_loss <DCID>``. It will likely result in the loss of the most recently committed mutations and is intended to be used if the primary datacenter has been lost. 
+
+This command will change the :ref:`region configuration <configuration-configuring-regions>` to have a positive priority for the chosen ``DCID`` and a negative priority for all other ``DCIDs``. It will also set ``usable_regions`` to 1. If the database has already recovered, this command does nothing.
 
 get
 ---
@@ -237,10 +250,44 @@ For each IP address or IP:port pair in ``<ADDRESS...>``, the command removes any
 
 For information on adding machines to a cluster, see :ref:`adding-machines-to-a-cluster`.
 
+kill
+----
+
+The ``kill`` command attempts to kill one or more processes in the cluster.
+
+``kill``
+
+With no arguments, ``kill`` populates the list of processes that can be killed. This must be run prior to running any other ``kill`` commands.
+
+``kill list``
+
+Displays all known processes. This is only useful when the database is unresponsive.
+
+``kill <ADDRESS...>``
+
+Attempts to kill all specified processes. Each address should include the IP and port of the process being targeted.
+
+``kill all``
+
+Attempts to kill all known processes in the cluster.
+
 lock
 ----
 
 The ``lock`` command locks the database with a randomly generated lockUID.
+
+maintenance
+-----------
+
+The ``maintenance`` command marks a particular zone ID (i.e. fault domain) as being under maintenance. Its syntax is ``maintenance [on|off] [ZONEID] [SECONDS]``. 
+
+A zone that is under maintenance will not have data moved away from it even if processes in that zone fail. In particular, this means the cluster will not attempt to heal the replication factor as a result of failures in the maintenance zone. This is useful when the amount of time that the processes in a fault domain are expected to be absent is reasonably short and you don't want to move data to and from the affected processes. 
+
+Running this command with no arguments will display the state of any current maintenance.
+
+Running ``maintenance on <ZONEID> <SECONDS>`` will turn maintenance on for the specified zone. A duration must be specified for the length of maintenance mode.
+
+Running ``maintenance off`` will turn off maintenance mode.
 
 option
 ------
@@ -254,6 +301,39 @@ If there is no active transaction, then the option will be applied to all operat
 If there is an active transaction (one created with ``begin``), then enabled options apply only to that transaction. Options cannot be disabled on an active transaction.
 
 Calling the ``option`` command with no parameters prints a list of all enabled options.
+
+profile
+-------
+
+The ``profile`` command is used to control various profiling actions.
+
+client
+^^^^^^
+
+``profile client <get|set>``
+
+Reads or sets parameters of client transaction sampling. Use ``get`` to list the current parameters, and ``set <RATE|default> <SIZE|default>`` to set them. ``RATE`` is the fraction of transactions to be sampled, and ``SIZE`` is the amount (in bytes) of sampled data to store in the database.
+
+list
+^^^^
+
+``profile list``
+
+Lists the processes that can be profiled using the ``flow`` and ``heap`` subcommands.
+
+flow
+^^^^
+
+``profile flow run <DURATION> <FILENAME> <PROCESS...>``
+
+Enables flow profiling on the specifed processes for ``DURATION`` seconds. Profiling output will be stored at the specified filename relative to the fdbserver process's trace log directory. To profile all processes, use ``all`` for the ``PROCESS`` parameter.
+
+heap
+^^^^
+
+``profile heap <PROCESS>``
+
+Enables heap profiling for the specified process.
 
 reset
 -----
@@ -271,6 +351,18 @@ set
 The ``set`` command sets a value for a given key. Its syntax is ``set <KEY> <VALUE>``. If ``<KEY>`` is not already present in the database, it will be created.
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
+
+setclass
+--------
+
+The ``setclass`` command can be used to change the :ref:`process class <guidelines-process-class-config>` for a given process. Its syntax is ``setclass [<ADDRESS> <CLASS>]``. If no arguments are specified, then the process classes of all processes are listed. Setting the class to ``default`` to revert to the process class specified on the command line.
+
+The available process classes are ``unset``, ``storage``, ``transaction``, ``resolution``, ``proxy``, ``master``, ``test``, ``unset``, ``stateless``, ``log``, ``router``, ``cluster_controller``, ``fast_restore``, ``data_distributor``, ``coordinator``, ``ratekeeper``, ``storage_cache``, ``backup``, and ``default``.
+
+sleep
+-----
+
+The ``sleep`` command inserts a delay before running the next command. Its syntax is ``sleep <SECONDS>``. This command can be useful when ``fdbcli`` is run with the ``--exec`` flag to control the timing of commands.
 
 .. _cli-status:
 
@@ -381,3 +473,16 @@ unlock
 ------
 
 The ``unlock`` command unlocks the database with the specified lock UID. Because this is a potentially dangerous operation, users must copy a passphrase before the unlock command is executed.
+
+writemode
+---------
+
+Controls whether or not ``fdbcli`` can perform sets and clears.
+
+``writemode off``
+
+Disables writing from ``fdbcli`` (the default). In this mode, attempting to set or clear keys will result in an error.
+
+``writemode on``
+
+Enables writing from ``fdbcli``.
