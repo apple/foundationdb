@@ -29,7 +29,7 @@
 #include <inttypes.h>
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 630
+#define FDB_API_VERSION 700
 #endif
 
 #include <foundationdb/fdb_c.h>
