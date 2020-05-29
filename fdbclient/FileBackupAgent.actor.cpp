@@ -3582,7 +3582,7 @@ public:
 		state ReadYourWritesTransaction tr(cx);
 		state Future<Void> watchForRestoreRequestDone;
 		state bool restoreDone = false;
-		TraceEvent("FastRestoreAgentWaitForRestoreToFinish").detail("DBLock", randomUID);
+		TraceEvent("FastRestoreToolWaitForRestoreToFinish").detail("DBLock", randomUID);
 		loop {
 			try {
 				tr.reset();
@@ -3607,23 +3607,23 @@ public:
 				wait(tr.onError(e));
 			}
 		}
-		TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBStart", randomUID);
+		TraceEvent("FastRestoreToolRestoreFinished").detail("UnlockDBStart", randomUID);
 		try {
 			wait(unlockDatabase(cx, randomUID));
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) { // Should only happen in simulation
-				TraceEvent(SevWarnAlways, "FastRestoreAgentOnCancelingActor")
+				TraceEvent(SevWarnAlways, "FastRestoreToolOnCancelingActor")
 				    .detail("DBLock", randomUID)
 				    .detail("ManualCheck", "Is DB locked");
 			} else {
-				TraceEvent(SevError, "FastRestoreAgentUnlockDBFailed")
+				TraceEvent(SevError, "FastRestoreToolUnlockDBFailed")
 				    .detail("DBLock", randomUID)
 				    .detail("ErrorCode", e.code())
 				    .detail("Error", e.what());
 				ASSERT_WE_THINK(false); // This unlockDatabase should always succeed, we think.
 			}
 		}
-		TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBFinish", randomUID);
+		TraceEvent("FastRestoreToolRestoreFinished").detail("UnlockDBFinish", randomUID);
 		return Void();
 	}
 
@@ -3668,10 +3668,10 @@ public:
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(checkDatabaseLock(tr, randomUID));
 
-				TraceEvent("FastRestoreAgentSubmitRestoreRequests").detail("DBIsLocked", randomUID);
+				TraceEvent("FastRestoreToolSubmitRestoreRequests").detail("DBIsLocked", randomUID);
 				break;
 			} catch (Error& e) {
-				TraceEvent("FastRestoreAgentSubmitRestoreRequests").detail("CheckLockError", e.what());
+				TraceEvent("FastRestoreToolSubmitRestoreRequests").detail("CheckLockError", e.what());
 				TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreMayFail")
 				    .detail("Reason", "DB is not properly locked")
 				    .detail("ExpectedLockID", randomUID);

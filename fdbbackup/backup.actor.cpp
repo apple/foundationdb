@@ -74,7 +74,7 @@ enum enumProgramExe {
 	EXE_AGENT,
 	EXE_BACKUP,
 	EXE_RESTORE,
-	EXE_FASTRESTORE_AGENT,
+	EXE_FASTRESTORE_TOOL,
 	EXE_DR_AGENT,
 	EXE_DB_BACKUP,
 	EXE_UNDEFINED
@@ -824,7 +824,7 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 const KeyRef exeAgent = LiteralStringRef("backup_agent");
 const KeyRef exeBackup = LiteralStringRef("fdbbackup");
 const KeyRef exeRestore = LiteralStringRef("fdbrestore");
-const KeyRef exeFastRestoreAgent = LiteralStringRef("fastrestore_agent"); // must be lower case
+const KeyRef exeFastRestoreTool = LiteralStringRef("fastrestore_tool"); // must be lower case
 const KeyRef exeDatabaseAgent = LiteralStringRef("dr_agent");
 const KeyRef exeDatabaseBackup = LiteralStringRef("fdbdr");
 
@@ -1191,7 +1191,7 @@ static void printUsage(enumProgramExe programExe, bool devhelp)
 	case EXE_RESTORE:
 		printRestoreUsage(devhelp);
 		break;
-	case EXE_FASTRESTORE_AGENT:
+	case EXE_FASTRESTORE_TOOL:
 		printFastRestoreUsage(devhelp);
 		break;
 	case EXE_DR_AGENT:
@@ -1258,10 +1258,10 @@ enumProgramExe	getProgramType(std::string programExe)
 	}
 
 	// Check if restore
-	else if ((programExe.length() >= exeFastRestoreAgent.size()) &&
-	         (programExe.compare(programExe.length() - exeFastRestoreAgent.size(), exeFastRestoreAgent.size(),
-	                             (const char*)exeFastRestoreAgent.begin()) == 0)) {
-		enProgramExe = EXE_FASTRESTORE_AGENT;
+	else if ((programExe.length() >= exeFastRestoreTool.size()) &&
+	         (programExe.compare(programExe.length() - exeFastRestoreTool.size(), exeFastRestoreTool.size(),
+	                             (const char*)exeFastRestoreTool.begin()) == 0)) {
+		enProgramExe = EXE_FASTRESTORE_TOOL;
 	}
 
 	// Check if db agent
@@ -1591,7 +1591,7 @@ ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::s
 	}
 }
 
-ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name, enumProgramExe exe, double *pollDelay, Database taskDest = Database(), 
+ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name, enumProgramExe exe, double *pollDelay, Database taskDest = Database(),
 										std::string id = nondeterministicRandom()->randomUniqueID().toString()) {
 	state std::string metaKey = layerStatusMetaPrefixRange.begin.toString() + "json/" + name;
 	state std::string rootKey = backupStatusPrefixRange.begin.toString() + name + "/json";
@@ -2189,7 +2189,7 @@ ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std:
 }
 
 // Fast restore agent that kicks off the restore: send restore requests to restore workers.
-ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::string container,
+ACTOR Future<Void> runFastRestoreTool(Database db, std::string tagName, std::string container,
                                        Standalone<VectorRef<KeyRangeRef>> ranges, Version dbVersion,
                                        bool performRestore, bool verbose, bool waitForDone) {
 	try {
@@ -2204,12 +2204,12 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 			ranges.push_back(ranges.arena(), normalKeys);
 		}
 
-		printf("[INFO] runFastRestoreAgent: restore_ranges:%d first range:%s\n", ranges.size(),
+		printf("[INFO] runFastRestoreTool: restore_ranges:%d first range:%s\n", ranges.size(),
 		       ranges.front().toString().c_str());
 
 		if (performRestore) {
 			if (dbVersion == invalidVersion) {
-				TraceEvent("FastRestoreAgent").detail("TargetRestoreVersion", "Largest restorable version");
+				TraceEvent("FastRestoreTool").detail("TargetRestoreVersion", "Largest restorable version");
 				BackupDescription desc = wait(IBackupContainer::openContainer(container)->describeBackup());
 				if (!desc.maxRestorableVersion.present()) {
 					fprintf(stderr, "The specified backup is not restorable to any version.\n");
@@ -2217,21 +2217,21 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 				}
 
 				dbVersion = desc.maxRestorableVersion.get();
-				TraceEvent("FastRestoreAgent").detail("TargetRestoreVersion", dbVersion);
+				TraceEvent("FastRestoreTool").detail("TargetRestoreVersion", dbVersion);
 			}
 			state UID randomUID = deterministicRandom()->randomUniqueID();
-			TraceEvent("FastRestoreAgent")
+			TraceEvent("FastRestoreTool")
 			    .detail("SubmitRestoreRequests", ranges.size())
 			    .detail("RestoreUID", randomUID);
 			wait(backupAgent.submitParallelRestore(db, KeyRef(tagName), ranges, KeyRef(container), dbVersion, true,
 			                                       randomUID));
 			if (waitForDone) {
 				// Wait for parallel restore to finish and unlock DB after that
-				TraceEvent("FastRestoreAgent").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");
+				TraceEvent("FastRestoreTool").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");
 				wait(backupAgent.parallelRestoreFinish(db, randomUID));
-				TraceEvent("FastRestoreAgent").detail("BackupAndParallelRestore", "RestoreFinished");
+				TraceEvent("FastRestoreTool").detail("BackupAndParallelRestore", "RestoreFinished");
 			} else {
-				TraceEvent("FastRestoreAgent")
+				TraceEvent("FastRestoreTool")
 				    .detail("RestoreUID", randomUID)
 				    .detail("OperationGuide", "Manually unlock DB when restore finishes");
 				printf("WARNING: DB will be in locked state after restore. Need UID:%s to unlock DB\n",
@@ -2472,7 +2472,7 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 			throw backup_error();
 		}
 	}
-	
+
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(db));
 	loop {
 		try {
@@ -2885,7 +2885,7 @@ int main(int argc, char* argv[]) {
 			}
 			args = new CSimpleOpt(argc - 1, argv + 1, g_rgRestoreOptions, SO_O_EXACT);
 			break;
-		case EXE_FASTRESTORE_AGENT:
+		case EXE_FASTRESTORE_TOOL:
 			if (argc < 2) {
 				printFastRestoreUsage(false);
 				return FDB_EXIT_ERROR;
@@ -3325,7 +3325,7 @@ int main(int argc, char* argv[]) {
 				return FDB_EXIT_ERROR;
 				break;
 
-			case EXE_FASTRESTORE_AGENT:
+			case EXE_FASTRESTORE_TOOL:
 				fprintf(stderr, "ERROR: FDB Fast Restore Agent does not support argument value `%s'\n",
 				        args->File(argLoop));
 				printHelpTeaser(argv[0]);
@@ -3741,12 +3741,12 @@ int main(int argc, char* argv[]) {
 					throw restore_error();
 			}
 			break;
-		case EXE_FASTRESTORE_AGENT:
+		case EXE_FASTRESTORE_TOOL:
 			// TODO: We have not implmented the code commented out in this case
 			if (!initCluster()) return FDB_EXIT_ERROR;
 			switch (restoreType) {
 			case RESTORE_START:
-				f = stopAfter(runFastRestoreAgent(db, tagName, restoreContainer, backupKeys, restoreVersion, !dryRun,
+				f = stopAfter(runFastRestoreTool(db, tagName, restoreContainer, backupKeys, restoreVersion, !dryRun,
 				                                  !quietDisplay, waitForDone));
 				break;
 			case RESTORE_WAIT:
