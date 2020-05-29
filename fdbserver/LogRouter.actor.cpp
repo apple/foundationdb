@@ -85,6 +85,10 @@ struct LogRouterData {
 	bool allowPops;
 	LogSet logSet;
 	bool foundEpochEnd;
+	double waitForVersionTime = 0;
+	double maxWaitForVersionTime = 0;
+	double getMoreTime = 0;
+	double maxGetMoreTime = 0;
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>> sequence_version;
@@ -94,6 +98,7 @@ struct LogRouterData {
 	std::map<UID, PeekTrackerData> peekTracker;
 
 	CounterCollection cc;
+	Counter getMoreCount, getMoreBlockedCount;
 	Future<Void> logger;
 	Reference<EventCacheHolder> eventCacheHolder;
 
@@ -116,7 +121,7 @@ struct LogRouterData {
 
 	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), 
 	  version(req.startVersion-1), minPopped(0), startVersion(req.startVersion), allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false),
-		cc("LogRouter", dbgid.toString()) {
+		cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc), getMoreBlockedCount("GetMoreBlockedCount", cc) {
 		//setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;
@@ -133,11 +138,17 @@ struct LogRouterData {
 
 		eventCacheHolder = Reference<EventCacheHolder>( new EventCacheHolder(dbgid.shortString() + ".PeekLocation") );
 
-		specialCounter(cc, "Version", [this](){return this->version.get(); });
-		specialCounter(cc, "MinPopped", [this](){return this->minPopped.get(); });
+		
+		specialCounter(cc, "Version", [this](){ return this->version.get(); });
+		specialCounter(cc, "MinPopped", [this](){ return this->minPopped.get(); });
 		specialCounter(cc, "FetchedVersions", [this](){ return std::max<Version>(0, std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, this->version.get() - this->minPopped.get())); });
 		specialCounter(cc, "MinKnownCommittedVersion", [this](){ return this->minKnownCommittedVersion; });
 		specialCounter(cc, "PoppedVersion", [this](){ return this->poppedVersion; });
+		specialCounter(cc, "FoundEpochEnd", [this](){ return this->foundEpochEnd; });
+		specialCounter(cc, "WaitForVersionTime", [this](){ double val = this->waitForVersionTime; this->waitForVersionTime = 0; return val; });
+		specialCounter(cc, "MaxWaitForVersionTime", [this](){ double val = this->maxWaitForVersionTime; this->maxWaitForVersionTime = 0; return val; });
+		specialCounter(cc, "GetMoreTime", [this](){ double val = this->getMoreTime; this->getMoreTime = 0; return val; });
+		specialCounter(cc, "MaxGetMoreTime", [this](){ double val = this->maxGetMoreTime; this->maxGetMoreTime = 0; return val; });
 		logger = traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LogRouterMetrics");
 	}
 };
@@ -195,11 +206,14 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
 	// The only time the log router should allow a gap in versions larger than MAX_READ_TRANSACTION_LIFE_VERSIONS is when processing epoch end.
 	// Since one set of log routers is created per generation of transaction logs, the gap caused by epoch end will be within MAX_VERSIONS_IN_FLIGHT of the log routers start version.
+	state double startTime = now();
 	if(self->version.get() < self->startVersion) {
 		if(ver > self->startVersion) {
 			self->version.set(self->startVersion);
 			wait(self->minPopped.whenAtLeast(self->version.get()));
 		}
+		self->waitForVersionTime += now() - startTime;
+		self->maxWaitForVersionTime = std::max(self->maxWaitForVersionTime, now() - startTime);
 		return Void();
 	}
 	if(!self->foundEpochEnd) {
@@ -217,6 +231,8 @@ ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
 	if(ver >= self->startVersion + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT) {
 		self->foundEpochEnd = true;
 	}
+	self->waitForVersionTime += now() - startTime;
+	self->maxWaitForVersionTime = std::max(self->maxWaitForVersionTime, now() - startTime);
 	return Void();
 }
 
@@ -230,8 +246,16 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 
 	loop {
 		loop {
+			Future<Void> getMoreF = r ? r->getMore(TaskPriority::TLogCommit) : Never();
+			++self->getMoreCount;
+			if(!getMoreF.isReady()) {
+				++self->getMoreBlockedCount;
+			}
+			state double startTime = now();
 			choose {
-				when(wait( r ? r->getMore(TaskPriority::TLogCommit) : Never() ) ) {
+				when(wait( getMoreF ) ) {
+					self->getMoreTime += now() - startTime;
+					self->maxGetMoreTime = std::max(self->maxGetMoreTime, now() - startTime);
 					break;
 				}
 				when( wait( dbInfoChange ) ) { //FIXME: does this actually happen?
