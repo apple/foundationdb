@@ -824,7 +824,7 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 const KeyRef exeAgent = LiteralStringRef("backup_agent");
 const KeyRef exeBackup = LiteralStringRef("fdbbackup");
 const KeyRef exeRestore = LiteralStringRef("fdbrestore");
-const KeyRef exeFastRestoreTool = LiteralStringRef("fastrestore_tool"); // must be lower case
+const KeyRef exeFastRestoreTool = LiteralStringRef("fastrestore_toola"); // must be lower case
 const KeyRef exeDatabaseAgent = LiteralStringRef("dr_agent");
 const KeyRef exeDatabaseBackup = LiteralStringRef("fdbdr");
 
