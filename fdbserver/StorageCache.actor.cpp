@@ -1715,7 +1715,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 	state Future<Void> dbInfoChange = Void();
 	state Reference<ILogSystem::IPeekCursor> cursor;
 	state Version tagAt = 0;
-
+	state double start = now();
 	state Version ver = invalidVersion;
 	++data->counters.updateBatches;
 
@@ -1741,6 +1741,12 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 
 			data->lastTLogVersion = cursor->getMaxKnownVersion();
 			data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
+
+			start = now();
+			wait( data->updateVersionLock.take(TaskPriority::TLogPeekReply,1) );
+			state FlowLock::Releaser holdingDVL( data->updateVersionLock );
+			if(now() - start > 0.1)
+				TraceEvent("SCSlowTakeLock1", data->thisServerID).detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken).detail("Duration", now() - start).detail("Version", data->version.get());
 
 			state FetchInjectionInfo fii;
 			state Reference<ILogSystem::IPeekCursor> cloneCursor2;
@@ -1807,7 +1813,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 				state int mutationNum = 0;
 				state VerUpdateRef* pUpdate = &fii.changes[changeNum];
 				for(; mutationNum < pUpdate->mutations.size(); mutationNum++) {
-					//TraceEvent("InjectedChanges", data->thisServerID).detail("Version", pUpdate->version);
+					TraceEvent("SCInjectedChanges", data->thisServerID).detail("Version", pUpdate->version);
 					applyMutation(data->updater, data, pUpdate->mutations[mutationNum], pUpdate->version);
 					mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 					injectedChanges = true;
@@ -1967,7 +1973,9 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 						begin = kv.key;
 						privatized.param1 = begin.withPrefix(systemKeys.begin);
 						privatized.param2 = serverKeysTrue;
-						//TraceEvent(SevDebug, "SCStartupFetch", self->thisServerID).detail("BeginKey", begin.substr(storageCacheKeys.begin.size()));
+						//TraceEvent(SevDebug, "SCStartupFetch", self->thisServerID).
+						//	detail("BeginKey", begin.substr(storageCacheKeys.begin.size())).
+						//	detail("ReadVersion", readVersion).detail("DataVersion", self->version.get());
 						applyMutation(self->updater, self, privatized, readVersion);
 						currCached = true;
 					} else {
@@ -1975,7 +1983,8 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 						end = kv.key;
 						privatized.param1 = begin.withPrefix(systemKeys.begin);
 						privatized.param2 = serverKeysFalse;
-						//TraceEvent(SevDebug, "SCStartupFetch", self->thisServerID).detail("EndKey", end.substr(storageCacheKeys.begin.size()));
+						//TraceEvent(SevDebug, "SCStartupFetch", self->thisServerID).detail("EndKey", end.substr(storageCacheKeys.begin.size())).
+						//	detail("ReadVersion", readVersion).detail("DataVersion", self->version.get());
 						applyMutation(self->updater, self, privatized, readVersion);
 					}
 				}
