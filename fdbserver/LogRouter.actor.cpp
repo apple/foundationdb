@@ -138,7 +138,6 @@ struct LogRouterData {
 
 		eventCacheHolder = Reference<EventCacheHolder>( new EventCacheHolder(dbgid.shortString() + ".PeekLocation") );
 
-		
 		specialCounter(cc, "Version", [this](){ return this->version.get(); });
 		specialCounter(cc, "MinPopped", [this](){ return this->minPopped.get(); });
 		specialCounter(cc, "FetchedVersions", [this](){ return std::max<Version>(0, std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, this->version.get() - this->minPopped.get())); });
