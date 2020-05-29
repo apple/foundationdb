@@ -133,8 +133,8 @@ bool findBestPolicySetSimple(int targetUniqueValueCount, Reference<LocalitySet>&
 		}
 		
 		++it;
-		if(it == entries.end()) {
-			it = entries.begin();
+		if(it == randomizedEntries.end()) {
+			it = randomizedEntries.begin();
 		}
 	}
 
