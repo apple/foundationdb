@@ -28,9 +28,9 @@
 #include <stdint.h>
 #include <time.h>
 
-#include "..\flow\SimpleOpt.h"
-#include "..\fdbmonitor\SimpleIni.h"
-#include "fdbclient/IncludeVersions.h"
+#include "flow/SimpleOpt.h"
+#include "fdbmonitor/SimpleIni.h"
+#include "fdbclient/versions.h"
 
 // For PathFileExists
 #include "Shlwapi.h"

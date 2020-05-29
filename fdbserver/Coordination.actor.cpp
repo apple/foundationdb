@@ -34,6 +34,8 @@
 struct GenerationRegVal {
 	UniqueGeneration readGen, writeGen;
 	Optional<Value> val;
+
+	//To change this serialization, ProtocolVersion::GenerationRegVal must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, readGen, writeGen, val);
@@ -144,7 +146,7 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 			TraceEvent("GenerationRegReadReply").detail("RVSize", rawV.present() ? rawV.get().size() : -1).detail("VWG", v.writeGen.generation);
 			if (v.readGen < req.gen) {
 				v.readGen = req.gen;
-				store->set( KeyValueRef( req.key, BinaryWriter::toValue(v, IncludeVersion()) ) );
+				store->set( KeyValueRef( req.key, BinaryWriter::toValue(v, IncludeVersion(ProtocolVersion::withGenerationRegVal())) ) );
 				wait(store->commit());
 			}
 			req.reply.send( GenerationRegReadReply( v.val, v.writeGen, v.readGen ) );
@@ -156,7 +158,7 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 			if (v.readGen <= wrq.gen && v.writeGen < wrq.gen) {
 				v.writeGen = wrq.gen;
 				v.val = wrq.kv.value;
-				store->set( KeyValueRef( wrq.kv.key, BinaryWriter::toValue(v, IncludeVersion()) ) );
+				store->set( KeyValueRef( wrq.kv.key, BinaryWriter::toValue(v, IncludeVersion(ProtocolVersion::withGenerationRegVal())) ) );
 				wait(store->commit());
 				TraceEvent("GenerationRegWrote").detail("From", wrq.reply.getEndpoint().getPrimaryAddress()).detail("Key", wrq.kv.key)
 					.detail("ReqGen", wrq.gen.generation).detail("Returning", v.writeGen.generation);
@@ -490,7 +492,7 @@ struct LeaderRegisterCollection {
 		try { 
 			// FIXME: Get worker ID here
 			startRole(Role::COORDINATOR, id, UID());
-			wait(actor); 
+			wait(actor || traceRole(Role::COORDINATOR, id));
 			endRole(Role::COORDINATOR, id, "Coordinator changed");
 		} catch (Error& err) {
 			endRole(Role::COORDINATOR, id, err.what(), err.code() == error_code_actor_cancelled, err);

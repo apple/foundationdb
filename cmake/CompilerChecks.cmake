@@ -32,7 +32,10 @@ function(use_libcxx out)
 endfunction()
 
 function(static_link_libcxx out)
-  if(APPLE)
+  if(USE_TSAN)
+    # Libc/libstdc++ static linking is not supported for tsan
+    set("${out}" OFF PARENT_SCOPE)
+  elseif(APPLE)
     set("${out}" OFF PARENT_SCOPE)
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     default_linker(linker)

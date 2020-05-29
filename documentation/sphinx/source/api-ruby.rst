@@ -93,7 +93,7 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 630
+    FDB.api_version 700
     db = FDB.open
 
 .. function:: open( cluster_file=nil ) -> Database
@@ -626,8 +626,6 @@ In each of the methods below, ``param`` should be a string appropriately packed 
     |atomic-versionstamps-1|
 
     |atomic-versionstamps-2|
-
-    |atomic-set-versionstamped-key-2|
 
     .. warning :: |atomic-versionstamps-tuple-warning-key|
 

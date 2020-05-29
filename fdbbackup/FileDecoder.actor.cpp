@@ -219,8 +219,9 @@ struct VersionedMutations {
  */
 struct DecodeProgress {
 	DecodeProgress() = default;
-	DecodeProgress(const LogFile& file, std::vector<std::tuple<Arena, Version, int32_t, StringRef>> values)
-	  : file(file), keyValues(values) {}
+	template <class U>
+	DecodeProgress(const LogFile& file, U &&values)
+	  : file(file), keyValues(std::forward<U>(values)) {}
 
 	// If there are no more mutations to pull from the file.
 	// However, we could have unfinished version in the buffer when EOF is true,
@@ -228,7 +229,7 @@ struct DecodeProgress {
 	// should call getUnfinishedBuffer() to get these left data.
 	bool finished() { return (eof && keyValues.empty()) || (leftover && !keyValues.empty()); }
 
-	std::vector<std::tuple<Arena, Version, int32_t, StringRef>>&& getUnfinishedBuffer() { return std::move(keyValues); }
+	std::vector<std::tuple<Arena, Version, int32_t, StringRef>>&& getUnfinishedBuffer() && { return std::move(keyValues); }
 
 	// Returns all mutations of the next version in a batch.
 	Future<VersionedMutations> getNextBatch() { return getNextBatchImpl(this); }
@@ -448,7 +449,7 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 	for (; i < logs.size(); i++) {
 		if (logs[i].fileSize == 0) continue;
 
-		state DecodeProgress progress(logs[i], left);
+		state DecodeProgress progress(logs[i], std::move(left));
 		wait(progress.openFile(container));
 		while (!progress.finished()) {
 			VersionedMutations vms = wait(progress.getNextBatch());
@@ -456,7 +457,7 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 				std::cout << vms.version << " " << m.toString() << "\n";
 			}
 		}
-		left = progress.getUnfinishedBuffer();
+		left = std::move(progress).getUnfinishedBuffer();
 		if (!left.empty()) {
 			TraceEvent("UnfinishedFile").detail("File", logs[i].fileName).detail("Q", left.size());
 		}

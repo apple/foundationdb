@@ -50,6 +50,22 @@ struct TagThrottleApiWorkload : TestWorkload {
 
 	virtual void getMetrics(vector<PerfMetric>& m) {}
 
+	static Optional<TagThrottleType> randomTagThrottleType() {
+		Optional<TagThrottleType> throttleType;
+		switch(deterministicRandom()->randomInt(0, 3)) {
+			case 0:
+				throttleType = TagThrottleType::AUTO;
+				break;
+			case 1:
+				throttleType = TagThrottleType::MANUAL;
+				break;
+			default:	
+				break;
+		}
+
+		return throttleType;
+	}
+
 	ACTOR Future<Void> throttleTag(Database cx, std::map<std::pair<TransactionTag, TransactionPriority>, TagThrottleInfo> *manuallyThrottledTags) {
 		state TransactionTag tag = TransactionTagRef(deterministicRandom()->randomChoice(DatabaseContext::debugTransactionTagChoices));
 		state TransactionPriority priority = deterministicRandom()->randomChoice(allTransactionPriorities);
@@ -60,7 +76,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 		tagSet.addTag(tag);
 
 		try {
-			wait(ThrottleApi::throttleTags(cx, tagSet, rate, duration, false, priority));
+			wait(ThrottleApi::throttleTags(cx, tagSet, rate, duration, TagThrottleType::MANUAL, priority));
 		}
 		catch(Error &e) {
 			state Error err = e;
@@ -72,7 +88,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 			throw err;
 		}
 
-		manuallyThrottledTags->insert_or_assign(std::make_pair(tag, priority), TagThrottleInfo(tag, false, priority, rate, now() + duration, duration));
+		manuallyThrottledTags->insert_or_assign(std::make_pair(tag, priority), TagThrottleInfo(tag, TagThrottleType::MANUAL, priority, rate, now() + duration, duration));
 
 		return Void();
 	}
@@ -82,26 +98,30 @@ struct TagThrottleApiWorkload : TestWorkload {
 		TagSet tagSet;
 		tagSet.addTag(tag);
 
-		state bool autoThrottled = deterministicRandom()->coinflip();
-		TransactionPriority priority = deterministicRandom()->randomChoice(allTransactionPriorities);
+		state Optional<TagThrottleType> throttleType = TagThrottleApiWorkload::randomTagThrottleType();
+		Optional<TransactionPriority> priority = deterministicRandom()->coinflip() ? Optional<TransactionPriority>() : deterministicRandom()->randomChoice(allTransactionPriorities);
 
 		state bool erased = false;
-		state double expiration = 0;
-		if(!autoThrottled) {
-			auto itr = manuallyThrottledTags->find(std::make_pair(tag, priority));
-			if(itr != manuallyThrottledTags->end()) {
-				expiration = itr->second.expirationTime;
-				erased = true;
-				manuallyThrottledTags->erase(itr);
+		state double maxExpiration = 0;
+		if(!throttleType.present() || throttleType.get() == TagThrottleType::MANUAL) {
+			for(auto p : allTransactionPriorities) {
+				if(!priority.present() || priority.get() == p) {
+					auto itr = manuallyThrottledTags->find(std::make_pair(tag, p));
+					if(itr != manuallyThrottledTags->end()) {
+						maxExpiration = std::max(maxExpiration, itr->second.expirationTime);
+						erased = true;
+						manuallyThrottledTags->erase(itr);
+					}
+				}
 			}
 		}
 
-		bool removed = wait(ThrottleApi::unthrottleTags(cx, tagSet, autoThrottled, priority));
+		bool removed = wait(ThrottleApi::unthrottleTags(cx, tagSet, throttleType, priority));
 		if(removed) {
-			ASSERT(erased || autoThrottled);
+			ASSERT(erased || !throttleType.present() || throttleType.get() == TagThrottleType::AUTO);
 		}
 		else {
-			ASSERT(expiration < now());
+			ASSERT(maxExpiration < now());
 		}
 
 		return Void();
@@ -113,7 +133,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 		int manualThrottledTags = 0;
 		int activeAutoThrottledTags = 0;
 		for(auto &tag : tags) {
-			if(!tag.autoThrottled) {
+			if(tag.throttleType == TagThrottleType::MANUAL) {
 				ASSERT(manuallyThrottledTags->find(std::make_pair(tag.tag, tag.priority)) != manuallyThrottledTags->end());
 				++manualThrottledTags;
 			}
@@ -139,34 +159,32 @@ struct TagThrottleApiWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> unthrottleTagGroup(Database cx, std::map<std::pair<TransactionTag, TransactionPriority>, TagThrottleInfo> *manuallyThrottledTags) {
-		state int choice = deterministicRandom()->randomInt(0, 3);
+		state Optional<TagThrottleType> throttleType = TagThrottleApiWorkload::randomTagThrottleType();
+		state Optional<TransactionPriority> priority = deterministicRandom()->coinflip() ? Optional<TransactionPriority>() : deterministicRandom()->randomChoice(allTransactionPriorities);
 
-		if(choice == 0) {
-			bool unthrottled = wait(ThrottleApi::unthrottleAll(cx));
+		bool unthrottled = wait(ThrottleApi::unthrottleAll(cx, throttleType, priority));
+		if(!throttleType.present() || throttleType.get() == TagThrottleType::MANUAL) {
 			bool unthrottleExpected = false;
-			for(auto itr = manuallyThrottledTags->begin(); itr != manuallyThrottledTags->end(); ++itr) {
-				if(itr->second.expirationTime > now()) {
-					unthrottleExpected = true;
+			bool empty = manuallyThrottledTags->empty();
+			for(auto itr = manuallyThrottledTags->begin(); itr != manuallyThrottledTags->end();) {
+				if(!priority.present() || priority.get() == itr->first.second) {
+					if(itr->second.expirationTime > now()) {
+						unthrottleExpected = true;
+					}
+
+					itr = manuallyThrottledTags->erase(itr);
+				}
+				else {
+					++itr;
 				}
 			}
 
-			ASSERT(!unthrottleExpected || unthrottled);
-			manuallyThrottledTags->clear();
-		}
-		else if(choice == 1) {
-			bool unthrottled = wait(ThrottleApi::unthrottleManual(cx));
-			bool unthrottleExpected = false;
-			for(auto itr = manuallyThrottledTags->begin(); itr != manuallyThrottledTags->end(); ++itr) {
-				if(itr->second.expirationTime > now()) {
-					unthrottleExpected = true;
-				}
+			if(throttleType.present()) {
+				ASSERT((unthrottled && !empty) || (!unthrottled && !unthrottleExpected));
 			}
-
-			ASSERT((unthrottled && !manuallyThrottledTags->empty()) || (!unthrottled && !unthrottleExpected));
-			manuallyThrottledTags->clear();
-		}
-		else {
-			bool unthrottled = wait(ThrottleApi::unthrottleAuto(cx));
+			else {
+				ASSERT(unthrottled || !unthrottleExpected);
+			}
 		}
 
 		return Void();
@@ -176,7 +194,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 		if(deterministicRandom()->coinflip()) {
 			wait(ThrottleApi::enableAuto(cx, true));
 			if(deterministicRandom()->coinflip()) {
-				bool unthrottled = wait(ThrottleApi::unthrottleAuto(cx));
+				bool unthrottled = wait(ThrottleApi::unthrottleAll(cx, TagThrottleType::AUTO, Optional<TransactionPriority>()));
 			}
 		}
 		else {

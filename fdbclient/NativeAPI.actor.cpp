@@ -50,7 +50,7 @@
 #include "flow/TLSConfig.actor.h"
 #include "flow/UnitTest.h"
 
-#include "fdbclient/IncludeVersions.h"
+#include "fdbclient/versions.h"
 
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -495,17 +495,16 @@ Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed);
 }
 
-void DatabaseContext::registerSpecialKeySpaceModule(std::unique_ptr<SpecialKeyRangeBaseImpl> module) {
-	specialKeySpace->registerKeyRange(module->getKeyRange(), module.get());
-	specialKeySpaceModules.push_back(std::move(module));
+void DatabaseContext::registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, std::unique_ptr<SpecialKeyRangeBaseImpl> impl) {
+	specialKeySpace->registerKeyRange(module, impl->getKeyRange(), impl.get());
+	specialKeySpaceModules.push_back(std::move(impl));
 }
 
 ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces(Reference<ClusterConnectionFile> clusterFile);
 ACTOR Future<Optional<Value>> getJSON(Database db);
 
 struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeBaseImpl {
-	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
-	                                            KeyRangeRef kr) const override {
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
 		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
 			Key prefix = Key(getKeyRange().begin);
 			return map(getWorkerInterfaces(ryw->getDatabase()->getConnectionFile()),
@@ -528,8 +527,8 @@ struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeBaseImpl {
 };
 
 struct SingleSpecialKeyImpl : SpecialKeyRangeBaseImpl {
-	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
-	                                            KeyRangeRef kr) const override {
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
+		ASSERT(kr.contains(k));
 		return map(f(ryw), [k = k](Optional<Value> v) {
 			Standalone<RangeResultRef> result;
 			if (v.present()) {
@@ -539,50 +538,12 @@ struct SingleSpecialKeyImpl : SpecialKeyRangeBaseImpl {
 		});
 	}
 
-	SingleSpecialKeyImpl(KeyRef k,
-	                     const std::function<Future<Optional<Value>>(Reference<ReadYourWritesTransaction>)>& f)
+	SingleSpecialKeyImpl(KeyRef k, const std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)>& f)
 	  : SpecialKeyRangeBaseImpl(singleKeyRange(k)), k(k), f(f) {}
 
 private:
 	Key k;
-	std::function<Future<Optional<Value>>(Reference<ReadYourWritesTransaction>)> f;
-};
-
-struct TransactionModule : SpecialKeyRangeBaseImpl {
-	Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
-	                                            KeyRangeRef kr) const override {
-		return getRange_(ryw, kr, this);
-	}
-
-	TransactionModule(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {
-		impls.emplace_back(std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
-		impls.emplace_back(std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
-		impls.emplace_back(std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
-	}
-
-private:
-	ACTOR static Future<Standalone<RangeResultRef>> getRange_(Reference<ReadYourWritesTransaction> ryw, KeyRangeRef kr,
-	                                                          const TransactionModule* self) {
-		state std::vector<Future<Standalone<RangeResultRef>>> futures;
-		futures.reserve(self->impls.size());
-		for (const auto& impl : self->impls) {
-			auto implRange = impl->getKeyRange();
-			auto begin = std::max(kr.begin, implRange.begin);
-			auto end = std::min(kr.end, implRange.end);
-			if (begin < end) {
-				futures.push_back(impl->getRange(ryw, KeyRangeRef(begin, end)));
-			}
-		}
-		self = nullptr;
-		wait(waitForAll(futures));
-		Standalone<RangeResultRef> result;
-		for (const auto& f : futures) {
-			result.append(result.arena(), f.get().begin(), f.get().size());
-			result.arena().dependsOn(f.get().arena());
-		}
-		return result;
-	}
-	std::vector<std::unique_ptr<SpecialKeyRangeBaseImpl>> impls;
+	std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)> f;
 };
 
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
@@ -621,7 +582,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
-    specialKeySpace(std::make_unique<SpecialKeySpace>(normalKeys.begin, specialKeys.end)) {
+    specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
 
@@ -641,49 +602,62 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	if (apiVersionAtLeast(630)) {
-		registerSpecialKeySpaceModule(std::make_unique<TransactionModule>(
-		    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0"))));
-		registerSpecialKeySpaceModule(std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::METRICS,
+		                              std::make_unique<DDStatsRangeImpl>(ddStatsRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::WORKERINTERFACE, std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
 		    LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
-		registerSpecialKeySpaceModule(std::make_unique<SingleSpecialKeyImpl>(
-		    LiteralStringRef("\xff\xff/status/json"),
-		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
-			    if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
-				    return getJSON(ryw->getDatabase());
-			    } else {
-				    return Optional<Value>();
-			    }
-		    }));
-		registerSpecialKeySpaceModule(std::make_unique<SingleSpecialKeyImpl>(
-		    LiteralStringRef("\xff\xff/cluster_file_path"),
-		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
-			    try {
-				    if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
-					    Optional<Value> output = StringRef(ryw->getDatabase()->getConnectionFile()->getFilename());
-					    return output;
-				    }
-			    } catch (Error& e) {
-				    return e;
-			    }
-			    return Optional<Value>();
-		    }));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::STATUSJSON,
+		    std::make_unique<SingleSpecialKeyImpl>(LiteralStringRef("\xff\xff/status/json"),
+		                                           [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			                                           if (ryw->getDatabase().getPtr() &&
+			                                               ryw->getDatabase()->getConnectionFile()) {
+				                                           return getJSON(ryw->getDatabase());
+			                                           } else {
+				                                           return Optional<Value>();
+			                                           }
+		                                           }));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::CLUSTERFILEPATH,
+		    std::make_unique<SingleSpecialKeyImpl>(
+		        LiteralStringRef("\xff\xff/cluster_file_path"),
+		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			        try {
+				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
+					        Optional<Value> output = StringRef(ryw->getDatabase()->getConnectionFile()->getFilename());
+					        return output;
+				        }
+			        } catch (Error& e) {
+				        return e;
+			        }
+			        return Optional<Value>();
+		        }));
 
-		registerSpecialKeySpaceModule(std::make_unique<SingleSpecialKeyImpl>(
-		    LiteralStringRef("\xff\xff/connection_string"),
-		    [](Reference<ReadYourWritesTransaction> ryw) -> Future<Optional<Value>> {
-			    try {
-				    if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
-					    Reference<ClusterConnectionFile> f = ryw->getDatabase()->getConnectionFile();
-					    Optional<Value> output = StringRef(f->getConnectionString().toString());
-					    return output;
-				    }
-			    } catch (Error& e) {
-				    return e;
-			    }
-			    return Optional<Value>();
-		    }));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::CONNECTIONSTRING,
+		    std::make_unique<SingleSpecialKeyImpl>(
+		        LiteralStringRef("\xff\xff/connection_string"),
+		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			        try {
+				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
+					        Reference<ClusterConnectionFile> f = ryw->getDatabase()->getConnectionFile();
+					        Optional<Value> output = StringRef(f->getConnectionString().toString());
+					        return output;
+				        }
+			        } catch (Error& e) {
+				        return e;
+			        }
+			        return Optional<Value>();
+		        }));
 	}
 	throttleExpirer = recurring([this](){ expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
+
+	if(BUGGIFY) {
+		DatabaseContext::debugUseTags = true;
+	}
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
@@ -770,7 +744,7 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& k
 		locationCache.insert( KeyRangeRef(begin, end), Reference<LocationInfo>() );
 	}
 	locationCache.insert( keys, loc );
-	return std::move(loc);
+	return loc;
 }
 
 void DatabaseContext::invalidateCache( const KeyRef& key, bool isBackward ) {
@@ -1197,8 +1171,13 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 }
 
 void runNetwork() {
-	if(!g_network)
+	if(!g_network) {
 		throw network_not_setup();
+	}
+
+	if(!g_network->checkRunnable()) {
+		throw network_cannot_be_restarted();
+	}
 
 	if(networkOptions.traceDirectory.present() && networkOptions.runLoopProfilingEnabled) {
 		setupRunLoopProfiler();
@@ -1552,7 +1531,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			cx->readLatencies.addSample(latency);
 			if (trLogInfo) {
 				int valueSize = reply.value.present() ? reply.value.get().size() : 0;
-				trLogInfo->addLog(FdbClientLogEvents::EventGet(startTimeD, latency, valueSize, key));
+				trLogInfo->addLog(FdbClientLogEvents::EventGet(startTimeD, cx->clientLocality.dcId(), latency, valueSize, key));
 			}
 			cx->getValueCompleted->latency = timer_int() - startTime;
 			cx->getValueCompleted->log();
@@ -1584,7 +1563,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else {
 				if (trLogInfo)
-					trLogInfo->addLog(FdbClientLogEvents::EventGetError(startTimeD, static_cast<int>(e.code()), key));
+					trLogInfo->addLog(FdbClientLogEvents::EventGetError(startTimeD, cx->clientLocality.dcId(), static_cast<int>(e.code()), key));
 				throw e;
 			}
 		}
@@ -1989,7 +1968,7 @@ void getRangeFinished(Database cx, Reference<TransactionLogInfo> trLogInfo, doub
 	cx->transactionKeysRead += result.size();
 	
 	if( trLogInfo ) {
-		trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, now()-startTime, bytes, begin.getKey(), end.getKey()));
+		trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, cx->clientLocality.dcId(), now()-startTime, bytes, begin.getKey(), end.getKey()));
 	}
 
 	if( !snapshot ) {
@@ -2229,7 +2208,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 				} else {
 					if (trLogInfo)
-						trLogInfo->addLog(FdbClientLogEvents::EventGetRangeError(startTime, static_cast<int>(e.code()), begin.getKey(), end.getKey()));
+						trLogInfo->addLog(FdbClientLogEvents::EventGetRangeError(startTime, cx->clientLocality.dcId(), static_cast<int>(e.code()), begin.getKey(), end.getKey()));
 
 					throw e;
 				}
@@ -2251,7 +2230,7 @@ Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version>
 	return getRange(cx, Reference<TransactionLogInfo>(), fVersion, begin, end, limits, Promise<std::pair<Key, Key>>(), true, reverse, info, tags);
 }
 
-bool DatabaseContext::debugUseTags = true;
+bool DatabaseContext::debugUseTags = false;
 const std::vector<std::string> DatabaseContext::debugTransactionTagChoices = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t" }; 
 
 void debugAddTags(Transaction *tr) {
@@ -2483,7 +2462,7 @@ ACTOR Future< Key > getKeyAndConflictRange(
 			conflictRange.send( std::make_pair( rep, k.orEqual ? keyAfter( k.getKey() ) : Key(k.getKey(), k.arena()) ) );
 		else
 			conflictRange.send( std::make_pair( k.orEqual ? keyAfter( k.getKey() ) : Key(k.getKey(), k.arena()), keyAfter( rep ) ) );
-		return std::move(rep);
+		return rep;
 	} catch( Error&e ) {
 		conflictRange.send(std::make_pair(Key(), Key()));
 		throw;
@@ -3010,7 +2989,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->commitLatencies.addSample(latency);
 					cx->latencies.addSample(now() - tr->startTime);
 					if (trLogInfo)
-						trLogInfo->addLog(FdbClientLogEvents::EventCommit_V2(startTime, latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), ci.version, req));
+						trLogInfo->addLog(FdbClientLogEvents::EventCommit_V2(startTime, cx->clientLocality.dcId(), latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), ci.version, req));
 					return Void();
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
@@ -3073,7 +3052,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trLogInfo)
-				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
+				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, cx->clientLocality.dcId(), static_cast<int>(e.code()), req));
 			throw;
 		}
 	}
@@ -3383,18 +3362,20 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
-					auto &priorityThrottledTags = cx->throttledTags[priority];
-					for(auto& tag : tags) {
-						auto itr = v.tagThrottleInfo.find(tag.first);
-						if(itr == v.tagThrottleInfo.end()) {
-							TEST(true); // Removing client throttle
-							priorityThrottledTags.erase(tag.first);
-						}
-						else {
-							TEST(true); // Setting client throttle
-							auto result = priorityThrottledTags.try_emplace(tag.first, itr->second);
-							if(!result.second) {
-								result.first->second.update(itr->second);
+					if(tags.size() != 0) {
+						auto &priorityThrottledTags = cx->throttledTags[priority];
+						for(auto& tag : tags) {
+							auto itr = v.tagThrottleInfo.find(tag.first);
+							if(itr == v.tagThrottleInfo.end()) {
+								TEST(true); // Removing client throttle
+								priorityThrottledTags.erase(tag.first);
+							}
+							else {
+								TEST(true); // Setting client throttle
+								auto result = priorityThrottledTags.try_emplace(tag.first, itr->second);
+								if(!result.second) {
+									result.first->second.update(itr->second);
+								}
 							}
 						}
 					}
@@ -3466,11 +3447,11 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 
 			Future<Void> batch = incrementalBroadcastWithError(
 			    getConsistentReadVersion(cx, count, priority, flags, std::move(tags), std::move(debugID)),
-			    std::vector<Promise<GetReadVersionReply>>(requests), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
+			    std::move(requests), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 
 			tags.clear();
 			debugID = Optional<UID>();
-			requests = std::vector< Promise<GetReadVersionReply> >();
+			requests.clear();
 			addActor.send(batch);
 			timeout = Future<Void>();
 		}
@@ -3482,7 +3463,7 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, TransactionPriorit
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
 	if (trLogInfo)
-		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(startTime, latency, priority, rep.version));
+		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(startTime, cx->clientLocality.dcId(), latency, priority, rep.version));
 	if (rep.version == 1 && rep.locked) {
 		throw proxy_memory_limit_exceeded();
 	}
@@ -3504,25 +3485,27 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, TransactionPriorit
 			ASSERT(false);
 	}
 
-	auto &priorityThrottledTags = cx->throttledTags[priority];
-	for(auto &tag : tags) {
-		auto itr = priorityThrottledTags.find(tag);
-		if(itr != priorityThrottledTags.end()) {
-			if(itr->second.expired()) {
-				priorityThrottledTags.erase(itr);
-			}
-			else if(itr->second.throttleDuration() > 0) {
-				TEST(true); // Throttling transaction after getting read version
-				++cx->transactionReadVersionsThrottled;
-				throw tag_throttled();
+	if(tags.size() != 0) {
+		auto &priorityThrottledTags = cx->throttledTags[priority];
+		for(auto &tag : tags) {
+			auto itr = priorityThrottledTags.find(tag);
+			if(itr != priorityThrottledTags.end()) {
+				if(itr->second.expired()) {
+					priorityThrottledTags.erase(itr);
+				}
+				else if(itr->second.throttleDuration() > 0) {
+					TEST(true); // throttling transaction after getting read version
+					++cx->transactionReadVersionsThrottled;
+					throw tag_throttled();
+				}
 			}
 		}
-	}
 
-	for(auto &tag : tags) {
-		auto itr = priorityThrottledTags.find(tag);
-		if(itr != priorityThrottledTags.end()) {
-			itr->second.addReleased(1);
+		for(auto &tag : tags) {
+			auto itr = priorityThrottledTags.find(tag);
+			if(itr != priorityThrottledTags.end()) {
+				itr->second.addReleased(1);
+			}
 		}
 	}
 
@@ -3556,9 +3539,10 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 				ASSERT(false);
 		}
 
-		double maxThrottleDelay = 0.0;
-		bool canRecheck = false;
 		if(options.tags.size() != 0) {
+			double maxThrottleDelay = 0.0;
+			bool canRecheck = false;
+
 			auto &priorityThrottledTags = cx->throttledTags[options.priority];
 			for(auto &tag : options.tags) {
 				auto itr = priorityThrottledTags.find(tag);
@@ -3885,6 +3869,25 @@ Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, i
 		return extractMetrics(::waitStorageMetrics(cx, keys, StorageMetrics(), m, StorageMetrics(), shardLimit, -1));
 	} else {
 		return ::getStorageMetricsLargeKeyRange(cx, keys);
+	}
+}
+
+ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
+                                                                               int shardLimit) {
+	state Future<Void> clientTimeout = delay(5.0);
+	loop {
+		choose {
+			when(wait(cx->onMasterProxiesChanged())) {}
+			when(ErrorOr<GetDDMetricsReply> rep =
+			         wait(errorOr(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics,
+			                                  GetDDMetricsRequest(keys, shardLimit))))) {
+				if (rep.isError()) {
+					throw rep.getError();
+				}
+				return rep.get().storageMetricsList;
+			}
+			when(wait(clientTimeout)) { throw timed_out(); }
+		}
 	}
 }
 

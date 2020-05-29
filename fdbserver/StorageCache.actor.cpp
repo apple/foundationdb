@@ -956,6 +956,7 @@ ACTOR Future<Void> storageCache(StorageServerInterface ssi, uint16_t id, Referen
 
 	// pullAsyncData actor pulls mutations from the TLog and also applies them.
 	actors.add(pullAsyncData(&self));
+	actors.add(traceRole(Role::STORAGE_CACHE, ssi.id()));
 
 	loop {
 		++self.counters.loops;

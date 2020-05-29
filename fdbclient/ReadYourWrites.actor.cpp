@@ -1231,7 +1231,7 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(key)) {
 			TEST(true); // Special keys get
-			return getDatabase()->specialKeySpace->get(Reference<ReadYourWritesTransaction>::addRef(this), key);
+			return getDatabase()->specialKeySpace->get(this, key);
 		}
 	} else {
 		if (key == LiteralStringRef("\xff\xff/status/json")) {
@@ -1313,8 +1313,7 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(begin.getKey()) && end.getKey() <= specialKeys.end) {
 			TEST(true); // Special key space get range
-			return getDatabase()->specialKeySpace->getRange(Reference<ReadYourWritesTransaction>::addRef(this), begin,
-			                                                end, limits, reverse);
+			return getDatabase()->specialKeySpace->getRange(this, begin, end, limits, reverse);
 		}
 	} else {
 		if (begin.getKey() == LiteralStringRef("\xff\xff/worker_interfaces")) {

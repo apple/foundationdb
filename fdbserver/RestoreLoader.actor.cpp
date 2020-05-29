@@ -217,6 +217,9 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			VersionedMutationsMap::iterator it;
 			bool inserted;
 			std::tie(it, inserted) = kvOps.emplace(msgVersion, MutationsVec());
+			// A clear mutation can be split into multiple mutations with the same (version, sub).
+			// See saveMutationsToFile(). Current tests only use one key range per backup, thus
+			// only one clear mutation is generated (i.e., always inserted).
 			ASSERT(inserted);
 
 			ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(currentProtocolVersion));
