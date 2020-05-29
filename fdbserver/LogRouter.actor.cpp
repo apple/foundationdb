@@ -144,10 +144,10 @@ struct LogRouterData {
 		specialCounter(cc, "MinKnownCommittedVersion", [this](){ return this->minKnownCommittedVersion; });
 		specialCounter(cc, "PoppedVersion", [this](){ return this->poppedVersion; });
 		specialCounter(cc, "FoundEpochEnd", [this](){ return this->foundEpochEnd; });
-		specialCounter(cc, "WaitForVersionTime", [this](){ double val = this->waitForVersionTime; this->waitForVersionTime = 0; return val; });
-		specialCounter(cc, "MaxWaitForVersionTime", [this](){ double val = this->maxWaitForVersionTime; this->maxWaitForVersionTime = 0; return val; });
-		specialCounter(cc, "GetMoreTime", [this](){ double val = this->getMoreTime; this->getMoreTime = 0; return val; });
-		specialCounter(cc, "MaxGetMoreTime", [this](){ double val = this->maxGetMoreTime; this->maxGetMoreTime = 0; return val; });
+		specialCounter(cc, "WaitForVersionMS", [this](){ double val = this->waitForVersionTime; this->waitForVersionTime = 0; return 1000*val; });
+		specialCounter(cc, "WaitForVersionMaxMS", [this](){ double val = this->maxWaitForVersionTime; this->maxWaitForVersionTime = 0; return 1000*val; });
+		specialCounter(cc, "GetMoreMS", [this](){ double val = this->getMoreTime; this->getMoreTime = 0; return 1000*val; });
+		specialCounter(cc, "GetMoreMaxMS", [this](){ double val = this->maxGetMoreTime; this->maxGetMoreTime = 0; return 1000*val; });
 		logger = traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LogRouterMetrics");
 	}
 };
@@ -245,10 +245,13 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 
 	loop {
 		loop {
-			Future<Void> getMoreF = r ? r->getMore(TaskPriority::TLogCommit) : Never();
-			++self->getMoreCount;
-			if(!getMoreF.isReady()) {
-				++self->getMoreBlockedCount;
+			Future<Void> getMoreF = Never();
+			if(r) {
+				getMoreF = r->getMore(TaskPriority::TLogCommit);
+				++self->getMoreCount;
+				if(!getMoreF.isReady()) {
+					++self->getMoreBlockedCount;
+				}
 			}
 			state double startTime = now();
 			choose {
