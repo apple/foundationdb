@@ -163,7 +163,11 @@ class DLDatabase : public IDatabase, ThreadSafeReferenceCounted<DLDatabase> {
 public:
 	DLDatabase(Reference<FdbCApi> api, FdbCApi::FDBDatabase *db) : api(api), db(db), ready(Void()) {}
 	DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture);
-	~DLDatabase() { api->databaseDestroy(db); }
+	~DLDatabase() {
+		if (db) {
+			api->databaseDestroy(db);
+		}
+	}
 
 	ThreadFuture<Void> onReady();
 
