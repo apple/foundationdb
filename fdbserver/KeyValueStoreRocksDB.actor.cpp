@@ -241,9 +241,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					cursor->Next();
 				}
 			} else {
-				cursor->Seek(toSlice(a.keys.end));
-        if (cursor->Valid()) cursor->Prev();
-				while (cursor->Valid() && toStringRef(cursor->key()) >= a.keys.begin && result.size() < a.rowLimit &&
+				cursor->SeekForPrev(toSlice(a.keys.end));
+				while (cursor->Valid() && toStringRef(cursor->key()) >= a.keys.begin && result.size() < -a.rowLimit &&
 				       accumulatedBytes < a.byteLimit) {
 					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
 					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
