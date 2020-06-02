@@ -536,6 +536,8 @@ Every field in this configuration is optional, and any missing fields will be le
 
 Setting this configuration key to a value that changes the configuration will result in the cluster controller server process logging a ``LatencyBandConfigChanged`` event. This event will indicate whether a configuration is present or not using its ``Present`` field. Specifying an invalid configuration will result in the latency band feature being unconfigured, and the server process running the cluster controller will log a ``InvalidLatencyBandConfiguration`` trace event.
 
+.. note:: GRV requests are counted only at default and immediate priority. Batch priority GRV requests are ignored for the purposes of latency band tracking.
+
 When configured, the ``status json`` output will include additional fields to report the number of requests in each latency band located at ``cluster.processes.<ID>.roles[N].*_latency_bands``::
 
   "grv_latency_bands" : {
