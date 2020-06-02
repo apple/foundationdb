@@ -229,17 +229,27 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (!cursor) {
 				cursor.reset(db->NewIterator(readOptions));
 			}
-			cursor->Seek(toSlice(a.keys.begin));
 			Standalone<RangeResultRef> result;
 			int accumulatedBytes = 0;
-			while (cursor->Valid() &&
-				   toStringRef(cursor->key()) < a.keys.end &&
-				   result.size() < a.rowLimit &&
-				   accumulatedBytes < a.byteLimit) {
-				KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
-				result.push_back_deep(result.arena(), kv);
-				cursor->Next();
+			if (a.rowLimit >= 0) {
+				cursor->Seek(toSlice(a.keys.begin));
+				while (cursor->Valid() && toStringRef(cursor->key()) < a.keys.end && result.size() < a.rowLimit &&
+				       accumulatedBytes < a.byteLimit) {
+					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
+					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
+					result.push_back_deep(result.arena(), kv);
+					cursor->Next();
+				}
+			} else {
+				cursor->Seek(toSlice(a.keys.end));
+        if (cursor->Valid()) cursor->Prev();
+				while (cursor->Valid() && toStringRef(cursor->key()) >= a.keys.begin && result.size() < a.rowLimit &&
+				       accumulatedBytes < a.byteLimit) {
+					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
+					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
+					result.push_back_deep(result.arena(), kv);
+					cursor->Prev();
+				}
 			}
 			auto s = cursor->status();
 			if (!s.ok()) {
