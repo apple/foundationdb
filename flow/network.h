@@ -235,6 +235,17 @@ struct NetworkAddress {
 	bool isTLS() const { return (flags & FLAG_TLS) != 0; }
 	bool isV6() const { return ip.isV6(); }
 
+	size_t hash() const {
+		size_t result = 0;
+		if (ip.isV6()) {
+			uint16_t* ptr = (uint16_t*)ip.toV6().data();
+			result = ((size_t)ptr[5] << 32) | ((size_t)ptr[6] << 16) | ptr[7];
+		} else {
+			result = ip.toV4();
+		}
+		return (result << 16) + port;
+	}
+
 	static NetworkAddress parse(std::string const&); // May throw connection_string_invalid
 	static Optional<NetworkAddress> parseOptional(std::string const&);
 	static std::vector<NetworkAddress> parseList( std::string const& );
@@ -270,14 +281,7 @@ namespace std
 	{
 		size_t operator()(const NetworkAddress& na) const
 		{
-			size_t result = 0;
-			if (na.ip.isV6()) {
-				uint16_t* ptr = (uint16_t*)na.ip.toV6().data();
-				result = ((size_t)ptr[5] << 32) | ((size_t)ptr[6] << 16) | ptr[7];
-			} else {
-				result = na.ip.toV4();
-			}
-			return (result << 16) + na.port;
+			return na.hash();
 		}
 	};
 }
@@ -386,9 +390,11 @@ public:
 
 	virtual Future<Void> connectHandshake() = 0;
 
+	// Precondition: write() has been called and last returned 0
 	// returns when write() can write at least one byte (or may throw an error if the connection dies)
 	virtual Future<Void> onWritable() = 0;
 
+	// Precondition: read() has been called and last returned 0
 	// returns when read() can read at least one byte (or may throw an error if the connection dies)
 	virtual Future<Void> onReadable() = 0;
 
@@ -518,6 +524,9 @@ public:
 
 	virtual bool isAddressOnThisHost( NetworkAddress const& addr ) = 0;
 	// Returns true if it is reasonably certain that a connection to the given address would be a fast loopback connection
+
+	// If the network has not been run and this function has not been previously called, returns true. Otherwise, returns false.
+	virtual bool checkRunnable() = 0;
 
 	// Shorthand for transport().getLocalAddress()
 	static NetworkAddress getLocalAddress()

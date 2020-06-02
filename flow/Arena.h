@@ -592,7 +592,17 @@ private:
 };
 #pragma pack( pop )
 
-template<>
+namespace std {
+	template <>
+	struct hash<StringRef> {
+		static constexpr std::hash<std::string_view> hashFunc{};
+		std::size_t operator()(StringRef const& tag) const {
+			return hashFunc(std::string_view((const char*)tag.begin(), tag.size()));
+		}
+	};
+}
+
+template <>
 struct TraceableString<StringRef> {
 	static const char* begin(StringRef value) {
 		return reinterpret_cast<const char*>(value.begin());

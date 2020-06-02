@@ -139,7 +139,7 @@ Accessing cluster file information from a client
 Any client connected to FoundationDB can access information about its cluster file directly from the database:
 
 * To get the path to the cluster file, read the key ``\xFF\xFF/cluster_file_path``.
-* To get the contents of the cluster file, read the key ``\xFF\xFF/connection_string``.
+* To get the desired contents of the cluster file, read the key ``\xFF\xFF/connection_string``. Make sure the client can write to the cluster file and keep it up to date.
 
 .. _ipv6-support:
 
@@ -540,6 +540,11 @@ Disaster Recovery
 In the present version of FoundationDB, disaster recovery (DR) is implemented via asynchronous replication of a source cluster to a destination cluster residing in another datacenter. The asynchronous replication updates the destination cluster using transactions consistent with those that have been committed in the source cluster. In this way, the replication process guarantees that the destination cluster is always in a consistent state that matches a present or earlier state of the source cluster.
 
 Recovery takes place by reversing the asynchronous replication, so the data in the destination cluster is streamed back to a source cluster. For further information, see the :ref:`overview of backups <backup-introduction>` and the :ref:`fdbdr tool <fdbdr-intro>` that performs asynchronous replication.
+
+Managing traffic
+================
+
+If clients of the database make use of the :doc:`transaction tagging feature <transaction-tagging>`, then the number of transactions allowed to start for different tags can be controlled using the :ref:`throttle command <cli-throttle>` in ``fdbcli``. 
 
 .. _administration-other-administrative-concerns:
 

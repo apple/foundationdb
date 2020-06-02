@@ -58,7 +58,9 @@ const Value keyServersValue(
 	const std::vector<Tag>& destTag = std::vector<Tag>());
 // `result` must be the full result of getting serverTagKeys
 void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& value,
-	std::vector<UID>& src, std::vector<UID>& dest  );
+	std::vector<UID>& src, std::vector<UID>& dest, bool missingIsError = true );
+void decodeKeyServersValue( std::map<Tag, UID> const& tag_uid, const ValueRef& value,
+                            std::vector<UID>& src, std::vector<UID>& dest );
 
 // "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
 extern const KeyRangeRef storageCacheServerKeys;
@@ -85,6 +87,7 @@ extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
 extern const KeyRangeRef writeConflictRangeKeysRange;
 extern const KeyRangeRef readConflictRangeKeysRange;
+extern const KeyRangeRef ddStatsRange;
 
 extern const KeyRef cacheKeysPrefix;
 
@@ -240,6 +243,14 @@ extern const KeyRef moveKeysLockOwnerKey, moveKeysLockWriteKey;
 extern const KeyRef dataDistributionModeKey;
 extern const UID dataDistributionModeLock;
 
+// Keys to view and control tag throttling
+extern const KeyRangeRef tagThrottleKeys;
+extern const KeyRef tagThrottleKeysPrefix;
+extern const KeyRef tagThrottleAutoKeysPrefix;
+extern const KeyRef tagThrottleSignalKey;
+extern const KeyRef tagThrottleAutoEnabledKey;
+extern const KeyRef tagThrottleLimitKey;
+extern const KeyRef tagThrottleCountKey;
 
 // Log Range constant variables
 // \xff/logRanges/[16-byte UID][begin key] := serialize( make_pair([end key], [destination key prefix]), IncludeVersion() )

@@ -27,33 +27,6 @@
 #include "flow/flow.h"
 #include "fdbclient/FDBTypes.h"
 
-#define REDWOOD_DEBUG 0
-
-#define debug_printf_stream stdout
-#define debug_printf_always(...)                                                                                       \
-	{                                                                                                                  \
-		fprintf(debug_printf_stream, "%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__); \
-		fprintf(debug_printf_stream, __VA_ARGS__);                                                                     \
-		fflush(debug_printf_stream);                                                                                   \
-	}
-
-#define debug_printf_noop(...)
-
-#if defined(NO_INTELLISENSE)
-#if REDWOOD_DEBUG
-#define debug_printf debug_printf_always
-#else
-#define debug_printf debug_printf_noop
-#endif
-#else
-// To get error-checking on debug_printf statements in IDE
-#define debug_printf printf
-#endif
-
-#define BEACON debug_printf_always("HERE\n")
-#define TRACE                                                                                                          \
-	debug_printf_always("%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
-
 #ifndef VALGRIND
 #define VALGRIND_MAKE_MEM_UNDEFINED(x, y)
 #define VALGRIND_MAKE_MEM_DEFINED(x, y)

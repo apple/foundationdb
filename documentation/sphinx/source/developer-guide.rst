@@ -469,7 +469,6 @@ In some situations, you may want to explicitly control the number of key-value p
 
   LIMIT = 100 # adjust according to data characteristics
 
-  @fdb.transactional
   def get_range_limited(tr, begin, end):
       keys_found = True
       while keys_found:
@@ -757,6 +756,118 @@ If you only need to detect the *fact* of a change, and your response doesn't dep
 
 .. _developer-guide-peformance-considerations:
 
+
+Special keys
+============
+
+Keys starting with the bytes ``\xff\xff`` are called "special" keys, and they are materialized when read. :doc:`\\xff\\xff/status/json <mr-status>` is an example of a special key.
+As of api version 630, additional features have been exposed as special keys and are available to read as ranges instead of just individual keys. Additionally, the special keys are now organized into "modules".
+
+Modules
+-------
+
+A module is loosely defined as a key range in the special key space where a user can expect similar behavior from reading any key in that range.
+By default, users will see a ``special_keys_no_module_found`` error if they read from a range not contained in a module.
+The error indicates the read would always return an empty set of keys if it proceeded. This could be caused by typo in the keys to read.
+Users will also (by default) see a ``special_keys_cross_module_read`` error if their read spans a module boundary.
+The error is to save the user from the surprise of seeing the behavior of multiple modules in the same read.
+Users may opt out of these restrictions by setting the ``special_key_space_relaxed`` transaction option.
+
+Each special key that existed before api version 630 is its own module. These are
+
+#. ``\xff\xff/cluster_file_path`` See :ref:`cluster file client access <cluster-file-client-access>`
+#. ``\xff\xff/cluster_file_path`` See :ref:`cluster file client access <cluster-file-client-access>`
+#. ``\xff\xff/status/json`` See :doc:`Machine-readable status <mr-status>`
+
+Prior to api version 630, it was also possible to read a range starting at
+``\xff\xff/worker_interfaces``. This is mostly an implementation detail of fdbcli,
+but it's available in api version 630 as a module with prefix ``\xff\xff/worker_interfaces/``.
+
+Api version 630 includes two new modules with prefixes
+``\xff\xff/transaction/`` (information about the current transaction), and
+``\xff\xff/metrics/`` (various metrics, not transactional).
+
+Transaction module
+------------------
+
+Reads from the transaction module generally do not require an rpc and only inspect in-memory state for the current transaction.
+
+There are three sets of keys exposed by the transaction module, and each set uses the same encoding, so let's first describe that encoding.
+
+Let's say we have a set of keys represented as intervals of the form ``begin1 <= k < end1 && begin2 <= k < end2 && ...``.
+It could be the case that some of the intervals overlap, e.g. if ``begin1 <= begin2 < end1``, or are adjacent, e.g. if ``end1 == begin2``.
+If we merge all overlapping/adjacent intervals then sort, we end up with a canonical representation of this set of keys.
+
+We encode this canonical set as ordered key value pairs like this::
+
+  <namespace><begin1> -> "1"
+  <namespace><end1> -> "0"
+  <namespace><begin2> -> "1"
+  <namespace><end2> -> "0"
+  ...
+
+Python example::
+
+  >>> tr = db.create_transaction()
+  >>> tr.add_read_conflict_key('foo')
+  >>> tr.add_read_conflict_range('bar/', 'bar0')
+  >>> for k, v in tr.get_range_startswith('\xff\xff/transaction/read_conflict_range/'):
+  ...     print(k, v)
+  ...
+  ('\xff\xff/transaction/read_conflict_range/bar/', '1')
+  ('\xff\xff/transaction/read_conflict_range/bar0', '0')
+  ('\xff\xff/transaction/read_conflict_range/foo', '1')
+  ('\xff\xff/transaction/read_conflict_range/foo\x00', '0')
+
+For read-your-writes transactions, this canonical encoding of conflict ranges
+is already available in memory, and so requesting small ranges is
+correspondingly cheaper than large ranges.
+
+For transactions with read-your-writes disabled, this canonical encoding is computed on
+every read, so you're paying the full cost in CPU time whether or not you
+request a small range.
+
+The namespaces for sets of keys are
+
+#. ``\xff\xff/transaction/read_conflict_range/`` This is the set of keys that will be used for read conflict detection. If another transaction writes to any of these keys after this transaction's read version, then this transaction won't commit.
+#. ``\xff\xff/transaction/write_conflict_range/`` This is the set of keys that will be used for write conflict detection. Keys in this range may cause other transactions which read these keys to abort if this transaction commits.
+#. ``\xff\xff/transaction/conflicting_keys/`` If this transaction failed due to a conflict, it must be the case that some transaction attempted [#conflicting_keys]_ to commit with a write conflict range that intersects this transaction's read conflict range. This is the subset of your read conflict range that actually intersected a write conflict from another transaction.
+
+Caveats
+~~~~~~~
+
+#. ``\xff\xff/transaction/read_conflict_range/`` The conflict range for a read is sometimes not known until that read completes (e.g. range reads with limits, key selectors). When you read from these special keys, the returned future first blocks until all pending reads are complete so it can give an accurate response.
+#. ``\xff\xff/transaction/write_conflict_range/`` The conflict range range for a ``set_versionstamped_key`` atomic op is not known until commit time. You'll get an approximate range (the actual range will be a subset of the approximate range) until the precise range is known.
+#. ``\xff\xff/transaction/conflicting_keys/`` Since using this feature costs server (i.e., proxy and resolver) resources, it's disabled by default. You must opt in by setting the ``report_conflicting_keys`` transaction option.
+
+Metrics module
+--------------
+
+Reads in the metrics module are not transactional and may require rpcs to complete.
+
+The key ``\xff\xff/metrics/data_distribution_stats/<begin>`` represent stats about the shard that begins at ``<begin>``. The value is a json object with a "ShardBytes" field. More fields may be added in the future.
+
+A user can see stats about data distribution like so::
+
+  >>> for k, v in db.get_range_startswith('\xff\xff/metrics/data_distribution_stats/'):
+  ...     print(k, v)
+  ...
+  ('\xff\xff/metrics/data_distribution_stats/', '{"ShardBytes":330000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako00509', '{"ShardBytes":330000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako0099', '{"ShardBytes":330000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako01468', '{"ShardBytes":297000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako023', '{"ShardBytes":264000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako0289', '{"ShardBytes":297000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako037', '{"ShardBytes":330000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako042', '{"ShardBytes":264000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako0457', '{"ShardBytes":297000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako0524', '{"ShardBytes":264000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako058', '{"ShardBytes":297000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako064', '{"ShardBytes":297000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako0718', '{"ShardBytes":264000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako083', '{"ShardBytes":297000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako0909', '{"ShardBytes":741000}')
+
 Performance considerations
 ==========================
 
@@ -853,11 +964,11 @@ Versions are generated by the process that runs the *master* role. FoundationDB 
 
 In order to assign read and commit versions to transactions, a client will never talk to the master. Instead it will get both from a proxy. Getting a read version is more complex than a commit version. Let's first look at commit versions:
 
-1. The client will send a commit message to a proxy.
-1. The proxy will put this commit message in a queue in order to build a batch.
-1. In parallel, the proxy will ask for a new version from the master (note that this means that only proxies will ever ask for new versions - which scales much better as it puts less stress on the network).
-1. The proxy will then resolve all transactions within that batch (discussed later) and assign the version it got from the master to *all* transactions within that batch. It will then write the transactions to the transaction log system to make it durable.
-1. If the transaction succeeded, it will send back the version as commit version to the client. Otherwise it will send back an error.
+#. The client will send a commit message to a proxy.
+#. The proxy will put this commit message in a queue in order to build a batch.
+#. In parallel, the proxy will ask for a new version from the master (note that this means that only proxies will ever ask for new versions - which scales much better as it puts less stress on the network).
+#. The proxy will then resolve all transactions within that batch (discussed later) and assign the version it got from the master to *all* transactions within that batch. It will then write the transactions to the transaction log system to make it durable.
+#. If the transaction succeeded, it will send back the version as commit version to the client. Otherwise it will send back an error.
 
 As mentioned before, the algorithm to assign read versions is a bit more complex. At the start of a transaction, a client will ask a proxy server for a read version. The proxy will reply with the last committed version as of the time it received the request - this is important to guarantee external consistency. This is how this is achieved:
 
@@ -956,3 +1067,5 @@ The trickiest errors are non-retryable errors. ``Transaction.on_error`` will ret
 If you see one of those errors, the best way of action is to fail the client.
 
 At a first glance this looks very similar to an ``commit_unknown_result``. However, these errors lack the one guarantee ``commit_unknown_result`` still gives to the user: if the commit has already been sent to the database, the transaction could get committed at a later point in time. This means that if you retry the transaction, your new transaction might race with the old transaction. While this technically doesn't violate any consistency guarantees, abandoning a transaction means that there are no causality guaranatees.
+
+.. [#conflicting_keys] In practice, the transaction probably committed successfully. However, if you're running multiple resolvers then it's possible for a transaction to cause another to abort even if it doesn't commit successfully.

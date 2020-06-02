@@ -48,32 +48,101 @@ const KeyRef keyServersKey( const KeyRef& k, Arena& arena ) {
 	return k.withPrefix( keyServersPrefix, arena );
 }
 const Value keyServersValue( Standalone<RangeResultRef> result, const std::vector<UID>& src, const std::vector<UID>& dest ) {
+	if(!CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS) {
+		BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValue())); wr << src << dest;
+		return wr.toValue();
+	}
+	
 	std::vector<Tag> srcTag;
 	std::vector<Tag> destTag;
 
+	bool foundOldLocality = false;
 	for (const KeyValueRef kv : result) {
 		UID uid = decodeServerTagKey(kv.key);
 		if (std::find(src.begin(), src.end(), uid) != src.end()) {
 			srcTag.push_back( decodeServerTagValue(kv.value) );
+			if(srcTag.back().locality == tagLocalityUpgraded) {
+				foundOldLocality = true;
+				break;
+			}
 		}
 		if (std::find(dest.begin(), dest.end(), uid) != dest.end()) {
 			destTag.push_back( decodeServerTagValue(kv.value) );
+			if(destTag.back().locality == tagLocalityUpgraded) {
+				foundOldLocality = true;
+				break;
+			}
 		}
+	}
+
+	if(foundOldLocality || src.size() != srcTag.size() || dest.size() != destTag.size()) {
+		ASSERT_WE_THINK(foundOldLocality);
+		BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValue())); wr << src << dest;
+		return wr.toValue();
 	}
 
 	return keyServersValue(srcTag, destTag);
 }
 const Value keyServersValue( const std::vector<Tag>& srcTag, const std::vector<Tag>& destTag ) {
 	// src and dest are expected to be sorted
-	BinaryWriter wr(IncludeVersion()); wr << srcTag << destTag;
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValueV2())); wr << srcTag << destTag;
 	return wr.toValue();
 }
 
 void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& value,
-                            std::vector<UID>& src, std::vector<UID>& dest  ) {
+                            std::vector<UID>& src, std::vector<UID>& dest, bool missingIsError ) {
 	if (value.size() == 0) {
 		src.clear();
 		dest.clear();
+		return;
+	}
+
+	BinaryReader rd(value, IncludeVersion());
+	if(!rd.protocolVersion().hasKeyServerValueV2()) {
+		rd >> src >> dest;
+		return;
+	}
+	
+	std::vector<Tag> srcTag, destTag;
+	rd >> srcTag >> destTag;
+
+	src.clear();
+	dest.clear();
+
+	for (const KeyValueRef kv : result) {
+		Tag tag = decodeServerTagValue(kv.value);
+		if (std::find(srcTag.begin(), srcTag.end(), tag) != srcTag.end()) {
+			src.push_back( decodeServerTagKey(kv.key) );
+		}
+		if (std::find(destTag.begin(), destTag.end(), tag) != destTag.end()) {
+			dest.push_back( decodeServerTagKey(kv.key) );
+		}
+	}
+	std::sort(src.begin(), src.end());
+	std::sort(dest.begin(), dest.end());
+	if(missingIsError && (src.size() != srcTag.size() || dest.size() != destTag.size())) {
+		TraceEvent(SevError, "AttemptedToDecodeMissingTag");
+		for (const KeyValueRef kv : result) {
+			Tag tag = decodeServerTagValue(kv.value);
+			UID serverID = decodeServerTagKey(kv.key);
+			TraceEvent("TagUIDMap").detail("Tag", tag.toString()).detail("UID", serverID.toString());
+		}
+		for(auto& it : srcTag) {
+			TraceEvent("SrcTag").detail("Tag", it.toString());
+		}
+		for(auto& it : destTag) {
+			TraceEvent("DestTag").detail("Tag", it.toString());
+		}
+		ASSERT(false);
+	}
+}
+
+void decodeKeyServersValue( std::map<Tag, UID> const& tag_uid, const ValueRef& value,
+                            std::vector<UID>& src, std::vector<UID>& dest ) {
+	static std::vector<Tag> srcTag, destTag;
+	src.clear();
+	dest.clear();
+	if (value.size() == 0) {
 		return;
 	}
 
@@ -91,21 +160,30 @@ void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& v
 		return;
 	}
 
-	std::vector<Tag> srcTag, destTag;
+	srcTag.clear();
+	destTag.clear();
 	rd >> srcTag >> destTag;
 
-	src.clear();
-	dest.clear();
-
-	for (const KeyValueRef kv : result) {
-		Tag tag = decodeServerTagValue(kv.value);
-		if (std::find(srcTag.begin(), srcTag.end(), tag) != srcTag.end()) {
-			src.push_back( decodeServerTagKey(kv.key) );
-		}
-		if (std::find(destTag.begin(), destTag.end(), tag) != destTag.end()) {
-			dest.push_back( decodeServerTagKey(kv.key) );
+	for(auto t : srcTag) {
+		auto itr = tag_uid.find(t);
+		if(itr != tag_uid.end()) {
+			src.push_back(itr->second);
+		} else {
+			TraceEvent(SevError, "AttemptedToDecodeMissingSrcTag").detail("Tag", t.toString());
+			ASSERT(false);
 		}
 	}
+
+	for(auto t : destTag) {
+		auto itr = tag_uid.find(t);
+		if(itr != tag_uid.end()) {
+			dest.push_back(itr->second);
+		} else {
+			TraceEvent(SevError, "AttemptedToDecodeMissingDestTag").detail("Tag", t.toString());
+			ASSERT(false);
+		}
+	}
+
 	std::sort(src.begin(), src.end());
 	std::sort(dest.begin(), dest.end());
 }
@@ -147,6 +225,9 @@ const Value storageCacheServerValue(const StorageServerInterface& ssi) {
 	return wr.toValue();
 }
 
+const KeyRangeRef ddStatsRange = KeyRangeRef(LiteralStringRef("\xff\xff/metrics/data_distribution_stats/"),
+                                             LiteralStringRef("\xff\xff/metrics/data_distribution_stats/\xff\xff"));
+
 //    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
 const KeyRangeRef storageCacheKeys( LiteralStringRef("\xff/storageCache/"), LiteralStringRef("\xff/storageCache0") );
 const KeyRef storageCachePrefix = storageCacheKeys.begin;
@@ -156,7 +237,7 @@ const Key storageCacheKey( const KeyRef& k ) {
 }
 
 const Value storageCacheValue( const vector<uint16_t>& serverIndices ) {
-	BinaryWriter wr((IncludeVersion())); 
+	BinaryWriter wr((IncludeVersion(ProtocolVersion::withStorageCacheValue()))); 
 	wr << serverIndices;
 	return wr.toValue();
 }
@@ -170,7 +251,7 @@ void decodeStorageCacheValue( const ValueRef& value, vector<uint16_t>& serverInd
 }
 
 const Value logsValue( const vector<std::pair<UID, NetworkAddress>>& logs, const vector<std::pair<UID, NetworkAddress>>& oldLogs ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withLogsValue()));
 	wr << logs;
 	wr << oldLogs;
 	return wr.toValue();
@@ -307,7 +388,7 @@ const KeyRange serverTagHistoryRangeBefore( UID serverID, Version version ) {
 }
 
 const Value serverTagValue( Tag tag ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withServerTagValue()));
 	wr << tag;
 	return wr.toValue();
 }
@@ -367,7 +448,7 @@ const Key tagLocalityListKeyFor( Optional<Value> dcID ) {
 }
 
 const Value tagLocalityListValue( int8_t const& tagLocality ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagLocalityListValue()));
 	wr << tagLocality;
 	return wr.toValue();
 }
@@ -397,7 +478,7 @@ const Key datacenterReplicasKeyFor( Optional<Value> dcID ) {
 }
 
 const Value datacenterReplicasValue( int const& replicas ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withDatacenterReplicasValue()));
 	wr << replicas;
 	return wr.toValue();
 }
@@ -453,7 +534,7 @@ const Key serverListKeyFor( UID serverID ) {
 }
 
 const Value serverListValue( StorageServerInterface const& server ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withServerListValue()));
 	wr << server;
 	return wr.toValue();
 }
@@ -488,7 +569,7 @@ const Key processClassKeyFor(StringRef processID ) {
 }
 
 const Value processClassValue( ProcessClass const& processClass ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withProcessClassValue()));
 	wr << processClass;
 	return wr.toValue();
 }
@@ -562,7 +643,7 @@ const Key workerListKeyFor( StringRef processID ) {
 }
 
 const Value workerListValue( ProcessData const& processData ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withWorkerListValue()));
 	wr << processData;
 	return wr.toValue();
 }
@@ -595,7 +676,7 @@ const Key backupProgressKeyFor(UID workerID) {
 }
 
 const Value backupProgressValue(const WorkerBackupStatus& status) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBackupProgressValue()));
 	wr << status;
 	return wr.toValue();
 }
@@ -615,7 +696,7 @@ WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
 }
 
 Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBackupStartValue()));
 	wr << ids;
 	return wr.toValue();
 }
@@ -652,6 +733,17 @@ const KeyRef moveKeysLockWriteKey = LiteralStringRef("\xff/moveKeysLock/Write");
 
 const KeyRef dataDistributionModeKey = LiteralStringRef("\xff/dataDistributionMode");
 const UID dataDistributionModeLock = UID(6345,3425);
+
+// Keys to view and control tag throttling
+const KeyRangeRef tagThrottleKeys = KeyRangeRef(
+	LiteralStringRef("\xff\x02/throttledTags/tag/"),
+	LiteralStringRef("\xff\x02/throttledTags/tag0"));
+const KeyRef tagThrottleKeysPrefix = tagThrottleKeys.begin;
+const KeyRef tagThrottleAutoKeysPrefix = LiteralStringRef("\xff\x02/throttledTags/tag/\x01");
+const KeyRef tagThrottleSignalKey = LiteralStringRef("\xff\x02/throttledTags/signal");
+const KeyRef tagThrottleAutoEnabledKey = LiteralStringRef("\xff\x02/throttledTags/autoThrottlingEnabled");
+const KeyRef tagThrottleLimitKey = LiteralStringRef("\xff\x02/throttledTags/manualThrottleLimit");
+const KeyRef tagThrottleCountKey = LiteralStringRef("\xff\x02/throttledTags/manualThrottleCount");
 
 // Client status info prefix
 const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"), LiteralStringRef("\xff\x02/fdbClientInfo0"));
@@ -723,7 +815,7 @@ KeyRef logRangesDecodeKey(KeyRef key, UID* logUid) {
 
 // Returns the encoded key value comprised of the end key and destination path
 Key logRangesEncodeValue(KeyRef keyEnd, KeyRef destPath) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withLogRangeEncodeValue()));
 	wr << std::make_pair(keyEnd, destPath);
 	return wr.toValue();
 }
@@ -869,7 +961,7 @@ const Key restoreWorkerKeyFor(UID const& workerID) {
 
 // Encode restore agent value
 const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& cmdInterf) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreWorkerInterfaceValue()));
 	wr << cmdInterf;
 	return wr.toValue();
 }
@@ -884,7 +976,7 @@ RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value) 
 // Encode and decode restore request value
 // restoreRequestTrigger key
 const Value restoreRequestTriggerValue(UID randomID, int const numRequests) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreRequestTriggerValue()));
 	wr << numRequests;
 	wr << randomID;
 	return wr.toValue();
@@ -900,7 +992,7 @@ int decodeRestoreRequestTriggerValue(ValueRef const& value) {
 
 // restoreRequestDone key
 const Value restoreRequestDoneVersionValue(Version readVersion) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreRequestDoneVersionValue()));
 	wr << readVersion;
 	return wr.toValue();
 }
@@ -919,7 +1011,7 @@ const Key restoreRequestKeyFor(int const& index) {
 }
 
 const Value restoreRequestValue(RestoreRequest const& request) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreRequestValue()));
 	wr << request;
 	return wr.toValue();
 }
@@ -940,7 +1032,7 @@ const Key restoreStatusKeyFor(StringRef statusType) {
 }
 
 const Value restoreStatusValue(double val) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreStatusValue()));
 	wr << StringRef(std::to_string(val));
 	return wr.toValue();
 }
@@ -949,7 +1041,7 @@ const StringRef ignoreSSFailuresZoneString = LiteralStringRef("IgnoreSSFailures"
 const KeyRef rebalanceDDIgnoreKey = LiteralStringRef("\xff\x02/rebalanceDDIgnored");
 
 const Value healthyZoneValue( StringRef const& zoneId, Version version ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withHealthyZoneValue()));
 	wr << zoneId;
 	wr << version;
 	return wr.toValue();

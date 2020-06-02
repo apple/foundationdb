@@ -63,7 +63,7 @@ using std::endl;
 #endif
 #endif
 
-#include "fdbclient/IncludeVersions.h"
+#include "fdbclient/versions.h"
 
 #include "flow/SimpleOpt.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -593,8 +593,8 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_RESTORE_TIMESTAMP,            "--timestamp",         SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_RESTORECONTAINER,"-r",               SO_REQ_SEP },
-	{ OPT_PREFIX_ADD,      "-add_prefix",      SO_REQ_SEP },
-	{ OPT_PREFIX_REMOVE,   "-remove_prefix",   SO_REQ_SEP },
+	{ OPT_PREFIX_ADD,      "--add_prefix",     SO_REQ_SEP },
+	{ OPT_PREFIX_REMOVE,   "--remove_prefix",  SO_REQ_SEP },
 	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
 	{ OPT_BACKUPKEYS,      "-k",               SO_REQ_SEP },
@@ -2707,7 +2707,13 @@ extern uint8_t *g_extra_memory;
 int main(int argc, char* argv[]) {
 	platformInit();
 
-	int	status = FDB_EXIT_SUCCESS;
+	int status = FDB_EXIT_SUCCESS;
+
+	std::string commandLine;
+	for(int a=0; a<argc; a++) {
+		if (a) commandLine += ' ';
+		commandLine += argv[a];
+	}
 
 	try {
 #ifdef ALLOC_INSTRUMENTATION
@@ -3362,12 +3368,6 @@ int main(int argc, char* argv[]) {
 		{
 			delete args;
 			args = NULL;
-		}
-
-		std::string commandLine;
-		for(int a=0; a<argc; a++) {
-			if (a) commandLine += ' ';
-			commandLine += argv[a];
 		}
 
 		delete FLOW_KNOBS;

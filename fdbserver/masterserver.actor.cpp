@@ -131,7 +131,7 @@ private:
 		}
 
 		try {
-			wait( self->cstate.setExclusive( BinaryWriter::toValue(newState, IncludeVersion()) ) );
+			wait( self->cstate.setExclusive( BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withDBCoreState())) ) );
 		} catch (Error& e) {
 			TEST(true); // Master displaced during writeMasterState
 			throw;
@@ -501,7 +501,6 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 	// Register a fake master proxy (to be provided right here) to make ourselves available to clients
 	parent->provisionalProxies = vector<MasterProxyInterface>(1);
 	parent->provisionalProxies[0].provisional = true;
-	parent->provisionalProxies[0].locality = parent->myInterface.locality;
 	parent->provisionalProxies[0].initEndpoints();
 	state Future<Void> waitFailure = waitFailureServer(parent->provisionalProxies[0].waitFailure.getFuture());
 	parent->registrationTrigger.trigger();
@@ -825,8 +824,8 @@ void updateConfigForForcedRecovery(Reference<MasterData> self, vector<Standalone
 		std::sort(self->configuration.regions.begin(), self->configuration.regions.end(), RegionInfo::sort_by_priority() );
 		StatusObject regionJSON;
 		regionJSON["regions"] = self->configuration.getRegionJSON();
-		regionCommit.mutations.push_back_deep(regionCommit.arena(), MutationRef(MutationRef::SetValue, configKeysPrefix.toString() + "regions", BinaryWriter::toValue(regionJSON, IncludeVersion()).toString()));
-		self->configuration.applyMutation( regionCommit.mutations.back() ); //modifying the configuration directly does not change the configuration when it is re-serialized unless we call applyMutation
+		regionCommit.mutations.push_back_deep(regionCommit.arena(), MutationRef(MutationRef::SetValue, configKeysPrefix.toString() + "regions", BinaryWriter::toValue(regionJSON, IncludeVersion(ProtocolVersion::withRegionConfiguration())).toString()));
+		self->configuration.applyMutation( regionCommit.mutations.back() ); //modifying the configuration directly does not change the configuration when it is re-serialized unless we call applyMutation 
 		TraceEvent("ForcedRecoveryConfigChange", self->dbgid)
 			.setMaxEventLength(11000)
 			.setMaxFieldLength(10000)
@@ -1611,6 +1610,7 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 	state PromiseStream<Future<Void>> addActor;
 	state Reference<MasterData> self( new MasterData( db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery ) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
+	self->addActor.send(traceRole(Role::MASTER, mi.id()));
 
 	TEST( !lifetime.isStillValid( db->get().masterLifetime, mi.id()==db->get().master.id() ) );  // Master born doomed
 	TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());

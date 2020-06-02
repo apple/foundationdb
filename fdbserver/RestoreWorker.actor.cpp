@@ -248,6 +248,39 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 	return Void();
 }
 
+ACTOR static Future<Void> waitOnRestoreRequests(Database cx, UID nodeID = UID()) {
+	state Future<Void> watch4RestoreRequest;
+	state ReadYourWritesTransaction tr(cx);
+	state Optional<Value> numRequests;
+
+	// wait for the restoreRequestTriggerKey to be set by the client/test workload
+	TraceEvent("FastRestoreWaitOnRestoreRequest", nodeID);
+	loop {
+		try {
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> _numRequests = wait(tr.get(restoreRequestTriggerKey));
+			numRequests = _numRequests;
+			if (!numRequests.present()) {
+				watch4RestoreRequest = tr.watch(restoreRequestTriggerKey);
+				wait(tr.commit());
+				TraceEvent(SevInfo, "FastRestoreWaitOnRestoreRequestTriggerKey", nodeID);
+				wait(watch4RestoreRequest);
+				TraceEvent(SevInfo, "FastRestoreDetectRestoreRequestTriggerKeyChanged", nodeID);
+			} else {
+				TraceEvent(SevInfo, "FastRestoreRestoreRequestTriggerKey", nodeID)
+				    .detail("TriggerKey", numRequests.get().toString());
+				break;
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	return Void();
+}
+
 // RestoreMaster is the leader
 ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader, Database cx,
                                  RestoreWorkerInterface myWorkerInterf) {
@@ -274,7 +307,7 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 				}
 			} else {
 				// Workers compete to be the leader
-				tr.set(restoreLeaderKey, BinaryWriter::toValue(myWorkerInterf, IncludeVersion()));
+				tr.set(restoreLeaderKey, BinaryWriter::toValue(myWorkerInterf, IncludeVersion(ProtocolVersion::withRestoreWorkerInterfaceValue())));
 				leaderInterf = myWorkerInterf;
 			}
 			wait(tr.commit());
@@ -330,6 +363,8 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 	    .detail("NumAppliers", SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS)
 	    .detail("TxnBatchSize", SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES)
 	    .detail("VersionBatchSize", SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES);
+
+	wait(waitOnRestoreRequests(cx, myWorkerInterf.id()));
 
 	wait(monitorleader(leader, cx, myWorkerInterf));
 

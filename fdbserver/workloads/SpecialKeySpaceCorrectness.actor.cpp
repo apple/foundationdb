@@ -28,15 +28,21 @@
 class SKSCTestImpl : public SpecialKeyRangeBaseImpl {
 public:
 	explicit SKSCTestImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
-	virtual Future<Standalone<RangeResultRef>> getRange(Reference<ReadYourWritesTransaction> ryw,
-	                                                    KeyRangeRef kr) const {
+	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 		ASSERT(range.contains(kr));
 		auto resultFuture = ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY);
 		// all keys are written to RYW, since GRV is set, the read should happen locally
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
 		ASSERT(!result.more);
-		return resultFuture.getValue();
+		// To make the test more complext, instead of simply returning the k-v pairs, we reverse all the value strings
+		auto kvs = resultFuture.getValue();
+		for (int i = 0; i < kvs.size(); ++i) {
+			std::string valStr(kvs[i].value.toString());
+			std::reverse(valStr.begin(), valStr.end());
+			kvs[i].value = ValueRef(kvs.arena(), valStr);
+		}
+		return kvs;
 	}
 };
 
@@ -75,52 +81,63 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	double getCheckTimeout() override { return std::numeric_limits<double>::max(); }
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
-		cx->specialKeySpace = std::make_shared<SpecialKeySpace>();
-		if (self->clientId == 0) {
-			self->ryw = Reference(new ReadYourWritesTransaction(cx));
-			self->ryw->setVersion(100);
-			self->ryw->clear(normalKeys);
-			// generate key ranges
-			for (int i = 0; i < self->rangeCount; ++i) {
-				std::string baseKey = deterministicRandom()->randomAlphaNumeric(i + 1);
-				Key startKey(baseKey + "/");
-				Key endKey(baseKey + "/\xff");
-				self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
-				self->impls.push_back(std::make_shared<SKSCTestImpl>(KeyRangeRef(startKey, endKey)));
-				// Although there are already ranges registered, the testing range will replace them
-				cx->specialKeySpace->registerKeyRange(self->keys.back(), self->impls.back().get());
-				// generate keys in each key range
-				int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
-				self->keysCount += keysInRange;
-				for (int j = 0; j < keysInRange; ++j) {
-					self->ryw->set(Key(deterministicRandom()->randomAlphaNumeric(self->keyBytes)).withPrefix(startKey),
-					               Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
-				}
+		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();
+		self->ryw = Reference(new ReadYourWritesTransaction(cx));
+		self->ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
+		self->ryw->setVersion(100);
+		self->ryw->clear(normalKeys);
+		// generate key ranges
+		for (int i = 0; i < self->rangeCount; ++i) {
+			std::string baseKey = deterministicRandom()->randomAlphaNumeric(i + 1);
+			Key startKey(baseKey + "/");
+			Key endKey(baseKey + "/\xff");
+			self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
+			self->impls.push_back(std::make_shared<SKSCTestImpl>(KeyRangeRef(startKey, endKey)));
+			// Although there are already ranges registered, the testing range will replace them
+			cx->specialKeySpace->registerKeyRange(SpecialKeySpace::MODULE::TESTONLY, self->keys.back(),
+			                                      self->impls.back().get());
+			// generate keys in each key range
+			int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
+			self->keysCount += keysInRange;
+			for (int j = 0; j < keysInRange; ++j) {
+				self->ryw->set(Key(deterministicRandom()->randomAlphaNumeric(self->keyBytes)).withPrefix(startKey),
+				               Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
 			}
 		}
 		return Void();
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
-		if (self->clientId == 0) {
-			wait(timeout(self->getRangeCallActor(cx, self) && testConflictRanges(cx, /*read*/ true, self) &&
-			                 testConflictRanges(cx, /*read*/ false, self),
-			             self->testDuration, Void()));
-		}
+		testRywLifetime(cx);
+		wait(timeout(self->testModuleRangeReadErrors(cx, self) && self->getRangeCallActor(cx, self) &&
+		                 testConflictRanges(cx, /*read*/ true, self) && testConflictRanges(cx, /*read*/ false, self),
+		             self->testDuration, Void()));
 		return Void();
+	}
+
+	// This would be a unit test except we need a Database to create an ryw transaction
+	static void testRywLifetime(Database cx) {
+		Future<Void> f;
+		{
+			ReadYourWritesTransaction ryw{ cx->clone() };
+			f = success(ryw.get(LiteralStringRef("\xff\xff/status/json")));
+			TEST(!f.isReady());
+		}
+		ASSERT(f.isError());
+		ASSERT(f.getError().code() == error_code_transaction_cancelled);
 	}
 
 	ACTOR Future<Void> getRangeCallActor(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		state double lastTime = now();
 		loop {
 			wait(poisson(&lastTime, 1.0 / self->transactionsPerSecond));
-			state bool reverse = deterministicRandom()->random01() < 0.5;
+			state bool reverse = deterministicRandom()->coinflip();
 			state GetRangeLimits limit = self->randomLimits();
 			state KeySelector begin = self->randomKeySelector();
 			state KeySelector end = self->randomKeySelector();
 			auto correctResultFuture = self->ryw->getRange(begin, end, limit, false, reverse);
 			ASSERT(correctResultFuture.isReady());
 			auto correctResult = correctResultFuture.getValue();
-			auto testResultFuture = cx->specialKeySpace->getRange(self->ryw, begin, end, limit, reverse);
+			auto testResultFuture = cx->specialKeySpace->getRange(self->ryw.getPtr(), begin, end, limit, reverse);
 			ASSERT(testResultFuture.isReady());
 			auto testResult = testResultFuture.getValue();
 
@@ -159,12 +176,22 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			return false;
 		}
 		for (int i = 0; i < res1.size(); ++i) {
-			if (res1[i] != res2[i]) {
+			if (res1[i].key != res2[i].key) {
 				TraceEvent(SevError, "TestFailure")
-				    .detail("Reason", "Elements are inconsistent")
+				    .detail("Reason", "Keys are inconsistent")
 				    .detail("Index", i)
 				    .detail("CorrectKey", printable(res1[i].key))
-				    .detail("TestKey", printable(res2[i].key))
+				    .detail("TestKey", printable(res2[i].key));
+				return false;
+			}
+			// Value strings should be reversed pairs
+			std::string valStr(res2[i].value.toString());
+			std::reverse(valStr.begin(), valStr.end());
+			Value valReversed(valStr);
+			if (res1[i].value != valReversed) {
+				TraceEvent(SevError, "TestFailure")
+				    .detail("Reason", "Values are inconsistent, CorrectValue should be the reverse of the TestValue")
+				    .detail("Index", i)
 				    .detail("CorrectValue", printable(res1[i].value))
 				    .detail("TestValue", printable(res2[i].value));
 				return false;
@@ -191,13 +218,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		} else {
 			// pick up existing keys from registered key ranges
 			KeyRangeRef randomKeyRangeRef = keys[deterministicRandom()->randomInt(0, keys.size())];
-			randomKey = deterministicRandom()->random01() < 0.5 ? randomKeyRangeRef.begin : randomKeyRangeRef.end;
+			randomKey = deterministicRandom()->coinflip() ? randomKeyRangeRef.begin : randomKeyRangeRef.end;
 		}
-		// return Key(deterministicRandom()->randomAlphaNumeric(keyBytes)).withPrefix(prefix);
 		// covers corner cases where offset points outside the key space
 		int offset = deterministicRandom()->randomInt(-keysCount.getValue() - 1, keysCount.getValue() + 2);
-		bool orEqual = deterministicRandom()->random01() < 0.5;
-		return KeySelectorRef(randomKey, orEqual, offset);
+		return KeySelectorRef(randomKey, deterministicRandom()->coinflip(), offset);
 	}
 
 	GetRangeLimits randomLimits() {
@@ -209,6 +234,100 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		    1, keysCount.getValue() * (keyBytes + (rangeCount + 1) + valBytes + 8) + 1);
 
 		return GetRangeLimits(rowLimits, byteLimits);
+	}
+
+	ACTOR Future<Void> testModuleRangeReadErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
+		Database cx = cx_->clone();
+		state Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
+		// begin key outside module range
+		try {
+			wait(success(tx->getRange(
+			    KeyRangeRef(LiteralStringRef("\xff\xff/transactio"), LiteralStringRef("\xff\xff/transaction0")),
+			    CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_cross_module_read);
+			tx->reset();
+		}
+		// end key outside module range
+		try {
+			wait(success(tx->getRange(
+			    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction1")),
+			    CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_cross_module_read);
+			tx->reset();
+		}
+		// both begin and end outside module range
+		try {
+			wait(success(tx->getRange(
+			    KeyRangeRef(LiteralStringRef("\xff\xff/transaction"), LiteralStringRef("\xff\xff/transaction1")),
+			    CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_cross_module_read);
+			tx->reset();
+		}
+		// legal range read using the module range
+		try {
+			wait(success(tx->getRange(
+			    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")),
+			    CLIENT_KNOBS->TOO_MANY)));
+			TEST(true);
+			tx->reset();
+		} catch (Error& e) {
+			throw;
+		}
+		// begin keySelector outside module range
+		try {
+			const KeyRef key = LiteralStringRef("\xff\xff/cluster_file_path");
+			KeySelector begin = KeySelectorRef(key, false, 0);
+			KeySelector end = KeySelectorRef(keyAfter(key), false, 1);
+			wait(success(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY))));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_cross_module_read);
+			tx->reset();
+		}
+		// end keySelector inside module range, *** a tricky corner case ***
+		try {
+			tx->addReadConflictRange(singleKeyRange(LiteralStringRef("testKey")));
+			KeySelector begin = KeySelectorRef(readConflictRangeKeysRange.begin, false, 1);
+			KeySelector end = KeySelectorRef(LiteralStringRef("\xff\xff/transaction0"), false, 0);
+			wait(success(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY))));
+			TEST(true);
+			tx->reset();
+		} catch (Error& e) {
+			throw;
+		}
+		// No module found error case with keys
+		try {
+			wait(success(tx->getRange(
+			    KeyRangeRef(LiteralStringRef("\xff\xff/A_no_module_related_prefix"), LiteralStringRef("\xff\xff/I_am_also_not_in_any_module")),
+			    CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_no_module_found);
+			tx->reset();
+		}
+		// No module found error with KeySelectors, *** a tricky corner case ***
+		try {
+			KeySelector begin = KeySelectorRef(LiteralStringRef("\xff\xff/zzz_i_am_not_a_module"), false, 1);
+			KeySelector end = KeySelectorRef(LiteralStringRef("\xff\xff/zzz_to_be_the_final_one"), false, 2);
+			wait(success(tx->getRange(begin, end, CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_no_module_found);
+			tx->reset();
+		}
+		return Void();
 	}
 
 	ACTOR static Future<Void> testConflictRanges(Database cx_, bool read, SpecialKeySpaceCorrectnessWorkload* self) {
@@ -269,6 +388,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			}
 			TEST(true); // Read write conflict range of committed transaction
 		}
+		try {
+			wait(success(tx->get(LiteralStringRef("\xff\xff/1314109/i_hope_this_isn't_registered"))));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_no_module_found);
+		}
 		for (int i = 0; i < self->conflictRangeSizeFactor; ++i) {
 			GetRangeLimits limit;
 			KeySelector begin;
@@ -276,7 +402,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			loop {
 				begin = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
 				end = firstGreaterOrEqual(deterministicRandom()->randomChoice(keys));
-				if (begin.getKey() <= end.getKey()) break;
+				if (begin.getKey() < end.getKey()) break;
 			}
 			bool reverse = deterministicRandom()->coinflip();
 
@@ -303,6 +429,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    .detail("End", end.toString())
 					    .detail("Ryw", ryw);
 					had_error = true;
+					++self->wrongResults;
 				}
 				++correct_iter;
 				++test_iter;
@@ -318,6 +445,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("Ryw", ryw);
 				++correct_iter;
 				had_error = true;
+				++self->wrongResults;
 			}
 			while (test_iter != testResultFuture.get().end()) {
 				TraceEvent(SevError, "TestFailure")
@@ -330,6 +458,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("Ryw", ryw);
 				++test_iter;
 				had_error = true;
+				++self->wrongResults;
 			}
 			if (had_error) break;
 		}

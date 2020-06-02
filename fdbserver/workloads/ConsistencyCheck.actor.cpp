@@ -446,6 +446,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					req.limit = SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT;
 					req.limitBytes = SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES;
 					req.version = version;
+					req.tags = TagSet();
 
 					//Try getting the shard locations from the key servers
 					state vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
@@ -669,7 +670,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 			Standalone<RangeResultRef> UIDtoTagMap = wait( tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY ) );
 			ASSERT( !UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY );
-			decodeKeyServersValue(UIDtoTagMap, keyLocations[shard].value, sourceStorageServers, destStorageServers);
+			decodeKeyServersValue(UIDtoTagMap, keyLocations[shard].value, sourceStorageServers, destStorageServers, false);
 
 			//If the destStorageServers is non-empty, then this shard is being relocated
 			state bool isRelocating = destStorageServers.size() > 0;
@@ -781,6 +782,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 						req.limit = 1e4;
 						req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 						req.version = version;
+						req.tags = TagSet();
 
 						//Try getting the entries in the specified range
 						state vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
@@ -1482,8 +1484,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 							TraceEvent("ConsistencyCheck_LogRouterNotInNonExcludedWorkers").detail("Id", logRouter.id());
 							return false;
 						}
-						if (logRouter.interf().locality.dcId() != expectedRemoteDcId) {
-							TraceEvent("ConsistencyCheck_LogRouterNotBestDC").detail("expectedDC", getOptionalString(expectedRemoteDcId)).detail("ActualDC", getOptionalString(logRouter.interf().locality.dcId()));
+						if (logRouter.interf().filteredLocality.dcId() != expectedRemoteDcId) {
+							TraceEvent("ConsistencyCheck_LogRouterNotBestDC").detail("expectedDC", getOptionalString(expectedRemoteDcId)).detail("ActualDC", getOptionalString(logRouter.interf().filteredLocality.dcId()));
 							return false;
 						}
 					}

@@ -37,6 +37,7 @@ struct ReadYourWritesTransactionOptions {
 	bool nextWriteDisableConflictRange : 1;
 	bool debugRetryLogging : 1;
 	bool disableUsedDuringCommitProtection : 1;
+	bool specialKeySpaceRelaxed : 1;
 	double timeoutInSeconds;
 	int maxRetries;
 	int snapshotRywEnabled;
@@ -123,6 +124,8 @@ public:
 
 	// Wait for all reads that are currently pending to complete
 	Future<Void> pendingReads() { return resetPromise.getFuture() || reading; }
+	// Throws before the lifetime of this transaction ends
+	Future<Void> resetFuture() { return resetPromise.getFuture(); }
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods
 	Error deferredError;
@@ -143,6 +146,8 @@ public:
 	Standalone<RangeResultRef> getReadConflictRangeIntersecting(KeyRangeRef kr);
 	// Read from the special key space writeConflictRangeKeysRange
 	Standalone<RangeResultRef> getWriteConflictRangeIntersecting(KeyRangeRef kr);
+
+	bool specialKeySpaceRelaxed() const { return options.specialKeySpaceRelaxed; }
 
 private:
 	friend class RYWImpl;

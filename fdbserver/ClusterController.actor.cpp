@@ -988,7 +988,7 @@ public:
 
 		for( auto& logSet : dbi.logSystemConfig.tLogs ) {
 			for( auto& it : logSet.tLogs ) {
-				auto tlogWorker = id_worker.find(it.interf().locality.processId());
+				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());
 				if ( tlogWorker == id_worker.end() )
 					return false;
 				if ( tlogWorker->second.priorityInfo.isExcluded )
@@ -1005,7 +1005,7 @@ public:
 			}
 
 			for( auto& it : logSet.logRouters ) {
-				auto tlogWorker = id_worker.find(it.interf().locality.processId());
+				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());
 				if ( tlogWorker == id_worker.end() )
 					return false;
 				if ( tlogWorker->second.priorityInfo.isExcluded )
@@ -1030,7 +1030,7 @@ public:
 		// Get proxy classes
 		std::vector<WorkerDetails> proxyClasses;
 		for(auto& it : dbi.client.proxies ) {
-			auto proxyWorker = id_worker.find(it.locality.processId());
+			auto proxyWorker = id_worker.find(it.processId);
 			if ( proxyWorker == id_worker.end() )
 				return false;
 			if ( proxyWorker->second.priorityInfo.isExcluded )
@@ -1223,11 +1223,11 @@ public:
 		auto& dbInfo = db.serverInfo->get();
 		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
 			for (const auto& tlog: tlogset.tLogs) {
-				if (tlog.present() && tlog.interf().locality.processId() == processId) return true;
+				if (tlog.present() && tlog.interf().filteredLocality.processId() == processId) return true;
 			}
 		}
 		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
-			if (interf.locality.processId() == processId) return true;
+			if (interf.processId == processId) return true;
 		}
 		for (const ResolverInterface& interf: dbInfo.resolvers) {
 			if (interf.locality.processId() == processId) return true;
@@ -1254,13 +1254,13 @@ public:
 		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
 			for (const auto& tlog: tlogset.tLogs) {
 				if (tlog.present()) {
-					idUsed[tlog.interf().locality.processId()]++;
+					idUsed[tlog.interf().filteredLocality.processId()]++;
 				}
 			}
 		}
 		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
-			ASSERT(interf.locality.processId().present());
-			idUsed[interf.locality.processId()]++;
+			ASSERT(interf.processId.present());
+			idUsed[interf.processId]++;
 		}
 		for (const ResolverInterface& interf: dbInfo.resolvers) {
 			ASSERT(interf.locality.processId().present());
@@ -2649,18 +2649,20 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 			if(onChange.isReady()) {
 				break;
 			}
+			
+			if(primaryMetrics.get().v > 0 && remoteMetrics.get().v > 0) {
+				bool oldDifferenceTooLarge = !self->versionDifferenceUpdated || self->datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE;
+				self->versionDifferenceUpdated = true;
+				self->datacenterVersionDifference = primaryMetrics.get().v - remoteMetrics.get().v;
 
-			bool oldDifferenceTooLarge = !self->versionDifferenceUpdated || self->datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE;
-			self->versionDifferenceUpdated = true;
-			self->datacenterVersionDifference = primaryMetrics.get().v - remoteMetrics.get().v;
+				if(oldDifferenceTooLarge && self->datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
+					checkOutstandingRequests(self);
+				}
 
-			if(oldDifferenceTooLarge && self->datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
-				checkOutstandingRequests(self);
-			}
-
-			if(now() - lastLogTime > SERVER_KNOBS->CLUSTER_CONTROLLER_LOGGING_DELAY) {
-				lastLogTime = now();
-				TraceEvent("DatacenterVersionDifference", self->id).detail("Difference", self->datacenterVersionDifference);
+				if(now() - lastLogTime > SERVER_KNOBS->CLUSTER_CONTROLLER_LOGGING_DELAY) {
+					lastLogTime = now();
+					TraceEvent("DatacenterVersionDifference", self->id).detail("Difference", self->datacenterVersionDifference);
+				}
 			}
 
 			wait( delay(SERVER_KNOBS->VERSION_LAG_METRIC_INTERVAL) || onChange );
@@ -2915,6 +2917,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	self.addActor.send( monitorRatekeeper(&self) );
 	self.addActor.send( dbInfoUpdater(&self) );
 	self.addActor.send( traceCounters("ClusterControllerMetrics", self.id, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self.clusterControllerMetrics, self.id.toString() + "/ClusterControllerMetrics") );
+	self.addActor.send( traceRole(Role::CLUSTER_CONTROLLER, interf.id()) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {

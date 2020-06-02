@@ -99,7 +99,6 @@ int mostUsedZoneCount(Reference<LocalitySet>& logServerSet, std::vector<Locality
 bool findBestPolicySetSimple(int targetUniqueValueCount, Reference<LocalitySet>& logServerSet, std::vector<LocalityEntry>& bestSet,
                              int desired) {
 	auto& mutableEntries = logServerSet->getMutableEntries();
-	deterministicRandom()->randomShuffle(mutableEntries);
 	// First make sure the current localitySet is able to fulfuill the policy
 	AttribKey indexKey = logServerSet->keyIndex("zoneid");
 	int uniqueValueCount = logServerSet->getKeyValueArray()[indexKey._id].size();
@@ -118,18 +117,24 @@ bool findBestPolicySetSimple(int targetUniqueValueCount, Reference<LocalitySet>&
 	}
 
 	ASSERT_WE_THINK(uniqueValueCount == entries.size());
+	std::vector<std::vector<int>> randomizedEntries;
+	randomizedEntries.resize(entries.size());
+	for(auto it : entries) {
+		randomizedEntries.push_back(it.second);
+	}
+	deterministicRandom()->randomShuffle(randomizedEntries);
 
 	desired = std::max(desired, targetUniqueValueCount);
-	auto it = entries.begin();
+	auto it = randomizedEntries.begin();
 	while (bestSet.size() < desired) {
-		if(it->second.size()) {
-			bestSet.push_back(mutableEntries[it->second.back()]);
-			it->second.pop_back();
+		if(it->size()) {
+			bestSet.push_back(mutableEntries[it->back()]);
+			it->pop_back();
 		}
 		
 		++it;
-		if(it == entries.end()) {
-			it = entries.begin();
+		if(it == randomizedEntries.end()) {
+			it = randomizedEntries.begin();
 		}
 	}
 
@@ -920,6 +925,14 @@ void filterLocalityDataForPolicy(const std::set<std::string>& keys, LocalityData
 		}
 	}
 }
+}
+
+void filterLocalityDataForPolicyDcAndProcess(Reference<IReplicationPolicy> policy, LocalityData* ld) {
+	if (!policy) return;
+	std::set<std::string> keys = policy->attributeKeys();
+	keys.insert(LocalityData::keyDcId.toString());
+	keys.insert(LocalityData::keyProcessId.toString());
+	filterLocalityDataForPolicy(policy->attributeKeys(), ld);
 }
 
 void filterLocalityDataForPolicy(Reference<IReplicationPolicy> policy, LocalityData* ld) {

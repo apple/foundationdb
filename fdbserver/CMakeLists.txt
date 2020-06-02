@@ -133,6 +133,7 @@ set(FDBSERVER_SRCS
   workloads/ConsistencyCheck.actor.cpp
   workloads/CpuProfiler.actor.cpp
   workloads/Cycle.actor.cpp
+  workloads/DataDistributionMetrics.actor.cpp
   workloads/DDBalance.actor.cpp
   workloads/DDMetrics.actor.cpp
   workloads/DDMetricsExclude.actor.cpp
@@ -184,6 +185,7 @@ set(FDBSERVER_SRCS
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp
+  workloads/TagThrottleApi.actor.cpp
   workloads/TargetedKill.actor.cpp
   workloads/TaskBucketCorrectness.actor.cpp
   workloads/ThreadSafety.actor.cpp
@@ -233,4 +235,9 @@ if (GPERFTOOLS_FOUND)
   target_link_libraries(fdbserver PRIVATE gperftools)
 endif()
 
-fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)
+if(GENERATE_DEBUG_PACKAGES)
+  fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)
+else()
+  add_custom_target(prepare_fdbserver_install ALL DEPENDS strip_only_fdbserver)
+  fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbserver DESTINATION sbin COMPONENT server)
+endif()

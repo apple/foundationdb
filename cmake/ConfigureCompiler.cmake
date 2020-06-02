@@ -22,7 +22,10 @@ static_link_libcxx(_static_link_libcxx)
 env_set(STATIC_LINK_LIBCXX "${_static_link_libcxx}" BOOL "Statically link libstdcpp/libc++")
 
 if(USE_LIBCXX AND STATIC_LINK_LIBCXX AND NOT USE_LD STREQUAL "LLD")
-  message(FATAL_ERROR "Unsupported configuration: STATIC_LINK_LIBCXX with libc+++ only works if USE_LD=LLD")
+  message(FATAL_ERROR "Unsupported configuration: STATIC_LINK_LIBCXX with libc++ only works if USE_LD=LLD")
+endif()
+if(STATIC_LINK_LIBCXX AND USE_TSAN)
+  message(FATAL_ERROR "Unsupported configuration: STATIC_LINK_LIBCXX doesn't work with tsan")
 endif()
 
 set(rel_debug_paths OFF)
@@ -82,7 +85,17 @@ include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
 set(CMAKE_REQUIRED_LIBRARIES c)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+if(NOT WIN32)
+  include(CheckIncludeFile)
+  CHECK_INCLUDE_FILE("stdatomic.h" HAS_C11_ATOMICS)
+  if (NOT HAS_C11_ATOMICS)
+    message(FATAL_ERROR "C compiler does not support c11 atomics")
+  endif()
+endif()
 
 if(WIN32)
   # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
@@ -260,6 +273,12 @@ else()
       -fno-builtin-calloc
       -fno-builtin-realloc
       -fno-builtin-free)
+  endif()
+
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+    # Graviton or later
+    # https://github.com/aws/aws-graviton-gettting-started
+    add_compile_options(-march=armv8-a+crc+simd)
   endif()
 
   # Check whether we can use dtrace probes

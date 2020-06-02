@@ -2052,6 +2052,7 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, R
 	actors.add(pullAsyncData(&self));
 	actors.add(watchInterface(&self, ssi));
 
+	actors.add(traceRole(Role::STORAGE_CACHE, ssi.id()));
 	self.coreStarted.send( Void() );
 
 	loop {

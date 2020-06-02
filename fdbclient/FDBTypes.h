@@ -886,7 +886,7 @@ inline bool addressExcluded( std::set<AddressExclusion> const& exclusions, Netwo
 }
 
 struct ClusterControllerPriorityInfo {
-	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessBad }; //cannot be larger than 7 because of leader election mask
+	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessNotPreferred, FitnessBad }; //cannot be larger than 7 because of leader election mask
 
 	static DCFitness calculateDCFitness(Optional<Key> const& dcId, std::vector<Optional<Key>> const& dcPriority) {
 		if(!dcPriority.size()) {
@@ -895,7 +895,7 @@ struct ClusterControllerPriorityInfo {
 			if(dcId == dcPriority[0]) {
 				return FitnessPreferred;
 			} else {
-				return FitnessUnknown;
+				return FitnessNotPreferred;
 			}
 		} else {
 			if(dcId == dcPriority[0]) {
@@ -918,6 +918,7 @@ struct ClusterControllerPriorityInfo {
 	                                  ClusterControllerPriorityInfo::FitnessUnknown) {}
 	ClusterControllerPriorityInfo(uint8_t processClassFitness, bool isExcluded, uint8_t dcFitness) : processClassFitness(processClassFitness), isExcluded(isExcluded), dcFitness(dcFitness) {}
 
+	//To change this serialization, ProtocolVersion::ClusterControllerPriorityInfo must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, processClassFitness, isExcluded, dcFitness);
@@ -998,6 +999,21 @@ struct HealthMetrics {
 	}
 };
 
+struct DDMetricsRef {
+	int64_t shardBytes;
+	KeyRef beginKey;
+
+	DDMetricsRef() : shardBytes(0) {}
+	DDMetricsRef(int64_t bytes, KeyRef begin) : shardBytes(bytes), beginKey(begin) {}
+	DDMetricsRef(Arena& a, const DDMetricsRef& copyFrom)
+	  : shardBytes(copyFrom.shardBytes), beginKey(a, copyFrom.beginKey) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, shardBytes, beginKey);
+	}
+};
+
 struct WorkerBackupStatus {
 	LogEpoch epoch;
 	Version version;
@@ -1007,10 +1023,35 @@ struct WorkerBackupStatus {
 	WorkerBackupStatus() : epoch(0), version(invalidVersion) {}
 	WorkerBackupStatus(LogEpoch e, Version v, Tag t, int32_t total) : epoch(e), version(v), tag(t), totalTags(total) {}
 
+	//To change this serialization, ProtocolVersion::BackupProgressValue must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, epoch, version, tag, totalTags);
 	}
 };
+
+enum class TransactionPriority : uint8_t {
+	BATCH,
+	DEFAULT,
+	IMMEDIATE,
+	MIN=BATCH,
+	MAX=IMMEDIATE
+};
+
+const std::array<TransactionPriority, (int)TransactionPriority::MAX+1> allTransactionPriorities = { TransactionPriority::BATCH, TransactionPriority::DEFAULT, TransactionPriority::IMMEDIATE };
+
+inline const char* transactionPriorityToString(TransactionPriority priority, bool capitalize=true) {
+	switch(priority) {
+		case TransactionPriority::BATCH:
+			return capitalize ? "Batch" : "batch";
+		case TransactionPriority::DEFAULT:
+			return capitalize ? "Default" : "default";
+		case TransactionPriority::IMMEDIATE:
+			return capitalize ? "Immediate" : "immediate";
+	}
+
+	ASSERT(false);
+	throw internal_error();
+}
 
 #endif

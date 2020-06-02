@@ -149,6 +149,7 @@ public:
 
 	Fitness machineClassFitness( ClusterRole role ) const ;
 
+	//To change this serialization, ProtocolVersion::ProcessClassValue must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, _class, _source);
@@ -298,6 +299,7 @@ struct ProcessData {
 	ProcessData() {}
 	ProcessData( LocalityData locality, ProcessClass processClass, NetworkAddress address ) : locality(locality), processClass(processClass), address(address) {}
 
+	//To change this serialization, ProtocolVersion::WorkerListValue must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, locality, processClass, address);

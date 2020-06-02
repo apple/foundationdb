@@ -52,6 +52,7 @@ class EndpointMap : NonCopyable {
 public:
 	EndpointMap();
 	void insert( NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority );
+	const Endpoint& insert( NetworkAddressList localAddresses, std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams );
 	NetworkMessageReceiver* get( Endpoint::Token const& token );
 	TaskPriority getPriority( Endpoint::Token const& token );
 	void remove( Endpoint::Token const& token, NetworkMessageReceiver* r );
@@ -94,6 +95,42 @@ void EndpointMap::insert( NetworkMessageReceiver* r, Endpoint::Token& token, Tas
 	token = Endpoint::Token( token.first(), (token.second()&0xffffffff00000000LL) | index );
 	data[index].token() = Endpoint::Token( token.first(), (token.second()&0xffffffff00000000LL) | static_cast<uint32_t>(priority) );
 	data[index].receiver = r;
+}
+
+const Endpoint& EndpointMap::insert( NetworkAddressList localAddresses, std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams ) {
+	int adjacentFree = 0;
+	int adjacentStart = -1;
+	firstFree = -1;
+	for(int i = 0; i < data.size(); i++) {
+		if(data[i].receiver) {
+			adjacentFree = 0;
+		} else {
+			data[i].nextFree = firstFree;
+			firstFree = i;
+			if(adjacentStart == -1 && ++adjacentFree == streams.size()) {
+				adjacentStart = i+1-adjacentFree;
+				firstFree = data[adjacentStart].nextFree;
+			}
+		}
+	}
+	if(adjacentStart == -1) {
+		data.resize( data.size()+streams.size()-adjacentFree );
+		adjacentStart = data.size()-streams.size();
+		if(adjacentFree > 0) {
+			firstFree = data[adjacentStart].nextFree;
+		}
+	}
+
+	UID base = deterministicRandom()->randomUniqueID();
+	for(uint64_t i=0; i<streams.size(); i++) {
+		int index = adjacentStart+i;
+		uint64_t first = (base.first()+(i<<32)) | TOKEN_STREAM_FLAG;
+		streams[i].first->setEndpoint( Endpoint( localAddresses, UID( first, (base.second()&0xffffffff00000000LL) | index) ) );
+		data[index].token() = Endpoint::Token( first, (base.second()&0xffffffff00000000LL) | static_cast<uint32_t>(streams[i].second) );
+		data[index].receiver = (NetworkMessageReceiver*) streams[i].first;
+	}
+
+	return streams[0].first->getEndpoint(TaskPriority::DefaultEndpoint);
 }
 
 NetworkMessageReceiver* EndpointMap::get( Endpoint::Token const& token ) {
@@ -550,6 +587,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 			if (firstConnFailedTime.present()) {
 				if (now() - firstConnFailedTime.get() > FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT) {
 					TraceEvent(SevWarnAlways, "PeerUnavailableForLongTime", conn ? conn->getDebugID() : UID())
+					    .suppressFor(1.0)
 					    .detail("PeerAddr", self->destination);
 					firstConnFailedTime = now() - FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT/2.0;
 				}
@@ -559,7 +597,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 			// Don't immediately mark connection as failed. To stay closed to earlier behaviour of centralized
 			// failure monitoring, wait until connection stays failed for FLOW_KNOBS->FAILURE_DETECTION_DELAY timeout.
-			retryConnect = self->destination.isPublic() && e.code() == error_code_connection_failed;
+			retryConnect = true;
 			if (e.code() == error_code_connection_failed) {
 				if (!self->destination.isPublic()) {
 					// Can't connect back to non-public addresses.
@@ -1240,6 +1278,10 @@ void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* rec
 	self->endpoints.insert( receiver, endpoint.token, taskID );
 }
 
+void FlowTransport::addEndpoints( std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams ) {
+	self->endpoints.insert( self->localAddresses, streams );
+}
+
 void FlowTransport::removeEndpoint( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {
 	self->endpoints.remove(endpoint.token, receiver);
 }
@@ -1406,18 +1448,11 @@ bool FlowTransport::incompatibleOutgoingConnectionsPresent() {
 }
 
 void FlowTransport::createInstance(bool isClient, uint64_t transportId) {
-	g_network->setGlobal(INetwork::enFailureMonitor, (flowGlobalType) new SimpleFailureMonitor());
-	g_network->setGlobal(INetwork::enClientFailureMonitor, isClient ? (flowGlobalType)1 : nullptr);
 	g_network->setGlobal(INetwork::enFlowTransport, (flowGlobalType) new FlowTransport(transportId));
 	g_network->setGlobal(INetwork::enNetworkAddressFunc, (flowGlobalType) &FlowTransport::getGlobalLocalAddress);
 	g_network->setGlobal(INetwork::enNetworkAddressesFunc, (flowGlobalType) &FlowTransport::getGlobalLocalAddresses);
-
-	// Mark ourselves as avaiable in FailureMonitor
-	const auto& localAddresses = FlowTransport::transport().getLocalAddresses();
-	IFailureMonitor::failureMonitor().setStatus(localAddresses.address, FailureStatus(false));
-	if (localAddresses.secondaryAddress.present()) {
-		IFailureMonitor::failureMonitor().setStatus(localAddresses.secondaryAddress.get(), FailureStatus(false));
-	}
+	g_network->setGlobal(INetwork::enFailureMonitor, (flowGlobalType) new SimpleFailureMonitor());
+	g_network->setGlobal(INetwork::enClientFailureMonitor, isClient ? (flowGlobalType)1 : nullptr);
 }
 
 HealthMonitor* FlowTransport::healthMonitor() {

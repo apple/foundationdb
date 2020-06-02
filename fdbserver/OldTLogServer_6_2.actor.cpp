@@ -559,6 +559,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			logRouterPopToVersion(0), locality(tagLocalityInvalid), execOpCommitInProgress(false)
 	{
 		startRole(Role::TRANSACTION_LOG, interf.id(), tLogData->workerID, {{"SharedTLog", tLogData->dbgid.shortString()}}, context);
+		addActor.send(traceRole(Role::TRANSACTION_LOG, interf.id()));
 
 		persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
 		persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
@@ -632,7 +633,7 @@ template <class T>
 void TLogQueue::push( T const& qe, Reference<LogData> logData ) {
 	BinaryWriter wr( Unversioned() );  // outer framing is not versioned
 	wr << uint32_t(0);
-	IncludeVersion().write(wr);  // payload is versioned
+	IncludeVersion(ProtocolVersion::withTLogQueueEntryRef()).write(wr);  // payload is versioned
 	wr << qe;
 	wr << uint8_t(1);
 	*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);
@@ -1105,7 +1106,7 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 			commitLockReleaser.release();
 		}
 
-		if( totalSize < SERVER_KNOBS->UPDATE_STORAGE_BYTE_LIMIT ) {
+		if( totalSize < SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT ) {
 			wait( delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL, TaskPriority::UpdateStorage) );
 		}
 		else {

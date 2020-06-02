@@ -70,7 +70,7 @@ ERROR( serialization_failed, 1044, "Failed to deserialize an object" )
 ERROR( connection_unreferenced, 1048, "No peer references for connection" )
 ERROR( connection_idle, 1049, "Connection closed after idle timeout" )
 ERROR( disk_adapter_reset, 1050, "The disk queue adpater reset" )
-ERROR(batch_transaction_throttled, 1051, "Batch GRV request rate limit exceeded")
+ERROR( batch_transaction_throttled, 1051, "Batch GRV request rate limit exceeded")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -90,6 +90,7 @@ ERROR( master_proxy_failed, 1209, "Master terminating because a Proxy failed" )
 ERROR( master_resolver_failed, 1210, "Master terminating because a Resolver failed" )
 ERROR( server_overloaded, 1211, "Server is under too much load and cannot respond" )
 ERROR( master_backup_worker_failed, 1212, "Master terminating because a backup worker failed")
+ERROR( tag_throttled, 1213, "Transaction tag is being throttled" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -139,6 +140,7 @@ ERROR( no_commit_version, 2021, "Transaction is read-only and therefore does not
 ERROR( environment_variable_network_option_failed, 2022, "Environment variable network option could not be set" )
 ERROR( transaction_read_only, 2023, "Attempted to commit a transaction specified as read-only" )
 ERROR( invalid_cache_eviction_policy, 2024, "Invalid cache eviction policy, only random and lru are supported" )
+ERROR( network_cannot_be_restarted, 2025, "Network can only be started once" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
@@ -149,6 +151,11 @@ ERROR( address_in_use, 2105, "Local address in use" )
 ERROR( invalid_local_address, 2106, "Invalid local address" )
 ERROR( tls_error, 2107, "TLS error" )
 ERROR( unsupported_operation, 2108, "Operation is not supported" )
+ERROR( too_many_tags, 2109, "Too many tags set on transaction" )
+ERROR( tag_too_long, 2110, "Tag set on transaction is too long" )
+ERROR( too_many_tag_throttles, 2111, "Too many tag throttles have been created" )
+ERROR( special_keys_cross_module_read, 2112, "Special key space range read crosses modules. Refer to the `special_key_space_relaxed' transaction option for more details." )
+ERROR( special_keys_no_module_found, 2113, "Special key space range read does not intersect a module. Refer to the `special_key_space_relaxed' transaction option for more details." )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

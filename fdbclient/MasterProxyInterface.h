@@ -29,6 +29,8 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbserver/RatekeeperInterface.h"
+#include "fdbclient/TagThrottle.h"
 
 #include "flow/Stats.h"
 #include "fdbrpc/TimedRequest.h"
@@ -38,7 +40,7 @@ struct MasterProxyInterface {
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
-	LocalityData locality;
+	Optional<Key> processId;
 	bool provisional;
 	RequestStream< struct CommitTransactionRequest > commit;
 	RequestStream< struct GetReadVersionRequest > getConsistentReadVersion;  // Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
@@ -53,6 +55,7 @@ struct MasterProxyInterface {
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
 	RequestStream< struct ProxySnapRequest > proxySnapReq;
 	RequestStream< struct ExclusionSafetyCheckRequest > exclusionSafetyCheckReq;
+	RequestStream< struct GetDDMetricsRequest > getDDMetrics;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -62,17 +65,35 @@ struct MasterProxyInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, locality, provisional, commit, getConsistentReadVersion, getKeyServersLocations,
-				   waitFailure, getStorageServerRejoinInfo, getRawCommittedVersion,
-				   txnState, getHealthMetrics, proxySnapReq, exclusionSafetyCheckReq);
+		serializer(ar, processId, provisional, commit);
+		if( Archive::isDeserializing ) {
+			getConsistentReadVersion = RequestStream< struct GetReadVersionRequest >( commit.getEndpoint().getAdjustedEndpoint(1) );
+			getKeyServersLocations = RequestStream< struct GetKeyServerLocationsRequest >( commit.getEndpoint().getAdjustedEndpoint(2) );
+			getStorageServerRejoinInfo = RequestStream< struct GetStorageServerRejoinInfoRequest >( commit.getEndpoint().getAdjustedEndpoint(3) );
+			waitFailure = RequestStream<ReplyPromise<Void>>( commit.getEndpoint().getAdjustedEndpoint(4) );
+			getRawCommittedVersion = RequestStream< struct GetRawCommittedVersionRequest >( commit.getEndpoint().getAdjustedEndpoint(5) );
+			txnState = RequestStream< struct TxnStateRequest >( commit.getEndpoint().getAdjustedEndpoint(6) );
+			getHealthMetrics = RequestStream< struct GetHealthMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(7) );
+			proxySnapReq = RequestStream< struct ProxySnapRequest >( commit.getEndpoint().getAdjustedEndpoint(8) );
+			exclusionSafetyCheckReq = RequestStream< struct ExclusionSafetyCheckRequest >( commit.getEndpoint().getAdjustedEndpoint(9) );
+			getDDMetrics = RequestStream< struct GetDDMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(10) );
+		}
 	}
 
 	void initEndpoints() {
-		getConsistentReadVersion.getEndpoint(TaskPriority::ReadSocket);
-		getRawCommittedVersion.getEndpoint(TaskPriority::ProxyGetRawCommittedVersion);
-		commit.getEndpoint(TaskPriority::ReadSocket);
-		getStorageServerRejoinInfo.getEndpoint(TaskPriority::ProxyStorageRejoin);
-		getKeyServersLocations.getEndpoint(TaskPriority::ReadSocket); //priority lowered to TaskPriority::DefaultEndpoint on the proxy
+		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
+		streams.push_back(commit.getReceiver(TaskPriority::ReadSocket));
+		streams.push_back(getConsistentReadVersion.getReceiver(TaskPriority::ReadSocket));
+		streams.push_back(getKeyServersLocations.getReceiver(TaskPriority::ReadSocket)); //priority lowered to TaskPriority::DefaultEndpoint on the proxy
+		streams.push_back(getStorageServerRejoinInfo.getReceiver(TaskPriority::ProxyStorageRejoin));
+		streams.push_back(waitFailure.getReceiver());
+		streams.push_back(getRawCommittedVersion.getReceiver(TaskPriority::ProxyGetRawCommittedVersion));
+		streams.push_back(txnState.getReceiver());
+		streams.push_back(getHealthMetrics.getReceiver());
+		streams.push_back(proxySnapReq.getReceiver());
+		streams.push_back(exclusionSafetyCheckReq.getReceiver());
+		streams.push_back(getDDMetrics.getReceiver());
+		FlowTransport::transport().addEndpoints(streams);
 	}
 };
 
@@ -86,7 +107,9 @@ struct ClientDBInfo {
 	double clientTxnInfoSampleRate;
 	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;
-	ClientDBInfo() : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1) {}
+	double transactionTagSampleRate;
+
+	ClientDBInfo() : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1), transactionTagSampleRate(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE) {}
 
 	bool operator == (ClientDBInfo const& r) const { return id == r.id; }
 	bool operator != (ClientDBInfo const& r) const { return id != r.id; }
@@ -96,7 +119,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward);
+		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate);
 	}
 };
 
@@ -162,11 +185,13 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 
+	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
+
 	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, BasicLoadBalancedReply::recentRequests, version, locked, metadataVersion);
+		serializer(ar, BasicLoadBalancedReply::recentRequests, version, locked, metadataVersion, tagThrottleInfo);
 	}
 };
 
@@ -186,18 +211,53 @@ struct GetReadVersionRequest : TimedRequest {
 
 	uint32_t transactionCount;
 	uint32_t flags;
+	TransactionPriority priority;
+
+	TransactionTagMap<uint32_t> tags;
+
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
-	GetReadVersionRequest() : transactionCount( 1 ), flags( PRIORITY_DEFAULT ) {}
-	GetReadVersionRequest( uint32_t transactionCount, uint32_t flags, Optional<UID> debugID = Optional<UID>() ) : transactionCount( transactionCount ), flags( flags ), debugID( debugID ) {}
+	GetReadVersionRequest() : transactionCount(1), flags(0) {}
+	GetReadVersionRequest(uint32_t transactionCount, TransactionPriority priority, uint32_t flags = 0, TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(), Optional<UID> debugID = Optional<UID>()) 
+	    : transactionCount(transactionCount), priority(priority), flags(flags), tags(tags), debugID(debugID) 
+	{
+		flags = flags & ~FLAG_PRIORITY_MASK;
+		switch(priority) {
+			case TransactionPriority::BATCH:
+				flags |= PRIORITY_BATCH;
+				break;
+			case TransactionPriority::DEFAULT:
+				flags |= PRIORITY_DEFAULT;
+				break;
+			case TransactionPriority::IMMEDIATE:
+				flags |= PRIORITY_SYSTEM_IMMEDIATE;
+				break;
+			default:
+				ASSERT(false);
+		}
+	}
 	
-	int priority() const { return flags & FLAG_PRIORITY_MASK; }
-	bool operator < (GetReadVersionRequest const& rhs) const { return priority() < rhs.priority(); }
+	bool operator < (GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, transactionCount, flags, debugID, reply);
+		serializer(ar, transactionCount, flags, tags, debugID, reply);
+
+		if(ar.isDeserializing) {
+			if((flags & PRIORITY_SYSTEM_IMMEDIATE) == PRIORITY_SYSTEM_IMMEDIATE) {
+				priority = TransactionPriority::IMMEDIATE;
+			}
+			else if((flags & PRIORITY_DEFAULT) == PRIORITY_DEFAULT) {
+				priority = TransactionPriority::DEFAULT;
+			}
+			else if((flags & PRIORITY_BATCH) == PRIORITY_BATCH) {
+				priority = TransactionPriority::BATCH;
+			}
+			else {
+				priority = TransactionPriority::DEFAULT;
+			}
+		}
 	}
 };
 
@@ -330,6 +390,34 @@ struct GetHealthMetricsRequest
 	{
 		serializer(ar, reply, detailed);
 	}
+};
+
+struct GetDDMetricsReply
+{
+	constexpr static FileIdentifier file_identifier = 7277713;
+	Standalone<VectorRef<DDMetricsRef>> storageMetricsList;
+
+	GetDDMetricsReply() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, storageMetricsList);
+	}
+};
+
+struct GetDDMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 14536812;
+	KeyRange keys;
+	int shardLimit;
+	ReplyPromise<struct GetDDMetricsReply> reply;
+
+	GetDDMetricsRequest() {}
+	explicit GetDDMetricsRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
+
+	template<class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, shardLimit, reply);
+  }
 };
 
 struct ProxySnapRequest

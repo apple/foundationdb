@@ -31,7 +31,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/IncludeVersions.h"
+#include "fdbclient/versions.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 #undef max

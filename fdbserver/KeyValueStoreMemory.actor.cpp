@@ -743,7 +743,7 @@ private:
 
 					// Get the common prefix between this key and the previous one, or 0 if there was no previous one.
 					int commonPrefix;
-					if(useDelta) {
+					if(useDelta && SERVER_KNOBS->PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS) {
 						commonPrefix = commonPrefixLength(lastSnapshotKeyA, lastSnapshotKeyB);
 					}
 					else {

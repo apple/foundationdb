@@ -32,6 +32,7 @@ struct DataDistributorInterface {
 	struct LocalityData locality;
 	RequestStream<struct DistributorSnapRequest> distributorSnapReq;
 	RequestStream<struct DistributorExclusionSafetyCheckRequest> distributorExclCheckReq;
+	RequestStream<struct GetDataDistributorMetricsRequest> dataDistributorMetrics;
 
 	DataDistributorInterface() {}
 	explicit DataDistributorInterface(const struct LocalityData& l) : locality(l) {}
@@ -48,7 +49,7 @@ struct DataDistributorInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, haltDataDistributor, locality, distributorSnapReq, distributorExclCheckReq);
+		serializer(ar, waitFailure, haltDataDistributor, locality, distributorSnapReq, distributorExclCheckReq, dataDistributorMetrics);
 	}
 };
 
@@ -63,6 +64,33 @@ struct HaltDataDistributorRequest {
 	template<class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requesterID, reply);
+	}
+};
+
+struct GetDataDistributorMetricsReply {
+	constexpr static FileIdentifier file_identifier = 1284337;
+	Standalone<VectorRef<DDMetricsRef>> storageMetricsList;
+
+	GetDataDistributorMetricsReply() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,storageMetricsList);
+	}
+};
+
+struct GetDataDistributorMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 1059267;
+	KeyRange keys;
+	int shardLimit;
+	ReplyPromise<struct GetDataDistributorMetricsReply> reply;
+
+	GetDataDistributorMetricsRequest() {}
+	explicit GetDataDistributorMetricsRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
+
+	template<class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, shardLimit, reply);
 	}
 };
 
