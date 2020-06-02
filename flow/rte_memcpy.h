@@ -28,7 +28,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 
 #include <flow/Platform.h>
 
-#if defined (__linux__) || defined (__FreeBSD__)
+#if (defined (__linux__) || defined (__FreeBSD__)) && defined(__AVX__)
 
 #ifdef __cplusplus
 extern "C" {

@@ -12,7 +12,7 @@
 #include "flow/UnitTest.h"
 #include "flow/flow.h"
 
-#if defined (__linux__) || defined (__FreeBSD__)
+#if (defined (__linux__) || defined (__FreeBSD__)) && defined (__AVX__)
 extern "C" {
 	void* folly_memcpy(void* dst, const void* src, uint32_t length);
 }

@@ -22,8 +22,12 @@
 #define FLOW_FOLLY_MEMCPY_H
 #pragma once
 
+#if (defined (__linux__) || defined (__FreeBSD__)) && defined(__AVX__)
+
 extern "C" {
 	void* folly_memcpy(void* dst, const void* src, uint32_t length);
 }
+
+#endif // linux or bsd and avx
 
 #endif
