@@ -396,6 +396,7 @@ IKeyValueStore* keyValueStoreRocksDB(std::string const& path, UID logID, KeyValu
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 	return new RocksDBKeyValueStore(path, logID);
 #else
+	TraceEvent(SevError, "RocksDBEngineInitFailure").detail("Reason", "Built without RocksDB");
 	return keyValueStoreSQLite(path, logID, storeType, checkChecksums, checkIntegrity);
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 }
