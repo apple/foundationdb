@@ -162,7 +162,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		explicit Reader(DB& db)
 			: db(db)
 		{
-			readOptions.tailing = true;
 			readOptions.total_order_seek = true;
 		}
 
