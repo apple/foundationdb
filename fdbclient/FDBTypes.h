@@ -669,8 +669,8 @@ struct KeyValueStoreType {
 		MEMORY,
 		SSD_BTREE_V2,
 		SSD_REDWOOD_V1,
-		SSD_ROCKSDB_V1,
 		MEMORY_RADIXTREE,
+		SSD_ROCKSDB_V1,
 		END
 	};
 
