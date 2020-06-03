@@ -1465,7 +1465,12 @@ ACTOR Future<Void> fdbd(
 		Promise<Void> recoveredDiskFiles;
 
 		v.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
-		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
+		if(processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {
+			v.push_back(reportErrors(monitorLeader(connFile, cc), "ClusterController"));
+		}
+		else {
+			v.push_back(reportErrors(clusterController(connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities), "ClusterController"));
+		}
 		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
 		v.push_back( reportErrors(failureMonitorClient( ci, true ), "FailureMonitorClient") );
 		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold, coordFolder, whitelistBinPaths), "WorkerServer", UID(), &normalWorkerErrors()) );
