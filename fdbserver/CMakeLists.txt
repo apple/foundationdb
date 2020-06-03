@@ -215,8 +215,11 @@ add_library(fdb_sqlite STATIC
   sqlite/sqliteLimit.h
   sqlite/sqlite3.amalgamation.c)
 
-set(ROCKSDB_USE_STATIC_LIBS ON)
-find_package(RocksDB REQUIRED)
+if (SSD_ROCKSDB_EXPERIMENTAL)
+  add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)
+  set(ROCKSDB_USE_STATIC_LIBS ON)
+  find_package(RocksDB REQUIRED)
+endif()
 
 # Suppress warnings in sqlite since it's third party
 if(NOT WIN32)
@@ -232,7 +235,13 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_BINARY_DIR}/bindings/c
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
-target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite RocksDB)
+
+if (SSD_ROCKSDB_EXPERIMENTAL)
+  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite RocksDB)
+else()
+  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
+endif()
+
 if (GPERFTOOLS_FOUND)
   add_compile_definitions(USE_GPERFTOOLS)
   target_link_libraries(fdbserver PRIVATE gperftools)

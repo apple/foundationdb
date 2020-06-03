@@ -1,10 +1,17 @@
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+
 #include <rocksdb/env.h>
 #include <rocksdb/db.h>
 #include "flow/flow.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbserver/CoroFlow.h"
+
+#endif // SSD_ROCKSDB_EXPERIMENTAL
+
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/actorcompiler.h" // has to be last include
+
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 namespace {
 
@@ -383,6 +390,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 } // namespace
 
+#endif // SSD_ROCKSDB_EXPERIMENTAL
+
 IKeyValueStore* keyValueStoreRocksDB(std::string const& path, UID logID, KeyValueStoreType storeType, bool checkChecksums, bool checkIntegrity) {
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
 	return new RocksDBKeyValueStore(path, logID);
+#else
+	return keyValueStoreSQLite(path, logID, storeType, checkChecksums, checkIntegrity);
+#endif // SSD_ROCKSDB_EXPERIMENTAL
 }
