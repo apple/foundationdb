@@ -1355,11 +1355,11 @@ void SQLiteDB::open(bool writable) {
 
 	int chunkSize;
 	if( !g_network->isSimulated() ) {
-		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES;
+		chunkSize = SERVER_KNOBS->SQLITE_PAGE_SIZE * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES;
 	} else if( BUGGIFY ) {
-		chunkSize = 4096 * deterministicRandom()->randomInt(0, 100);
+		chunkSize = SERVER_KNOBS->SQLITE_PAGE_SIZE * deterministicRandom()->randomInt(0, 100);
 	} else {
-		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES_SIM;
+		chunkSize = SERVER_KNOBS->SQLITE_PAGE_SIZE * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES_SIM;
 	}
 	checkError("setChunkSize", sqlite3_file_control(db, nullptr, SQLITE_FCNTL_CHUNK_SIZE, &chunkSize));
 
@@ -1402,7 +1402,7 @@ void SQLiteDB::createFromScratch() {
 	int sqliteFlags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
 	checkError("open", sqlite3_open_v2(filename.c_str(), &db, sqliteFlags, NULL));
 
-	Statement(*this, "PRAGMA page_size = 4096").nextRow(); //fast
+	Statement(*this, "PRAGMA page_size = " + SERVER_KNOBS->SQLITE_PAGE_SIZE).nextRow(); //fast
 	btree = db->aDb[0].pBt;
 	initPagerCodec();
 
@@ -2042,10 +2042,10 @@ void GenerateIOLogChecksumFile(std::string filename) {
 
 	FILE *f = fopen(filename.c_str(), "r");
 	FILE *fout = fopen((filename + ".checksums").c_str(), "w");
-	uint8_t buf[4096];
+	uint8_t buf[SERVER_KNOBS->SQLITE_PAGE_SIZE];
 	unsigned int c = 0;
-	while(fread(buf, 1, 4096, f) > 0)
-		fprintf(fout, "%u %u\n", c++, hashlittle(buf, 4096, 0xab12fd93));
+	while(fread(buf, 1, SERVER_KNOBS->SQLITE_PAGE_SIZE, f) > 0)
+		fprintf(fout, "%u %u\n", c++, hashlittle(buf, SERVER_KNOBS->SQLITE_PAGE_SIZE, 0xab12fd93));
 	fclose(f);
 	fclose(fout);
 }

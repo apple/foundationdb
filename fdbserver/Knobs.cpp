@@ -639,6 +639,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX,                  15 );
 	init( REDWOOD_LOGGING_INTERVAL,                              5.0 );
 
+	init( SQLITE_PAGE_SIZE,                                     4096 );
+
 	// clang-format on
 
 	if(clientKnobs)

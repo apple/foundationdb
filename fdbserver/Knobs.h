@@ -571,6 +571,8 @@ public:
 	int REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX; // Number of versions between head of remap queue and oldest retained version before remap cleanup may stop
 	double REDWOOD_LOGGING_INTERVAL;
 
+	int SQLITE_PAGE_SIZE;
+
 	ServerKnobs();
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
