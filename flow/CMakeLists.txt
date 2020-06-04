@@ -67,7 +67,7 @@ set(FLOW_SRCS
   XmlTraceLogFormatter.cpp
   XmlTraceLogFormatter.h
   actorcompiler.h
-	crc32c.h
+  crc32c.h
   crc32c.cpp
   error_definitions.h
   ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h
@@ -75,14 +75,18 @@ set(FLOW_SRCS
   flat_buffers.h
   flow.cpp
   flow.h
+  folly_memcpy.S
   genericactors.actor.cpp
   genericactors.actor.h
   network.cpp
   network.h
+  rte_memcpy.h
   serialize.cpp
   serialize.h
   stacktrace.amalgamation.cpp
   stacktrace.h
+  test_memcpy.cpp
+  test_memcpy_perf.cpp
   version.cpp)
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)

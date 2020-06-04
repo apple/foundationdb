@@ -209,6 +209,25 @@ else()
   #   -mavx
   #   -msse4.2)
 
+  # Tentatively re-enabling vector instructions
+  set(USE_AVX512F OFF CACHE BOOL "Enable AVX 512F instructions")
+  if (USE_AVX512F)
+    add_compile_options(-mavx512f)
+  endif()
+  set(USE_AVX ON CACHE BOOL "Enable AVX instructions")
+  if (USE_AVX)
+    add_compile_options(-mavx)
+  endif()
+
+  # Intentionally using builtin memcpy.  G++ does a good job on small memcpy's when the size is known at runtime.
+  # If the size is not known, then it falls back on the memcpy that's available at runtime (rte_memcpy, as of this
+  # writing; see flow.cpp).
+  #
+  # The downside of the builtin memcpy is that it's slower at large copies, so if we spend a lot of time on large
+  # copies of sizes that are known at compile time, this might not be a win.  See the output of performance/memcpy
+  # for more information.
+  #add_compile_options(-fno-builtin-memcpy)
+
   if (USE_VALGRIND)
     add_compile_options(-DVALGRIND -DUSE_VALGRIND)
   endif()
@@ -254,7 +273,6 @@ else()
   endif()
   if (GCC)
     add_compile_options(-Wno-pragmas)
-
     # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
     # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
     add_compile_options(-Wno-attributes)
