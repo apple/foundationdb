@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.2.22
+======
+
+Fixes
+-----
+
+* Coordinator class processes could be recruited as the cluster controller. `(PR #3282) <https://github.com/apple/foundationdb/pull/3282>`_
+
 6.2.21
 ======
 
