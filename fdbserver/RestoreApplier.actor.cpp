@@ -244,10 +244,17 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 				}
 				wait(success(fValues[i]));
 			} catch (Error& e) {
-				if (e.code() == error_code_key_not_found) {
-					keyNotFounds.push_back(i);
+				if (e.code() == error_code_key_not_found || e.code() == error_code_transaction_too_old ||
+				    e.code() == error_code_future_version) {
+					keyNotFounds.insert(i);
 				} else {
 					hasError = true;
+				}
+				if (retries > 20) {
+					TraceEvent(SevError, "GetAndComputeStagingKeys", applierID)
+					    .detail("BatchIndex", batchIndex)
+					    .detail("KeyIndex", i)
+					    .error(e);
 				}
 				wait(tr->onError(e));
 			}
@@ -255,6 +262,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 		if (!hasError) {
 			break;
 		}
+		retries++;
 	}
 
 	ASSERT(fValues.size() == incompleteStagingKeys.size());
