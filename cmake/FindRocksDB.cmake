@@ -1,44 +1,40 @@
 # FindRocksDB
 
-if(ROCKSDB_USE_STATIC_LIBS)
-  set(_rocksdb_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
-  if(WIN32)
-    set(CMAKE_FIND_LIBRARY_SUFFIXES .lib .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
-  elseif(APPLE)
-    set(CMAKE_FIND_LIBRARY_SUFFIXES .a .dylib)
-  else()
-    set(CMAKE_FIND_LIBRARY_SUFFIXES .a .so)
-  endif()
-endif()
+include(ExternalProject)
 
-find_path(ROCKSDB_INCLUDE_DIR
-  NAMES rocksdb/db.h
-  PATH_SUFFIXES include)
+ExternalProject_Add(rocksdb
+    URL        https://github.com/facebook/rocksdb/archive/v6.10.1.tar.gz
+    URL_HASH   SHA256=d573d2f15cdda883714f7e0bc87b814a8d4a53a82edde558f08f940e905541ee
+    CMAKE_ARGS -DUSE_RTTI=1 -DPORTABLE=1
+        -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
+        -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+        -DWITH_GFLAGS=OFF
+        -DWITH_TESTS=OFF
+        -DWITH_TOOLS=OFF
+        -DWITH_CORE_TOOLS=OFF
+        -DWITH_BENCHMARK_TOOLS=OFF
+        -DWITH_BZ2=OFF
+        -DWITH_LZ4=OFF
+        -DWITH_SNAPPY=OFF
+        -DWITH_ZLIB=OFF
+        # Disable ZSTD for now as it breaks internal build
+        -DWITH_ZSTD=OFF
+        -DCMAKE_POSITION_INDEPENDENT_CODE=True
+    )
 
-find_library(ROCKSDB_LIBRARY
-  NAMES rocksdb)
+ExternalProject_Get_Property(rocksdb BINARY_DIR)
+set(ROCKSDB_LIBRARIES
+    ${BINARY_DIR}/librocksdb.a)
 
-find_library(SNAPPY_LIBRARY
-  NAMES snappy)
+set(ROCKSDB_FOUND TRUE)
 
-find_library(BZ2_LIBRARY
-  NAMES bz2)
+set(ROCKSDB_INCLUDE_DIRS
+    ${ROCKSDB_ROOT_DIR}/include)
+message(STATUS "Found RocksDB library: ${ROCKSDB_LIBRARIES}")
+message(STATUS "Found RocksDB includes: ${ROCKSDB_INCLUDE_DIRS}")
 
-find_library(LZ4_LIBRARY
-  NAMES lz4)
-
-mark_as_advanced(ROCKSDB_INCLUDE_DIR ROCKSDB_LIBRARY SNAPPY_LIBRARY BZ2_LIBRARY LZ4_LIBRARY)
-
-find_package_handle_standard_args(RocksDB
-  REQUIRED_VARS ROCKSDB_INCLUDE_DIR ROCKSDB_LIBRARY SNAPPY_LIBRARY BZ2_LIBRARY LZ4_LIBRARY
-  FAIL_MESSAGE "Could NOT find RocksDB, try to set the path to root folder in variable RocksDB_ROOT")
-
-if(ROCKSDB_FOUND)
-  add_library(RocksDB INTERFACE)
-  target_include_directories(RocksDB INTERFACE "${ROCKSDB_INCLUDE_DIR}")
-  target_link_libraries(RocksDB INTERFACE "${ROCKSDB_LIBRARY}" ${SNAPPY_LIBRARY} ${BZ2_LIBRARY} ${LZ4_LIBRARY})
-endif()
-
-if (ROCKSDB_USE_STATIC_LIBS)
-  set(CMAKE_FIND_LIBRARY_SUFFIXES ${_rocksdb_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
-endif()
+mark_as_advanced(
+    ROCKSDB_ROOT_DIR
+    ROCKSDB_LIBRARIES
+    ROCKSDB_INCLUDE_DIRS
+)
