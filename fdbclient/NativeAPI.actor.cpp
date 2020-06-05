@@ -1813,6 +1813,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 						reply = _reply;
 					}
 				}
+				++cx->transactionPhysicalReadsCompleted;
 			} catch(Error&) {
 				++cx->transactionPhysicalReadsCompleted;
 				throw;

@@ -1184,9 +1184,9 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 		// FIXME: enable when debugKeyRange is active
 		//debugKeyRange("fetchKeysBegin", data->version.get(), cacheRange->keys);
 
-		TraceEvent(SevDebug, interval.begin(), data->thisServerID)
-			.detail("KeyBegin", cacheRange->keys.begin)
-			.detail("KeyEnd",cacheRange->keys.end);
+		//TraceEvent(SevDebug, interval.begin(), data->thisServerID)
+		//	.detail("KeyBegin", cacheRange->keys.begin)
+		//	.detail("KeyEnd",cacheRange->keys.end);
 
 		validate(data);
 
@@ -1955,6 +1955,7 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
 	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
 	state MutationRef privatized;
+	privatized.type = MutationRef::SetValue;
 	state Version readVersion;
 	try {
 		loop {
