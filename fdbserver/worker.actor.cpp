@@ -1726,7 +1726,7 @@ ACTOR Future<Void> fdbd(
 		Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo()) );
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
-		if (processClass == ProcessClass::TesterClass) {
+		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {
 			actors.push_back( reportErrors( monitorLeader( connFile, cc ), "ClusterController" ) );
 		} else if (processClass == ProcessClass::StorageClass && SERVER_KNOBS->MAX_DELAY_STORAGE_CANDIDACY_SECONDS > 0) {
 			actors.push_back( reportErrors( monitorLeaderRemotelyWithDelayedCandidacy( connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, dbInfo ), "ClusterController" ) );
