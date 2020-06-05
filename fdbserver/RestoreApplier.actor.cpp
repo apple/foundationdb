@@ -218,9 +218,11 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state std::vector<Future<Optional<Value>>> fValues(incompleteStagingKeys.size(), Never());
 	state int retries = 0;
+	// state UID randomID = deterministicRandom()->randomUniqueID();
 
 	wait(delay(delayTime + deterministicRandom()->random01() * delayTime));
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysStart", applierID)
+	    //.detail("RandomUID", randomID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("GetKeys", incompleteStagingKeys.size())
 	    .detail("DelayTime", delayTime);
@@ -245,7 +247,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 				if (keyNotFounds.count(i)) {
 					continue;
 				}
-				wait(success(fValues[i]));
+				wait(success(fValues[i])); // NOTE: This may be waiting for ever!
 			} catch (Error& e) {
 				if (e.code() == error_code_key_not_found) { // e.code() == error_code_transaction_too_old || e.code() ==
 					                                        // error_code_future_version
@@ -271,7 +273,8 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	ASSERT(fValues.size() == incompleteStagingKeys.size());
 	int i = 0;
 	for (auto& key : incompleteStagingKeys) {
-		if (keyNotFounds.count(i) || !fValues[i].get().present()) { // Key not exist in DB
+		if (keyNotFounds.count(i) || (!fValues[i].get().present())) { // Key not exist in DB
+			// if condition: fValues[i].Valid() && fValues[i].isReady() && !fValues[i].isError() &&
 			TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB", applierID)
 			    .detail("BatchIndex", batchIndex)
 			    .detail("Key", key.first)
@@ -295,8 +298,10 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	}
 
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysDone", applierID)
+	    //.detail("RandomUID", randomID)
 	    .detail("BatchIndex", batchIndex)
-	    .detail("GetKeys", incompleteStagingKeys.size());
+	    .detail("GetKeys", incompleteStagingKeys.size())
+	    .detail("DelayTime", delayTime);
 
 	return Void();
 }
@@ -384,7 +389,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 			incompleteStagingKeys.clear();
 		}
 	}
-	if (numKeysInBatch > 0) {
+	if (numKeysInBatch >= 1) {
 		fGetAndComputeKeys.push_back(
 		    getAndComputeStagingKeys(incompleteStagingKeys, delayTime, cx, applierID, batchIndex));
 	}
