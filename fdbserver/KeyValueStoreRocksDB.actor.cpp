@@ -150,7 +150,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CloseAction& a) {
-			db->Close();
+			auto s = db->Close();
+			TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Close");
 			a.done.send(Void());
 		}
 	};
@@ -304,16 +305,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
-		state Promise<Void> closePromise = self->closePromise;
 		wait(self->readThreads->stop());
 		auto a = new Writer::CloseAction{};
 		auto f = a->done.getFuture();
 		self->writeThread->post(a);
 		wait(f);
 		wait(self->writeThread->stop());
-		delete self;
 		// TODO: delete data on close
-		closePromise.send(Void());
+		if (self->closePromise.canBeSet()) self->closePromise.send(Void());
+		if (self->errorPromise.canBeSet()) self->errorPromise.send(Never());
+		delete self->db;
+		delete self;
 	}
 
 	Future<Void> onClosed() override {
