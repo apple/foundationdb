@@ -9,6 +9,7 @@ Fixes
 -----
 
 * Coordinator class processes could be recruited as the cluster controller. `(PR #3282) <https://github.com/apple/foundationdb/pull/3282>`_
+* HTTPS requests made by backup would fail (introduced in 6.2.21). `(PR #3284) <https://github.com/apple/foundationdb/pull/3284>`_
 
 6.2.21
 ======
