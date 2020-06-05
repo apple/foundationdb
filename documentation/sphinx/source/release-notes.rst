@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.3.0
+6.3.1
 =====
 
 Features
