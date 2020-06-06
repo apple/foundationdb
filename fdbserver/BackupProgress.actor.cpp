@@ -115,7 +115,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 					// ASSERT(info.logRouterTags == epochTags[rit->first]);
 
 					updateTagVersions(&tagVersions, &tags, rit->second, info.epochEnd, adjustedBeginVersion, epoch);
-					break;
+					if (tags.empty()) break;
 				}
 				rit++;
 			}
