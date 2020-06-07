@@ -2404,7 +2404,6 @@ Future<Version> Transaction::getRawReadVersion() {
 
 Future< Void > Transaction::watch( Reference<Watch> watch ) {
 	++cx->transactionWatchRequests;
-	cx->addWatch();
 	watches.push_back(watch);
 	return ::watch(watch, cx, options.readTags, info);
 }
