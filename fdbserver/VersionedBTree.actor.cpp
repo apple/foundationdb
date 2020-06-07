@@ -5509,10 +5509,13 @@ public:
 
 	ACTOR static Future<Standalone<RangeResultRef>> readRange_impl(KeyValueStoreRedwoodUnversioned* self, KeyRange keys,
 	                                                               int rowLimit, int byteLimit) {
+		state VersionedBTree::BTreeCursor cur;
+		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
+
 		wait(self->m_concurrentReads.take());
 		state FlowLock::Releaser releaser(self->m_concurrentReads);
-
 		++g_redwoodMetrics.opGetRange;
+
 		state Standalone<RangeResultRef> result;
 		state int accumulatedBytes = 0;
 		ASSERT(byteLimit > 0);
@@ -5521,8 +5524,7 @@ public:
 			return result;
 		}
 
-		state VersionedBTree::BTreeCursor cur;
-		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
+		// Prefetch is disabled for now pending some decent logic for deciding how much to fetch
 		state int prefetchBytes = 0;
 
 		if (rowLimit > 0) {
@@ -5587,12 +5589,12 @@ public:
 
 	ACTOR static Future<Optional<Value>> readValue_impl(KeyValueStoreRedwoodUnversioned* self, Key key,
 	                                                    Optional<UID> debugID) {
-		wait(self->m_concurrentReads.take());
-		state FlowLock::Releaser releaser(self->m_concurrentReads);
-
-		++g_redwoodMetrics.opGet;
 		state VersionedBTree::BTreeCursor cur;
 		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
+
+		wait(self->m_concurrentReads.take());
+		state FlowLock::Releaser releaser(self->m_concurrentReads);
+		++g_redwoodMetrics.opGet;
 
 		wait(cur.seekGTE(key, 0));
 		if (cur.isValid() && cur.get().key == key) {
@@ -5607,12 +5609,12 @@ public:
 
 	ACTOR static Future<Optional<Value>> readValuePrefix_impl(KeyValueStoreRedwoodUnversioned* self, Key key,
 	                                                          int maxLength, Optional<UID> debugID) {
-		wait(self->m_concurrentReads.take());
-		state FlowLock::Releaser releaser(self->m_concurrentReads);
-
-		++g_redwoodMetrics.opGet;
 		state VersionedBTree::BTreeCursor cur;
 		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
+
+		wait(self->m_concurrentReads.take());
+		state FlowLock::Releaser releaser(self->m_concurrentReads);
+		++g_redwoodMetrics.opGet;
 
 		wait(cur.seekGTE(key, 0));
 		if (cur.isValid() && cur.get().key == key) {
