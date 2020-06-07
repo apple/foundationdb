@@ -6978,11 +6978,11 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state int maxKeySize = deterministicRandom()->randomInt(1, pageSize * 2);
 	state int maxValueSize = randomSize(pageSize * 25);
 	state int maxCommitSize = shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6));
-	state int mutationBytesTarget = shortTest ? 100000 : randomSize(std::min<int>(maxCommitSize * 100, 100e6));
+	state int mutationBytesTarget = shortTest ? 100000 : randomSize(std::min<int>(maxCommitSize * 100, pageSize * 100000));
 	state double clearProbability = deterministicRandom()->random01() * .1;
 	state double clearSingleKeyProbability = deterministicRandom()->random01();
 	state double clearPostSetProbability = deterministicRandom()->random01() * .1;
-	state double coldStartProbability = pagerMemoryOnly ? 0 : deterministicRandom()->random01();
+	state double coldStartProbability = pagerMemoryOnly ? 0 : (deterministicRandom()->random01() * 0.3);
 	state double advanceOldVersionProbability = deterministicRandom()->random01();
 	state double maxDuration = 60;
 	state int64_t cacheSizeBytes =
