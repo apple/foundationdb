@@ -22,6 +22,7 @@ if (RocksDB_FOUND)
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
                -DCMAKE_POSITION_INDEPENDENT_CODE=True
+    INSTALL_COMMAND ""
   )
 
   ExternalProject_Get_Property(rocksdb BINARY_DIR)
@@ -46,6 +47,7 @@ else()
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
                -DCMAKE_POSITION_INDEPENDENT_CODE=True
+    INSTALL_COMMAND ""
   )
 
   ExternalProject_Get_Property(rocksdb BINARY_DIR)
