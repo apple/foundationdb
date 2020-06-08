@@ -218,7 +218,7 @@ add_library(fdb_sqlite STATIC
 if (SSD_ROCKSDB_EXPERIMENTAL)
   add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)
 
-  find_package(RocksDB REQUIRED)
+  include(CompileRocksDB)
   list(APPEND RocksDB_LIBRARIES RocksDB::rocksdb)
 endif()
 
