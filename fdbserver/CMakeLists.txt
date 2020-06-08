@@ -217,6 +217,8 @@ add_library(fdb_sqlite STATIC
 
 if (SSD_ROCKSDB_EXPERIMENTAL)
   add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)
+  # Change this if you want to compile RocksDB with `-march=native`.
+  set(PORTABLE_ROCKSDB 1)
 
   include(CompileRocksDB)
   list(APPEND RocksDB_LIBRARIES RocksDB::rocksdb)
@@ -238,7 +240,7 @@ if (SSD_ROCKSDB_EXPERIMENTAL)
     ${CMAKE_BINARY_DIR}/bindings/c
     ${CMAKE_CURRENT_BINARY_DIR}/workloads
     ${CMAKE_CURRENT_SOURCE_DIR}/workloads
-    ${RocksDB_INCLUDE_DIR})
+    ${ROCKSDB_INCLUDE_DIR})
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES})
 else()
   target_include_directories(fdbserver PRIVATE
