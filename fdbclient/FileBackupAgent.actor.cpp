@@ -236,6 +236,7 @@ public:
 		TraceEvent t(SevWarn, "FileRestoreError");
 		t.error(e).detail("RestoreUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
 		// These should not happen
+		ASSERT(e.code() != error_code_key_not_found);
 		if(e.code() == error_code_key_not_found)
 			t.backtrace();
 
