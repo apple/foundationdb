@@ -2364,7 +2364,6 @@ void Watch::setWatch(Future<Void> watchFuture) {
 
 //FIXME: This seems pretty horrible. Now a Database can't die until all of its watches do...
 ACTOR Future<Void> watch(Reference<Watch> watch, Database cx, TagSet tags, TransactionInfo info) {
-	cx->addWatch();
 	try {
 		choose {
 			// RYOW write to value that is being watched (if applicable)
@@ -2404,6 +2403,7 @@ Future<Version> Transaction::getRawReadVersion() {
 
 Future< Void > Transaction::watch( Reference<Watch> watch ) {
 	++cx->transactionWatchRequests;
+	cx->addWatch();
 	watches.push_back(watch);
 	return ::watch(watch, cx, options.readTags, info);
 }
