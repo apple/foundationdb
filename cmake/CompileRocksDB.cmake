@@ -29,7 +29,6 @@ if (RocksDB_FOUND)
   set(ROCKSDB_LIBRARIES
       ${BINARY_DIR}/librocksdb.a)
 else()
-  message("She MISSED it!")
   ExternalProject_Add(rocksdb
     URL        https://github.com/facebook/rocksdb/archive/v6.10.1.tar.gz
     URL_HASH   SHA256=d573d2f15cdda883714f7e0bc87b814a8d4a53a82edde558f08f940e905541ee
