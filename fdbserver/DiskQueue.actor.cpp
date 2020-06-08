@@ -1013,7 +1013,7 @@ private:
 		ASSERT( nextPageSeq%sizeof(Page)==0 );
 
 		auto& p = backPage();
-		memset(&p, 0, sizeof(Page)); // FIXME: unnecessary?
+		memset(static_cast<void*>(&p), 0, sizeof(Page)); // FIXME: unnecessary?
 		p.magic = 0xFDB;
 		switch (diskQueueVersion) {
 		case DiskQueueVersion::V0:
