@@ -248,7 +248,6 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	state int i = 0;
 	loop {
 		try {
-			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			i = 0;
