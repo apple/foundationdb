@@ -74,6 +74,14 @@ services:
     <<: *snapshot-bindings-cmake
 
 
+  snapshot-cmake: &snapshot-testpackages
+    <<: *build-setup
+    command: scl enable devtoolset-8 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -G "Ninja" -DFDB_RELEASE=0 /__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb && ninja -v -j "$${MAKEJOBS}"'
+
+  prb-testpackages:
+    <<: *snapshot-testpackages
+
+
   snapshot-ctest: &snapshot-ctest
     <<: *build-setup
     command: scl enable devtoolset-8 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -G "Ninja" -DFDB_RELEASE=1 /__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb && ninja -v -j "$${MAKEJOBS}" && ctest -L fast -j "$${MAKEJOBS}" --output-on-failure'
