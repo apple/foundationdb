@@ -169,19 +169,20 @@ struct GetValueReply : public LoadBalancedReply {
 
 struct GetValueRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 8454530;
+	SpanID spanID;
 	Key key;
 	Version version;
 	Optional<TagSet> tags;
-	TransactionID txnID;
 	Optional<UID> debugID;
 	ReplyPromise<GetValueReply> reply;
 
 	GetValueRequest(){}
-	GetValueRequest(const Key& key, Version ver, Optional<TagSet> tags, TransactionID txnID, Optional<UID> debugID) : key(key), version(ver), tags(tags), debugID(debugID) {}
-	
-	template <class Ar> 
+	GetValueRequest(SpanID spanID, const Key& key, Version ver, Optional<TagSet> tags, Optional<UID> debugID)
+	  : spanID(spanID), key(key), version(ver), tags(tags), debugID(debugID) {}
+
+	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, key, version, tags, debugID, reply, txnID);
+		serializer(ar, key, version, tags, debugID, reply, spanID);
 	}
 };
 
@@ -200,22 +201,22 @@ struct WatchValueReply {
 
 struct WatchValueRequest {
 	constexpr static FileIdentifier file_identifier = 14747733;
+	SpanID spanID;
 	Key key;
 	Optional<Value> value;
 	Version version;
 	Optional<TagSet> tags;
-	TransactionID txnID;
 	Optional<UID> debugID;
 	ReplyPromise<WatchValueReply> reply;
 
 	WatchValueRequest(){}
-	WatchValueRequest(const Key& key, Optional<Value> value, Version ver, Optional<TagSet> tags, TransactionID txnID,
+	WatchValueRequest(SpanID spanID, const Key& key, Optional<Value> value, Version ver, Optional<TagSet> tags,
 	                  Optional<UID> debugID)
-	  : key(key), value(value), version(ver), tags(tags), txnID(txnID), debugID(debugID) {}
+	  : spanID(spanID), key(key), value(value), version(ver), tags(tags), debugID(debugID) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, key, value, version, tags, debugID, reply);
+		serializer(ar, key, value, version, tags, debugID, reply, spanID);
 	}
 };
 
@@ -237,6 +238,7 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 
 struct GetKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
+	SpanID spanID;
 	Arena arena;
 	KeySelectorRef begin, end;
 	Version version;		// or latestVersion
@@ -249,7 +251,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	GetKeyValuesRequest() : isFetchKeys(false) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, arena);
+		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanID, arena);
 	}
 };
 
@@ -268,6 +270,7 @@ struct GetKeyReply : public LoadBalancedReply {
 
 struct GetKeyRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 10457870;
+	SpanID spanID;
 	Arena arena;
 	KeySelectorRef sel;
 	Version version;		// or latestVersion
@@ -276,11 +279,13 @@ struct GetKeyRequest : TimedRequest {
 	ReplyPromise<GetKeyReply> reply;
 
 	GetKeyRequest() {}
-	GetKeyRequest(KeySelectorRef const& sel, Version version, Optional<TagSet> tags, Optional<UID> debugID) : sel(sel), version(version), debugID(debugID) {}
+	GetKeyRequest(SpanID spanID, KeySelectorRef const& sel, Version version, Optional<TagSet> tags,
+	              Optional<UID> debugID)
+	  : spanID(spanID), sel(sel), version(version), debugID(debugID) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, sel, version, tags, debugID, reply, arena);
+		serializer(ar, sel, version, tags, debugID, reply, spanID, arena);
 	}
 };
 

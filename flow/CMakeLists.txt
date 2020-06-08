@@ -20,8 +20,6 @@ set(FLOW_SRCS
   FastRef.h
   FaultInjection.cpp
   FaultInjection.h
-  FBTrace.h
-  FBTrace.cpp
   FileTraceLogWriter.cpp
   FileTraceLogWriter.h
   Hash3.c
@@ -63,6 +61,8 @@ set(FLOW_SRCS
   ThreadSafeQueue.h
   Trace.cpp
   Trace.h
+  Tracing.h
+  Tracing.cpp
   TreeBenchmark.h
   UnitTest.cpp
   UnitTest.h

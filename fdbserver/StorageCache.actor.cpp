@@ -29,7 +29,7 @@
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "flow/FBTrace.h"
+#include "flow/Tracing.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 
@@ -252,7 +252,6 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
 			//FIXME
 		}
-		fbTrace<GetValueDebugTrace>(req.txnID, now(), GetValueDebugTrace::STORAGECACHE_GETVALUE_DO_READ);
 
 		state Optional<Value> v;
 		state Version version = wait( waitForVersion( data, req.version ) );

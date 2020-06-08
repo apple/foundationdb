@@ -200,11 +200,13 @@ public:
 	bool enableLocalityLoadBalance;
 
 	struct VersionRequest {
+		SpanID spanID;
 		Promise<GetReadVersionReply> reply;
 		TagSet tags;
 		Optional<UID> debugID;
 
-		VersionRequest(TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>()) : tags(tags), debugID(debugID) {}
+		VersionRequest(SpanID spanID, TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>())
+		  : spanID(spanID), tags(tags), debugID(debugID) {}
 	};
 
 	// Transaction start request batching

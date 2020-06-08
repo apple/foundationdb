@@ -193,9 +193,6 @@ public:
 	int MAX_TRACE_EVENT_LENGTH;
 	bool ALLOCATION_TRACING_ENABLED;
 
-	// Flatbuffers Traces
-	bool FBTRACES_ENABLED;
-
 	//TDMetrics
 	int64_t MAX_METRIC_SIZE;
 	int64_t MAX_METRIC_LEVEL;
