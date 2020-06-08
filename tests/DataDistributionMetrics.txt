@@ -7,6 +7,7 @@ testTitle=DataDistributionMetrics
 	testName=DataDistributionMetrics
 	numTransactions=100
 	writesPerTransaction=1000
+	testDuration=10.0
 
 	testName=Attrition
 	machinesToKill=1
