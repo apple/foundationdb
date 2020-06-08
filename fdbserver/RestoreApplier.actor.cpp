@@ -220,6 +220,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<ReadYourWritesTransaction> tr, 
 		return v;
 	} catch (Error& e) {
 		if (e.code() == error_code_key_not_found) {
+			ASSERT(false); // Should not happen
 			keysNotFound->insert(i);
 			return Optional<Value>();
 		} else {
