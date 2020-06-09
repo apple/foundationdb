@@ -494,6 +494,7 @@
       "data_distribution_disabled_for_ss_failures":true,
       "data_distribution_disabled_for_rebalance":true,
       "data_distribution_disabled":true,
+      "active_primary_dc":"pv",
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,
