@@ -45,6 +45,8 @@ ACTOR Future<Void> submitCandidacy(Key key, LeaderElectionRegInterface coord, Le
 					    .detail("Hostname", hostname.get().toString())
 					    .detail("OldAddr", coord.candidacy.getEndpoint().getPrimaryAddress().toString());
 					connFile->getMutableConnectionString().resetToUnresolved();
+					// 50 milliseconds delay to prevent tight resolving loop due to outdated DNS cache
+					wait(delay(0.05));
 					throw coordinators_changed();
 				}
 			} else if (rep.present()) {
