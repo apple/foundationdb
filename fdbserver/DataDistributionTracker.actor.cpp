@@ -838,12 +838,6 @@ ACTOR Future<Void> fetchShardMetricsList_impl( DataDistributionTracker* self, Ge
 			}
 
 			if( !onChange.isValid() ) {
-				// std::string allKeyEntries = "";
-				// for(int i = 0; i < result.size(); i++) {
-				// 	allKeyEntries += printable( result[i].beginKey ) + " ";
-				// }
-				// TODO : remove this comment later
-				// TraceEvent(SevInfo, "DDStatsInfoTracker").detail("Request.keys", req.keys.toString()).detail("Result.size", result.size()).detail("Result.keys", allKeyEntries);
 				req.reply.send( result );
 				return Void();
 			}
