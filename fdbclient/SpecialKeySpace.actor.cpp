@@ -38,12 +38,13 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 // orEqual == false && offset == 1 (Standard form)
 // If the corresponding key is not in the underlying key range, it will move over the range
 ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* skrImpl, ReadYourWritesTransaction* ryw,
-                                                 KeySelector* ks) {
+                                                 KeySelector* ks, Optional<Standalone<RangeResultRef>>* cache) {
 	ASSERT(!ks->orEqual); // should be removed before calling
 	ASSERT(ks->offset != 1); // never being called if KeySelector is already normalized
 
 	state Key startKey(skrImpl->getKeyRange().begin);
 	state Key endKey(skrImpl->getKeyRange().end);
+	state Standalone<RangeResultRef> result;
 
 	if (ks->offset < 1) {
 		// less than the given key
@@ -60,7 +61,15 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* 
 	    .detail("SpecialKeyRangeStart", skrImpl->getKeyRange().begin)
 	    .detail("SpecialKeyRangeEnd", skrImpl->getKeyRange().end);
 
-	Standalone<RangeResultRef> result = wait(skrImpl->getRange(ryw, KeyRangeRef(startKey, endKey)));
+	if (skrImpl->isAsync()) {
+		const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(skrImpl);
+		Standalone<RangeResultRef> result_ = wait(ptr->getRange(ryw, KeyRangeRef(startKey, endKey), cache));
+		result = result_;
+	} else {
+		Standalone<RangeResultRef> result_ = wait(skrImpl->getRange(ryw, KeyRangeRef(startKey, endKey)));
+		result = result_;
+	}
+
 	if (result.size() == 0) {
 		TraceEvent(SevDebug, "ZeroElementsIntheRange").detail("Start", startKey).detail("End", endKey);
 		return Void();
@@ -107,7 +116,8 @@ void onModuleRead(ReadYourWritesTransaction* ryw, SpecialKeySpace::MODULE module
 // to maintain; Thus, separate each part to make the code easy to understand and more compact
 ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeySelector* ks,
                                              Optional<SpecialKeySpace::MODULE>* lastModuleRead, int* actualOffset,
-                                             Standalone<RangeResultRef>* result) {
+                                             Standalone<RangeResultRef>* result,
+                                             Optional<Standalone<RangeResultRef>>* cache) {
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter =
 	    ks->offset < 1 ? sks->getImpls().rangeContainingKeyBefore(ks->getKey())
 	                   : sks->getImpls().rangeContaining(ks->getKey());
@@ -115,7 +125,7 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWrite
 	       (ks->offset > 1 && iter != sks->getImpls().ranges().end())) {
 		onModuleRead(ryw, sks->getModules().rangeContaining(iter->begin())->value(), *lastModuleRead);
 		if (iter->value() != nullptr) {
-			wait(moveKeySelectorOverRangeActor(iter->value(), ryw, ks));
+			wait(moveKeySelectorOverRangeActor(iter->value(), ryw, ks, cache));
 		}
 		ks->offset < 1 ? --iter : ++iter;
 	}
@@ -164,13 +174,16 @@ SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks, ReadYourWritesTr
 	// This function handles ranges which cover more than one keyrange and aggregates all results
 	// KeySelector, GetRangeLimits and reverse are all handled here
 	state Standalone<RangeResultRef> result;
+	state Standalone<RangeResultRef> pairs;
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter;
 	state int actualBeginOffset;
 	state int actualEndOffset;
 	state Optional<SpecialKeySpace::MODULE> lastModuleRead;
+	// used to cache result from potential first read
+	state Optional<Standalone<RangeResultRef>> cache;
 
-	wait(normalizeKeySelectorActor(sks, ryw, &begin, &lastModuleRead, &actualBeginOffset, &result));
-	wait(normalizeKeySelectorActor(sks, ryw, &end, &lastModuleRead, &actualEndOffset, &result));
+	wait(normalizeKeySelectorActor(sks, ryw, &begin, &lastModuleRead, &actualBeginOffset, &result, &cache));
+	wait(normalizeKeySelectorActor(sks, ryw, &end, &lastModuleRead, &actualEndOffset, &result, &cache));
 	// Handle all corner cases like what RYW does
 	// return if range inverted
 	if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
@@ -195,7 +208,14 @@ SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks, ReadYourWritesTr
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
-			Standalone<RangeResultRef> pairs = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
+			if (iter->value()->isAsync() && cache.present()) {
+				const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
+				Standalone<RangeResultRef> pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), &cache));
+				pairs = pairs_;
+			} else {
+				Standalone<RangeResultRef> pairs_ = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
+				pairs = pairs_;
+			}
 			result.arena().dependsOn(pairs.arena());
 			// limits handler
 			for (int i = pairs.size() - 1; i >= 0; --i) {
@@ -218,7 +238,14 @@ SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks, ReadYourWritesTr
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
-			Standalone<RangeResultRef> pairs = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
+			if (iter->value()->isAsync() && cache.present()) {
+				const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
+				Standalone<RangeResultRef> pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), &cache));
+				pairs = pairs_;
+			} else {
+				Standalone<RangeResultRef> pairs_ = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
+				pairs = pairs_;
+			}
 			result.arena().dependsOn(pairs.arena());
 			// limits handler
 			for (int i = 0; i < pairs.size(); ++i) {
@@ -316,7 +343,7 @@ Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(ReadYourWritesT
 	return result;
 }
 
-ACTOR Future<Standalone<RangeResultRef>> ddStatsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+ACTOR Future<Standalone<RangeResultRef>> ddMetricsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	try {
 		auto keys = kr.removePrefix(ddStatsRange.begin);
 		Standalone<VectorRef<DDMetricsRef>> resultWithoutPrefix =
@@ -339,10 +366,10 @@ ACTOR Future<Standalone<RangeResultRef>> ddStatsGetRangeActor(ReadYourWritesTran
 	}
 }
 
-DDStatsRangeImpl::DDStatsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+DDStatsRangeImpl::DDStatsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
 
 Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
-	return ddStatsGetRangeActor(ryw, kr);
+	return ddMetricsGetRangeActor(ryw, kr);
 }
 
 class SpecialKeyRangeTestImpl : public SpecialKeyRangeBaseImpl {
