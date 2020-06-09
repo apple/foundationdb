@@ -1220,9 +1220,9 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 
 		//FIXME: temporarily code to test storage cache
 		//TODO: caching disabled for this merge
-		//if(dc==0) {
-		//	machines++;
-		//}
+		if(dc==0) {
+			machines++;
+		}
 
 		int useSeedForMachine = deterministicRandom()->randomInt(0, machines);
 		Standalone<StringRef> zoneId;
@@ -1249,10 +1249,10 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 
 			//FIXME: temporarily code to test storage cache
 			//TODO: caching disabled for this merge
-			//if(machine==machines-1 && dc==0) {
-			//	processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
-			//	nonVersatileMachines++;
-			//}
+			if(machine==machines-1 && dc==0) {
+				processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
+				nonVersatileMachines++;
+			}
 
 			std::vector<IPAddress> ips;
 			for (int i = 0; i < processesPerMachine; i++) {
