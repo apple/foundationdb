@@ -3580,22 +3580,23 @@ public:
 	// Parallel restore
 	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID) {
 		state ReadYourWritesTransaction tr(cx);
-		state Future<Void> watchForRestoreRequestDone;
 		state Optional<Value> restoreRequestDoneKeyValue;
-		state bool restoreDone = false;
 		TraceEvent("FastRestoreAgentWaitForRestoreToFinish").detail("DBLock", randomUID);
+		// TODO: register watch first and then check if the key exist
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
+				Optional<Value> _restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
+				restoreRequestDoneKeyValue = _restoreRequestDoneKeyValue;
 				// Restore may finish before restoreAgent waits on the restore finish event.
 				if (restoreRequestDoneKeyValue.present()) {
 					break;
 				} else {
-					watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
+					state Future<Void> watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
 					wait(tr.commit());
 					wait(watchForRestoreRequestDone);
+					break;
 				}
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -3608,6 +3609,7 @@ public:
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->clear(restoreRequestDoneKey);
+			return Void();
 		}));
 
 		TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBStart", randomUID);
