@@ -783,6 +783,7 @@ TraceEvent::TraceEvent(TraceEvent &&ev) {
 	tmpEventMetric = ev.tmpEventMetric;
 	trackingKey = ev.trackingKey;
 	type = ev.type;
+	timeIndex = ev.timeIndex;
 
 	ev.initialized = true;
 	ev.enabled = false;
@@ -803,6 +804,7 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 	tmpEventMetric = ev.tmpEventMetric;
 	trackingKey = ev.trackingKey;
 	type = ev.type;
+	timeIndex = ev.timeIndex;
 
 	ev.initialized = true;
 	ev.enabled = false;

@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.3.0
+6.3.1
 =====
 
 Features
@@ -100,6 +100,7 @@ Other Changes
 
 Earlier release notes
 ---------------------
+* :doc:`6.3 (API Version 630) </old-release-notes/release-notes-630>`
 * :doc:`6.2 (API Version 620) </old-release-notes/release-notes-620>`
 * :doc:`6.1 (API Version 610) </old-release-notes/release-notes-610>`
 * :doc:`6.0 (API Version 600) </old-release-notes/release-notes-600>`

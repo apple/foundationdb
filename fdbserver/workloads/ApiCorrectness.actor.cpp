@@ -20,6 +20,7 @@
 
 #include "fdbserver/QuietDatabase.h"
 
+#include "fdbserver/MutationTracking.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/ApiWorkload.h"
 #include "fdbserver/workloads/MemoryKeyValueStore.h"
@@ -328,7 +329,7 @@ public:
 
 					wait(transaction->commit());
 					for(int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, data.size()); i++)
-						debugMutation("ApiCorrectnessSet", transaction->getCommittedVersion(), MutationRef(MutationRef::DebugKey, data[i].key, data[i].value));
+						DEBUG_MUTATION("ApiCorrectnessSet", transaction->getCommittedVersion(), MutationRef(MutationRef::DebugKey, data[i].key, data[i].value));
 
 					currentIndex += self->maxKeysPerTransaction;
 					break;
@@ -660,7 +661,7 @@ public:
 
 					wait(transaction->commit());
 					for(int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size()); i++)
-						debugMutation("ApiCorrectnessClear", transaction->getCommittedVersion(), MutationRef(MutationRef::DebugKey, keys[i], StringRef()));
+						DEBUG_MUTATION("ApiCorrectnessClear", transaction->getCommittedVersion(), MutationRef(MutationRef::DebugKey, keys[i], StringRef()));
 
 					currentIndex += self->maxKeysPerTransaction;
 					break;
@@ -711,7 +712,7 @@ public:
 				}
 				transaction->clear(range);
 				wait(transaction->commit());
-				debugKeyRange("ApiCorrectnessClear", transaction->getCommittedVersion(), range);
+				DEBUG_KEY_RANGE("ApiCorrectnessClear", transaction->getCommittedVersion(), range);
 				break;
 			}
 			catch(Error &e) {
