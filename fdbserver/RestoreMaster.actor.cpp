@@ -198,17 +198,25 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 
 	TraceEvent("FastRestoreMasterWaitOnRestoreRequests", self->id()).detail("RestoreRequests", restoreRequests.size());
 
-	// DB has been locked where restore request is submitted
-	wait(clearDB(cx));
+	// TODO: Sanity check restoreRequests' key ranges do not overlap
 
 	// Step: Perform the restore requests
 	try {
 		for (restoreIndex = 0; restoreIndex < restoreRequests.size(); restoreIndex++) {
-			RestoreRequest& request = restoreRequests[restoreIndex];
+			state RestoreRequest request = restoreRequests[restoreIndex];
 			TraceEvent("FastRestoreMasterProcessRestoreRequests", self->id())
 			    .detail("RestoreRequestInfo", request.toString());
 			// TODO: Initialize MasterData and all loaders and appliers' data for each restore request!
 			self->resetPerRestoreRequest();
+
+			// clear the key range that will be restored
+			wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr->clear(request.range);
+				return Void();
+			}));
+
 			wait(success(processRestoreRequest(self, cx, request)));
 			wait(notifyRestoreCompleted(self, false));
 		}
@@ -637,7 +645,6 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 	loop {
 		try {
 			TraceEvent("FastRestoreMasterPhaseCollectRestoreRequestsWait");
-			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
