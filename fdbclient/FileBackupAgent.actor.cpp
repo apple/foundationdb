@@ -3585,7 +3585,6 @@ public:
 		TraceEvent("FastRestoreAgentWaitForRestoreToFinish").detail("DBLock", randomUID);
 		loop {
 			try {
-				tr.reset();
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -3671,18 +3670,18 @@ public:
 				TraceEvent("FastRestoreAgentSubmitRestoreRequests").detail("DBIsLocked", randomUID);
 				break;
 			} catch (Error& e) {
-				TraceEvent("FastRestoreAgentSubmitRestoreRequests").detail("CheckLockError", e.what());
-				TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreMayFail")
+				TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreAgentSubmitRestoreRequestsMayFail")
 				    .detail("Reason", "DB is not properly locked")
-				    .detail("ExpectedLockID", randomUID);
+				    .detail("ExpectedLockID", randomUID)
+				    .error(e);
 				numTries++;
-				wait(delay(5.0));
+				wait(tr->onError(e));
 			}
 		}
 
 		// set up restore request
+		tr->reset();
 		loop {
-			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
@@ -4444,7 +4443,10 @@ public:
 		return r;
 	}
 
-	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent, Database cx, Optional<Database> cxOrig, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB, UID randomUid) {
+	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent, Database cx, Optional<Database> cxOrig,
+	                                     Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                     bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix,
+	                                     Key removePrefix, bool lockDB, UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
 		state BackupDescription desc = wait(bc->describeBackup());
