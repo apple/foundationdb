@@ -213,22 +213,6 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 	return Void();
 }
 
-ACTOR Future<Optional<Value>> getValue(Reference<ReadYourWritesTransaction> tr, Key key, int i,
-                                       std::set<int>* keysNotFound) {
-	try {
-		Optional<Value> v = wait(tr->get(key));
-		return v;
-	} catch (Error& e) {
-		if (e.code() == error_code_key_not_found) {
-			ASSERT(false); // Should not happen
-			keysNotFound->insert(i);
-			return Optional<Value>();
-		} else {
-			throw;
-		}
-	}
-}
-
 // Get keys in incompleteStagingKeys and precompute the stagingKey which is stored in batchData->stagingKeys
 ACTOR static Future<Void> getAndComputeStagingKeys(
     std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys, double delayTime, Database cx,
