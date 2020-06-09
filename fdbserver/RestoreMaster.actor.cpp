@@ -866,6 +866,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 		}
 
 		ASSERT(batchData->applyToDB.present());
+		ASSERT(!batchData->applyToDB.get().isError());
 		wait(batchData->applyToDB.get());
 
 		// Sanity check all appliers have applied data to destination DB
