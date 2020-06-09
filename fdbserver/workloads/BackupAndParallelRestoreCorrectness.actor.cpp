@@ -668,7 +668,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				g_simulator.backupAgents = ISimulator::NoBackupAgents;
 			}
 		} catch (Error& e) {
-			TraceEvent(SevError, "BackupAndRestoreCorrectness").error(e).GetLastError();
+			TraceEvent(SevError, "BackupAndParallelRestoreCorrectness").error(e).GetLastError();
 			throw;
 		}
 		return Void();
