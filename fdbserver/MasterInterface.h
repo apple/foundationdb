@@ -37,6 +37,10 @@ struct MasterInterface {
 	RequestStream< struct TLogRejoinRequest > tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
 	RequestStream< struct GetCommitVersionRequest > getCommitVersion;
+	// Report a proxy's committed version.
+	RequestStream< struct ReportLiveCommittedVersionRequest > reportLiveCommittedVersion;
+	// Get the centralized live committed version reported by proxies.
+	RequestStream< struct GetLiveCommittedVersionRequest > getLiveCommittedVersion;
 	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
@@ -63,6 +67,8 @@ struct MasterInterface {
 		streams.push_back(tlogRejoin.getReceiver(TaskPriority::MasterTLogRejoin));
 		streams.push_back(changeCoordinators.getReceiver());
 		streams.push_back(getCommitVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
+		streams.push_back(getLiveCommittedVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
+		streams.push_back(reportLiveCommittedVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
 		streams.push_back(notifyBackupWorkerDone.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
@@ -167,6 +173,45 @@ struct GetCommitVersionRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply);
+	}
+};
+
+struct GetLiveCommittedVersionReply {
+	constexpr static FileIdentifier file_identifier = 6298345;
+	Version version;
+
+	GetLiveCommittedVersionReply() : version(0) {}
+	explicit GetLiveCommittedVersionReply(Version version) : version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
+	}
+};
+
+struct GetLiveCommittedVersionRequest {
+	constexpr static FileIdentifier file_identifier = 3358313;
+	ReplyPromise<GetLiveCommittedVersionReply> reply;
+
+	GetLiveCommittedVersionRequest() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct ReportLiveCommittedVersionRequest {
+	constexpr static FileIdentifier file_identifier = 1853148;
+	Version version;
+	ReplyPromise<Void> reply;
+
+	ReportLiveCommittedVersionRequest() : version(0) {}
+	explicit ReportLiveCommittedVersionRequest(Version version) : version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, reply);
 	}
 };
 

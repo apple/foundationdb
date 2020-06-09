@@ -167,7 +167,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	AsyncTrigger registrationTrigger;
 	Version lastEpochEnd, // The last version in the old epoch not (to be) rolled back in this recovery
-		recoveryTransactionVersion;  // The first version in this epoch
+		recoveryTransactionVersion,  // The first version in this epoch
+		liveCommittedVersion;  // The most recent live committed version reported by proxies.
 	double lastCommitTime;
 
 	DatabaseConfiguration originalConfiguration;
@@ -247,6 +248,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  primaryLocality(tagLocalityInvalid),
 		  neverCreated(false),
 		  lastEpochEnd(invalidVersion),
+		  liveCommittedVersion(invalidVersion),
 		  recoveryTransactionVersion(invalidVersion),
 		  lastCommitTime(0),
 		  registrationCount(0),
@@ -993,6 +995,22 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	}
 }
 
+ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
+	loop {
+		choose {
+			when(GetLiveCommittedVersionRequest req = waitNext(self->myInterface.getLiveCommittedVersion.getFuture())) {
+				if (self->liveCommittedVersion == invalidVersion) {
+					self->liveCommittedVersion = self->recoveryTransactionVersion;
+				}
+				req.reply.send(GetLiveCommittedVersionReply(self->liveCommittedVersion));
+			}
+			when(ReportLiveCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
+				self->liveCommittedVersion = std::max<Version>(self->liveCommittedVersion, req.version);
+			}
+		}
+	}
+}
+
 std::pair<KeyRangeRef, bool> findRange( CoalescedKeyRangeMap<int>& key_resolver, Standalone<VectorRef<ResolverMoveRef>>& movedRanges, int src, int dest ) {
 	auto ranges = key_resolver.ranges();
 	auto prev = ranges.begin();
@@ -1536,6 +1554,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	self->addActor.send( waitResolverFailure( self->resolvers ) );
 	self->addActor.send( waitProxyFailure( self->proxies ) );
 	self->addActor.send( provideVersions(self) );
+	self->addActor.send( serveLiveCommittedVersion(self) );
 	self->addActor.send( reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid) );
 	self->registrationTrigger.trigger();
 
