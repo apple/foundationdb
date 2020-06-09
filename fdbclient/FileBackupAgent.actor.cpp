@@ -3581,31 +3581,35 @@ public:
 	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID) {
 		state ReadYourWritesTransaction tr(cx);
 		state Future<Void> watchForRestoreRequestDone;
+		state Optional<Value> restoreRequestDoneKeyValue;
 		state bool restoreDone = false;
 		TraceEvent("FastRestoreAgentWaitForRestoreToFinish").detail("DBLock", randomUID);
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				Optional<Value> restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
+				restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
 				// Restore may finish before restoreAgent waits on the restore finish event.
 				if (restoreRequestDoneKeyValue.present()) {
-					restoreDone = true; // In case commit clears the key but in unknown_state
-					tr.clear(restoreRequestDoneKey);
-					wait(tr.commit());
 					break;
-				} else if (!restoreDone) {
+				} else {
 					watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
 					wait(tr.commit());
 					wait(watchForRestoreRequestDone);
-				} else {
-					break;
 				}
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
 		}
+		TraceEvent("FastRestoreAgentRestoreFinished")
+		    .detail("ClearRestoreRequestDoneKey", restoreRequestDoneKeyValue.present());
+		// Only this agent can clear the restoreRequestDoneKey
+		wait(runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->clear(restoreRequestDoneKey);
+		}));
+
 		TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBStart", randomUID);
 		try {
 			wait(unlockDatabase(cx, randomUID));
