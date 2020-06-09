@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.2.23
+======
+
+Status
+------
+
+* Added ``cluster.active_primary_dc`` that indicates which datacenter is serving as the primary datacenter in multi-region setups. `(PR #3320) <https://github.com/apple/foundationdb/pull/3320>`_
+
 6.2.22
 ======
 
