@@ -290,9 +290,9 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 
 ACTOR Future<Void> queueTransactionStartRequests(
 	Reference<AsyncVar<ServerDBInfo>> db,
-	Deque<GetReadVersionRequest> *systemQueue,
-	Deque<GetReadVersionRequest> *defaultQueue,
-	Deque<GetReadVersionRequest> *batchQueue,
+	SpannedDeque<GetReadVersionRequest> *systemQueue,
+	SpannedDeque<GetReadVersionRequest> *defaultQueue,
+	SpannedDeque<GetReadVersionRequest> *batchQueue,
 	FutureStream<GetReadVersionRequest> readVersionRequests,
 	PromiseStream<Void> GRVTimer, double *lastGRVTime,
 	double *GRVBatchTime, FutureStream<double> replyTimes,
@@ -329,9 +329,11 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				if (req.priority >= TransactionPriority::IMMEDIATE) {
 					stats->txnSystemPriorityStartIn += req.transactionCount;
 					systemQueue->push_back(req);
+					systemQueue->span->parents.insert(req.spanID);
 				} else if (req.priority >= TransactionPriority::DEFAULT) {
 					stats->txnDefaultPriorityStartIn += req.transactionCount;
 					defaultQueue->push_back(req);
+					defaultQueue->span->parents.insert(req.spanID);
 				} else {
 					// Return error for batch_priority GRV requests
 					int64_t proxiesCount = std::max((int)db->get().client.proxies.size(), 1);
@@ -343,6 +345,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 
 					stats->txnBatchPriorityStartIn += req.transactionCount;
 					batchQueue->push_back(req);
+					batchQueue->span->parents.insert(req.spanID);
 				}
 			}
 		}
@@ -793,7 +796,7 @@ ACTOR Future<Void> commitBatch(
 	state Optional<UID> debugID;
 	state bool forceRecovery = false;
 	state int batchOperations = 0;
-	state Span span(deterministicRandom()->randomUniqueID(), "MP:commitBatch"_loc);
+	state Span span("MP:commitBatch"_loc);
 	int64_t batchBytes = 0;
 	for (int t = 0; t<trs.size(); t++) {
 		batchOperations += trs[t].transaction.mutations.size();

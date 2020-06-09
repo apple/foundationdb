@@ -2042,6 +2042,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
 	state Standalone<RangeResultRef> output;
+	state Span span("NAPI:getRange"_loc, info.span);
 
 	try {
 		state Version version = wait( fVersion );
@@ -2094,6 +2095,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 
 			req.tags = cx->sampleReadTags() ? tags : Optional<TagSet>();
 			req.debugID = info.debugID;
+			req.spanID = span->context;
 			try {
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.Before");
@@ -2900,6 +2902,8 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 ACTOR static Future<Void> commitDummyTransaction( Database cx, KeyRange range, TransactionInfo info, TransactionOptions options ) {
 	state Transaction tr(cx);
 	state int retries = 0;
+	state Span span("NAPI:dummyTransaction"_loc, info.span);
+	tr.info.span->parents.insert(span->context);
 	loop {
 		try {
 			TraceEvent("CommitDummyTransaction").detail("Key", range.begin).detail("Retries", retries);
@@ -3389,9 +3393,10 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 	}
 }
 
-ACTOR Future<GetReadVersionReply> getConsistentReadVersion(Span span, DatabaseContext* cx, uint32_t transactionCount,
+ACTOR Future<GetReadVersionReply> getConsistentReadVersion(Span parentSpan, DatabaseContext* cx, uint32_t transactionCount,
                                                            TransactionPriority priority, uint32_t flags,
                                                            TransactionTagMap<uint32_t> tags, Optional<UID> debugID) {
+	state Span span("NAPI:getConsistentReadVersion"_loc, parentSpan);
 	try {
 		++cx->transactionReadVersionBatches;
 		if( debugID.present() )
@@ -3448,7 +3453,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 	state PromiseStream<double> replyTimes;
 	state PromiseStream<Error> _errorStream;
 	state double batchTime = 0;
-	state Span span(deterministicRandom()->randomUniqueID(), "NAPI:readVersionBatcher"_loc);
+	state Span span("NAPI:readVersionBatcher"_loc);
 	loop {
 		send_batch = false;
 		choose {
@@ -3487,10 +3492,10 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 			addActor.send(ready(timeReply(GRVReply.getFuture(), replyTimes)));
 
 			Future<Void> batch = incrementalBroadcastWithError(
-			    getConsistentReadVersion(Span("NAPI:getConsistentReadVersion"_loc, { span->context }),
-			                             cx, count, priority, flags, std::move(tags), std::move(debugID)),
+			    getConsistentReadVersion(span, cx, count, priority, flags, std::move(tags), std::move(debugID)),
 			    std::move(requests), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 
+			span = Span("NAPI:readVersionBatcher"_loc);
 			tags.clear();
 			debugID = Optional<UID>();
 			requests.clear();
@@ -3500,7 +3505,11 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 	}
 }
 
-ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, TransactionPriority priority, Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f, bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion, TagSet tags) {
+ACTOR Future<Version> extractReadVersion(Span parentSpan, DatabaseContext* cx, TransactionPriority priority,
+                                         Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f,
+                                         bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion,
+                                         TagSet tags) {
+	// parentSpan here is only used to keep the parent alive until the request completes
 	GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
@@ -3622,10 +3631,12 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			batcher.actor = readVersionBatcher( cx.getPtr(), batcher.stream.getFuture(), options.priority, flags );
 		}
 
-		auto const req = DatabaseContext::VersionRequest(info.span->context, options.tags, info.debugID);
+		Span span("NAPI:getReadVersion"_loc, info.span);
+		auto const req = DatabaseContext::VersionRequest(span->context, options.tags, info.debugID);
 		batcher.stream.send(req);
 		startTime = now();
-		readVersion = extractReadVersion( cx.getPtr(), options.priority, trLogInfo, req.reply.getFuture(), options.lockAware, startTime, metadataVersion, options.tags);
+		readVersion = extractReadVersion(span, cx.getPtr(), options.priority, trLogInfo, req.reply.getFuture(),
+		                                 options.lockAware, startTime, metadataVersion, options.tags);
 	}
 	return readVersion;
 }
