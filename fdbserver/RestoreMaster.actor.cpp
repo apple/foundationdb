@@ -951,7 +951,7 @@ ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> se
 ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreMasterData> self, Database cx) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
-	wait(notifyRestoreCompleted(self, true));
+	wait(notifyRestoreCompleted(self, true)); // notify workers the restore has completed
 
 	wait(delay(5.0)); // Give some time for loaders and appliers to exit
 
