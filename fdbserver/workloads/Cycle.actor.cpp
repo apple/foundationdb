@@ -28,7 +28,6 @@
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 #include "flow/serialize.h"
-#include <_types/_uint64_t.h>
 #include <cstring>
 
 struct CycleWorkload : TestWorkload {
