@@ -2993,7 +2993,8 @@ public:
 
 	VersionedBTree(IPager2* pager, std::string name)
 	  : m_pager(pager), m_writeVersion(invalidVersion), m_lastCommittedVersion(invalidVersion), m_pBuffer(nullptr),
-	    m_name(name) {
+	    m_commitReadLock(SERVER_KNOBS->REDWOOD_COMMIT_CONCURRENT_READS), m_name(name) {
+
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);
 		m_latestCommit = m_init;
@@ -3440,6 +3441,7 @@ private:
 	Version m_writeVersion;
 	Version m_lastCommittedVersion;
 	Version m_newOldestVersion;
+	FlowLock m_commitReadLock;
 	Future<Void> m_latestCommit;
 	Future<Void> m_init;
 	std::string m_name;
@@ -4131,8 +4133,13 @@ private:
 		}
 
 		state Version writeVersion = self->getLastCommittedVersion() + 1;
+
+		wait(self->m_commitReadLock.take());
+		state FlowLock::Releaser readLock(self->m_commitReadLock);
 		state Reference<const IPage> page =
 		    wait(readPage(snapshot, rootID, update->decodeLowerBound, update->decodeUpperBound));
+		readLock.release();
+
 		state BTreePage* btPage = (BTreePage*)page->begin();
 		ASSERT(isLeaf == btPage->isLeaf());
 		g_redwoodMetrics.level(btPage->height).pageCommitStart += 1;
