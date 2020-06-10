@@ -102,6 +102,18 @@ if(GEM_EXECUTABLE)
   set(WITH_RUBY ON)
 endif()
 
+################################################################################
+# RocksDB
+################################################################################
+
+if (SSD_ROCKSDB_EXPERIMENTAL)
+  set(WITH_ROCKSDB_EXPERIMENTAL ON)
+else()
+  set(WITH_ROCKSDB_EXPERIMENTAL ON)
+endif()
+
+################################################################################
+
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)
 add_custom_target(packages)
 
@@ -117,6 +129,7 @@ function(print_components)
   message(STATUS "Build Documentation (make html):      ${WITH_DOCUMENTATION}")
   message(STATUS "Build Bindings (depends on Python):   ${WITH_PYTHON}")
   message(STATUS "Configure CTest (depends on Python):  ${WITH_PYTHON}")
+  message(STATUS "Build with RocksDB:                   ${WITH_ROCKSDB_EXPERIMENTAL}")
   message(STATUS "=========================================")
 endfunction()
 

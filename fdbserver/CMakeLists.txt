@@ -215,7 +215,7 @@ add_library(fdb_sqlite STATIC
   sqlite/sqliteLimit.h
   sqlite/sqlite3.amalgamation.c)
 
-if (SSD_ROCKSDB_EXPERIMENTAL)
+if (WITH_ROCKSDB_EXPERIMENTAL)
   add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)
   # Change this if you want to compile RocksDB with `-march=native`.
   set(PORTABLE_ROCKSDB 1)
@@ -233,7 +233,7 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 
-if (SSD_ROCKSDB_EXPERIMENTAL)
+if (WITH_ROCKSDB_EXPERIMENTAL)
   add_dependencies(fdbserver rocksdb)
   target_include_directories(fdbserver PRIVATE
     ${CMAKE_SOURCE_DIR}/bindings/c
