@@ -1024,7 +1024,7 @@ void StorageCacheData::addMutation(KeyRangeRef const& cachedKeyRange, Version ve
 	expanded = addMutationToMutationLog(mLog, expanded);
 
 	DEBUG_MUTATION("expandedMutation", version, expanded).detail("Begin", cachedKeyRange.begin).detail("End", cachedKeyRange.end);
-	applyMutation( this, expanded, mLog.arena(), mutableData() );
+	applyMutation( expanded, mLog.arena(), mutableData() );
 	//printf("\nSCUpdate: Printing versioned tree after applying mutation\n");
 	//mutableData().printTree(version);
 }
