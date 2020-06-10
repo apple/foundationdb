@@ -20,7 +20,6 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 
-#include <_types/_uint64_t.h>
 #include <iterator>
 #include <regex>
 #include <unordered_set>
