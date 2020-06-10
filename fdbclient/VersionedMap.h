@@ -612,9 +612,9 @@ public:
 	VersionedMap() : oldestVersion(0), latestVersion(0) {
 		roots.emplace_back(0, Tree());
 	}
-	VersionedMap( VersionedMap&& v ) BOOST_NOEXCEPT : oldestVersion(v.oldestVersion), latestVersion(v.latestVersion), roots(std::move(v.roots)) {
-	}
-	void operator = (VersionedMap && v) BOOST_NOEXCEPT {
+	VersionedMap(VersionedMap&& v) noexcept
+	  : oldestVersion(v.oldestVersion), latestVersion(v.latestVersion), roots(std::move(v.roots)) {}
+	void operator=(VersionedMap&& v) noexcept {
 		oldestVersion = v.oldestVersion;
 		latestVersion = v.latestVersion;
 		roots = std::move(v.roots);

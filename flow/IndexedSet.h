@@ -150,8 +150,13 @@ public:
 
 	IndexedSet() : root(nullptr){};
 	~IndexedSet() { delete root; }
-	IndexedSet(IndexedSet&& r) BOOST_NOEXCEPT : root(r.root) { r.root = nullptr; }
-	IndexedSet& operator=(IndexedSet&& r) BOOST_NOEXCEPT { delete root; root = r.root; r.root = 0; return *this; }
+	IndexedSet(IndexedSet&& r) noexcept : root(r.root) { r.root = nullptr; }
+	IndexedSet& operator=(IndexedSet&& r) noexcept {
+		delete root;
+		root = r.root;
+		r.root = 0;
+		return *this;
+	}
 
 	const_iterator begin() const { return ConstImpl::begin(*this); };
 	iterator begin() { return NonConstImpl::begin(*this); };
@@ -359,8 +364,11 @@ public:
 	void operator= ( MapPair const& rhs ) { key = rhs.key; value = rhs.value; }
 	MapPair( MapPair const& rhs ) : key(rhs.key), value(rhs.value) {}
 
-	MapPair(MapPair&& r) BOOST_NOEXCEPT  : key(std::move(r.key)), value(std::move(r.value)) {}
-	void operator=(MapPair&& r) BOOST_NOEXCEPT { key = std::move(r.key); value = std::move(r.value); }
+	MapPair(MapPair&& r) noexcept : key(std::move(r.key)), value(std::move(r.value)) {}
+	void operator=(MapPair&& r) noexcept {
+		key = std::move(r.key);
+		value = std::move(r.value);
+	}
 
 	int compare(MapPair<Key, Value> const& r) const { return ::compare(key, r.key); }
 	template <class CompatibleWithKey>
@@ -490,8 +498,8 @@ public:
 
 	static int getElementBytes() { return IndexedSet< Pair, Metric >::getElementBytes(); }
 
-	Map(Map&& r) BOOST_NOEXCEPT : set(std::move(r.set)) {}
-	void operator=(Map&& r) BOOST_NOEXCEPT { set = std::move(r.set); }
+	Map(Map&& r) noexcept : set(std::move(r.set)) {}
+	void operator=(Map&& r) noexcept { set = std::move(r.set); }
 
 private:
 	Map( Map<Key,Value,Pair> const& ); // unimplemented

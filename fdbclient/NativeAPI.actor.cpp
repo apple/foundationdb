@@ -2479,7 +2479,7 @@ Transaction::~Transaction() {
 	cancelWatches();
 }
 
-void Transaction::operator=(Transaction&& r) BOOST_NOEXCEPT {
+void Transaction::operator=(Transaction&& r) noexcept {
 	flushTrLogsIfEnabled();
 	cx = std::move(r.cx);
 	tr = std::move(r.tr);
