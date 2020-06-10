@@ -2711,7 +2711,7 @@ TransactionOptions::TransactionOptions(Database const& cx) {
 }
 
 TransactionOptions::TransactionOptions() {
-	memset(this, 0, sizeof(*this));
+	memset(static_cast<void*>(this), 0, sizeof(*this));
 	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
 	sizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 	tags = TagSet();
@@ -2720,7 +2720,7 @@ TransactionOptions::TransactionOptions() {
 }
 
 void TransactionOptions::reset(Database const& cx) {
-	memset(this, 0, sizeof(*this));
+	memset(static_cast<void*>(this), 0, sizeof(*this));
 	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
 	sizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 	tags = TagSet();
