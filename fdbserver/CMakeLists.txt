@@ -217,7 +217,7 @@ add_library(fdb_sqlite STATIC
 
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)
-  # Change this if you want to compile RocksDB with `-march=native`.
+  # Set this to 0 if you want to compile RocksDB with `-march=native`.
   set(PORTABLE_ROCKSDB 1)
 
   include(CompileRocksDB)
