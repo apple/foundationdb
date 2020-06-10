@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.3.1
+6.3.2
 =====
 
 Features
@@ -97,6 +97,11 @@ Other Changes
 * The ``\xff\xff/worker_interfaces/`` keyspace now begins at a key which includes a trailing ``/`` (previously ``\xff\xff/worker_interfaces``). Range reads to this range now respect the end key passed into the range and include the keyspace prefix in the resulting keys. `(PR #3095) <https://github.com/apple/foundationdb/pull/3095>`_
 * Added FreeBSD support. `(PR #2634) <https://github.com/apple/foundationdb/pull/2634>`_
 * Updated boost to 1.72.  `(PR #2684) <https://github.com/apple/foundationdb/pull/2684>`_
+
+Features impacting only 6.3.0+
+------------------------------
+
+* Renamed ``MIN_DELAY_STORAGE_CANDIDACY_SECONDS`` knob to ``MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS``. [6.3.2] `(PR #) <https://github.com/apple/foundationdb/pull/>`_
 
 Earlier release notes
 ---------------------
