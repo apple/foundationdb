@@ -53,8 +53,12 @@ struct ProxyVersionReplies {
 	std::map<uint64_t, GetCommitVersionReply> replies;
 	NotifiedVersion latestRequestNum;
 
-	ProxyVersionReplies(ProxyVersionReplies&& r) BOOST_NOEXCEPT  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
-	void operator=(ProxyVersionReplies&& r) BOOST_NOEXCEPT { replies = std::move(r.replies); latestRequestNum = std::move(r.latestRequestNum); }
+	ProxyVersionReplies(ProxyVersionReplies&& r) noexcept
+	  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
+	void operator=(ProxyVersionReplies&& r) noexcept {
+		replies = std::move(r.replies);
+		latestRequestNum = std::move(r.latestRequestNum);
+	}
 
 	ProxyVersionReplies() : latestRequestNum(0) {}
 };

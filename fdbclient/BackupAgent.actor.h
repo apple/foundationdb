@@ -247,14 +247,11 @@ class FileBackupAgent : public BackupAgentBase {
 public:
 	FileBackupAgent();
 
-	FileBackupAgent( FileBackupAgent&& r ) BOOST_NOEXCEPT :
-		subspace( std::move(r.subspace) ),
-		config( std::move(r.config) ),
-		lastRestorable( std::move(r.lastRestorable) ),
-		taskBucket( std::move(r.taskBucket) ),
-		futureBucket( std::move(r.futureBucket) ) {}
+	FileBackupAgent(FileBackupAgent&& r) noexcept
+	  : subspace(std::move(r.subspace)), config(std::move(r.config)), lastRestorable(std::move(r.lastRestorable)),
+	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)) {}
 
-	void operator=( FileBackupAgent&& r ) BOOST_NOEXCEPT {
+	void operator=(FileBackupAgent&& r) noexcept {
 		subspace = std::move(r.subspace);
 		config = std::move(r.config);
 		lastRestorable = std::move(r.lastRestorable),
@@ -381,19 +378,13 @@ public:
 	DatabaseBackupAgent();
 	explicit DatabaseBackupAgent(Database src);
 
-	DatabaseBackupAgent( DatabaseBackupAgent&& r ) BOOST_NOEXCEPT :
-		subspace( std::move(r.subspace) ),
-		states( std::move(r.states) ),
-		config( std::move(r.config) ),
-		errors( std::move(r.errors) ),
-		ranges( std::move(r.ranges) ),
-		tagNames( std::move(r.tagNames) ),
-		taskBucket( std::move(r.taskBucket) ),
-		futureBucket( std::move(r.futureBucket) ),
-		sourceStates( std::move(r.sourceStates) ),
-		sourceTagNames( std::move(r.sourceTagNames) ) {}
+	DatabaseBackupAgent(DatabaseBackupAgent&& r) noexcept
+	  : subspace(std::move(r.subspace)), states(std::move(r.states)), config(std::move(r.config)),
+	    errors(std::move(r.errors)), ranges(std::move(r.ranges)), tagNames(std::move(r.tagNames)),
+	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)),
+	    sourceStates(std::move(r.sourceStates)), sourceTagNames(std::move(r.sourceTagNames)) {}
 
-	void operator=( DatabaseBackupAgent&& r ) BOOST_NOEXCEPT {
+	void operator=(DatabaseBackupAgent&& r) noexcept {
 		subspace = std::move(r.subspace);
 		states = std::move(r.states);
 		config = std::move(r.config);
