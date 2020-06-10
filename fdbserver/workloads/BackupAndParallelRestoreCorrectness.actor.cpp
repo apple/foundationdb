@@ -475,6 +475,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				state std::vector<Standalone<StringRef>> restoreTags;
 
 				// Submit parallel restore requests
+				// TODO: Add addPrefix and removePrefix feature
 				TraceEvent("FastRestore").detail("PrepareRestores", self->backupRanges.size());
 				wait(backupAgent.submitParallelRestore(cx, self->backupTag, self->backupRanges,
 				                                       KeyRef(lastBackupContainer->getURL()), targetVersion,
@@ -514,10 +515,12 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				for (auto& restore : restores) {
 					ASSERT(!restore.isError());
 				}
+
+				// TODO: If addPrefix and removePrefix set, we want to transform the effect by copying data
 			}
 
 			// Q: What is the extra backup and why do we need to care about it?
-			if (extraBackup.isValid()) {
+			if (extraBackup.isValid()) { // SOMEDAY: Handle this case
 				TraceEvent("BARW_WaitExtraBackup", randomID).detail("BackupTag", printable(self->backupTag));
 				extraTasks = true;
 				try {

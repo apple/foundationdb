@@ -3578,7 +3578,7 @@ public:
 	static const int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
 
 	// Parallel restore
-	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID) {
+	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB = true) {
 		state ReadYourWritesTransaction tr(cx);
 		state Future<Void> watchForRestoreRequestDone;
 		state bool restoreDone = false;
@@ -3607,11 +3607,19 @@ public:
 				wait(tr.onError(e));
 			}
 		}
-		TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBStart", randomUID);
+
 		try {
-			wait(unlockDatabase(cx, randomUID));
+			// TODO: We do not unlock db when we test addPrefix and removePrefix feature;
+			if (unlockDB) {
+				TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBStart", randomUID);
+				wait(unlockDatabase(cx, randomUID));
+			} else {
+				TraceEvent("FastRestoreAgentRestoreFinished").detail("DBLeftLockedAfterRestore", randomUID);
+			}
 		} catch (Error& e) {
+			// TODO: Does this error ever happen?
 			if (e.code() == error_code_operation_cancelled) { // Should only happen in simulation
+				ASSERT(false);
 				TraceEvent(SevWarnAlways, "FastRestoreAgentOnCancelingActor")
 				    .detail("DBLock", randomUID)
 				    .detail("ManualCheck", "Is DB locked");
@@ -3620,7 +3628,7 @@ public:
 				    .detail("DBLock", randomUID)
 				    .detail("ErrorCode", e.code())
 				    .detail("Error", e.what());
-				ASSERT_WE_THINK(false); // This unlockDatabase should always succeed, we think.
+				throw;
 			}
 		}
 		TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBFinish", randomUID);
