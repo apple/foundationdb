@@ -98,10 +98,10 @@ Other Changes
 * Added FreeBSD support. `(PR #2634) <https://github.com/apple/foundationdb/pull/2634>`_
 * Updated boost to 1.72.  `(PR #2684) <https://github.com/apple/foundationdb/pull/2684>`_
 
-Features impacting only 6.3.0+
-------------------------------
+Fixes only impacting 6.3.0+
+---------------------------
 
-* Renamed ``MIN_DELAY_STORAGE_CANDIDACY_SECONDS`` knob to ``MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS``. [6.3.2] `(PR #) <https://github.com/apple/foundationdb/pull/>`_
+* Renamed ``MIN_DELAY_STORAGE_CANDIDACY_SECONDS`` knob to ``MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS``. [6.3.2] `(PR #3327) <https://github.com/apple/foundationdb/pull/3327>`_
 
 Earlier release notes
 ---------------------
