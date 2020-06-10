@@ -538,7 +538,8 @@ namespace PTreeImpl {
 			return;
 		}
 		if (p->updated && p->lastUpdateVersion <= newOldestVersion) {
-			/* If the node has been updated, figure out which pointer was repalced. And delete that pointer */
+		/* If the node has been updated, figure out which pointer was replaced. And replace that pointer with the updated pointer.
+		   Then we can get rid of the updated child pointer and then make room in the node for future updates */
 			auto which = p->replacedPointer;
 			p->pointer[which] = p->pointer[2];
 			p->updated = false;

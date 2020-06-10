@@ -1119,8 +1119,7 @@ public:
 			}
 
 			bool retry_limit_hit = ryw->options.maxRetries != -1 && ryw->retries >= ryw->options.maxRetries;
-			if (ryw->retries < std::numeric_limits<int>::max()) 
-				ryw->retries++;
+			if (ryw->retries < std::numeric_limits<int>::max()) ryw->retries++;
 			if(retry_limit_hit) {
 				throw e;
 			}
@@ -1130,7 +1129,7 @@ public:
 			ryw->debugLogRetries(e);
 
 			ryw->resetRyow();
-			return Void(); 
+			return Void();
 		} catch( Error &e ) {
 			if ( !ryw->resetPromise.isSet() ) {
 				if(ryw->tr.apiVersionAtLeast(610)) {

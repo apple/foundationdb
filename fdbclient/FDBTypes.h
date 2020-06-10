@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "flow/Arena.h"
 #include "flow/flow.h"
 #include "fdbclient/Knobs.h"
 
@@ -78,6 +79,10 @@ struct Tag {
 		serializer(ar, locality, id);
 	}
 };
+
+template <>
+struct flow_ref<Tag> : std::integral_constant<bool, false> {};
+
 #pragma pack(pop)
 
 template <class Ar> void load( Ar& ar, Tag& tag ) { tag.serialize_unversioned(ar); }

@@ -123,7 +123,8 @@ struct StagingKey {
 		    .detail("Value", val)
 		    .detail("MType", type < MutationRef::MAX_ATOMIC_OP ? getTypeString(type) : "[Unset]")
 		    .detail("LargestPendingVersion",
-		            (pendingMutations.empty() ? "[none]" : pendingMutations.rbegin()->first.toString()));
+		            (pendingMutations.empty() ? "[none]" : pendingMutations.rbegin()->first.toString()))
+		    .detail("PendingMutations", pendingMutations.size());
 		std::map<LogMessageVersion, Standalone<MutationRef>>::iterator lb = pendingMutations.lower_bound(version);
 		if (lb == pendingMutations.end()) {
 			return;

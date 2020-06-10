@@ -72,9 +72,9 @@ struct StorageServerInterface {
 	RequestStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType;
 	RequestStream<struct WatchValueRequest> watchValue;
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
-
-	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
-	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
+	bool isCacheServer;
+	explicit StorageServerInterface(UID uid) : uniqueID( uid ), isCacheServer(false) {}
+	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ), isCacheServer(false) {}
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
 	NetworkAddress stableAddress() const { return getValue.getEndpoint().getStableAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return getValue.getEndpoint().addresses.secondaryAddress; }
@@ -86,7 +86,7 @@ struct StorageServerInterface {
 		//To change this serialization, ProtocolVersion::ServerListValue must be updated, and downgrades need to be considered
 
 		if (ar.protocolVersion().hasSmallEndpoints()) {
-			serializer(ar, uniqueID, locality, getValue);
+			serializer(ar, uniqueID, locality, getValue, isCacheServer);
 			if( Ar::isDeserializing ) {
 				getKey = RequestStream<struct GetKeyRequest>( getValue.getEndpoint().getAdjustedEndpoint(1) );
 				getKeyValues = RequestStream<struct GetKeyValuesRequest>( getValue.getEndpoint().getAdjustedEndpoint(2) );
@@ -108,6 +108,7 @@ struct StorageServerInterface {
 			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 					splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
+			if (ar.protocolVersion().hasCacheRole()) serializer(ar, isCacheServer);
 		}
 	}
 	bool operator == (StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
@@ -157,13 +158,14 @@ struct ServerCacheInfo {
 struct GetValueReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1378929;
 	Optional<Value> value;
+	bool cached;
 
-	GetValueReply() {}
-	GetValueReply(Optional<Value> value) : value(value) {}
+	GetValueReply() : cached(false) {}
+	GetValueReply(Optional<Value> value, bool cached) : value(value), cached(cached) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, value);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, value, cached);
 	}
 };
 
@@ -190,12 +192,13 @@ struct WatchValueReply {
 	constexpr static FileIdentifier file_identifier = 3;
 
 	Version version;
+	bool cached = false;
 	WatchValueReply() = default;
 	explicit WatchValueReply(Version version) : version(version) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version);
+		serializer(ar, version, cached);
 	}
 };
 
@@ -226,13 +229,13 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 	VectorRef<KeyValueRef, VecSerStrategy::String> data;
 	Version version; // useful when latestVersion was requested
 	bool more;
-	bool cached;
+	bool cached = false;
 
 	GetKeyValuesReply() : version(invalidVersion), more(false), cached(false) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, arena);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, cached, arena);
 	}
 };
 
@@ -258,13 +261,14 @@ struct GetKeyValuesRequest : TimedRequest {
 struct GetKeyReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 11226513;
 	KeySelector sel;
+	bool cached;
 
-	GetKeyReply() {}
-	GetKeyReply(KeySelector sel) : sel(sel) {}
+	GetKeyReply() : cached(false) {}
+	GetKeyReply(KeySelector sel, bool cached) : sel(sel), cached(cached) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, sel);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, sel, cached);
 	}
 };
 

@@ -21,6 +21,8 @@
 #include <tuple>
 #include <boost/lexical_cast.hpp>
 
+#include "fdbrpc/Locality.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
@@ -212,7 +214,8 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 
 			endRole(err.role, err.id, "Error", ok, err.error);
 
-			if (err.error.code() == error_code_please_reboot || err.error.code() == error_code_io_timeout) throw err.error;
+
+			if (err.error.code() == error_code_please_reboot || err.error.code() == error_code_io_timeout || (err.role == Role::SHARED_TRANSACTION_LOG && err.error.code() == error_code_io_error )) throw err.error;
 		}
 	}
 }
@@ -452,7 +455,7 @@ ACTOR Future<Void> registrationClient(
 	state Future<Void> cacheErrorsFuture;
 	state Optional<double> incorrectTime;
 	loop {
-		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), scInterf->get(), degraded->get());
+		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), degraded->get());
 		for (auto const& i : issues->get()) {
 			request.issues.push_back_deep(request.issues.arena(), i);
 		}
@@ -490,41 +493,10 @@ ACTOR Future<Void> registrationClient(
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
 				processClass = reply.processClass;
 				asyncPriorityInfo->set( reply.priorityInfo );
-
-				if(!reply.storageCache.present()) {
-					cacheProcessFuture.cancel();
-					scInterf->set(Optional<std::pair<uint16_t,StorageServerInterface>>());
-				} else if (!scInterf->get().present() || scInterf->get().get().first != reply.storageCache.get()) {
-					StorageServerInterface recruited;
-					recruited.locality = locality;
-					recruited.initEndpoints();
-
-					std::map<std::string, std::string> details;
-					startRole( Role::STORAGE_CACHE, recruited.id(), interf.id(), details );
-
-					//DUMPTOKEN(recruited.getVersion);
-					DUMPTOKEN(recruited.getValue);
-					DUMPTOKEN(recruited.getKey);
-					DUMPTOKEN(recruited.getKeyValues);
-					DUMPTOKEN(recruited.getShardState);
-					DUMPTOKEN(recruited.waitMetrics);
-					DUMPTOKEN(recruited.splitMetrics);
-					DUMPTOKEN(recruited.getReadHotRanges);
-					DUMPTOKEN(recruited.getStorageMetrics);
-					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.getQueuingMetrics);
-					DUMPTOKEN(recruited.getKeyValueStoreType);
-					DUMPTOKEN(recruited.watchValue);
-
-					cacheProcessFuture = storageCache( recruited, reply.storageCache.get(), dbInfo );
-					cacheErrorsFuture = forwardError(errors, Role::STORAGE_CACHE, recruited.id(), setWhenDoneOrError(cacheProcessFuture, scInterf, Optional<std::pair<uint16_t,StorageServerInterface>>()));
-					scInterf->set(std::make_pair(reply.storageCache.get(), recruited));
-				}
 			}
 			when ( wait( ccInterface->onChange() )) {}
 			when ( wait( ddInterf->onChange() ) ) {}
 			when ( wait( rkInterf->onChange() ) ) {}
-			when ( wait( scInterf->onChange() ) ) {}
 			when ( wait( degraded->onChange() ) ) {}
 			when ( wait( FlowTransport::transport().onIncompatibleChanged() ) ) {}
 			when ( wait( issues->onChange() ) ) {}
@@ -708,6 +680,41 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 
 		prevStorageServer = storageServer( store, recruited, db, folder, Promise<Void>(), Reference<ClusterConnectionFile> (nullptr) );
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
+	}
+}
+
+ACTOR Future<Void> storageCacheRollbackRebooter( Future<Void> prevStorageCache, UID id, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> db) {
+	loop {
+		ErrorOr<Void> e = wait( errorOr( prevStorageCache) );
+		if (!e.isError()) {
+			TraceEvent("StorageCacheRequestedReboot1", id);
+			return Void();
+		}
+		else if (e.getError().code() != error_code_please_reboot && e.getError().code() != error_code_worker_removed) {
+			TraceEvent("StorageCacheRequestedReboot2", id).detail("Code",e.getError().code());
+			throw e.getError();
+		}
+
+		TraceEvent("StorageCacheRequestedReboot", id);
+
+		StorageServerInterface recruited;
+		recruited.uniqueID = deterministicRandom()->randomUniqueID();// id;
+		recruited.locality = locality;
+		recruited.initEndpoints();
+
+		DUMPTOKEN(recruited.getValue);
+		DUMPTOKEN(recruited.getKey);
+		DUMPTOKEN(recruited.getKeyValues);
+		DUMPTOKEN(recruited.getShardState);
+		DUMPTOKEN(recruited.waitMetrics);
+		DUMPTOKEN(recruited.splitMetrics);
+		DUMPTOKEN(recruited.getStorageMetrics);
+		DUMPTOKEN(recruited.waitFailure);
+		DUMPTOKEN(recruited.getQueuingMetrics);
+		DUMPTOKEN(recruited.getKeyValueStoreType);
+		DUMPTOKEN(recruited.watchValue);
+
+		prevStorageCache = storageCacheServer(recruited, 0, db);
 	}
 }
 
@@ -1048,10 +1055,40 @@ ACTOR Future<Void> workerServer(
 			}
 		}
 
+		bool hasCache = false;
+		//  start cache role if we have the right process class
+		if (initialClass.classType() == ProcessClass::StorageCacheClass) {
+			hasCache = true;
+			StorageServerInterface recruited;
+			recruited.locality = locality;
+			recruited.initEndpoints();
+
+			std::map<std::string, std::string> details;
+			startRole(Role::STORAGE_CACHE, recruited.id(), interf.id(), details);
+
+			// DUMPTOKEN(recruited.getVersion);
+			DUMPTOKEN(recruited.getValue);
+			DUMPTOKEN(recruited.getKey);
+			DUMPTOKEN(recruited.getKeyValues);
+			DUMPTOKEN(recruited.getShardState);
+			DUMPTOKEN(recruited.waitMetrics);
+			DUMPTOKEN(recruited.splitMetrics);
+			DUMPTOKEN(recruited.getStorageMetrics);
+			DUMPTOKEN(recruited.waitFailure);
+			DUMPTOKEN(recruited.getQueuingMetrics);
+			DUMPTOKEN(recruited.getKeyValueStoreType);
+			DUMPTOKEN(recruited.watchValue);
+
+			auto f = storageCacheServer(recruited, 0, dbInfo);
+			f = storageCacheRollbackRebooter( f, recruited.id(), recruited.locality, dbInfo);
+			errorForwarders.add(forwardError(errors, Role::STORAGE_CACHE, recruited.id(), f));
+		}
+
 		std::map<std::string, std::string> details;
 		details["Locality"] = locality.toString();
 		details["DataFolder"] = folder;
 		details["StoresPresent"] = format("%d", stores.size());
+		details["CachePresent"] = hasCache ? "true" : "false";
 		startRole( Role::WORKER, interf.id(), interf.id(), details );
 		errorForwarders.add(traceRole(Role::WORKER, interf.id()));
 
@@ -1346,7 +1383,7 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN( recruited.getQueuingMetrics );
 				DUMPTOKEN( recruited.confirmRunning );
 
-				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(), 
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(),
 						logRouter( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
@@ -1725,7 +1762,7 @@ ACTOR Future<Void> fdbd(
 		Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo()) );
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
-		if (processClass == ProcessClass::TesterClass) {
+		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {
 			actors.push_back( reportErrors( monitorLeader( connFile, cc ), "ClusterController" ) );
 		} else if (processClass == ProcessClass::StorageClass && SERVER_KNOBS->MAX_DELAY_STORAGE_CANDIDACY_SECONDS > 0) {
 			actors.push_back( reportErrors( monitorLeaderRemotelyWithDelayedCandidacy( connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, dbInfo ), "ClusterController" ) );

@@ -713,6 +713,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			state vector<UID> storageServers = (isRelocating) ? destStorageServers : sourceStorageServers;
 			state vector<StorageServerInterface> storageServerInterfaces;
 
+			//TraceEvent("ConsistencyCheck_GetStorageInfo").detail("StorageServers", storageServers.size());
 			loop {
 				try {
 					vector< Future< Optional<Value> > > serverListEntries;
@@ -725,6 +726,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 						else if (self->performQuiescentChecks)
 							self->testFailure("/FF/serverList changing in a quiescent database");
 					}
+
 					break;
 				}
 				catch(Error &e) {
@@ -922,7 +924,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 							else if(!isRelocating)
 							{
 								TraceEvent("ConsistencyCheck_StorageServerUnavailable").suppressFor(1.0).detail("StorageServer", storageServers[j]).detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end))
-									.detail("Address", storageServerInterfaces[j].address()).detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token);
+									.detail("Address", storageServerInterfaces[j].address()).detail("UID", storageServerInterfaces[j].id()).detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token);
 
 								//All shards should be available in quiscence
 								if(self->performQuiescentChecks)

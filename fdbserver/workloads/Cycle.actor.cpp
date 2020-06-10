@@ -128,9 +128,9 @@ struct CycleWorkload : TestWorkload {
 						tr.set( self->key(r), self->value(r3) );
 						tr.set( self->key(r2), self->value(r4) );
 						tr.set( self->key(r3), self->value(r2) );
-						// TraceEvent("CyclicTestMX").detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
-						// TraceEvent("CyclicTestMX").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
-						// TraceEvent("CyclicTestMX").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
+						//TraceEvent("CyclicTestMX1").detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
+						//TraceEvent("CyclicTestMX2").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
+						//TraceEvent("CyclicTestMX3").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
 						wait( tr.commit() );
 						// TraceEvent("CycleCommit");
@@ -174,7 +174,10 @@ struct CycleWorkload : TestWorkload {
 			return false;
 		}
 		int i=0;
-		for(int c=0; c<nodeCount; c++) {
+		int iPrev=0;
+		double d;
+		int c;
+		for(c=0; c<nodeCount; c++) {
 			if (c && !i) {
 				TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got shorter").detail("Before", nodeCount).detail("After", c).detail("KeyPrefix", keyPrefix.printable());
 				logTestData(data);
@@ -185,7 +188,8 @@ struct CycleWorkload : TestWorkload {
 				logTestData(data);
 				return false;
 			}
-			double d = testKeyToDouble(data[i].value, keyPrefix);
+			d = testKeyToDouble(data[i].value, keyPrefix);
+			iPrev = i;
 			i = (int)d;
 			if ( i != d || i<0 || i>=nodeCount) {
 				TraceEvent(SevError, "TestFailure").detail("Reason", "Invalid value").detail("KeyPrefix", keyPrefix.printable());
@@ -194,7 +198,8 @@ struct CycleWorkload : TestWorkload {
 			}
 		}
 		if (i != 0) {
-			TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got longer").detail("KeyPrefix", keyPrefix.printable());
+			TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got longer").detail("KeyPrefix", keyPrefix.printable()).detail("Key", key(i)).detail("Value", data[i].value).
+				detail("Iteration", c).detail("Nodecount", nodeCount).detail("Int", i).detail("Double", d).detail("ValuePrev", data[iPrev].value).detail("KeyPrev", data[iPrev].key);
 			logTestData(data);
 			return false;
 		}
