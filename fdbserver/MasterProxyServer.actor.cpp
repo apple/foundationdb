@@ -1283,7 +1283,7 @@ ACTOR Future<Void> commitBatch(
 		self->committedVersion.set(commitVersion);
 
 		// Let master know this bigger commit version so that every other proxy can know.
-		wait(self->master.reportLiveCommittedVersion.getReply(ReportLiveCommittedVersionRequest(commitVersion)));
+		wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
 	}
 
 	if (forceRecovery) {
@@ -1405,9 +1405,16 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	}
 
 	state GetReadVersionReply rep;
+	rep.locked = commitData->locked;
+	rep.metadataVersion = commitData->metadataVersion;
+	rep.recentRequests = commitData->stats.getRecentRequests();
+	rep.version = commitData->committedVersion.get();
+
 	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
-		state GetLiveCommittedVersionReply liveCommittedVersionReply = wait(commitData->master.getLiveCommittedVersion.getReply(GetLiveCommittedVersionRequest()));
-		rep.version = std::max<Version>(liveCommittedVersionReply.version, commitData->committedVersion.get());
+		GetReadVersionReply liveCommittedVersionReply = wait(commitData->master.getLiveCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID)));
+		if (liveCommittedVersionReply.version > rep.version) {
+			rep = liveCommittedVersionReply;
+		}
 	} else {
 		state vector<Future<GetReadVersionReply>> proxyVersions;
 		for (auto const& p : *otherProxies)
@@ -1419,9 +1426,6 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 			}
 		}
 	}
-	rep.locked = commitData->locked;
-	rep.metadataVersion = commitData->metadataVersion;
-	rep.recentRequests = commitData->stats.getRecentRequests();
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.getLiveCommittedVersion.After");

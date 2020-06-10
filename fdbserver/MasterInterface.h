@@ -38,9 +38,9 @@ struct MasterInterface {
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
 	RequestStream< struct GetCommitVersionRequest > getCommitVersion;
 	// Get the centralized live committed version reported by proxies.
-	RequestStream< struct GetLiveCommittedVersionRequest > getLiveCommittedVersion;
+	RequestStream< struct GetRawCommittedVersionRequest > getLiveCommittedVersion;
 	// Report a proxy's committed version.
-	RequestStream< struct ReportLiveCommittedVersionRequest > reportLiveCommittedVersion;
+	RequestStream< struct ReportRawCommittedVersionRequest> reportLiveCommittedVersion;
 	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
@@ -57,8 +57,8 @@ struct MasterInterface {
 			tlogRejoin = RequestStream< struct TLogRejoinRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(1) );
 			changeCoordinators = RequestStream< struct ChangeCoordinatorsRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(2) );
 			getCommitVersion = RequestStream< struct GetCommitVersionRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(3) );
-			getLiveCommittedVersion = RequestStream< struct GetLiveCommittedVersionRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(4) );
-			reportLiveCommittedVersion = RequestStream< struct ReportLiveCommittedVersionRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(5) );
+			getLiveCommittedVersion = RequestStream< struct GetRawCommittedVersionRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(4) );
+			reportLiveCommittedVersion = RequestStream< struct ReportRawCommittedVersionRequest>( waitFailure.getEndpoint().getAdjustedEndpoint(5) );
 			notifyBackupWorkerDone = RequestStream<struct BackupWorkerDoneRequest>( waitFailure.getEndpoint().getAdjustedEndpoint(6) );
 		}
 	}
@@ -70,7 +70,7 @@ struct MasterInterface {
 		streams.push_back(changeCoordinators.getReceiver());
 		streams.push_back(getCommitVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
 		streams.push_back(getLiveCommittedVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
-		streams.push_back(reportLiveCommittedVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
+		streams.push_back(reportLiveCommittedVersion.getReceiver(TaskPriority::ProxyCommit));
 		streams.push_back(notifyBackupWorkerDone.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
@@ -178,42 +178,20 @@ struct GetCommitVersionRequest {
 	}
 };
 
-struct GetLiveCommittedVersionReply {
-	constexpr static FileIdentifier file_identifier = 6298345;
-	Version version;
-
-	GetLiveCommittedVersionReply() : version(0) {}
-	explicit GetLiveCommittedVersionReply(Version version) : version(version) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, version);
-	}
-};
-
-struct GetLiveCommittedVersionRequest {
-	constexpr static FileIdentifier file_identifier = 3358313;
-	ReplyPromise<GetLiveCommittedVersionReply> reply;
-
-	GetLiveCommittedVersionRequest() = default;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
-	}
-};
-
-struct ReportLiveCommittedVersionRequest {
+struct ReportRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 1853148;
 	Version version;
+	bool locked;
+	Optional<Value> metadataVersion;
+
 	ReplyPromise<Void> reply;
 
-	ReportLiveCommittedVersionRequest() : version(0) {}
-	explicit ReportLiveCommittedVersionRequest(Version version) : version(version) {}
+	ReportRawCommittedVersionRequest() : version(invalidVersion), locked(false) {}
+	ReportRawCommittedVersionRequest(Version version, bool locked, Optional<Value> metadataVersion) : version(version), locked(locked), metadataVersion(metadataVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, reply);
+		serializer(ar, version, locked, metadataVersion, reply);
 	}
 };
 

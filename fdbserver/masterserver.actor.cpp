@@ -167,9 +167,12 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	AsyncTrigger registrationTrigger;
 	Version lastEpochEnd, // The last version in the old epoch not (to be) rolled back in this recovery
-		recoveryTransactionVersion,  // The first version in this epoch
-		liveCommittedVersion;  // The most recent live committed version reported by proxies.
+		recoveryTransactionVersion;  // The first version in this epoch
 	double lastCommitTime;
+
+	Version liveCommittedVersion; // The live committed version reported by proxies.
+	bool proxyLocked;
+	Optional<Value> proxyMetadataVersion;
 
 	DatabaseConfiguration originalConfiguration;
 	DatabaseConfiguration configuration;
@@ -249,6 +252,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  neverCreated(false),
 		  lastEpochEnd(invalidVersion),
 		  liveCommittedVersion(invalidVersion),
+	      proxyLocked(false),
 		  recoveryTransactionVersion(invalidVersion),
 		  lastCommitTime(0),
 		  registrationCount(0),
@@ -998,14 +1002,25 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	loop {
 		choose {
-			when(GetLiveCommittedVersionRequest req = waitNext(self->myInterface.getLiveCommittedVersion.getFuture())) {
+			when(GetRawCommittedVersionRequest req = waitNext(self->myInterface.getLiveCommittedVersion.getFuture())) {
+				if (req.debugID.present())
+					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
+
 				if (self->liveCommittedVersion == invalidVersion) {
 					self->liveCommittedVersion = self->recoveryTransactionVersion;
 				}
-				req.reply.send(GetLiveCommittedVersionReply(self->liveCommittedVersion));
+				state GetReadVersionReply reply;
+				reply.version = self->liveCommittedVersion;
+				reply.locked = self->proxyLocked;
+				reply.metadataVersion = self->proxyMetadataVersion;
+				req.reply.send(reply);
 			}
-			when(ReportLiveCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-				self->liveCommittedVersion = std::max<Version>(self->liveCommittedVersion, req.version);
+			when(ReportRawCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
+				if (req.version > self->liveCommittedVersion) {
+					self->liveCommittedVersion = req.version;
+					self->proxyLocked = req.locked;
+					self->proxyMetadataVersion = req.metadataVersion;
+				}
 				req.reply.send(Void());
 			}
 		}
