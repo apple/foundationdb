@@ -20,6 +20,9 @@
 
 #ifndef FDBSERVER_RESOLVERINTERFACE_H
 #define FDBSERVER_RESOLVERINTERFACE_H
+#include "fdbclient/CommitTransaction.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/fdbrpc.h"
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -91,17 +94,19 @@ struct ResolveTransactionBatchRequest {
 	constexpr static FileIdentifier file_identifier = 16462858;
 	Arena arena;
 
+	SpanID spanID;
 	Version prevVersion;
 	Version version;   // FIXME: ?
 	Version lastReceivedVersion;
-	VectorRef<CommitTransactionRef> transactions;
+	VectorRef<struct CommitTransactionRef> transactions;
 	VectorRef<int> txnStateTransactions;   // Offsets of elements of transactions that have (transaction subsystem state) mutations
 	ReplyPromise<ResolveTransactionBatchReply> reply;
 	Optional<UID> debugID;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, prevVersion, version, lastReceivedVersion, transactions, txnStateTransactions, reply, arena, debugID);
+		serializer(ar, prevVersion, version, lastReceivedVersion, transactions, txnStateTransactions, reply, arena,
+		           debugID, spanID);
 	}
 };
 

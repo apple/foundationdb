@@ -511,8 +511,11 @@ struct ResolutionRequestBuilder {
 	                                 // [CommitTransactionRef_Index][Resolver_Index][Read_Conflict_Range_Index_on_Resolver]
 	                                 // -> read_conflict_range's original index in the commitTransactionRef
 
-	ResolutionRequestBuilder( ProxyCommitData* self, Version version, Version prevVersion, Version lastReceivedVersion) : self(self), requests(self->resolvers.size()) {
-		for(auto& req : requests) {
+	ResolutionRequestBuilder(ProxyCommitData* self, Version version, Version prevVersion, Version lastReceivedVersion,
+	                         Span& parentSpan)
+	  : self(self), requests(self->resolvers.size()) {
+		for (auto& req : requests) {
+			req.spanID = parentSpan->context;
 			req.prevVersion = prevVersion;
 			req.version = version;
 			req.lastReceivedVersion = lastReceivedVersion;
@@ -840,7 +843,7 @@ ACTOR Future<Void> commitBatch(
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.GettingCommitVersion");
 
-	GetCommitVersionRequest req(self->commitVersionRequestNumber++, self->mostRecentProcessedRequestNumber, self->dbgid);
+	GetCommitVersionRequest req(span->context, self->commitVersionRequestNumber++, self->mostRecentProcessedRequestNumber, self->dbgid);
 	GetCommitVersionReply versionReply = wait( brokenPromiseToNever(self->master.getCommitVersion.getReply(req, TaskPriority::ProxyMasterVersionReply)) );
 	self->mostRecentProcessedRequestNumber = versionReply.requestNum;
 
@@ -861,7 +864,7 @@ ACTOR Future<Void> commitBatch(
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.GotCommitVersion");
 
-	ResolutionRequestBuilder requests( self, commitVersion, prevVersion, self->version );
+	ResolutionRequestBuilder requests( self, commitVersion, prevVersion, self->version, span );
 	int conflictRangeCount = 0;
 	state int64_t maxTransactionBytes = 0;
 	for (int t = 0; t<trs.size(); t++) {
