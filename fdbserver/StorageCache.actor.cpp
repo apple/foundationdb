@@ -456,7 +456,6 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
-	
 		//TODO what's this?
 		wait( delay(0, TaskPriority::DefaultEndpoint) );
 
