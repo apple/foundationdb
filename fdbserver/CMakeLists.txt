@@ -221,7 +221,6 @@ if (SSD_ROCKSDB_EXPERIMENTAL)
   set(PORTABLE_ROCKSDB 1)
 
   include(CompileRocksDB)
-  list(APPEND RocksDB_LIBRARIES RocksDB::rocksdb)
 endif()
 
 # Suppress warnings in sqlite since it's third party
@@ -235,6 +234,7 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 
 if (SSD_ROCKSDB_EXPERIMENTAL)
+  add_dependencies(fdbserver rocksdb)
   target_include_directories(fdbserver PRIVATE
     ${CMAKE_SOURCE_DIR}/bindings/c
     ${CMAKE_BINARY_DIR}/bindings/c
