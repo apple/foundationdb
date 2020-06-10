@@ -3580,33 +3580,38 @@ public:
 	// Parallel restore
 	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID) {
 		state ReadYourWritesTransaction tr(cx);
-		state Future<Void> watchForRestoreRequestDone;
-		state bool restoreDone = false;
+		state Optional<Value> restoreRequestDoneKeyValue;
 		TraceEvent("FastRestoreAgentWaitForRestoreToFinish").detail("DBLock", randomUID);
+		// TODO: register watch first and then check if the key exist
 		loop {
 			try {
-				tr.reset();
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				Optional<Value> restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
+				Optional<Value> _restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
+				restoreRequestDoneKeyValue = _restoreRequestDoneKeyValue;
 				// Restore may finish before restoreAgent waits on the restore finish event.
 				if (restoreRequestDoneKeyValue.present()) {
-					restoreDone = true; // In case commit clears the key but in unknown_state
-					tr.clear(restoreRequestDoneKey);
-					wait(tr.commit());
 					break;
-				} else if (!restoreDone) {
-					watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
+				} else {
+					state Future<Void> watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
 					wait(tr.commit());
 					wait(watchForRestoreRequestDone);
-				} else {
 					break;
 				}
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
 		}
+		TraceEvent("FastRestoreAgentRestoreFinished")
+		    .detail("ClearRestoreRequestDoneKey", restoreRequestDoneKeyValue.present());
+		// Only this agent can clear the restoreRequestDoneKey
+		wait(runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->clear(restoreRequestDoneKey);
+			return Void();
+		}));
+
 		TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBStart", randomUID);
 		try {
 			wait(unlockDatabase(cx, randomUID));
@@ -3671,18 +3676,18 @@ public:
 				TraceEvent("FastRestoreAgentSubmitRestoreRequests").detail("DBIsLocked", randomUID);
 				break;
 			} catch (Error& e) {
-				TraceEvent("FastRestoreAgentSubmitRestoreRequests").detail("CheckLockError", e.what());
-				TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreMayFail")
+				TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreAgentSubmitRestoreRequestsMayFail")
 				    .detail("Reason", "DB is not properly locked")
-				    .detail("ExpectedLockID", randomUID);
+				    .detail("ExpectedLockID", randomUID)
+				    .error(e);
 				numTries++;
-				wait(delay(5.0));
+				wait(tr->onError(e));
 			}
 		}
 
 		// set up restore request
+		tr->reset();
 		loop {
-			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
@@ -4444,7 +4449,10 @@ public:
 		return r;
 	}
 
-	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent, Database cx, Optional<Database> cxOrig, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB, UID randomUid) {
+	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent, Database cx, Optional<Database> cxOrig,
+	                                     Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                     bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix,
+	                                     Key removePrefix, bool lockDB, UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
 		state BackupDescription desc = wait(bc->describeBackup());
