@@ -329,11 +329,11 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				if (req.priority >= TransactionPriority::IMMEDIATE) {
 					stats->txnSystemPriorityStartIn += req.transactionCount;
 					systemQueue->push_back(req);
-					systemQueue->span->parents.insert(req.spanID);
+					systemQueue->span->parents.insert(req.spanContext);
 				} else if (req.priority >= TransactionPriority::DEFAULT) {
 					stats->txnDefaultPriorityStartIn += req.transactionCount;
 					defaultQueue->push_back(req);
-					defaultQueue->span->parents.insert(req.spanID);
+					defaultQueue->span->parents.insert(req.spanContext);
 				} else {
 					// Return error for batch_priority GRV requests
 					int64_t proxiesCount = std::max((int)db->get().client.proxies.size(), 1);
@@ -345,7 +345,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 
 					stats->txnBatchPriorityStartIn += req.transactionCount;
 					batchQueue->push_back(req);
-					batchQueue->span->parents.insert(req.spanID);
+					batchQueue->span->parents.insert(req.spanContext);
 				}
 			}
 		}
@@ -515,7 +515,7 @@ struct ResolutionRequestBuilder {
 	                         Span& parentSpan)
 	  : self(self), requests(self->resolvers.size()) {
 		for (auto& req : requests) {
-			req.spanID = parentSpan->context;
+			req.spanContext = parentSpan->context;
 			req.prevVersion = prevVersion;
 			req.version = version;
 			req.lastReceivedVersion = lastReceivedVersion;
@@ -822,7 +822,7 @@ ACTOR Future<Void> commitBatch(
 				debugID = nondeterministicRandom()->randomUniqueID();
 			g_traceBatch.addAttach("CommitAttachID", trs[t].debugID.get().first(), debugID.get().first());
 		}
-		span->parents.insert(trs[t].spanID);
+		span->parents.insert(trs[t].spanContext);
 	}
 
 	if(localBatchNumber == 2 && !debugID.present() && self->firstProxy && !g_network->isSimulated()) {
@@ -2105,7 +2105,7 @@ ACTOR Future<Void> masterProxyServerCore(
 		}
 		when(GetRawCommittedVersionRequest req = waitNext(proxy.getRawCommittedVersion.getFuture())) {
 			//TraceEvent("ProxyGetRCV", proxy.id());
-			Span span("MP:getRawCommittedReadVersion"_loc, { req.spanID });
+			Span span("MP:getRawCommittedReadVersion"_loc, { req.spanContext });
 			if (req.debugID.present())
 				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterProxyServer.masterProxyServerCore.GetRawCommittedVersion");
 			GetReadVersionReply rep;

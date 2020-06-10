@@ -1858,8 +1858,8 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 	}
 }
 
-ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version, SpanID spanID ) {
-	state Span span("NA:waitForCommittedVersion"_loc, { spanID });
+ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version, SpanID spanContext ) {
+	state Span span("NA:waitForCommittedVersion"_loc, { spanContext });
 	try {
 		loop {
 			choose {
@@ -1882,14 +1882,14 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version, Spa
 	}
 }
 
-ACTOR Future<Version> getRawVersion( Database cx, SpanID spanID ) {
-	state Span span("NA:getRawVersion"_loc, { spanID });
+ACTOR Future<Version> getRawVersion( Database cx, SpanID spanContext ) {
+	state Span span("NA:getRawVersion"_loc, { spanContext });
 	loop {
 		choose {
 			when ( wait( cx->onMasterProxiesChanged() ) ) {}
 			when(GetReadVersionReply v =
 			         wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion,
-			                               GetReadVersionRequest(spanID, 0, TransactionPriority::IMMEDIATE), cx->taskID))) {
+			                               GetReadVersionRequest(spanContext, 0, TransactionPriority::IMMEDIATE), cx->taskID))) {
 				return v.version;
 			}
 		}
@@ -2002,7 +2002,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 			req.version = version;
 			req.begin = firstGreaterOrEqual( range.begin );
 			req.end = firstGreaterOrEqual( range.end );
-			req.spanID = span->context;
+			req.spanContext = span->context;
 
 			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
@@ -2300,7 +2300,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 
 			req.tags = cx->sampleReadTags() ? tags : Optional<TagSet>();
 			req.debugID = info.debugID;
-			req.spanID = span->context;
+			req.spanContext = span->context;
 			try {
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.Before");
@@ -3159,7 +3159,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 	state TraceInterval interval( "TransactionCommit" );
 	state double startTime = now();
 	state Span span("NA:tryCommit"_loc, { info.span->context });
-	req.spanID = span->context;
+	req.spanContext = span->context;
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
 	try {
@@ -3672,7 +3672,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 					}
 					g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
 				}
-				span->parents.insert(req.spanID);
+				span->parents.insert(req.spanContext);
 				requests.push_back(req.reply);
 				for(auto tag : req.tags) {
 					++tags[tag];

@@ -97,7 +97,7 @@ struct ResolveTransactionBatchRequest {
 	constexpr static FileIdentifier file_identifier = 16462858;
 	Arena arena;
 
-	SpanID spanID;
+	SpanID spanContext;
 	Version prevVersion;
 	Version version;   // FIXME: ?
 	Version lastReceivedVersion;
@@ -109,7 +109,7 @@ struct ResolveTransactionBatchRequest {
 	template <class Archive>
 	void serialize(Archive& ar) {
 		serializer(ar, prevVersion, version, lastReceivedVersion, transactions, txnStateTransactions, reply, arena,
-		           debugID, spanID);
+		           debugID, spanContext);
 	}
 };
 
