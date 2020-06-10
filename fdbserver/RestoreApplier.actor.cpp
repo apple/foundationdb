@@ -213,21 +213,6 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 	return Void();
 }
 
-ACTOR Future<Optional<Value>> getValue(Reference<ReadYourWritesTransaction> tr, Key key, int i,
-                                       std::set<int>* keysNotFound) {
-	try {
-		Optional<Value> v = wait(tr->get(key));
-		return v;
-	} catch (Error& e) {
-		if (e.code() == error_code_key_not_found) {
-			keysNotFound->insert(i);
-			return Optional<Value>();
-		} else {
-			throw;
-		}
-	}
-}
-
 // Get keys in incompleteStagingKeys and precompute the stagingKey which is stored in batchData->stagingKeys
 ACTOR static Future<Void> getAndComputeStagingKeys(
     std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys, double delayTime, Database cx,
@@ -243,28 +228,23 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	    .detail("BatchIndex", batchIndex)
 	    .detail("GetKeys", incompleteStagingKeys.size())
 	    .detail("DelayTime", delayTime);
-	state std::set<int> keysNotFound;
 
-	state int i = 0;
 	loop {
 		try {
+			int i = 0;
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			i = 0;
 			for (auto& key : incompleteStagingKeys) {
-				if (!keysNotFound.count(i)) { // only get exist-keys
-					fValues[i] = getValue(tr, key.first, i, &keysNotFound);
-				}
-				++i;
+				fValues[i++] = tr->get(key.first);
 			}
 			wait(waitForAll(fValues));
 			break;
 		} catch (Error& e) {
-			bool ok = (e.code() != error_code_key_not_found);
-			if (!ok || retries++ > incompleteStagingKeys.size()) {
-				TraceEvent(!ok ? SevError : SevWarnAlways, "GetAndComputeStagingKeys", applierID)
+			if (retries++ > incompleteStagingKeys.size()) {
+				TraceEvent(SevWarnAlways, "GetAndComputeStagingKeys", applierID)
+				    .suppressFor(1.0)
+				    .detail("RandomUID", randomID)
 				    .detail("BatchIndex", batchIndex)
-				    .detail("KeyIndex", i)
 				    .error(e);
 			}
 			wait(tr->onError(e));
@@ -274,7 +254,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	ASSERT(fValues.size() == incompleteStagingKeys.size());
 	int i = 0;
 	for (auto& key : incompleteStagingKeys) {
-		if (keysNotFound.count(i) || (!fValues[i].get().present())) { // Key not exist in DB
+		if (!fValues[i].get().present()) { // Key not exist in DB
 			// if condition: fValues[i].Valid() && fValues[i].isReady() && !fValues[i].isError() &&
 			TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB", applierID)
 			    .detail("BatchIndex", batchIndex)
