@@ -50,19 +50,19 @@
 
 struct IssuesListImpl {
 	IssuesListImpl(){}
-	void addIssue(std::string issue) override {
+	void addIssue(std::string issue) {
 		MutexHolder h(mutex);
 		issues.insert(issue);
 	}
 
-	void retrieveIssues(std::set<std::string>& out) override {
+	void retrieveIssues(std::set<std::string>& out) {
 		MutexHolder h(mutex);
 		for (auto const& i : issues) {
 			out.insert(i);
 		}
 	}
 
-	void resolveIssue(std::string issue) override {
+	void resolveIssue(std::string issue) {
 		MutexHolder h(mutex);
 		issues.erase(issue);
 	}
