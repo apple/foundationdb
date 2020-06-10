@@ -1006,6 +1006,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			}
 			when(ReportLiveCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
 				self->liveCommittedVersion = std::max<Version>(self->liveCommittedVersion, req.version);
+				req.reply.send(Void());
 			}
 		}
 	}

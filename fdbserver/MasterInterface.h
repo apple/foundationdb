@@ -37,10 +37,10 @@ struct MasterInterface {
 	RequestStream< struct TLogRejoinRequest > tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
 	RequestStream< struct GetCommitVersionRequest > getCommitVersion;
-	// Report a proxy's committed version.
-	RequestStream< struct ReportLiveCommittedVersionRequest > reportLiveCommittedVersion;
 	// Get the centralized live committed version reported by proxies.
 	RequestStream< struct GetLiveCommittedVersionRequest > getLiveCommittedVersion;
+	// Report a proxy's committed version.
+	RequestStream< struct ReportLiveCommittedVersionRequest > reportLiveCommittedVersion;
 	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
@@ -57,7 +57,9 @@ struct MasterInterface {
 			tlogRejoin = RequestStream< struct TLogRejoinRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(1) );
 			changeCoordinators = RequestStream< struct ChangeCoordinatorsRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(2) );
 			getCommitVersion = RequestStream< struct GetCommitVersionRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(3) );
-			notifyBackupWorkerDone = RequestStream<struct BackupWorkerDoneRequest>( waitFailure.getEndpoint().getAdjustedEndpoint(4) );
+			getLiveCommittedVersion = RequestStream< struct GetLiveCommittedVersionRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(4) );
+			reportLiveCommittedVersion = RequestStream< struct ReportLiveCommittedVersionRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(5) );
+			notifyBackupWorkerDone = RequestStream<struct BackupWorkerDoneRequest>( waitFailure.getEndpoint().getAdjustedEndpoint(6) );
 		}
 	}
 
