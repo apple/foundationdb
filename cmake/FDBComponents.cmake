@@ -109,7 +109,7 @@ endif()
 if (SSD_ROCKSDB_EXPERIMENTAL)
   set(WITH_ROCKSDB_EXPERIMENTAL ON)
 else()
-  set(WITH_ROCKSDB_EXPERIMENTAL ON)
+  set(WITH_ROCKSDB_EXPERIMENTAL OFF)
 endif()
 
 ################################################################################
