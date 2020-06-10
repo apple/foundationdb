@@ -212,7 +212,8 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 
 			endRole(err.role, err.id, "Error", ok, err.error);
 
-			if (err.error.code() == error_code_please_reboot || err.error.code() == error_code_io_timeout) throw err.error;
+
+			if (err.error.code() == error_code_please_reboot || err.error.code() == error_code_io_timeout || (err.role == Role::SHARED_TRANSACTION_LOG && err.error.code() == error_code_io_error )) throw err.error;
 		}
 	}
 }
@@ -1678,7 +1679,7 @@ ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy( Reference<ClusterC
 		if(currentCC->get().present() && dbInfo->get().clusterInterface == currentCC->get().get() && IFailureMonitor::failureMonitor().getState( currentCC->get().get().registerWorker.getEndpoint() ).isAvailable()) {
 			timeout = Future<Void>();
 		} else if(!timeout.isValid()) {
-			timeout = delay( SERVER_KNOBS->MIN_DELAY_STORAGE_CANDIDACY_SECONDS + (deterministicRandom()->random01()*(SERVER_KNOBS->MAX_DELAY_STORAGE_CANDIDACY_SECONDS-SERVER_KNOBS->MIN_DELAY_STORAGE_CANDIDACY_SECONDS)) );
+			timeout = delay( SERVER_KNOBS->MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS + (deterministicRandom()->random01()*(SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS-SERVER_KNOBS->MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS)) );
 		}
 		choose {
 			when( wait(currentCC->onChange()) ) {}
@@ -1735,9 +1736,9 @@ ACTOR Future<Void> fdbd(
 		Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo()) );
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
-		if (processClass == ProcessClass::TesterClass) {
+		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {
 			actors.push_back( reportErrors( monitorLeader( connFile, cc ), "ClusterController" ) );
-		} else if (processClass == ProcessClass::StorageClass && SERVER_KNOBS->MAX_DELAY_STORAGE_CANDIDACY_SECONDS > 0) {
+		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit && SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
 			actors.push_back( reportErrors( monitorLeaderRemotelyWithDelayedCandidacy( connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, dbInfo ), "ClusterController" ) );
 		} else {
 			actors.push_back( reportErrors( clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
