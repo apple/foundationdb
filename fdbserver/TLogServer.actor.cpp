@@ -28,6 +28,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -373,8 +374,12 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 		TagData( Tag tag, Version popped, IDiskQueue::location poppedLocation, bool nothingPersistent, bool poppedRecently, bool unpoppedRecovered ) : tag(tag), nothingPersistent(nothingPersistent), poppedRecently(poppedRecently), popped(popped), persistentPopped(0), versionForPoppedLocation(0), poppedLocation(poppedLocation), unpoppedRecovered(unpoppedRecovered) {}
 
-		TagData(TagData&& r) BOOST_NOEXCEPT : versionMessages(std::move(r.versionMessages)), nothingPersistent(r.nothingPersistent), poppedRecently(r.poppedRecently), popped(r.popped), persistentPopped(r.persistentPopped), versionForPoppedLocation(r.versionForPoppedLocation), poppedLocation(r.poppedLocation), tag(r.tag), unpoppedRecovered(r.unpoppedRecovered) {}
-		void operator= (TagData&& r) BOOST_NOEXCEPT {
+		TagData(TagData&& r) noexcept
+		  : versionMessages(std::move(r.versionMessages)), nothingPersistent(r.nothingPersistent),
+		    poppedRecently(r.poppedRecently), popped(r.popped), persistentPopped(r.persistentPopped),
+		    versionForPoppedLocation(r.versionForPoppedLocation), poppedLocation(r.poppedLocation), tag(r.tag),
+		    unpoppedRecovered(r.unpoppedRecovered) {}
+		void operator=(TagData&& r) noexcept {
 			versionMessages = std::move(r.versionMessages);
 			nothingPersistent = r.nothingPersistent;
 			poppedRecently = r.poppedRecently;
@@ -1677,7 +1682,10 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
 
-	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("EndVer", reply.end).detail("MsgBytes", reply.messages.expectedSize()).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
+	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("Tag", req.tag.toString()).
+	//	detail("BeginVer", req.begin).detail("EndVer", reply.end).
+	//	detail("MsgBytes", reply.messages.expectedSize()).
+	//	detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
 
 	if(req.sequence.present()) {
 		auto& trackerData = logData->peekTracker[peekId];

@@ -122,7 +122,7 @@ Future<Void> RestoreConfigFR::logError(Database cx, Error e, std::string const& 
 	}
 	TraceEvent t(SevWarn, "FileRestoreError");
 	t.error(e).detail("RestoreUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
-	// These should not happen
+	// key_not_found could happen
 	if (e.code() == error_code_key_not_found) t.backtrace();
 
 	return updateErrorInfo(cx, e, details);

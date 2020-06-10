@@ -264,7 +264,7 @@ class BindPromise {
 public:
 	BindPromise( const char* errContext, UID errID ) : errContext(errContext), errID(errID) {}
 	BindPromise( BindPromise const& r ) : p(r.p), errContext(r.errContext), errID(r.errID) {}
-	BindPromise(BindPromise&& r) BOOST_NOEXCEPT : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
+	BindPromise(BindPromise&& r) noexcept : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
 
 	Future<Void> getFuture() { return p.getFuture(); }
 
@@ -841,7 +841,7 @@ private:
 struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	Promise<Void> promise;
 	PromiseTask() {}
-	explicit PromiseTask( Promise<Void>&& promise ) BOOST_NOEXCEPT : promise(std::move(promise)) {}
+	explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
 
 	virtual void operator()() {
 		promise.send(Void());

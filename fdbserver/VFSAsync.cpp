@@ -531,7 +531,7 @@ static int asyncOpen(
 	if (flags & SQLITE_OPEN_WAL) oflags |= IAsyncFile::OPEN_LARGE_PAGES;
 	oflags |= IAsyncFile::OPEN_LOCK;
 
-	memset(p, 0, sizeof(VFSAsyncFile));
+	memset(static_cast<void*>(p), 0, sizeof(VFSAsyncFile));
 	new (p) VFSAsyncFile(zName, flags);
 	try {
 		// Note that SQLiteDB::open also opens the db file, so its flags and modes are important, too

@@ -201,5 +201,8 @@ bool schemaMatch( json_spirit::mValue const& schema, json_spirit::mValue const& 
 // storage nodes
 ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
+Future<Void> addCachedRange(const Database& cx, KeyRangeRef range);
+Future<Void> removeCachedRange(const Database& cx, KeyRangeRef range);
+
 #include "flow/unactorcompiler.h"
 #endif
