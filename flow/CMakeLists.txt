@@ -28,6 +28,7 @@ set(FLOW_SRCS
   IRandom.h
   IThreadPool.cpp
   IThreadPool.h
+  ITrace.h
   IndexedSet.actor.h
   IndexedSet.cpp
   IndexedSet.h
