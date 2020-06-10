@@ -132,9 +132,6 @@
 .. |atomic-set-versionstamped-key-1| replace::
     Transforms ``key`` using a versionstamp for the transaction. This key must be at least 14 bytes long. The final 4 bytes will be interpreted as a 32-bit little-endian integer denoting an index into the key at which to perform the transformation, and then trimmed off the key. The 10 bytes in the key beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the key, the result will be an error. Sets the transformed key in the database to ``param``.
 
-.. |atomic-set-versionstamped-key-2| replace::
-    This operation is not compatible with |read-your-writes-disable-option| and will generate an error if used with it.
-
 .. |atomic-set-versionstamped-value| replace::
     Transforms ``param`` using a versionstamp for the transaction. This parameter must be at least 14 bytes long. The final 4 bytes will be interpreted as a 32-bit little-endian integer denoting an index into the parameter at which to perform the transformation, and then trimmed off the key. The 10 bytes in the parameter beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the parameter, the result will be an error. Sets ``key`` in the database to the transformed parameter.
 

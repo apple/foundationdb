@@ -2,6 +2,15 @@
 Release Notes
 #############
 
+6.2.22
+======
+
+Fixes
+-----
+
+* Coordinator class processes could be recruited as the cluster controller. `(PR #3282) <https://github.com/apple/foundationdb/pull/3282>`_
+* HTTPS requests made by backup would fail (introduced in 6.2.21). `(PR #3284) <https://github.com/apple/foundationdb/pull/3284>`_
+
 6.2.21
 ======
 
@@ -11,6 +20,7 @@ Fixes
 * HTTPS requests made by backup could hang indefinitely. `(PR #3027) <https://github.com/apple/foundationdb/pull/3027>`_
 * ``fdbrestore`` prefix options required exactly a single hyphen instead of the standard two. `(PR #3056) <https://github.com/apple/foundationdb/pull/3056>`_
 * Commits could stall on a newly elected proxy because of inaccurate compute estimates. `(PR #3123) <https://github.com/apple/foundationdb/pull/3123>`_
+* A transaction class process with a bad disk could be repeatedly recruited as a transaction log. `(PR #3268) <https://github.com/apple/foundationdb/pull/3268>`_
 
 Features
 --------
