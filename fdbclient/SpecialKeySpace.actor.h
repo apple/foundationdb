@@ -65,6 +65,7 @@ public:
 	ACTOR static Future<Standalone<RangeResultRef>> getRangeAsyncActor(const SpecialKeyRangeBaseImpl* skrAyncImpl,
 	                                                                   ReadYourWritesTransaction* ryw, KeyRangeRef kr,
 	                                                                   Optional<Standalone<RangeResultRef>>* cache) {
+		ASSERT(skrAyncImpl->getKeyRange().contains(kr));
 		if (cache == nullptr) {
 			// a nullptr means we want to read directly and do not need to cache them
 			Standalone<RangeResultRef> result = wait(skrAyncImpl->getRange(ryw, kr));
