@@ -171,7 +171,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	double lastCommitTime;
 
 	Version liveCommittedVersion; // The live committed version reported by proxies.
-	bool proxyLocked;
+	bool databaseLocked;
 	Optional<Value> proxyMetadataVersion;
 
 	DatabaseConfiguration originalConfiguration;
@@ -252,7 +252,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  neverCreated(false),
 		  lastEpochEnd(invalidVersion),
 		  liveCommittedVersion(invalidVersion),
-	      proxyLocked(false),
+		  databaseLocked(false),
 		  recoveryTransactionVersion(invalidVersion),
 		  lastCommitTime(0),
 		  registrationCount(0),
@@ -1009,16 +1009,16 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				if (self->liveCommittedVersion == invalidVersion) {
 					self->liveCommittedVersion = self->recoveryTransactionVersion;
 				}
-				state GetReadVersionReply reply;
+				GetReadVersionReply reply;
 				reply.version = self->liveCommittedVersion;
-				reply.locked = self->proxyLocked;
+				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
 				if (req.version > self->liveCommittedVersion) {
 					self->liveCommittedVersion = req.version;
-					self->proxyLocked = req.locked;
+					self->databaseLocked = req.locked;
 					self->proxyMetadataVersion = req.metadataVersion;
 				}
 				req.reply.send(Void());
