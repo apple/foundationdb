@@ -320,7 +320,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		// TODO: delete data on close
 		if (self->closePromise.canBeSet()) self->closePromise.send(Void());
 		if (self->errorPromise.canBeSet()) self->errorPromise.send(Never());
-		delete self->db;
 		delete self;
 	}
 
