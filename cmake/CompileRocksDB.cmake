@@ -21,6 +21,7 @@ if (RocksDB_FOUND)
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
+               -DROCKSDB_BUILD_SHARED=OFF
                -DCMAKE_POSITION_INDEPENDENT_CODE=True
     BUILD_BYPRODUCTS ${BINARY_DIR}/librocksdb.a
     INSTALL_COMMAND ""
@@ -46,6 +47,7 @@ else()
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
+               -DROCKSDB_BUILD_SHARED=OFF
                -DCMAKE_POSITION_INDEPENDENT_CODE=True
     BUILD_BYPRODUCTS ${BINARY_DIR}/librocksdb.a
     INSTALL_COMMAND ""
