@@ -26,52 +26,110 @@
 
 struct DataDistributionMetricsWorkload : KVWorkload {
 
-	int numTransactions;
-	int writesPerTransaction;
-	int transactionsCommitted;
-	int numShards;
+	int numShards, readPerTx, writePerTx;
 	int64_t avgBytes;
+	double testDuration;
+	std::string keyPrefix;
+	PerfIntCounter commits, errors;
 
 	DataDistributionMetricsWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), transactionsCommitted(0), numShards(0), avgBytes(0) {
-		numTransactions = getOption(options, LiteralStringRef("numTransactions"), 100);
-		writesPerTransaction = getOption(options, LiteralStringRef("writesPerTransaction"), 1000);
+	  : KVWorkload(wcx), numShards(0), avgBytes(0), commits("Commits"), errors("Errors") {
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		keyPrefix = getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("DDMetrics")).toString();
+		readPerTx = getOption(options, LiteralStringRef("readPerTransaction"), 1);
+		writePerTx = getOption(options, LiteralStringRef("writePerTransaction"), 5 * readPerTx);
+		ASSERT(nodeCount > 1);
 	}
 
 	static Value getRandomValue() {
 		return Standalone<StringRef>(format("Value/%08d", deterministicRandom()->randomInt(0, 10e6)));
 	}
 
-	ACTOR static Future<Void> _start(Database cx, DataDistributionMetricsWorkload* self) {
-		state int tNum;
-		for (tNum = 0; tNum < self->numTransactions; ++tNum) {
-			loop {
-				state ReadYourWritesTransaction tr(cx);
-				try {
-					state int i;
-					for (i = 0; i < self->writesPerTransaction; ++i) {
-						tr.set(StringRef(format("Key/%08d", tNum * self->writesPerTransaction + i)), getRandomValue());
+	Key keyForIndex(int n) { return doubleToTestKey((double)n / nodeCount, keyPrefix); }
+
+	ACTOR static Future<Void> ddRWClient(Database cx, DataDistributionMetricsWorkload* self) {
+		loop {
+			state ReadYourWritesTransaction tr(cx);
+			state int i;
+			try {
+				for (i = 0; i < self->readPerTx; ++i)
+					wait(success(tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount))))); // read
+				for (i = 0; i < self->writePerTx; ++i)
+					tr.set(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount)), getRandomValue()); // write
+				wait(tr.commit());
+				++self->commits;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+			tr.reset();
+		}
+	}
+
+	ACTOR Future<Void> resultConsistencyCheckClient(Database cx, DataDistributionMetricsWorkload* self) {
+		state Reference<ReadYourWritesTransaction> tr =
+		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+		loop {
+			try {
+				int startIndex = deterministicRandom()->randomInt(0, self->nodeCount - 1);
+				int endIndex = deterministicRandom()->randomInt(startIndex + 1, self->nodeCount);
+				state Key startKey = self->keyForIndex(startIndex);
+				state Key endKey = self->keyForIndex(endIndex);
+				// lastLessOrEqual
+				state KeySelector begin = KeySelectorRef(startKey.withPrefix(ddStatsRange.begin, startKey.arena()), true, 0);
+				state KeySelector end = KeySelectorRef(endKey.withPrefix(ddStatsRange.begin, endKey.arena()), false, 2);
+				Standalone<RangeResultRef> result = wait(tr->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->SHARD_COUNT_LIMIT)));
+				if (result.size() > 1) {
+					if (result[0].key <= begin.getKey() && result[1].key > begin.getKey()) {
+						TraceEvent(SevDebug, "DDMetricsConsistencyTest")
+						    .detail("Size", result.size())
+						    .detail("FirstKey", result[0].key.toString())
+						    .detail("SecondKey", result[1].key.toString())
+						    .detail("BeginKeySelector", begin.toString());
+					} else {
+						++self->errors;
+						TraceEvent(SevError, "TestFailure")
+						    .detail("Reason", "Result mismatches the given begin selector")
+						    .detail("Size", result.size())
+						    .detail("FirstKey", result[0].key.toString())
+						    .detail("SecondKey", result[1].key.toString())
+						    .detail("BeginKeySelector", begin.toString());
 					}
-					wait(tr.commit());
-					++self->transactionsCommitted;
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					if (result[result.size()-1].key >= end.getKey() && result[result.size()-2].key < end.getKey()) {
+						TraceEvent(SevDebug, "DDMetricsConsistencyTest")
+						    .detail("Size", result.size())
+						    .detail("LastKey", result[result.size()-1].key.toString())
+						    .detail("SecondLastKey", result[result.size()-2].key.toString())
+						    .detail("EndKeySelector", end.toString());
+					} else {
+						++self->errors;
+						TraceEvent(SevError, "TestFailure")
+						    .detail("Reason", "Result mismatches the given end selector")
+						    .detail("Size", result.size())
+						    .detail("FirstKey", result[result.size()-1].key.toString())
+						    .detail("SecondKey", result[result.size()-2].key.toString())
+						    .detail("EndKeySelector", end.toString());
+					}
 				}
+			} catch (Error& e) {
+				// Ignore timed_out error and cross_module_read, the end key may potentially point outside the range
+				if (e.code() == error_code_timed_out || e.code() == error_code_special_keys_cross_module_read) continue;
+				TraceEvent(SevDebug, "FailedToRetrieveDDMetrics").detail("Error", e.what());
+				wait(tr->onError(e));
 			}
 		}
-		return Void();
 	}
 
 	ACTOR static Future<bool> _check(Database cx, DataDistributionMetricsWorkload* self) {
-		if (self->transactionsCommitted == 0) {
-			TraceEvent(SevError, "NoTransactionsCommitted");
+		if (self->errors.getValue() > 0) {
+			TraceEvent(SevError, "TestFailure").detail("Reason", "GetRange Results Inconsistent");
 			return false;
 		}
+		// TODO : find why this not work
+		// wait(quietDatabase(cx, self->dbInfo, "PopulateTPCC"));
 		state Reference<ReadYourWritesTransaction> tr =
 		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 		try {
-			state Standalone<RangeResultRef> result = wait(tr->getRange(ddStatsRange, 100));
+			state Standalone<RangeResultRef> result = wait(tr->getRange(ddStatsRange, CLIENT_KNOBS->SHARD_COUNT_LIMIT));
 			ASSERT(!result.more);
 			self->numShards = result.size();
 			if (self->numShards < 1) return false;
@@ -81,17 +139,29 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 				totalBytes += readJSONStrictly(result[i].value.toString()).get_obj()["ShardBytes"].get_int64();
 			}
 			self->avgBytes = totalBytes / self->numShards;
-			// fetch data-distribution stats for a smalller range
+			// fetch data-distribution stats for a smaller range
+			ASSERT(result.size());
 			state int idx = deterministicRandom()->randomInt(0, result.size());
 			Standalone<RangeResultRef> res = wait(tr->getRange(
-			    KeyRangeRef(result[idx].key, idx + 1 < result.size() ? result[idx + 1].key : ddStatsRange.end), 100));
+				KeyRangeRef(result[idx].key, idx + 1 < result.size() ? result[idx + 1].key : ddStatsRange.end),
+				100));
 			ASSERT_WE_THINK(res.size() == 1 &&
-			       res[0] == result[idx]); // It works good now. However, not sure in any case of data-distribution, the number changes
+							res[0] == result[idx]); // It works good now. However, not sure in any
+													// case of data-distribution, the number changes
 		} catch (Error& e) {
 			TraceEvent(SevError, "FailedToRetrieveDDMetrics").detail("Error", e.what());
-			return false;
+			throw;
 		}
 		return true;
+	}
+
+	ACTOR Future<Void> _start(Database cx, DataDistributionMetricsWorkload* self) {
+		std::vector<Future<Void>> clients;
+		clients.push_back(self->resultConsistencyCheckClient(cx, self));
+		for (int i = 0; i < self->actorCount; ++i) clients.push_back(self->ddRWClient(cx, self));
+		wait(timeout(waitForAll(clients), self->testDuration, Void()));
+		wait(delay(5.0));
+		return Void();
 	}
 
 	virtual std::string description() { return "DataDistributionMetrics"; }
@@ -102,6 +172,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	virtual void getMetrics(vector<PerfMetric>& m) {
 		m.push_back(PerfMetric("NumShards", numShards, true));
 		m.push_back(PerfMetric("AvgBytes", avgBytes, true));
+		m.push_back(commits.getMetric());
 	}
 };
 
