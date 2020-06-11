@@ -89,6 +89,10 @@ class NonCopyable
 	NonCopyable & operator = (const NonCopyable &);
 };
 
+// An Arena is a custom allocator that consists of a set of ArenaBlocks.  Allocation is performed by bumping a pointer
+// on the most recent ArenaBlock until the block is unable to service the next allocation request.  When the current
+// ArenaBlock is full, a new (larger) one is added to the Arena.  Deallocation is not directly supported.  Instead,
+// memory is freed by deleting the entire Arena at once. See flow/README.md for details on using Arenas.
 class Arena {
 public:
 	Arena();

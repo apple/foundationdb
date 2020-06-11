@@ -36,14 +36,14 @@
 // When allocating memory to a user, mark that memory as undefined.
 
 namespace {
-void unpoison(ArenaBlock* b) {
+void allow_access(ArenaBlock* b) {
 	if (b) {
 		VALGRIND_MAKE_MEM_DEFINED(b, ArenaBlock::TINY_HEADER);
 		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
 		VALGRIND_MAKE_MEM_DEFINED(b, headerSize);
 	}
 }
-void poison(ArenaBlock* b) {
+void disallow_access(ArenaBlock* b) {
 	if (b) {
 		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
 		VALGRIND_MAKE_MEM_NOACCESS(b, headerSize);
@@ -55,9 +55,9 @@ Arena::Arena() : impl(NULL) {}
 Arena::Arena(size_t reservedSize) : impl(0) {
 	UNSTOPPABLE_ASSERT(reservedSize < std::numeric_limits<int>::max());
 	if (reservedSize) {
-		unpoison(impl.getPtr());
+		allow_access(impl.getPtr());
 		ArenaBlock::create((int)reservedSize, impl);
-		poison(impl.getPtr());
+		disallow_access(impl.getPtr());
 	}
 }
 Arena::Arena(const Arena& r) = default;
@@ -66,29 +66,29 @@ Arena& Arena::operator=(const Arena& r) = default;
 Arena& Arena::operator=(Arena&& r) noexcept = default;
 void Arena::dependsOn(const Arena& p) {
 	if (p.impl) {
-		unpoison(impl.getPtr());
-		unpoison(p.impl.getPtr());
+		allow_access(impl.getPtr());
+		allow_access(p.impl.getPtr());
 		ArenaBlock::dependOn(impl, p.impl.getPtr());
-		poison(p.impl.getPtr());
+		disallow_access(p.impl.getPtr());
 		if (p.impl.getPtr() != impl.getPtr()) {
-			poison(impl.getPtr());
+			disallow_access(impl.getPtr());
 		}
 	}
 }
 size_t Arena::getSize() const {
 	if (impl) {
-		unpoison(impl.getPtr());
+		allow_access(impl.getPtr());
 		auto result = impl->totalSize();
-		poison(impl.getPtr());
+		disallow_access(impl.getPtr());
 		return result;
 	}
 	return 0;
 }
 bool Arena::hasFree(size_t size, const void* address) {
 	if (impl) {
-		unpoison(impl.getPtr());
+		allow_access(impl.getPtr());
 		auto result = impl->unused() >= size && impl->getNextData() == address;
-		poison(impl.getPtr());
+		disallow_access(impl.getPtr());
 		return result;
 	}
 	return false;
@@ -146,9 +146,9 @@ size_t ArenaBlock::totalSize() {
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
 		VALGRIND_MAKE_MEM_DEFINED(r, sizeof(ArenaBlockRef));
-		unpoison(r->next);
+		allow_access(r->next);
 		s += r->next->totalSize();
-		poison(r->next);
+		disallow_access(r->next);
 		o = r->nextBlockOffset;
 		VALGRIND_MAKE_MEM_NOACCESS(r, sizeof(ArenaBlockRef));
 	}
@@ -202,15 +202,15 @@ void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
 
 void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 	ArenaBlock* b = self.getPtr();
-	unpoison(b);
+	allow_access(b);
 	if (!self || self->unused() < bytes) {
 		auto* tmp = b;
 		b = create(bytes, self);
-		poison(tmp);
+		disallow_access(tmp);
 	}
 
 	void* result = (char*)b->getData() + b->addUsed(bytes);
-	poison(b);
+	disallow_access(b);
 	VALGRIND_MAKE_MEM_UNDEFINED(result, bytes);
 	return result;
 }
@@ -314,23 +314,23 @@ void ArenaBlock::destroy() {
 	// If the stack never contains more than one item, nothing will be allocated from stackArena.
 	// If stackArena is used, it will always be a linked list, so destroying *it* will not create another arena
 	ArenaBlock* tinyStack = this;
-	unpoison(this);
+	allow_access(this);
 	Arena stackArena;
 	VectorRef<ArenaBlock*> stack(&tinyStack, 1);
 
 	while (stack.size()) {
 		ArenaBlock* b = stack.end()[-1];
 		stack.pop_back();
-		unpoison(b);
+		allow_access(b);
 
 		if (!b->isTiny()) {
 			int o = b->nextBlockOffset;
 			while (o) {
 				ArenaBlockRef* br = (ArenaBlockRef*)((char*)b->getData() + o);
 				VALGRIND_MAKE_MEM_DEFINED(br, sizeof(ArenaBlockRef));
-				unpoison(br->next);
+				allow_access(br->next);
 				if (br->next->delref_no_destroy()) stack.push_back(stackArena, br->next);
-				poison(br->next);
+				disallow_access(br->next);
 				o = br->nextBlockOffset;
 			}
 		}
