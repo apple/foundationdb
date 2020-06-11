@@ -15,8 +15,8 @@ EOF
   s.email = 'fdb-dist@apple.com'
   s.files = ["LICENSE", "lib/fdb.rb", "lib/fdbdirectory.rb", "lib/fdbimpl.rb", "lib/fdblocality.rb", "lib/fdboptions.rb", "lib/fdbsubspace.rb", "lib/fdbtuple.rb", "lib/fdbimpl_v609.rb"]
   s.homepage = 'https://www.foundationdb.org'
-  s.license = 'Apache v2'
-  s.add_dependency('ffi', '>= 1.1.5')
+  s.license = 'Apache-2.0'
+  s.add_dependency('ffi', '~> 1.1', '>= 1.1.5')
   s.required_ruby_version = '>= 1.9.3'
   s.requirements << 'These bindings require the FoundationDB client. The client can be obtained from https://www.foundationdb.org/download/.'
 end
