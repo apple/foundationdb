@@ -179,13 +179,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
+			Optional<TraceBatch> traceBatch;
 			if (a.debugID.present()) {
-				g_traceBatch.addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
+				traceBatch = { TraceBatch{} };
+				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
 			rocksdb::PinnableSlice value;
 			auto s = db->Get(readOptions, db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
-				g_traceBatch.addEvent("GetValueDebug", a.debugID.get().first(), "Reader.After");
+				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.After");
+				traceBatch.get().dump();
 			}
 			if (s.ok()) {
 				a.result.send(Value(toStringRef(value)));
@@ -207,14 +210,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		};
 		void action(ReadValuePrefixAction& a) {
 			rocksdb::PinnableSlice value;
+			Optional<TraceBatch> traceBatch;
 			if (a.debugID.present()) {
-				g_traceBatch.addEvent("GetValuePrefixDebug", a.debugID.get().first(),
-									  "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
+				traceBatch = { TraceBatch{} };
+				traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
+				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
 			auto s = db->Get(readOptions, db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
-				g_traceBatch.addEvent("GetValuePrefixDebug", a.debugID.get().first(),
-									  "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
+				traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
+				                          "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
+				traceBatch.get().dump();
 			}
 			if (s.ok()) {
 				a.result.send(Value(StringRef(reinterpret_cast<const uint8_t*>(value.data()),
@@ -409,6 +415,7 @@ IKeyValueStore* keyValueStoreRocksDB(std::string const& path, UID logID, KeyValu
 	return new RocksDBKeyValueStore(path, logID);
 #else
 	TraceEvent(SevError, "RocksDBEngineInitFailure").detail("Reason", "Built without RocksDB");
-	return keyValueStoreSQLite(path, logID, storeType, checkChecksums, checkIntegrity);
+	ASSERT(false);
+	return nullptr;
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 }
