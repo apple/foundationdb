@@ -50,6 +50,9 @@ public:
 		if (r.end < r.capacity()) {
 			std::copy(r.arr + r.begin, r.arr + r.begin + r.size(), arr);
 		} else {
+			// Mask is used for wrapping, so r.end is always >= r.begin,
+			// but if r.end >= r.capacity(), the deque wraps around so the
+			// copy must be performed in two parts
 			auto partOneSize = r.capacity() - r.begin;
 			std::copy(r.arr + r.begin, r.arr + r.begin + partOneSize, arr);
 			std::copy(r.arr, r.arr + (r.end & r.mask), arr + partOneSize);
@@ -71,6 +74,9 @@ public:
 		if (r.end < r.capacity()) {
 			std::copy(r.arr + r.begin, r.arr + r.begin + r.size(), arr);
 		} else {
+			// Mask is used for wrapping, so r.end is always >= r.begin,
+			// but if r.end >= r.capacity(), the deque wraps around so the
+			// copy must be performed in two parts
 			auto partOneSize = r.capacity() - r.begin;
 			std::copy(r.arr + r.begin, r.arr + r.begin + partOneSize, arr);
 			std::copy(r.arr, r.arr + (r.end & r.mask), arr + partOneSize);
