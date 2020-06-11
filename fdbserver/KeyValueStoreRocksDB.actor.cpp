@@ -78,6 +78,17 @@ StringRef toStringRef(rocksdb::Slice s) {
 	return StringRef(reinterpret_cast<const uint8_t*>(s.data()), s.size());
 }
 
+rocksdb::Options getOptions(const std::string& path) {
+	rocksdb::Options options;
+	bool exists = directoryExists(path);
+	options.create_if_missing = !exists;
+	return options;
+}
+
+rocksdb::ColumnFamilyOptions getCFOptions() {
+	return {};
+}
+
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
 	using CF = rocksdb::ColumnFamilyHandle*;
@@ -105,8 +116,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		struct OpenAction : TypedAction<Writer, OpenAction> {
-			rocksdb::Options options;
-			rocksdb::ColumnFamilyOptions cfOptions;
 			std::string path;
 			ThreadReturnPromise<Void> done;
 
@@ -115,11 +124,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		};
 		void action(OpenAction& a) {
-			bool exists = directoryExists(a.path);
-			a.options.create_if_missing = !exists;
-			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF{ rocksdb::ColumnFamilyDescriptor{"default", rocksdb::ColumnFamilyOptions{}} };
+			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
+				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
-			auto status = rocksdb::DB::Open(a.options, a.path, defaultCF, &handle, &db);
+			auto status = rocksdb::DB::Open(getOptions(a.path), a.path, defaultCF, &handle, &db);
 			if (!status.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", status.ToString()).detail("Method", "Open");
 				a.done.sendError(statusToError(status));
@@ -239,11 +247,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
-			if (cursor == nullptr) {
-				cursor.reset(db->NewIterator(readOptions));
-			} else {
-				cursor->Refresh();
-			}
+			auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions));
 			Standalone<RangeResultRef> result;
 			int accumulatedBytes = 0;
 			if (a.rowLimit >= 0) {
@@ -320,6 +324,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		// TODO: delete data on close
 		if (self->closePromise.canBeSet()) self->closePromise.send(Void());
 		if (self->errorPromise.canBeSet()) self->errorPromise.send(Never());
+		if (deleteOnClose) {
+			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
+				"default", getCFOptions() } };
+			rocksdb::DestroyDB(self->path, getOptions(self->path), defaultCF);
+		}
 		delete self;
 	}
 
