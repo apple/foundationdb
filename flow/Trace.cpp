@@ -1254,7 +1254,7 @@ void TraceBatch::dump() {
 		g_traceLog.writeEvent(buggifyBatch[i].fields, "", false);
 	}
 
-	onMainThreadVoid([](){ g_traceLog.flush(); }, NULL);
+	onMainThreadVoid([](){ g_traceLog.flush(); }, nullptr);
 	eventBatch.clear();
 	attachBatch.clear();
 	buggifyBatch.clear();
