@@ -700,8 +700,6 @@ Applications must provide error handling and an appropriate retry loop around th
 
     |atomic-versionstamps-2|
 
-    |atomic-set-versionstamped-key-2|
-
     .. warning :: |atomic-versionstamps-tuple-warning-key|
 
     ``FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE``

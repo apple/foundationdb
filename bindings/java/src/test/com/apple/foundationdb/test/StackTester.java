@@ -649,9 +649,10 @@ public class StackTester {
 					}
 				}
 				catch(FDBException e) {
-					Transaction tr = db.createTransaction();
-					tr.onError(e).join();
-					return false;
+					try(Transaction tr = db.createTransaction()) {
+						tr.onError(e).join();
+						return false;
+					}
 				}
 			}
 		}

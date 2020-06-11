@@ -83,6 +83,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 					updateProcessStats(self);
 					updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 				}
+				when(wait(actors.getResult())) {}
 				when(wait(exitRole)) {
 					TraceEvent("RestoreApplierCoreExitRole", self->id());
 					break;
@@ -92,6 +93,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 			TraceEvent(SevWarn, "FastRestoreApplierError", self->id())
 			    .detail("RequestType", requestTypeStr)
 			    .error(e, true);
+			actors.clear(false);
 			break;
 		}
 	}
@@ -179,7 +181,6 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 	    .detail("DelayTime", delayTime);
 	loop {
 		try {
-			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (auto& range : ranges) {
@@ -216,47 +217,50 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
     std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys, double delayTime, Database cx,
     UID applierID, int batchIndex) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state std::vector<Future<Optional<Value>>> fValues;
+	state std::vector<Future<Optional<Value>>> fValues(incompleteStagingKeys.size(), Never());
 	state int retries = 0;
+	state UID randomID = deterministicRandom()->randomUniqueID();
 
 	wait(delay(delayTime + deterministicRandom()->random01() * delayTime));
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysStart", applierID)
+	    .detail("RandomUID", randomID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("GetKeys", incompleteStagingKeys.size())
 	    .detail("DelayTime", delayTime);
+
 	loop {
 		try {
-			tr->reset();
+			int i = 0;
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (auto& key : incompleteStagingKeys) {
-				fValues.push_back(tr->get(key.first));
+				fValues[i++] = tr->get(key.first);
 			}
 			wait(waitForAll(fValues));
 			break;
 		} catch (Error& e) {
-			if (retries++ > 10) { // TODO: Can we stop retry at the first error?
-				TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysGetKeysStuck", applierID)
+			if (retries++ > incompleteStagingKeys.size()) {
+				TraceEvent(SevWarnAlways, "GetAndComputeStagingKeys", applierID)
+				    .suppressFor(1.0)
+				    .detail("RandomUID", randomID)
 				    .detail("BatchIndex", batchIndex)
-				    .detail("GetKeys", incompleteStagingKeys.size())
 				    .error(e);
-				break;
 			}
 			wait(tr->onError(e));
-			fValues.clear();
 		}
 	}
 
 	ASSERT(fValues.size() == incompleteStagingKeys.size());
 	int i = 0;
 	for (auto& key : incompleteStagingKeys) {
-		if (!fValues[i].get().present()) { // Debug info to understand which key does not exist in DB
+		if (!fValues[i].get().present()) { // Key not exist in DB
+			// if condition: fValues[i].Valid() && fValues[i].isReady() && !fValues[i].isError() &&
 			TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB", applierID)
 			    .detail("BatchIndex", batchIndex)
 			    .detail("Key", key.first)
-			    .detail("Reason", "Not found in DB")
+			    .detail("IsReady", fValues[i].isReady())
 			    .detail("PendingMutations", key.second->second.pendingMutations.size())
-			    .detail("StagingKeyType", (int)key.second->second.type);
+			    .detail("StagingKeyType", getTypeString(key.second->second.type));
 			for (auto& vm : key.second->second.pendingMutations) {
 				TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
 				    .detail("PendingMutationVersion", vm.first.toString())
@@ -274,8 +278,10 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	}
 
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysDone", applierID)
+	    .detail("RandomUID", randomID)
 	    .detail("BatchIndex", batchIndex)
-	    .detail("GetKeys", incompleteStagingKeys.size());
+	    .detail("GetKeys", incompleteStagingKeys.size())
+	    .detail("DelayTime", delayTime);
 
 	return Void();
 }
@@ -404,7 +410,6 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 	TraceEvent("FastRestoreApplierPhaseApplyStagingKeysBatch", applierID).detail("Begin", begin->first);
 	loop {
 		try {
-			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			std::map<Key, StagingKey>::iterator iter = begin;
@@ -502,6 +507,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 	    .detail("FinishedBatch", self->finishedBatch.get());
 
 	// Ensure batch (i-1) is applied before batch i
+	// TODO: Add a counter to warn when too many requests are waiting on the actor
 	wait(self->finishedBatch.whenAtLeast(req.batchIndex - 1));
 
 	state bool isDuplicated = true;
@@ -523,6 +529,8 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 		}
 
 		ASSERT(batchData->dbApplier.present());
+		ASSERT(!batchData->dbApplier.get().isError()); // writeMutationsToDB actor cannot have error.
+		                                               // We cannot blindly retry because it is not idempodent
 
 		wait(batchData->dbApplier.get());
 
