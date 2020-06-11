@@ -47,6 +47,7 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/versions.h"
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
@@ -62,9 +63,6 @@
 #include "flow/TLSConfig.actor.h"
 #include "flow/Tracing.h"
 #include "flow/UnitTest.h"
-#include "flow/serialize.h"
-
-#include "fdbclient/versions.h"
 #include "flow/serialize.h"
 
 #ifdef WIN32
@@ -1541,7 +1539,7 @@ ACTOR Future<Optional<vector<StorageServerInterface>>> transactionalGetServerInt
 
 //If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key). Otherwise returns the shard containing key
 ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( Database cx, Key key, TransactionInfo info, bool isBackward = false ) {
-	state Span span("NA:getKeyLocation"_loc, { info.span->context });
+	state Span span("NAPI:getKeyLocation"_loc, { info.span->context });
 	if (isBackward) {
 		ASSERT( key != allKeys.begin && key <= allKeys.end );
 	} else {
@@ -1594,7 +1592,7 @@ Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& c
 }
 
 ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations_internal( Database cx, KeyRange keys, int limit, bool reverse, TransactionInfo info ) {
-	state Span span("NA:getKeyRangeLocations"_loc, { info.span->context });
+	state Span span("NAPI:getKeyRangeLocations"_loc, { info.span->context });
 	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocations.Before");
 
@@ -1696,7 +1694,7 @@ Future<Void> Transaction::warmRange(Database cx, KeyRange keys) {
 ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Database cx, TransactionInfo info, Reference<TransactionLogInfo> trLogInfo, TagSet tags )
 {
 	state Version ver = wait( version );
-	state Span span("NA:getValue"_loc, { info.span->context });
+	state Span span("NAPI:getValue"_loc, { info.span->context });
 	cx->validateVersion(ver);
 
 	loop {
@@ -1792,7 +1790,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 	wait(success(version));
 
 	state Optional<UID> getKeyID = Optional<UID>();
-	state Span span("NA:getKey"_loc, { info.span->context });
+	state Span span("NAPI:getKey"_loc, { info.span->context });
 	if( info.debugID.present() ) {
 		getKeyID = nondeterministicRandom()->randomUniqueID();
 
@@ -1859,7 +1857,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 }
 
 ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version, SpanID spanContext ) {
-	state Span span("NA:waitForCommittedVersion"_loc, { spanContext });
+	state Span span("NAPI:waitForCommittedVersion"_loc, { spanContext });
 	try {
 		loop {
 			choose {
@@ -1883,7 +1881,7 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version, Spa
 }
 
 ACTOR Future<Version> getRawVersion( Database cx, SpanID spanContext ) {
-	state Span span("NA:getRawVersion"_loc, { spanContext });
+	state Span span("NAPI:getRawVersion"_loc, { spanContext });
 	loop {
 		choose {
 			when ( wait( cx->onMasterProxiesChanged() ) ) {}
@@ -1903,7 +1901,7 @@ ACTOR Future<Void> readVersionBatcher(
 ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> value, Database cx,
                               TransactionInfo info, TagSet tags) {
 	state Version ver = wait( version );
-	state Span span(deterministicRandom()->randomUniqueID(), "NA:watchValue"_loc, { info.span->context });
+	state Span span(deterministicRandom()->randomUniqueID(), "NAPI:watchValue"_loc, { info.span->context });
 	cx->validateVersion(ver);
 	ASSERT(ver != latestVersion);
 
@@ -1988,7 +1986,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 	KeyRange keys, GetRangeLimits limits, bool reverse, TransactionInfo info, TagSet tags )
 {
 	state Standalone<RangeResultRef> output;
-	state Span span("NA:getExactRange"_loc, { info.span->context });
+	state Span span("NAPI:getExactRange"_loc, { info.span->context });
 
 	//printf("getExactRange( '%s', '%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
 	loop {
@@ -3158,7 +3156,7 @@ void Transaction::setupWatches() {
 ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> trLogInfo, CommitTransactionRequest req, Future<Version> readVersion, TransactionInfo info, Version* pCommittedVersion, Transaction* tr, TransactionOptions options) {
 	state TraceInterval interval( "TransactionCommit" );
 	state double startTime = now();
-	state Span span("NA:tryCommit"_loc, { info.span->context });
+	state Span span("NAPI:tryCommit"_loc, { info.span->context });
 	req.spanContext = span->context;
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );

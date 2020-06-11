@@ -44,13 +44,13 @@ struct CycleWorkload : TestWorkload {
 		transactions("Transactions"), retries("Retries"), totalLatency("Latency"),
 		tooOldRetries("Retries.too_old"), commitFailedRetries("Retries.commit_failed")
 	{
-		testDuration = getOption( options, "testDuration"_ref, 10.0 );
-		transactionsPerSecond = getOption( options, "transactionsPerSecond"_ref, 5000.0 ) / clientCount;
-		actorCount = getOption( options, "actorsPerClient"_ref, transactionsPerSecond / 5 );
-		nodeCount = getOption(options, "nodeCount"_ref, transactionsPerSecond * clientCount);
-		keyPrefix = unprintable( getOption(options, "keyPrefix"_ref, LiteralStringRef("")).toString() );
-		traceParentProbability = getOption(options, "traceParentProbability "_ref, 0.01);
-		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, LiteralStringRef("expectedRate"), 0.7);
+		testDuration = getOption( options, "testDuration"_sr, 10.0 );
+		transactionsPerSecond = getOption( options, "transactionsPerSecond"_sr, 5000.0 ) / clientCount;
+		actorCount = getOption( options, "actorsPerClient"_sr, transactionsPerSecond / 5 );
+		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
+		keyPrefix = unprintable( getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString() );
+		traceParentProbability = getOption(options, "traceParentProbability "_sr, 0.01);
+		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 	}
 
 	virtual std::string description() { return "CycleWorkload"; }

@@ -631,7 +631,7 @@ struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::tru
 };
 
 #define LiteralStringRef( str ) StringRef( (const uint8_t*)(str), sizeof((str))-1 )
-inline StringRef operator "" _ref(const char* str, size_t size) {
+inline StringRef operator "" _sr(const char* str, size_t size) {
 	return StringRef(reinterpret_cast<const uint8_t*>(str), size);
 }
 
