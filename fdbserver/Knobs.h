@@ -20,7 +20,6 @@
 
 #ifndef FDBSERVER_KNOBS_H
 #define FDBSERVER_KNOBS_H
-#include <sys/_types/_int64_t.h>
 #pragma once
 
 #include "flow/Knobs.h"
