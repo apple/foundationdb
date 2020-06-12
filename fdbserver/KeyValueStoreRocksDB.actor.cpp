@@ -353,7 +353,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (sRange.size() != rRange.size()) {
 			std::cout << "Begin: " << key.begin.printable() << " End: " << key.end.printable() << " Len: " << maxLength
 			          << "\n";
-			std::cout << "Wrong number of elements. Rocks: " << rRange.size() << "SQLite: " << sRange.size() << "\n";
+			std::cout << "Wrong number of elements. Rocks: " << rRange.size() << " SQLite: " << sRange.size() << "\n";
 		} else {
 			bool different = false;
 			for (int ii; ii < sRange.size(); ++ii) {
