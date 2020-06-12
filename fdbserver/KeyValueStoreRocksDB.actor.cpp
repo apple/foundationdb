@@ -337,20 +337,62 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return Void();
 	}
 
-	ACTOR static Future<Optional<Value>> compare(KeyRef key, Future<Optional<Value>> s, Future<Optional<Value>> r) {
+	ACTOR static Future<Optional<Value>> compare_read(KeyRef key, Future<Optional<Value>> s,
+	                                                  Future<Optional<Value>> r) {
 		state Optional<Value> sValue = wait(s);
 		Optional<Value> rValue = wait(r);
-		if (sValue != rValue) {
-			std::cout << "Mismatch: " << key.printable() << "\n";
-		}
-		if (sValue.present() && !rValue.present()) {
-			std::cout << "RocksDB missing: " << sValue.get().printable() << "\n";
-		} else if (!sValue.present() && rValue.present()) {
-			std::cout << "RocksDB added: " << rValue.get().printable() << "\n";
-		} else if (sValue.get() != rValue.get()) {
-			std::cout << "RocksDB: " << rValue.get().printable() << " SQL: " << sValue.get().printable() << "\n";
-		}
+		compare(key, sValue, rValue);
 		return sValue;
+	}
+
+	ACTOR static Future<Standalone<RangeResultRef>> compare_range(KeyRangeRef key, int maxLength,
+	                                                              Future<Standalone<RangeResultRef>> s,
+	                                                              Future<Standalone<RangeResultRef>> r) {
+		state Standalone<RangeResultRef> sRange = wait(s);
+		Standalone<RangeResultRef> rRange = wait(r);
+		if (sRange.size() != rRange.size()) {
+			std::cout << "Begin: " << key.begin.printable() << " End: " << key.end.printable() << " Len: " << maxLength
+			          << "\n";
+			std::cout << "Wrong number of elements. Rocks: " << rRange.size() << "SQLite: " << sRange.size() << "\n";
+		} else {
+			bool different = false;
+			for (int ii; ii < sRange.size(); ++ii) {
+				different = compare(key.begin, sRange[ii], rRange[ii]) || different;
+			}
+			if (different) {
+				std::cout << "Begin: " << key.begin.printable() << " End: " << key.end.printable()
+				          << " Len: " << maxLength << "\n";
+			}
+		}
+		return sRange;
+	}
+
+	static bool compare(KeyRef key, const Optional<Value>& s, const Optional<Value>& r) {
+		if (s == r) {
+			return false;
+		}
+		std::cout << "Mismatch: " << key.printable() << "\n";
+		if (s.present() && !r.present()) {
+			std::cout << "RocksDB missing: " << s.get().printable() << "\n";
+		} else if (!s.present() && r.present()) {
+			std::cout << "RocksDB added: " << r.get().printable() << "\n";
+		} else if (s.get() != r.get()) {
+			std::cout << "RocksDB: " << r.get().printable() << " SQL: " << s.get().printable() << "\n";
+		}
+		return true;
+	}
+
+	static bool compare(KeyRef key, const KeyValueRef& s, const KeyValueRef& r) {
+		if (s == r) {
+			return false;
+		}
+		if (s.key != r.key) {
+			std::cout << "Key mismatch. Rocks: " << r.key.printable() << " SQLite: " << s.key.printable() << "\n";
+		}
+		if (s.value != r.value) {
+			std::cout << "Value mismatch. Rocks: " << r.value.printable() << " SQLite: " << s.value.printable() << "\n";
+		}
+		return true;
 	}
 
 	Future<Void> onClosed() override { return join(closePromise.getFuture(), sqlLite->onClosed()); }
@@ -410,7 +452,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		auto a = new Reader::ReadValueAction(key, debugID);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
-		return compare(key, res, sqlLite->readValue(key, debugID));
+		return compare_read(key, res, sqlLite->readValue(key, debugID));
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) override {
@@ -424,7 +466,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
-		return res;
+		return compare_range(keys, rowLimit, res, sqlLite->readRange(keys, rowLimit, byteLimit));
 	}
 
 	StorageBytes getStorageBytes() override {
@@ -443,8 +485,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 IKeyValueStore* keyValueStoreRocksDB(std::string const& path, UID logID, KeyValueStoreType storeType, bool checkChecksums, bool checkIntegrity) {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
-	return new RocksDBKeyValueStore(
-	    path, logID, keyValueStoreSQLite(path, logID, KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity));
+	return new RocksDBKeyValueStore(path, logID,
+	                                keyValueStoreSQLite("/data/foundationdb/tmp", logID,
+	                                                    KeyValueStoreType::SSD_BTREE_V2, checkChecksums,
+	                                                    checkIntegrity));
 #else
 	TraceEvent(SevError, "RocksDBEngineInitFailure").detail("Reason", "Built without RocksDB");
 	ASSERT(false);
