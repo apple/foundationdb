@@ -20,7 +20,6 @@
 
 #ifndef FDBCLIENT_SYSTEMDATA_H
 #define FDBCLIENT_SYSTEMDATA_H
-#include <_types/_uint16_t.h>
 #pragma once
 
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"

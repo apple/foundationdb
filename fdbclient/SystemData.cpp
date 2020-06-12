@@ -25,7 +25,6 @@
 #include "flow/Arena.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/serialize.h"
-#include <_types/_uint16_t.h>
 
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
