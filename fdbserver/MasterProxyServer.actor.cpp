@@ -1276,14 +1276,14 @@ ACTOR Future<Void> commitBatch(
 		ASSERT(p.second.isReady());
 	}
 
+	// Let master know this commit version so that every other proxy can know.
+	wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
+
 	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
 	if( commitVersion > self->committedVersion.get() ) {
 		self->locked = lockedAfter;
 		self->metadataVersion = metadataVersionAfter;
 		self->committedVersion.set(commitVersion);
-
-		// Let master know this bigger commit version so that every other proxy can know.
-		wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
 	}
 
 	if (forceRecovery) {
@@ -1395,7 +1395,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	state vector<Future<GetReadVersionReply>> proxyVersions;
 	state Future<GetReadVersionReply> replyFromMasterFuture;
 	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
-		replyFromMasterFuture = commitData->master.getLiveCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID));
+		replyFromMasterFuture = commitData->master.getLiveCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::ProxyMasterVersionReply);
 	} else {
 		for (auto const& p : *otherProxies)
 			proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::TLogConfirmRunningReply)));
