@@ -55,7 +55,7 @@ public:
 			// copy must be performed in two parts
 			auto partOneSize = r.capacity() - r.begin;
 			auto partTwo = std::copy(r.arr + r.begin, r.arr + r.capacity(), arr);
-			std::copy(r.arr, r.arr + (r.end & r.mask), arr + partOneSize);
+			std::copy(r.arr, r.arr + (r.end & r.mask), partTwo);
 		}
 	}
 
