@@ -155,18 +155,21 @@ struct GetCommitVersionReply {
 
 struct GetCommitVersionRequest {
 	constexpr static FileIdentifier file_identifier = 16683181;
+	SpanID spanContext;
 	uint64_t requestNum;
 	uint64_t mostRecentProcessedRequestNum;
 	UID requestingProxy;
 	ReplyPromise<GetCommitVersionReply> reply;
 
 	GetCommitVersionRequest() { }
-	GetCommitVersionRequest(uint64_t requestNum, uint64_t mostRecentProcessedRequestNum, UID requestingProxy)
-		: requestNum(requestNum), mostRecentProcessedRequestNum(mostRecentProcessedRequestNum), requestingProxy(requestingProxy) {}
+	GetCommitVersionRequest(SpanID spanContext, uint64_t requestNum, uint64_t mostRecentProcessedRequestNum,
+	                        UID requestingProxy)
+	  : spanContext(spanContext), requestNum(requestNum), mostRecentProcessedRequestNum(mostRecentProcessedRequestNum),
+	    requestingProxy(requestingProxy) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply);
+		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply, spanContext);
 	}
 };
 
