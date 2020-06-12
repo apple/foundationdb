@@ -54,7 +54,7 @@ public:
 			// but if r.end >= r.capacity(), the deque wraps around so the
 			// copy must be performed in two parts
 			auto partOneSize = r.capacity() - r.begin;
-			std::copy(r.arr + r.begin, r.arr + r.begin + partOneSize, arr);
+			auto partTwo = std::copy(r.arr + r.begin, r.arr + r.capacity(), arr);
 			std::copy(r.arr, r.arr + (r.end & r.mask), arr + partOneSize);
 		}
 	}
