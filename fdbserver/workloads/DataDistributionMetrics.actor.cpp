@@ -53,9 +53,11 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 			state int i;
 			try {
 				for (i = 0; i < self->readPerTx; ++i)
-					wait(success(tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount))))); // read
+					wait(success(
+					    tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount))))); // read
 				for (i = 0; i < self->writePerTx; ++i)
-					tr.set(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount)), getRandomValue()); // write
+					tr.set(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount)),
+					       getRandomValue()); // write
 				wait(tr.commit());
 				++self->commits;
 			} catch (Error& e) {
@@ -74,10 +76,17 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 				int endIndex = deterministicRandom()->randomInt(startIndex + 1, self->nodeCount);
 				state Key startKey = self->keyForIndex(startIndex);
 				state Key endKey = self->keyForIndex(endIndex);
-				// lastLessOrEqual
-				state KeySelector begin = KeySelectorRef(startKey.withPrefix(ddStatsRange.begin, startKey.arena()), true, 0);
+				// Find the last key <= startKey and use as the begin of the range. Since "Key()" is always the starting point, this key selector will never do cross_module_range_read.
+				// In addition, the first key in the result will be the last one <= startKey (Condition #1)
+				state KeySelector begin =
+				    KeySelectorRef(startKey.withPrefix(ddStatsRange.begin, startKey.arena()), true, 0);
+				// Find the last key less than endKey, move forward 2 keys, and use this key as the (exclusive) end of
+				// the range. If we didn't read through the end of the range, then the second last key
+				// in the result will be the last key less than endKey. (Condition #2)
 				state KeySelector end = KeySelectorRef(endKey.withPrefix(ddStatsRange.begin, endKey.arena()), false, 2);
-				Standalone<RangeResultRef> result = wait(tr->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->SHARD_COUNT_LIMIT)));
+				Standalone<RangeResultRef> result =
+				    wait(tr->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->SHARD_COUNT_LIMIT)));
+				// Condition #1 and #2 can be broken if multiple rpc calls happened in one getRange
 				if (result.size() > 1) {
 					if (result[0].key <= begin.getKey() && result[1].key > begin.getKey()) {
 						TraceEvent(SevDebug, "DDMetricsConsistencyTest")
@@ -94,24 +103,24 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 						    .detail("SecondKey", result[1].key.toString())
 						    .detail("BeginKeySelector", begin.toString());
 					}
-					if (result[result.size()-1].key >= end.getKey() && result[result.size()-2].key < end.getKey()) {
+					if (result[result.size() - 1].key >= end.getKey() && result[result.size() - 2].key < end.getKey()) {
 						TraceEvent(SevDebug, "DDMetricsConsistencyTest")
 						    .detail("Size", result.size())
-						    .detail("LastKey", result[result.size()-1].key.toString())
-						    .detail("SecondLastKey", result[result.size()-2].key.toString())
+						    .detail("LastKey", result[result.size() - 1].key.toString())
+						    .detail("SecondLastKey", result[result.size() - 2].key.toString())
 						    .detail("EndKeySelector", end.toString());
 					} else {
 						++self->errors;
 						TraceEvent(SevError, "TestFailure")
 						    .detail("Reason", "Result mismatches the given end selector")
 						    .detail("Size", result.size())
-						    .detail("FirstKey", result[result.size()-1].key.toString())
-						    .detail("SecondKey", result[result.size()-2].key.toString())
+						    .detail("FirstKey", result[result.size() - 1].key.toString())
+						    .detail("SecondKey", result[result.size() - 2].key.toString())
 						    .detail("EndKeySelector", end.toString());
 					}
 				}
 			} catch (Error& e) {
-				// Ignore timed_out error and cross_module_read, the end key may potentially point outside the range
+				// Ignore timed_out error and cross_module_read, the end key selector may read through the end
 				if (e.code() == error_code_timed_out || e.code() == error_code_special_keys_cross_module_read) continue;
 				TraceEvent(SevDebug, "FailedToRetrieveDDMetrics").detail("Error", e.what());
 				wait(tr->onError(e));
@@ -143,11 +152,9 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 			ASSERT(result.size());
 			state int idx = deterministicRandom()->randomInt(0, result.size());
 			Standalone<RangeResultRef> res = wait(tr->getRange(
-				KeyRangeRef(result[idx].key, idx + 1 < result.size() ? result[idx + 1].key : ddStatsRange.end),
-				100));
-			ASSERT_WE_THINK(res.size() == 1 &&
-							res[0] == result[idx]); // It works good now. However, not sure in any
-													// case of data-distribution, the number changes
+			    KeyRangeRef(result[idx].key, idx + 1 < result.size() ? result[idx + 1].key : ddStatsRange.end), 100));
+			ASSERT_WE_THINK(res.size() == 1 && res[0] == result[idx]); // It works good now. However, not sure in any
+			                                                           // case of data-distribution, the number changes
 		} catch (Error& e) {
 			TraceEvent(SevError, "FailedToRetrieveDDMetrics").detail("Error", e.what());
 			throw;

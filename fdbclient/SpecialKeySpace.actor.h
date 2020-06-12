@@ -38,21 +38,22 @@ public:
 	// Each derived class only needs to implement this simple version of getRange
 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
 
-	explicit SpecialKeyRangeBaseImpl(KeyRangeRef kr, bool async = false) : range(kr), async(async) {}
+	explicit SpecialKeyRangeBaseImpl(KeyRangeRef kr) : range(kr) {}
 	KeyRangeRef getKeyRange() const { return range; }
-	bool isAsync() const { return async; }
+	// true if the getRange call can emit more than one rpc calls,
+	// we cache the results to keep consistency in the same getrange lifetime
+	// TODO : give this function a more descriptive name
+	virtual bool isAsync() const { return false; }
 
 	virtual ~SpecialKeyRangeBaseImpl() {}
 
 protected:
 	KeyRange range; // underlying key range for this function
-	bool async; // true if the range read emits a rpc call, thus we cache the results to keep consistency in the same
-	            // range read
 };
 
 class SpecialKeyRangeAsyncImpl : public SpecialKeyRangeBaseImpl {
 public:
-	explicit SpecialKeyRangeAsyncImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr, true) {}
+	explicit SpecialKeyRangeAsyncImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
 
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
 
@@ -62,17 +63,17 @@ public:
 		return getRangeAsyncActor(this, ryw, kr, cache);
 	}
 
+	bool isAsync() const override { return true; }
+
 	ACTOR static Future<Standalone<RangeResultRef>> getRangeAsyncActor(const SpecialKeyRangeBaseImpl* skrAyncImpl,
 	                                                                   ReadYourWritesTransaction* ryw, KeyRangeRef kr,
 	                                                                   Optional<Standalone<RangeResultRef>>* cache) {
 		ASSERT(skrAyncImpl->getKeyRange().contains(kr));
-		if (cache == nullptr) {
-			// a nullptr means we want to read directly and do not need to cache them
-			Standalone<RangeResultRef> result = wait(skrAyncImpl->getRange(ryw, kr));
-			return result;
-		} else if (!cache->present()) {
+		ASSERT(cache != nullptr);
+		if (!cache->present()) {
 			// For simplicity, every time we need to cache, we read the whole range
-			// TODO : improvements are needed if we have expensive rpc calls
+			// Although sometimes the range can be narrowed,
+			// there is not a general way to do it in complicated scenarios
 			Standalone<RangeResultRef> result_ = wait(skrAyncImpl->getRange(ryw, skrAyncImpl->getKeyRange()));
 			*cache = result_;
 		}
