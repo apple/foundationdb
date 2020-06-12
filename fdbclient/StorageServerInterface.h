@@ -72,9 +72,8 @@ struct StorageServerInterface {
 	RequestStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType;
 	RequestStream<struct WatchValueRequest> watchValue;
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
-	bool isCacheServer;
-	explicit StorageServerInterface(UID uid) : uniqueID( uid ), isCacheServer(false) {}
-	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ), isCacheServer(false) {}
+	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
+	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
 	NetworkAddress stableAddress() const { return getValue.getEndpoint().getStableAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return getValue.getEndpoint().addresses.secondaryAddress; }
@@ -86,7 +85,7 @@ struct StorageServerInterface {
 		//To change this serialization, ProtocolVersion::ServerListValue must be updated, and downgrades need to be considered
 
 		if (ar.protocolVersion().hasSmallEndpoints()) {
-			serializer(ar, uniqueID, locality, getValue, isCacheServer);
+			serializer(ar, uniqueID, locality, getValue);
 			if( Ar::isDeserializing ) {
 				getKey = RequestStream<struct GetKeyRequest>( getValue.getEndpoint().getAdjustedEndpoint(1) );
 				getKeyValues = RequestStream<struct GetKeyValuesRequest>( getValue.getEndpoint().getAdjustedEndpoint(2) );
@@ -108,7 +107,6 @@ struct StorageServerInterface {
 			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 					splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
-			if (ar.protocolVersion().hasCacheRole()) serializer(ar, isCacheServer);
 		}
 	}
 	bool operator == (StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
