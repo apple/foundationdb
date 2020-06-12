@@ -1520,6 +1520,11 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		}
 	}
 
+	MutationRef recoveryVersionMutation;
+	recoveryVersionMutation.type = MutationRef::SetVersionstampedValue;
+	recoveryVersionMutation.param1 = recoveryVersionsKey(recoveryCommitRequest.arena, self->lastEpochEnd);
+	recoveryVersionMutation.param2 = emptyVersionStampValue;
+	recoveryCommitRequest.transaction.mutations.push_back(recoveryCommitRequest.arena, recoveryVersionMutation);
 	applyMetadataMutations(self->dbgid, recoveryCommitRequest.arena, tr.mutations.slice(mmApplied, tr.mutations.size()), self->txnStateStore, nullptr, nullptr);
 	mmApplied = tr.mutations.size();
 

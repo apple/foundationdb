@@ -20,6 +20,7 @@
 
 #ifndef FDBSERVER_KNOBS_H
 #define FDBSERVER_KNOBS_H
+#include <sys/_types/_int64_t.h>
 #pragma once
 
 #include "flow/Knobs.h"
@@ -288,6 +289,8 @@ public:
 	int PROXY_COMPUTE_BUCKETS;
 	double PROXY_COMPUTE_GROWTH_RATE;
 	int TXN_STATE_SEND_AMOUNT;
+	double TXN_STATE_CLEANER_DELAY;
+	int64_t TXN_STATE_LIFE_VERSIONS;
 
 	// Master Server
 	double COMMIT_SLEEP_TIME;

@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#include "flow/IRandom.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
 	#define FDBCLIENT_NATIVEAPI_ACTOR_G_H
 	#include "fdbclient/NativeAPI.actor.g.h"
@@ -131,6 +132,8 @@ struct TransactionOptions {
 	bool firstInBatch : 1;
 	bool includePort : 1;
 	bool reportConflictingKeys : 1;
+	bool isIdempotent;
+	bool retryUnknownCommit;
 
 	TransactionPriority priority;
 
@@ -146,6 +149,7 @@ struct TransactionOptions {
 class ReadYourWritesTransaction; // workaround cyclic dependency
 struct TransactionInfo {
 	Optional<UID> debugID;
+	UID txID;
 	TaskPriority taskID;
 	bool useProvisionalProxies;
 	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
@@ -153,7 +157,8 @@ struct TransactionInfo {
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
-	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
+	explicit TransactionInfo(TaskPriority taskID)
+	  : txID(deterministicRandom()->randomUniqueID()), taskID(taskID), useProvisionalProxies(false) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {

@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_SYSTEMDATA_H
 #define FDBCLIENT_SYSTEMDATA_H
+#include <_types/_uint16_t.h>
 #pragma once
 
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
@@ -394,6 +395,21 @@ std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& );
 // All mutations done to this range are blindly copied into txnStateStore.
 // Used to create artifically large txnStateStore instances in testing.
 extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
+
+// Transaction idempotency
+extern const KeyRef txStateLifetime;
+extern const KeyRangeRef transactionIDs;
+extern const KeyRef transactionIDMinVersion;
+extern const KeyRangeRef recoveryVersions;
+extern const KeyRef emptyVersionStampValue;
+
+extern Key recoveryVersionsKey(Version v);
+extern KeyRef recoveryVersionsKey(Arena& arena, Version v);
+extern Version decodeRecoveryVersionsValue(ValueRef v);
+extern Key keyForTransaction(Version readVersion, UID id);
+extern Key subkeyForTransactionVersion(Version readVersion);
+extern std::pair<Version, uint16_t> decodeTxVersion(ValueRef value);
+extern Version decodeMinTxVersionValue(ValueRef value);
 
 #pragma clang diagnostic pop
 

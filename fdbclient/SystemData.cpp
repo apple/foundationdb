@@ -25,6 +25,7 @@
 #include "flow/Arena.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/serialize.h"
+#include <_types/_uint16_t.h>
 
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
@@ -1059,3 +1060,47 @@ const KeyRangeRef testOnlyTxnStateStorePrefixRange(
     LiteralStringRef("\xff/TESTONLYtxnStateStore/"),
     LiteralStringRef("\xff/TESTONLYtxnStateStore0")
 );
+
+const KeyRef txStateLifetime = LiteralStringRef("\xff/conf/tx-state-lifetime");
+const KeyRangeRef transactionIDs(LiteralStringRef("\xff\x02/txID/"), LiteralStringRef("\xff\x02/txID0"));
+const KeyRef transactionIDMinVersion = LiteralStringRef("\xff\x02/txState/minVersion");
+const KeyRangeRef recoveryVersions(LiteralStringRef("\xff\x02/txState/recoveries/"),
+                                LiteralStringRef("\xff\x02/txState/recoveries0"));
+const KeyRef emptyVersionStampValue = LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
+
+Key keyForTransaction(Version readVersion, UID id) {
+	BinaryWriter wr(Unversioned());
+	wr << readVersion;
+	wr.serializeBinaryItem('/');
+	wr << id;
+	return wr.toValue().withPrefix(transactionIDs.begin);
+}
+
+Key subkeyForTransactionVersion(Version readVersion) {
+	BinaryWriter wr(Unversioned());
+	wr << readVersion;
+	return wr.toValue().withPrefix(transactionIDs.begin);
+}
+
+std::pair<Version, uint16_t> decodeTxVersion(ValueRef value) {
+	ASSERT(value.size() >= 10);
+	std::pair<Version, uint16_t> res;
+	BinaryReader reader(value, Unversioned());
+	reader >> res.first >> res.second;
+	return res;
+}
+Version decodeMinTxVersionValue(ValueRef value) {
+	return BinaryReader::fromStringRef<Version>(value, IncludeVersion());
+}
+
+Key recoveryVersionsKey(Version v) {
+	return recoveryVersions.begin.withSuffix(BinaryWriter::toValue(v, Unversioned()));
+}
+
+KeyRef recoveryVersionsKey(Arena& arena, Version v) {
+	return recoveryVersions.begin.withSuffix(BinaryWriter::toValue(v, Unversioned()), arena);
+}
+
+Value recoveryVersionsValue(Version v) {
+	return BinaryWriter::toValue(v, IncludeVersion());
+}

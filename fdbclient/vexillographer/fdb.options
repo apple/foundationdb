@@ -203,6 +203,8 @@ description is not currently required but encouraged.
             description="Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction."/>
     <Option name="read_ahead_disable" code="52"
             description="Deprecated" />
+    <Option name="transaction_is_idempotent" code="53" description="Marks this transaction as idempotent"/>
+    <Option name="retry_on_unknown_result" code="54" description="Will retry transactions if it doesn't know whether the transaction committed successfully"/>
     <Option name="durability_datacenter" code="110" />
     <Option name="durability_risky" code="120" />
     <Option name="durability_dev_null_is_web_scale" code="130"
