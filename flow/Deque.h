@@ -50,7 +50,7 @@ public:
 		if (r.end < r.capacity()) {
 			std::copy(r.arr + r.begin, r.arr + r.begin + r.size(), arr);
 		} else {
-			// Mask is used for wrapping, so r.end is always >= r.begin,
+			// r.begin is always < capacity(), and r.end is always >= r.begin.  Mask is used for wrapping r.end.
 			// but if r.end >= r.capacity(), the deque wraps around so the
 			// copy must be performed in two parts
 			auto partOneSize = r.capacity() - r.begin;
