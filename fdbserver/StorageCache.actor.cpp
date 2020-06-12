@@ -2019,7 +2019,7 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, R
 	state StorageCacheUpdater updater(self.lastVersionWithData);
 	self.updater = &updater;
 
-	//TraceEvent("StorageCache_CacheServerInterface", self.thisServerID).detail("UID", ssi.uniqueID).detail("IsCacheServer", ssi.isCacheServer);
+	//TraceEvent("StorageCache_CacheServerInterface", self.thisServerID).detail("UID", ssi.uniqueID);
 
 	// This helps identify the private mutations meant for this cache server
 	self.ck = cacheKeysPrefixFor( id ).withPrefix(systemKeys.begin);  // FFFF/02cacheKeys/[this server]/
