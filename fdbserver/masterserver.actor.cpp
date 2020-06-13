@@ -170,7 +170,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		recoveryTransactionVersion;  // The first version in this epoch
 	double lastCommitTime;
 
-	Version liveCommittedVersion; // The live committed version reported by proxies.
+	Version liveCommittedVersion; // The largest live committed version reported by proxies.
 	bool databaseLocked;
 	Optional<Value> proxyMetadataVersion;
 
