@@ -151,7 +151,7 @@ private:
 		if(g_network->isSimulated()) {
 			return roleInfoMap[g_network->getLocalAddress()];
 		}
-		
+
 		return roleInfo;
 	}
 
@@ -202,7 +202,7 @@ public:
 	Reference<BarrierList> barriers;
 
 	struct WriterThread : IThreadPoolReceiver {
-		WriterThread( Reference<BarrierList> barriers, Reference<ITraceLogWriter> logWriter, Reference<ITraceLogFormatter> formatter ) 
+		WriterThread( Reference<BarrierList> barriers, Reference<ITraceLogWriter> logWriter, Reference<ITraceLogFormatter> formatter )
 			: barriers(barriers), logWriter(logWriter), formatter(formatter) {}
 
 		virtual void init() {}
@@ -1010,7 +1010,7 @@ TraceEvent& TraceEvent::setMaxFieldLength(int maxFieldLength) {
 	ASSERT(!logged);
 	if(maxFieldLength == 0) {
 		this->maxFieldLength = FLOW_KNOBS ? FLOW_KNOBS->MAX_TRACE_FIELD_LENGTH : 495;
-	} 
+	}
 	else {
 		this->maxFieldLength = maxFieldLength;
 	}
@@ -1022,7 +1022,7 @@ TraceEvent& TraceEvent::setMaxEventLength(int maxEventLength) {
 	ASSERT(!logged);
 	if(maxEventLength == 0) {
 		this->maxEventLength = FLOW_KNOBS ? FLOW_KNOBS->MAX_TRACE_EVENT_LENGTH : 4000;
-	} 
+	}
 	else {
 		this->maxEventLength = maxEventLength;
 	}
@@ -1197,7 +1197,7 @@ void TraceBatch::dump() {
 		g_traceLog.writeEvent(buggifyBatch[i].fields, "", false);
 	}
 
-	g_traceLog.flush();
+	onMainThreadVoid([](){ g_traceLog.flush(); }, nullptr);
 	eventBatch.clear();
 	attachBatch.clear();
 	buggifyBatch.clear();

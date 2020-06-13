@@ -891,7 +891,7 @@ struct CLIOptions {
 	double fileIoTimeout = 0.0;
 	bool fileIoWarnOnly = false;
 	uint64_t rsssize = -1;
-	std::vector<std::string> blobCredentials; // used for fast restore workers
+	std::vector<std::string> blobCredentials; // used for fast restore workers & backup workers
 	const char* blobCredsFromENV = nullptr;
 
 	Reference<ClusterConnectionFile> connectionFile;
@@ -1812,6 +1812,16 @@ int main(int argc, char* argv[]) {
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator.run();
 		} else if (role == FDBD) {
+			// Update the global blob credential files list so that both fast
+			// restore workers and backup workers can access blob storage.
+			std::vector<std::string>* pFiles =
+			    (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
+			if (pFiles != nullptr) {
+				for (auto& f : opts.blobCredentials) {
+					pFiles->push_back(f);
+				}
+			}
+
 			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
 			if (opts.processClass == ProcessClass::FastRestoreClass) {
 				printf("Run as fast restore worker\n");
@@ -1819,15 +1829,6 @@ int main(int argc, char* argv[]) {
 				auto dataFolder = opts.dataFolder;
 				if (!dataFolder.size())
 					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
-
-				// Update the global blob credential files list
-				std::vector<std::string>* pFiles =
-				    (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
-				if (pFiles != nullptr) {
-					for (auto& f : opts.blobCredentials) {
-						pFiles->push_back(f);
-					}
-				}
 
 				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 				actors.push_back(restoreWorker(opts.connectionFile, opts.localities, dataFolder));

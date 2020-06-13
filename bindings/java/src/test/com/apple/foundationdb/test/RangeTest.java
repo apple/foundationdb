@@ -64,7 +64,9 @@ public class RangeTest {
 
 			System.out.println("First transaction was successful");
 
-			checkRange(db.createTransaction());
+			try(Transaction tr = db.createTransaction()) {
+				checkRange(tr);
+			}
 
 			long version;
 			try(Transaction tr = db.createTransaction()) {
@@ -184,7 +186,6 @@ public class RangeTest {
 			String value = new String(kv.getValue());
 			System.out.println(" -- " + key + " -> " + value);
 		}
-
 	}
 
 	private RangeTest() {}
