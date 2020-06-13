@@ -21,6 +21,7 @@
 #include <math.h>
 
 #include "flow/IRandom.h"
+#include "flow/Tracing.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -376,12 +377,16 @@ struct ConsistencyCheckWorkload : TestWorkload
 		state Key begin = keyServersKeys.begin;
 		state Key end = keyServersKeys.end;
 		state int limitKeyServers = BUGGIFY ? 1 : 100;
+		state Span span(deterministicRandom()->randomUniqueID(), "WL:ConsistencyCheck"_loc);
 
 		while (begin < end) {
 			state Reference<ProxyInfo> proxyInfo = wait(cx->getMasterProxiesFuture(false));
 			keyServerLocationFutures.clear();
 			for (int i = 0; i < proxyInfo->size(); i++)
-				keyServerLocationFutures.push_back(proxyInfo->get(i, &MasterProxyInterface::getKeyServersLocations).getReplyUnlessFailedFor(GetKeyServerLocationsRequest(begin, end, limitKeyServers, false, Arena()), 2, 0));
+				keyServerLocationFutures.push_back(
+				    proxyInfo->get(i, &MasterProxyInterface::getKeyServersLocations)
+				        .getReplyUnlessFailedFor(
+				            GetKeyServerLocationsRequest(span->context, begin, end, limitKeyServers, false, Arena()), 2, 0));
 
 			state bool keyServersInsertedForThisIteration = false;
 			choose {
@@ -708,6 +713,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			state vector<UID> storageServers = (isRelocating) ? destStorageServers : sourceStorageServers;
 			state vector<StorageServerInterface> storageServerInterfaces;
 
+			//TraceEvent("ConsistencyCheck_GetStorageInfo").detail("StorageServers", storageServers.size());
 			loop {
 				try {
 					vector< Future< Optional<Value> > > serverListEntries;
@@ -720,6 +726,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 						else if (self->performQuiescentChecks)
 							self->testFailure("/FF/serverList changing in a quiescent database");
 					}
+
 					break;
 				}
 				catch(Error &e) {
@@ -917,7 +924,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 							else if(!isRelocating)
 							{
 								TraceEvent("ConsistencyCheck_StorageServerUnavailable").suppressFor(1.0).detail("StorageServer", storageServers[j]).detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end))
-									.detail("Address", storageServerInterfaces[j].address()).detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token);
+									.detail("Address", storageServerInterfaces[j].address()).detail("UID", storageServerInterfaces[j].id()).detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token);
 
 								//All shards should be available in quiscence
 								if(self->performQuiescentChecks)

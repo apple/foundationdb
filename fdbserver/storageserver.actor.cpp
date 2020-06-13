@@ -21,6 +21,9 @@
 #include <cinttypes>
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
+#include "flow/Arena.h"
+#include "flow/IRandom.h"
+#include "flow/Tracing.h"
 #include "flow/IndexedSet.h"
 #include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
@@ -712,7 +715,7 @@ public:
 	}
 
 	template<class Request, class HandleFunction>
-	Future<Void> readGuard(const Request& request, const HandleFunction& fun) {
+	Future<Void> readGuard(const Span& parentSpan, const Request& request, const HandleFunction& fun) {
 		auto rate = currentRate();
 		if (rate < SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD && deterministicRandom()->random01() > std::max(SERVER_KNOBS->STORAGE_DURABILITY_LAG_MIN_RATE, rate/SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD)) {
 			//request.error = future_version();
@@ -720,7 +723,7 @@ public:
 			++counters.readsRejected;
 			return Void();
 		}
-		return fun(this, request);
+		return fun(this, request, parentSpan);
 	}
 };
 
@@ -846,7 +849,8 @@ updateProcessStats(StorageServer* self)
 #pragma region Queries
 #endif
 
-ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version) {
+ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanID spanContext) {
+	state Span span("SS.WaitForVersion"_loc, { spanContext });
 	choose {
 		when(wait(data->version.whenAtLeast(version))) {
 			// FIXME: A bunch of these can block with or without the following delay 0.
@@ -865,7 +869,7 @@ ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version) 
 	}
 }
  
-Future<Version> waitForVersion(StorageServer* data, Version version) {
+Future<Version> waitForVersion(StorageServer* data, Version version, SpanID spanContext) {
 	if (version == latestVersion) {
 		version = std::max(Version(1), data->version.get());
 	}
@@ -883,7 +887,7 @@ Future<Version> waitForVersion(StorageServer* data, Version version) {
 	if (deterministicRandom()->random01() < 0.001) {
 		TraceEvent("WaitForVersion1000x");
 	}
-	return waitForVersionActor(data, version);
+	return waitForVersionActor(data, version, spanContext);
 }
 
 ACTOR Future<Version> waitForVersionNoTooOld( StorageServer* data, Version version ) {
@@ -907,7 +911,7 @@ ACTOR Future<Version> waitForVersionNoTooOld( StorageServer* data, Version versi
 	}
 }
 
-ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
+ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req, Span span ) {
 	state int64_t resultSize = 0;
 
 	try {
@@ -924,7 +928,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
 
 		state Optional<Value> v;
-		state Version version = wait( waitForVersion( data, req.version ) );
+		state Version version = wait( waitForVersion( data, req.version, req.spanContext ) );
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
@@ -982,7 +986,12 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
-		GetValueReply reply(v);
+		// Check if the desired key might be cached
+		auto cached = data->cachedRangeMap[req.key];
+		//if (cached)
+		//	TraceEvent(SevDebug, "SSGetValueCached").detail("Key", req.key);
+
+		GetValueReply reply(v, cached);
 		reply.penalty = data->getPenalty();
 		req.reply.send(reply);
 	} catch (Error& e) {
@@ -1003,7 +1012,8 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 	return Void();
 };
 
-ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req ) {
+ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req, SpanID parent ) {
+	state Span span("SS:WatchValueImpl"_loc, { parent });
 	try {
 		++data->counters.watchQueries;
 
@@ -1018,9 +1028,11 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 			try {
 				state Version latest = data->data().latestVersion;
 				state Future<Void> watchFuture = data->watches.onChange(req.key);
-				GetValueRequest getReq( req.key, latest, req.tags, req.debugID );
-				state Future<Void> getValue = getValueQ( data, getReq ); //we are relying on the delay zero at the top of getValueQ, if removed we need one here
+				state Span getValueSpan(deterministicRandom()->randomUniqueID(), "SS:GetValue"_loc, { span->context });
+				GetValueRequest getReq( getValueSpan->context, req.key, latest, req.tags, req.debugID );
+				state Future<Void> getValue = getValueQ( data, getReq, span ); //we are relying on the delay zero at the top of getValueQ, if removed we need one here
 				GetValueReply reply = wait( getReq.reply.getFuture() );
+				getValueSpan.reset();
 				//TraceEvent("WatcherCheckValue").detail("Key",  req.key  ).detail("Value",  req.value  ).detail("CurrentValue",  v  ).detail("Ver", latest);
 
 				if(reply.error.present()) {
@@ -1067,8 +1079,8 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 	return Void();
 }
 
-ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req ) {
-	state Future<Void> watch = watchValue_impl( data, req );
+ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req, Span span ) {
+	state Future<Void> watch = watchValue_impl( data, req, span->context );
 	state double startTime = now();
 
 	loop {
@@ -1173,7 +1185,7 @@ void merge( Arena& arena, VectorRef<KeyValueRef, VecSerStrategy::String>& output
 
 // If limit>=0, it returns the first rows in the range (sorted ascending), otherwise the last rows (sorted descending).
 // readRange has O(|result|) + O(log |data|) cost
-ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version, KeyRange range, int limit, int* pLimitBytes ) {
+ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version, KeyRange range, int limit, int* pLimitBytes, Span parentSpan ) {
 	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
 	state StorageServer::VersionedData::iterator vCurrent = view.end();
@@ -1181,6 +1193,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	state KeyRef readEnd;
 	state Key readBeginTemp;
 	state int vCount = 0;
+	state Span span("SS:readRange"_loc, parentSpan);
 
 	// for caching the storage queue results during the first PTree traversal
 	state VectorRef<KeyValueRef> resultCache;
@@ -1190,11 +1203,14 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	state int pos = 0;
 
 
-	// Check if the desired key-range intersects the cached key-ranges
-	// TODO Find a more efficient way to do it
-	// TODO Also need this check in single key/value lookup
-	auto cached = data->cachedRangeMap.intersectingRanges(range);
-	result.cached = (cached.begin() != cached.end());
+	// Check if the desired key-range is cached
+	auto containingRange = data->cachedRangeMap.rangeContaining(range.begin);
+	if (containingRange.value() && containingRange->range().end >= range.end) {
+		//TraceEvent(SevDebug, "SSReadRangeCached").detail("Size",data->cachedRangeMap.size()).detail("ContainingRangeBegin",containingRange->range().begin).detail("ContainingRangeEnd",containingRange->range().end).
+		//	detail("Begin", range.begin).detail("End",range.end);
+		result.cached = true;
+	} else
+		result.cached = false;
 
 	// if (limit >= 0) we are reading forward, else backward
 	if (limit >= 0) {
@@ -1349,7 +1365,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 //	return sel.getKey() >= range.begin && (sel.isBackward() ? sel.getKey() <= range.end : sel.getKey() < range.end);
 //}
 
-ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version version, KeyRange range, int* pOffset)
+ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version version, KeyRange range, int* pOffset, SpanID parentSpan)
 // Attempts to find the key indicated by sel in the data at version, within range.
 // Precondition: selectorInRange(sel, range)
 // If it is found, offset is set to 0 and a key is returned which falls inside range.
@@ -1366,6 +1382,7 @@ ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version vers
 	state int sign = forward ? +1 : -1;
 	state bool skipEqualKey = sel.orEqual == forward;
 	state int distance = forward ? sel.offset : 1-sel.offset;
+	state Span span("SS.findKey"_loc, { parentSpan });
 
 	//Don't limit the number of bytes if this is a trivial key selector (there will be at most two items returned from the read range in this case)
 	state int maxBytes;
@@ -1374,14 +1391,18 @@ ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version vers
 	else
 		maxBytes = BUGGIFY ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
 
-	state GetKeyValuesReply rep = wait( readRange( data, version, forward ? KeyRangeRef(sel.getKey(), range.end) : KeyRangeRef(range.begin, keyAfter(sel.getKey())), (distance + skipEqualKey)*sign, &maxBytes ) );
+	state GetKeyValuesReply rep = wait(
+	    readRange(data, version,
+	              forward ? KeyRangeRef(sel.getKey(), range.end) : KeyRangeRef(range.begin, keyAfter(sel.getKey())),
+	              (distance + skipEqualKey) * sign, &maxBytes, span));
 	state bool more = rep.more && rep.data.size() != distance + skipEqualKey;
 
 	//If we get only one result in the reverse direction as a result of the data being too large, we could get stuck in a loop
 	if(more && !forward && rep.data.size() == 1) {
 		TEST(true); //Reverse key selector returned only one result in range read
 		maxBytes = std::numeric_limits<int>::max();
-		GetKeyValuesReply rep2 = wait( readRange( data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes ) );
+		GetKeyValuesReply rep2 =
+		    wait(readRange(data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes, span));
 		rep = rep2;
 		more = rep.more && rep.data.size() != distance + skipEqualKey;
 		ASSERT(rep.data.size() == 2 || !more);
@@ -1436,7 +1457,7 @@ KeyRange getShardKeyRange( StorageServer* data, const KeySelectorRef& sel )
 	return i->range();
 }
 
-ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
+ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req, Span span )
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large selector offset prevents
 // all data from being read in one range read
 {
@@ -1461,7 +1482,7 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 	try {
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
-		state Version version = wait( waitForVersion( data, req.version ) );
+		state Version version = wait( waitForVersion( data, req.version, span->context ) );
 
 		state uint64_t changeCounter = data->shardChangeCounter;
 //		try {
@@ -1479,8 +1500,8 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 
 		state int offset1;
 		state int offset2;
-		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual() ? Future<Key>(req.begin.getKey()) : findKey( data, req.begin, version, shard, &offset1 );
-		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual() ? Future<Key>(req.end.getKey()) : findKey( data, req.end, version, shard, &offset2 );
+		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual() ? Future<Key>(req.begin.getKey()) : findKey( data, req.begin, version, shard, &offset1, span->context );
+		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual() ? Future<Key>(req.end.getKey()) : findKey( data, req.end, version, shard, &offset2, span->context );
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 		if( req.debugID.present() )
@@ -1514,7 +1535,7 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
 
-			GetKeyValuesReply _r = wait( readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes) );
+			GetKeyValuesReply _r = wait( readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span) );
 			GetKeyValuesReply r = _r;
 
 			if( req.debugID.present() )
@@ -1576,7 +1597,7 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 	return Void();
 }
 
-ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req ) {
+ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req, Span span ) {
 	state int64_t resultSize = 0;
 
 	++data->counters.getKeyQueries;
@@ -1589,12 +1610,12 @@ ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req ) {
 	wait( delay(0, TaskPriority::DefaultEndpoint) );
 
 	try {
-		state Version version = wait( waitForVersion( data, req.version ) );
+		state Version version = wait( waitForVersion( data, req.version, req.spanContext ) );
 		state uint64_t changeCounter = data->shardChangeCounter;
 		state KeyRange shard = getShardKeyRange( data, req.sel );
 
 		state int offset;
-		Key k = wait( findKey( data, req.sel, version, shard, &offset ) );
+		Key k = wait( findKey( data, req.sel, version, shard, &offset, req.spanContext ) );
 
 		data->checkChangeCounter( changeCounter, KeyRangeRef( std::min<KeyRef>(req.sel.getKey(), k), std::max<KeyRef>(req.sel.getKey(), k) ) );
 
@@ -1610,8 +1631,14 @@ ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req ) {
 		data->counters.bytesQueried += resultSize;
 		++data->counters.rowsQueried;
 
-		GetKeyReply reply(updated);
+		// Check if the desired key might be cached
+		auto cached = data->cachedRangeMap[k];
+		//if (cached)
+		//	TraceEvent(SevDebug, "SSGetKeyCached").detail("Key", k).detail("Begin", shard.begin.printable()).detail("End", shard.end.printable());
+
+		GetKeyReply reply(updated, cached);
 		reply.penalty = data->getPenalty();
+
 		req.reply.send(reply);
 	}
 	catch (Error& e) {
@@ -2584,7 +2611,6 @@ public:
 			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix))
 				applyPrivateCacheData( data, m);
 			else {
-				//TraceEvent("PrivateData", data->thisServerID).detail("Mutation", m.toString()).detail("Version", ver);
 				applyPrivateData( data, m );
 			}
 		} else {
@@ -2673,7 +2699,7 @@ private:
 	}
 
 	void applyPrivateCacheData( StorageServer* data, MutationRef const& m ) {
-		TraceEvent(SevDebug, "SSPrivateCacheMutation", data->thisServerID).detail("Mutation", m.toString());
+		//TraceEvent(SevDebug, "SSPrivateCacheMutation", data->thisServerID).detail("Mutation", m.toString());
 
 		if (processedCacheStartKey) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
@@ -2681,17 +2707,16 @@ private:
 			KeyRangeRef keys( cacheStartKey.removePrefix(systemKeys.begin).removePrefix( storageCachePrefix ),
 							  m.param1.removePrefix(systemKeys.begin).removePrefix( storageCachePrefix ));
 			data->cachedRangeMap.insert(keys, true);
-			//TraceEvent(SevDebug, "SSPrivateCacheMutation", data->thisServerID).detail("Begin", keys.begin).detail("End", keys.end);
-			//fprintf(stderr, "applyPrivateCacheData : begin: %s, end: %s\n", printable(keys.begin).c_str(), printable(keys.end).c_str());
 
 			//Figure out the affected shard ranges and maintain the cached key-range information in the in-memory map
 			// TODO revisit- we are not splitting the cached ranges based on shards as of now.
 			if (0) {
-			auto cachedRanges = data->shards.intersectingRanges(keys);
-			for(auto shard = cachedRanges.begin(); shard != cachedRanges.end(); ++shard) {
-				KeyRangeRef intersectingRange = shard.range() & keys;
-				data->cachedRangeMap.insert(KeyRangeRef(intersectingRange.begin, intersectingRange.end), true);
-			}
+				auto cachedRanges = data->shards.intersectingRanges(keys);
+				for(auto shard = cachedRanges.begin(); shard != cachedRanges.end(); ++shard) {
+					KeyRangeRef intersectingRange = shard.range() & keys;
+					TraceEvent(SevDebug, "SSPrivateCacheMutationInsertUnexpected", data->thisServerID).detail("Begin", intersectingRange.begin).detail("End", intersectingRange.end);
+					data->cachedRangeMap.insert(intersectingRange, true);
+				}
 			}
 			processedStartKey = false;
 		} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix)) {
@@ -2728,7 +2753,6 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		}
 
 		state Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
-		//TraceEvent("SSUpdatePeeking", data->thisServerID).detail("MyVer", data->version.get()).detail("Epoch", data->updateEpoch).detail("Seq", data->updateSequence);
 
 		loop {
 			wait( cursor->getMore() );
@@ -2775,12 +2799,14 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 				if (LogProtocolMessage::isNextIn(cloneReader)) {
 					LogProtocolMessage lpm;
 					cloneReader >> lpm;
+					//TraceEvent(SevDebug, "SSReadingLPM", data->thisServerID).detail("Mutation", lpm.toString());
 					dbgLastMessageWasProtocol = true;
 					cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
 				}
 				else {
 					MutationRef msg;
 					cloneReader >> msg;
+					//TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg.toString());
 
 					if (firstMutation && msg.param1.startsWith(systemKeys.end))
 						hasPrivateData = true;
@@ -2844,7 +2870,6 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		state Version ver = invalidVersion;
 		cloneCursor2->setProtocolVersion(data->logProtocol);
-		//TraceEvent("SSUpdatePeeked", data->thisServerID).detail("FromEpoch", data->updateEpoch).detail("FromSeq", data->updateSequence).detail("ToEpoch", results.end_epoch).detail("ToSeq", results.end_seq).detail("MsgSize", results.messages.size());
 		for (;cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
 			if(mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 				mutationBytes = 0;
@@ -3651,6 +3676,7 @@ ACTOR Future<Void> checkBehind( StorageServer* self ) {
 ACTOR Future<Void> serveGetValueRequests( StorageServer* self, FutureStream<GetValueRequest> getValue ) {
 	loop {
 		GetValueRequest req = waitNext(getValue);
+		Span span("SS:getValue"_loc, { req.spanContext });
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "storageServer.received"); //.detail("TaskID", g_network->getCurrentTask());
@@ -3658,32 +3684,35 @@ ACTOR Future<Void> serveGetValueRequests( StorageServer* self, FutureStream<GetV
 		if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
 			req.reply.send(GetValueReply());
 		else
-			self->actors.add(self->readGuard(req , getValueQ));
+			self->actors.add(self->readGuard(span, req , getValueQ));
 	}
 }
 
 ACTOR Future<Void> serveGetKeyValuesRequests( StorageServer* self, FutureStream<GetKeyValuesRequest> getKeyValues ) {
 	loop {
 		GetKeyValuesRequest req = waitNext(getKeyValues);
+		Span span("SS:getKeyValues"_loc, { req.spanContext });
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
-		self->actors.add(self->readGuard(req, getKeyValuesQ));
+		self->actors.add(self->readGuard(span, req, getKeyValuesQ));
 	}
 }
 
 ACTOR Future<Void> serveGetKeyRequests( StorageServer* self, FutureStream<GetKeyRequest> getKey ) {
 	loop {
 		GetKeyRequest req = waitNext(getKey);
+		Span span("SS:getKey"_loc, { req.spanContext });
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
-		self->actors.add(self->readGuard(req , getKeyQ));
+		self->actors.add(self->readGuard(span, req , getKeyQ));
 	}
 }
 
 ACTOR Future<Void> serveWatchValueRequests( StorageServer* self, FutureStream<WatchValueRequest> watchValue ) {
 	loop {
 		WatchValueRequest req = waitNext(watchValue);
+		Span span("SS:watchValue"_loc, { req.spanContext });
 		// TODO: fast load balancing?
 		// SOMEDAY: combine watches for the same key/value into a single watch
-		self->actors.add(self->readGuard(req, watchValueQ));
+		self->actors.add(self->readGuard(span, req, watchValueQ));
 	}
 }
 

@@ -1119,8 +1119,7 @@ public:
 			}
 
 			bool retry_limit_hit = ryw->options.maxRetries != -1 && ryw->retries >= ryw->options.maxRetries;
-			if (ryw->retries < std::numeric_limits<int>::max()) 
-				ryw->retries++;
+			if (ryw->retries < std::numeric_limits<int>::max()) ryw->retries++;
 			if(retry_limit_hit) {
 				throw e;
 			}
@@ -1130,7 +1129,7 @@ public:
 			ryw->debugLogRetries(e);
 
 			ryw->resetRyow();
-			return Void(); 
+			return Void();
 		} catch( Error &e ) {
 			if ( !ryw->resetPromise.isSet() ) {
 				if(ryw->tr.apiVersionAtLeast(610)) {
@@ -2025,7 +2024,7 @@ void ReadYourWritesTransaction::setOptionImpl( FDBTransactionOptions::Option opt
 	tr.setOption( option, value );
 }
 
-void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT {
+void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcept {
 	cache = std::move( r.cache );
 	writes = std::move( r.writes );
 	arena = std::move( r.arena );
@@ -2051,21 +2050,12 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) BOOST_N
 	versionStampKeys = std::move(r.versionStampKeys);
 }
 
-ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT :
-	cache( std::move(r.cache) ),
-	writes( std::move(r.writes) ), 
-	arena( std::move(r.arena) ), 
-	reading( std::move(r.reading) ),
-	retries( r.retries ), 
-	approximateSize(r.approximateSize),
-	creationTime( r.creationTime ), 
-	deferredError( std::move(r.deferredError) ), 
-	timeoutActor( std::move(r.timeoutActor) ),
-	resetPromise( std::move(r.resetPromise) ),
-	commitStarted( r.commitStarted ),
-	options( r.options ),
-	transactionDebugInfo( r.transactionDebugInfo )
-{
+ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept
+  : cache(std::move(r.cache)), writes(std::move(r.writes)), arena(std::move(r.arena)), reading(std::move(r.reading)),
+    retries(r.retries), approximateSize(r.approximateSize), creationTime(r.creationTime),
+    deferredError(std::move(r.deferredError)), timeoutActor(std::move(r.timeoutActor)),
+    resetPromise(std::move(r.resetPromise)), commitStarted(r.commitStarted), options(r.options),
+    transactionDebugInfo(r.transactionDebugInfo) {
 	cache.arena = &arena;
 	writes.arena = &arena;
 	tr = std::move( r.tr );

@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "flow/Arena.h"
 #include "flow/flow.h"
 #include "fdbclient/Knobs.h"
 
@@ -35,6 +36,7 @@ typedef uint64_t Sequence;
 typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
+typedef UID SpanID;
 
 enum {
 	tagLocalitySpecial = -1,
@@ -77,6 +79,10 @@ struct Tag {
 		serializer(ar, locality, id);
 	}
 };
+
+template <>
+struct flow_ref<Tag> : std::integral_constant<bool, false> {};
+
 #pragma pack(pop)
 
 template <class Ar> void load( Ar& ar, Tag& tag ) { tag.serialize_unversioned(ar); }

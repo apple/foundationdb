@@ -249,7 +249,6 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 }
 
 ACTOR static Future<Void> waitOnRestoreRequests(Database cx, UID nodeID = UID()) {
-	state Future<Void> watch4RestoreRequest;
 	state ReadYourWritesTransaction tr(cx);
 	state Optional<Value> numRequests;
 
@@ -263,10 +262,10 @@ ACTOR static Future<Void> waitOnRestoreRequests(Database cx, UID nodeID = UID())
 			Optional<Value> _numRequests = wait(tr.get(restoreRequestTriggerKey));
 			numRequests = _numRequests;
 			if (!numRequests.present()) {
-				watch4RestoreRequest = tr.watch(restoreRequestTriggerKey);
+				state Future<Void> watchForRestoreRequest = tr.watch(restoreRequestTriggerKey);
 				wait(tr.commit());
 				TraceEvent(SevInfo, "FastRestoreWaitOnRestoreRequestTriggerKey", nodeID);
-				wait(watch4RestoreRequest);
+				wait(watchForRestoreRequest);
 				TraceEvent(SevInfo, "FastRestoreDetectRestoreRequestTriggerKeyChanged", nodeID);
 			} else {
 				TraceEvent(SevInfo, "FastRestoreRestoreRequestTriggerKey", nodeID)

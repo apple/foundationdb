@@ -565,8 +565,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( DEGRADED_WARNING_RESET_DELAY,                   7*24*60*60 );
 	init( TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS,         10 );
 	init( TRACE_LOG_PING_TIMEOUT_SECONDS,                        5.0 );
-	init( MIN_DELAY_STORAGE_CANDIDACY_SECONDS,                  10.0 );
-	init( MAX_DELAY_STORAGE_CANDIDACY_SECONDS,                  30.0 ); 
+	init( MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS,             10.0 );
+	init( MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS,             30.0 ); 
 	init( DBINFO_FAILED_DELAY,                                   1.0 );
 
 	// Test harness
@@ -630,6 +630,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	init( REDWOOD_DEFAULT_PAGE_SIZE,                            4096 );
 	init( REDWOOD_KVSTORE_CONCURRENT_READS,                       64 );
+	init( REDWOOD_COMMIT_CONCURRENT_READS,                        64 );
 	init( REDWOOD_PAGE_REBUILD_FILL_FACTOR,                     0.66 );
 	init( REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES,                    10 );
 	init( REDWOOD_LAZY_CLEAR_MIN_PAGES,                            0 );

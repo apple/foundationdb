@@ -264,7 +264,7 @@ class BindPromise {
 public:
 	BindPromise( const char* errContext, UID errID ) : errContext(errContext), errID(errID) {}
 	BindPromise( BindPromise const& r ) : p(r.p), errContext(r.errContext), errID(r.errID) {}
-	BindPromise(BindPromise&& r) BOOST_NOEXCEPT : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
+	BindPromise(BindPromise&& r) noexcept : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
 
 	Future<Void> getFuture() { return p.getFuture(); }
 
@@ -293,6 +293,35 @@ public:
 		} catch (...) {
 			p.sendError(unknown_error());
 		}
+	}
+};
+
+struct SendBufferIterator {
+	typedef boost::asio::const_buffer value_type;
+	typedef std::forward_iterator_tag iterator_category;
+	typedef size_t difference_type;
+	typedef boost::asio::const_buffer* pointer;
+	typedef boost::asio::const_buffer& reference;
+
+	SendBuffer const* p;
+	int limit;
+
+	SendBufferIterator(SendBuffer const* p=0, int limit = std::numeric_limits<int>::max()) : p(p), limit(limit) {
+		ASSERT(limit > 0);
+	}
+
+	bool operator == (SendBufferIterator const& r) const { return p == r.p; }
+	bool operator != (SendBufferIterator const& r) const { return p != r.p; }
+	void operator++() {
+		limit -= p->bytes_written - p->bytes_sent;
+		if(limit > 0)
+			p = p->next;
+		else
+			p = NULL;
+	}
+
+	boost::asio::const_buffer operator*() const {
+		return boost::asio::const_buffer( p->data + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent) );
 	}
 };
 
@@ -419,35 +448,6 @@ private:
 	UID id;
 	tcp::socket socket;
 	NetworkAddress peer_address;
-
-	struct SendBufferIterator {
-		typedef boost::asio::const_buffer value_type;
-		typedef std::forward_iterator_tag iterator_category;
-		typedef size_t difference_type;
-		typedef boost::asio::const_buffer* pointer;
-		typedef boost::asio::const_buffer& reference;
-
-		SendBuffer const* p;
-		int limit;
-
-		SendBufferIterator(SendBuffer const* p=0, int limit = std::numeric_limits<int>::max()) : p(p), limit(limit) {
-			ASSERT(limit > 0);
-		}
-
-		bool operator == (SendBufferIterator const& r) const { return p == r.p; }
-		bool operator != (SendBufferIterator const& r) const { return p != r.p; }
-		void operator++() {
-			limit -= p->bytes_written - p->bytes_sent;
-			if(limit > 0)
-				p = p->next;
-			else
-				p = NULL;
-		}
-
-		boost::asio::const_buffer operator*() const {
-			return boost::asio::const_buffer( p->data + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent) );
-		}
-	};
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
@@ -721,6 +721,10 @@ public:
 
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)
 	virtual int write( SendBuffer const* data, int limit ) {
+#ifdef __APPLE__
+		// For some reason, writing ssl_sock with more than 2016 bytes when socket is writeable sometimes results in a broken pipe error.
+		limit = std::min(limit, 2016);
+#endif
 		boost::system::error_code err;
 		++g_net2->countWrites;
 
@@ -762,35 +766,6 @@ private:
 	ssl_socket ssl_sock;
 	NetworkAddress peer_address;
 	Reference<ReferencedObject<boost::asio::ssl::context>> sslContext;
-
-	struct SendBufferIterator {
-		typedef boost::asio::const_buffer value_type;
-		typedef std::forward_iterator_tag iterator_category;
-		typedef size_t difference_type;
-		typedef boost::asio::const_buffer* pointer;
-		typedef boost::asio::const_buffer& reference;
-
-		SendBuffer const* p;
-		int limit;
-
-		SendBufferIterator(SendBuffer const* p=0, int limit = std::numeric_limits<int>::max()) : p(p), limit(limit) {
-			ASSERT(limit > 0);
-		}
-
-		bool operator == (SendBufferIterator const& r) const { return p == r.p; }
-		bool operator != (SendBufferIterator const& r) const { return p != r.p; }
-		void operator++() {
-			limit -= p->bytes_written - p->bytes_sent;
-			if(limit > 0)
-				p = p->next;
-			else
-				p = NULL;
-		}
-
-		boost::asio::const_buffer operator*() const {
-			return boost::asio::const_buffer( p->data + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent) );
-		}
-	};
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
@@ -866,7 +841,7 @@ private:
 struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	Promise<Void> promise;
 	PromiseTask() {}
-	explicit PromiseTask( Promise<Void>&& promise ) BOOST_NOEXCEPT : promise(std::move(promise)) {}
+	explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
 
 	virtual void operator()() {
 		promise.send(Void());

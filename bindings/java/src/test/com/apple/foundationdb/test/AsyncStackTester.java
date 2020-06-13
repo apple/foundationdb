@@ -761,10 +761,6 @@ public class AsyncStackTester {
 		c.run();
 		//System.out.println("Done with test.");
 
-		/*byte[] key = Tuple.from("test_results".getBytes(), 5).pack();
-		byte[] bs = db.createTransaction().get(key).get();
-		System.out.println("output of " + ByteArrayUtil.printable(key) + " as: " + ByteArrayUtil.printable(bs));*/
-
 		db.close();
 		System.gc();
 
