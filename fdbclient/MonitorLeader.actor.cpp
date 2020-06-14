@@ -414,7 +414,8 @@ void ClusterConnectionString::parseKey( std::string const& key ) {
 std::string ClusterConnectionString::toString() const {
 	std::string s = key.toString();
 	s += '@';
-	for(int i=0; i<coord.size(); i++) {
+	int i = 0;
+	for (; i < coord.size(); i++) {
 		if (_resolveResults.find(coord[i]) == _resolveResults.end()) {
 			if (i) {
 				s += ',';
@@ -423,7 +424,7 @@ std::string ClusterConnectionString::toString() const {
 		}
 	}
 	for (auto const& host : hosts) {
-		if (s.find_first_of(',') != s.npos) {
+		if (i) {
 			s += ',';
 		}
 		s += host.toString();

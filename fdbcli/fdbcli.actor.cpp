@@ -2017,7 +2017,6 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 }
 
 // FIXME: Factor address parsing from coordinators, include, exclude
-
 ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, bool isClusterTLS ) {
 	state StringRef setName;
 	StringRef nameTokenBegin = LiteralStringRef("description=");
@@ -2043,7 +2042,6 @@ ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, boo
 		for(t = tokens.begin()+1; t != tokens.end(); ++t) {
 			try {
 				// SOMEDAY: Check for keywords
-				// TODO: support parsing hostname here.
 				auto const& addr = NetworkAddress::parse( t->toString() );
 				if (addresses.count(addr)){
 					printf("ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
@@ -3137,7 +3135,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					auto cs = ClusterConnectionFile(db->getConnectionFile()->getFilename()).getConnectionString();
 					if (tokens.size() < 2) {
 						printf("Cluster description: %s\n", cs.clusterKeyName().toString().c_str());
-						printf("Cluster coordinators (%zu): %s\n", cs.coordinators().size(), describe(cs.coordinators()).c_str());
+						printf("Cluster coordinators (%zu): %s\n", (cs.coordinators().size() + cs.hostnames().size()),
+						       cs.toString().c_str());
 						printf("Type `help coordinators' to learn how to change this information.\n");
 					} else {
 						bool err = wait( coordinators( db, tokens, cs.coordinators()[0].isTLS() ) );
