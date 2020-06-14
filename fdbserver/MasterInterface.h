@@ -69,9 +69,9 @@ struct MasterInterface {
 		streams.push_back(tlogRejoin.getReceiver(TaskPriority::MasterTLogRejoin));
 		streams.push_back(changeCoordinators.getReceiver());
 		streams.push_back(getCommitVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
+		streams.push_back(notifyBackupWorkerDone.getReceiver());
 		streams.push_back(getLiveCommittedVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
 		streams.push_back(reportLiveCommittedVersion.getReceiver(TaskPriority::ProxyCommit));
-		streams.push_back(notifyBackupWorkerDone.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -190,7 +190,7 @@ struct ReportRawCommittedVersionRequest {
 
 	ReplyPromise<Void> reply;
 
-	ReportRawCommittedVersionRequest() : version(invalidVersion), locked(false) {}
+	ReportRawCommittedVersionRequest() : spanContext(), version(invalidVersion), locked(false) {}
 	ReportRawCommittedVersionRequest(SpanID spanContext, Version version, bool locked, Optional<Value> metadataVersion) : spanContext(spanContext), version(version), locked(locked), metadataVersion(metadataVersion) {}
 
 	template <class Ar>
