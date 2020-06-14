@@ -40,7 +40,7 @@ typedef Standalone<TransactionTagRef> TransactionTag;
 
 class TagSet {
 public:
-	typedef std::set<TransactionTagRef>::const_iterator const_iterator;
+	typedef std::vector<TransactionTagRef>::const_iterator const_iterator;
 
 	TagSet() : bytes(0) {}
 
@@ -74,10 +74,9 @@ public:
 		const uint8_t *end = data + size;
 		while(data < end) {
 			uint8_t len = *(data++);
-			TransactionTagRef tag(context.tryReadZeroCopy(data, len), len);
 			data += len;
-
-			tags.insert(tag);
+			// Tags are already deduplicated
+			const auto& tag = tags.emplace_back(context.tryReadZeroCopy(data, len), len);
 			bytes += tag.size();
 		}
 
@@ -91,14 +90,12 @@ public:
 
 	size_t getBytes() const { return bytes; }
 
-	const Arena &getArena() const {
-		return arena;
-	}
+	const Arena& getArena() const { return arena; }
 
 private:
 	size_t bytes;
 	Arena arena;
-	std::set<TransactionTagRef> tags;
+	std::vector<TransactionTagRef> tags;
 };
 
 template <>
