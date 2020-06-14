@@ -477,7 +477,7 @@ public:
 				TEST(true); // Tracking tag on storage server
 				double cost = costFunction(bytes);
 				for(auto& tag : tags.get()) {
-					int64_t &count = intervalCounts[TransactionTag(tag, tags.get().arena)];
+					int64_t &count = intervalCounts[TransactionTag(tag, tags.get().getArena())];
 					count += cost;
 					if(count > busiestTagCount) {
 						busiestTagCount = count;
