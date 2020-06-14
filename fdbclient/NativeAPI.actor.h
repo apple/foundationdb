@@ -141,6 +141,9 @@ struct TransactionOptions {
 	TransactionOptions();
 
 	void reset(Database const& cx);
+
+private:
+	void clear();
 };
 
 class ReadYourWritesTransaction; // workaround cyclic dependency
