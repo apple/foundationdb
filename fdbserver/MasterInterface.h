@@ -183,6 +183,7 @@ struct GetCommitVersionRequest {
 
 struct ReportRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 1853148;
+	SpanID spanContext;
 	Version version;
 	bool locked;
 	Optional<Value> metadataVersion;
@@ -190,11 +191,11 @@ struct ReportRawCommittedVersionRequest {
 	ReplyPromise<Void> reply;
 
 	ReportRawCommittedVersionRequest() : version(invalidVersion), locked(false) {}
-	ReportRawCommittedVersionRequest(Version version, bool locked, Optional<Value> metadataVersion) : version(version), locked(locked), metadataVersion(metadataVersion) {}
+	ReportRawCommittedVersionRequest(SpanID spanContext, Version version, bool locked, Optional<Value> metadataVersion) : spanContext(spanContext), version(version), locked(locked), metadataVersion(metadataVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked, metadataVersion, reply);
+		serializer(ar, version, locked, metadataVersion, reply, spanContext);
 	}
 };
 

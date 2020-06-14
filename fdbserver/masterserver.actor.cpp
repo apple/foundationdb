@@ -1008,6 +1008,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	loop {
 		choose {
 			when(GetRawCommittedVersionRequest req = waitNext(self->myInterface.getLiveCommittedVersion.getFuture())) {
+				Span span("MS:getLiveCommittedVersion"_loc, { req.spanContext });
 				if (req.debugID.present())
 					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
 
@@ -1021,6 +1022,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
+				Span span("MS:reportLiveCommittedVersion"_loc, { req.spanContext });
 				if (req.version > self->liveCommittedVersion) {
 					self->liveCommittedVersion = req.version;
 					self->databaseLocked = req.locked;
