@@ -159,7 +159,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		};
 		void action(CloseAction& a) {
 			auto s = db->Close();
-			TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Close");
+			if (!s.ok()) {
+				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Close");
+			}
 			a.done.send(Void());
 		}
 	};
