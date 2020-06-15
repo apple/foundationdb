@@ -206,7 +206,7 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 		return result;
 	}
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Ranges ranges =
-	    sks->impls.intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
+	    sks->getImpls().intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
 	// TODO : workaround to write this two together to make the code compact
 	// The issue here is boost::iterator_range<> doest not provide rbegin(), rend()
 	iter = reverse ? ranges.end() : ranges.begin();
@@ -381,13 +381,17 @@ Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(ReadYourWritesTran
 }
 
 // Management API - exclude / include
-ExcludeServersRangeImpl::ExcludeServersRangeImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
-
-Future<Standalone<RangeResultRef>> ExcludeServersRangeImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                                     KeyRangeRef kr) const {
+ACTOR Future<Standalone<RangeResultRef>> excludeServersGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	// get all keys under \xff/conf/excluded, \xff/conf/excluded
 	ASSERT(excludedServersKeys.contains(kr));
 	Standalone<RangeResultRef> result = wait(ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
 	return result;
+}
+
+ExcludeServersRangeImpl::ExcludeServersRangeImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> ExcludeServersRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                     KeyRangeRef kr) const {
+	return excludeServersGetRangeActor(ryw, kr);
 }
