@@ -49,7 +49,7 @@ else()
                -DWITH_ZSTD=OFF
                -DROCKSDB_BUILD_SHARED=OFF
                -DCMAKE_POSITION_INDEPENDENT_CODE=True
-    BUILD_BYPRODUCTS <BINARY_DIR/librocksdb.a
+    BUILD_BYPRODUCTS <BINARY_DIR>/librocksdb.a
     INSTALL_COMMAND ""
   )
 

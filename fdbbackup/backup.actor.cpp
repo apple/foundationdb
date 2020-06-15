@@ -955,7 +955,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
-	printf("  -p, --partitioned_log  Starts with new type of backup system using partitioned logs.\n");
+	printf("  --partitioned_log_experimental  Starts with new type of backup system using partitioned logs.\n");
 	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
 		   "  --logdir PATH  Specifes the output directory for trace files. If\n"

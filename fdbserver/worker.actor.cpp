@@ -431,7 +431,7 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	auto result4 = getDiskStores( folder, memoryRTSuffix.second, memoryRTSuffix.first );
 	result.insert( result.end(), result4.begin(), result4.end() );
 	auto result5 = getDiskStores( folder, rocksdbSuffix.second, rocksdbSuffix.first);
-	result.insert( result.end(), result3.begin(), result3.end() );
+	result.insert( result.end(), result5.begin(), result5.end() );
 	return result;
 }
 
@@ -1601,14 +1601,17 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 
 ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> result, MonitorLeaderInfo info ) {
 	state ClusterConnectionString ccf = info.intermediateConnFile->getConnectionString();
+	state vector<NetworkAddress> addrs = ccf.coordinators();
 	state ElectionResultRequest request;
-	request.key = ccf.clusterKey();
-	request.coordinators = ccf.coordinators();
 	state int index = 0;
 	state int successIndex = 0;
+	request.key = ccf.clusterKey();
+	request.coordinators = ccf.coordinators();
+
+	deterministicRandom()->randomShuffle(addrs);
 
 	loop {
-		LeaderElectionRegInterface interf( request.coordinators[index] );
+		LeaderElectionRegInterface interf( addrs[index] );
 		request.reply = ReplyPromise<Optional<LeaderInfo>>();
 
 		ErrorOr<Optional<LeaderInfo>> leader = wait( interf.electionResult.tryGetReply( request ) );
@@ -1644,7 +1647,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<Cl
 			}
 			successIndex = index;
 		} else {
-			index = (index+1) % request.coordinators.size();
+			index = (index+1) % addrs.size();
 			if (index == successIndex) {
 				wait( delay( CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY ) );
 			}
