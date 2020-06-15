@@ -332,8 +332,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	ACTOR static Future<Void> join(Future<Void> a, Future<Void> b) {
-		wait(a);
-		wait(b);
+		wait(success(a) && success(b));
 		return Void();
 	}
 
@@ -357,7 +356,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		} else {
 			bool different = false;
 			for (int ii; ii < sRange.size(); ++ii) {
-				different = compare(key.begin, sRange[ii], rRange[ii]) || different;
+				if (compare(key.begin, sRange[ii], rRange[ii])) {
+					different = true;
+					std::cout << "Diference in " << ii << "\n";
+				}
 			}
 			if (different) {
 				std::cout << "Begin: " << key.begin.printable() << " End: " << key.end.printable()
@@ -390,6 +392,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::cout << "Key mismatch. Rocks: " << r.key.printable() << " SQLite: " << s.key.printable() << "\n";
 		}
 		if (s.value != r.value) {
+			if (s.key == r.key) {
+				std::cout << "Key: " << s.key.printable() << "\n";
+			}
 			std::cout << "Value mismatch. Rocks: " << r.value.printable() << " SQLite: " << s.value.printable() << "\n";
 		}
 		return true;
