@@ -883,7 +883,7 @@ public:
 		}
 		TraceEvent t(SevWarn, "FileBackupError");
 		t.error(e).detail("BackupUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
-		// These should not happen
+		// key_not_found could happen
 		if(e.code() == error_code_key_not_found)
 			t.backtrace();
 
