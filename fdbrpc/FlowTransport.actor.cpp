@@ -89,8 +89,7 @@ void EndpointMap::realloc() {
 }
 
 void EndpointMap::insertWellKnown(NetworkMessageReceiver* r, const Endpoint::Token& token, TaskPriority priority) {
-	ASSERT(r->isStream());
-	int index = token.first();
+	int index = token.second();
 	ASSERT(data[index].receiver == nullptr);
 	data[index].receiver = r;
 	data[index].token() =
