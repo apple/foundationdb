@@ -95,6 +95,9 @@ public:
 private:
 	size_t bytes;
 	Arena arena;
+	// Currently there are never >= 256 tags, so
+	// std::vector is faster than std::set. This may
+	// change if we allow more tags in the future.
 	std::vector<TransactionTagRef> tags;
 };
 
