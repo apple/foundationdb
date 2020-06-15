@@ -49,7 +49,9 @@ const uint64_t TOKEN_STREAM_FLAG = 1;
 
 class EndpointMap : NonCopyable {
 public:
-	EndpointMap();
+	// Reserve space for this many wellKnownEndpoints
+	explicit EndpointMap(int wellKnownEndpointCount);
+	void insertWellKnown(NetworkMessageReceiver* r, const Endpoint::Token& token, TaskPriority priority);
 	void insert( NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority );
 	const Endpoint& insert( NetworkAddressList localAddresses, std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams );
 	NetworkMessageReceiver* get( Endpoint::Token const& token );
@@ -64,17 +66,16 @@ private:
 			uint64_t uid[2];  // priority packed into lower 32 bits; actual lower 32 bits of token are the index in data[]
 			uint32_t nextFree;
 		};
-		NetworkMessageReceiver* receiver;
+		NetworkMessageReceiver* receiver = nullptr;
 		Endpoint::Token& token() { return *(Endpoint::Token*)uid; }
 	};
+	int wellKnownEndpointCount;
 	std::vector<Entry> data;
 	uint32_t firstFree;
 };
 
-EndpointMap::EndpointMap()
- : firstFree(-1)
-{
-}
+EndpointMap::EndpointMap(int wellKnownEndpointCount)
+  : wellKnownEndpointCount(wellKnownEndpointCount), data(wellKnownEndpointCount), firstFree(-1) {}
 
 void EndpointMap::realloc() {
 	int oldSize = data.size();
@@ -85,6 +86,15 @@ void EndpointMap::realloc() {
 	}
 	data[data.size()-1].nextFree = firstFree;
 	firstFree = oldSize;
+}
+
+void EndpointMap::insertWellKnown(NetworkMessageReceiver* r, const Endpoint::Token& token, TaskPriority priority) {
+	ASSERT(r->isStream());
+	int index = token.first();
+	ASSERT(data[index].receiver == nullptr);
+	data[index].receiver = r;
+	data[index].token() =
+	    Endpoint::Token(token.first(), (token.second() & 0xffffffff00000000LL) | static_cast<uint32_t>(priority));
 }
 
 void EndpointMap::insert( NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority ) {
@@ -148,6 +158,7 @@ TaskPriority EndpointMap::getPriority( Endpoint::Token const& token ) {
 
 void EndpointMap::remove( Endpoint::Token const& token, NetworkMessageReceiver* r ) {
 	uint32_t index = token.second();
+	ASSERT(index >= wellKnownEndpointCount);
 	if ( index < data.size() && data[index].token().first() == token.first() && ((data[index].token().second()&0xffffffff00000000LL)|index)==token.second() && data[index].receiver == r ) {
 		data[index].receiver = 0;
 		data[index].nextFree = firstFree;
@@ -157,10 +168,7 @@ void EndpointMap::remove( Endpoint::Token const& token, NetworkMessageReceiver* 
 
 struct EndpointNotFoundReceiver : NetworkMessageReceiver {
 	EndpointNotFoundReceiver(EndpointMap& endpoints) {
-		//endpoints[WLTOKEN_ENDPOINT_NOT_FOUND] = this;
-		Endpoint::Token e = WLTOKEN_ENDPOINT_NOT_FOUND;
-		endpoints.insert(this, e, TaskPriority::DefaultEndpoint);
-		ASSERT( e == WLTOKEN_ENDPOINT_NOT_FOUND );
+		endpoints.insertWellKnown(this, WLTOKEN_ENDPOINT_NOT_FOUND, TaskPriority::DefaultEndpoint);
 	}
 	virtual void receive( ArenaReader& reader ) {
 		// Remote machine tells us it doesn't have endpoint e
@@ -177,9 +185,7 @@ struct EndpointNotFoundReceiver : NetworkMessageReceiver {
 
 struct PingReceiver : NetworkMessageReceiver {
 	PingReceiver(EndpointMap& endpoints) {
-		Endpoint::Token e = WLTOKEN_PING_PACKET;
-		endpoints.insert(this, e, TaskPriority::ReadSocket);
-		ASSERT( e == WLTOKEN_PING_PACKET );
+		endpoints.insertWellKnown(this, WLTOKEN_PING_PACKET, TaskPriority::ReadSocket);
 	}
 	virtual void receive( ArenaReader& reader ) {
 		ReplyPromise<Void> reply; reader >> reply;
@@ -213,13 +219,9 @@ struct ProtocolInfoReceiver : NetworkMessageReceiver {
 class TransportData {
 public:
 	TransportData(uint64_t transportId)
-	  : endpointNotFoundReceiver(endpoints),
-		pingReceiver(endpoints),
-		warnAlwaysForLargePacket(true),
-		lastIncompatibleMessage(0),
-		transportId(transportId),
-		numIncompatibleConnections(0)
-	{
+	  : endpoints(/*wellKnownTokenCount*/ 10), endpointNotFoundReceiver(endpoints), pingReceiver(endpoints),
+	    warnAlwaysForLargePacket(true), lastIncompatibleMessage(0), transportId(transportId),
+	    numIncompatibleConnections(0) {
 		degraded = Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) );
 	}
 
@@ -1305,10 +1307,8 @@ void FlowTransport::removeEndpoint( const Endpoint& endpoint, NetworkMessageRece
 
 void FlowTransport::addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, TaskPriority taskID ) {
 	endpoint.addresses = self->localAddresses;
-	ASSERT( ((endpoint.token.first() & TOKEN_STREAM_FLAG)!=0) == receiver->isStream() );
-	Endpoint::Token otoken = endpoint.token;
-	self->endpoints.insert( receiver, endpoint.token, taskID );
-	ASSERT( endpoint.token == otoken );
+	ASSERT(receiver->isStream());
+	self->endpoints.insertWellKnown(receiver, endpoint.token, taskID);
 }
 
 static void sendLocal( TransportData* self, ISerializeSource const& what, const Endpoint& destination ) {
