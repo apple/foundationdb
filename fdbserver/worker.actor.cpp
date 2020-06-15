@@ -1627,14 +1627,17 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 
 ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> result, MonitorLeaderInfo info ) {
 	state ClusterConnectionString ccf = info.intermediateConnFile->getConnectionString();
+	state vector<NetworkAddress> addrs = ccf.coordinators();
 	state ElectionResultRequest request;
-	request.key = ccf.clusterKey();
-	request.coordinators = ccf.coordinators();
 	state int index = 0;
 	state int successIndex = 0;
+	request.key = ccf.clusterKey();
+	request.coordinators = ccf.coordinators();
+
+	deterministicRandom()->randomShuffle(addrs);
 
 	loop {
-		LeaderElectionRegInterface interf( request.coordinators[index] );
+		LeaderElectionRegInterface interf( addrs[index] );
 		request.reply = ReplyPromise<Optional<LeaderInfo>>();
 
 		ErrorOr<Optional<LeaderInfo>> leader = wait( interf.electionResult.tryGetReply( request ) );
@@ -1670,7 +1673,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<Cl
 			}
 			successIndex = index;
 		} else {
-			index = (index+1) % request.coordinators.size();
+			index = (index+1) % addrs.size();
 			if (index == successIndex) {
 				wait( delay( CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY ) );
 			}
