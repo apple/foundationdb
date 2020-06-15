@@ -72,8 +72,6 @@ if(NOT WIN32)
     test/mako/utils.c
     test/mako/utils.h)
 
-  set_source_files_properties(test/mako/mako.c PROPERTIES COMPILE_FLAGS -Wno-array-bounds)
-
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
     add_library(fdb_c_ryw_benchmark OBJECT test/ryw_benchmark.c test/test.h)
