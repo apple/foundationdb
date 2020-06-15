@@ -51,6 +51,19 @@ protected:
 	KeyRange range; // underlying key range for this function
 };
 
+class SpecialKeyRangeWriteImpl {
+public:
+	virtual void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value ) = 0;
+	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range ) = 0;
+	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRef& key ) = 0;
+
+	explicit SpecialKeyRangeWriteImpl(KeyRangeRef kr) : range(kr) {}
+	KeyRangeRef getKeyRange() const { return range; }
+
+protected:
+	KeyRange range;
+};
+
 class SpecialKeyRangeAsyncImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit SpecialKeyRangeAsyncImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
@@ -115,10 +128,24 @@ public:
 		// Default begin of KeyRangeMap is Key(), insert the range to update start key if needed
 		readImpls.insert(range, nullptr);
 		if (!testOnly) readModulesBoundaryInit(); // testOnly is used in the correctness workload
+		writeImpls = KeyRangeMap<SpecialKeyRangeWriteImpl*>(nullptr, spaceEndKey);
+	}
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value ) {
+		auto impl = writeImpls[key];
+		if (impl == nullptr)
+			throw special_keys_no_module_found(); // TODO : change the error type here
+		return impl->set(ryw, key, value);
+	}
+	// void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range );
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key ) {
+		auto impl = writeImpls[key];
+		if (impl == nullptr)
+			throw special_keys_no_module_found(); // TODO : change the error type here
+		return impl->clear(ryw, key);
 	}
 	// Initialize module boundaries, used to handle cross_module_read
 	void readModulesBoundaryInit() {
-		for (const auto& pair : moduleToBoundary) {
+		for (const auto& pair : readModuleToBoundary) {
 			ASSERT(range.contains(pair.second));
 			// Make sure the module is not overlapping with any registered read modules
 			// Note: same like ranges, one module's end cannot be another module's start, relax the condition if needed
@@ -134,7 +161,7 @@ public:
 		if (module == SpecialKeySpace::MODULE::TESTONLY)
 			ASSERT(normalKeys.contains(kr))
 		else
-			ASSERT(moduleToBoundary.at(module).contains(kr));
+			ASSERT(readModuleToBoundary.at(module).contains(kr));
 		// make sure the registered range is not overlapping with existing ones
 		// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
 		for (auto iter = readImpls.rangeContaining(kr.begin); true; ++iter) {
@@ -146,6 +173,7 @@ public:
 	}
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*>& getReadImpls() { return readImpls; }
+	KeyRangeMap<SpecialKeyRangeWriteImpl*>& getWriteImpls() { return writeImpls; }
 	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return readModules; }
 	KeyRangeRef getKeyRange() const { return range; }
 
@@ -162,9 +190,10 @@ private:
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*> readImpls;
 	KeyRangeMap<SpecialKeySpace::MODULE> readModules;
-	KeyRange range; // key space range, (\xff\xff, \xff\xff\xff) in prod and (, \xff) in test 
+	KeyRangeMap<SpecialKeyRangeWriteImpl*> writeImpls;
+	KeyRange range; // key space range, (\xff\xff, \xff\xff\xff\xf) in prod and (, \xff) in test 
 
-	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
+	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> readModuleToBoundary;
 };
 
 // Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",

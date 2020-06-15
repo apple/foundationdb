@@ -25,9 +25,9 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"
 
-class SKSCTestImpl : public SpecialKeyRangeBaseImpl {
+class SKSCTestImpl : public SpecialKeyRangeReadImpl {
 public:
-	explicit SKSCTestImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+	explicit SKSCTestImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 		ASSERT(range.contains(kr));
 		auto resultFuture = ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY);
