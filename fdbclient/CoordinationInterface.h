@@ -30,6 +30,9 @@
 
 const int MAX_CLUSTER_FILE_BYTES = 60000;
 
+constexpr UID WLTOKEN_CLIENTLEADERREG_GETLEADER(-1, 2);
+constexpr UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE(-1, 3);
+
 struct ClientLeaderRegInterface {
 	RequestStream< struct GetLeaderRequest > getLeader;
 	RequestStream< struct OpenDatabaseCoordRequest > openDatabase;

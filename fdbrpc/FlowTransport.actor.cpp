@@ -42,9 +42,8 @@
 
 static NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
 
-const UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
-const UID WLTOKEN_PING_PACKET(-1, 1);
-const UID TOKEN_IGNORE_PACKET(0, 2);
+constexpr UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
+constexpr UID WLTOKEN_PING_PACKET(-1, 1);
 const uint64_t TOKEN_STREAM_FLAG = 1;
 
 
@@ -184,6 +183,24 @@ struct PingReceiver : NetworkMessageReceiver {
 	}
 	virtual void receive( ArenaReader& reader ) {
 		ReplyPromise<Void> reply; reader >> reply;
+		reply.send(Void());
+	}
+	virtual void receive(ArenaObjectReader& reader) {
+		ReplyPromise<Void> reply;
+		reader.deserialize(reply);
+		reply.send(Void());
+	}
+};
+
+struct ProtocolInfoReceiver : NetworkMessageReceiver {
+	ProtocolInfoReceiver(EndpointMap& endpoints) {
+		Endpoint::Token e = WLTOKEN_PING_PACKET;
+		endpoints.insert(this, e, TaskPriority::ReadSocket);
+		ASSERT(e == WLTOKEN_PING_PACKET);
+	}
+	virtual void receive(ArenaReader& reader) {
+		ReplyPromise<Void> reply;
+		reader >> reply;
 		reply.send(Void());
 	}
 	virtual void receive(ArenaObjectReader& reader) {
