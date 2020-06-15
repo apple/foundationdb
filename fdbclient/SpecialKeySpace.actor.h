@@ -33,27 +33,27 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-class SpecialKeyRangeBaseImpl {
+class SpecialKeyRangeReadImpl {
 public:
 	// Each derived class only needs to implement this simple version of getRange
 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
 
-	explicit SpecialKeyRangeBaseImpl(KeyRangeRef kr) : range(kr) {}
+	explicit SpecialKeyRangeReadImpl(KeyRangeRef kr) : range(kr) {}
 	KeyRangeRef getKeyRange() const { return range; }
 	// true if the getRange call can emit more than one rpc calls,
 	// we cache the results to keep consistency in the same getrange lifetime
 	// TODO : give this function a more descriptive name
 	virtual bool isAsync() const { return false; }
 
-	virtual ~SpecialKeyRangeBaseImpl() {}
+	virtual ~SpecialKeyRangeReadImpl() {}
 
 protected:
 	KeyRange range; // underlying key range for this function
 };
 
-class SpecialKeyRangeAsyncImpl : public SpecialKeyRangeBaseImpl {
+class SpecialKeyRangeAsyncImpl : public SpecialKeyRangeReadImpl {
 public:
-	explicit SpecialKeyRangeAsyncImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+	explicit SpecialKeyRangeAsyncImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
 
@@ -65,7 +65,7 @@ public:
 
 	bool isAsync() const override { return true; }
 
-	ACTOR static Future<Standalone<RangeResultRef>> getRangeAsyncActor(const SpecialKeyRangeBaseImpl* skrAyncImpl,
+	ACTOR static Future<Standalone<RangeResultRef>> getRangeAsyncActor(const SpecialKeyRangeReadImpl* skrAyncImpl,
 	                                                                   ReadYourWritesTransaction* ryw, KeyRangeRef kr,
 	                                                                   Optional<Standalone<RangeResultRef>>* cache) {
 		ASSERT(skrAyncImpl->getKeyRange().contains(kr));
@@ -110,26 +110,26 @@ public:
 	                                            GetRangeLimits limits, bool reverse = false);
 
 	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true)
-	  : range(KeyRangeRef(spaceStartKey, spaceEndKey)), impls(nullptr, spaceEndKey),
-	    modules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey) {
+	  : range(KeyRangeRef(spaceStartKey, spaceEndKey)), readImpls(nullptr, spaceEndKey),
+	    readModules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey) {
 		// Default begin of KeyRangeMap is Key(), insert the range to update start key if needed
-		impls.insert(range, nullptr);
-		if (!testOnly) modulesBoundaryInit(); // testOnly is used in the correctness workload
+		readImpls.insert(range, nullptr);
+		if (!testOnly) readModulesBoundaryInit(); // testOnly is used in the correctness workload
 	}
 	// Initialize module boundaries, used to handle cross_module_read
-	void modulesBoundaryInit() {
+	void readModulesBoundaryInit() {
 		for (const auto& pair : moduleToBoundary) {
 			ASSERT(range.contains(pair.second));
-			// Make sure the module is not overlapping with any registered modules
+			// Make sure the module is not overlapping with any registered read modules
 			// Note: same like ranges, one module's end cannot be another module's start, relax the condition if needed
-			ASSERT(modules.rangeContaining(pair.second.begin) == modules.rangeContaining(pair.second.end) &&
-			       modules[pair.second.begin] == SpecialKeySpace::MODULE::UNKNOWN);
-			modules.insert(pair.second, pair.first);
-			impls.insert(pair.second, nullptr); // Note: Due to underlying implementation, the insertion here is
-			                                    // important to make cross_module_read being handled correctly
+			ASSERT(readModules.rangeContaining(pair.second.begin) == readModules.rangeContaining(pair.second.end) &&
+			       readModules[pair.second.begin] == SpecialKeySpace::MODULE::UNKNOWN);
+			readModules.insert(pair.second, pair.first);
+			readImpls.insert(pair.second, nullptr); // Note: Due to underlying implementation, the insertion here is
+			                                        // important to make cross_module_read being handled correctly
 		}
 	}
-	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeBaseImpl* impl) {
+	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeReadImpl* impl) {
 		// module boundary check
 		if (module == SpecialKeySpace::MODULE::TESTONLY)
 			ASSERT(normalKeys.contains(kr))
@@ -137,16 +137,16 @@ public:
 			ASSERT(moduleToBoundary.at(module).contains(kr));
 		// make sure the registered range is not overlapping with existing ones
 		// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
-		for (auto iter = impls.rangeContaining(kr.begin); true; ++iter) {
+		for (auto iter = readImpls.rangeContaining(kr.begin); true; ++iter) {
 			ASSERT(iter->value() == nullptr);
-			if (iter == impls.rangeContaining(kr.end))
+			if (iter == readImpls.rangeContaining(kr.end))
 				break; // relax the condition that the end can be another range's start, if needed
 		}
-		impls.insert(kr, impl);
+		readImpls.insert(kr, impl);
 	}
 
-	KeyRangeMap<SpecialKeyRangeBaseImpl*>& getImpls() { return impls; }
-	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return modules; }
+	KeyRangeMap<SpecialKeyRangeReadImpl*>& getReadImpls() { return readImpls; }
+	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return readModules; }
 	KeyRangeRef getKeyRange() const { return range; }
 
 private:
@@ -156,13 +156,13 @@ private:
 	                                                                 ReadYourWritesTransaction* ryw, KeySelector begin,
 	                                                                 KeySelector end, GetRangeLimits limits,
 	                                                                 bool reverse);
-	ACTOR static Future<Standalone<RangeResultRef>> getRangeAggregationActor(SpecialKeySpace* sks,
-	                                                                         ReadYourWritesTransaction* ryw,
-	                                                                         KeySelector begin, KeySelector end,
-	                                                                         GetRangeLimits limits, bool reverse);
-	KeyRange range;
-	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
-	KeyRangeMap<SpecialKeySpace::MODULE> modules;
+	ACTOR static Future<Standalone<RangeResultRef>>
+	getRangeAggregationActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end,
+	                         GetRangeLimits limits, bool reverse);
+
+	KeyRangeMap<SpecialKeyRangeReadImpl*> readImpls;
+	KeyRangeMap<SpecialKeySpace::MODULE> readModules;
+	KeyRange range; // key space range, (\xff\xff, \xff\xff\xff) in prod and (, \xff) in test 
 
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
 };
@@ -173,19 +173,19 @@ private:
 // prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 // prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 // Currently, the conflicting keyranges returned are original read_conflict_ranges or union of them.
-class ConflictingKeysImpl : public SpecialKeyRangeBaseImpl {
+class ConflictingKeysImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit ConflictingKeysImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
-class ReadConflictRangeImpl : public SpecialKeyRangeBaseImpl {
+class ReadConflictRangeImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit ReadConflictRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
-class WriteConflictRangeImpl : public SpecialKeyRangeBaseImpl {
+class WriteConflictRangeImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit WriteConflictRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
@@ -197,7 +197,7 @@ public:
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
-class ExcludeServersRangeImpl : public SpecialKeyRangeBaseImpl {
+class ExcludeServersRangeImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit ExcludeServersRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
