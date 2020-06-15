@@ -29,6 +29,7 @@ set(FDBSERVER_SRCS
   IVersionedStore.h
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
+  KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreSQLite.actor.cpp
   Knobs.cpp
   Knobs.h
