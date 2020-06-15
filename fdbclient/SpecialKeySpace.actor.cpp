@@ -31,7 +31,9 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	{ SpecialKeySpace::MODULE::CONNECTIONSTRING, singleKeyRange(LiteralStringRef("\xff\xff/connection_string")) },
 	{ SpecialKeySpace::MODULE::CLUSTERFILEPATH, singleKeyRange(LiteralStringRef("\xff\xff/cluster_file_path")) },
 	{ SpecialKeySpace::MODULE::METRICS,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/metrics/"), LiteralStringRef("\xff\xff/metrics0")) }
+	  KeyRangeRef(LiteralStringRef("\xff\xff/metrics/"), LiteralStringRef("\xff\xff/metrics0")) },
+	{ SpecialKeySpace::MODULE::MANAGEMENT,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/conf/"), LiteralStringRef("\xff\xff/conf0")) }
 };
 
 // This function will move the given KeySelector as far as possible to the standard form:
@@ -376,4 +378,16 @@ DDStatsRangeImpl::DDStatsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr
 
 Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 	return ddMetricsGetRangeActor(ryw, kr);
+}
+
+// Management API - exclude / include
+ExcludeServersRangeImpl::ExcludeServersRangeImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> ExcludeServersRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                     KeyRangeRef kr) const {
+	// get all keys under \xff/conf/excluded, \xff/conf/excluded
+	ASSERT(excludedServersKeys.contains(kr));
+	Standalone<RangeResultRef> result = wait(ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
+	return result;
 }

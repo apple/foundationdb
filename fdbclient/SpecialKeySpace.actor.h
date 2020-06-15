@@ -95,6 +95,7 @@ public:
 	enum class MODULE {
 		CLUSTERFILEPATH,
 		CONNECTIONSTRING,
+		MANAGEMENT, // Management-API
 		METRICS, // data-distribution metrics
 		TESTONLY, // only used by correctness tests
 		TRANSACTION, // transaction related info, conflicting keys, read/write conflict range
@@ -193,6 +194,12 @@ public:
 class DDStatsRangeImpl : public SpecialKeyRangeAsyncImpl {
 public:
 	explicit DDStatsRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+};
+
+class ExcludeServersRangeImpl : public SpecialKeyRangeBaseImpl {
+public:
+	explicit ExcludeServersRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
