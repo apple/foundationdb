@@ -158,10 +158,13 @@ TaskPriority EndpointMap::getPriority( Endpoint::Token const& token ) {
 	return TaskPriority::UnknownEndpoint;
 }
 
-void EndpointMap::remove( Endpoint::Token const& token, NetworkMessageReceiver* r ) {
+void EndpointMap::remove(Endpoint::Token const& token, NetworkMessageReceiver* r) {
 	uint32_t index = token.second();
-	ASSERT(index >= wellKnownEndpointCount);
-	if ( index < data.size() && data[index].token().first() == token.first() && ((data[index].token().second()&0xffffffff00000000LL)|index)==token.second() && data[index].receiver == r ) {
+	if (index < wellKnownEndpointCount) {
+		data[index].receiver = nullptr;
+	} else if (index < data.size() && data[index].token().first() == token.first() &&
+	           ((data[index].token().second() & 0xffffffff00000000LL) | index) == token.second() &&
+	           data[index].receiver == r) {
 		data[index].receiver = 0;
 		data[index].nextFree = firstFree;
 		firstFree = index;
