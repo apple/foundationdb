@@ -431,7 +431,7 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	auto result4 = getDiskStores( folder, memoryRTSuffix.second, memoryRTSuffix.first );
 	result.insert( result.end(), result4.begin(), result4.end() );
 	auto result5 = getDiskStores( folder, rocksdbSuffix.second, rocksdbSuffix.first);
-	result.insert( result.end(), result3.begin(), result3.end() );
+	result.insert( result.end(), result5.begin(), result5.end() );
 	return result;
 }
 
