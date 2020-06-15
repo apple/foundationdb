@@ -85,8 +85,6 @@ void ISimulator::displayWorkers() const
 	return;
 }
 
-const UID TOKEN_ENDPOINT_NOT_FOUND(-1, -1);
-
 ISimulator* g_pSimulator = 0;
 thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = 0;
 int openCount = 0;
