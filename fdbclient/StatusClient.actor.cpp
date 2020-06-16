@@ -292,7 +292,17 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader, GetLeaderRequest(coord.clusterKey, UID()), TaskPriority::CoordinationReply));
 
-		wait( smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) || delay(2.0) );
+		state vector<Future<ProtocolInfoReply>> coordProtocols;
+		coordProtocols.reserve(coord.clientLeaderServers.size());
+		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
+			RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{
+				{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO } };
+			coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
+		}
+
+		wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) &&
+		         smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5) ||
+		     delay(2.0));
 
 		statusObj["quorum_reachable"] = *quorum_reachable = quorum(leaderServers, leaderServers.size() / 2 + 1).isReady();
 
@@ -308,6 +318,9 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 			else {
 				coordinatorsUnavailable++;
 				coordStatus["reachable"] = false;
+			}
+			if (coordProtocols[i].isReady()) {
+				coordStatus["protocol"] = coordProtocols[i].get().version.version();
 			}
 			coordsStatus.push_back(coordStatus);
 		}

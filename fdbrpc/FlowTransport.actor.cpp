@@ -46,7 +46,6 @@ constexpr UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
 constexpr UID WLTOKEN_PING_PACKET(-1, 1);
 const uint64_t TOKEN_STREAM_FLAG = 1;
 
-
 class EndpointMap : NonCopyable {
 public:
 	// Reserve space for this many wellKnownEndpoints
@@ -175,13 +174,8 @@ struct EndpointNotFoundReceiver : NetworkMessageReceiver {
 	EndpointNotFoundReceiver(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(this, WLTOKEN_ENDPOINT_NOT_FOUND, TaskPriority::DefaultEndpoint);
 	}
-	virtual void receive( ArenaReader& reader ) {
-		// Remote machine tells us it doesn't have endpoint e
-		Endpoint e; reader >> e;
-		IFailureMonitor::failureMonitor().endpointNotFound(e);
-	}
 
-	virtual void receive(ArenaObjectReader& reader) {
+	void receive(ArenaObjectReader& reader) override {
 		Endpoint e;
 		reader.deserialize(e);
 		IFailureMonitor::failureMonitor().endpointNotFound(e);
@@ -192,29 +186,7 @@ struct PingReceiver : NetworkMessageReceiver {
 	PingReceiver(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(this, WLTOKEN_PING_PACKET, TaskPriority::ReadSocket);
 	}
-	virtual void receive( ArenaReader& reader ) {
-		ReplyPromise<Void> reply; reader >> reply;
-		reply.send(Void());
-	}
-	virtual void receive(ArenaObjectReader& reader) {
-		ReplyPromise<Void> reply;
-		reader.deserialize(reply);
-		reply.send(Void());
-	}
-};
-
-struct ProtocolInfoReceiver : NetworkMessageReceiver {
-	ProtocolInfoReceiver(EndpointMap& endpoints) {
-		Endpoint::Token e = WLTOKEN_PING_PACKET;
-		endpoints.insert(this, e, TaskPriority::ReadSocket);
-		ASSERT(e == WLTOKEN_PING_PACKET);
-	}
-	virtual void receive(ArenaReader& reader) {
-		ReplyPromise<Void> reply;
-		reader >> reply;
-		reply.send(Void());
-	}
-	virtual void receive(ArenaObjectReader& reader) {
+	void receive(ArenaObjectReader& reader) override {
 		ReplyPromise<Void> reply;
 		reader.deserialize(reply);
 		reply.send(Void());
@@ -224,9 +196,8 @@ struct ProtocolInfoReceiver : NetworkMessageReceiver {
 class TransportData {
 public:
 	TransportData(uint64_t transportId)
-	  : endpoints(/*wellKnownTokenCount*/ 10), endpointNotFoundReceiver(endpoints), pingReceiver(endpoints),
-	    warnAlwaysForLargePacket(true), lastIncompatibleMessage(0), transportId(transportId),
-	    numIncompatibleConnections(0) {
+	  : endpoints(/*wellKnownTokenCount*/ 11), warnAlwaysForLargePacket(true), lastIncompatibleMessage(0),
+	    transportId(transportId), numIncompatibleConnections(0) {
 		degraded = Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) );
 	}
 
@@ -255,11 +226,9 @@ public:
 	Reference<AsyncVar<bool>> degraded;
 	bool warnAlwaysForLargePacket;
 
-	// These declarations must be in exactly this order
 	EndpointMap endpoints;
-	EndpointNotFoundReceiver endpointNotFoundReceiver;
-	PingReceiver pingReceiver;
-	// End ordered declarations
+	EndpointNotFoundReceiver endpointNotFoundReceiver{ endpoints };
+	PingReceiver pingReceiver{ endpoints };
 
 	Int64MetricHandle bytesSent;
 	Int64MetricHandle countPacketsReceived;
@@ -786,6 +755,15 @@ TransportData::~TransportData() {
 	}
 }
 
+static bool checkCompatible(const PeerCompatibilityPolicy& policy, ProtocolVersion version) {
+	switch (policy.requirement) {
+	case RequirePeer::Exactly:
+		return version.version() == policy.version.version();
+	case RequirePeer::AtLeast:
+		return version.version() >= policy.version.version();
+	}
+}
+
 ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket) {
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
 	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
@@ -796,6 +774,10 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 
 	auto receiver = self->endpoints.get(destination.token);
 	if (receiver) {
+		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
+			// TODO(anoyes): Report incompatibility somehow
+			return;
+		}
 		try {
 			g_currentDeliveryPeerAddress = destination.addresses;
 			StringRef data = reader.arenaReadAll();
@@ -896,7 +878,7 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(p, packetLen);
 #endif
-		ArenaReader reader(arena, StringRef(p, packetLen), AssumeVersion(currentProtocolVersion));
+		ArenaReader reader(arena, StringRef(p, packetLen), AssumeVersion(peerProtocolVersion));
 		UID token;
 		reader >> token;
 
@@ -1007,7 +989,7 @@ ACTOR static Future<Void> connectionReader(
 
 						uint64_t connectionId = pkt.connectionId;
 						if (!pkt.protocolVersion.hasObjectSerializerFlag() ||
-						    !pkt.protocolVersion.isCompatible(currentProtocolVersion)) {
+						    !pkt.protocolVersion.hasStableInterfaces()) {
 							incompatibleProtocolVersionNewer = pkt.protocolVersion > currentProtocolVersion;
 							NetworkAddress addr = pkt.canonicalRemotePort
 							                          ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
@@ -1020,7 +1002,6 @@ ACTOR static Future<Void> connectionReader(
 									    .detail("Reason", "IncompatibleProtocolVersion")
 									    .detail("LocalVersion", currentProtocolVersion.version())
 									    .detail("RejectedVersion", pkt.protocolVersion.version())
-									    .detail("VersionMask", ProtocolVersion::compatibleProtocolVersionMask)
 									    .detail("Peer", pkt.canonicalRemotePort ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
 									                                            : conn->getPeerAddress())
 									    .detail("ConnectionId", connectionId);

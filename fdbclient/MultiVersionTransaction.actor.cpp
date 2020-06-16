@@ -1394,7 +1394,7 @@ bool ClientInfo::canReplace(Reference<ClientInfo> other) const {
 		return true;
 	}
 
-	return !protocolVersion.isCompatible(other->protocolVersion);
+	return !other->protocolVersion.hasStableInterfaces();
 }
 
 // UNIT TESTS
