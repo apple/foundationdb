@@ -18,21 +18,15 @@
  * limitations under the License.
  */
 
-#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
-#include "flow/Arena.h"
-#include "flow/IRandom.h"
-#include "flow/Trace.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
-#include "flow/serialize.h"
-#include <cstring>
 
 struct CycleWorkload : TestWorkload {
 	int actorCount, nodeCount;
-	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
+	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond;
 	Key		keyPrefix;
 
 	vector<Future<Void>> clients;
@@ -44,13 +38,12 @@ struct CycleWorkload : TestWorkload {
 		transactions("Transactions"), retries("Retries"), totalLatency("Latency"),
 		tooOldRetries("Retries.too_old"), commitFailedRetries("Retries.commit_failed")
 	{
-		testDuration = getOption( options, "testDuration"_sr, 10.0 );
-		transactionsPerSecond = getOption( options, "transactionsPerSecond"_sr, 5000.0 ) / clientCount;
-		actorCount = getOption( options, "actorsPerClient"_sr, transactionsPerSecond / 5 );
-		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
-		keyPrefix = unprintable( getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString() );
-		traceParentProbability = getOption(options, "traceParentProbability "_sr, 0.01);
-		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
+		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
+		transactionsPerSecond = getOption( options, LiteralStringRef("transactionsPerSecond"), 5000.0 ) / clientCount;
+		actorCount = getOption( options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5 );
+		nodeCount = getOption(options, LiteralStringRef("nodeCount"), transactionsPerSecond * clientCount);
+		keyPrefix = unprintable( getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("")).toString() );
+		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, LiteralStringRef("expectedRate"), 0.7);
 	}
 
 	virtual std::string description() { return "CycleWorkload"; }
@@ -105,12 +98,6 @@ struct CycleWorkload : TestWorkload {
 				state double tstart = now();
 				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
 				state Transaction tr(cx);
-				if (deterministicRandom()->random01() >= self->traceParentProbability) {
-					state Span span("CycleClient"_loc);
-					TraceEvent("CycleTracingTransaction", span->context);
-					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
-					             BinaryWriter::toValue(span->context, Unversioned()));
-				}
 				while (true) {
 					try {
 						// Reverse next and next^2 node

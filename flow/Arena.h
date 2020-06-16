@@ -631,9 +631,6 @@ struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::tru
 };
 
 #define LiteralStringRef( str ) StringRef( (const uint8_t*)(str), sizeof((str))-1 )
-inline StringRef operator "" _sr(const char* str, size_t size) {
-	return StringRef(reinterpret_cast<const uint8_t*>(str), size);
-}
 
 // makeString is used to allocate a Standalone<StringRef> of a known length for later
 // mutation (via mutateString).  If you need to append to a string of unknown length,

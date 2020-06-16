@@ -23,28 +23,10 @@
 #define FLOW_FILE_TRACE_LOG_WRITER_H
 #pragma once
 
-#include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 
 #include <functional>
-
-struct IssuesListImpl;
-struct IssuesList : ITraceLogIssuesReporter, ThreadSafeReferenceCounted<IssuesList> {
-	IssuesList();
-	virtual ~IssuesList();
-	void addIssue(std::string issue) override;
-
-	void retrieveIssues(std::set<std::string>& out) override;
-
-	void resolveIssue(std::string issue) override;
-
-	void addref() { ThreadSafeReferenceCounted<IssuesList>::addref(); }
-	void delref() { ThreadSafeReferenceCounted<IssuesList>::delref(); }
-
-private:
-	IssuesListImpl* impl;
-};
 
 class FileTraceLogWriter : public ITraceLogWriter, ReferenceCounted<FileTraceLogWriter> {
 private:
@@ -60,8 +42,6 @@ private:
 
 	std::function<void()> onError;
 
-	void write(const char* str, size_t size);
-
 public:
 	FileTraceLogWriter(std::string directory, std::string processName, std::string basename, std::string extension,
 	                   uint64_t maxLogsSize, std::function<void()> onError, Reference<ITraceLogIssuesReporter> issues);
@@ -71,12 +51,11 @@ public:
 
 	void lastError(int err);
 
-	void write(const std::string& str) override;
-	void write(StringRef const& str) override;
-	void open() override;
-	void close() override;
-	void roll() override;
-	void sync() override;
+	void write(const std::string& str);
+	void open();
+	void close();
+	void roll();
+	void sync();
 
 	void cleanupTraceFiles();
 };

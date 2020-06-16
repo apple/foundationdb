@@ -48,36 +48,6 @@
 #include <fcntl.h>
 #include <cmath>
 
-struct IssuesListImpl {
-	IssuesListImpl(){}
-	void addIssue(std::string issue) {
-		MutexHolder h(mutex);
-		issues.insert(issue);
-	}
-
-	void retrieveIssues(std::set<std::string>& out) {
-		MutexHolder h(mutex);
-		for (auto const& i : issues) {
-			out.insert(i);
-		}
-	}
-
-	void resolveIssue(std::string issue) {
-		MutexHolder h(mutex);
-		issues.erase(issue);
-	}
-
-private:
-	Mutex mutex;
-	std::set<std::string> issues;
-};
-
-IssuesList::IssuesList() : impl(new IssuesListImpl{}) {}
-IssuesList::~IssuesList() { delete impl; }
-void IssuesList::addIssue(std::string issue) { impl->addIssue(issue); }
-void IssuesList::retrieveIssues(std::set<std::string> &out) { impl->retrieveIssues(out); }
-void IssuesList::resolveIssue(std::string issue) { impl->resolveIssue(issue); }
-
 FileTraceLogWriter::FileTraceLogWriter(std::string directory, std::string processName, std::string basename,
                                        std::string extension, uint64_t maxLogsSize, std::function<void()> onError,
                                        Reference<ITraceLogIssuesReporter> issues)
@@ -102,16 +72,8 @@ void FileTraceLogWriter::lastError(int err) {
 }
 
 void FileTraceLogWriter::write(const std::string& str) {
-	write(str.data(), str.size());
-}
-
-void FileTraceLogWriter::write(const StringRef& str) {
-	write(reinterpret_cast<const char*>(str.begin()), str.size());
-}
-
-void FileTraceLogWriter::write(const char* str, size_t len) {
-	auto ptr = str;
-	int remaining = len;
+	auto ptr = str.c_str();
+	int remaining = str.size();
 	bool needsResolve = false;
 
 	while ( remaining ) {
