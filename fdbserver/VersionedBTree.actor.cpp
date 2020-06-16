@@ -5444,7 +5444,7 @@ RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"))
 class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
 	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID)
-	  : m_filePrefix(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS) {
+	  : m_filePrefix(filePrefix), m_concurrentReads(new FlowLock(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS)) {
 		// TODO: This constructor should really just take an IVersionedStore
 		IPager2* pager = new DWALPager(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE, filePrefix, 0);
 		m_tree = new VersionedBTree(pager, filePrefix);
@@ -5520,8 +5520,9 @@ public:
 		state VersionedBTree::BTreeCursor cur;
 		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
 
-		wait(self->m_concurrentReads.take());
-		state FlowLock::Releaser releaser(self->m_concurrentReads);
+		state Reference<FlowLock> readLock = self->m_concurrentReads;
+		wait(readLock->take());
+		state FlowLock::Releaser releaser(*readLock);
 		++g_redwoodMetrics.opGetRange;
 
 		state Standalone<RangeResultRef> result;
@@ -5600,8 +5601,9 @@ public:
 		state VersionedBTree::BTreeCursor cur;
 		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
 
-		wait(self->m_concurrentReads.take());
-		state FlowLock::Releaser releaser(self->m_concurrentReads);
+		state Reference<FlowLock> readLock = self->m_concurrentReads;
+		wait(readLock->take());
+		state FlowLock::Releaser releaser(*readLock);
 		++g_redwoodMetrics.opGet;
 
 		wait(cur.seekGTE(key, 0));
@@ -5620,8 +5622,9 @@ public:
 		state VersionedBTree::BTreeCursor cur;
 		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion()));
 
-		wait(self->m_concurrentReads.take());
-		state FlowLock::Releaser releaser(self->m_concurrentReads);
+		state Reference<FlowLock> readLock = self->m_concurrentReads;
+		wait(readLock->take());
+		state FlowLock::Releaser releaser(*readLock);
 		++g_redwoodMetrics.opGet;
 
 		wait(cur.seekGTE(key, 0));
@@ -5646,7 +5649,7 @@ private:
 	Future<Void> m_init;
 	Promise<Void> m_closed;
 	Promise<Void> m_error;
-	FlowLock m_concurrentReads;
+	Reference<FlowLock> m_concurrentReads;
 
 	template <typename T>
 	inline Future<T> catchError(Future<T> f) {
