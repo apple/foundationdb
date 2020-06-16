@@ -491,7 +491,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 IKeyValueStore* keyValueStoreRocksDB(std::string const& path, UID logID, KeyValueStoreType storeType, bool checkChecksums, bool checkIntegrity) {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 	return new RocksDBKeyValueStore(path, logID,
-	                                keyValueStoreSQLite("/data/foundationdb/tmp", logID,
+	                                keyValueStoreSQLite(std::string(path) + "/sqlite", logID,
 	                                                    KeyValueStoreType::SSD_BTREE_V2, checkChecksums,
 	                                                    checkIntegrity));
 #else
