@@ -1,21 +1,24 @@
-testTitle=DataDistributionMetrics
+testTitle=DataDistributionMetricsCorrectness
+	testName=DataDistributionMetrics
+	testDuration=10.0
+	nodeCount=100000
+	actorCount=64
+	keyPrefix=DDMetrics
+
 	testName=Cycle
 	transactionsPerSecond=2500.0
 	testDuration=10.0
 	expectedRate=0.025
 
-	testName=DataDistributionMetrics
-	numTransactions=100
-	writesPerTransaction=1000
-
-	testName=Attrition
-	machinesToKill=1
-	machinesToLeave=3
-	reboot=true
-	testDuration=10.0
-
-	testName=Attrition
-	machinesToKill=1
-	machinesToLeave=3
-	reboot=true
-	testDuration=10.0
+	testName=Mako
+    testDuration=10.0
+    transactionsPerSecond=2500
+    rows=100000
+    sampleSize=100
+    valueBytes=16
+    keyBytes=16
+    operations=u8i
+    actorCountPerClient=64
+    populateData=true
+    runBenchmark=true
+    preserveData=false
