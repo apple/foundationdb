@@ -307,9 +307,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 		// No module found error case with keys
 		try {
-			wait(success(tx->getRange(
-			    KeyRangeRef(LiteralStringRef("\xff\xff/A_no_module_related_prefix"), LiteralStringRef("\xff\xff/I_am_also_not_in_any_module")),
-			    CLIENT_KNOBS->TOO_MANY)));
+			wait(success(tx->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/A_no_module_related_prefix"),
+			                                      LiteralStringRef("\xff\xff/I_am_also_not_in_any_module")),
+			                          CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) throw;
