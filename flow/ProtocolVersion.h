@@ -73,6 +73,11 @@ public:
 	constexpr bool operator>(const ProtocolVersion other) const { return version() > other.version(); }
 
 public: // introduced features
+	// The 5th digit from right is dev version, for example, 2 in 0x0FDB00B061020000LL;
+	// It was used to identify a protocol change (e.g., interface change) between major/minor versions (say 5.1 and 5.2)
+	// We stopped using the dev version consistently in the past.
+	// To ensure binaries work across patch releases (e.g., 6.2.0 to 6.2.22), we require that the protocol version be
+	// the same for each of them.
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A200090000LL, Watches);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A2000D0000LL, MovableCoordinatedState);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A340000000LL, ProcessID);

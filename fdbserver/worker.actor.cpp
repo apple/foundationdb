@@ -1627,14 +1627,17 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 
 ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> result, MonitorLeaderInfo info ) {
 	state ClusterConnectionString ccf = info.intermediateConnFile->getConnectionString();
+	state vector<NetworkAddress> addrs = ccf.coordinators();
 	state ElectionResultRequest request;
-	request.key = ccf.clusterKey();
-	request.coordinators = ccf.coordinators();
 	state int index = 0;
 	state int successIndex = 0;
+	request.key = ccf.clusterKey();
+	request.coordinators = ccf.coordinators();
+
+	deterministicRandom()->randomShuffle(addrs);
 
 	loop {
-		LeaderElectionRegInterface interf( request.coordinators[index] );
+		LeaderElectionRegInterface interf( addrs[index] );
 		request.reply = ReplyPromise<Optional<LeaderInfo>>();
 
 		ErrorOr<Optional<LeaderInfo>> leader = wait( interf.electionResult.tryGetReply( request ) );
@@ -1670,7 +1673,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<Cl
 			}
 			successIndex = index;
 		} else {
-			index = (index+1) % request.coordinators.size();
+			index = (index+1) % addrs.size();
 			if (index == successIndex) {
 				wait( delay( CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY ) );
 			}
@@ -1705,7 +1708,7 @@ ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy( Reference<ClusterC
 		if(currentCC->get().present() && dbInfo->get().clusterInterface == currentCC->get().get() && IFailureMonitor::failureMonitor().getState( currentCC->get().get().registerWorker.getEndpoint() ).isAvailable()) {
 			timeout = Future<Void>();
 		} else if(!timeout.isValid()) {
-			timeout = delay( SERVER_KNOBS->MIN_DELAY_STORAGE_CANDIDACY_SECONDS + (deterministicRandom()->random01()*(SERVER_KNOBS->MAX_DELAY_STORAGE_CANDIDACY_SECONDS-SERVER_KNOBS->MIN_DELAY_STORAGE_CANDIDACY_SECONDS)) );
+			timeout = delay( SERVER_KNOBS->MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS + (deterministicRandom()->random01()*(SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS-SERVER_KNOBS->MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS)) );
 		}
 		choose {
 			when( wait(currentCC->onChange()) ) {}
@@ -1764,7 +1767,7 @@ ACTOR Future<Void> fdbd(
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
 		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {
 			actors.push_back( reportErrors( monitorLeader( connFile, cc ), "ClusterController" ) );
-		} else if (processClass == ProcessClass::StorageClass && SERVER_KNOBS->MAX_DELAY_STORAGE_CANDIDACY_SECONDS > 0) {
+		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit && SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
 			actors.push_back( reportErrors( monitorLeaderRemotelyWithDelayedCandidacy( connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, dbInfo ), "ClusterController" ) );
 		} else {
 			actors.push_back( reportErrors( clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );

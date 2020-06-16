@@ -28,6 +28,7 @@ set(FLOW_SRCS
   IRandom.h
   IThreadPool.cpp
   IThreadPool.h
+  ITrace.h
   IndexedSet.actor.h
   IndexedSet.cpp
   IndexedSet.h
@@ -61,6 +62,8 @@ set(FLOW_SRCS
   ThreadSafeQueue.h
   Trace.cpp
   Trace.h
+  Tracing.h
+  Tracing.cpp
   TreeBenchmark.h
   UnitTest.cpp
   UnitTest.h
@@ -75,7 +78,6 @@ set(FLOW_SRCS
   flat_buffers.h
   flow.cpp
   flow.h
-  folly_memcpy.S
   genericactors.actor.cpp
   genericactors.actor.h
   network.cpp
@@ -88,6 +90,10 @@ set(FLOW_SRCS
   test_memcpy.cpp
   test_memcpy_perf.cpp
   version.cpp)
+
+if(UNIX AND NOT APPLE)
+  list(APPEND FLOW_SRCS folly_memcpy.S)
+endif()
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)
 

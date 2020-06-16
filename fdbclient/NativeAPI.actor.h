@@ -20,6 +20,7 @@
 
 #pragma once
 #include "flow/IRandom.h"
+#include "flow/Tracing.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
 	#define FDBCLIENT_NATIVEAPI_ACTOR_G_H
 	#include "fdbclient/NativeAPI.actor.g.h"
@@ -151,6 +152,7 @@ struct TransactionInfo {
 	Optional<UID> debugID;
 	UID txID;
 	TaskPriority taskID;
+	Span span;
 	bool useProvisionalProxies;
 	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
@@ -159,6 +161,8 @@ struct TransactionInfo {
 
 	explicit TransactionInfo(TaskPriority taskID)
 	  : txID(deterministicRandom()->randomUniqueID()), taskID(taskID), useProvisionalProxies(false) {}
+      : txID(deterministicRandom()->randomUniqueID()), taskID(taskID), span(deterministicRandom()->randomUniqueID(), "Transaction"_loc), useProvisionalProxies(false) {
+    }
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
@@ -334,7 +338,7 @@ private:
 	Future<Void> committing;
 };
 
-ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version);
+ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanID spanContext);
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
                                                                                int shardLimit);
 
