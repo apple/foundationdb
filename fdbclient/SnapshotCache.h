@@ -31,7 +31,7 @@ struct ExtStringRef {
 	ExtStringRef() : extra_zero_bytes(0) {}
 	ExtStringRef( StringRef const& s, int extra_zero_bytes=0 ) : base( s ), extra_zero_bytes(extra_zero_bytes) {}
 
-	Standalone<StringRef> toStandaloneStringRef() {
+	Standalone<StringRef> toStandaloneStringRef() const {
 		auto s = makeString( size() );
 		if (base.size() > 0) {
 			memcpy(mutateString(s), base.begin(), base.size());
@@ -40,7 +40,7 @@ struct ExtStringRef {
 		return s;
 	};
 
-	StringRef toArenaOrRef( Arena& a ) {
+	StringRef toArenaOrRef(Arena& a) const {
 		if (extra_zero_bytes) {
 			StringRef dest = StringRef( new(a) uint8_t[ size() ], size() );
 			if (base.size() > 0) {
@@ -52,12 +52,12 @@ struct ExtStringRef {
 			return base;
 	}
 
-	StringRef assertRef() {
+	StringRef assertRef() const {
 		ASSERT( extra_zero_bytes == 0 );
 		return base;
 	}
 
-	StringRef toArena( Arena& a ) {
+	StringRef toArena(Arena& a) const {
 		if (extra_zero_bytes) {
 			StringRef dest = StringRef( new(a) uint8_t[ size() ], size() );
 			if (base.size() > 0) {
@@ -186,19 +186,19 @@ public:
 
 		enum SEGMENT_TYPE { UNKNOWN_RANGE, EMPTY_RANGE, KV };
 
-		SEGMENT_TYPE type() {
+		SEGMENT_TYPE type() const {
 			if (!offset) return UNKNOWN_RANGE;
 			if (offset&1) return EMPTY_RANGE;
 			return KV;
 		}
 
-		bool is_kv() { return type() == KV; }
-		bool is_unknown_range() { return type() == UNKNOWN_RANGE; }
-		bool is_empty_range() { return type() == EMPTY_RANGE; }
-		bool is_dependent() { return false; }
-		bool is_unreadable() { return false; }
+		bool is_kv() const { return type() == KV; }
+		bool is_unknown_range() const { return type() == UNKNOWN_RANGE; }
+		bool is_empty_range() const { return type() == EMPTY_RANGE; }
+		bool is_dependent() const { return false; }
+		bool is_unreadable() const { return false; }
 
-		ExtStringRef beginKey() {
+		ExtStringRef beginKey() const {
 			if (offset == 0) {
 				auto prev = it;
 				prev.decrementNonEnd();
@@ -208,7 +208,7 @@ public:
 			else
 				return ExtStringRef( it->values[ (offset-2)>>1 ].key, offset&1 );
 		}
-		ExtStringRef endKey() {
+		ExtStringRef endKey() const {
 			if (offset == 0)
 				return it->beginKey;
 			else if (offset == it->segments()-1)
@@ -217,7 +217,7 @@ public:
 				return ExtStringRef( it->values[ (offset-1)>>1 ].key, 1-(offset&1) );
 		}
 
-		const KeyValueRef* kv(Arena& arena) { // only if is_kv()
+		const KeyValueRef* kv(Arena& arena) const { // only if is_kv()
 			return &it->values[(offset - 2) >> 1];
 		}
 

@@ -39,9 +39,9 @@ public:
 	                    bool replaceContent, bool exactRecovery);
 
 	// IClosable
-	virtual Future<Void> getError() { return log->getError(); }
-	virtual Future<Void> onClosed() { return log->onClosed(); }
-	virtual void dispose() {
+	virtual Future<Void> getError() override { return log->getError(); }
+	virtual Future<Void> onClosed() override { return log->onClosed(); }
+	virtual void dispose() override {
 		recovering.cancel();
 		log->dispose();
 		if (reserved_buffer != nullptr) {
@@ -50,7 +50,7 @@ public:
 		}
 		delete this;
 	}
-	virtual void close() {
+	virtual void close() override {
 		recovering.cancel();
 		log->close();
 		if (reserved_buffer != nullptr) {
@@ -61,9 +61,9 @@ public:
 	}
 
 	// IKeyValueStore
-	virtual KeyValueStoreType getType() { return type; }
+	virtual KeyValueStoreType getType() const override { return type; }
 
-	virtual std::tuple<size_t, size_t, size_t> getSize() { return data.size(); }
+	virtual std::tuple<size_t, size_t, size_t> getSize() const override { return data.size(); }
 
 	int64_t getAvailableSize() {
 		int64_t residentSize = data.sumTo(data.end()) + queue.totalSize() + // doesn't account for overhead in queue
@@ -72,7 +72,7 @@ public:
 		return memoryLimit - residentSize;
 	}
 
-	virtual StorageBytes getStorageBytes() {
+	virtual StorageBytes getStorageBytes() override {
 		StorageBytes diskQueueBytes = log->getStorageBytes();
 
 		// Try to bound how many in-memory bytes we might need to write to disk if we commit() now
@@ -103,7 +103,7 @@ public:
 		committedWriteBytes += bytesWritten;
 	}
 
-	virtual void set(KeyValueRef keyValue, const Arena* arena) {
+	virtual void set(KeyValueRef keyValue, const Arena* arena) override {
 		// A commit that occurs with no available space returns Never, so we can throw out all modifications
 		if (getAvailableSize() <= 0) return;
 
@@ -117,7 +117,7 @@ public:
 		}
 	}
 
-	virtual void clear(KeyRangeRef range, const Arena* arena) {
+	virtual void clear(KeyRangeRef range, const Arena* arena) override {
 		// A commit that occurs with no available space returns Never, so we can throw out all modifications
 		if (getAvailableSize() <= 0) return;
 
@@ -131,7 +131,7 @@ public:
 		}
 	}
 
-	virtual Future<Void> commit(bool sequential) {
+	virtual Future<Void> commit(bool sequential) override {
 		if(getAvailableSize() <= 0) {
 			TraceEvent(SevError, "KeyValueStoreMemory_OutOfSpace", id);
 			return Never();
@@ -184,7 +184,7 @@ public:
 		return c;
 	}
 
-	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) {
+	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
 		if (recovering.isError()) throw recovering.getError();
 		if (!recovering.isReady()) return waitAndReadValue(this, key);
 
@@ -194,7 +194,7 @@ public:
 	}
 
 	virtual Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength,
-	                                                Optional<UID> debugID = Optional<UID>()) {
+	                                                Optional<UID> debugID = Optional<UID>()) override {
 		if (recovering.isError()) throw recovering.getError();
 		if (!recovering.isReady()) return waitAndReadValuePrefix(this, key, maxLength);
 
@@ -210,7 +210,8 @@ public:
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	virtual Future<Standalone<RangeResultRef>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 ) {
+	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
+	                                                     int byteLimit = 1 << 30) override {
 		if(recovering.isError()) throw recovering.getError();
 		if (!recovering.isReady()) return waitAndReadRange(this, keys, rowLimit, byteLimit);
 
@@ -252,13 +253,13 @@ public:
 		return result;
 	}
 
-	virtual void resyncLog() {
+	virtual void resyncLog() override {
 		ASSERT(recovering.isReady());
 		resetSnapshot = true;
 		log_op(OpSnapshotAbort, StringRef(), StringRef());
 	}
 
-	virtual void enableSnapshot() { disableSnapshot = false; }
+	virtual void enableSnapshot() override { disableSnapshot = false; }
 
 private:
 	enum OpType {

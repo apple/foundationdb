@@ -1347,7 +1347,7 @@ public:
 
 	// Returns the usable size of pages returned by the pager (i.e. the size of the page that isn't pager overhead).
 	// For a given pager instance, separate calls to this function must return the same value.
-	int getUsablePageSize() override { return logicalPageSize - sizeof(FastAllocatedPage::Checksum); }
+	int getUsablePageSize() const override { return logicalPageSize - sizeof(FastAllocatedPage::Checksum); }
 
 	// Get a new, previously available page ID.  The page will be considered in-use after the next commit
 	// regardless of whether or not it was written to, until it is returned to the pager via freePage()
@@ -1613,7 +1613,7 @@ public:
 
 	// Get the oldest *readable* version, which is not the same as the oldest retained version as the version
 	// returned could have been set as the oldest version in the pending commit
-	Version getOldestVersion() override { return pHeader->oldestVersion; };
+	Version getOldestVersion() const override { return pHeader->oldestVersion; };
 
 	// Calculate the *effective* oldest version, which can be older than the one set in the last commit since we
 	// are allowing active snapshots to temporarily delay page reuse.
@@ -1884,7 +1884,7 @@ public:
 
 	Future<Void> onClosed() override { return closedPromise.getFuture(); }
 
-	StorageBytes getStorageBytes() override {
+	StorageBytes getStorageBytes() const override {
 		ASSERT(recoverFuture.isReady());
 		int64_t free;
 		int64_t total;
@@ -1931,7 +1931,7 @@ public:
 
 	Future<Void> init() override { return recoverFuture; }
 
-	Version getLatestVersion() override { return pLastCommittedHeader->committedVersion; }
+	Version getLatestVersion() const override { return pLastCommittedHeader->committedVersion; }
 
 private:
 	~DWALPager() {}
@@ -2833,8 +2833,7 @@ struct BoundaryRefAndPage {
 	}
 };
 
-#define NOT_IMPLEMENTED                                                                                                \
-	{ UNSTOPPABLE_ASSERT(false); }
+#define NOT_IMPLEMENTED UNSTOPPABLE_ASSERT(false)
 
 #pragma pack(push, 1)
 template <typename T, typename SizeT = int8_t>
@@ -2939,23 +2938,22 @@ public:
 
 	void close() { return close_impl(false); }
 
-	KeyValueStoreType getType() NOT_IMPLEMENTED bool supportsMutation(int op) NOT_IMPLEMENTED StorageBytes
-	    getStorageBytes() {
-		return m_pager->getStorageBytes();
-	}
+	KeyValueStoreType getType() const override { NOT_IMPLEMENTED; }
+	bool supportsMutation(int op) const override { NOT_IMPLEMENTED; }
+	StorageBytes getStorageBytes() const override { return m_pager->getStorageBytes(); }
 
 	// Writes are provided in an ordered stream.
 	// A write is considered part of (a change leading to) the version determined by the previous call to
 	// setWriteVersion() A write shall not become durable until the following call to commit() begins, and shall be
 	// durable once the following call to commit() returns
-	void set(KeyValueRef keyValue) {
+	void set(KeyValueRef keyValue) override {
 		++g_redwoodMetrics.opSet;
 		++g_redwoodMetrics.opSetKeyBytes += keyValue.key.size();
 		++g_redwoodMetrics.opSetValueBytes += keyValue.value.size();
 		m_pBuffer->insert(keyValue.key).mutation().setBoundaryValue(m_pBuffer->copyToArena(keyValue.value));
 	}
 
-	void clear(KeyRangeRef clearedRange) {
+	void clear(KeyRangeRef clearedRange) override {
 		// Optimization for single key clears to create just one mutation boundary instead of two
 		if (clearedRange.begin.size() == clearedRange.end.size() - 1 &&
 		    clearedRange.end[clearedRange.end.size() - 1] == 0 && clearedRange.end.startsWith(clearedRange.begin)) {
@@ -2974,22 +2972,20 @@ public:
 		m_pBuffer->erase(iBegin, iEnd);
 	}
 
-	void mutate(int op, StringRef param1, StringRef param2) NOT_IMPLEMENTED
+	void mutate(int op, StringRef param1, StringRef param2) override { NOT_IMPLEMENTED; }
 
-	    void setOldestVersion(Version v) {
-		m_newOldestVersion = v;
-	}
+	void setOldestVersion(Version v) override { m_newOldestVersion = v; }
 
-	Version getOldestVersion() { return m_pager->getOldestVersion(); }
+	Version getOldestVersion() const override { return m_pager->getOldestVersion(); }
 
-	Version getLatestVersion() {
+	Version getLatestVersion() const override {
 		if (m_writeVersion != invalidVersion) return m_writeVersion;
 		return m_pager->getLatestVersion();
 	}
 
-	Version getWriteVersion() { return m_writeVersion; }
+	Version getWriteVersion() override { return m_writeVersion; }
 
-	Version getLastCommittedVersion() { return m_lastCommittedVersion; }
+	Version getLastCommittedVersion() override { return m_lastCommittedVersion; }
 
 	VersionedBTree(IPager2* pager, std::string name)
 	  : m_pager(pager), m_writeVersion(invalidVersion), m_lastCommittedVersion(invalidVersion), m_pBuffer(nullptr),
@@ -3170,7 +3166,7 @@ public:
 		m_writeVersion = v;
 	}
 
-	Future<Void> commit() {
+	Future<Void> commit() override {
 		if (m_pBuffer == nullptr) return m_latestCommit;
 		return commit_impl(this);
 	}
@@ -5481,22 +5477,22 @@ public:
 		delete self;
 	}
 
-	void close() { shutdown(this, false); }
+	void close() override { shutdown(this, false); }
 
-	void dispose() { shutdown(this, true); }
+	void dispose() override { shutdown(this, true); }
 
-	Future<Void> onClosed() { return m_closed.getFuture(); }
+	Future<Void> onClosed() override { return m_closed.getFuture(); }
 
-	Future<Void> commit(bool sequential = false) {
+	Future<Void> commit(bool sequential = false) override {
 		Future<Void> c = m_tree->commit();
 		m_tree->setOldestVersion(m_tree->getLatestVersion());
 		m_tree->setWriteVersion(m_tree->getWriteVersion() + 1);
 		return catchError(c);
 	}
 
-	KeyValueStoreType getType() { return KeyValueStoreType::SSD_REDWOOD_V1; }
+	KeyValueStoreType getType() const override { return KeyValueStoreType::SSD_REDWOOD_V1; }
 
-	StorageBytes getStorageBytes() { return m_tree->getStorageBytes(); }
+	StorageBytes getStorageBytes() override { return m_tree->getStorageBytes(); }
 
 	Future<Void> getError() { return delayed(m_error.getFuture()); };
 
@@ -5505,12 +5501,13 @@ public:
 		m_tree->clear(range);
 	}
 
-	void set(KeyValueRef keyValue, const Arena* arena = NULL) {
+	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
 		debug_printf("SET %s\n", printable(keyValue).c_str());
 		m_tree->set(keyValue);
 	}
 
-	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) {
+	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
+	                                             int byteLimit = 1 << 30) override {
 		debug_printf("READRANGE %s\n", printable(keys).c_str());
 		return catchError(readRange_impl(this, keys, rowLimit, byteLimit));
 	}

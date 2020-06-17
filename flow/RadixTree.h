@@ -257,7 +257,9 @@ public:
 	radix_tree(const radix_tree& other) = delete; // delete
 	radix_tree& operator=(const radix_tree other) = delete; // delete
 
-	inline std::tuple<size_type, size_type, size_type> size() { return std::make_tuple(m_size, m_node, inline_keys); }
+	inline std::tuple<size_type, size_type, size_type> size() const {
+		return std::make_tuple(m_size, m_node, inline_keys);
+	}
 
 	// Return the amount of memory used by an entry in the RadixTree
 	static int getElementBytes(node* node) {
