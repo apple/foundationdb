@@ -108,12 +108,9 @@ public:
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end,
 	                                            GetRangeLimits limits, bool reverse = false);
 
-	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true) {
-		// Default value is nullptr, begin of KeyRangeMap is Key()
-		impls = KeyRangeMap<SpecialKeyRangeBaseImpl*>(nullptr, spaceEndKey);
-		range = KeyRangeRef(spaceStartKey, spaceEndKey);
-		modules = KeyRangeMap<SpecialKeySpace::MODULE>(
-		    testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey);
+	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true)
+	  : range(KeyRangeRef(spaceStartKey, spaceEndKey)), impls(nullptr, spaceEndKey),
+	    modules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey) {
 		if (!testOnly) modulesBoundaryInit(); // testOnly is used in the correctness workload
 	}
 	// Initialize module boundaries, used to handle cross_module_read
@@ -159,10 +156,9 @@ private:
 	ACTOR static Future<std::pair<Standalone<RangeResultRef>, Optional<SpecialKeySpace::MODULE>>>
 	getRangeAggregationActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end,
 	                         GetRangeLimits limits, bool reverse);
-
+	KeyRange range;
 	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
 	KeyRangeMap<SpecialKeySpace::MODULE> modules;
-	KeyRange range;
 
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
 };
