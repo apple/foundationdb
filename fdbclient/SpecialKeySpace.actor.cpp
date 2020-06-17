@@ -110,7 +110,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* 
 // However, moving the KeySelector while handling other parameters like limits makes the code much more complex and hard
 // to maintain; Thus, separate each part to make the code easy to understand and more compact
 // Boundary is the range of the legal key space, which, by default is the range of the module
-// And (\xff\xff, \xff\xff\xff\xff) if SPECIAL_KEY_SPACE_RELAXED is turned on
+// And (\xff\xff, \xff\xff\xff) if SPECIAL_KEY_SPACE_RELAXED is turned on
 ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeySelector* ks,
                                              KeyRangeRef boundary, int* actualOffset,
                                              Standalone<RangeResultRef>* result,
@@ -118,14 +118,14 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWrite
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter =
 	    ks->offset < 1 ? sks->getImpls().rangeContainingKeyBefore(ks->getKey())
 	                   : sks->getImpls().rangeContaining(ks->getKey());
-	while ((ks->offset < 1 && iter.begin() > boundary.begin) || (ks->offset > 1 && iter.begin() < boundary.end)) {
+	while ((ks->offset < 1 && iter->begin() > boundary.begin) || (ks->offset > 1 && iter->begin() < boundary.end)) {
 		if (iter->value() != nullptr) {
 			wait(moveKeySelectorOverRangeActor(iter->value(), ryw, ks, cache));
 		}
 		ks->offset < 1 ? --iter : ++iter;
 	}
 	*actualOffset = ks->offset;
-	if (iter.begin() == boundary.begin || iter.begin() == boundary.end) ks->setKey(iter.begin());
+	if (iter->begin() == boundary.begin || iter->begin() == boundary.end) ks->setKey(iter->begin());
 
 	if (!ks->isFirstGreaterOrEqual()) {
 		// The Key Selector clamps up to the legal key space
@@ -171,9 +171,11 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	// used to cache result from potential first read
 	state Optional<Standalone<RangeResultRef>> cache;
 
-	if (!ryw->specialKeySpaceRelaxed()) {
+	if (ryw->specialKeySpaceRelaxed()) {
+		moduleBoundary = sks->range;
+	} else {
 		auto beginIter = sks->getModules().rangeContaining(begin.getKey());
-		if (beginIter->begin() <= end.getKey() && end.getKey() <= beginIter.end()) {
+		if (beginIter->begin() <= end.getKey() && end.getKey() <= beginIter->end()) {
 			if (beginIter->value() == SpecialKeySpace::MODULE::UNKNOWN)
 				throw special_keys_no_module_found();
 			else
@@ -186,8 +188,6 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			    .detail("BoundaryEnd", beginIter->end());
 			throw special_keys_cross_module_read();
 		}
-	} else {
-		moduleBoundary = sks->range;
 	}
 
 	wait(normalizeKeySelectorActor(sks, ryw, &begin, moduleBoundary, &actualBeginOffset, &result, &cache));
