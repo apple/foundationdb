@@ -203,7 +203,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	KeySelector randomKeySelector() {
 		Key randomKey;
-		// TODO : add randomness to pickup existing keys
 		if (deterministicRandom()->random01() < absoluteRandomProb) {
 			Key prefix;
 			if (deterministicRandom()->random01() < absoluteRandomProb)
@@ -287,7 +286,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 			const KeyRef startKey = LiteralStringRef("\xff\xff/transactio");
 			const KeyRef endKey = LiteralStringRef("\xff\xff/transaction1");
-			Standalone<RangeResultRef> result = wait(tx->getRange(KeyRangeRef(startKey, endKey), GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			Standalone<RangeResultRef> result =
+			    wait(tx->getRange(KeyRangeRef(startKey, endKey), GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			// The whole transaction module should be empty
 			ASSERT(!result.size());
 			tx->reset();

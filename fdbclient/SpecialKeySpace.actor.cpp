@@ -109,6 +109,8 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeBaseImpl* 
 // It does have overhead here since we query all keys twice in the worst case.
 // However, moving the KeySelector while handling other parameters like limits makes the code much more complex and hard
 // to maintain; Thus, separate each part to make the code easy to understand and more compact
+// Boundary is the range of the legal key space, which, by default is the range of the module
+// And (\xff\xff, \xff\xff\xff\xff) if SPECIAL_KEY_SPACE_RELAXED is turned on
 ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeySelector* ks,
                                              KeyRangeRef boundary, int* actualOffset,
                                              Standalone<RangeResultRef>* result,
@@ -165,7 +167,6 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter;
 	state int actualBeginOffset;
 	state int actualEndOffset;
-	// state Optional<SpecialKeySpace::MODULE> lastModuleRead;
 	state KeyRangeRef moduleBoundary;
 	// used to cache result from potential first read
 	state Optional<Standalone<RangeResultRef>> cache;
