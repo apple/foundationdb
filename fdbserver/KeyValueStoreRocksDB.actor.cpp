@@ -346,9 +346,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		doClose(this, false);
 	}
 
-	KeyValueStoreType getType() override {
-		return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1);
-	}
+	KeyValueStoreType getType() const override { return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1); }
 
 	Future<Void> init() override {
 		std::unique_ptr<Writer::OpenAction> a(new Writer::OpenAction());
@@ -406,7 +404,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
-	StorageBytes getStorageBytes() override {
+	StorageBytes getStorageBytes() const override {
 		int64_t free;
 		int64_t total;
 
