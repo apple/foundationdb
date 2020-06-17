@@ -358,7 +358,7 @@ bool createDirectory( std::string const& directory );
 std::vector<std::string> listFiles( std::string const& directory, std::string const& extension = "");
 
 // returns directory names relative to directory
-std::vector<std::string> listDirectories( std::string const& directory );
+std::vector<std::string> listDirectories(std::string const& directory, std::string const& extension = "");
 
 void findFilesRecursively(std::string path, std::vector<std::string> &out);
 
