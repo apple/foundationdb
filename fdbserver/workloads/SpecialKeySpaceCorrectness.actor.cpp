@@ -282,17 +282,17 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		} catch (Error& e) {
 			throw;
 		}
-		// begin keySelector outside module range
+		// cross module read with option turned on
 		try {
-			const KeyRef key = LiteralStringRef("\xff\xff/cluster_file_path");
-			KeySelector begin = KeySelectorRef(key, false, 0);
-			KeySelector end = KeySelectorRef(keyAfter(key), false, 1);
-			wait(success(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY))));
-			ASSERT(false);
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
-			ASSERT(e.code() == error_code_special_keys_cross_module_read);
+			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
+			const KeyRef startKey = LiteralStringRef("\xff\xff/transactio");
+			const KeyRef endKey = LiteralStringRef("\xff\xff/transaction1");
+			Standalone<RangeResultRef> result = wait(tx->getRange(KeyRangeRef(startKey, endKey), GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			// The whole transaction module should be empty
+			ASSERT(!result.size());
 			tx->reset();
+		} catch (Error& e) {
+			throw;
 		}
 		// end keySelector inside module range, *** a tricky corner case ***
 		try {
@@ -327,6 +327,18 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			ASSERT(e.code() == error_code_special_keys_no_module_found);
 			tx->reset();
 		}
+		// begin and end keySelectors clamp up to the boundary of the module
+		try {
+			const KeyRef key = LiteralStringRef("\xff\xff/cluster_file_path");
+			KeySelector begin = KeySelectorRef(key, false, 0);
+			KeySelector end = KeySelectorRef(keyAfter(key), false, 2);
+			Standalone<RangeResultRef> result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(result.readToBegin && result.readThroughEnd);
+			tx->reset();
+		} catch (Error& e) {
+			throw;
+		}
+
 		return Void();
 	}
 
