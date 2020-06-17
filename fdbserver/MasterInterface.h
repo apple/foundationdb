@@ -37,11 +37,11 @@ struct MasterInterface {
 	RequestStream< struct TLogRejoinRequest > tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
 	RequestStream< struct GetCommitVersionRequest > getCommitVersion;
+	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 	// Get the centralized live committed version reported by proxies.
 	RequestStream< struct GetRawCommittedVersionRequest > getLiveCommittedVersion;
 	// Report a proxy's committed version.
 	RequestStream< struct ReportRawCommittedVersionRequest> reportLiveCommittedVersion;
-	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
 	NetworkAddressList addresses() const { return changeCoordinators.getEndpoint().addresses; }
@@ -70,8 +70,8 @@ struct MasterInterface {
 		streams.push_back(changeCoordinators.getReceiver());
 		streams.push_back(getCommitVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
 		streams.push_back(notifyBackupWorkerDone.getReceiver());
-		streams.push_back(getLiveCommittedVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
-		streams.push_back(reportLiveCommittedVersion.getReceiver(TaskPriority::ProxyCommit));
+		streams.push_back(getLiveCommittedVersion.getReceiver(TaskPriority::GetLiveCommittedVersion));
+		streams.push_back(reportLiveCommittedVersion.getReceiver(TaskPriority::ReportLiveCommittedVersion));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };

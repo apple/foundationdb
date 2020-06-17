@@ -1278,9 +1278,16 @@ ACTOR Future<Void> commitBatch(
 
 	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
 	if( commitVersion > self->committedVersion.get() ) {
+		if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
+			// Let master know this commit version so that every other proxy can know.
+			wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
+		}
 		self->locked = lockedAfter;
 		self->metadataVersion = metadataVersionAfter;
-		self->committedVersion.set(commitVersion);
+		TEST(commitVersion < self->committedVersion.get());
+		if (commitVersion > self->committedVersion.get()) {
+			self->committedVersion.set(commitVersion);
+		}
 	}
 
 	if (forceRecovery) {
@@ -1392,10 +1399,10 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	state vector<Future<GetReadVersionReply>> proxyVersions;
 	state Future<GetReadVersionReply> replyFromMasterFuture;
 	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
-		replyFromMasterFuture = commitData->master.getLiveCommittedVersion.getReply(GetRawCommittedVersionRequest(span->context, debugID), TaskPriority::ProxyMasterVersionReply);
+		replyFromMasterFuture = commitData->master.getLiveCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::GetLiveCommittedVersionReply);
 	} else {
 		for (auto const& p : *otherProxies)
-			proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(GetRawCommittedVersionRequest(span->context, debugID), TaskPriority::TLogConfirmRunningReply)));
+			proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::TLogConfirmRunningReply)));
 	}
 
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags&GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {

@@ -1010,7 +1010,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				if (req.debugID.present())
 					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
 
-				if (self->liveCommittedVersion == invalidVersion) {
+				if(self->liveCommittedVersion == invalidVersion) {
 					self->liveCommittedVersion = self->recoveryTransactionVersion;
 				}
 				GetReadVersionReply reply;
