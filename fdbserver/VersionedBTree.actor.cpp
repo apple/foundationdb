@@ -2248,7 +2248,7 @@ struct RedwoodRecordRef {
 	inline RedwoodRecordRef withoutValue() const { return RedwoodRecordRef(key, version); }
 
 	inline RedwoodRecordRef withMaxPageID() const {
-		return RedwoodRecordRef(key, version, StringRef((uint8_t *)&maxPageID, sizeof(maxPageID)));
+		return RedwoodRecordRef(key, version, StringRef((uint8_t*)&maxPageID, sizeof(maxPageID)));
 	}
 
 	// Truncate (key, version, part) tuple to len bytes.
@@ -5171,7 +5171,7 @@ public:
 				debug_printf("move%s() first loop cursor=%s\n", forward ? "Next" : "Prev", self->toString().c_str());
 				auto& entry = self->path.back();
 				bool success;
-				if(entry.cursor.valid()) {
+				if (entry.cursor.valid()) {
 					success = forward ? entry.cursor.moveNext() : entry.cursor.movePrev();
 				} else {
 					success = forward ? entry.cursor.moveFirst() : false;
@@ -5542,9 +5542,9 @@ public:
 				// Read page contents without using waits
 				bool isRoot = cur.inRoot();
 				BTreePage::BinaryTree::Cursor leafCursor = cur.popPath();
-				while(leafCursor.valid()) {
+				while (leafCursor.valid()) {
 					KeyValueRef kv = leafCursor.get().toKeyValueRef();
-					if(kv.key >= keys.end) {
+					if (kv.key >= keys.end) {
 						break;
 					}
 					accumulatedBytes += kv.expectedSize();
@@ -5556,7 +5556,7 @@ public:
 				}
 				// Stop if the leaf cursor is still valid which means we hit a key or size limit or
 				// if we started in the root page
-				if(leafCursor.valid() || isRoot) {
+				if (leafCursor.valid() || isRoot) {
 					break;
 				}
 				wait(cur.moveNext());
@@ -5567,9 +5567,9 @@ public:
 				// Read page contents without using waits
 				bool isRoot = cur.inRoot();
 				BTreePage::BinaryTree::Cursor leafCursor = cur.popPath();
-				while(leafCursor.valid()) {
+				while (leafCursor.valid()) {
 					KeyValueRef kv = leafCursor.get().toKeyValueRef();
-					if(kv.key < keys.begin) {
+					if (kv.key < keys.begin) {
 						break;
 					}
 					accumulatedBytes += kv.expectedSize();
@@ -5581,7 +5581,7 @@ public:
 				}
 				// Stop if the leaf cursor is still valid which means we hit a key or size limit or
 				// if we started in the root page
-				if(leafCursor.valid() || isRoot) {
+				if (leafCursor.valid() || isRoot) {
 					break;
 				}
 				wait(cur.movePrev());
@@ -6047,7 +6047,8 @@ ACTOR Future<int> seekAll(VersionedBTree* btree, Version v,
 
 // Verify the result of point reads for every set or cleared key at the given version
 ACTOR Future<int> seekAllBTreeCursor(VersionedBTree* btree, Version v,
-                          std::map<std::pair<std::string, Version>, Optional<std::string>>* written, int* pErrorCount) {
+                                     std::map<std::pair<std::string, Version>, Optional<std::string>>* written,
+                                     int* pErrorCount) {
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i = written->cbegin();
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd = written->cend();
 	state int errors = 0;
@@ -6074,22 +6075,19 @@ ACTOR Future<int> seekAllBTreeCursor(VersionedBTree* btree, Version v,
 					if (!foundKey) {
 						printf("Verify ERROR: key_not_found: '%s' -> '%s' @%" PRId64 "\n", key.c_str(),
 						       val.get().c_str(), ver);
-					}
-					else if (!hasValue) {
+					} else if (!hasValue) {
 						printf("Verify ERROR: value_not_found: '%s' -> '%s' @%" PRId64 "\n", key.c_str(),
 						       val.get().c_str(), ver);
-					}
-					else if (!valueMatch) {
+					} else if (!valueMatch) {
 						printf("Verify ERROR: value_incorrect: for '%s' found '%s' expected '%s' @%" PRId64 "\n",
-						       key.c_str(), cur.get().value.get().toString().c_str(), val.get().c_str(),
-						       ver);
+						       key.c_str(), cur.get().value.get().toString().c_str(), val.get().c_str(), ver);
 					}
 				}
 			} else if (foundKey && hasValue) {
 				++errors;
 				++*pErrorCount;
 				printf("Verify ERROR: cleared_key_found: '%s' -> '%s' @%" PRId64 "\n", key.c_str(),
-						cur.get().value.get().toString().c_str(), ver);
+				       cur.get().value.get().toString().c_str(), ver);
 			}
 		}
 		++i;
@@ -6127,12 +6125,12 @@ ACTOR Future<Void> verify(VersionedBTree* btree, FutureStream<Version> vStream,
 			state Reference<IStoreCursor> cur = btree->readAtVersion(v);
 
 			debug_printf("Verifying entire key range at version %" PRId64 "\n", v);
-			if(deterministicRandom()->coinflip()) {
-				fRangeAll = verifyRange(btree, LiteralStringRef(""), LiteralStringRef("\xff\xff"), v, written,
-												pErrorCount);
+			if (deterministicRandom()->coinflip()) {
+				fRangeAll =
+				    verifyRange(btree, LiteralStringRef(""), LiteralStringRef("\xff\xff"), v, written, pErrorCount);
 			} else {
-				fRangeAll = verifyRangeBTreeCursor(btree, LiteralStringRef(""), LiteralStringRef("\xff\xff"), v, written,
-												pErrorCount);
+				fRangeAll = verifyRangeBTreeCursor(btree, LiteralStringRef(""), LiteralStringRef("\xff\xff"), v,
+				                                   written, pErrorCount);
 			}
 			if (serial) {
 				wait(success(fRangeAll));
@@ -6142,7 +6140,7 @@ ACTOR Future<Void> verify(VersionedBTree* btree, FutureStream<Version> vStream,
 			Key end = randomKV().key;
 			debug_printf("Verifying range (%s, %s) at version %" PRId64 "\n", toString(begin).c_str(),
 			             toString(end).c_str(), v);
-			if(deterministicRandom()->coinflip()) {
+			if (deterministicRandom()->coinflip()) {
 				fRangeRandom = verifyRange(btree, begin, end, v, written, pErrorCount);
 			} else {
 				fRangeRandom = verifyRangeBTreeCursor(btree, begin, end, v, written, pErrorCount);
@@ -6152,7 +6150,7 @@ ACTOR Future<Void> verify(VersionedBTree* btree, FutureStream<Version> vStream,
 			}
 
 			debug_printf("Verifying seeks to each changed key at version %" PRId64 "\n", v);
-			if(deterministicRandom()->coinflip()) {
+			if (deterministicRandom()->coinflip()) {
 				fSeekAll = seekAll(btree, v, written, pErrorCount);
 			} else {
 				fSeekAll = seekAllBTreeCursor(btree, v, written, pErrorCount);
@@ -6989,7 +6987,8 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state int maxKeySize = deterministicRandom()->randomInt(1, pageSize * 2);
 	state int maxValueSize = randomSize(pageSize * 25);
 	state int maxCommitSize = shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6));
-	state int mutationBytesTarget = shortTest ? 100000 : randomSize(std::min<int>(maxCommitSize * 100, pageSize * 100000));
+	state int mutationBytesTarget =
+	    shortTest ? 100000 : randomSize(std::min<int>(maxCommitSize * 100, pageSize * 100000));
 	state double clearProbability = deterministicRandom()->random01() * .1;
 	state double clearSingleKeyProbability = deterministicRandom()->random01();
 	state double clearPostSetProbability = deterministicRandom()->random01() * .1;
