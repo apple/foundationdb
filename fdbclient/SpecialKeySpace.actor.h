@@ -151,7 +151,7 @@ public:
 private:
 	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
 
-	ACTOR static Future<Standalone<RangeResultRef>> checkModuleFound(SpecialKeySpace* sks,
+	ACTOR static Future<Standalone<RangeResultRef>> checkRYWValid(SpecialKeySpace* sks,
 	                                                                 ReadYourWritesTransaction* ryw, KeySelector begin,
 	                                                                 KeySelector end, GetRangeLimits limits,
 	                                                                 bool reverse);
