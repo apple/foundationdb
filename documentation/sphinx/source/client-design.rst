@@ -2,7 +2,7 @@
 Client Design
 #############
 
-FoundationDB supports language bindings for application development using the ordered key-value store. The following documents cover use of the bindings, from getting started and design principles to best practices and data modeling. The latest changes are detailed in :doc:`release-notes`.
+FoundationDB supports language bindings for application development using the ordered key-value store. The following documents cover use of the bindings, from getting started and design principles to best practices and data modeling. The latest changes are detailed in :ref:`release-notes`.
 
 * :doc:`getting-started-mac` explains how to install a local FoundationDB server suitable for development on macOS.
 
@@ -27,7 +27,6 @@ FoundationDB supports language bindings for application development using the or
     :titlesonly:
     :hidden:
 
-    release-notes
     getting-started-mac
     getting-started-linux
     downloads
