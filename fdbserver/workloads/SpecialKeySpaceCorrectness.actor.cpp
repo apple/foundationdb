@@ -338,6 +338,17 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		} catch (Error& e) {
 			throw;
 		}
+		try {
+			tx->addReadConflictRange(singleKeyRange(LiteralStringRef("readKey")));
+			const KeyRef key = LiteralStringRef("\xff\xff/transaction/a_to_be_the_first");
+			KeySelector begin = KeySelectorRef(key, false, 0);
+			KeySelector end = KeySelectorRef(key, false, 2);
+			Standalone<RangeResultRef> result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(result.readToBegin && !result.readThroughEnd);
+			tx->reset();
+		} catch (Error& e) {
+			throw;
+		}
 
 		return Void();
 	}
