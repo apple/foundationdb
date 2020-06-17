@@ -1,5 +1,6 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
+#include <rocksdb/trace_reader_writer.h>
 #include <rocksdb/env.h>
 #include <rocksdb/db.h>
 #include "flow/flow.h"
@@ -125,14 +126,39 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		};
 		void action(OpenAction& a) {
+			auto opt = getOptions(a.path);
+			auto* env = rocksdb::Env::Default();
+			rocksdb::EnvOptions env_options(opt);
+			std::unique_ptr<rocksdb::TraceWriter> trace_writer;
+			auto status =
+			    rocksdb::NewFileTraceWriter(env, env_options, "/data/foundationdb/rocksdb_trace", &trace_writer);
+			if (!status.ok()) {
+				TraceEvent(SevError, "RocksDBError")
+				    .detail("Error", status.ToString())
+				    .detail("Method", "NewFileTraceWriter");
+				a.done.sendError(statusToError(status));
+				return;
+			}
+
 			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
-			auto status = rocksdb::DB::Open(getOptions(a.path), a.path, defaultCF, &handle, &db);
+			status = rocksdb::DB::Open(opt, a.path, defaultCF, &handle, &db);
+
 			if (!status.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", status.ToString()).detail("Method", "Open");
 				a.done.sendError(statusToError(status));
 			} else {
+				rocksdb::TraceOptions trace_opt;
+				status = db->StartTrace(trace_opt, std::move(trace_writer));
+				if (!status.ok()) {
+					TraceEvent(SevError, "RocksDBError")
+					    .detail("Error", status.ToString())
+					    .detail("Method", "StartTrace");
+					a.done.sendError(statusToError(status));
+					return;
+				}
+
 				a.done.send(Void());
 			}
 		}
@@ -314,6 +340,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> getError() override { return join(errorPromise.getFuture(), sqlLite->getError()); }
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
+		self->db->EndTrace();
 		wait(self->readThreads->stop());
 		auto a = new Writer::CloseAction{};
 		auto f = a->done.getFuture();
