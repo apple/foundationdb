@@ -734,7 +734,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	if (deterministicRandom()->random01() < 0.25) db.desiredTLogCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.masterProxyCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.resolverCount = deterministicRandom()->randomInt(1,7);
-	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
+/*	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
 	switch (storage_engine_type) {
 	case 0: {
 		TEST(true); // Simulated cluster using ssd storage engine
@@ -758,7 +758,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		}
 	default:
 		ASSERT(false); // Programmer forgot to adjust cases.
-	}
+	} */
+	set_config("ssd-rocksdb-experimental");
 	//	if (deterministicRandom()->random01() < 0.5) {
 	//		set_config("ssd");
 	//	} else {
