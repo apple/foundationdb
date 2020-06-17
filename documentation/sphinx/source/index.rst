@@ -22,7 +22,7 @@ FoundationDB is a robust choice for a broad range of use cases:
 
 **FoundationDB supports flexible application architectures.** Your application can talk directly to FoundationDB, to a layer, or both. Layers provide new capability on top of FoundationDB but are stateless.
 
-The latest changes are detailed in :doc:`release-notes`. The documentation has the following sections:
+The latest changes are detailed in :ref:`release-notes`. The documentation has the following sections:
 
 * :doc:`why-foundationdb` describes the technical alternatives involved in NoSQL database design and explains the advantages of transaction processing at scale.
 
