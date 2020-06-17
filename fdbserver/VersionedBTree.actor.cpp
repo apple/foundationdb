@@ -5492,7 +5492,7 @@ public:
 
 	KeyValueStoreType getType() const override { return KeyValueStoreType::SSD_REDWOOD_V1; }
 
-	StorageBytes getStorageBytes() override { return m_tree->getStorageBytes(); }
+	StorageBytes getStorageBytes() const override { return m_tree->getStorageBytes(); }
 
 	Future<Void> getError() { return delayed(m_error.getFuture()); };
 

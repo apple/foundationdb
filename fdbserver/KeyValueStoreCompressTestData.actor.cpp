@@ -47,7 +47,7 @@ struct KeyValueStoreCompressTestData : IKeyValueStore {
 	}
 
 	virtual KeyValueStoreType getType() const override { return store->getType(); }
-	virtual StorageBytes getStorageBytes() override { return store->getStorageBytes(); }
+	virtual StorageBytes getStorageBytes() const override { return store->getStorageBytes(); }
 
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
 		store->set( KeyValueRef( keyValue.key, pack(keyValue.value) ), arena );

@@ -65,14 +65,14 @@ public:
 
 	virtual std::tuple<size_t, size_t, size_t> getSize() const override { return data.size(); }
 
-	int64_t getAvailableSize() {
+	int64_t getAvailableSize() const {
 		int64_t residentSize = data.sumTo(data.end()) + queue.totalSize() + // doesn't account for overhead in queue
 		                       transactionSize;
 
 		return memoryLimit - residentSize;
 	}
 
-	virtual StorageBytes getStorageBytes() override {
+	virtual StorageBytes getStorageBytes() const override {
 		StorageBytes diskQueueBytes = log->getStorageBytes();
 
 		// Try to bound how many in-memory bytes we might need to write to disk if we commit() now

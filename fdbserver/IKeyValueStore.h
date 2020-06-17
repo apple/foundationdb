@@ -57,7 +57,7 @@ public:
 	virtual std::tuple<size_t, size_t, size_t> getSize() const { return std::make_tuple(0, 0, 0); }
 
 	// Returns the amount of free and total space for this store, in bytes
-	virtual StorageBytes getStorageBytes() = 0;
+	virtual StorageBytes getStorageBytes() const = 0;
 
 	virtual void resyncLog() {}
 

@@ -1452,7 +1452,7 @@ public:
 	virtual Future<Void> onClosed() override { return stopped.getFuture(); }
 
 	virtual KeyValueStoreType getType() const override { return type; }
-	virtual StorageBytes getStorageBytes() override;
+	virtual StorageBytes getStorageBytes() const override;
 
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) override;
 	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
@@ -1965,7 +1965,7 @@ KeyValueStoreSQLite::~KeyValueStoreSQLite() {
 	//printf("dbf=%lld bytes, wal=%lld bytes\n", getFileSize((filename+".fdb").c_str()), getFileSize((filename+".fdb-wal").c_str()));
 }
 
-StorageBytes KeyValueStoreSQLite::getStorageBytes() {
+StorageBytes KeyValueStoreSQLite::getStorageBytes() const {
 	int64_t free;
 	int64_t total;
 
