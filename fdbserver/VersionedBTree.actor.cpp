@@ -2983,9 +2983,9 @@ public:
 		return m_pager->getLatestVersion();
 	}
 
-	Version getWriteVersion() override { return m_writeVersion; }
+	Version getWriteVersion() const { return m_writeVersion; }
 
-	Version getLastCommittedVersion() override { return m_lastCommittedVersion; }
+	Version getLastCommittedVersion() const { return m_lastCommittedVersion; }
 
 	VersionedBTree(IPager2* pager, std::string name)
 	  : m_pager(pager), m_writeVersion(invalidVersion), m_lastCommittedVersion(invalidVersion), m_pBuffer(nullptr),
