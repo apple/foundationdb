@@ -478,6 +478,35 @@ struct StorageServerMetrics {
 		req.reply.send(reply);
 	}
 
+	std::vector<KeyRef> getSplitPoints(KeyRangeRef range, int64_t chunkSize) {
+		std::vector<KeyRef> toReturn;
+		KeyRef beginKey = range.begin;
+		IndexedSet<Key, int64_t>::iterator endKey =
+		    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
+		while (endKey != byteSample.sample.end()) {
+			if (*endKey > range.end) {
+				break;
+			}
+			if (*endKey == beginKey) {
+				++endKey;
+				continue;
+			}
+			toReturn.push_back(*endKey);
+			beginKey = *endKey;
+			endKey =
+			    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
+		}
+		return toReturn;
+	}
+
+	void getSplitPoints(SplitRangeRequest req) {
+		SplitRangeReply reply;
+		std::vector<KeyRef> points = getSplitPoints(req.keys, req.chunkSize);
+
+		reply.splitPoints = VectorRef<KeyRef>(points.data(), points.size());
+		req.reply.send(reply);
+	}
+
 private:
 	static void collapse( KeyRangeMap<int>& map, KeyRef const& key ) {
 		auto range = map.rangeContaining(key);

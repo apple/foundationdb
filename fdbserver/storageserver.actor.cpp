@@ -3640,6 +3640,14 @@ ACTOR Future<Void> metricsCore( StorageServer* self, StorageServerInterface ssi 
 					self->metrics.getReadHotRanges(req);
 				}
 			}
+			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
+				if (!self->isReadable(req.keys)) {
+					TEST(true); // getSplitPoints immediate wrong_shard_server()
+					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
+				} else {
+					self->metrics.getSplitPoints(req);
+				}
+			}
 			when (wait(doPollMetrics) ) {
 				self->metrics.poll();
 				doPollMetrics = delay(SERVER_KNOBS->STORAGE_SERVER_POLL_METRICS_DELAY);
