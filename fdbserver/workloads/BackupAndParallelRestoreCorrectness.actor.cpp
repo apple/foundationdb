@@ -81,6 +81,20 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		KeyRef endRange;
 		UID randomID = nondeterministicRandom()->randomUniqueID();
 
+		// Generate addPrefix
+		if (addPrefix == LiteralStringRef("") && removePrefix == LiteralStringRef("")) {
+			if (deterministicRandom()->random01() < 0.2) { // Generate random addPrefix
+				Key addPrefix = LiteralStringRef(
+				    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 100)));
+			}
+		}
+		TraceEvent("BackupAndParallelRestoreCorrectness")
+		    .detail("AddPrefix", addPrefix)
+		    .detail("RemovePrefix", removePrefix);
+		// Do not support removePrefix right now because we must ensure all backup keys have the removePrefix
+		// otherwise, test will fail because fast restore will simply add the removePrefix to every key in the end.
+		ASSERT(removePrefix.size() == 0);
+
 		if (shareLogRange) {
 			bool beforePrefix = sharedRandomNumber & 1;
 			if (beforePrefix)
