@@ -83,10 +83,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		// Generate addPrefix
 		if (addPrefix == LiteralStringRef("") && removePrefix == LiteralStringRef("")) {
-			if (deterministicRandom()->random01() < 0.2) { // Generate random addPrefix
+			if (deterministicRandom()->random01() < 0.5) { // Generate random addPrefix
 				std::string randomStr =
 				    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 100));
-				Key addPrefix = LiteralStringRef(randomStr.c_str());
+				addPrefix = LiteralStringRef(randomStr.c_str());
 			}
 		}
 		TraceEvent("BackupAndParallelRestoreCorrectness")
