@@ -270,10 +270,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					cursor->Next();
 				}
 			} else {
-				cursor->Seek(toSlice(a.keys.end));
-				if (!cursor->Valid()) {
-					cursor->SeekToLast();
-				} else {
+				cursor->SeekForPrev(toSlice(a.keys.end));
+				if (cursor->Valid() && toStringRef(cursor->key()) == a.keys.end) {
 					cursor->Prev();
 				}
 
