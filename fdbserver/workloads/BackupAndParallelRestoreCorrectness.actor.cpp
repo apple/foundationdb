@@ -84,8 +84,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		// Generate addPrefix
 		if (addPrefix == LiteralStringRef("") && removePrefix == LiteralStringRef("")) {
 			if (deterministicRandom()->random01() < 0.2) { // Generate random addPrefix
-				Key addPrefix = LiteralStringRef(
-				    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 100)));
+				std::string randomStr =
+				    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 100));
+				Key addPrefix = LiteralStringRef(randomStr.c_str());
 			}
 		}
 		TraceEvent("BackupAndParallelRestoreCorrectness")
@@ -575,9 +576,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					ASSERT(!restore.isError());
 				}
 
-				// TODO: If addPrefix and removePrefix set, we want to transform the effect by copying data
+				// If addPrefix or removePrefix set, we want to transform the effect by copying data
 				if (self->hasPrefix()) {
-					wait(transformDatabaseContents(cx, self->removePrefix, self->addPrefix));
+					// wait(transformDatabaseContents(cx, self->removePrefix, self->addPrefix));
 					wait(unlockDatabase(cx, randomID));
 				}
 			}
