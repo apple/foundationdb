@@ -25,6 +25,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define TEST_ABORT_FASTRESTORE	0
@@ -73,8 +74,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
 		usePartitionedLogs = getOption(options, LiteralStringRef("usePartitionedLogs"),
 		                               deterministicRandom()->random01() < 0.5 ? true : false);
-		addPrefix = getOption(options, LiteralStringRef("addPrefix"), "");
-		removePrefix = getOption(options, LiteralStringRef("removePrefix"), "");
+		addPrefix = getOption(options, LiteralStringRef("addPrefix"), LiteralStringRef(""));
+		removePrefix = getOption(options, LiteralStringRef("removePrefix"), LiteralStringRef(""));
 
 		KeyRef beginRange;
 		KeyRef endRange;
@@ -302,7 +303,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	// write [begin, end) in kvs to DB
 	ACTOR static Future<Void> writeKVs(Database cx, Standalone<RangeResultRef> kvs, int begin, int end) {
 		while (begin < end) {
-			wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				int i = 0;
 				while (i < 100) {
 					tr->set(kvs[begin].key, kvs[begin].value);
@@ -322,7 +325,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		    .detail("AddPrefix", addPrefix)
 		    .detail("RemovePrefix", removePrefix);
 		Standalone<RangeResultRef> kvs = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
-		ASSERT(!kvs.ismore);
+		ASSERT(!kvs.more);
 		state int i = 0;
 		for (i = 0; i < kvs.size(); ++i) {
 			KeyValueRef kv = kvs[i];
@@ -520,7 +523,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				TraceEvent("FastRestore").detail("PrepareRestores", self->backupRanges.size());
 				wait(backupAgent.submitParallelRestore(cx, self->backupTag, self->backupRanges,
 				                                       KeyRef(lastBackupContainer->getURL()), targetVersion,
-				                                       self->locked, randomID));
+				                                       self->locked, randomID, self->addPrefix, self->removePrefix));
 				TraceEvent("FastRestore").detail("TriggerRestore", "Setting up restoreRequestTriggerKey");
 
 				// Sometimes kill and restart the restore
@@ -560,8 +563,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// TODO: If addPrefix and removePrefix set, we want to transform the effect by copying data
 				if (self->hasPrefix()) {
-					ASSERT(finalPrefix.size() >= 0);
-					transformDatabaseContents(cx, self->removePrefix, self->addPrefix);
+					wait(transformDatabaseContents(cx, self->removePrefix, self->addPrefix));
 					wait(unlockDatabase(cx, randomID));
 				}
 			}

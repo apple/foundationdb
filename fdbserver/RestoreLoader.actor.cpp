@@ -245,6 +245,11 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			if (isRangeMutation(mutation)) {
 				mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
 				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
+				// Remove prefix or add prefix when we restore to a new key space
+				mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix);
+				mutation.param2.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix);
+			} else {
+				mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix);
 			}
 
 			TraceEvent(SevFRMutationInfo, "FastRestoreDecodePartitionedLogFile")
@@ -787,6 +792,11 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 			if (isRangeMutation(mutation)) {
 				mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
 				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
+				// Remove prefix or add prefix if we restore data to a new key space
+				mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix);
+				mutation.param2.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix);
+			} else {
+				mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix);
 			}
 
 			cc->sampledLogBytes += mutation.totalSize();
@@ -880,9 +890,9 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	// Convert KV in data into SET mutations of different keys in kvOps
 	for (const KeyValueRef& kv : data) {
 		// NOTE: The KV pairs in range files are the real KV pairs in original DB.
-		// Should NOT add prefix or remove surfix for the backup data!
-		MutationRef m(MutationRef::Type::SetValue, kv.key,
-		              kv.value); // ASSUME: all operation in range file is set.
+		MutationRef m(MutationRef::Type::SetValue, kv.key, kv.value);
+		// Remove prefix or add prefix in case we restore data to a different sub keyspace
+		m.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix);
 		cc->loadedRangeBytes += m.totalSize();
 
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
