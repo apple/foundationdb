@@ -298,7 +298,7 @@ public:
 	}
 
 	// Return the amount of memory used by an entry in the IndexedSet
-	static int getElementBytes() { return sizeof(Node); }
+	constexpr static int getElementBytes() { return sizeof(Node); }
 
 private:
 	// Copy operations unimplemented.  SOMEDAY: Implement and make public.
