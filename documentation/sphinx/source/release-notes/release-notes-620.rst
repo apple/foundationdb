@@ -120,7 +120,7 @@ Performance
 * Reduced tail commit latencies by improving commit pipelining on the proxies. `(PR #2589) <https://github.com/apple/foundationdb/pull/2589>`_.
 * Data distribution does a better job balancing data when disks are more than 70% full. `(PR #2722) <https://github.com/apple/foundationdb/pull/2722>`_.
 * Reverse range reads could read too much data from disk, resulting in poor performance relative to forward range reads. `(PR #2650) <https://github.com/apple/foundationdb/pull/2650>`_.
-* Switched from LibreSSL to OpenSSL to improve the speed of establishing connections. `(PR #2650) <https://github.com/apple/foundationdb/pull/2650>`_.
+* Switched from LibreSSL to OpenSSL to improve the speed of establishing connections. `(PR #2646) <https://github.com/apple/foundationdb/pull/2646>`_.
 * The cluster controller does a better job avoiding multiple recoveries when first recruited. `(PR #2698) <https://github.com/apple/foundationdb/pull/2698>`_.
 
 Fixes
