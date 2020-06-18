@@ -1,10 +1,9 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-#include <rocksdb/env.h>
 #include <rocksdb/db.h>
+#include <rocksdb/options.h>
 #include "flow/flow.h"
-#include "fdbrpc/AsyncFileCached.actor.h"
-#include "fdbserver/CoroFlow.h"
+#include "flow/IThreadPool.h"
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
@@ -14,61 +13,6 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 namespace {
-
-class FlowLogger : public rocksdb::Logger, public FastAllocated<FlowLogger> {
-	UID id;
-	std::string loggerName;
-	size_t logSize = 0;
-public:
-	explicit FlowLogger(UID id, const std::string& loggerName, const rocksdb::InfoLogLevel log_level = rocksdb::InfoLogLevel::INFO_LEVEL)
-		: rocksdb::Logger(log_level)
-		, id(id)
-		, loggerName(loggerName) {}
-
-	rocksdb::Status Close() override { return rocksdb::Status::OK(); }
-
-	void Logv(const char* fmtString, va_list ap) override {
-		Logv(rocksdb::InfoLogLevel::INFO_LEVEL, fmtString, ap);
-	}
-
-	void Logv(const rocksdb::InfoLogLevel log_level, const char* fmtString, va_list ap) override {
-		Severity sev;
-		switch (log_level) {
-			case rocksdb::InfoLogLevel::DEBUG_LEVEL:
-				sev = SevDebug;
-				break;
-			case rocksdb::InfoLogLevel::INFO_LEVEL:
-			case rocksdb::InfoLogLevel::HEADER_LEVEL:
-			case rocksdb::InfoLogLevel::NUM_INFO_LOG_LEVELS:
-				sev = SevInfo;
-				break;
-			case rocksdb::InfoLogLevel::WARN_LEVEL:
-				sev = SevWarn;
-				break;
-			case rocksdb::InfoLogLevel::ERROR_LEVEL:
-				sev = SevWarnAlways;
-				break;
-			case rocksdb::InfoLogLevel::FATAL_LEVEL:
-				sev = SevError;
-				break;
-		}
-		std::string outStr;
-		auto sz = vsformat(outStr, fmtString, ap);
-		if (sz < 0) {
-			TraceEvent(SevError, "RocksDBLogFormatError", id)
-				.detail("Logger", loggerName)
-				.detail("FormatString", fmtString);
-			return;
-		}
-		logSize += sz;
-		TraceEvent(sev, "RocksDBLogMessage", id)
-			.detail("Msg", outStr);
-	}
-
-	size_t GetLogFileSize() const override {
-		return logSize;
-	}
-};
 
 rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
