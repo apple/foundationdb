@@ -201,11 +201,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
-			if (cursor == nullptr) {
-				cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions));
-			} else {
-				cursor->Refresh();
-			}
+			auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions));
 			Standalone<RangeResultRef> result;
 			int accumulatedBytes = 0;
 			if (a.rowLimit >= 0) {
