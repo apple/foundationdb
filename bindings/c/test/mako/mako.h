@@ -32,6 +32,8 @@
 #define FDB_ERROR_ABORT -2
 #define FDB_ERROR_CONFLICT -3
 
+#define INIT_STORE 0
+
 /* transaction specification */
 enum Operations {
 	OP_GETREADVERSION,
@@ -129,6 +131,7 @@ typedef struct {
 	int signal;
 	int readycount;
 	double throttle_factor;
+	int stopcount;
 } mako_shmhdr_t;
 
 typedef struct {
@@ -153,6 +156,8 @@ typedef struct {
 /* args for threads */
 typedef struct {
 	int thread_id;
+	int elem_size[MAX_OP];
+	uint64_t* data[MAX_OP];
 	process_info_t* process;
 } thread_args_t;
 
