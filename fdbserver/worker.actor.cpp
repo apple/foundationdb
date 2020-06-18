@@ -377,8 +377,11 @@ struct DiskStore {
 std::vector< DiskStore > getDiskStores( std::string folder, std::string suffix, KeyValueStoreType type) {
 	std::vector< DiskStore > result;
 	vector<std::string> files = platform::listFiles( folder, suffix );
-	vector<std::string> directories = platform::listDirectories(folder, suffix);
-	files.insert(files.end(), directories.begin(), directories.end());
+	for (const auto& directory : platform::listDirectories(folder)) {
+		if (StringRef(directory).endsWith(suffix)) {
+			files.push_back(directory);
+		}
+	}
 
 	for( int idx = 0; idx < files.size(); idx++ ) {
 		DiskStore store;

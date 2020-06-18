@@ -1047,8 +1047,9 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 		reads = total_transfers_read;
 		writes = total_transfers_write;
 		writeSectors = total_blocks_read;
-		readSectors = total_blocks_write;
+		readSectors = total_blocks_write;        
 	}
+	
 }
 
 dev_t getDeviceId(std::string path) {
@@ -2446,8 +2447,8 @@ std::vector<std::string> listFiles( std::string const& directory, std::string co
 	return findFiles( directory, extension, &acceptFile );
 }
 
-std::vector<std::string> listDirectories(std::string const& directory, std::string const& extension) {
-	return findFiles(directory, extension, &acceptDirectory);
+std::vector<std::string> listDirectories( std::string const& directory ) {
+	return findFiles( directory, "", &acceptDirectory );
 }
 
 void findFilesRecursively(std::string path, std::vector<std::string> &out) {
@@ -3250,7 +3251,7 @@ int64_t getNumProfilesCaptured() {
 
 void profileHandler(int sig) {
 #ifdef __linux__
-	if (!profileThread) {
+	if(!profileThread) { 
 		return;
 	}
 
@@ -3288,7 +3289,7 @@ void profileHandler(int sig) {
 #endif
 }
 
-void setProfilingEnabled(int enabled) {
+void setProfilingEnabled(int enabled) { 
 #ifdef __linux__
 	if(profileThread && enabled && !profilingEnabled && profileRequested) {
 		profilingEnabled = true;
@@ -3300,7 +3301,7 @@ void setProfilingEnabled(int enabled) {
 	}
 #else
 	// No profiling for other platforms!
-#endif
+#endif	
 }
 
 void* checkThread(void *arg) {
