@@ -305,7 +305,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	size_t diskBytesUsed = 0;
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
-	unsigned nReaders = 2;
+	unsigned nReaders = 16;
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
