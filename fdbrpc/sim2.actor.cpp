@@ -1668,10 +1668,6 @@ public:
 				killProcess(t.machine, KillInstantly);
 			}
 
-			//if( this->time > 45.522817 ) {
-			//	printf("foo\n");
-			//}
-
 			if (randLog)
 				fprintf( randLog, "T %f %d %s %" PRId64 "\n", this->time, int(deterministicRandom()->peek() % 10000), t.machine ? t.machine->name : "none", t.stable);
 		}
