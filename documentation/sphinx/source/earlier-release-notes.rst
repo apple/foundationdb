@@ -12,4 +12,4 @@ were used to track the feature's development.
     :maxdepth: 1
     :glob:
 
-    old-release-notes/*
+    release-notes/*
