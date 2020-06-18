@@ -146,12 +146,13 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 	NetworkAddress address() const { return heartbeat.getEndpoint().addresses.address; }
 
 	void initEndpoints() {
+		// Endpoint in a later restore phase has higher priority
 		heartbeat.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		updateRestoreSysInfo.getEndpoint(TaskPriority::LoadBalancedEndpoint);
-		loadFile.getEndpoint(TaskPriority::LoadBalancedEndpoint);
-		sendMutations.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		initVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
-		finishVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		loadFile.getEndpoint(TaskPriority::RestoreLoaderLoadFiles);
+		sendMutations.getEndpoint(TaskPriority::RestoreLoaderSendMutations);
+		finishVersionBatch.getEndpoint(TaskPriority::RestoreLoaderFinishVersionBatch);
 		collectRestoreRoleInterfaces.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		finishRestore.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 	}
@@ -184,9 +185,10 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 	NetworkAddress address() const { return heartbeat.getEndpoint().addresses.address; }
 
 	void initEndpoints() {
+		// Endpoint in a later restore phase has higher priority
 		heartbeat.getEndpoint(TaskPriority::LoadBalancedEndpoint);
-		sendMutationVector.getEndpoint(TaskPriority::LoadBalancedEndpoint);
-		applyToDB.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		sendMutationVector.getEndpoint(TaskPriority::RestoreApplierReceiveMutations);
+		applyToDB.getEndpoint(TaskPriority::RestoreApplierWriteDB);
 		initVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		collectRestoreRoleInterfaces.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		finishRestore.getEndpoint(TaskPriority::LoadBalancedEndpoint);
