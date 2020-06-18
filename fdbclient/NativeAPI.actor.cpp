@@ -2364,7 +2364,6 @@ void Watch::setWatch(Future<Void> watchFuture) {
 
 //FIXME: This seems pretty horrible. Now a Database can't die until all of its watches do...
 ACTOR Future<Void> watch(Reference<Watch> watch, Database cx, TagSet tags, TransactionInfo info) {
-	cx->addWatch();
 	try {
 		choose {
 			// RYOW write to value that is being watched (if applicable)
@@ -2710,22 +2709,31 @@ TransactionOptions::TransactionOptions(Database const& cx) {
 	}
 }
 
-TransactionOptions::TransactionOptions() {
-	memset(this, 0, sizeof(*this));
+void TransactionOptions::clear() {
 	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
+	getReadVersionFlags = 0;
 	sizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
-	tags = TagSet();
-	readTags = TagSet();
+	maxTransactionLoggingFieldLength = 0;
+	checkWritesEnabled = false;
+	causalWriteRisky = false;
+	commitOnFirstProxy = false;
+	debugDump = false;
+	lockAware = false;
+	readOnly = false;
+	firstInBatch = false;
+	includePort = false;
+	reportConflictingKeys = false;
+	tags = TagSet{};
+	readTags = TagSet{};
 	priority = TransactionPriority::DEFAULT;
 }
 
+TransactionOptions::TransactionOptions() {
+	clear();
+}
+
 void TransactionOptions::reset(Database const& cx) {
-	memset(this, 0, sizeof(*this));
-	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
-	sizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
-	tags = TagSet();
-	readTags = TagSet();
-	priority = TransactionPriority::DEFAULT;
+	clear();
 	lockAware = cx->lockAware;
 	if (cx->apiVersionAtLeast(630)) {
 		includePort = true;

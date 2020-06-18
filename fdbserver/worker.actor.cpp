@@ -254,6 +254,7 @@ std::pair<KeyValueStoreType, std::string> bTreeV2Suffix = std::make_pair(KeyValu
 std::pair<KeyValueStoreType, std::string> memorySuffix = std::make_pair( KeyValueStoreType::MEMORY,         "-0.fdq" );
 std::pair<KeyValueStoreType, std::string> memoryRTSuffix = std::make_pair( KeyValueStoreType::MEMORY_RADIXTREE, "-0.fdr" );
 std::pair<KeyValueStoreType, std::string> redwoodSuffix = std::make_pair( KeyValueStoreType::SSD_REDWOOD_V1,   ".redwood" );
+std::pair<KeyValueStoreType, std::string> rocksdbSuffix = std::make_pair( KeyValueStoreType::SSD_ROCKSDB_V1,   ".rocksdb" );
 
 std::string validationFilename = "_validate";
 
@@ -265,6 +266,8 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 	else if( storeType == KeyValueStoreType::MEMORY || storeType == KeyValueStoreType::MEMORY_RADIXTREE )
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
 	else if ( storeType == KeyValueStoreType::SSD_REDWOOD_V1 )
+		return joinPath(folder, sample_filename);
+	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
 		return joinPath(folder, sample_filename);
 	UNREACHABLE();
 }
@@ -278,6 +281,8 @@ std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std
 		return joinPath( folder, prefix + id.toString() + "-" );
 	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
 		return joinPath(folder, prefix + id.toString() + ".redwood");
+	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
+		return joinPath(folder, prefix + id.toString() + ".rocksdb");
 
 	UNREACHABLE();
 }
@@ -423,8 +428,10 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	result.insert( result.end(), result2.begin(), result2.end() );
 	auto result3 = getDiskStores( folder, redwoodSuffix.second, redwoodSuffix.first);
 	result.insert( result.end(), result3.begin(), result3.end() );
-    auto result4 = getDiskStores( folder, memoryRTSuffix.second, memoryRTSuffix.first );
-    result.insert( result.end(), result4.begin(), result4.end() );
+	auto result4 = getDiskStores( folder, memoryRTSuffix.second, memoryRTSuffix.first );
+	result.insert( result.end(), result4.begin(), result4.end() );
+	auto result5 = getDiskStores( folder, rocksdbSuffix.second, rocksdbSuffix.first);
+	result.insert( result.end(), result5.begin(), result5.end() );
 	return result;
 }
 
@@ -1078,7 +1085,7 @@ ACTOR Future<Void> workerServer(
 						notUpdated = interf.updateServerDBInfo.getEndpoint();
 					}
 					else if(localInfo.infoGeneration > dbInfo->get().infoGeneration || dbInfo->get().clusterInterface != ccInterface->get().get()) {
-						
+
 						TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
 						.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
 						.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
@@ -1347,7 +1354,7 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN( recruited.getQueuingMetrics );
 				DUMPTOKEN( recruited.confirmRunning );
 
-				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(), 
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(),
 						logRouter( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
@@ -1386,6 +1393,9 @@ ACTOR Future<Void> workerServer(
 						}
 						else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
 							included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
+						}
+						else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
+							included = fileExists(joinPath(d.filename, "CURRENT")) && fileExists(joinPath(d.filename, "IDENTITY"));
 						} else if (d.storeType == KeyValueStoreType::MEMORY) {
 							included = fileExists(d.filename + "1.fdq");
 						} else {
@@ -1591,14 +1601,17 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 
 ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> result, MonitorLeaderInfo info ) {
 	state ClusterConnectionString ccf = info.intermediateConnFile->getConnectionString();
+	state vector<NetworkAddress> addrs = ccf.coordinators();
 	state ElectionResultRequest request;
-	request.key = ccf.clusterKey();
-	request.coordinators = ccf.coordinators();
 	state int index = 0;
 	state int successIndex = 0;
+	request.key = ccf.clusterKey();
+	request.coordinators = ccf.coordinators();
+
+	deterministicRandom()->randomShuffle(addrs);
 
 	loop {
-		LeaderElectionRegInterface interf( request.coordinators[index] );
+		LeaderElectionRegInterface interf( addrs[index] );
 		request.reply = ReplyPromise<Optional<LeaderInfo>>();
 
 		ErrorOr<Optional<LeaderInfo>> leader = wait( interf.electionResult.tryGetReply( request ) );
@@ -1634,7 +1647,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<Cl
 			}
 			successIndex = index;
 		} else {
-			index = (index+1) % request.coordinators.size();
+			index = (index+1) % addrs.size();
 			if (index == successIndex) {
 				wait( delay( CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY ) );
 			}
@@ -1669,7 +1682,7 @@ ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy( Reference<ClusterC
 		if(currentCC->get().present() && dbInfo->get().clusterInterface == currentCC->get().get() && IFailureMonitor::failureMonitor().getState( currentCC->get().get().registerWorker.getEndpoint() ).isAvailable()) {
 			timeout = Future<Void>();
 		} else if(!timeout.isValid()) {
-			timeout = delay( SERVER_KNOBS->MIN_DELAY_STORAGE_CANDIDACY_SECONDS + (deterministicRandom()->random01()*(SERVER_KNOBS->MAX_DELAY_STORAGE_CANDIDACY_SECONDS-SERVER_KNOBS->MIN_DELAY_STORAGE_CANDIDACY_SECONDS)) );
+			timeout = delay( SERVER_KNOBS->MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS + (deterministicRandom()->random01()*(SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS-SERVER_KNOBS->MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS)) );
 		}
 		choose {
 			when( wait(currentCC->onChange()) ) {}
@@ -1728,7 +1741,7 @@ ACTOR Future<Void> fdbd(
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
 		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {
 			actors.push_back( reportErrors( monitorLeader( connFile, cc ), "ClusterController" ) );
-		} else if (processClass == ProcessClass::StorageClass && SERVER_KNOBS->MAX_DELAY_STORAGE_CANDIDACY_SECONDS > 0) {
+		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit && SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
 			actors.push_back( reportErrors( monitorLeaderRemotelyWithDelayedCandidacy( connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, dbInfo ), "ClusterController" ) );
 		} else {
 			actors.push_back( reportErrors( clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
