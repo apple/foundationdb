@@ -137,10 +137,15 @@ struct TransactionOptions {
 	TagSet tags; // All tags set on transaction
 	TagSet readTags; // Tags that can be sent with read requests
 
+	// update clear function if you add a new field
+
 	TransactionOptions(Database const& cx);
 	TransactionOptions();
 
 	void reset(Database const& cx);
+
+private:
+	void clear();
 };
 
 class ReadYourWritesTransaction; // workaround cyclic dependency

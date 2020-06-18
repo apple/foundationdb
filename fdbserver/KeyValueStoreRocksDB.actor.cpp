@@ -182,12 +182,20 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		struct CloseAction : TypedAction<Writer, CloseAction> {
 			ThreadReturnPromise<Void> done;
+			std::string path;
+			bool deleteOnClose;
+			CloseAction(std::string path, bool deleteOnClose) : path(path), deleteOnClose(deleteOnClose) {}
 			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CloseAction& a) {
 			auto s = db->Close();
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Close");
+			}
+			if (a.deleteOnClose) {
+				std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
+					"default", getCFOptions() } };
+				rocksdb::DestroyDB(a.path, getOptions(a.path), defaultCF);
 			}
 			a.done.send(Void());
 		}
@@ -288,10 +296,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					cursor->Next();
 				}
 			} else {
-				cursor->Seek(toSlice(a.keys.end));
-				if (!cursor->Valid()) {
-					cursor->SeekToLast();
-				} else {
+				cursor->SeekForPrev(toSlice(a.keys.end));
+				if (cursor->Valid() && toStringRef(cursor->key()) == a.keys.end) {
 					cursor->Prev();
 				}
 
@@ -342,19 +348,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
 		self->db->EndTrace();
 		wait(self->readThreads->stop());
-		auto a = new Writer::CloseAction{};
+		auto a = new Writer::CloseAction(self->path, deleteOnClose);
 		auto f = a->done.getFuture();
 		self->writeThread->post(a);
 		wait(f);
 		wait(self->writeThread->stop());
-		// TODO: delete data on close
 		if (self->closePromise.canBeSet()) self->closePromise.send(Void());
 		if (self->errorPromise.canBeSet()) self->errorPromise.send(Never());
-		if (deleteOnClose) {
-			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
-				"default", getCFOptions() } };
-			rocksdb::DestroyDB(self->path, getOptions(self->path), defaultCF);
-		}
 		delete self;
 	}
 

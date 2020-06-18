@@ -40,11 +40,54 @@ public:
 
 	explicit SpecialKeyRangeBaseImpl(KeyRangeRef kr) : range(kr) {}
 	KeyRangeRef getKeyRange() const { return range; }
+	// true if the getRange call can emit more than one rpc calls,
+	// we cache the results to keep consistency in the same getrange lifetime
+	// TODO : give this function a more descriptive name
+	virtual bool isAsync() const { return false; }
 
 	virtual ~SpecialKeyRangeBaseImpl() {}
 
 protected:
 	KeyRange range; // underlying key range for this function
+};
+
+class SpecialKeyRangeAsyncImpl : public SpecialKeyRangeBaseImpl {
+public:
+	explicit SpecialKeyRangeAsyncImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
+
+	// calling with a cache object to have consistent results if we need to call rpc
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr,
+	                                            Optional<Standalone<RangeResultRef>>* cache) const {
+		return getRangeAsyncActor(this, ryw, kr, cache);
+	}
+
+	bool isAsync() const override { return true; }
+
+	ACTOR static Future<Standalone<RangeResultRef>> getRangeAsyncActor(const SpecialKeyRangeBaseImpl* skrAyncImpl,
+	                                                                   ReadYourWritesTransaction* ryw, KeyRangeRef kr,
+	                                                                   Optional<Standalone<RangeResultRef>>* cache) {
+		ASSERT(skrAyncImpl->getKeyRange().contains(kr));
+		ASSERT(cache != nullptr);
+		if (!cache->present()) {
+			// For simplicity, every time we need to cache, we read the whole range
+			// Although sometimes the range can be narrowed,
+			// there is not a general way to do it in complicated scenarios
+			Standalone<RangeResultRef> result_ = wait(skrAyncImpl->getRange(ryw, skrAyncImpl->getKeyRange()));
+			*cache = result_;
+		}
+		const auto& allResults = cache->get();
+		int start = 0, end = allResults.size();
+		while (start < allResults.size() && allResults[start].key < kr.begin) ++start;
+		while (end > 0 && allResults[end - 1].key >= kr.end) --end;
+		if (start < end) {
+			Standalone<RangeResultRef> result = RangeResultRef(allResults.slice(start, end), false);
+			result.arena().dependsOn(allResults.arena());
+			return result;
+		} else
+			return Standalone<RangeResultRef>();
+	}
 };
 
 class SpecialKeySpace {
@@ -148,7 +191,7 @@ public:
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
-class DDStatsRangeImpl : public SpecialKeyRangeBaseImpl {
+class DDStatsRangeImpl : public SpecialKeyRangeAsyncImpl {
 public:
 	explicit DDStatsRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
