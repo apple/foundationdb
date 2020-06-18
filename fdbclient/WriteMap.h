@@ -346,13 +346,17 @@ public:
 		bool is_unreadable() const { return offset ? entry().following_keys_unreadable : entry().is_unreadable; }
 
 		bool is_independent() const {
+			ASSERT(is_operation());
 			return entry().following_keys_cleared || !entry().stack.isDependent();
-		} // Defined if is_operation()
+		}
 
 		ExtStringRef beginKey() const { return ExtStringRef(entry().key, offset && entry().stack.size()); }
 		ExtStringRef endKey() const { return offset ? nextEntry().key : ExtStringRef(entry().key, 1); }
 
-		OperationStack const& op() const { return entry().stack; } // Only if is_operation()
+		OperationStack const& op() const {
+			ASSERT(is_operation());
+			return entry().stack;
+		}
 
 		iterator& operator++() {
 			if (!offset && !equalsKeyAfter( entry().key, nextEntry().key )) {
