@@ -1,0 +1,14 @@
+FROM foundationdb/foundationdb-dev:0.11.4
+
+USER root
+
+RUN git clone https://github.com/google/benchmark.git &&\
+    git clone https://github.com/google/googletest.git benchmark/googletest &&\
+    cd benchmark &&\
+    git checkout v1.5.1 &&\
+    mkdir build &&\
+    cd build &&\
+    CC=clang CXX=clang++ cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DBENCHMARK_ENABLE_LTO=true ../ &&\
+    ninja &&\
+    ninja test &&\
+    ninja install
