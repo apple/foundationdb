@@ -535,11 +535,15 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// Submit parallel restore requests
 				// TODO: Add addPrefix and removePrefix feature
-				TraceEvent("FastRestore").detail("PrepareRestores", self->backupRanges.size());
+				TraceEvent("BackupAndParallelRestoreWorkload")
+				    .detail("PrepareRestores", self->backupRanges.size())
+				    .detail("AddPrefix", self->addPrefix)
+				    .detail("RemovePrefix", self->removePrefix);
 				wait(backupAgent.submitParallelRestore(cx, self->backupTag, self->backupRanges,
 				                                       KeyRef(lastBackupContainer->getURL()), targetVersion,
 				                                       self->locked, randomID, self->addPrefix, self->removePrefix));
-				TraceEvent("FastRestore").detail("TriggerRestore", "Setting up restoreRequestTriggerKey");
+				TraceEvent("BackupAndParallelRestoreWorkload")
+				    .detail("TriggerRestore", "Setting up restoreRequestTriggerKey");
 
 				// Sometimes kill and restart the restore
 				// In real cluster, aborting a restore needs:
