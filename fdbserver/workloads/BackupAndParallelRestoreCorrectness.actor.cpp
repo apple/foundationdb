@@ -42,6 +42,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	bool allowPauses;
 	bool shareLogRange;
 	bool usePartitionedLogs;
+	Key addPrefix, removePrefix; // Orignal key will be first apply removePrefix and then addPrefix
+	// CAVEAT: When removePrefix is used, we must ensure every key in backup have the removePrefix
 
 	std::map<Standalone<KeyRef>, Standalone<ValueRef>> dbKVs;
 
@@ -71,6 +73,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
 		usePartitionedLogs = getOption(options, LiteralStringRef("usePartitionedLogs"),
 		                               deterministicRandom()->random01() < 0.5 ? true : false);
+		addPrefix = getOption(options, LiteralStringRef("addPrefix"), "");
+		removePrefix = getOption(options, LiteralStringRef("removePrefix"), "");
 
 		KeyRef beginRange;
 		KeyRef endRange;
@@ -130,6 +134,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		return _start(cx, this);
 	}
+
+	bool hasPrefix() { return addPrefix != LiteralStringRef("") || removePrefix != LiteralStringRef(""); }
 
 	virtual Future<bool> check(Database const& cx) { return true; }
 
@@ -289,6 +295,41 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		    .detail("Tag", printable(tag))
 		    .detail("Status", statusText)
 		    .detail("StatusValue", statusValue);
+
+		return Void();
+	}
+
+	// write [begin, end) in kvs to DB
+	ACTOR static Future<Void> writeKVs(Database cx, Standalone<RangeResultRef> kvs, int begin, int end) {
+		while (begin < end) {
+			wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+				int i = 0;
+				while (i < 100) {
+					tr->set(kvs[begin].key, kvs[begin].value);
+					++begin;
+					++i;
+				}
+				return Void();
+			}));
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> transformDatabaseContents(Database cx, Key addPrefix, Key removePrefix) {
+		state ReadYourWritesTransaction tr(cx);
+
+		TraceEvent("FastRestoreWorkloadTransformDatabaseContents")
+		    .detail("AddPrefix", addPrefix)
+		    .detail("RemovePrefix", removePrefix);
+		Standalone<RangeResultRef> kvs = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+		ASSERT(!kvs.ismore);
+		state int i = 0;
+		for (i = 0; i < kvs.size(); ++i) {
+			KeyValueRef kv = kvs[i];
+			kv.key.removePrefix(removePrefix).withPrefix(addPrefix);
+		}
+
+		wait(writeKVs(cx, kvs, 0, kvs.size()));
 
 		return Void();
 	}
@@ -509,7 +550,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// Wait for parallel restore to finish before we can proceed
 				TraceEvent("FastRestoreWorkload").detail("WaitForRestoreToFinish", randomID);
-				wait(backupAgent.parallelRestoreFinish(cx, randomID));
+				// Do not unlock DB when restore finish because we need to transformDatabaseContents
+				wait(backupAgent.parallelRestoreFinish(cx, randomID, !self->hasPrefix()));
 				TraceEvent("FastRestoreWorkload").detail("RestoreFinished", randomID);
 
 				for (auto& restore : restores) {
@@ -517,6 +559,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				}
 
 				// TODO: If addPrefix and removePrefix set, we want to transform the effect by copying data
+				if (self->hasPrefix()) {
+					ASSERT(finalPrefix.size() >= 0);
+					transformDatabaseContents(cx, self->removePrefix, self->addPrefix);
+					wait(unlockDatabase(cx, randomID));
+				}
 			}
 
 			// Q: What is the extra backup and why do we need to care about it?

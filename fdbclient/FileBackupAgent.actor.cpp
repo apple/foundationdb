@@ -3578,7 +3578,7 @@ public:
 	static const int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
 
 	// Parallel restore
-	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB = true) {
+	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB) {
 		state ReadYourWritesTransaction tr(cx);
 		state Optional<Value> restoreRequestDoneKeyValue;
 		TraceEvent("FastRestoreAgentWaitForRestoreToFinish").detail("DBLock", randomUID);
@@ -4625,8 +4625,8 @@ const int BackupAgentBase::logHeaderSize = 12;
 const int FileBackupAgent::dataFooterSize = 20;
 
 // Return if parallel restore has finished
-Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx, UID randomUID) {
-	return FileBackupAgentImpl::parallelRestoreFinish(cx, randomUID);
+Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB) {
+	return FileBackupAgentImpl::parallelRestoreFinish(cx, randomUID, unlockDB);
 }
 
 Future<Void> FileBackupAgent::submitParallelRestore(Database cx, Key backupTag,

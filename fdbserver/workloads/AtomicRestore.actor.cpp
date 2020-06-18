@@ -87,6 +87,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 		if (self->fastRestore) { // New fast parallel restore
 			TraceEvent(SevInfo, "AtomicParallelRestore");
+			// TODO: Use non-empty addPrefix and removePrefix
 			wait(backupAgent.atomicParallelRestore(cx, BackupAgentBase::getDefaultTag(), self->backupRanges,
 			                                       StringRef(), StringRef()));
 		} else { // Old style restore
