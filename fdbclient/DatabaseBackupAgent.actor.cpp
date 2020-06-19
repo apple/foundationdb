@@ -620,7 +620,7 @@ namespace dbBackup {
 									if(first) {
 										tr.addReadConflictRange(singleKeyRange(kv.key));
 										first = false;
-										TraceEvent(SevInfo, "debug.CopyLogRangeTaskFunc::dumpData.50").detail("store", kv.key.removePrefix(backupLogKeys.begin).removePrefix(task->params[BackupAgentBase::destUid]).withPrefix(task->params[BackupAgentBase::keyConfigLogUid]).withPrefix(applyLogKeys.begin));
+										// TraceEvent(SevInfo, "debug.CopyLogRangeTaskFunc::dumpData.50").detail("store", kv.key.removePrefix(backupLogKeys.begin).removePrefix(task->params[BackupAgentBase::destUid]).withPrefix(task->params[BackupAgentBase::keyConfigLogUid]).withPrefix(applyLogKeys.begin));
 									}
 									tr.set(kv.key.removePrefix(backupLogKeys.begin).removePrefix(task->params[BackupAgentBase::destUid]).withPrefix(task->params[BackupAgentBase::keyConfigLogUid]).withPrefix(applyLogKeys.begin), kv.value);
 									bytesSet += kv.expectedSize() - backupLogKeys.begin.expectedSize() + applyLogKeys.begin.expectedSize();
@@ -681,7 +681,7 @@ namespace dbBackup {
 			state Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(beginVersion, newEndVersion, task->params[BackupAgentBase::destUid], CLIENT_KNOBS->COPY_LOG_BLOCK_SIZE);
 			state int nRanges = ranges.size();
 
-			TraceEvent(SevInfo, "debug.CopyLogRangeTaskFunc::_execute.10").detail("beginVersion", beginVersion).detail("endVersion", endVersion).detail("newEndVersion", newEndVersion).detail("nRanges", nRanges);
+			// TraceEvent(SevInfo, "debug.CopyLogRangeTaskFunc::_execute.10").detail("beginVersion", beginVersion).detail("endVersion", endVersion).detail("newEndVersion", newEndVersion).detail("nRanges", nRanges);
 
 			state std::vector<PromiseStream<RCGroup>> results;
 			state std::vector<Future<Void>> rc;
@@ -730,11 +730,13 @@ namespace dbBackup {
 			  rangeN ++;
 			}
 			
+			/*
 			TraceEvent(SevInfo, "debug.CopyLogRangeTaskFunc::_execute.20")
 			  .detail("beginVersion", beginVersion)
 			  .detail("endVersion", endVersion)
 			  .detail("nextVersion", nextVersion)
 			  .detail("bytesWritten", Params.bytesWritten().getOrDefault(task));
+			 */
 
 			if (nextVersion < endVersion) {
 				task->params[CopyLogRangeTaskFunc::keyNextBeginVersion] = BinaryWriter::toValue(nextVersion, Unversioned());
