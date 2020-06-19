@@ -317,19 +317,15 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 	// write [begin, end) in kvs to DB
 	ACTOR static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef>> kvs, int begin, int end) {
-		while (begin < end) {
-			wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				int i = 0;
-				while (i < 100) {
-					tr->set(kvs[begin].key, kvs[begin].value);
-					++begin;
-					++i;
-				}
-				return Void();
-			}));
-		}
+		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			while (begin < end) {
+				tr->set(kvs[begin].key, kvs[begin].value);
+				++begin;
+			}
+			return Void();
+		}));
 		return Void();
 	}
 
@@ -345,13 +341,23 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		ASSERT(!kvs.more);
 		int i = 0;
 
-		Standalone<VectorRef<KeyValueRef>> newKVs;
+		state Standalone<VectorRef<KeyValueRef>> newKVs;
 		for (i = 0; i < kvs.size(); ++i) {
-			KeyRef keyRef = kvs[i].key.removePrefix(removePrefix).withPrefix(addPrefix);
-			newKVs.push_back_deep(newKVs.arena(), KeyValueRef(keyRef, kvs[i].value));
+			Key newKey = kvs[i].key.removePrefix(removePrefix).withPrefix(addPrefix);
+			newKVs.push_back_deep(newKVs.arena(), KeyValueRef(newKey.contents(), kvs[i].value));
+			TraceEvent("TransformDatabaseContents")
+			    .detail("Index", i)
+			    .detail("GetKey", kvs[i].key)
+			    .detail("NewKey", newKVs[i].key);
 		}
 
-		wait(writeKVs(cx, newKVs, 0, newKVs.size()));
+		state int begin = 0;
+		state int len;
+		while (begin < newKVs.size()) {
+			len = std::min(100, newKVs.size() - begin);
+			wait(writeKVs(cx, newKVs, begin, begin + len));
+			begin = begin + len;
+		}
 
 		TraceEvent("FastRestoreWorkloadTransformDatabaseContentsFinish")
 		    .detail("AddPrefix", addPrefix)
