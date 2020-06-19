@@ -329,6 +329,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
+	// TODO: Add restore request as a parameter so that we only transform contents in restored ranges
 	ACTOR static Future<Void> transformDatabaseContents(Database cx, Key addPrefix, Key removePrefix) {
 		state ReadYourWritesTransaction tr(cx);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -343,20 +344,27 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		state Standalone<VectorRef<KeyValueRef>> newKVs;
 		for (i = 0; i < kvs.size(); ++i) {
-			Key newKey = kvs[i].key.removePrefix(removePrefix).withPrefix(addPrefix);
+			Key newKey(kvs[i].key);
+			TraceEvent("TransformDatabaseContents")
+			    .detail("Keys", kvs.size())
+			    .detail("Index", i)
+			    .detail("GetKey", kvs[i].key)
+			    .detail("GetValue", kvs[i].value);
+			ASSERT(removePrefix.size() >= newKey.size()); // If fail, must check why?!
+			newKey = newKey.removePrefix(removePrefix).withPrefix(addPrefix);
 			newKVs.push_back_deep(newKVs.arena(), KeyValueRef(newKey.contents(), kvs[i].value));
 			TraceEvent("TransformDatabaseContents")
 			    .detail("Index", i)
-			    .detail("GetKey", kvs[i].key)
-			    .detail("NewKey", newKVs[i].key);
+			    .detail("NewKey", newKVs[i].key)
+			    .detail("NewValue", newKVs[i].value);
 		}
 
 		// Clear the transformed data (original data with removePrefix and addPrefix)
-		TraceEvent("TransformDatabaseContents").detail("Clear", KeyRangeRef(addPrefix.contents(), strinc(addPrefix)));
+		TraceEvent("TransformDatabaseContents").detail("Clear", normalKeys);
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->clear(KeyRangeRef(addPrefix.contents(), strinc(addPrefix)));
+			tr->clear(normalKeys); // Careful when we restore only a sub key range!
 			return Void();
 		}));
 
