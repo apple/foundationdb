@@ -1,11 +1,10 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-#include <rocksdb/trace_reader_writer.h>
-#include <rocksdb/env.h>
 #include <rocksdb/db.h>
+#include <rocksdb/options.h>
+#include <rocksdb/trace_reader_writer.h>
 #include "flow/flow.h"
-#include "fdbrpc/AsyncFileCached.actor.h"
-#include "fdbserver/CoroFlow.h"
+#include "flow/IThreadPool.h"
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
@@ -15,61 +14,6 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 namespace {
-
-class FlowLogger : public rocksdb::Logger, public FastAllocated<FlowLogger> {
-	UID id;
-	std::string loggerName;
-	size_t logSize = 0;
-public:
-	explicit FlowLogger(UID id, const std::string& loggerName, const rocksdb::InfoLogLevel log_level = rocksdb::InfoLogLevel::INFO_LEVEL)
-		: rocksdb::Logger(log_level)
-		, id(id)
-		, loggerName(loggerName) {}
-
-	rocksdb::Status Close() override { return rocksdb::Status::OK(); }
-
-	void Logv(const char* fmtString, va_list ap) override {
-		Logv(rocksdb::InfoLogLevel::INFO_LEVEL, fmtString, ap);
-	}
-
-	void Logv(const rocksdb::InfoLogLevel log_level, const char* fmtString, va_list ap) override {
-		Severity sev;
-		switch (log_level) {
-			case rocksdb::InfoLogLevel::DEBUG_LEVEL:
-				sev = SevDebug;
-				break;
-			case rocksdb::InfoLogLevel::INFO_LEVEL:
-			case rocksdb::InfoLogLevel::HEADER_LEVEL:
-			case rocksdb::InfoLogLevel::NUM_INFO_LOG_LEVELS:
-				sev = SevInfo;
-				break;
-			case rocksdb::InfoLogLevel::WARN_LEVEL:
-				sev = SevWarn;
-				break;
-			case rocksdb::InfoLogLevel::ERROR_LEVEL:
-				sev = SevWarnAlways;
-				break;
-			case rocksdb::InfoLogLevel::FATAL_LEVEL:
-				sev = SevError;
-				break;
-		}
-		std::string outStr;
-		auto sz = vsformat(outStr, fmtString, ap);
-		if (sz < 0) {
-			TraceEvent(SevError, "RocksDBLogFormatError", id)
-				.detail("Logger", loggerName)
-				.detail("FormatString", fmtString);
-			return;
-		}
-		logSize += sz;
-		TraceEvent(sev, "RocksDBLogMessage", id)
-			.detail("Msg", outStr);
-	}
-
-	size_t GetLogFileSize() const override {
-		return logSize;
-	}
-};
 
 rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
@@ -127,37 +71,37 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		};
 		void action(OpenAction& a) {
 			auto opt = getOptions(a.path);
-			auto* env = rocksdb::Env::Default();
+			/*auto* env = rocksdb::Env::Default();
 			rocksdb::EnvOptions env_options(opt);
-			std::unique_ptr<rocksdb::TraceWriter> trace_writer;
+			    std::unique_ptr<rocksdb::TraceWriter> trace_writer;
 			auto status =
 			    rocksdb::NewFileTraceWriter(env, env_options, "/data/foundationdb/rocksdb_trace", &trace_writer);
 			if (!status.ok()) {
-				TraceEvent(SevError, "RocksDBError")
-				    .detail("Error", status.ToString())
-				    .detail("Method", "NewFileTraceWriter");
-				a.done.sendError(statusToError(status));
-				return;
-			}
+			    TraceEvent(SevError, "RocksDBError")
+			        .detail("Error", status.ToString())
+			        .detail("Method", "NewFileTraceWriter");
+			    a.done.sendError(statusToError(status));
+			    return;
+		}*/
 
 			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
-			status = rocksdb::DB::Open(opt, a.path, defaultCF, &handle, &db);
+			auto status = rocksdb::DB::Open(opt, a.path, defaultCF, &handle, &db);
 
 			if (!status.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", status.ToString()).detail("Method", "Open");
 				a.done.sendError(statusToError(status));
 			} else {
-				rocksdb::TraceOptions trace_opt;
+				/*rocksdb::TraceOptions trace_opt;
 				status = db->StartTrace(trace_opt, std::move(trace_writer));
 				if (!status.ok()) {
-					TraceEvent(SevError, "RocksDBError")
-					    .detail("Error", status.ToString())
-					    .detail("Method", "StartTrace");
-					a.done.sendError(statusToError(status));
-					return;
-				}
+				    TraceEvent(SevError, "RocksDBError")
+				        .detail("Error", status.ToString())
+				        .detail("Method", "StartTrace");
+				    a.done.sendError(statusToError(status));
+				    return;
+		  }*/
 
 				a.done.send(Void());
 			}
@@ -283,11 +227,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
-			if (cursor == nullptr) {
-				cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions));
-			} else {
-				cursor->Refresh();
-			}
+			auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions));
 			Standalone<RangeResultRef> result;
 			int accumulatedBytes = 0;
 			if (a.rowLimit >= 0) {
@@ -331,7 +271,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	size_t diskBytesUsed = 0;
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
-	unsigned nReaders = 2;
+	unsigned nReaders = 16;
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
@@ -350,7 +290,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> getError() override { return join(errorPromise.getFuture(), sqlLite->getError()); }
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
-		self->db->EndTrace();
+		// self->db->EndTrace();
 		wait(self->readThreads->stop());
 		auto a = new Writer::CloseAction(self->path, deleteOnClose);
 		auto f = a->done.getFuture();
@@ -367,8 +307,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return Void();
 	}
 
-	ACTOR static Future<Optional<Value>> compare_read(KeyRef key, Future<Optional<Value>> s,
-	                                                  Future<Optional<Value>> r) {
+	ACTOR static Future<Optional<Value>> compare_read(KeyRef key, Future<Optional<Value>> r,
+	                                                  Future<Optional<Value>> s) {
 		state Optional<Value> sValue = wait(s);
 		Optional<Value> rValue = wait(r);
 		compare(key, sValue, rValue);
@@ -376,8 +316,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	ACTOR static Future<Standalone<RangeResultRef>> compare_range(KeyRangeRef key, int maxLength,
-	                                                              Future<Standalone<RangeResultRef>> s,
-	                                                              Future<Standalone<RangeResultRef>> r) {
+	                                                              Future<Standalone<RangeResultRef>> r,
+	                                                              Future<Standalone<RangeResultRef>> s) {
 		state Standalone<RangeResultRef> sRange = wait(s);
 		Standalone<RangeResultRef> rRange = wait(r);
 		if (sRange.size() != rRange.size()) {
@@ -400,7 +340,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return sRange;
 	}
 
-	static bool compare(KeyRef key, const Optional<Value>& s, const Optional<Value>& r) {
+	static bool compare(KeyRef key, const Optional<Value>& r, const Optional<Value>& s) {
 		if (s == r) {
 			return false;
 		}
@@ -415,7 +355,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return true;
 	}
 
-	static bool compare(KeyRef key, const KeyValueRef& s, const KeyValueRef& r) {
+	static bool compare(KeyRef key, const KeyValueRef& r, const KeyValueRef& s) {
 		if (s == r) {
 			return false;
 		}
