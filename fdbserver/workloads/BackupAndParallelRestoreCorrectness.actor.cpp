@@ -315,7 +315,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	// write [begin, end) in kvs to DB
+	// Write [begin, end) in kvs to DB
 	ACTOR static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef>> kvs, int begin, int end) {
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -350,6 +350,15 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			    .detail("GetKey", kvs[i].key)
 			    .detail("NewKey", newKVs[i].key);
 		}
+
+		// Clear the transformed data (original data with removePrefix and addPrefix)
+		TraceEvent("TransformDatabaseContents").detail("Clear", KeyRangeRef(addPrefix.contents(), strinc(addPrefix)));
+		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->clear(KeyRangeRef(addPrefix.contents(), strinc(addPrefix)));
+			return Void();
+		}));
 
 		state int begin = 0;
 		state int len;
