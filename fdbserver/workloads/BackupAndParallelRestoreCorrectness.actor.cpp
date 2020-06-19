@@ -316,7 +316,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	}
 
 	// write [begin, end) in kvs to DB
-	ACTOR static Future<Void> writeKVs(Database cx, Standalone<RangeResultRef> kvs, int begin, int end) {
+	ACTOR static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef>> kvs, int begin, int end) {
 		while (begin < end) {
 			wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -341,13 +341,15 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		    .detail("RemovePrefix", removePrefix);
 		Standalone<RangeResultRef> kvs = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
 		ASSERT(!kvs.more);
-		state int i = 0;
+		int i = 0;
+
+		Standalone<VectorRef<KeyValueRef>> newKVs;
 		for (i = 0; i < kvs.size(); ++i) {
-			KeyValueRef kv = kvs[i];
-			kv.key.removePrefix(removePrefix).withPrefix(addPrefix);
+			KeyRef keyRef = kvs[i].key.removePrefix(removePrefix).withPrefix(addPrefix);
+			newKVs.push_back_deep(newKVs.arena(), KeyValueRef(keyRef, kvs[i].value));
 		}
 
-		wait(writeKVs(cx, kvs, 0, kvs.size()));
+		wait(writeKVs(cx, newKVs, 0, newKVs.size()));
 
 		return Void();
 	}
@@ -582,7 +584,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// If addPrefix or removePrefix set, we want to transform the effect by copying data
 				if (self->hasPrefix()) {
-					// wait(transformDatabaseContents(cx, self->removePrefix, self->addPrefix));
+					wait(transformDatabaseContents(cx, self->removePrefix, self->addPrefix));
 					wait(unlockDatabase(cx, randomID));
 				}
 			}

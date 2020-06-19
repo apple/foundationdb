@@ -36,7 +36,7 @@
 #include <cstdarg>
 
 #define SevFRMutationInfo SevVerbose
-//#define SevFRMutationInfo SevInfo
+// #define SevFRMutationInfo SevInfo
 
 struct VersionedMutation {
 	MutationRef mutation;

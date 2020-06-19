@@ -197,6 +197,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 	wait(processedFileOffset->whenAtLeast(asset.offset));
 	ASSERT(processedFileOffset->get() == asset.offset);
 
+	Arena tempArena;
 	StringRefReader reader(buf, restore_corrupted_data());
 	try {
 		// Read block header
@@ -246,10 +247,13 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 				mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
 				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
 				// Remove prefix or add prefix when we restore to a new key space
-				mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix);
-				mutation.param2.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix);
+				mutation.param1 =
+				    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				mutation.param2 =
+				    mutation.param2.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
 			} else {
-				mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix);
+				mutation.param1 =
+				    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
 			}
 
 			TraceEvent(SevFRMutationInfo, "FastRestoreDecodePartitionedLogFile")
@@ -745,6 +749,7 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 	MutationsVec& samples = samplesIter->second;
 	SerializedMutationListMap& mutationMap = *pmutationMap;
 
+	Arena tempArena;
 	for (auto& m : mutationMap) {
 		StringRef k = m.first.contents();
 		StringRef val = m.second.first.contents();
@@ -793,10 +798,13 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 				mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
 				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
 				// Remove prefix or add prefix if we restore data to a new key space
-				mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix);
-				mutation.param2.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix);
+				mutation.param1 =
+				    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				mutation.param2 =
+				    mutation.param2.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
 			} else {
-				mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix);
+				mutation.param1 =
+				    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
 			}
 
 			cc->sampledLogBytes += mutation.totalSize();
@@ -837,7 +845,8 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	    .detail("Filename", asset.filename)
 	    .detail("Version", version)
 	    .detail("BeginVersion", asset.beginVersion)
-	    .detail("EndVersion", asset.endVersion);
+	    .detail("EndVersion", asset.endVersion)
+	    .detail("RestoreAsset", asset.toString());
 	// Sanity check the range file is within the restored version range
 	ASSERT_WE_THINK(asset.isInVersionRange(version));
 
@@ -888,11 +897,12 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	const LogMessageVersion msgVersion(version, std::numeric_limits<int32_t>::max());
 
 	// Convert KV in data into SET mutations of different keys in kvOps
+	Arena tempArena;
 	for (const KeyValueRef& kv : data) {
 		// NOTE: The KV pairs in range files are the real KV pairs in original DB.
 		MutationRef m(MutationRef::Type::SetValue, kv.key, kv.value);
 		// Remove prefix or add prefix in case we restore data to a different sub keyspace
-		m.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix);
+		m.param1 = m.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
 		cc->loadedRangeBytes += m.totalSize();
 
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
