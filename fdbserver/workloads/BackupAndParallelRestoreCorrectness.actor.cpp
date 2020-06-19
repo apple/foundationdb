@@ -335,6 +335,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 	ACTOR static Future<Void> transformDatabaseContents(Database cx, Key addPrefix, Key removePrefix) {
 		state ReadYourWritesTransaction tr(cx);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		TraceEvent("FastRestoreWorkloadTransformDatabaseContents")
 		    .detail("AddPrefix", addPrefix)
@@ -350,6 +352,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		}
 
 		wait(writeKVs(cx, newKVs, 0, newKVs.size()));
+
+		TraceEvent("FastRestoreWorkloadTransformDatabaseContentsFinish")
+		    .detail("AddPrefix", addPrefix)
+		    .detail("RemovePrefix", removePrefix);
 
 		return Void();
 	}
