@@ -20,6 +20,7 @@
 
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
@@ -48,6 +49,9 @@
 #include "flow/Stats.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/serialize.h"
+
+#include <numeric>
 
 ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply) {
 	state ReplyPromise<Void> reply = req.reply;
@@ -1972,6 +1976,85 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db,
 	return Void();
 }
 
+ACTOR Future<Version> getTxnStateLifetime(Database db) {
+	state Transaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> val = wait(tr.get(txStateLifetime));
+			if (val.present()) {
+				return BinaryReader::fromStringRef<Version>(val.get(), IncludeVersion());
+			} else {
+				tr.set(txStateLifetime, BinaryWriter::toValue(SERVER_KNOBS->TXN_STATE_LIFE_VERSIONS, IncludeVersion()));
+				wait(tr.commit());
+				return SERVER_KNOBS->TXN_STATE_LIFE_VERSIONS;
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<std::deque<std::pair<Version, Version>>> readRecoveryVersions(Database db) {
+	state std::deque<std::pair<Version, Version>> result;
+	state Transaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Standalone<RangeResultRef> range = wait(tr.getRange(recoveryVersions, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!range.more);
+			for (auto const& kv : range) {
+				auto from = BinaryReader::fromStringRef<Version>(kv.key.removePrefix(recoveryVersions.begin), Unversioned());
+				auto to = BinaryReader::fromStringRef<Version>(kv.value, IncludeVersion());
+				ASSERT(from < to);
+				ASSERT(result.empty() || result.back().second < from);
+				result.emplace_back(from, to);
+			}
+			return result;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> txnStateCleaner(ProxyCommitData* self) {
+	state Transaction tr(self->cx);
+	state Version minVersion;
+	state KeyRange minVersionKey = singleKeyRange(transactionIDMinVersion);
+	state Version stateLifeTime = wait(getTxnStateLifetime(self->cx));
+	state std::deque<std::pair<Version, Version>> recoveryRanges = wait(readRecoveryVersions(self->cx));
+	stateLifeTime = std::min(stateLifeTime, SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS);
+	for (auto const& p : recoveryRanges) {
+		stateLifeTime += p.second - p.first;
+	}
+	loop {
+		wait(delay(SERVER_KNOBS->TXN_STATE_CLEANER_DELAY));
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Version currentVersion = wait(tr.getReadVersion());
+				minVersion = currentVersion - stateLifeTime;
+				if (minVersion > recoveryRanges.front().first) {
+					// we need to jump the recovery versions
+					minVersion -= recoveryRanges.front().second - recoveryRanges.front().first;
+					tr.clear(singleKeyRange(recoveryVersionsKey(recoveryRanges.front().first)));
+					recoveryRanges.pop_front();
+				}
+				auto clearTo = subkeyForTransactionVersion(minVersion);
+				KeyRangeRef toClean = KeyRangeRef(transactionIDs.begin, clearTo);
+				tr.addReadConflictRange(toClean);
+				tr.addReadConflictRange(minVersionKey);
+				tr.clear(toClean);
+				tr.set(minVersionKey.begin, BinaryWriter::toValue(minVersionKey, IncludeVersion()));
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> masterProxyServerCore(
 	MasterProxyInterface proxy,
 	MasterInterface master,
@@ -1999,6 +2082,9 @@ ACTOR Future<Void> masterProxyServerCore(
 
 	addActor.send( waitFailureServer(proxy.waitFailure.getFuture()) );
 	addActor.send( traceRole(Role::MASTER_PROXY, proxy.id()) );
+	if (firstProxy) {
+		addActor.send(txnStateCleaner(&commitData));
+	}
 
 	//TraceEvent("ProxyInit1", proxy.id());
 

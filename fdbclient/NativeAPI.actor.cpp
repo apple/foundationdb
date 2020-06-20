@@ -2763,12 +2763,22 @@ void Transaction::addReadConflictRange( KeyRangeRef const& keys ) {
 }
 
 void Transaction::makeSelfConflicting() {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(LiteralStringRef("\xFF/SC/"));
-	wr << deterministicRandom()->randomUniqueID();
-	auto r = singleKeyRange( wr.toValue(), tr.arena );
-	tr.transaction.read_conflict_ranges.push_back( tr.arena, r );
-	tr.transaction.write_conflict_ranges.push_back( tr.arena, r );
+	if (!options.isIdempotent) {
+		BinaryWriter wr(Unversioned());
+		wr.serializeBytes(LiteralStringRef("\xFF/SC/"));
+		wr << info.txID;
+		auto r = singleKeyRange( wr.toValue(), tr.arena );
+		tr.transaction.read_conflict_ranges.push_back( tr.arena, r );
+		tr.transaction.write_conflict_ranges.push_back( tr.arena, r );
+	} else {
+		Key k = keyForTransaction(readVersion.get(), info.txID);
+		auto r = singleKeyRange(k, tr.arena);
+		tr.transaction.read_conflict_ranges.push_back(tr.arena, r);
+		tr.transaction.write_conflict_ranges.push_back(tr.arena, r);
+		tr.transaction.mutations.push_back(
+		    tr.arena, MutationRef(MutationRef::SetVersionstampedValue, r.begin,
+		                          emptyVersionStampValue));
+	}
 }
 
 void Transaction::set( const KeyRef& key, const ValueRef& value, bool addConflictRange ) {
@@ -2959,6 +2969,7 @@ void Transaction::reset() {
 	versionstampPromise = Promise<Standalone<StringRef>>();
 	commitResult = Promise<Void>();
 	committing = Future<Void>();
+	info.txID = deterministicRandom()->randomUniqueID();
 	info.taskID = cx->taskID;
 	info.debugID = Optional<UID>();
 	flushTrLogsIfEnabled();
@@ -3108,6 +3119,51 @@ ACTOR static Future<Void> commitDummyTransaction( Database cx, KeyRange range, T
 	}
 }
 
+ACTOR static Future<Optional<CommitID>> getCommitVersion(Database cx, TransactionOptions options, Version version,
+                                                         UID txID) {
+	state Transaction tr(cx);
+	state Key key = keyForTransaction(version, txID);
+	state int retries = 0;
+	state Future<Optional<Value>> minVersion;
+	state Future<Optional<Value>> versionStamp;
+	state Error err;
+	loop {
+		try {
+			tr.options = options;
+			tr.setOption(FDBTransactionOptions::TRANSACTION_IS_IDEMPOTENT);
+			versionStamp = tr.get(key);
+			minVersion = tr.get(transactionIDMinVersion);
+			wait(success(versionStamp) && success(minVersion));
+			if (minVersion.get().present()) {
+				auto v = decodeMinTxVersionValue(minVersion.get().get());
+				if (v > version) {
+					err = commit_unknown_result();
+					break;
+				}
+			}
+			if (versionStamp.get().present()) {
+				if (versionStamp.get().get().size() < 10) {
+					err = transaction_aborted();
+					break;
+				}
+				CommitID res;
+				std::tie(res.version, res.txnBatchId) = decodeTxVersion(versionStamp.get().get());
+				res.metadataVersion = cx->metadataVersionCache[cx->mvCacheInsertLocation].second;
+				return res;
+			} else {
+				tr.set(key, LiteralStringRef(""));
+				wait(tr.commit());
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_transaction_aborted) throw;
+			TraceEvent("CommitDummyTransactionError").error(e,true).detail("Key", key).detail("Retries", retries);
+			wait(tr.onError(e));
+			++retries;
+		}
+	}
+	throw err;
+}
+
 void Transaction::cancelWatches(Error const& e) {
 	for(int i = 0; i < watches.size(); ++i)
 		if(!watches[i]->onChangeTrigger.isSet())
@@ -3131,9 +3187,42 @@ void Transaction::setupWatches() {
 	}
 }
 
-ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> trLogInfo, CommitTransactionRequest req, Future<Version> readVersion, TransactionInfo info, Version* pCommittedVersion, Transaction* tr, TransactionOptions options) {
-	state TraceInterval interval( "TransactionCommit" );
+static void commitSuccess(CommitID const& ci, Database const& cx, Transaction* tr,
+                          Reference<TransactionLogInfo> const& trLogInfo, TransactionInfo const& info,
+                          CommitTransactionRequest const& req, double startTime,
+                          TraceInterval& interval) {
+	auto v = ci.version;
+	if (info.debugID.present()) TraceEvent(interval.end()).detail("CommittedVersion", v);
+	if(v > cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
+		cx->mvCacheInsertLocation = (cx->mvCacheInsertLocation + 1)%cx->metadataVersionCache.size();
+		cx->metadataVersionCache[cx->mvCacheInsertLocation] = std::make_pair(v, ci.metadataVersion);
+	}
+
+	Standalone<StringRef> ret = makeString(10);
+	placeVersionstamp(mutateString(ret), v, ci.txnBatchId);
+	tr->versionstampPromise.send(ret);
+
+	tr->numErrors = 0;
+	++cx->transactionsCommitCompleted;
+	cx->transactionCommittedMutations += req.transaction.mutations.size();
+	cx->transactionCommittedMutationBytes += req.transaction.mutations.expectedSize();
+
+	if(info.debugID.present())
+		g_traceBatch.addEvent("CommitDebug", req.debugID.get().first(), "NativeAPI.commit.After");
+
+	double latency = now() - startTime;
+	cx->commitLatencies.addSample(latency);
+	cx->latencies.addSample(now() - tr->startTime);
+	if (trLogInfo)
+		trLogInfo->addLog(FdbClientLogEvents::EventCommit_V2(startTime, cx->clientLocality.dcId(), latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), ci.version, req));
+}
+
+ACTOR static Future<Void> tryCommit(Database cx, Reference<TransactionLogInfo> trLogInfo, CommitTransactionRequest req,
+                                    Future<Version> readVersion, TransactionInfo info, Version* pCommittedVersion,
+                                    Transaction* tr, TransactionOptions options) {
+	state TraceInterval interval("TransactionCommit");
 	state double startTime = now();
+	state Version readSnapshot;
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
 	try {
@@ -3146,6 +3235,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		}
 
 		Version v = wait( readVersion );
+		readSnapshot = v;
 		req.transaction.read_snapshot = v;
 
 		startTime = now();
@@ -3180,31 +3270,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					if (CLIENT_BUGGIFY) {
 						throw commit_unknown_result();
 					}
-					if (info.debugID.present())
-						TraceEvent(interval.end()).detail("CommittedVersion", v);
 					*pCommittedVersion = v;
-					if(v > cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
-						cx->mvCacheInsertLocation = (cx->mvCacheInsertLocation + 1)%cx->metadataVersionCache.size();
-						cx->metadataVersionCache[cx->mvCacheInsertLocation] = std::make_pair(v, ci.metadataVersion);
-					}
-
-					Standalone<StringRef> ret = makeString(10);
-					placeVersionstamp(mutateString(ret), v, ci.txnBatchId);
-					tr->versionstampPromise.send(ret);
-
-					tr->numErrors = 0;
-					++cx->transactionsCommitCompleted;
-					cx->transactionCommittedMutations += req.transaction.mutations.size();
-					cx->transactionCommittedMutationBytes += req.transaction.mutations.expectedSize();
-
-					if(info.debugID.present())
-						g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.After");
-
-					double latency = now() - startTime;
-					cx->commitLatencies.addSample(latency);
-					cx->latencies.addSample(now() - tr->startTime);
-					if (trLogInfo)
-						trLogInfo->addLog(FdbClientLogEvents::EventCommit_V2(startTime, cx->clientLocality.dcId(), latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), ci.version, req));
+					commitSuccess(ci, cx, tr, trLogInfo, info, req, startTime, interval);
 					return Void();
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
@@ -3251,10 +3318,19 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 
 				TEST(true);  // Waiting for dummy transaction to report commit_unknown_result
 
-				wait( commitDummyTransaction( cx, singleKeyRange(selfConflictingRange.begin), info, tr->options ) );
+				if (options.isIdempotent) {
+					wait( commitDummyTransaction( cx, singleKeyRange(selfConflictingRange.begin), info, tr->options ) );
+				} else {
+					Optional<CommitID> ver = wait(getCommitVersion(cx, options, readSnapshot, info.txID));
+					if (ver.present()) {
+						commitSuccess(ver.get(), cx, tr, trLogInfo, info, req, startTime, interval);
+						return Void();
+					}
+				}
 			}
 
-			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops retry it anyway (relying on transaction idempotence) but a client might do something else.
+			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry
+			// loops retry it anyway (relying on transaction idempotence) but a client might do something else.
 			throw commit_unknown_result();
 		} else {
 			if (e.code() != error_code_transaction_too_old
@@ -3562,9 +3638,19 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 		    options.reportConflictingKeys = true;
 		    break;
 
-	    default:
+		case FDBTransactionOptions::TRANSACTION_IS_IDEMPOTENT:
+			validateOptionValue(value, false);
+			options.isIdempotent = true;
 			break;
-	}
+
+		case FDBTransactionOptions::RETRY_ON_UNKNOWN_RESULT:
+			validateOptionValue(value, false);
+			options.retryUnknownCommit = true;
+			break;
+
+	    default:
+		    break;
+	    }
 }
 
 ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx, uint32_t transactionCount, TransactionPriority priority, uint32_t flags, TransactionTagMap<uint32_t> tags, Optional<UID> debugID ) {
@@ -3829,7 +3915,8 @@ Future<Void> Transaction::onError( Error const& e ) {
 		return client_invalid_operation();
 	}
 	if (e.code() == error_code_not_committed ||
-		e.code() == error_code_commit_unknown_result ||
+		(e.code() == error_code_commit_unknown_result &&
+		 (options.retryUnknownCommit || options.isIdempotent)) ||
 		e.code() == error_code_database_locked ||
 		e.code() == error_code_proxy_memory_limit_exceeded ||
 		e.code() == error_code_process_behind ||

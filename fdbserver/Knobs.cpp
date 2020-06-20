@@ -358,6 +358,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PROXY_COMPUTE_BUCKETS,                                20000 );
 	init( PROXY_COMPUTE_GROWTH_RATE,                             0.01 );
 	init( TXN_STATE_SEND_AMOUNT,                                    2 );
+	init( TXN_STATE_CLEANER_DELAY,                                2.0 );
+	init( TXN_STATE_LIFE_VERSIONS,           30 * VERSIONS_PER_SECOND ); if ( randomize && BUGGIFY ) TXN_STATE_LIFE_VERSIONS = 2 * VERSIONS_PER_SECOND;
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)

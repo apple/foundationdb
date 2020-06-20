@@ -395,6 +395,21 @@ std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& );
 // Used to create artifically large txnStateStore instances in testing.
 extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
 
+// Transaction idempotency
+extern const KeyRef txStateLifetime;
+extern const KeyRangeRef transactionIDs;
+extern const KeyRef transactionIDMinVersion;
+extern const KeyRangeRef recoveryVersions;
+extern const KeyRef emptyVersionStampValue;
+
+extern Key recoveryVersionsKey(Version v);
+extern KeyRef recoveryVersionsKey(Arena& arena, Version v);
+extern Version decodeRecoveryVersionsValue(ValueRef v);
+extern Key keyForTransaction(Version readVersion, UID id);
+extern Key subkeyForTransactionVersion(Version readVersion);
+extern std::pair<Version, uint16_t> decodeTxVersion(ValueRef value);
+extern Version decodeMinTxVersionValue(ValueRef value);
+
 #pragma clang diagnostic pop
 
 #endif
