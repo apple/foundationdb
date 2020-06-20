@@ -646,7 +646,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 						out.send({ std::move(batch), batchBytes });
 						lastBatch = now();
 						timeout = delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher);
-						batch = std::vector<CommitTransactionRequest>();
+						batch.clear();
 						batchBytes = 0;
 					}
 
