@@ -585,7 +585,7 @@ struct ResolutionRequestBuilder {
 				resolversUsed.push_back(r);
 				outTr[r]->report_conflicting_keys = trIn.report_conflicting_keys;
 			}
-		transactionResolverMap.push_back(std::move(resolversUsed));
+		transactionResolverMap.emplace_back(std::move(resolversUsed));
 	}
 };
 
@@ -1576,7 +1576,8 @@ ACTOR static Future<Void> transactionStarter(
 			else
 				batchPriTransactionsStarted[req.flags & 1] += tc;
 
-			start[req.flags & 1].push_back(std::move(req));  static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
+			start[req.flags & 1].emplace_back(std::move(req));
+			static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
 			transactionQueue->pop_front();
 			requestsToStart++;
 		}
@@ -2149,7 +2150,7 @@ ACTOR Future<Void> masterProxyServerCore(
 									keyInfoData.emplace_back(MapPair<Key,ServerCacheInfo>(k, info), 1);
 								}
 							} else {
-								mutations.push_back(mutations.arena(), MutationRef(MutationRef::SetValue, kv.key, kv.value));
+								mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
 							}
 						}
 
