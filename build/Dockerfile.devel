@@ -48,6 +48,18 @@ RUN cp -iv /usr/local/bin/clang++ /usr/local/bin/clang++.deref &&\
 	ldconfig &&\
 	rm -rf /mnt/artifacts
 
+# Install Google microbenchmark library
+RUN git clone https://github.com/google/benchmark.git &&\
+    git clone https://github.com/google/googletest.git benchmark/googletest &&\
+    cd benchmark &&\
+    git checkout v1.5.1 &&\
+    mkdir build &&\
+    cd build &&\
+    CC=clang CXX=clang++ cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DBENCHMARK_ENABLE_LTO=true ../ &&\
+    ninja &&\
+    ninja test &&\
+    ninja install
+
 LABEL version=0.11.6
 ENV DOCKER_IMAGEVER=0.11.6
 
