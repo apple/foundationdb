@@ -351,13 +351,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				oldData.push_back_deep(oldData.arena(), KeyValueRef(kv.key, kv.value));
 			}
 		}
-		Standalone<RangeResultRef> kvs = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
-		ASSERT(!kvs.more);
-		int i = 0;
 
 		// Convert data by removePrefix and addPrefix in memory
 		state Standalone<VectorRef<KeyValueRef>> newKVs;
-		for (i = 0; i < oldData.size(); ++i) {
+		for (int i = 0; i < oldData.size(); ++i) {
 			Key newKey(oldData[i].key);
 			TraceEvent("TransformDatabaseContents")
 			    .detail("Keys", oldData.size())
@@ -371,7 +368,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				continue;
 			}
 			newKey = newKey.removePrefix(removePrefix).withPrefix(addPrefix);
-			newKVs.push_back_deep(newKVs.arena(), KeyValueRef(newKey.contents(), kvs[i].value));
+			newKVs.push_back_deep(newKVs.arena(), KeyValueRef(newKey.contents(), oldData[i].value));
 			TraceEvent("TransformDatabaseContents")
 			    .detail("Index", i)
 			    .detail("NewKey", newKVs.back().key)
@@ -379,11 +376,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		}
 
 		// Clear the transformed data (original data with removePrefix and addPrefix) in restoreRanges
-		TraceEvent("TransformDatabaseContents").detail("Clear", normalKeys);
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (auto& range : restoreRanges) {
+				TraceEvent("TransformDatabaseContents").detail("Clear", range);
 				tr->clear(range); // Careful when we restore only a sub key range!
 			}
 			return Void();
@@ -639,6 +636,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						KeyRange range(self->backupRanges[i]);
 						Key begin = range.begin.removePrefix(self->removePrefix).withPrefix(self->addPrefix);
 						Key end = range.end.removePrefix(self->removePrefix).withPrefix(self->addPrefix);
+						TraceEvent("FastRestoreWorkloadTransformDatabaseContents")
+						    .detail("Begin", begin)
+						    .detail("End", end);
 						restoreRanges.push_back_deep(restoreRanges.arena(),
 						                             KeyRangeRef(begin.contents(), end.contents()));
 					}
