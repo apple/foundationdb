@@ -169,9 +169,11 @@ public:
 
 	bool useThreadPool;
 
+#ifndef TLS_DISABLED
 	// Used by SSLConnection and SSLListener classes
 	Reference<IThreadPool> sslHandshakerPool;
 	int sslPoolHandshakesInProgress;
+#endif
 //private:
 
 	ASIOReactor reactor;
@@ -952,11 +954,13 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 {
 	TraceEvent("Net2Starting");
 
+#ifndef TLS_DISABLED
 	sslPoolHandshakesInProgress = 0;
 	sslHandshakerPool = createGenericThreadPool();
 	for(int i = 0; i < FLOW_KNOBS->TLS_HANDSHAKE_THREADS; ++i) {
 		sslHandshakerPool->addThread(new SSLHandshakerThread());
 	}
+#endif
 
 	// Set the global members
 	if(useMetrics) {
