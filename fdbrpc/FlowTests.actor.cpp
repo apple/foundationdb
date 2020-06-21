@@ -250,10 +250,10 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override {
 		return baseNetwork->startThread(func, arg);
 	}
-	virtual Future<Reference<class IAsyncFile>> open(std::string filename, int64_t flags, int64_t mode) override {
+	Future<Reference<class IAsyncFile>> open(std::string filename, int64_t flags, int64_t mode) {
 		return IAsyncFileSystem::filesystem()->open(filename, flags, mode);
 	}
-	virtual Future<Void> deleteFile(std::string filename, bool mustBeDurable) override {
+	Future<Void> deleteFile(std::string filename, bool mustBeDurable) {
 		return IAsyncFileSystem::filesystem()->deleteFile(filename, mustBeDurable);
 	}
 	virtual void run() override { return baseNetwork->run(); }

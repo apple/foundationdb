@@ -1434,7 +1434,7 @@ Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( std::string host, 
 	return resolveTCPEndpoint_impl(this, host, service);
 }
 
-bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const override {
+bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {
 	auto it = addressOnHostCache.find( addr.ip );
 	if (it != addressOnHostCache.end())
 		return it->second;
@@ -1492,7 +1492,7 @@ Reference<IListener> Net2::listen( NetworkAddress localAddr ) {
 	}
 }
 
-void Net2::getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override {
+void Net2::getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	return ::getDiskBytes(directory, free, total);
 }
 

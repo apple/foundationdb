@@ -669,7 +669,7 @@ class SendBuffer {
 	uint8_t* _data;
 
 public:
-	inline uint8_t const* const& data() const { return _data; }
+	inline uint8_t const* data() const { return _data; }
 	inline uint8_t*& data() { return _data; }
 	SendBuffer* next;
 	int bytes_written, bytes_sent;
