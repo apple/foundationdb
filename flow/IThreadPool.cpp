@@ -43,11 +43,12 @@ class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
 			threadUserObject = userObject;
 			try {
 				userObject->init();
-				while (pool->ios.run_one() && !pool->mode);
+				while (pool->ios.run_one() && (pool->mode == Mode::Run));
 			} catch (Error& e) {
 				TraceEvent(SevError, "ThreadPoolError").error(e);
 			}
-			delete userObject; userObject = 0;
+			delete userObject;
+			userObject = nullptr;
 			stopped.set();
 		}
 		static void dispatch( PThreadAction action ) {

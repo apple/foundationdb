@@ -168,6 +168,10 @@ public:
 	virtual bool checkRunnable();
 
 	bool useThreadPool;
+
+	// Used by SSLConnection and SSLListener classes
+	Reference<IThreadPool> sslHandshakerPool;
+	int sslPoolHandshakesInProgress;
 //private:
 
 	ASIOReactor reactor;
@@ -528,6 +532,45 @@ private:
 #ifndef TLS_DISABLED
 typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket&> ssl_socket;
 
+struct SSLHandshakerThread : IThreadPoolReceiver {
+	SSLHandshakerThread() {}
+	virtual void init() {}
+
+	struct Handshake : TypedAction<SSLHandshakerThread,Handshake> {
+		Handshake(ssl_socket &socket, ssl_socket::handshake_type type) : socket(socket), type(type) {
+		}
+		virtual double getTimeEstimate() { return 0.001; }
+
+		ThreadReturnPromise<Void> done;
+		ssl_socket &socket;
+		ssl_socket::handshake_type type;
+		boost::system::error_code err;
+	};
+
+	void action( Handshake &h) {
+		try {
+			h.socket.next_layer().non_blocking(false, h.err);
+			if(!h.err.failed()) {
+				h.socket.handshake(h.type, h.err);
+			}
+			if(!h.err.failed()) {
+				h.socket.next_layer().non_blocking(true, h.err);
+			}
+			if(h.err.failed()) {
+				TraceEvent(SevWarn, h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError" : "N2_AcceptHandshakeError")
+					.detail("ErrorCode", h.err.value())
+					.detail("ErrorMsg", h.err.message().c_str());
+				h.done.sendError(connection_failed());
+			} else {
+				h.done.send(Void());
+			}
+		} catch(...) {
+			TraceEvent(SevWarn, h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeUnknownError" : "N2_AcceptHandshakeUnknownError");
+			h.done.sendError(connection_failed());
+		}
+	}
+};
+
 class SSLConnection : public IConnection, ReferenceCounted<SSLConnection> {
 public:
 	virtual void addref() { ReferenceCounted<SSLConnection>::addref(); }
@@ -584,8 +627,11 @@ public:
 	}
 
 	ACTOR static void doAcceptHandshake( Reference<SSLConnection> self, Promise<Void> connected) {
+		state std::pair<IPAddress,uint16_t> peerIP;
+		state bool usePool = false;
+
 		try {
-			state std::pair<IPAddress,uint16_t> peerIP = std::make_pair(self->getPeerAddress().ip, static_cast<uint16_t>(0));
+			peerIP = std::make_pair(self->getPeerAddress().ip, static_cast<uint16_t>(0));
 			auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
 			if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
 				if (now() < iter->second.second) {
@@ -604,9 +650,22 @@ public:
 			int64_t permitNumber = wait(g_network->networkInfo.handshakeLock->take());
 			state BoundedFlowLock::Releaser releaser(g_network->networkInfo.handshakeLock, permitNumber);
 
-			BindPromise p("N2_AcceptHandshakeError", UID());
-			auto onHandshook = p.getFuture();
-			self->getSSLSocket().async_handshake( boost::asio::ssl::stream_base::server, std::move(p) );
+			Future<Void> onHandshook;
+
+			// If the background handshakers are not all busy, use one
+			if(N2::g_net2->sslPoolHandshakesInProgress < FLOW_KNOBS->TLS_HANDSHAKE_THREADS) {
+				usePool = true;
+				++N2::g_net2->sslPoolHandshakesInProgress;
+				auto handshake = new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
+				onHandshook = handshake->done.getFuture();
+				N2::g_net2->sslHandshakerPool->post(handshake);
+			}
+			else {
+				// Otherwise use flow network thread
+				BindPromise p("N2_AcceptHandshakeError", UID());
+				onHandshook = p.getFuture();
+				self->ssl_sock.async_handshake( boost::asio::ssl::stream_base::server, std::move(p) );
+			}
 			wait( onHandshook );
 			wait(delay(0, TaskPriority::Handshake));
 			connected.send(Void());
@@ -619,6 +678,10 @@ public:
 			}
 			self->closeSocket();
 			connected.sendError(connection_failed());
+		}
+
+		if(usePool) {
+			--N2::g_net2->sslPoolHandshakesInProgress;
 		}
 	}
 
@@ -640,13 +703,27 @@ public:
 	}
 
 	ACTOR static void doConnectHandshake( Reference<SSLConnection> self, Promise<Void> connected) {
+		state bool usePool = false;
+
 		try {
 			int64_t permitNumber = wait(g_network->networkInfo.handshakeLock->take());
 			state BoundedFlowLock::Releaser releaser(g_network->networkInfo.handshakeLock, permitNumber);
 
-			BindPromise p("N2_ConnectHandshakeError", self->id);
-			Future<Void> onHandshook = p.getFuture();
-			self->ssl_sock.async_handshake( boost::asio::ssl::stream_base::client, std::move(p) );
+			Future<Void> onHandshook;
+			// If the background handshakers are not all busy, use one
+			if(N2::g_net2->sslPoolHandshakesInProgress < FLOW_KNOBS->TLS_HANDSHAKE_THREADS) {
+				usePool = true;
+				++N2::g_net2->sslPoolHandshakesInProgress;
+				auto handshake = new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
+				onHandshook = handshake->done.getFuture();
+				N2::g_net2->sslHandshakerPool->post(handshake);
+			}
+			else {
+				// Otherwise use flow network thread
+				BindPromise p("N2_ConnectHandshakeError", self->id);
+				Future<Void> onHandshook = p.getFuture();
+				self->ssl_sock.async_handshake( boost::asio::ssl::stream_base::client, std::move(p) );
+			}
 			wait( onHandshook );
 			wait(delay(0, TaskPriority::Handshake));
 			connected.send(Void());
@@ -660,6 +737,10 @@ public:
 			}
 			self->closeSocket();
 			connected.sendError(connection_failed());
+		}
+
+		if(usePool) {
+			--N2::g_net2->sslPoolHandshakesInProgress;
 		}
 	}
 
@@ -870,6 +951,12 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 
 {
 	TraceEvent("Net2Starting");
+
+	sslPoolHandshakesInProgress = 0;
+	sslHandshakerPool = createGenericThreadPool();
+	for(int i = 0; i < FLOW_KNOBS->TLS_HANDSHAKE_THREADS; ++i) {
+		sslHandshakerPool->addThread(new SSLHandshakerThread());
+	}
 
 	// Set the global members
 	if(useMetrics) {
