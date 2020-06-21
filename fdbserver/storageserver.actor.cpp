@@ -171,9 +171,9 @@ struct StorageServerDisk {
 	Future<Optional<Value>> readValuePrefix( KeyRef key, int maxLength, Optional<UID> debugID = Optional<UID>() ) { return storage->readValuePrefix(key, maxLength, debugID); }
 	Future<Standalone<RangeResultRef>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 ) { return storage->readRange(keys, rowLimit, byteLimit); }
 
-	KeyValueStoreType getKeyValueStoreType() { return storage->getType(); }
-	StorageBytes getStorageBytes() { return storage->getStorageBytes(); }
-	std::tuple<size_t, size_t, size_t> getSize() { return storage->getSize(); }
+	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
+	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
+	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
 
 private:
 	struct StorageServer* data;
@@ -290,7 +290,7 @@ public:
 	double cpuUsage;
 	double diskUsage;
 
-	std::map<Version, Standalone<VersionUpdateRef>> const & getMutationLog() { return mutationLog; }
+	std::map<Version, Standalone<VersionUpdateRef>> const& getMutationLog() const { return mutationLog; }
 	std::map<Version, Standalone<VersionUpdateRef>>& getMutableMutationLog() { return mutationLog; }
 	VersionedData const& data() const { return versionedData; }
 	VersionedData& mutableData() { return versionedData; }

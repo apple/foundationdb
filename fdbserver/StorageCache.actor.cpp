@@ -297,7 +297,7 @@ public:
 	}
 
 	Arena lastArena;
-	std::map<Version, Standalone<VersionUpdateRef>> const & getMutationLog() { return mutationLog; }
+	std::map<Version, Standalone<VersionUpdateRef>> const& getMutationLog() const { return mutationLog; }
 	std::map<Version, Standalone<VersionUpdateRef>>& getMutableMutationLog() { return mutationLog; }
 	VersionedData const& data() const { return versionedData; }
 	VersionedData& mutableData() { return versionedData; }
