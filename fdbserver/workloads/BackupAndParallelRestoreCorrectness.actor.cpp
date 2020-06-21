@@ -329,8 +329,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	// TODO: Add restore request as a parameter so that we only transform contents in restored ranges
-	ACTOR static Future<Void> transformDatabaseContents(Database cx, Key addPrefix, Key removePrefix) {
+	// restoreRanges is the actual range that has applied removePrefix and addPrefix processed by restore system
+	// Assume: restoreRanges do not overlap which is achieved by ensuring backup ranges do not overlap
+	ACTOR static Future<Void> transformDatabaseContents(Database cx, Key addPrefix, Key removePrefix,
+	                                                    Standalone<VectorRef<KeyRangeRef>> restoreRanges) {
 		state ReadYourWritesTransaction tr(cx);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -338,33 +340,52 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		TraceEvent("FastRestoreWorkloadTransformDatabaseContents")
 		    .detail("AddPrefix", addPrefix)
 		    .detail("RemovePrefix", removePrefix);
+
+		// Read all data from DB
+		state Standalone<VectorRef<KeyValueRef>> oldData;
+		state int i = 0;
+		for (i = 0; i < restoreRanges.size(); ++i) {
+			Standalone<RangeResultRef> kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!kvs.more);
+			for (auto kv : kvs) {
+				oldData.push_back_deep(oldData.arena(), KeyValueRef(kv.key, kv.value));
+			}
+		}
 		Standalone<RangeResultRef> kvs = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
 		ASSERT(!kvs.more);
 		int i = 0;
 
+		// Convert data by removePrefix and addPrefix in memory
 		state Standalone<VectorRef<KeyValueRef>> newKVs;
-		for (i = 0; i < kvs.size(); ++i) {
-			Key newKey(kvs[i].key);
+		for (i = 0; i < oldData.size(); ++i) {
+			Key newKey(oldData[i].key);
 			TraceEvent("TransformDatabaseContents")
-			    .detail("Keys", kvs.size())
+			    .detail("Keys", oldData.size())
 			    .detail("Index", i)
-			    .detail("GetKey", kvs[i].key)
-			    .detail("GetValue", kvs[i].value);
-			ASSERT(removePrefix.size() >= newKey.size()); // If fail, must check why?!
+			    .detail("GetKey", oldData[i].key)
+			    .detail("GetValue", oldData[i].value);
+			if (newKey.size() < removePrefix.size()) { // If true, must check why?!
+				TraceEvent(SevWarnAlways, "TransformDatabaseContents")
+				    .detail("Key", newKey)
+				    .detail("RemovePrefix", removePrefix);
+				continue;
+			}
 			newKey = newKey.removePrefix(removePrefix).withPrefix(addPrefix);
 			newKVs.push_back_deep(newKVs.arena(), KeyValueRef(newKey.contents(), kvs[i].value));
 			TraceEvent("TransformDatabaseContents")
 			    .detail("Index", i)
-			    .detail("NewKey", newKVs[i].key)
-			    .detail("NewValue", newKVs[i].value);
+			    .detail("NewKey", newKVs.back().key)
+			    .detail("NewValue", newKVs.back().value);
 		}
 
-		// Clear the transformed data (original data with removePrefix and addPrefix)
+		// Clear the transformed data (original data with removePrefix and addPrefix) in restoreRanges
 		TraceEvent("TransformDatabaseContents").detail("Clear", normalKeys);
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->clear(normalKeys); // Careful when we restore only a sub key range!
+			for (auto& range : restoreRanges) {
+				tr->clear(range); // Careful when we restore only a sub key range!
+			}
 			return Void();
 		}));
 
@@ -613,7 +634,15 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// If addPrefix or removePrefix set, we want to transform the effect by copying data
 				if (self->hasPrefix()) {
-					wait(transformDatabaseContents(cx, self->removePrefix, self->addPrefix));
+					Standalone<VectorRef<KeyRangeRef>> restoreRanges;
+					for (int i = 0; i < self->backupRanges.size(); ++i) {
+						KeyRange range(self->backupRanges[i]);
+						Key begin = range.begin.removePrefix(self->removePrefix).withPrefix(self->addPrefix);
+						Key end = range.end.removePrefix(self->removePrefix).withPrefix(self->addPrefix);
+						restoreRanges.push_back_deep(restoreRanges.arena(),
+						                             KeyRangeRef(begin.contents(), end.contents()));
+					}
+					wait(transformDatabaseContents(cx, self->removePrefix, self->addPrefix, restoreRanges));
 					wait(unlockDatabase(cx, randomID));
 				}
 			}
