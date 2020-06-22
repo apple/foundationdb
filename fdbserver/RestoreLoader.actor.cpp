@@ -242,7 +242,9 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			    (!isRangeMutation(mutation) && mutation.param1 < asset.range.begin)) {
 				continue;
 			}
+
 			// Only apply mutation within the asset.range
+			ASSERT(asset.removePrefix.size() == 0);
 			if (isRangeMutation(mutation)) {
 				mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
 				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
@@ -794,6 +796,7 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 				continue;
 			}
 			// Only apply mutation within the asset.range and apply removePrefix and addPrefix
+			ASSERT(asset.removePrefix.size() == 0);
 			if (isRangeMutation(mutation)) {
 				mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
 				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
@@ -902,6 +905,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 		// NOTE: The KV pairs in range files are the real KV pairs in original DB.
 		MutationRef m(MutationRef::Type::SetValue, kv.key, kv.value);
 		// Remove prefix or add prefix in case we restore data to a different sub keyspace
+		ASSERT(asset.removePrefix.size() == 0);
 		m.param1 = m.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
 		cc->loadedRangeBytes += m.totalSize();
 

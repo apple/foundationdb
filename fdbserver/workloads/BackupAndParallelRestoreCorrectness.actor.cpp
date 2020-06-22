@@ -83,7 +83,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		// Generate addPrefix
 		if (addPrefix == LiteralStringRef("") && removePrefix == LiteralStringRef("")) {
-			if (deterministicRandom()->random01() < 0.5) { // Generate random addPrefix
+			if (deterministicRandom()->random01() < 2) { // Generate random addPrefix
 				std::string randomStr =
 				    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 100));
 				addPrefix = LiteralStringRef(randomStr.c_str());
@@ -370,21 +370,28 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			newKey = newKey.removePrefix(removePrefix).withPrefix(addPrefix);
 			newKVs.push_back_deep(newKVs.arena(), KeyValueRef(newKey.contents(), oldData[i].value));
 			TraceEvent("TransformDatabaseContents")
+			    .detail("Keys", newKVs.size())
 			    .detail("Index", i)
 			    .detail("NewKey", newKVs.back().key)
 			    .detail("NewValue", newKVs.back().value);
+		}
+
+		state Standalone<VectorRef<KeyRangeRef>> backupRanges; // dest. ranges
+		for (auto& range : restoreRanges) {
+			KeyRange tmpRange = range;
+			backupRanges.push_back(backupRanges.arena(), tmpRange.removePrefix(removePrefix).withPrefix(addPrefix));
 		}
 
 		// Clear the transformed data (original data with removePrefix and addPrefix) in restoreRanges
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			for (auto& range : restoreRanges) {
-				TraceEvent("TransformDatabaseContents").detail("Clear", range);
-				tr->clear(range); // Clear the range.removePrefix().withPrefix()
-				KeyRange newRange = range;
-				newRange = newRange.removePrefix(removePrefix).withPrefix(addPrefix); // Clear dest. range
-				tr->clear(newRange);
+			for (int i = 0; i < restoreRanges.size(); i++) {
+				TraceEvent("TransformDatabaseContents")
+				    .detail("ClearRestoreRange", restoreRanges[i])
+				    .detail("ClearBackupRange", backupRanges[i]);
+				tr->clear(restoreRanges[i]); // Clear the range.removePrefix().withPrefix()
+				tr->clear(backupRanges[i]);
 			}
 			return Void();
 		}));
