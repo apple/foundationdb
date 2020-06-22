@@ -9,6 +9,7 @@
 #include <foundationdb/fdb_c.h>
 #include <pthread.h>
 #include <sys/types.h>
+#include <stdbool.h> 
 #if defined(__linux__)
 #include <linux/limits.h>
 #elif defined(__APPLE__)
@@ -32,7 +33,7 @@
 #define FDB_ERROR_ABORT -2
 #define FDB_ERROR_CONFLICT -3
 
-#define INIT_STORE 0
+#define LAT_BLOCK_SIZE 511    /* size of each block to get detailed latency for each operation */
 
 /* transaction specification */
 enum Operations {
@@ -49,6 +50,7 @@ enum Operations {
 	OP_CLEARRANGE,
 	OP_SETCLEARRANGE,
 	OP_COMMIT,
+	OP_TRANSACTION,  /* pseudo-operation */
 	MAX_OP /* must be the last item */
 };
 
@@ -135,6 +137,11 @@ typedef struct {
 } mako_shmhdr_t;
 
 typedef struct {
+    uint64_t data[LAT_BLOCK_SIZE];
+    void* next_block;
+} lat_block_t;
+
+typedef struct {
 	uint64_t xacts;
 	uint64_t conflicts;
 	uint64_t ops[MAX_OP];
@@ -148,6 +155,7 @@ typedef struct {
 /* per-process information */
 typedef struct {
 	int worker_id;
+	pid_t parent_id;
 	FDBDatabase* database;
 	mako_args_t* args;
 	mako_shmhdr_t* shm;
@@ -157,7 +165,8 @@ typedef struct {
 typedef struct {
 	int thread_id;
 	int elem_size[MAX_OP];
-	uint64_t* data[MAX_OP];
+	bool is_memory_allocated[MAX_OP];
+	lat_block_t* block[MAX_OP];
 	process_info_t* process;
 } thread_args_t;
 

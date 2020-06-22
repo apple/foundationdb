@@ -3,6 +3,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <ftw.h>
 
 /* uniform-distribution random */
 /* return a uniform random number between low and high, both inclusive */
@@ -54,7 +55,8 @@ void genkey(char* str, int num, int rows, int len);
 // The main function to that sorts arr[] of size n using  
 // Radix Sort 
 void radix_sort(uint64_t arr[], int n);
-void countSort(uint64_t arr[], int n, uint64_t exp) ;
-uint64_t getMax(uint64_t arr[], int n) ;
+void bucket_data(uint64_t arr[], int n, uint64_t exp) ;
+uint64_t get_max(uint64_t arr[], int n) ;
+
 
 #endif /* UTILS_H */

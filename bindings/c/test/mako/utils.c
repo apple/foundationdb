@@ -81,7 +81,7 @@ void genkey(char* str, int num, int rows, int len) {
 }
 
 
-uint64_t getMax(uint64_t arr[], int n) 
+uint64_t get_max(uint64_t arr[], int n) 
 { 
     uint64_t mx = arr[0]; 
     for (int i = 1; i < n; i++) 
@@ -90,7 +90,7 @@ uint64_t getMax(uint64_t arr[], int n)
     return mx; 
 }
 
-void countSort(uint64_t arr[], int n, uint64_t exp) 
+void bucket_data(uint64_t arr[], int n, uint64_t exp) 
 { 
     uint64_t output[n]; 
     int i, count[10] = {0}; 
@@ -116,7 +116,7 @@ void countSort(uint64_t arr[], int n, uint64_t exp)
 // Radix Sort 
 void radix_sort(uint64_t arr[], int n)  { 
     // Find the maximum number to know number of digits 
-    uint64_t m = getMax(arr, n); 
+    uint64_t m = get_max(arr, n); 
     for (uint64_t exp = 1; m/exp > 0; exp *= 10) 
-        countSort(arr, n, exp); 
+        bucket_data(arr, n, exp); 
 }
