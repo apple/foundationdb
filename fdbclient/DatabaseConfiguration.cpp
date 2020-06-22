@@ -527,7 +527,7 @@ void DatabaseConfiguration::makeConfigurationMutable() {
 	auto& mc = mutableConfiguration.get();
 	for(auto r = rawConfiguration.begin(); r != rawConfiguration.end(); ++r)
 		mc[ r->key.toString() ] = r->value.toString();
-	rawConfiguration = Standalone<VectorRef<KeyValueRef>>();
+	rawConfiguration.clear();
 }
 
 void DatabaseConfiguration::makeConfigurationImmutable() {
