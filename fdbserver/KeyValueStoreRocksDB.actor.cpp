@@ -5,6 +5,7 @@
 #include <rocksdb/trace_reader_writer.h>
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
+#include "flow/Platform.h"
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
@@ -109,6 +110,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		struct CommitAction : TypedAction<Writer, CommitAction> {
 			std::unique_ptr<rocksdb::WriteBatch> batchToCommit;
+			std::vector<std::string> keys;
 			ThreadReturnPromise<Void> done;
 			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -116,6 +118,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::WriteOptions options;
 			options.sync = true;
 			auto s = db->Write(options, a.batchToCommit.get());
+			for (const auto& key : a.keys) {
+				if (key.rfind("mako", 0) == 0) {
+					// std::cout << "Committed: " << key << "\n";
+				}
+			}
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Commit");
 				a.done.sendError(statusToError(s));
@@ -227,7 +234,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
-			auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions));
+			rocksdb::ReadOptions options;
+			// options.snapshot = db->GetSnapshot();
+
+			auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
 			Standalone<RangeResultRef> result;
 			int accumulatedBytes = 0;
 			if (a.rowLimit >= 0) {
@@ -400,6 +410,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
 		}
+		// std::cout << "set Key: " << kv.key.printable() << " Value: " << kv.value.printable() << "\n";
 		writeBatch->Put(toSlice(kv.key), toSlice(kv.value));
 	}
 
@@ -417,8 +428,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (writeBatch == nullptr) {
 			return sqlLite->commit(s);
 		}
+		for (const auto& key : keys) {
+			if (key.rfind("mako", 0) == 0) {
+				// std::cout << "About to commit: " << key << "\n";
+			}
+		}
 		auto a = new Writer::CommitAction();
 		a->batchToCommit = std::move(writeBatch);
+		a->keys = std::move(keys);
 		auto res = a->done.getFuture();
 		writeThread->post(a);
 		return join(res, sqlLite->commit(s));
@@ -439,6 +456,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit, int byteLimit) override {
+		// std::cout << "Starting begin: " << keys.begin.printable() << "\n";
 		auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
