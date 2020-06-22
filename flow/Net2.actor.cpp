@@ -561,13 +561,15 @@ struct SSLHandshakerThread : IThreadPoolReceiver {
 			if(h.err.failed()) {
 				TraceEvent(SevWarn, h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError" : "N2_AcceptHandshakeError")
 					.detail("ErrorCode", h.err.value())
-					.detail("ErrorMsg", h.err.message().c_str());
+					.detail("ErrorMsg", h.err.message().c_str())
+					.detail("BackgroundThread", true);
 				h.done.sendError(connection_failed());
 			} else {
 				h.done.send(Void());
 			}
 		} catch(...) {
-			TraceEvent(SevWarn, h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeUnknownError" : "N2_AcceptHandshakeUnknownError");
+			TraceEvent(SevWarn, h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeUnknownError" : "N2_AcceptHandshakeUnknownError")
+				.detail("BackgroundThread", true);
 			h.done.sendError(connection_failed());
 		}
 	}

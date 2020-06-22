@@ -260,10 +260,16 @@ struct P2PNetworkTest {
 	Standalone<StringRef> msgBuffer;
 	int sendRecvSize;
 
-	std::string statsString() const {
+	std::string statsString() {
 		double elapsed = now() - startTime;
-		return format("%.2f MB/s bytes in  %.2f MB/s bytes out  %.2f/s sessions in  %.2f/s sessions out",
+		std::string s = format("%.2f MB/s bytes in  %.2f MB/s bytes out  %.2f/s completed sessions in  %.2f/s completed sessions out",
 			bytesReceived / elapsed / 1e6, bytesSent / elapsed / 1e6, sessionsIn / elapsed, sessionsOut / elapsed);
+		bytesSent = 0;
+		bytesReceived = 0;
+		sessionsIn = 0;
+		sessionsOut = 0;
+		startTime = now();
+		return s;
 	}
 
 	P2PNetworkTest() {}
@@ -350,8 +356,13 @@ struct P2PNetworkTest {
 		return Void();
 	}
 
-	ACTOR static Future<Void> doSession(P2PNetworkTest *self, Reference<IConnection> conn) {
+	ACTOR static Future<Void> doSession(P2PNetworkTest *self, Reference<IConnection> conn, bool accept) {
 		try {
+			if(accept) {
+				wait(conn->acceptHandshake());
+			} else {
+				wait(conn->connectHandshake());
+			}
 			wait(readMsg(self, conn) && writeMsg(self, conn));
 			wait(delay(self->idleMilliseconds.get() / 1e3));
 			conn->close();
@@ -369,10 +380,9 @@ struct P2PNetworkTest {
 
 			try {
 				state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(remote));
-				wait(conn->connectHandshake());
 				//printf("Connected to %s\n", remote.toString().c_str());
+				wait(doSession(self, conn, false));
 				++self->sessionsOut;
-				wait(doSession(self, conn));
 			} catch(Error &e) {
 				printf("outgoing: error %s on remote %s\n", e.what(), remote.toString().c_str());
 			}
@@ -387,10 +397,9 @@ struct P2PNetworkTest {
 
 			try {
 				state Reference<IConnection> conn = wait(listener->accept());
-				wait(conn->acceptHandshake());
 				//printf("Connected from %s\n", conn->getPeerAddress().toString().c_str());
 				++self->sessionsIn;
-				sessions.add(doSession(self, conn));
+				sessions.add(doSession(self, conn, true));
 			} catch(Error &e) {
 				printf("incoming: error %s on listener %s\n", e.what(), listener->getListenAddress().toString().c_str());
 			}
