@@ -258,6 +258,7 @@ struct P2PNetworkTest {
 	int sessionsIn;
 	int sessionsOut;
 	Standalone<StringRef> msgBuffer;
+	int sendRecvSize;
 
 	std::string statsString() const {
 		double elapsed = now() - startTime;
@@ -267,8 +268,8 @@ struct P2PNetworkTest {
 
 	P2PNetworkTest() {}
 
-	P2PNetworkTest(std::string listenerAddresses, std::string remoteAddresses, int connectionsOut, RandomIntRange msgBytes, RandomIntRange idleMilliseconds)
-	  : connectionsOut(connectionsOut), msgBytes(msgBytes), idleMilliseconds(idleMilliseconds) {
+	P2PNetworkTest(std::string listenerAddresses, std::string remoteAddresses, int connectionsOut, RandomIntRange msgBytes, RandomIntRange idleMilliseconds, int sendRecvSize)
+	  : connectionsOut(connectionsOut), msgBytes(msgBytes), idleMilliseconds(idleMilliseconds), sendRecvSize(sendRecvSize) {
 		bytesSent = 0;
 		bytesReceived = 0;
 		sessionsIn = 0;
@@ -291,22 +292,26 @@ struct P2PNetworkTest {
 	}
 
 	ACTOR static Future<Void> readMsg(P2PNetworkTest *self, Reference<IConnection> conn) {
-		state Standalone<StringRef> buffer = makeString(32000);
+		state Standalone<StringRef> buffer = makeString(self->sendRecvSize);
 		state int bytesToRead = sizeof(int);
 		state int writeOffset = 0;
 		state bool gotHeader = false;
 
+		// Fill buffer sequentially until the initial bytesToRead is read (or more), then read
+		// intended message size and add it to bytesToRead, continue if needed until bytesToRead is 0.
 		loop {
 			int len = conn->read((uint8_t *)buffer.begin() + writeOffset, (uint8_t *)buffer.end());
 			bytesToRead -= len;
 			self->bytesReceived += len;
-			if(!gotHeader) {
-				if(bytesToRead <= 0) {
+			writeOffset += len;
+
+			// If no size header yet but there are enough bytes, read the size
+			if(!gotHeader && bytesToRead <= 0) {
 					gotHeader = true;
-					bytesToRead += *(uint64_t *)buffer.begin();
-					writeOffset = 0;
-				}
-			} else {
+					bytesToRead += *(int *)buffer.begin();
+			}
+
+			if(gotHeader) {
 				if(bytesToRead == 0) {
 					break;
 				}
@@ -334,7 +339,7 @@ struct P2PNetworkTest {
 		loop {
 			wait(conn->onWritable());
 			wait( delay( 0, TaskPriority::WriteSocket ) );
-			int len = conn->write(packets.getUnsent(), 32000);
+			int len = conn->write(packets.getUnsent(), self->sendRecvSize);
 			self->bytesSent += len;
 			packets.sent(len);
 
@@ -346,17 +351,12 @@ struct P2PNetworkTest {
 	}
 
 	ACTOR static Future<Void> doSession(P2PNetworkTest *self, Reference<IConnection> conn) {
-		state bool waiting = false;
 		try {
 			wait(readMsg(self, conn) && writeMsg(self, conn));
-			waiting = true;
 			wait(delay(self->idleMilliseconds.get() / 1e3));
 			conn->close();
 		} catch(Error &e) {
-			if(!waiting) {
-				printf("Unexpected error: %s on remote %s\n", e.what(), conn->getPeerAddress().toString().c_str());
-				throw e;
-			}
+			printf("doSession: error %s on remote %s\n", e.what(), conn->getPeerAddress().toString().c_str());
 		}
 
 		return Void();
@@ -364,14 +364,17 @@ struct P2PNetworkTest {
 
 	ACTOR static Future<Void> outgoing(P2PNetworkTest *self) {
 		loop {
+			wait(delay(0, TaskPriority::WriteSocket));
 			state NetworkAddress remote = self->randomRemote();
+
 			try {
-				Reference<IConnection> conn = wait(INetworkConnections::net()->connect(remote));
+				state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(remote));
+				wait(conn->connectHandshake());
 				//printf("Connected to %s\n", remote.toString().c_str());
 				++self->sessionsOut;
 				wait(doSession(self, conn));
 			} catch(Error &e) {
-				printf("Unexpected error: %s on remote %s\n", e.what(), remote.toString().c_str());
+				printf("outgoing: error %s on remote %s\n", e.what(), remote.toString().c_str());
 			}
 		}
 	}
@@ -380,22 +383,30 @@ struct P2PNetworkTest {
 		state ActorCollection sessions(false);
 
 		loop {
+			wait(delay(0, TaskPriority::AcceptSocket));
+
 			try {
-				Reference<IConnection> conn = wait(listener->accept());
+				state Reference<IConnection> conn = wait(listener->accept());
+				wait(conn->acceptHandshake());
 				//printf("Connected from %s\n", conn->getPeerAddress().toString().c_str());
 				++self->sessionsIn;
 				sessions.add(doSession(self, conn));
 			} catch(Error &e) {
-				printf("Unexpected error: %s on listener %s\n", e.what(), listener->getListenAddress().toString().c_str());
+				printf("incoming: error %s on listener %s\n", e.what(), listener->getListenAddress().toString().c_str());
 			}
 		}
 	}
 
 	ACTOR static Future<Void> run_impl(P2PNetworkTest *self) {
 		state ActorCollection actors(false);
+		g_network->initTLS();
+
 		self->startTime = now();
 
-		printf("Starting.  %d listeners, %d remotes, %d outgoing connections\n", self->listeners.size(), self->remotes.size(), self->connectionsOut);
+		printf("%d listeners, %d remotes, %d outgoing connections\n", self->listeners.size(), self->remotes.size(), self->connectionsOut);
+		printf("Message size %d to %d bytes\n", self->msgBytes.min, self->msgBytes.max);
+		printf("Post exchange delay %f to %f seconds\n", self->idleMilliseconds.min / 1e3, self->idleMilliseconds.max / 1e3);
+		printf("Send/Recv size %d bytes\n", self->sendRecvSize);
 
 		for(auto n : self->remotes) {
 			printf("Remote: %s\n", n.toString().c_str());
@@ -406,8 +417,10 @@ struct P2PNetworkTest {
 			actors.add(incoming(self, el));
 		}
 
-		for(int i = 0; i < self->connectionsOut; ++i) {
-			actors.add(outgoing(self));
+		if(!self->remotes.empty()) {
+			for(int i = 0; i < self->connectionsOut; ++i) {
+				actors.add(outgoing(self));
+			}
 		}
 
 		loop {
@@ -435,11 +448,12 @@ std::string getEnvStr(const char *name, std::string defaultValue = "") {
 // TODO: Remove this hacky thing and make a "networkp2ptest" role in fdbserver
 TEST_CASE("!p2ptest") {
 	state P2PNetworkTest p2p(
-		getEnvStr("listenerAddresses"),
-		getEnvStr("remoteAddresses"),
-		getEnvInt("connectionsOut"),
-		{getEnvInt("minMsgBytes"), getEnvInt("maxMsgBytes")},
-		{getEnvInt("minIdleMilliseconds"), getEnvInt("maxIdleMilliseconds")}
+		getEnvStr("listenerAddresses", "127.0.0.1:5000,127.0.0.1:5001:tls"),
+		getEnvStr("remoteAddresses", "127.0.0.1:5000,127.0.0.1:5001:tls"),
+		getEnvInt("connectionsOut", 2),
+		{getEnvInt("minMsgBytes", 0), getEnvInt("maxMsgBytes", 1000000)},
+		{getEnvInt("minIdleMilliseconds", 500), getEnvInt("maxIdleMilliseconds", 1000)},
+		getEnvInt("sendRecvSize", 32000)
 	);
 
 	wait(p2p.run());
