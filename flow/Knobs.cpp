@@ -135,7 +135,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TSC_YIELD_TIME,                                  1000000 );
 	init( MIN_LOGGED_PRIORITY_BUSY_FRACTION,                  0.05 );
 	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
-	init( TLS_HANDSHAKE_THREADS,                                10 );
+	init( TLS_HANDSHAKE_THREADS,                                30 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
