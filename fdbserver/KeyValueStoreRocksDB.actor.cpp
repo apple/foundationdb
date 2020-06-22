@@ -120,13 +120,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			auto s = db->Write(options, a.batchToCommit.get());
 			for (const auto& key : a.keys) {
 				if (key.rfind("mako", 0) == 0) {
-					// std::cout << "Committed: " << key << "\n";
+					std::cout << "Committed: " << key << "\n";
 				}
 			}
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Commit");
 				a.done.sendError(statusToError(s));
 			} else {
+				threadSleep(1);
 				a.done.send(Void());
 			}
 		}
@@ -150,21 +151,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			a.done.send(Void());
 		}
-	};
 
-	struct Reader : IThreadPoolReceiver {
-		DB& db;
 		rocksdb::ReadOptions readOptions;
-		std::unique_ptr<rocksdb::Iterator> cursor = nullptr;
-		IKeyValueStore* sqlLite;
 
-		explicit Reader(DB& db, IKeyValueStore* sqlLite) : db(db), sqlLite(sqlLite) {
-			readOptions.total_order_seek = true;
-		}
-
-		void init() override {}
-
-		struct ReadValueAction : TypedAction<Reader, ReadValueAction> {
+		struct ReadValueAction : TypedAction<Writer, ReadValueAction> {
 			Key key;
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
@@ -195,7 +185,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		}
 
-		struct ReadValuePrefixAction : TypedAction<Reader, ReadValuePrefixAction> {
+		struct ReadValuePrefixAction : TypedAction<Writer, ReadValuePrefixAction> {
 			Key key;
 			int maxLength;
 			Optional<UID> debugID;
@@ -226,7 +216,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		}
 
-		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
+		struct ReadRangeAction : TypedAction<Writer, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			KeyRange keys;
 			int rowLimit, byteLimit;
 			ThreadReturnPromise<Standalone<RangeResultRef>> result;
@@ -234,6 +224,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
+			std::cout << "Starting begin: " << a.keys.begin.printable() << "\n";
 			rocksdb::ReadOptions options;
 			// options.snapshot = db->GetSnapshot();
 
@@ -280,28 +271,29 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	UID id;
 	size_t diskBytesUsed = 0;
 	Reference<IThreadPool> writeThread;
-	Reference<IThreadPool> readThreads;
+	//	Reference<IThreadPool> readThreads;
 	unsigned nReaders = 16;
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	IKeyValueStore* sqlLite;
+	std::vector<std::string> keys;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id, IKeyValueStore* sqlLite)
 	  : path(path), id(id), sqlLite(sqlLite) {
 		writeThread = createGenericThreadPool();
-		readThreads = createGenericThreadPool();
+		// readThreads = createGenericThreadPool();
 		writeThread->addThread(new Writer(db, id, sqlLite));
-		for (unsigned i = 0; i < nReaders; ++i) {
-			readThreads->addThread(new Reader(db, sqlLite));
-		}
+		/*for (unsigned i = 0; i < nReaders; ++i) {
+		    readThreads->addThread(new Reader(db, sqlLite));
+	  }*/
 	}
 
 	Future<Void> getError() override { return join(errorPromise.getFuture(), sqlLite->getError()); }
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
 		// self->db->EndTrace();
-		wait(self->readThreads->stop());
+		// wait(self->readThreads->stop());
 		auto a = new Writer::CloseAction(self->path, deleteOnClose);
 		auto f = a->done.getFuture();
 		self->writeThread->post(a);
@@ -406,11 +398,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	void set(KeyValueRef kv, const Arena* a) override {
+		if (kv.key.startsWith(LiteralStringRef("mako"))) {
+			keys.push_back(kv.key.printable());
+		}
 		sqlLite->set(kv, a);
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
 		}
-		// std::cout << "set Key: " << kv.key.printable() << " Value: " << kv.value.printable() << "\n";
+		std::cout << "set Key: " << kv.key.printable() << " Value: " << kv.value.printable() << "\n";
 		writeBatch->Put(toSlice(kv.key), toSlice(kv.value));
 	}
 
@@ -430,7 +425,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 		for (const auto& key : keys) {
 			if (key.rfind("mako", 0) == 0) {
-				// std::cout << "About to commit: " << key << "\n";
+				std::cout << "About to commit: " << key << "\n";
 			}
 		}
 		auto a = new Writer::CommitAction();
@@ -442,24 +437,23 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID) override {
-		auto a = new Reader::ReadValueAction(key, debugID);
+		auto a = new Writer::ReadValueAction(key, debugID);
 		auto res = a->result.getFuture();
-		readThreads->post(a);
+		writeThread->post(a);
 		return compare_read(key, res, sqlLite->readValue(key, debugID));
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) override {
-		auto a = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
+		auto a = new Writer::ReadValuePrefixAction(key, maxLength, debugID);
 		auto res = a->result.getFuture();
-		readThreads->post(a);
+		writeThread->post(a);
 		return res;
 	}
 
 	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit, int byteLimit) override {
-		// std::cout << "Starting begin: " << keys.begin.printable() << "\n";
-		auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
+		auto a = new Writer::ReadRangeAction(keys, rowLimit, byteLimit);
 		auto res = a->result.getFuture();
-		readThreads->post(a);
+		writeThread->post(a);
 		return compare_range(keys, rowLimit, res, sqlLite->readRange(keys, rowLimit, byteLimit));
 	}
 
