@@ -366,6 +366,12 @@ struct P2PNetworkTest {
 			wait(readMsg(self, conn) && writeMsg(self, conn));
 			wait(delay(self->idleMilliseconds.get() / 1e3));
 			conn->close();
+			if(accept) {
+				++self->sessionsIn;
+			} else {
+				++self->sessionsOut;
+			}
+
 		} catch(Error &e) {
 			printf("doSession: error %s on remote %s\n", e.what(), conn->getPeerAddress().toString().c_str());
 		}
@@ -382,7 +388,6 @@ struct P2PNetworkTest {
 				state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(remote));
 				//printf("Connected to %s\n", remote.toString().c_str());
 				wait(doSession(self, conn, false));
-				++self->sessionsOut;
 			} catch(Error &e) {
 				printf("outgoing: error %s on remote %s\n", e.what(), remote.toString().c_str());
 			}
@@ -398,7 +403,6 @@ struct P2PNetworkTest {
 			try {
 				state Reference<IConnection> conn = wait(listener->accept());
 				//printf("Connected from %s\n", conn->getPeerAddress().toString().c_str());
-				++self->sessionsIn;
 				sessions.add(doSession(self, conn, true));
 			} catch(Error &e) {
 				printf("incoming: error %s on listener %s\n", e.what(), listener->getListenAddress().toString().c_str());
