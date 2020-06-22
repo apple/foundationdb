@@ -2383,7 +2383,7 @@ ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string 
 		loop {
 			std::string name = fd.cFileName;
 			if ((directoryOnly && acceptDirectory(fd.dwFileAttributes, name, extension)) ||
-				(!directoryOnly && acceptFile(fd.dwFileAttributes, name, extension))) {
+			    (!directoryOnly && acceptFile(fd.dwFileAttributes, name, extension))) {
 				result.push_back( name );
 			}
 			if (!FindNextFile( h, &fd ))
