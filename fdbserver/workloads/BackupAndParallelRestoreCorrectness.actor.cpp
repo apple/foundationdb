@@ -329,6 +329,33 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
+	static bool insideValidRange(KeyValueRef kv, Standalone<VectorRef<KeyRangeRef>> restoreRanges,
+	                             Standalone<VectorRef<KeyRangeRef>> backupRanges) {
+		bool insideRestoreRange = false;
+		bool insideBackupRange = false;
+		for (auto& range : restoreRanges) {
+			TraceEvent("InsideValidRestoreRange")
+			    .detail("Key", kv.key)
+			    .detail("Range", range)
+			    .detail("Inside", (kv.key >= range.begin && kv.key < range.end));
+			if (kv.key >= range.begin && kv.key < range.end) {
+				insideRestoreRange = true;
+				break;
+			}
+		}
+		for (auto& range : backupRanges) {
+			TraceEvent("InsideValidBackupRange")
+			    .detail("Key", kv.key)
+			    .detail("Range", range)
+			    .detail("Inside", (kv.key >= range.begin && kv.key < range.end));
+			if (kv.key >= range.begin && kv.key < range.end) {
+				insideBackupRange = true;
+				break;
+			}
+		}
+		return insideBackupRange && !insideRestoreRange;
+	}
+
 	// restoreRanges is the actual range that has applied removePrefix and addPrefix processed by restore system
 	// Assume: restoreRanges do not overlap which is achieved by ensuring backup ranges do not overlap
 	ACTOR static Future<Void> transformDatabaseContents(Database cx, Key addPrefix, Key removePrefix,
@@ -362,7 +389,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			    .detail("GetKey", oldData[i].key)
 			    .detail("GetValue", oldData[i].value);
 			if (newKey.size() < removePrefix.size()) { // If true, must check why?!
-				TraceEvent(SevWarnAlways, "TransformDatabaseContents")
+				TraceEvent(SevError, "TransformDatabaseContents")
 				    .detail("Key", newKey)
 				    .detail("RemovePrefix", removePrefix);
 				continue;
@@ -379,7 +406,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges; // dest. ranges
 		for (auto& range : restoreRanges) {
 			KeyRange tmpRange = range;
-			backupRanges.push_back(backupRanges.arena(), tmpRange.removePrefix(removePrefix).withPrefix(addPrefix));
+			backupRanges.push_back_deep(backupRanges.arena(),
+			                            tmpRange.removePrefix(removePrefix).withPrefix(addPrefix));
 		}
 
 		// Clear the transformed data (original data with removePrefix and addPrefix) in restoreRanges
@@ -396,12 +424,37 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			return Void();
 		}));
 
+		// Sanity check to ensure no data in the ranges
+		tr.reset();
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		Standalone<RangeResultRef> emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+		for (int i = 0; i < emptyData.size(); ++i) {
+			TraceEvent(SevError, "ExpectEmptyData")
+			    .detail("Index", i)
+			    .detail("Key", emptyData[i].key)
+			    .detail("Value", emptyData[i].value);
+		}
+
 		state int begin = 0;
 		state int len;
 		while (begin < newKVs.size()) {
 			len = std::min(100, newKVs.size() - begin);
 			wait(writeKVs(cx, newKVs, begin, begin + len));
 			begin = begin + len;
+		}
+
+		// Sanity check
+		tr.reset();
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		Standalone<RangeResultRef> allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+		for (int i = 0; i < allData.size(); ++i) {
+			bool valid = insideValidRange(allData[i], restoreRanges, backupRanges);
+			TraceEvent(valid ? SevInfo : SevError, "SanityCheckData")
+			    .detail("Index", i)
+			    .detail("Key", allData[i].key)
+			    .detail("Value", allData[i].value);
 		}
 
 		TraceEvent("FastRestoreWorkloadTransformDatabaseContentsFinish")
@@ -641,19 +694,24 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// If addPrefix or removePrefix set, we want to transform the effect by copying data
 				if (self->hasPrefix()) {
-					Standalone<VectorRef<KeyRangeRef>> restoreRanges;
-					for (int i = 0; i < self->backupRanges.size(); ++i) {
-						KeyRange range(self->backupRanges[i]);
-						Key begin = range.begin.removePrefix(self->removePrefix).withPrefix(self->addPrefix);
-						Key end = range.end.removePrefix(self->removePrefix).withPrefix(self->addPrefix);
-						TraceEvent("FastRestoreWorkloadTransformDatabaseContents")
-						    .detail("Begin", begin)
-						    .detail("End", end);
-						restoreRanges.push_back_deep(restoreRanges.arena(),
-						                             KeyRangeRef(begin.contents(), end.contents()));
+					try {
+						Standalone<VectorRef<KeyRangeRef>> restoreRanges;
+						for (int i = 0; i < self->backupRanges.size(); ++i) {
+							KeyRange range(self->backupRanges[i]);
+							Key begin = range.begin.removePrefix(self->removePrefix).withPrefix(self->addPrefix);
+							Key end = range.end.removePrefix(self->removePrefix).withPrefix(self->addPrefix);
+							TraceEvent("FastRestoreWorkloadTransformDatabaseContents")
+							    .detail("Begin", begin)
+							    .detail("End", end);
+							restoreRanges.push_back_deep(restoreRanges.arena(),
+							                             KeyRangeRef(begin.contents(), end.contents()));
+						}
+						wait(transformDatabaseContents(cx, self->removePrefix, self->addPrefix, restoreRanges));
+						wait(unlockDatabase(cx, randomID));
+					} catch (Error& e) {
+						TraceEvent(SevError, "BackupAndParallelRestoreWorkloadTransformPrefix", randomID).error(e);
+						throw;
 					}
-					wait(transformDatabaseContents(cx, self->removePrefix, self->addPrefix, restoreRanges));
-					wait(unlockDatabase(cx, randomID));
 				}
 			}
 
