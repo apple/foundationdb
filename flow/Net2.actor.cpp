@@ -723,7 +723,7 @@ public:
 			else {
 				// Otherwise use flow network thread
 				BindPromise p("N2_ConnectHandshakeError", self->id);
-				Future<Void> onHandshook = p.getFuture();
+				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake( boost::asio::ssl::stream_base::client, std::move(p) );
 			}
 			wait( onHandshook );
