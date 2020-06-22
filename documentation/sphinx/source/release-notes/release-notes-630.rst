@@ -37,6 +37,7 @@ Performance
 * Reduced the number of comparisons used by various map implementations. `(PR #2882) <https://github.com/apple/foundationdb/pull/2882>`_
 * Reduced the serialized size of empty strings. `(PR #3063) <https://github.com/apple/foundationdb/pull/3063>`_
 * Reduced the serialized size of various interfaces by 10x. `(PR #3068) <https://github.com/apple/foundationdb/pull/3068>`_
+* TLS handshakes can now be done in a background thread pool. `(PR #3403) <https://github.com/apple/foundationdb/pull/3403>`_
 
 Reliability
 -----------
