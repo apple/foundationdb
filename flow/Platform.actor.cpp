@@ -2417,7 +2417,7 @@ bool acceptDirectory( FILE_ATTRIBUTE_DATA fileAttributes, std::string const& nam
 }
 
 ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string extension,
-											 bool directoryOnly, bool async) {
+                                             bool directoryOnly, bool async) {
 	INJECT_FAULT( platform_error, "findFiles" );
 	state vector<std::string> result;
 	state int64_t tsc_begin = __rdtsc();
