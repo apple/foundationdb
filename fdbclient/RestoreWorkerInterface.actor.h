@@ -257,6 +257,8 @@ struct RestoreAsset {
 		return ss.str();
 	}
 
+	bool hasPrefix() const { return addPrefix.size() > 0 || removePrefix.size() > 0; }
+
 	// RestoreAsset and VersionBatch both use endVersion as exclusive in version range
 	bool isInVersionRange(Version commitVersion) const {
 		return commitVersion >= beginVersion && commitVersion < endVersion;
@@ -264,11 +266,24 @@ struct RestoreAsset {
 
 	// Is mutation's begin and end keys are in RestoreAsset's range
 	bool isInKeyRange(MutationRef mutation) const {
-		if (isRangeMutation(mutation)) {
-			// Range mutation's right side is exclusive
-			return mutation.param1 >= range.begin && mutation.param2 <= range.end;
+		if (hasPrefix()) {
+			Key begin = range.begin; // Avoid creating new keys if we do not have addPrefix or removePrefix
+			Key end = range.end;
+			begin = begin.removePrefix(removePrefix).withPrefix(addPrefix);
+			end = end.removePrefix(removePrefix).withPrefix(addPrefix);
+			if (isRangeMutation(mutation)) {
+				// Range mutation's right side is exclusive
+				return mutation.param1 >= begin && mutation.param2 <= end;
+			} else {
+				return mutation.param1 >= begin && mutation.param1 < end;
+			}
 		} else {
-			return mutation.param1 >= range.begin && mutation.param1 < range.end;
+			if (isRangeMutation(mutation)) {
+				// Range mutation's right side is exclusive
+				return mutation.param1 >= range.begin && mutation.param2 <= range.end;
+			} else {
+				return mutation.param1 >= range.begin && mutation.param1 < range.end;
+			}
 		}
 	}
 };

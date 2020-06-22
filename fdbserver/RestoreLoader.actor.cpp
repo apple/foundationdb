@@ -793,7 +793,7 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 			    (!isRangeMutation(mutation) && mutation.param1 < asset.range.begin)) {
 				continue;
 			}
-			// Only apply mutation within the asset.range
+			// Only apply mutation within the asset.range and apply removePrefix and addPrefix
 			if (isRangeMutation(mutation)) {
 				mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
 				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;

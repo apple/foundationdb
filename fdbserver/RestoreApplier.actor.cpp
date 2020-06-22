@@ -147,7 +147,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			    isAtomicOp((MutationRef::Type)versionedMutation.mutation.type) ? 1 : 0;
 			// Sanity check
 			ASSERT_WE_THINK(req.asset.isInVersionRange(versionedMutation.version.version));
-			ASSERT_WE_THINK(req.asset.isInKeyRange(versionedMutation.mutation));
+			ASSERT_WE_THINK(req.asset.isInKeyRange(
+			    versionedMutation.mutation)); // mutation is already applied removePrefix and addPrefix
 
 			// Note: Log and range mutations may be delivered out of order. Can we handle it?
 			batchData->addMutation(versionedMutation.mutation, versionedMutation.version);

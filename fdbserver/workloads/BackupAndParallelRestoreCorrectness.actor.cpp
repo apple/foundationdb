@@ -381,7 +381,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (auto& range : restoreRanges) {
 				TraceEvent("TransformDatabaseContents").detail("Clear", range);
-				tr->clear(range); // Careful when we restore only a sub key range!
+				tr->clear(range); // Clear the range.removePrefix().withPrefix()
+				KeyRange newRange = range;
+				newRange = newRange.removePrefix(removePrefix).withPrefix(addPrefix); // Clear dest. range
+				tr->clear(newRange);
 			}
 			return Void();
 		}));
