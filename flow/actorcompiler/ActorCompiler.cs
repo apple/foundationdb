@@ -573,7 +573,7 @@ namespace actorcompiler
                 {
                     LineNumber(cx.target, stmt.FirstSourceLine);
                     if (stmt.decl.initializerConstructorSyntax || stmt.decl.initializer=="")
-                        cx.target.WriteLine("{0} = std::move( {1}({2}) );", stmt.decl.name, stmt.decl.type, stmt.decl.initializer);
+                        cx.target.WriteLine("{0} = {1}({2});", stmt.decl.name, stmt.decl.type, stmt.decl.initializer);
                     else
                         cx.target.WriteLine("{0} = {1};", stmt.decl.name, stmt.decl.initializer);
                 }
