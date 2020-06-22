@@ -3,7 +3,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <ftw.h>
 
 /* uniform-distribution random */
 /* return a uniform random number between low and high, both inclusive */
