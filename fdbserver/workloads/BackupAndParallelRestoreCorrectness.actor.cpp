@@ -365,8 +365,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	static bool insideValidRange(KeyValueRef kv, Standalone<VectorRef<KeyRangeRef>> restoreRanges,
-	                             Standalone<VectorRef<KeyRangeRef>> backupRanges) {
+	static std::pair<bool, bool> insideValidRange(KeyValueRef kv, Standalone<VectorRef<KeyRangeRef>> restoreRanges,
+	                                              Standalone<VectorRef<KeyRangeRef>> backupRanges) {
 		bool insideRestoreRange = false;
 		bool insideBackupRange = false;
 		for (auto& range : restoreRanges) {
@@ -389,7 +389,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				break;
 			}
 		}
-		return insideBackupRange && !insideRestoreRange;
+		return std::make_pair(insideBackupRange, insideRestoreRange);
 	}
 
 	// restoreRanges is the actual range that has applied removePrefix and addPrefix processed by restore system
@@ -513,11 +513,14 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				Standalone<RangeResultRef> allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
 				TraceEvent(SevInfo, "SanityCheckData").detail("Size", allData.size());
 				for (int i = 0; i < allData.size(); ++i) {
-					bool valid = insideValidRange(allData[i], restoreRanges, backupRanges);
-					TraceEvent(valid ? SevInfo : SevError, "SanityCheckData")
+					std::pair<bool, bool> backupRestoreValid =
+					    insideValidRange(allData[i], restoreRanges, backupRanges);
+					TraceEvent(backupRestoreValid.first ? SevInfo : SevError, "SanityCheckData")
 					    .detail("Index", i)
 					    .detail("Key", allData[i].key)
-					    .detail("Value", allData[i].value);
+					    .detail("Value", allData[i].value)
+					    .detail("InsideBackupRange", backupRestoreValid.first)
+					    .detail("InsideRestoreRange", backupRestoreValid.second);
 				}
 				break;
 			} catch (Error& e) {
