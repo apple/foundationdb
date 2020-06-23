@@ -30,6 +30,9 @@
 
 #define TEST_ABORT_FASTRESTORE	0
 
+#define SevFRTestInfo SevVerbose
+//#define SevFRTestInfo SevInfo
+
 // A workload which test the correctness of backup and restore process
 struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	double backupAfter, restoreAfter, abortAndRestartAfter;
@@ -326,7 +329,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			int index = begin;
 			while (index < end) {
-				TraceEvent("TransformDatabaseContentsWriteKV")
+				TraceEvent(SevFRTestInfo, "TransformDatabaseContentsWriteKV")
 				    .detail("Index", index)
 				    .detail("KVs", kvs.size())
 				    .detail("Key", kvs[index].key)
@@ -345,7 +348,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				KeyRef k1 = kvs[begin].key;
 				KeyRef k2 = end < kvs.size() ? kvs[end].key : normalKeys.end;
-				TraceEvent("TransformDatabaseContentsWriteKVReadBack")
+				TraceEvent(SevFRTestInfo, "TransformDatabaseContentsWriteKVReadBack")
 				    .detail("Range", KeyRangeRef(k1, k2))
 				    .detail("Begin", begin)
 				    .detail("End", end);
@@ -353,14 +356,12 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				ASSERT(readKVs.size() > 0 || begin == end);
 				break;
 			} catch (Error& e) {
-				TraceEvent("TransformDatabaseContentsWriteKVReadBackError").error(e);
+				TraceEvent(SevError, "TransformDatabaseContentsWriteKVReadBackError").error(e);
 				wait(tr.onError(e));
 			}
 		}
 
-		TraceEvent("TransformDatabaseContentsWriteKVDone")
-		    .detail("Begin", begin)
-		    .detail("End", end);
+		TraceEvent(SevFRTestInfo, "TransformDatabaseContentsWriteKVDone").detail("Begin", begin).detail("End", end);
 
 		return Void();
 	}
@@ -427,7 +428,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		state Standalone<VectorRef<KeyValueRef>> newKVs;
 		for (int i = 0; i < oldData.size(); ++i) {
 			Key newKey(oldData[i].key);
-			TraceEvent("TransformDatabaseContents")
+			TraceEvent(SevFRTestInfo, "TransformDatabaseContents")
 			    .detail("Keys", oldData.size())
 			    .detail("Index", i)
 			    .detail("GetKey", oldData[i].key)
@@ -440,7 +441,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			}
 			newKey = newKey.removePrefix(removePrefix).withPrefix(addPrefix);
 			newKVs.push_back_deep(newKVs.arena(), KeyValueRef(newKey.contents(), oldData[i].value));
-			TraceEvent("TransformDatabaseContents")
+			TraceEvent(SevFRTestInfo, "TransformDatabaseContents")
 			    .detail("Keys", newKVs.size())
 			    .detail("Index", i)
 			    .detail("NewKey", newKVs.back().key)
@@ -459,7 +460,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (int i = 0; i < restoreRanges.size(); i++) {
-				TraceEvent("TransformDatabaseContents")
+				TraceEvent(SevFRTestInfo, "TransformDatabaseContents")
 				    .detail("ClearRestoreRange", restoreRanges[i])
 				    .detail("ClearBackupRange", backupRanges[i]);
 				tr->clear(restoreRanges[i]); // Clear the range.removePrefix().withPrefix()
