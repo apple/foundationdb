@@ -479,6 +479,10 @@ public:
 		return enabled;
 	}
 
+	explicit operator bool() const {
+		return enabled;
+	}
+
 	void log();
 
 	~TraceEvent();  // Actually logs the event

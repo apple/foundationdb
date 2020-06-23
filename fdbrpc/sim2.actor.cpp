@@ -1630,10 +1630,18 @@ public:
 		Promise<Void> action;
 		Task( double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Promise<Void>&& action ) : time(time), taskID(taskID), stable(stable), machine(machine), action(std::move(action)) {}
 		Task( double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Future<Void>& future ) : time(time), taskID(taskID), stable(stable), machine(machine) { future = action.getFuture(); }
-		Task(Task&& rhs) BOOST_NOEXCEPT : time(rhs.time), taskID(rhs.taskID), stable(rhs.stable), machine(rhs.machine), action(std::move(rhs.action)) {}
+		Task(Task&& rhs) noexcept
+		  : time(rhs.time), taskID(rhs.taskID), stable(rhs.stable), machine(rhs.machine),
+		    action(std::move(rhs.action)) {}
 		void operator= ( Task const& rhs ) { taskID = rhs.taskID; time = rhs.time; stable = rhs.stable; machine = rhs.machine; action = rhs.action; }
 		Task( Task const& rhs ) : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine), action(rhs.action) {}
-		void operator= (Task&& rhs) BOOST_NOEXCEPT { time = rhs.time; taskID = rhs.taskID; stable = rhs.stable; machine = rhs.machine; action = std::move(rhs.action); }
+		void operator=(Task&& rhs) noexcept {
+			time = rhs.time;
+			taskID = rhs.taskID;
+			stable = rhs.stable;
+			machine = rhs.machine;
+			action = std::move(rhs.action);
+		}
 
 		bool operator < (Task const& rhs) const {
 			// Ordering is reversed for priority_queue
@@ -1654,15 +1662,8 @@ public:
 
 			this->currentProcess = t.machine;
 			try {
-				//auto before = getCPUTicks();
 				t.action.send(Void());
 				ASSERT( this->currentProcess == t.machine );
-				/*auto elapsed = getCPUTicks() - before;
-				currentProcess->cpuTicks += elapsed;
-				if (deterministicRandom()->random01() < 0.01){
-					TraceEvent("TaskDuration").detail("CpuTicks", currentProcess->cpuTicks);
-					currentProcess->cpuTicks = 0;
-				}*/
 			} catch (Error& e) {
 				TraceEvent(SevError, "UnhandledSimulationEventError").error(e, true);
 				killProcess(t.machine, KillInstantly);

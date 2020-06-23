@@ -42,8 +42,10 @@ struct LogRouterData {
 
 		TagData( Tag tag, Version popped, Version durableKnownCommittedVersion ) : tag(tag), popped(popped), durableKnownCommittedVersion(durableKnownCommittedVersion) {}
 
-		TagData(TagData&& r) BOOST_NOEXCEPT : version_messages(std::move(r.version_messages)), tag(r.tag), popped(r.popped), durableKnownCommittedVersion(r.durableKnownCommittedVersion) {}
-		void operator= (TagData&& r) BOOST_NOEXCEPT {
+		TagData(TagData&& r) noexcept
+		  : version_messages(std::move(r.version_messages)), tag(r.tag), popped(r.popped),
+		    durableKnownCommittedVersion(r.durableKnownCommittedVersion) {}
+		void operator=(TagData&& r) noexcept {
 			version_messages = std::move(r.version_messages);
 			tag = r.tag;
 			popped = r.popped;

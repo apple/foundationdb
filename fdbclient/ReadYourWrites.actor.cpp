@@ -2027,7 +2027,7 @@ void ReadYourWritesTransaction::setOptionImpl( FDBTransactionOptions::Option opt
 	tr.setOption( option, value );
 }
 
-void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT {
+void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcept {
 	cache = std::move( r.cache );
 	writes = std::move( r.writes );
 	arena = std::move( r.arena );
@@ -2054,21 +2054,12 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) BOOST_N
 	specialKeySpaceWriteMap = std::move(r.specialKeySpaceWriteMap);
 }
 
-ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT :
-	cache( std::move(r.cache) ),
-	writes( std::move(r.writes) ), 
-	arena( std::move(r.arena) ), 
-	reading( std::move(r.reading) ),
-	retries( r.retries ), 
-	approximateSize(r.approximateSize),
-	creationTime( r.creationTime ), 
-	deferredError( std::move(r.deferredError) ), 
-	timeoutActor( std::move(r.timeoutActor) ),
-	resetPromise( std::move(r.resetPromise) ),
-	commitStarted( r.commitStarted ),
-	options( r.options ),
-	transactionDebugInfo( r.transactionDebugInfo )
-{
+ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept
+  : cache(std::move(r.cache)), writes(std::move(r.writes)), arena(std::move(r.arena)), reading(std::move(r.reading)),
+    retries(r.retries), approximateSize(r.approximateSize), creationTime(r.creationTime),
+    deferredError(std::move(r.deferredError)), timeoutActor(std::move(r.timeoutActor)),
+    resetPromise(std::move(r.resetPromise)), commitStarted(r.commitStarted), options(r.options),
+    transactionDebugInfo(r.transactionDebugInfo) {
 	cache.arena = &arena;
 	writes.arena = &arena;
 	tr = std::move( r.tr );
