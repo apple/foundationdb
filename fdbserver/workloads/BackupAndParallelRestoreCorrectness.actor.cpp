@@ -339,8 +339,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Key k1 = kvs[begin].key;
-				Key k2 = end < kvs.size() ? kvs[end].key : normalKeys.end;
+				KeyRef k1 = kvs[begin].key;
+				KeyRef k2 = end < kvs.size() ? kvs[end].key : normalKeys.end;
 				TraceEvent("TransformDatabaseContentsWriteKVReadBack")
 				    .detail("Range", KeyRangeRef(k1, k2))
 				    .detail("Begin", begin)
@@ -483,6 +483,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			}
 		}
 
+		// Write transformed KVs (i.e., kv backup took) back to DB
 		loop {
 			try {
 				state int begin = 0;
