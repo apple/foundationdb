@@ -215,9 +215,6 @@ public:
 
 	Reference<Peer> sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection );// { cancelReliable(sendReliable(what,destination)); }
 
-	int getEndpointCount();
-	// for tracing only
-
 	bool incompatibleOutgoingConnectionsPresent();
 
 	static FlowTransport& transport() { return *static_cast<FlowTransport*>((void*) g_network->global(INetwork::enFlowTransport)); }
