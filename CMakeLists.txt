@@ -163,6 +163,8 @@ else()
 endif()
 add_subdirectory(fdbbackup)
 add_subdirectory(contrib)
+# TODO: Fix linking issues and build the performance directory
+# add_subdirectory(performance)
 add_subdirectory(tests)
 if(WITH_PYTHON)
   add_subdirectory(bindings)

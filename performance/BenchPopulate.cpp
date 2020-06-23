@@ -1,0 +1,61 @@
+/*
+ * BenchPopulate.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "benchmark/benchmark.h"
+
+#include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
+#include "flow/Arena.h"
+#include "flow/FastAlloc.h"
+
+constexpr const uint8_t data[1024] = {};
+
+// Benchmarks the population of a VectorRef<MutationRef>
+template <bool emplace>
+static void bench_populate(benchmark::State& state) {
+	int items = state.range(0);
+	size_t size = state.range(1);
+	KeyRef key(data, size);
+	KeyRef value(data + size, size);
+	while (state.KeepRunning()) {
+		Standalone<VectorRef<MutationRef>> mutations;
+		mutations.reserve(mutations.arena(), items);
+		for (int i = 0; i < items; ++i) {
+			if constexpr (emplace) {
+				mutations.emplace_back(mutations.arena(), MutationRef::Type::SetValue, key, value);
+			} else {
+				mutations.push_back(mutations.arena(), MutationRef(MutationRef::Type::SetValue, key, value));
+			}
+		}
+		benchmark::DoNotOptimize(mutations);
+	}
+	state.SetItemsProcessed(items * static_cast<long>(state.iterations()));
+}
+
+static void populate_emplace(benchmark::State& state) {
+	bench_populate<true>(state);
+}
+
+static void populate_push(benchmark::State& state) {
+	bench_populate<false>(state);
+}
+
+BENCHMARK(populate_emplace)->Ranges({ { 1, 1 << 20 }, { 1, 512 } })->ReportAggregatesOnly(true);
+BENCHMARK(populate_push)->Ranges({ { 1, 1 << 20 }, { 1, 512 } })->ReportAggregatesOnly(true);
