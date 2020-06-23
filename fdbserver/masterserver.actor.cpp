@@ -174,6 +174,10 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		recoveryTransactionVersion;  // The first version in this epoch
 	double lastCommitTime;
 
+	Version liveCommittedVersion; // The largest live committed version reported by proxies.
+	bool databaseLocked;
+	Optional<Value> proxyMetadataVersion;
+
 	DatabaseConfiguration originalConfiguration;
 	DatabaseConfiguration configuration;
 	std::vector<Optional<Key>> primaryDcId;
@@ -251,6 +255,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  primaryLocality(tagLocalityInvalid),
 		  neverCreated(false),
 		  lastEpochEnd(invalidVersion),
+		  liveCommittedVersion(invalidVersion),
+		  databaseLocked(false),
 		  recoveryTransactionVersion(invalidVersion),
 		  lastCommitTime(0),
 		  registrationCount(0),
@@ -997,6 +1003,34 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	}
 }
 
+ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
+	loop {
+		choose {
+			when(GetRawCommittedVersionRequest req = waitNext(self->myInterface.getLiveCommittedVersion.getFuture())) {
+				if (req.debugID.present())
+					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
+
+				if(self->liveCommittedVersion == invalidVersion) {
+					self->liveCommittedVersion = self->recoveryTransactionVersion;
+				}
+				GetReadVersionReply reply;
+				reply.version = self->liveCommittedVersion;
+				reply.locked = self->databaseLocked;
+				reply.metadataVersion = self->proxyMetadataVersion;
+				req.reply.send(reply);
+			}
+			when(ReportRawCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
+				if (req.version > self->liveCommittedVersion) {
+					self->liveCommittedVersion = req.version;
+					self->databaseLocked = req.locked;
+					self->proxyMetadataVersion = req.metadataVersion;
+				}
+				req.reply.send(Void());
+			}
+		}
+	}
+}
+
 std::pair<KeyRangeRef, bool> findRange( CoalescedKeyRangeMap<int>& key_resolver, Standalone<VectorRef<ResolverMoveRef>>& movedRanges, int src, int dest ) {
 	auto ranges = key_resolver.ranges();
 	auto prev = ranges.begin();
@@ -1531,6 +1565,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	self->addActor.send( waitResolverFailure( self->resolvers ) );
 	self->addActor.send( waitProxyFailure( self->proxies ) );
 	self->addActor.send( provideVersions(self) );
+	self->addActor.send( serveLiveCommittedVersion(self) );
 	self->addActor.send( reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid) );
 	self->registrationTrigger.trigger();
 

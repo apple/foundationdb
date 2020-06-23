@@ -1191,6 +1191,9 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN( recruited.tlogRejoin );
 				DUMPTOKEN( recruited.changeCoordinators );
 				DUMPTOKEN( recruited.getCommitVersion );
+				DUMPTOKEN( recruited.getLiveCommittedVersion);
+				DUMPTOKEN( recruited.reportLiveCommittedVersion);
+				DUMPTOKEN( recruited.notifyBackupWorkerDone);
 
 				//printf("Recruited as masterServer\n");
 				Future<Void> masterProcess = masterServer( recruited, dbInfo, ServerCoordinators( connFile ), req.lifetime, req.forceRecovery );
