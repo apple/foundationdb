@@ -1044,6 +1044,8 @@ public:
 	ACTOR static Future<Void> commit( ReadYourWritesTransaction *ryw ) {
 		try {
 			ryw->commitStarted = true;
+			// TODO : special-key-space delayed check, I guess we should first set the commit start flag
+			wait(ryw->getDatabase()->specialKeySpace->commit(ryw));
 			
 			Future<Void> ready = ryw->reading;
 			wait( ryw->resetPromise.getFuture() || ready );
@@ -1160,7 +1162,8 @@ public:
 
 ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx)
   : cache(&arena), writes(&arena), tr(cx), retries(0), approximateSize(0), creationTime(now()), commitStarted(false),
-    options(tr), deferredError(cx->deferredError), versionStampFuture(tr.getVersionstamp()) {
+    options(tr), deferredError(cx->deferredError), versionStampFuture(tr.getVersionstamp()),
+	specialKeySpaceWriteMap(std::make_pair(false, Optional<Value>()), specialKeys.end) {
 	std::copy(cx.getTransactionDefaults().begin(), cx.getTransactionDefaults().end(),
 	          std::back_inserter(persistentOptions));
 	applyPersistentOptions();
@@ -2048,6 +2051,7 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) BOOST_N
 	nativeReadRanges = std::move(r.nativeReadRanges);
 	nativeWriteRanges = std::move(r.nativeWriteRanges);
 	versionStampKeys = std::move(r.versionStampKeys);
+	specialKeySpaceWriteMap = std::move(r.specialKeySpaceWriteMap);
 }
 
 ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT :
@@ -2075,6 +2079,7 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&&
 	nativeReadRanges = std::move(r.nativeReadRanges);
 	nativeWriteRanges = std::move(r.nativeWriteRanges);
 	versionStampKeys = std::move(r.versionStampKeys);
+	specialKeySpaceWriteMap = std::move(r.specialKeySpaceWriteMap); // TODO: Check why copy constructor is deleted 
 }
 
 Future<Void> ReadYourWritesTransaction::onError(Error const& e) {
@@ -2112,6 +2117,7 @@ void ReadYourWritesTransaction::resetRyow() {
 	versionStampKeys = VectorRef<KeyRef>();
 	nativeReadRanges = Standalone<VectorRef<KeyRangeRef>>();
 	nativeWriteRanges = Standalone<VectorRef<KeyRangeRef>>();
+	specialKeySpaceWriteMap.rawErase(specialKeys); // TODO : check rawErase
 	watchMap.clear();
 	reading = AndFuture();
 	approximateSize = 0;

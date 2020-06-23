@@ -149,6 +149,9 @@ public:
 
 	bool specialKeySpaceRelaxed() const { return options.specialKeySpaceRelaxed; }
 
+	KeyRangeMap<std::pair<bool, Optional<Value>>>& getSpecialKeySpaceWriteMap() {return specialKeySpaceWriteMap;}
+	bool readYourWritesDisabled() const { return options.readYourWritesDisabled; }
+
 private:
 	friend class RYWImpl;
 
@@ -175,6 +178,8 @@ private:
 	    nativeWriteRanges; // Used to read conflict ranges after committing an ryw disabled transaction
 
 	Reference<TransactionDebugInfo> transactionDebugInfo;
+
+	KeyRangeMap<std::pair<bool, Optional<Value>>> specialKeySpaceWriteMap;
 
 	void resetTimeout();
 	void updateConflictMap( KeyRef const& key, WriteMap::iterator& it ); // pre: it.segmentContains(key)

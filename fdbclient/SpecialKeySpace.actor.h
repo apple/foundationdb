@@ -51,14 +51,17 @@ protected:
 	KeyRange range; // underlying key range for this function
 };
 
-class SpecialKeyRangeWriteImpl {
+class SpecialKeyRangeRWImpl : SpecialKeyRangeReadImpl{
 public:
 	virtual void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value ) = 0;
 	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range ) = 0;
 	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRef& key ) = 0;
+	virtual Future<Void> commit(ReadYourWritesTransaction* ryw) = 0; // all delayed async operations of writes in special-key-space
 
-	explicit SpecialKeyRangeWriteImpl(KeyRangeRef kr) : range(kr) {}
+	explicit SpecialKeyRangeRWImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 	KeyRangeRef getKeyRange() const { return range; }
+
+	virtual ~SpecialKeyRangeRWImpl() {}
 
 protected:
 	KeyRange range;
@@ -117,19 +120,22 @@ public:
 		WORKERINTERFACE,
 	};
 
-	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key);
-
-	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end,
-	                                            GetRangeLimits limits, bool reverse = false);
-
 	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true)
 	  : range(KeyRangeRef(spaceStartKey, spaceEndKey)), readImpls(nullptr, spaceEndKey),
 	    readModules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey) {
 		// Default begin of KeyRangeMap is Key(), insert the range to update start key if needed
 		readImpls.insert(range, nullptr);
 		if (!testOnly) readModulesBoundaryInit(); // testOnly is used in the correctness workload
-		writeImpls = KeyRangeMap<SpecialKeyRangeWriteImpl*>(nullptr, spaceEndKey);
+		writeImpls = KeyRangeMap<SpecialKeyRangeRWImpl*>(nullptr, spaceEndKey);
 	}
+
+	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key);
+
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end,
+	                                            GetRangeLimits limits, bool reverse = false);
+												
+	Future<Void> commit(ReadYourWritesTransaction* ryw);
+
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value ) {
 		auto impl = writeImpls[key];
 		if (impl == nullptr)
@@ -173,7 +179,7 @@ public:
 	}
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*>& getReadImpls() { return readImpls; }
-	KeyRangeMap<SpecialKeyRangeWriteImpl*>& getWriteImpls() { return writeImpls; }
+	KeyRangeMap<SpecialKeyRangeRWImpl*>& getRWImpls() { return writeImpls; }
 	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return readModules; }
 	KeyRangeRef getKeyRange() const { return range; }
 
@@ -190,7 +196,7 @@ private:
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*> readImpls;
 	KeyRangeMap<SpecialKeySpace::MODULE> readModules;
-	KeyRangeMap<SpecialKeyRangeWriteImpl*> writeImpls;
+	KeyRangeMap<SpecialKeyRangeRWImpl*> writeImpls;
 	KeyRange range; // key space range, (\xff\xff, \xff\xff\xff\xf) in prod and (, \xff) in test 
 
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> readModuleToBoundary;
@@ -226,10 +232,14 @@ public:
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
-class ExcludeServersRangeImpl : public SpecialKeyRangeReadImpl {
+class ExcludeServersRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ExcludeServersRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value ) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range ) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key ) override;
+	Future<Void> commit(ReadYourWritesTransaction* ryw) override;
 };
 
 #include "flow/unactorcompiler.h"

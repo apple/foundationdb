@@ -93,7 +93,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 			ks->setKey(KeyRef(ks->arena(), result[ks->offset - 1].key));
 			ks->offset = 1;
 		} else {
-			ks->setKey(KeyRef(ks->arena(), keyAfter(result[result.size() - 1].key)));
+			ks->setKey(KeyRef(ks->arena(), keyAfter(result[result.size() - 1].key))); // TODO : the keyAfter will just return if key == \xff\xff
 			ks->offset -= result.size();
 		}
 	}
@@ -311,6 +311,27 @@ Future<Optional<Value>> SpecialKeySpace::get(ReadYourWritesTransaction* ryw, con
 	return getActor(this, ryw, key);
 }
 
+ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw) {
+	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(specialKeys);
+	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Iterator iter = ranges.begin();
+	// TODO : update this set container
+	state std::set<SpecialKeyRangeRWImpl*> writeModulePtrs;
+	while (iter != ranges.end()) {
+		std::pair<bool, Optional<Value>> entry = iter->value();
+		if (entry.first) {
+			writeModulePtrs.insert(sks->getRWImpls().rangeContaining(iter->begin())->value());
+		}
+	}
+	state std::set<SpecialKeyRangeRWImpl*>::const_iterator it;
+	for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it)
+		wait((*it)->commit(ryw));
+	return Void();
+}
+
+Future<Void> SpecialKeySpace::commit(ReadYourWritesTransaction* ryw) {
+	return commitActor(this, ryw);
+}
+
 ReadConflictRangeImpl::ReadConflictRangeImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
 ACTOR static Future<Standalone<RangeResultRef>> getReadConflictRangeImpl(ReadYourWritesTransaction* ryw, KeyRange kr) {
@@ -381,17 +402,81 @@ Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(ReadYourWritesTran
 }
 
 // Management API - exclude / include
-ACTOR Future<Standalone<RangeResultRef>> excludeServersGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+ACTOR Future<Standalone<RangeResultRef>> excludeServersGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef range, KeyRangeRef kr) {
 	// get all keys under \xff/conf/excluded, \xff/conf/excluded
-	ASSERT(excludedServersKeys.contains(kr));
-	Standalone<RangeResultRef> result = wait(ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY));
-	ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
+	KeyRangeRef krWithoutPrefix = kr.removePrefix(normalKeys.end);
+	ASSERT(excludedServersKeys.contains(krWithoutPrefix));
+	Standalone<RangeResultRef> resultWithoutPrefix = wait(ryw->getRange(krWithoutPrefix, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(!resultWithoutPrefix.more && resultWithoutPrefix.size() < CLIENT_KNOBS->TOO_MANY);
+	Standalone<RangeResultRef> result;
+	// TODO : add support for readYourWritesDisabled
+	if (ryw->readYourWritesDisabled()) {
+		for (const KeyValueRef& kv : resultWithoutPrefix) {
+			KeyRef rk = kv.key.withPrefix(normalKeys.end, result.arena());
+			ValueRef rv(result.arena(), kv.value);
+			result.push_back(result.arena(), KeyValueRef(rk, rv));
+		}
+	} else {
+		RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
+		RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Iterator iter = ranges.begin();
+		int index = 0;
+		while (iter != ranges.end()) {
+			// add all previous entries into result
+			while (index < resultWithoutPrefix.size() && resultWithoutPrefix[index].key.withPrefix(normalKeys.end) < iter->begin()) {
+				const KeyValueRef& kv = resultWithoutPrefix[index];
+				KeyRef rk = kv.key.withPrefix(normalKeys.end, result.arena());
+				ValueRef rv(result.arena(), kv.value);
+				result.push_back(result.arena(), KeyValueRef(rk, rv));
+				++index;
+			}
+			std::pair<bool, Optional<Value>> entry = iter->value();	
+			if (entry.first) {
+				// add the writen entries if exists
+				if (entry.second.present()) {
+					KeyRef rk(result.arena(), iter->begin());
+					ValueRef rv(result.arena(), entry.second.get());
+					result.push_back(result.arena(), KeyValueRef(rk, rv));
+				}
+				// move index to skip all entries in the iter->range
+				while (index < resultWithoutPrefix.size() && iter->range().contains(resultWithoutPrefix[index].key.withPrefix(normalKeys.end)))
+					++index;
+			}
+			++iter;
+		}
+		// add all remaining entries into result
+		while (index < resultWithoutPrefix.size()) {
+			const KeyValueRef& kv = resultWithoutPrefix[index];
+			KeyRef rk = kv.key.withPrefix(normalKeys.end, result.arena());
+			ValueRef rv(result.arena(), kv.value);
+			result.push_back(result.arena(), KeyValueRef(rk, rv));
+			++index;
+		}
+	}
 	return result;
 }
 
-ExcludeServersRangeImpl::ExcludeServersRangeImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
+ExcludeServersRangeImpl::ExcludeServersRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
 Future<Standalone<RangeResultRef>> ExcludeServersRangeImpl::getRange(ReadYourWritesTransaction* ryw,
                                                                      KeyRangeRef kr) const {
-	return excludeServersGetRangeActor(ryw, kr);
+	return excludeServersGetRangeActor(ryw, getKeyRange(), kr);
+}
+
+void ExcludeServersRangeImpl::set(ReadYourWritesTransaction *ryw, const KeyRef &key, const ValueRef &value) {
+	// TODO : check value valid
+	Value val(value);
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(val)));
+}
+
+void ExcludeServersRangeImpl::clear(ReadYourWritesTransaction *ryw, const KeyRef &key) {
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
+}
+
+void ExcludeServersRangeImpl::clear(ReadYourWritesTransaction *ryw, const KeyRangeRef &range) {
+	ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
+}
+
+Future<Void> ExcludeServersRangeImpl::commit(ReadYourWritesTransaction *ryw) {
+	// Do all the checks
+	return Void();
 }
