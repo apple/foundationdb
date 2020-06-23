@@ -383,5 +383,14 @@ Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel, std::
 	return Void();
 }
 
+// For fast restore simulation test
+// For testing addPrefix feature in fast restore.
+// Transform db content in restoreRanges by removePrefix and then addPrefix.
+// Assume: DB is locked
+ACTOR Future<Void> transformDatabaseContents(Database cx, Key addPrefix, Key removePrefix,
+                                             Standalone<VectorRef<KeyRangeRef>> restoreRanges);
+ACTOR Future<Void> transformRestoredDatabase(Database cx, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                             Key addPrefix, Key removePrefix);
+
 #include "flow/unactorcompiler.h"
 #endif // FDBSERVER_RESTORECOMMON_ACTOR_H

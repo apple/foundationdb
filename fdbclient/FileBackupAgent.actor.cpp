@@ -4602,8 +4602,10 @@ public:
 			bool lockDB = true;
 			wait(submitParallelRestore(cx, tagName, ranges, KeyRef(bc->getURL()), targetVersion, lockDB, randomUid,
 			                           addPrefix, removePrefix));
-			TraceEvent("AtomicParallelRestoreWaitForRestoreFinish");
-			wait(parallelRestoreFinish(cx, randomUid));
+			bool unlockDB = (addPrefix.size() == 0 && removePrefix.size() == 0);
+			TraceEvent("AtomicParallelRestoreWaitForRestoreFinish").detail("UnlockDBAfterFinish", unlockDB);
+			wait(parallelRestoreFinish(cx, randomUid, unlockDB));
+			// Handle addPrefix
 			return -1;
 		} else {
 			TraceEvent("AS_StartRestore");
