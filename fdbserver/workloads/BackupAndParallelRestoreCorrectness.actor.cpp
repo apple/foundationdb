@@ -317,15 +317,27 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 	// Write [begin, end) in kvs to DB
 	ACTOR static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef>> kvs, int begin, int end) {
+		state int startIndex = begin;
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			while (begin < end) {
+				TraceEvent("TransformDatabaseContentsWriteKV")
+				    .detail("Index", begin)
+				    .detail("KVs", kvs.size())
+				    .detail("Key", kvs[begin].key)
+				    .detail("Value", kvs[begin].value);
 				tr->set(kvs[begin].key, kvs[begin].value);
 				++begin;
 			}
 			return Void();
 		}));
+
+		TraceEvent("TransformDatabaseContentsWriteKVDone")
+		    .detail("Start", startIndex)
+		    .detail("Begin", begin)
+		    .detail("End", end);
+
 		return Void();
 	}
 
@@ -449,6 +461,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		Standalone<RangeResultRef> allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+		TraceEvent(SevInfo, "SanityCheckData").detail("Size", allData.size());
 		for (int i = 0; i < allData.size(); ++i) {
 			bool valid = insideValidRange(allData[i], restoreRanges, backupRanges);
 			TraceEvent(valid ? SevInfo : SevError, "SanityCheckData")

@@ -751,6 +751,8 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 	MutationsVec& samples = samplesIter->second;
 	SerializedMutationListMap& mutationMap = *pmutationMap;
 
+	TraceEvent("FastRestoreLoaderParseSerializedLogMutation").detail("RestoreAsset", asset.toString());
+
 	Arena tempArena;
 	for (auto& m : mutationMap) {
 		StringRef k = m.first.contents();
@@ -939,10 +941,8 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pPro
 	// decodeLogFileBlock() must read block by block!
 	state Standalone<VectorRef<KeyValueRef>> data =
 	    wait(parallelFileRestore::decodeLogFileBlock(inFile, asset.offset, asset.len));
-	TraceEvent("FastRestoreLoader")
-	    .detail("DecodedLogFile", asset.filename)
-	    .detail("Offset", asset.offset)
-	    .detail("Length", asset.len)
+	TraceEvent("FastRestoreLoaderDecodeLogFile")
+	    .detail("RestoreAsset", asset.toString())
 	    .detail("DataSize", data.contents().size());
 
 	// Ensure data blocks in the same file are processed in order

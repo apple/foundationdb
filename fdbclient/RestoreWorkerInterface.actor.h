@@ -248,7 +248,7 @@ struct RestoreAsset {
 		           removePrefix);
 	}
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream ss;
 		ss << "UID:" << uid.toString() << " begin:" << beginVersion << " end:" << endVersion
 		   << " range:" << range.toString() << " filename:" << filename << " fileIndex:" << fileIndex
