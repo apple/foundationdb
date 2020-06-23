@@ -1402,7 +1402,8 @@ void SQLiteDB::createFromScratch() {
 	int sqliteFlags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
 	checkError("open", sqlite3_open_v2(filename.c_str(), &db, sqliteFlags, NULL));
 
-	Statement(*this, "PRAGMA page_size = " + SERVER_KNOBS->SQLITE_PAGE_SIZE).nextRow(); //fast
+	std::string pageSizeSQL = "PRAGMA page_size = " + std::to_string(SERVER_KNOBS->SQLITE_PAGE_SIZE);
+	Statement(*this, pageSizeSQL.c_str()).nextRow(); // fast
 	btree = db->aDb[0].pBt;
 	initPagerCodec();
 
