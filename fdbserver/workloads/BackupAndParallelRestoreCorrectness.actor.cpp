@@ -86,7 +86,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		// Generate addPrefix
 		if (addPrefix.size() == 0 && removePrefix.size() == 0) {
-			if (deterministicRandom()->random01() < 2) { // Generate random addPrefix
+			if (deterministicRandom()->random01() < 0.5) { // Generate random addPrefix
 				int len = deterministicRandom()->randomInt(1, 100);
 				std::string randomStr = deterministicRandom()->randomAlphaNumeric(len);
 				TraceEvent("BackupAndParallelRestoreCorrectness")
