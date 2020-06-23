@@ -356,7 +356,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				ASSERT(readKVs.size() > 0 || begin == end);
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevError, "TransformDatabaseContentsWriteKVReadBackError").error(e);
+				TraceEvent("TransformDatabaseContentsWriteKVReadBackError").error(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -489,15 +489,17 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		}
 
 		// Write transformed KVs (i.e., kv backup took) back to DB
+		state std::vector<Future<Void>> fwrites;
 		loop {
 			try {
 				state int begin = 0;
 				state int len = 0;
 				while (begin < newKVs.size()) {
 					len = std::min(100, newKVs.size() - begin);
-					wait(writeKVs(cx, newKVs, begin, begin + len));
+					fwrites.push_back(writeKVs(cx, newKVs, begin, begin + len));
 					begin = begin + len;
 				}
+				wait(waitForAll(fwrites));
 				break;
 			} catch (Error& e) {
 				TraceEvent(SevError, "FastRestoreWorkloadTransformDatabaseContentsUnexpectedErrorOnWriteKVs").error(e);
@@ -512,11 +514,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Standalone<RangeResultRef> allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
-				TraceEvent(SevInfo, "SanityCheckData").detail("Size", allData.size());
+				TraceEvent(SevFRTestInfo, "SanityCheckData").detail("Size", allData.size());
 				for (int i = 0; i < allData.size(); ++i) {
 					std::pair<bool, bool> backupRestoreValid =
 					    insideValidRange(allData[i], restoreRanges, backupRanges);
-					TraceEvent(backupRestoreValid.first ? SevInfo : SevError, "SanityCheckData")
+					TraceEvent(backupRestoreValid.first ? SevFRTestInfo : SevError, "SanityCheckData")
 					    .detail("Index", i)
 					    .detail("Key", allData[i].key)
 					    .detail("Value", allData[i].value)
