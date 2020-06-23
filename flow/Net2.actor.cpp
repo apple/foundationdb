@@ -949,7 +949,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 
 #ifndef TLS_DISABLED
 	sslPoolHandshakesInProgress = 0;
-	sslHandshakerPool = createGenericThreadPool();
+	sslHandshakerPool = createGenericThreadPool(FLOW_KNOBS->TLS_HANDSHAKE_THREAD_STACKSIZE);
 	for(int i = 0; i < FLOW_KNOBS->TLS_HANDSHAKE_THREADS; ++i) {
 		sslHandshakerPool->addThread(new SSLHandshakerThread());
 	}

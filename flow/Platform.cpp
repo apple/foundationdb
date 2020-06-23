@@ -2519,13 +2519,25 @@ void setCloseOnExec( int fd ) {
 } // namespace platform
 
 #ifdef _WIN32
-THREAD_HANDLE startThread(void (*func) (void *), void *arg) {
-	return (void *)_beginthread(func, 0, arg);
+THREAD_HANDLE startThread(void (*func) (void *), void *arg, int stackSize) {
+	return (void *)_beginthread(func, stackSize, arg);
 }
 #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-THREAD_HANDLE startThread(void *(*func) (void *), void *arg) {
+THREAD_HANDLE startThread(void *(*func) (void *), void *arg, int stackSize) {
 	pthread_t t;
-	pthread_create(&t, NULL, func, arg);
+	pthread_attr_t attr;
+
+	// TODO:  Errors should be handled here, though startThread is used early enough that TraceEvent
+	// can't be used.  If setting the stack size fails the default will be used so an invalid stack
+	// size option should probably just be a warning.
+	pthread_attr_init(&attr);
+	if(stackSize != 0) {
+		pthread_attr_setstacksize(&attr, stackSize);
+	}
+
+	pthread_create(&t, &attr, func, arg);
+	pthread_attr_destroy(&attr);
+
 	return t;
 }
 #else

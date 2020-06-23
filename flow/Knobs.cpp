@@ -87,6 +87,8 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT,             11.0 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
 	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               0 );
+	init( TLS_HANDSHAKE_THREADS,                                30 );
+	init( TLS_HANDSHAKE_THREAD_STACKSIZE,                    16384 );
 
 	init( NETWORK_TEST_CLIENT_COUNT,                            30 );
 	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
@@ -135,7 +137,6 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TSC_YIELD_TIME,                                  1000000 );
 	init( MIN_LOGGED_PRIORITY_BUSY_FRACTION,                  0.05 );
 	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
-	init( TLS_HANDSHAKE_THREADS,                                30 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
