@@ -2527,12 +2527,16 @@ THREAD_HANDLE startThread(void *(*func) (void *), void *arg, int stackSize) {
 	pthread_t t;
 	pthread_attr_t attr;
 
-	// TODO:  Errors should be handled here, though startThread is used early enough that TraceEvent
-	// can't be used.  If setting the stack size fails the default will be used so an invalid stack
-	// size option should probably just be a warning.
 	pthread_attr_init(&attr);
 	if(stackSize != 0) {
-		pthread_attr_setstacksize(&attr, stackSize);
+		if(pthread_attr_setstacksize(&attr, stackSize) != 0) {
+			// If setting the stack size fails the default stack size will be used, so failure to set
+			// the stack size is treated as a warning.
+			// Logging a trace event here is a bit risky because startThread() could be used early
+			// enough that TraceEvent can't be used yet, though currently it is not used with a nonzero
+			// stack size that early in execution.
+			TraceEvent(SevWarnAlways, "StartThreadInvalidStackSize").detail("StackSize", stackSize);
+		};
 	}
 
 	pthread_create(&t, &attr, func, arg);

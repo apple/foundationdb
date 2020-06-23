@@ -170,16 +170,13 @@ public:
 
 	bool useThreadPool;
 
-#ifndef TLS_DISABLED
-	// Used by SSLConnection and SSLListener classes
-	Reference<IThreadPool> sslHandshakerPool;
-	int sslPoolHandshakesInProgress;
-#endif
 //private:
 
 	ASIOReactor reactor;
 #ifndef TLS_DISABLED
 	AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>> sslContextVar;
+	Reference<IThreadPool> sslHandshakerPool;
+	int sslPoolHandshakesInProgress;
 #endif
 	TLSConfig tlsConfig;
 	Future<Void> backgroundCertRefresh;
@@ -941,19 +938,12 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	  tlsConfig(tlsConfig),
 	  started(false)
 #ifndef TLS_DISABLED
-	  ,sslContextVar({ReferencedObject<boost::asio::ssl::context>::from(boost::asio::ssl::context(boost::asio::ssl::context::tls))})
+	  ,sslContextVar({ReferencedObject<boost::asio::ssl::context>::from(boost::asio::ssl::context(boost::asio::ssl::context::tls))}),
+	  sslPoolHandshakesInProgress(0)
 #endif
 
 {
 	TraceEvent("Net2Starting");
-
-#ifndef TLS_DISABLED
-	sslPoolHandshakesInProgress = 0;
-	sslHandshakerPool = createGenericThreadPool(FLOW_KNOBS->TLS_HANDSHAKE_THREAD_STACKSIZE);
-	for(int i = 0; i < FLOW_KNOBS->TLS_HANDSHAKE_THREADS; ++i) {
-		sslHandshakerPool->addThread(new SSLHandshakerThread());
-	}
-#endif
 
 	// Set the global members
 	if(useMetrics) {
@@ -1053,6 +1043,11 @@ void Net2::initTLS() {
 #ifndef TLS_DISABLED
 	auto onPolicyFailure = [this]() { this->countTLSPolicyFailures++; };
 	try {
+		sslHandshakerPool = createGenericThreadPool(FLOW_KNOBS->TLS_HANDSHAKE_THREAD_STACKSIZE);
+		for(int i = 0; i < FLOW_KNOBS->TLS_HANDSHAKE_THREADS; ++i) {
+			sslHandshakerPool->addThread(new SSLHandshakerThread());
+		}
+
 		boost::asio::ssl::context newContext(boost::asio::ssl::context::tls);
 		const LoadedTLSConfig& loaded = tlsConfig.loadSync();
 		TraceEvent("Net2TLSConfig")

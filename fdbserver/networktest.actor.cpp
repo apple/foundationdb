@@ -412,7 +412,6 @@ struct P2PNetworkTest {
 
 	ACTOR static Future<Void> run_impl(P2PNetworkTest *self) {
 		state ActorCollection actors(false);
-		g_network->initTLS();
 
 		self->startTime = now();
 

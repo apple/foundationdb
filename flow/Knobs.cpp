@@ -88,7 +88,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
 	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               0 );
 	init( TLS_HANDSHAKE_THREADS,                                30 );
-	init( TLS_HANDSHAKE_THREAD_STACKSIZE,                    16384 );
+	init( TLS_HANDSHAKE_THREAD_STACKSIZE,                64 * 1024 );
 
 	init( NETWORK_TEST_CLIENT_COUNT,                            30 );
 	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
