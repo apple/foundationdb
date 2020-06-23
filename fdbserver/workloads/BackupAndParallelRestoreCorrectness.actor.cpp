@@ -550,7 +550,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// If addPrefix or removePrefix set, we want to transform the effect by copying data
 				if (self->hasPrefix()) {
-					wait(transformRestoredDatabase(cx, self->backupRanges, self->removePrefix, self->addPrefix));
+					wait(transformRestoredDatabase(cx, self->backupRanges, self->addPrefix, self->removePrefix));
 					wait(unlockDatabase(cx, randomID));
 				}
 			}

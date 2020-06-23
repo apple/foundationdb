@@ -4607,7 +4607,7 @@ public:
 			wait(parallelRestoreFinish(cx, randomUid, !hasPrefix));
 			// If addPrefix or removePrefix set, we want to transform the effect by copying data
 			if (hasPrefix) {
-				wait(transformRestoredDatabase(cx, self->backupRanges, self->removePrefix, self->addPrefix));
+				wait(transformRestoredDatabase(cx, ranges, addPrefix, removePrefix));
 				wait(unlockDatabase(cx, randomUid));
 			}
 			return -1;

@@ -22,6 +22,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/RestoreCommon.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 //A workload which test the correctness of backup and restore process
@@ -112,7 +113,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 		if (self->fastRestore) { // New fast parallel restore
 			TraceEvent(SevInfo, "AtomicParallelRestore");
 			wait(backupAgent.atomicParallelRestore(cx, BackupAgentBase::getDefaultTag(), self->backupRanges,
-			                                       addPrefix, removePrefix);
+			                                       self->addPrefix, self->removePrefix));
 		} else { // Old style restore
 			loop {
 				std::vector<Future<Version>> restores;
