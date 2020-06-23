@@ -562,7 +562,7 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 						end = kv.key.substr(storageCacheKeys.begin.size());
 						KeyRangeRef cachedRange{begin, end};
 						auto ranges = self->locationCache.containedRanges(cachedRange);
-						KeyRef containedRangesBegin, containedRangesEnd, prevKey;
+						KeyRef containedRangesBegin, containedRangesEnd;
 						if (!ranges.empty()) {
 							containedRangesBegin = ranges.begin().range().begin;
 						}
