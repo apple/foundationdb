@@ -40,6 +40,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/genericactors.actor.h"
+#include "flow/Util.h"
 
 // See the comment in TLSConfig.actor.h for the explanation of why this module breaking include was done.
 #include "fdbrpc/IAsyncFile.h"
@@ -632,7 +633,7 @@ public:
 
 	ACTOR static void doAcceptHandshake( Reference<SSLConnection> self, Promise<Void> connected) {
 		state std::pair<IPAddress,uint16_t> peerIP;
-		state bool usePool = false;
+		state Hold<int> holder;
 
 		try {
 			peerIP = std::make_pair(self->getPeerAddress().ip, static_cast<uint16_t>(0));
@@ -658,8 +659,7 @@ public:
 
 			// If the background handshakers are not all busy, use one
 			if(N2::g_net2->sslPoolHandshakesInProgress < FLOW_KNOBS->TLS_HANDSHAKE_THREADS) {
-				usePool = true;
-				++N2::g_net2->sslPoolHandshakesInProgress;
+				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake = new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
@@ -683,10 +683,6 @@ public:
 			self->closeSocket();
 			connected.sendError(connection_failed());
 		}
-
-		if(usePool) {
-			--N2::g_net2->sslPoolHandshakesInProgress;
-		}
 	}
 
 	ACTOR static Future<Void> acceptHandshakeWrapper( Reference<SSLConnection> self ) {
@@ -707,7 +703,7 @@ public:
 	}
 
 	ACTOR static void doConnectHandshake( Reference<SSLConnection> self, Promise<Void> connected) {
-		state bool usePool = false;
+		state Hold<int> holder;
 
 		try {
 			int64_t permitNumber = wait(g_network->networkInfo.handshakeLock->take());
@@ -716,8 +712,7 @@ public:
 			Future<Void> onHandshook;
 			// If the background handshakers are not all busy, use one
 			if(N2::g_net2->sslPoolHandshakesInProgress < FLOW_KNOBS->TLS_HANDSHAKE_THREADS) {
-				usePool = true;
-				++N2::g_net2->sslPoolHandshakesInProgress;
+				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake = new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
 				onHandshook = handshake->done.getFuture();
 				N2::g_net2->sslHandshakerPool->post(handshake);
@@ -741,10 +736,6 @@ public:
 			}
 			self->closeSocket();
 			connected.sendError(connection_failed());
-		}
-
-		if(usePool) {
-			--N2::g_net2->sslPoolHandshakesInProgress;
 		}
 	}
 
