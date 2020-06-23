@@ -82,11 +82,15 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		UID randomID = nondeterministicRandom()->randomUniqueID();
 
 		// Generate addPrefix
-		if (addPrefix == LiteralStringRef("") && removePrefix == LiteralStringRef("")) {
+		if (addPrefix.size() == 0 && removePrefix.size() == 0) {
 			if (deterministicRandom()->random01() < 2) { // Generate random addPrefix
-				std::string randomStr =
-				    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 100));
-				addPrefix = LiteralStringRef(randomStr.c_str());
+				int len = deterministicRandom()->randomInt(1, 100);
+				std::string randomStr = deterministicRandom()->randomAlphaNumeric(len);
+				TraceEvent("BackupAndParallelRestoreCorrectness")
+				    .detail("GenerateAddPrefix", randomStr)
+				    .detail("Length", len)
+				    .detail("StrLen", randomStr.size());
+				addPrefix = Key(randomStr);
 			}
 		}
 		TraceEvent("BackupAndParallelRestoreCorrectness")
@@ -487,7 +491,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		loop {
 			try {
 				state int begin = 0;
-				state int len;
+				state int len = 0;
 				while (begin < newKVs.size()) {
 					len = std::min(100, newKVs.size() - begin);
 					wait(writeKVs(cx, newKVs, begin, begin + len));
