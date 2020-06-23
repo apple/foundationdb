@@ -317,24 +317,44 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 	// Write [begin, end) in kvs to DB
 	ACTOR static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef>> kvs, int begin, int end) {
-		state int startIndex = begin;
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			while (begin < end) {
+			int index = begin;
+			while (index < end) {
 				TraceEvent("TransformDatabaseContentsWriteKV")
-				    .detail("Index", begin)
+				    .detail("Index", index)
 				    .detail("KVs", kvs.size())
-				    .detail("Key", kvs[begin].key)
-				    .detail("Value", kvs[begin].value);
-				tr->set(kvs[begin].key, kvs[begin].value);
-				++begin;
+				    .detail("Key", kvs[index].key)
+				    .detail("Value", kvs[index].value);
+				tr->set(kvs[index].key, kvs[index].value);
+				++index;
 			}
 			return Void();
 		}));
 
+		// Sanity check data has been written to DB
+		state ReadYourWritesTransaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Key k1 = kvs[begin].key;
+				Key k2 = end < kvs.size() ? kvs[end].key : normalKeys.end;
+				TraceEvent("TransformDatabaseContentsWriteKVReadBack")
+				    .detail("Range", KeyRangeRef(k1, k2))
+				    .detail("Begin", begin)
+				    .detail("End", end);
+				Standalone<RangeResultRef> readKVs = wait(tr.getRange(KeyRangeRef(k1, k2), CLIENT_KNOBS->TOO_MANY));
+				ASSERT(readKVs.size() > 0 || begin == end);
+				break;
+			} catch (Error& e) {
+				TraceEvent("TransformDatabaseContentsWriteKVReadBackError").error(e);
+				wait(tr.onError(e));
+			}
+		}
+
 		TraceEvent("TransformDatabaseContentsWriteKVDone")
-		    .detail("Start", startIndex)
 		    .detail("Begin", begin)
 		    .detail("End", end);
 
@@ -373,21 +393,29 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	ACTOR static Future<Void> transformDatabaseContents(Database cx, Key addPrefix, Key removePrefix,
 	                                                    Standalone<VectorRef<KeyRangeRef>> restoreRanges) {
 		state ReadYourWritesTransaction tr(cx);
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-
-		TraceEvent("FastRestoreWorkloadTransformDatabaseContents")
-		    .detail("AddPrefix", addPrefix)
-		    .detail("RemovePrefix", removePrefix);
-
-		// Read all data from DB
 		state Standalone<VectorRef<KeyValueRef>> oldData;
-		state int i = 0;
-		for (i = 0; i < restoreRanges.size(); ++i) {
-			Standalone<RangeResultRef> kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
-			ASSERT(!kvs.more);
-			for (auto kv : kvs) {
-				oldData.push_back_deep(oldData.arena(), KeyValueRef(kv.key, kv.value));
+
+		loop { // Read all data from DB
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				TraceEvent("FastRestoreWorkloadTransformDatabaseContents")
+				    .detail("AddPrefix", addPrefix)
+				    .detail("RemovePrefix", removePrefix);
+
+				state int i = 0;
+				for (i = 0; i < restoreRanges.size(); ++i) {
+					Standalone<RangeResultRef> kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
+					ASSERT(!kvs.more);
+					for (auto kv : kvs) {
+						oldData.push_back_deep(oldData.arena(), KeyValueRef(kv.key, kv.value));
+					}
+				}
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+				oldData = Standalone<VectorRef<KeyValueRef>>(); // clear the vector
 			}
 		}
 
@@ -437,37 +465,59 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		}));
 
 		// Sanity check to ensure no data in the ranges
-		tr.reset();
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		Standalone<RangeResultRef> emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
-		for (int i = 0; i < emptyData.size(); ++i) {
-			TraceEvent(SevError, "ExpectEmptyData")
-			    .detail("Index", i)
-			    .detail("Key", emptyData[i].key)
-			    .detail("Value", emptyData[i].value);
+		loop {
+			try {
+				tr.reset();
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Standalone<RangeResultRef> emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+				for (int i = 0; i < emptyData.size(); ++i) {
+					TraceEvent(SevError, "ExpectEmptyData")
+					    .detail("Index", i)
+					    .detail("Key", emptyData[i].key)
+					    .detail("Value", emptyData[i].value);
+				}
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 
-		state int begin = 0;
-		state int len;
-		while (begin < newKVs.size()) {
-			len = std::min(100, newKVs.size() - begin);
-			wait(writeKVs(cx, newKVs, begin, begin + len));
-			begin = begin + len;
+		loop {
+			try {
+				state int begin = 0;
+				state int len;
+				while (begin < newKVs.size()) {
+					len = std::min(100, newKVs.size() - begin);
+					wait(writeKVs(cx, newKVs, begin, begin + len));
+					begin = begin + len;
+				}
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevError, "FastRestoreWorkloadTransformDatabaseContentsUnexpectedErrorOnWriteKVs").error(e);
+				wait(tr.onError(e));
+			}
 		}
 
 		// Sanity check
-		tr.reset();
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		Standalone<RangeResultRef> allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
-		TraceEvent(SevInfo, "SanityCheckData").detail("Size", allData.size());
-		for (int i = 0; i < allData.size(); ++i) {
-			bool valid = insideValidRange(allData[i], restoreRanges, backupRanges);
-			TraceEvent(valid ? SevInfo : SevError, "SanityCheckData")
-			    .detail("Index", i)
-			    .detail("Key", allData[i].key)
-			    .detail("Value", allData[i].value);
+		loop {
+			try {
+				tr.reset();
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Standalone<RangeResultRef> allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+				TraceEvent(SevInfo, "SanityCheckData").detail("Size", allData.size());
+				for (int i = 0; i < allData.size(); ++i) {
+					bool valid = insideValidRange(allData[i], restoreRanges, backupRanges);
+					TraceEvent(valid ? SevInfo : SevError, "SanityCheckData")
+					    .detail("Index", i)
+					    .detail("Key", allData[i].key)
+					    .detail("Value", allData[i].value);
+				}
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 
 		TraceEvent("FastRestoreWorkloadTransformDatabaseContentsFinish")
