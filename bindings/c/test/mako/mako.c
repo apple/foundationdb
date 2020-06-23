@@ -261,6 +261,7 @@ int populate(FDBTransaction* transaction, mako_args_t* args, int worker_id, int 
 			update_op_lat_stats(&timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size, is_memory_allocated);
 			update_op_lat_stats(&timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size, is_memory_allocated);
 			stats->ops[OP_COMMIT]++;
+			stats->ops[OP_TRANSACTION]++;
 			clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_start);
 
 			fdb_transaction_reset(transaction);
@@ -436,7 +437,7 @@ int run_one_transaction(FDBTransaction* transaction, mako_args_t* args, mako_sta
 retryTxn:
 	for (i = 0; i < MAX_OP; i++) {
 
-		if ((args->txnspec.ops[i][OP_COUNT] > 0) && (i != OP_COMMIT)) {
+		if ((args->txnspec.ops[i][OP_COUNT] > 0) && (i != OP_TRANSACTION) && (i!=OP_COMMIT)) {
 			for (count = 0; count < args->txnspec.ops[i][OP_COUNT]; count++) {
 
 				/* note: for simplicity, always generate a new key(s) even when retrying */
@@ -516,8 +517,9 @@ retryTxn:
 						clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
 						rc = commit_transaction(transaction);
 						if (rc == FDB_SUCCESS) {
-							stats->ops[OP_COMMIT]++;
 							clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
+							stats->ops[OP_COMMIT]++;
+							stats->ops[OP_TRANSACTION]++;
 							update_op_lat_stats(&timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size, is_memory_allocated); 
 							update_op_lat_stats(&timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size, is_memory_allocated);
 						} else {
@@ -569,6 +571,7 @@ retryTxn:
 					rc = commit_transaction(transaction);
 					if (rc == FDB_SUCCESS) {
 						stats->ops[OP_COMMIT]++;
+						stats->ops[OP_TRANSACTION]++;
 						clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
 						update_op_lat_stats(&timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size, is_memory_allocated);
 						update_op_lat_stats(&timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size, is_memory_allocated);
@@ -577,7 +580,7 @@ retryTxn:
 						if (rc == FDB_ERROR_CONFLICT) {
 							stats->conflicts++;
 						} else {
-							stats->errors[OP_COMMIT]++;
+							stats->errors[OP_TRANSACTION]++;
 						}
 						if (rc == FDB_ERROR_ABORT) {
 							/* make sure to reset transaction */
@@ -611,7 +614,7 @@ retryTxn:
 					if (rc == FDB_ERROR_CONFLICT) {
 						stats->conflicts++;
 					} else {
-						stats->errors[OP_COMMIT]++;
+						stats->errors[OP_TRANSACTION]++;
 					}
 					if (rc == FDB_ERROR_ABORT) {
 						/* make sure to reset transaction */
@@ -633,13 +636,12 @@ retryTxn:
 			stats->ops[OP_COMMIT]++;
 			clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
 			update_op_lat_stats(&timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size, is_memory_allocated);
-			update_op_lat_stats(&timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size, is_memory_allocated);
 		} else {
 			/* error */
 			if (rc == FDB_ERROR_CONFLICT) {
 				stats->conflicts++;
 			} else {
-				stats->errors[OP_COMMIT]++;
+				stats->errors[OP_TRANSACTION]++;
 			}
 			if (rc == FDB_ERROR_ABORT) {
 				/* make sure to reset transaction */
@@ -649,6 +651,10 @@ retryTxn:
 			goto retryTxn;
 		}
 	}
+
+	clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
+	stats->ops[OP_TRANSACTION]++;
+	update_op_lat_stats(&timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size, is_memory_allocated);
 
 	stats->xacts++;
 
@@ -841,7 +847,10 @@ void* worker_thread(void* thread_args) {
 	mako_stats_t* stats = (void*)((thread_args_t*)thread_args)->process->shm + sizeof(mako_shmhdr_t) /* skip header */
 	                      + (sizeof(mako_stats_t) * (worker_id * args->num_threads + thread_id));
 
-	lat_block_t** block = &((thread_args_t*)thread_args)->block[0];
+	lat_block_t* block[MAX_OP];
+	for(int i=0;i<MAX_OP;i++){
+		block[i] = ((thread_args_t*)thread_args)->block[i];
+	}
 	int* elem_size = &((thread_args_t*)thread_args)->elem_size[0];
 	pid_t* parent_id = &((thread_args_t*)thread_args)->process->parent_id;
 	bool* is_memory_allocated = &((thread_args_t*)thread_args)->is_memory_allocated[0];
@@ -905,16 +914,16 @@ void* worker_thread(void* thread_args) {
 		sprintf(str2, "/dev/shm/tempDataFile%d", *parent_id);
 		rc = mkdir(str2, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 		for (op = 0; op < MAX_OP; op++) {
-			if (args->txnspec.ops[op][OP_COUNT] > 0 || op==OP_COMMIT || op==OP_TRANSACTION) {
+			if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_COMMIT || op == OP_TRANSACTION) {
 				FILE* fp;
 				char file_name[NAME_MAX] = {'\0'};
 				strcat(file_name,str2);
 				get_file_name(file_name, worker_id, thread_id, op);
 				fp = fopen(file_name,"w");
-				lat_block_t* temp_block = block[op];
+				lat_block_t* temp_block = ((thread_args_t*)thread_args)->block[op];
 				if(is_memory_allocated[op]){
 					size = stats->latency_samples[op]/LAT_BLOCK_SIZE;
-					for(i=0; i<size; i++){
+					for(i=0; i<size && temp_block!=NULL; i++){
 						fwrite(&temp_block->data, sizeof(uint64_t)*LAT_BLOCK_SIZE,1,fp);
 						temp_block = temp_block->next_block;
 					}
@@ -938,7 +947,7 @@ void* worker_thread(void* thread_args) {
 	/* fall through */
 failExit:
 	for(op=0; op<MAX_OP; op++) {
-		lat_block_t* curr = block[op];
+		lat_block_t* curr = ((thread_args_t*)thread_args)->block[op];;
 		lat_block_t* prev = NULL;
 		size = elem_size[op]/LAT_BLOCK_SIZE;
 		while(size--){
@@ -1073,9 +1082,15 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 		thread_args[i].thread_id = i;
 		for(int j=0;j<MAX_OP;j++){
 			thread_args[i].block[j] = (lat_block_t*)malloc(sizeof(lat_block_t));
-			thread_args[i].block[j]->next_block = NULL;
-			thread_args[i].elem_size[j] = LAT_BLOCK_SIZE;
-			thread_args[i].is_memory_allocated[j] = true;
+			if (thread_args[i].block[j]==NULL) {
+				thread_args[i].is_memory_allocated[j] = false;
+				thread_args[i].elem_size[j] = 0;
+			}
+			else{
+				thread_args[i].is_memory_allocated[j] = true;
+				thread_args[i].block[j]->next_block = NULL;
+				thread_args[i].elem_size[j] = LAT_BLOCK_SIZE;
+			}
 		}
 		thread_args[i].process = &process;
 		rc = pthread_create(&worker_threads[i], NULL, worker_thread, (void*)&thread_args[i]);
@@ -1563,7 +1578,7 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 			errors_total_prev[op] = errors_total[op];
 		}
 	}
-	/* COMMITS */
+	/* TPS */
 	printf("%" STR(STATS_FIELD_WIDTH) ".2f ", (totalxacts - totalxacts_prev) * 1000000000.0 / durationns);
 	totalxacts_prev = totalxacts;
 
@@ -1584,7 +1599,7 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 }
 
 
-void print_stats_header(mako_args_t* args, bool show_TPS) {
+void print_stats_header(mako_args_t* args, bool show_commit) {
 	int op;
 	int i;
 
@@ -1629,14 +1644,12 @@ void print_stats_header(mako_args_t* args, bool show_TPS) {
 			case OP_SETCLEARRANGE:
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "SETCLRRANGE");
 				break;
-			case OP_COMMIT:
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "COMMIT");
-				break;
 			}
 		}
 	}
-	printf("%" STR(STATS_FIELD_WIDTH) "s ", "COMMITS");
-	if(show_TPS) printf("%" STR(STATS_FIELD_WIDTH) "s ", "TPS");
+
+	if(show_commit) printf("%" STR(STATS_FIELD_WIDTH) "s ", "COMMIT");
+	printf("%" STR(STATS_FIELD_WIDTH) "s ", "TPS");
 	printf("%" STR(STATS_FIELD_WIDTH) "s\n", "Conflicts/s");
 
 	for (i = 0; i < STATS_TITLE_WIDTH; i++) printf("=");
@@ -1648,14 +1661,16 @@ void print_stats_header(mako_args_t* args, bool show_TPS) {
 		}
 	}
 
-	/* COMMITS */
+	/* COMMIT */
 	for (i = 0; i < STATS_FIELD_WIDTH; i++) printf("=");
 	printf(" ");
+
 	/* TPS */
-	if(show_TPS) {
+	if(show_commit) {
 		for (i = 0; i < STATS_FIELD_WIDTH; i++) printf("=");
 		printf(" ");
 	}
+
 	/* Conflicts */
 	for (i = 0; i < STATS_FIELD_WIDTH; i++) printf("=");
 	printf("\n");
@@ -1689,7 +1704,7 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 			totalxacts += stats[idx].xacts;
 			conflicts += stats[idx].conflicts;
 			for (op = 0; op < MAX_OP; op++) {
-				if ((args->txnspec.ops[op][OP_COUNT] > 0) || (op == OP_COMMIT) || (op == OP_TRANSACTION)) {
+				if ((args->txnspec.ops[op][OP_COUNT] > 0) || (op == OP_TRANSACTION) || (op == OP_COMMIT)) {
 					totalerrors += stats[idx].errors[op];
 					ops_total[op] += stats[idx].ops[op];
 					errors_total[op] += stats[idx].errors[op];
@@ -1740,12 +1755,10 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 	/* OPS */
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Total OPS");
 	for (op = 0; op < MAX_OP; op++) {
-		if (args->txnspec.ops[op][OP_COUNT] > 0 && op != OP_COMMIT && op!= OP_TRANSACTION) {
+		if ((args->txnspec.ops[op][OP_COUNT] > 0 && op!= OP_TRANSACTION) || op == OP_COMMIT) {
 			printf("%" STR(STATS_FIELD_WIDTH) "lld ", ops_total[op]);
 		}
 	}
-	/* COMMITS */
-	printf("%" STR(STATS_FIELD_WIDTH) ".2f ", totalxacts * 1000000000.0 / durationns);
 
 	/* TPS */
 	printf("%" STR(STATS_FIELD_WIDTH) ".2f ", totalxacts * 1000000000.0 / durationns);
@@ -1756,7 +1769,7 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 	/* Errors */
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Errors");
 	for (op = 0; op < MAX_OP; op++) {
-		if (args->txnspec.ops[op][OP_COUNT] > 0 && op != OP_COMMIT && op!= OP_TRANSACTION) {
+		if (args->txnspec.ops[op][OP_COUNT] > 0 && op!= OP_TRANSACTION) {
 			printf("%" STR(STATS_FIELD_WIDTH) "lld ", errors_total[op]);
 		}
 	}
@@ -1769,7 +1782,7 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 	/* Total Samples */
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Samples");
 		for (op = 0; op < MAX_OP; op++) {
-		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_COMMIT || op == OP_TRANSACTION) {
+		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (lat_total[op]) {
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", lat_samples[op]);
 			} else {
@@ -1782,7 +1795,7 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 	/* Min Latency */
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Min");
 	for (op = 0; op < MAX_OP; op++) {
-		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_COMMIT || op == OP_TRANSACTION) {
+		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (lat_min[op] == -1) {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			} else {
@@ -1795,7 +1808,7 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 	/* Avg Latency */
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Avg");
 	for (op = 0; op < MAX_OP; op++) {
-		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_COMMIT || op == OP_TRANSACTION) {
+		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (lat_total[op]) {
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", lat_total[op] / lat_samples[op]);
 			} else {
@@ -1808,7 +1821,7 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 	/* Max Latency */
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Max");
 	for (op = 0; op < MAX_OP; op++) {
-		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_COMMIT || op == OP_TRANSACTION) {
+		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (lat_max[op] == 0) {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			} else {
@@ -1827,7 +1840,7 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Median");
 	int num_points[MAX_OP] = {0};
 	for (op = 0; op < MAX_OP; op++) {
-		if (args->txnspec.ops[op][OP_COUNT] > 0 || op==OP_COMMIT || op==OP_TRANSACTION) {
+		if (args->txnspec.ops[op][OP_COUNT] > 0 || op==OP_TRANSACTION || op == OP_COMMIT) {
 			if(lat_total[op]){
 				dataPoints[op] = (uint64_t*)malloc(sizeof(uint64_t)*lat_samples[op]);
 				k = 0;
@@ -1868,7 +1881,7 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 	/* 95%ile Latency */
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "95.0 pctile");
 	for (op = 0; op < MAX_OP; op++) {
-		if (args->txnspec.ops[op][OP_COUNT] > 0 || op==OP_COMMIT || op==OP_TRANSACTION) {
+		if (args->txnspec.ops[op][OP_COUNT] > 0 || op==OP_TRANSACTION || op == OP_COMMIT) {
 			if(lat_total[op]){
 				point_95pct = ((float)(num_points[op])*0.95)-1;
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", dataPoints[op][point_95pct]);
@@ -1883,7 +1896,7 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 	/* 99%ile Latency */
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "99.0 pctile");
 	for (op = 0; op < MAX_OP; op++) {
-		if (args->txnspec.ops[op][OP_COUNT] > 0 || op==OP_COMMIT || op==OP_TRANSACTION) {
+		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if(lat_total[op]){
 				point_99pct = ((float)(num_points[op])*0.99)-1;
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", dataPoints[op][point_99pct]);
@@ -1898,7 +1911,7 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 	/* 99.9%ile Latency */
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "99.9 pctile");
 	for (op = 0; op < MAX_OP; op++) {
-		if (args->txnspec.ops[op][OP_COUNT] > 0 || op==OP_COMMIT || op==OP_TRANSACTION) {
+		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if(lat_total[op]){
 				point_99_9pct = ((float)(num_points[op])*0.999)-1;
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", dataPoints[op][point_99_9pct]);
@@ -1915,7 +1928,7 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 	system(command_remove);
 
 	for(op=0; op<MAX_OP; op++) {
-		if (args->txnspec.ops[op][OP_COUNT] > 0 || op==OP_COMMIT || op==OP_TRANSACTION) {
+		if (args->txnspec.ops[op][OP_COUNT] > 0 || op==OP_TRANSACTION) {
 			if(lat_total[op]) free(dataPoints[op]);
 		}
 	}
