@@ -249,13 +249,17 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 				mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
 				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
 				// Remove prefix or add prefix when we restore to a new key space
-				mutation.param1 =
-				    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
-				mutation.param2 =
-				    mutation.param2.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				if (asset.hasPrefix()) { // Avoid creating new Key
+					mutation.param1 =
+					    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+					mutation.param2 =
+					    mutation.param2.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				}
 			} else {
-				mutation.param1 =
-				    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				if (asset.hasPrefix()) { // Avoid creating new Key
+					mutation.param1 =
+					    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				}
 			}
 
 			TraceEvent(SevFRMutationInfo, "FastRestoreDecodePartitionedLogFile")
@@ -803,13 +807,17 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 				mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
 				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
 				// Remove prefix or add prefix if we restore data to a new key space
-				mutation.param1 =
-				    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
-				mutation.param2 =
-				    mutation.param2.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				if (asset.hasPrefix()) { // Avoid creating new Key
+					mutation.param1 =
+					    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+					mutation.param2 =
+					    mutation.param2.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				}
 			} else {
-				mutation.param1 =
-				    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				if (asset.hasPrefix()) { // Avoid creating new Key
+					mutation.param1 =
+					    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				}
 			}
 
 			cc->sampledLogBytes += mutation.totalSize();
@@ -907,8 +915,11 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 		// NOTE: The KV pairs in range files are the real KV pairs in original DB.
 		MutationRef m(MutationRef::Type::SetValue, kv.key, kv.value);
 		// Remove prefix or add prefix in case we restore data to a different sub keyspace
-		ASSERT(asset.removePrefix.size() == 0);
-		m.param1 = m.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+		if (asset.hasPrefix()) { // Avoid creating new Key
+			ASSERT(asset.removePrefix.size() == 0);
+			m.param1 = m.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+		}
+
 		cc->loadedRangeBytes += m.totalSize();
 
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
