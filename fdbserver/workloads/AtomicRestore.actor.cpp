@@ -30,6 +30,8 @@ struct AtomicRestoreWorkload : TestWorkload {
 	bool fastRestore; // true: use fast restore, false: use old style restore
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	bool usePartitionedLogs;
+	Key addPrefix, removePrefix; // Orignal key will be first apply removePrefix and then addPrefix
+	// CAVEAT: When removePrefix is used, we must ensure every key in backup have the removePrefix
 
 	AtomicRestoreWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx) {
@@ -40,6 +42,26 @@ struct AtomicRestoreWorkload : TestWorkload {
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		usePartitionedLogs = getOption(options, LiteralStringRef("usePartitionedLogs"),
 		                               deterministicRandom()->random01() < 0.5 ? true : false);
+
+		addPrefix = getOption(options, LiteralStringRef("addPrefix"), LiteralStringRef(""));
+		removePrefix = getOption(options, LiteralStringRef("removePrefix"), LiteralStringRef(""));
+
+		// Generate addPrefix
+		if (addPrefix.size() == 0 && removePrefix.size() == 0) {
+			if (deterministicRandom()->random01() < 0.5) { // Generate random addPrefix
+				int len = deterministicRandom()->randomInt(1, 100);
+				std::string randomStr = deterministicRandom()->randomAlphaNumeric(len);
+				TraceEvent("AtomicRestoreWorkload")
+				    .detail("GenerateAddPrefix", randomStr)
+				    .detail("Length", len)
+				    .detail("StrLen", randomStr.size());
+				addPrefix = Key(randomStr);
+			}
+		}
+		TraceEvent("AtomicRestoreWorkload").detail("AddPrefix", addPrefix).detail("RemovePrefix", removePrefix);
+		// Do not support removePrefix right now because we must ensure all backup keys have the removePrefix
+		// otherwise, test will fail because fast restore will simply add the removePrefix to every key in the end.
+		ASSERT(removePrefix.size() == 0);
 	}
 
 	virtual std::string description() {
@@ -62,6 +84,8 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 	virtual void getMetrics(vector<PerfMetric>& m) {
 	}
+
+	bool hasPrefix() { return addPrefix != LiteralStringRef("") || removePrefix != LiteralStringRef(""); }
 
 	ACTOR static Future<Void> _start(Database cx, AtomicRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
@@ -87,9 +111,8 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 		if (self->fastRestore) { // New fast parallel restore
 			TraceEvent(SevInfo, "AtomicParallelRestore");
-			// TODO: Use non-empty addPrefix and removePrefix
 			wait(backupAgent.atomicParallelRestore(cx, BackupAgentBase::getDefaultTag(), self->backupRanges,
-			                                       StringRef(), StringRef()));
+			                                       addPrefix, removePrefix);
 		} else { // Old style restore
 			loop {
 				std::vector<Future<Version>> restores;

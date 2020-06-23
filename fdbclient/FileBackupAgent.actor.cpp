@@ -4602,10 +4602,14 @@ public:
 			bool lockDB = true;
 			wait(submitParallelRestore(cx, tagName, ranges, KeyRef(bc->getURL()), targetVersion, lockDB, randomUid,
 			                           addPrefix, removePrefix));
-			bool unlockDB = (addPrefix.size() == 0 && removePrefix.size() == 0);
-			TraceEvent("AtomicParallelRestoreWaitForRestoreFinish").detail("UnlockDBAfterFinish", unlockDB);
-			wait(parallelRestoreFinish(cx, randomUid, unlockDB));
-			// Handle addPrefix
+			bool hasPrefix = (addPrefix.size() > 0 || removePrefix.size() > 0);
+			TraceEvent("AtomicParallelRestoreWaitForRestoreFinish").detail("HasPrefix", hasPrefix);
+			wait(parallelRestoreFinish(cx, randomUid, !hasPrefix));
+			// If addPrefix or removePrefix set, we want to transform the effect by copying data
+			if (hasPrefix) {
+				wait(transformRestoredDatabase(cx, self->backupRanges, self->removePrefix, self->addPrefix));
+				wait(unlockDatabase(cx, randomUid));
+			}
 			return -1;
 		} else {
 			TraceEvent("AS_StartRestore");
