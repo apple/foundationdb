@@ -416,7 +416,7 @@ extern std::string format(const char* form, ...);
 class StringRef {
 public:
 	constexpr static FileIdentifier file_identifier = 13300811;
-	StringRef() : data(0), length(0) {}
+	constexpr StringRef() : data(0), length(0) {}
 	StringRef( Arena& p, const StringRef& toCopy ) : data( new (p) uint8_t[toCopy.size()] ), length( toCopy.size() ) {
 		if (length > 0) {
 			memcpy((void*)data, toCopy.data, length);
@@ -432,22 +432,26 @@ public:
 			memcpy((void*)data, toCopy, length);
 		}
 	}
-	StringRef( const uint8_t* data, int length ) : data(data), length(length) {}
+	constexpr StringRef(const uint8_t* data, int length) : data(data), length(length) {}
 	StringRef( const std::string& s ) : data((const uint8_t*)s.c_str()), length((int)s.size()) {
 		if (s.size() > std::numeric_limits<int>::max()) abort();
 	}
 	//StringRef( const StringRef& p );
 
-	const uint8_t* begin() const { return data; }
-	const uint8_t* end() const { return data + length; }
-	int size() const { return length; }
+	constexpr const uint8_t* begin() const { return data; }
+	constexpr const uint8_t* end() const { return data + length; }
+	constexpr int size() const { return length; }
 
-	uint8_t operator[](int i) const { return data[i]; }
+	constexpr uint8_t operator[](int i) const { return data[i]; }
 
-	StringRef substr(int start) const { return StringRef( data + start, length - start ); }
-	StringRef substr(int start, int size) const { return StringRef( data + start, size ); }
-	bool startsWith( const StringRef& s ) const { return size() >= s.size() && !memcmp(begin(), s.begin(), s.size()); }
-	bool endsWith( const StringRef& s ) const { return size() >= s.size() && !memcmp(end()-s.size(), s.begin(), s.size()); }
+	constexpr StringRef substr(int start) const { return StringRef(data + start, length - start); }
+	constexpr StringRef substr(int start, int size) const { return StringRef(data + start, size); }
+	constexpr bool startsWith(const StringRef& s) const {
+		return size() >= s.size() && !memcmp(begin(), s.begin(), s.size());
+	}
+	constexpr bool endsWith(const StringRef& s) const {
+		return size() >= s.size() && !memcmp(end() - s.size(), s.begin(), s.size());
+	}
 
 	StringRef withPrefix(const StringRef& prefix, Arena& arena) const {
 		uint8_t* s = new (arena) uint8_t[prefix.size() + size()];
@@ -483,13 +487,13 @@ public:
 		return r;
 	}
 
-	StringRef removePrefix( const StringRef& s ) const {
+	constexpr StringRef removePrefix(const StringRef& s) const {
 		// pre: startsWith(s)
 		UNSTOPPABLE_ASSERT( s.size() <= size() );  //< In debug mode, we could check startsWith()
 		return substr( s.size() );
 	}
 
-	StringRef removeSuffix( const StringRef& s ) const {
+	constexpr StringRef removeSuffix(const StringRef& s) const {
 		// pre: endsWith(s)
 		UNSTOPPABLE_ASSERT( s.size() <= size() );  //< In debug mode, we could check endsWith()
 		return substr( 0, size() - s.size() );
@@ -497,7 +501,7 @@ public:
 
 	std::string toString() const { return std::string((const char*)data, length); }
 
-	static bool isPrintable(char c) { return c > 32 && c < 127; }
+	constexpr static bool isPrintable(char c) { return c > 32 && c < 127; }
 	inline std::string printable() const;
 
 	std::string toHexString(int limit = -1) const {
@@ -526,7 +530,7 @@ public:
 		return s;
 	}
 
-	int expectedSize() const { return size(); }
+	constexpr int expectedSize() const { return size(); }
 
 	int compare(StringRef const& other) const {
 		size_t minSize = std::min(size(), other.size());
@@ -548,14 +552,12 @@ public:
 		}
 		return eat();
 	}
-	StringRef eat() {
+	constexpr StringRef eat() {
 		StringRef r = *this;
 		*this = StringRef();
 		return r;
 	}
-	StringRef eat(const char *sep) {
-		return eat(StringRef((const uint8_t *)sep, (int)strlen(sep)));
-	}
+	StringRef eat(const char* sep) { return eat(StringRef((const uint8_t*)sep, (int)strlen(sep))); }
 	// Return StringRef of bytes from begin() up to but not including the first byte matching any byte in sep,
 	// and remove that sequence (including the sep byte) from *this
 	// Returns and removes all bytes from *this if no bytes within sep were found
@@ -623,8 +625,8 @@ inline std::string StringRef::printable() const {
 	return Traceable<StringRef>::toString(*this);
 }
 
-template<class T>
-struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
+template <class T>
+struct Traceable<Standalone<T>> : std::integral_constant<bool, Traceable<T>::value> {
 	static std::string toString(const Standalone<T>& value) {
 		return Traceable<T>::toString(value);
 	}
