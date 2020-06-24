@@ -4799,16 +4799,14 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx, Key addPrefix, 
 	state ReadYourWritesTransaction tr(cx);
 	state Standalone<VectorRef<KeyValueRef>> oldData;
 
+	TraceEvent("FastRestoreWorkloadTransformDatabaseContents")
+	    .detail("AddPrefix", addPrefix)
+	    .detail("RemovePrefix", removePrefix);
+	state int i = 0;
 	loop { // Read all data from DB
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			TraceEvent("FastRestoreWorkloadTransformDatabaseContents")
-			    .detail("AddPrefix", addPrefix)
-			    .detail("RemovePrefix", removePrefix);
-
-			state int i = 0;
 			for (i = 0; i < restoreRanges.size(); ++i) {
 				Standalone<RangeResultRef> kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!kvs.more);
@@ -4818,8 +4816,12 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx, Key addPrefix, 
 			}
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			TraceEvent("FastRestoreWorkloadTransformDatabaseContentsGetAllKeys")
+			    .detail("Index", i)
+			    .detail("RestoreRange", restoreRanges[i])
+			    .error(e);
 			oldData = Standalone<VectorRef<KeyValueRef>>(); // clear the vector
+			wait(tr.onError(e));
 		}
 	}
 
