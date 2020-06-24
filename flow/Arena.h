@@ -748,15 +748,19 @@ enum class VecSerStrategy {
 
 template <class T, VecSerStrategy>
 struct VectorRefPreserializer {
-	VectorRefPreserializer() {}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) { return *this; }
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>&) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>&) { return *this; }
+	constexpr VectorRefPreserializer() {}
+	constexpr VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) {}
+	constexpr VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) {
+		return *this;
+	}
+	constexpr VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>&) {}
+	constexpr VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>&) {
+		return *this;
+	}
 
-	void invalidate() {}
-	void add(const T& item) {}
-	void remove(const T& item) {}
+	constexpr void invalidate() {}
+	constexpr void add(const T& item) {}
+	constexpr void remove(const T& item) {}
 };
 
 template <class T>
@@ -764,26 +768,27 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 	mutable int32_t _cached_size; // -1 means unknown
 	string_serialized_traits<T> _string_traits;
 
-	VectorRefPreserializer() : _cached_size(0) {}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other)
+	constexpr VectorRefPreserializer() : _cached_size(0) {}
+	constexpr VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other)
 	  : _cached_size(other._cached_size) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>& other) {
+	constexpr VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>& other) {
 		_cached_size = other._cached_size;
 		return *this;
 	}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) : _cached_size(-1) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) {
+	constexpr VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&)
+	  : _cached_size(-1) {}
+	constexpr VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) {
 		_cached_size = -1;
 		return *this;
 	}
 
-	void invalidate() { _cached_size = -1; }
-	void add(const T& item) {
+	constexpr void invalidate() { _cached_size = -1; }
+	constexpr void add(const T& item) {
 		if (_cached_size > 0) {
 			_cached_size += _string_traits.getSize(item);
 		}
 	}
-	void remove(const T& item) {
+	constexpr void remove(const T& item) {
 		if (_cached_size > 0) {
 			_cached_size -= _string_traits.getSize(item);
 		}
@@ -801,13 +806,13 @@ public:
 	static_assert(SerStrategy == VecSerStrategy::FlatBuffers || string_serialized_traits<T>::value);
 
 	// T must be trivially destructible!
-	VectorRef() : data(0), m_size(0), m_capacity(0) {}
+	constexpr VectorRef() : data(0), m_size(0), m_capacity(0) {}
 
 	template <VecSerStrategy S>
-	VectorRef(const VectorRef<T, S>& other)
+	constexpr VectorRef(const VectorRef<T, S>& other)
 	  : VPS(other), data(other.data), m_size(other.m_size), m_capacity(other.m_capacity) {}
 	template <VecSerStrategy S>
-	VectorRef& operator=(const VectorRef<T, S>& other) {
+	constexpr VectorRef& operator=(const VectorRef<T, S>& other) {
 		*static_cast<VPS*>(this) = other;
 		data = other.data;
 		m_size = other.m_size;
@@ -835,13 +840,13 @@ public:
 		}
 	}
 
-	VectorRef(T* data, int size) : data(data), m_size(size), m_capacity(size) {}
-	VectorRef(T* data, int size, int capacity) : data(data), m_size(size), m_capacity(capacity) {}
+	constexpr VectorRef(T* data, int size) : data(data), m_size(size), m_capacity(size) {}
+	constexpr VectorRef(T* data, int size, int capacity) : data(data), m_size(size), m_capacity(capacity) {}
 	// VectorRef( const VectorRef<T>& toCopy ) : data( toCopy.data ), m_size( toCopy.m_size ), m_capacity(
 	// toCopy.m_capacity ) {} VectorRef<T>& operator=( const VectorRef<T>& );
 
 	template <VecSerStrategy S = SerStrategy>
-	typename std::enable_if<S == VecSerStrategy::String, uint32_t>::type serializedSize() const {
+	constexpr typename std::enable_if<S == VecSerStrategy::String, uint32_t>::type serializedSize() const {
 		uint32_t result = sizeof(uint32_t);
 		string_serialized_traits<T> t;
 		if (VPS::_cached_size >= 0) {
@@ -854,30 +859,31 @@ public:
 		return result;
 	}
 
-	const T* begin() const { return data; }
-	const T* end() const { return data + m_size; }
-	T const& front() const { return *begin(); }
-	T const& back() const { return end()[-1]; }
-	int size() const { return m_size; }
-	bool empty() const { return m_size == 0; }
-	const T& operator[](int i) const { return data[i]; }
+	constexpr const T* begin() const { return data; }
+	constexpr const T* end() const { return data + m_size; }
+	constexpr T const& front() const { return *begin(); }
+	constexpr T const& back() const { return end()[-1]; }
+	constexpr int size() const { return m_size; }
+	constexpr bool empty() const { return m_size == 0; }
+	constexpr const T& operator[](int i) const { return data[i]; }
 
 	// const versions of some VectorRef operators
-	const T* cbegin() const { return data; }
-	const T* cend() const { return data + m_size; }
-	T const& cfront() const { return *begin(); }
-	T const& cback() const { return end()[-1]; }
+	constexpr const T* cbegin() const { return data; }
+	constexpr const T* cend() const { return data + m_size; }
+	constexpr T const& cfront() const { return *begin(); }
+	constexpr T const& cback() const { return end()[-1]; }
 
 	std::reverse_iterator<const T*> rbegin() const { return std::reverse_iterator<const T*>(end()); }
 	std::reverse_iterator<const T*> rend() const { return std::reverse_iterator<const T*>(begin()); }
 
 	template <VecSerStrategy S = SerStrategy>
-	typename std::enable_if<S == VecSerStrategy::FlatBuffers, VectorRef>::type slice(int begin, int end) const {
+	constexpr typename std::enable_if<S == VecSerStrategy::FlatBuffers, VectorRef>::type slice(int begin,
+	                                                                                           int end) const {
 		return VectorRef(data + begin, end - begin);
 	}
 
 	template <VecSerStrategy S>
-	bool operator==(VectorRef<T, S> const& rhs) const {
+	constexpr bool operator==(VectorRef<T, S> const& rhs) const {
 		if (size() != rhs.size()) return false;
 		for (int i = 0; i < m_size; i++)
 			if ((*this)[i] != rhs[i]) return false;
@@ -886,23 +892,23 @@ public:
 
 	// Warning: Do not mutate a VectorRef that has previously been copy constructed or assigned,
 	// since copies will share data
-	T* begin() {
+	constexpr T* begin() {
 		VPS::invalidate();
 		return data;
 	}
-	T* end() {
+	constexpr T* end() {
 		VPS::invalidate();
 		return data + m_size;
 	}
-	T& front() {
+	constexpr T& front() {
 		VPS::invalidate();
 		return *begin();
 	}
-	T& back() {
+	constexpr T& back() {
 		VPS::invalidate();
 		return end()[-1];
 	}
-	T& operator[](int i) {
+	constexpr T& operator[](int i) {
 		VPS::invalidate();
 		return data[i];
 	}
@@ -936,12 +942,12 @@ public:
 		}
 		m_size += count;
 	}
-	void pop_back() {
+	constexpr void pop_back() {
 		VPS::remove(back());
 		m_size--;
 	}
 
-	void pop_front(int count) {
+	constexpr void pop_front(int count) {
 		VPS::invalidate();
 		count = std::min(m_size, count);
 
@@ -965,21 +971,21 @@ public:
 
 	// expectedSize() for non-Ref types, identified by !flow_ref
 	template <class T2 = T>
-	typename std::enable_if<!flow_ref<T2>::value, size_t>::type expectedSize() const {
+	constexpr typename std::enable_if<!flow_ref<T2>::value, size_t>::type expectedSize() const {
 		return sizeof(T) * m_size;
 	}
 
 	// expectedSize() for Ref types, which must in turn have expectedSize() implemented.
 	template <class T2 = T>
-	typename std::enable_if<flow_ref<T2>::value, size_t>::type expectedSize() const {
+	constexpr typename std::enable_if<flow_ref<T2>::value, size_t>::type expectedSize() const {
 		size_t t = sizeof(T) * m_size;
 		for (int i = 0; i < m_size; i++) t += data[i].expectedSize();
 		return t;
 	}
 
-	int capacity() const { return m_capacity; }
+	constexpr int capacity() const { return m_capacity; }
 
-	void extendUnsafeNoReallocNoInit(int amount) { m_size += amount; }
+	constexpr void extendUnsafeNoReallocNoInit(int amount) { m_size += amount; }
 
 private:
 	T* data;
@@ -1043,7 +1049,7 @@ struct vector_like_traits<VectorRef<T, VecSerStrategy::FlatBuffers>> : std::true
 	using insert_iterator = T*;
 
 	template <class Context>
-	static size_t num_entries(const VectorRef<T>& v, Context&) {
+	constexpr static size_t num_entries(const VectorRef<T>& v, Context&) {
 		return v.size();
 	}
 	template <class Context>
@@ -1054,7 +1060,9 @@ struct vector_like_traits<VectorRef<T, VecSerStrategy::FlatBuffers>> : std::true
 	template <class Context>
 	static insert_iterator insert(Vec& v, Context&) { return v.begin(); }
 	template <class Context>
-	static iterator begin(const Vec& v, Context&) { return v.begin(); }
+	constexpr static iterator begin(const Vec& v, Context&) {
+		return v.begin();
+	}
 };
 
 template <class V>
@@ -1062,7 +1070,7 @@ struct dynamic_size_traits<VectorRef<V, VecSerStrategy::String>> : std::true_typ
 	using T = VectorRef<V, VecSerStrategy::String>;
 	// May be called multiple times during one serialization
 	template <class Context>
-	static size_t size(const T& t, Context&) {
+	constexpr static size_t size(const T& t, Context&) {
 		return t.serializedSize();
 	}
 
