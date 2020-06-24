@@ -90,6 +90,7 @@ namespace FDB {
 		}
 
 		virtual Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys) = 0;
+		virtual Future<FDBStandalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) = 0;
 
 		virtual void addReadConflictRange(KeyRangeRef const& keys) = 0;
 		virtual void addReadConflictKey(KeyRef const& key) = 0;

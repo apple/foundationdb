@@ -27,6 +27,7 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/FDBTransaction.java
   src/main/com/apple/foundationdb/FutureInt64.java
   src/main/com/apple/foundationdb/FutureKey.java
+  src/main/com/apple/foundationdb/FutureKeyArray.java
   src/main/com/apple/foundationdb/FutureResult.java
   src/main/com/apple/foundationdb/FutureResults.java
   src/main/com/apple/foundationdb/FutureStrings.java
@@ -42,6 +43,7 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/package-info.java
   src/main/com/apple/foundationdb/Range.java
   src/main/com/apple/foundationdb/RangeQuery.java
+  src/main/com/apple/foundationdb/KeyArrayResult.java
   src/main/com/apple/foundationdb/RangeResult.java
   src/main/com/apple/foundationdb/RangeResultInfo.java
   src/main/com/apple/foundationdb/RangeResultSummary.java
