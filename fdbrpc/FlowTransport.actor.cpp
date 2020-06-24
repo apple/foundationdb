@@ -208,7 +208,7 @@ public:
 		countConnClosedWithoutError.init(LiteralStringRef("Net2.CountConnClosedWithoutError"));
 	}
 
-	Reference<struct Peer> getPeer( NetworkAddress const& address );
+	Reference<struct Peer> getPeer( NetworkAddress const& address ) const;
 	Reference<struct Peer> getOrOpenPeer( NetworkAddress const& address, bool startConnectionKeeper=true );
 
 	// Returns true if given network address 'address' is one of the address we are listening on.
@@ -1125,7 +1125,7 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 	}
 }
 
-Reference<Peer> TransportData::getPeer( NetworkAddress const& address ) {
+Reference<Peer> TransportData::getPeer( NetworkAddress const& address ) const {
 	auto peer = peers.find(address);
 	if (peer != peers.end()) {
 		return peer->second;
