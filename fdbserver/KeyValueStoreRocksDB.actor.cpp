@@ -123,11 +123,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		rocksdb::ReadOptions readOptions;
 		std::unique_ptr<rocksdb::Iterator> cursor = nullptr;
 
-		explicit Reader(DB& db)
-			: db(db)
-		{
-			readOptions.total_order_seek = true;
-		}
+		explicit Reader(DB& db) : db(db) {}
 
 		void init() override {}
 
