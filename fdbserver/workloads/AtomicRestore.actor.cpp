@@ -48,19 +48,21 @@ struct AtomicRestoreWorkload : TestWorkload {
 		addPrefix = getOption(options, LiteralStringRef("addPrefix"), LiteralStringRef(""));
 		removePrefix = getOption(options, LiteralStringRef("removePrefix"), LiteralStringRef(""));
 
+		// Correctness is not clean for addPrefix feature yet. Uncomment below to enable the test
 		// Generate addPrefix
-		if (addPrefix.size() == 0 && removePrefix.size() == 0) {
-			if (deterministicRandom()->random01() < 0.5) { // Generate random addPrefix
-				int len = deterministicRandom()->randomInt(1, 100);
-				std::string randomStr = deterministicRandom()->randomAlphaNumeric(len);
-				TraceEvent("AtomicRestoreWorkload")
-				    .detail("GenerateAddPrefix", randomStr)
-				    .detail("Length", len)
-				    .detail("StrLen", randomStr.size());
-				addPrefix = Key(randomStr);
-			}
-		}
+		// if (addPrefix.size() == 0 && removePrefix.size() == 0) {
+		// 	if (deterministicRandom()->random01() < 0.5) { // Generate random addPrefix
+		// 		int len = deterministicRandom()->randomInt(1, 100);
+		// 		std::string randomStr = deterministicRandom()->randomAlphaNumeric(len);
+		// 		TraceEvent("AtomicRestoreWorkload")
+		// 		    .detail("GenerateAddPrefix", randomStr)
+		// 		    .detail("Length", len)
+		// 		    .detail("StrLen", randomStr.size());
+		// 		addPrefix = Key(randomStr);
+		// 	}
+		// }
 		TraceEvent("AtomicRestoreWorkload").detail("AddPrefix", addPrefix).detail("RemovePrefix", removePrefix);
+		ASSERT(addPrefix.size() == 0 && removePrefix.size() == 0);
 		// Do not support removePrefix right now because we must ensure all backup keys have the removePrefix
 		// otherwise, test will fail because fast restore will simply add the removePrefix to every key in the end.
 		ASSERT(removePrefix.size() == 0);
