@@ -57,6 +57,19 @@ Error internal_error_impl( const char* file, int line ) {
 	return Error(error_code_internal_error);
 }
 
+Error internal_error_impl(const char* msg, const char* file, int line) {
+	fprintf(stderr, "Assertion %s failed @ %s %d:\n  %s\n", msg, file, line, platform::get_backtrace().c_str());
+
+	TraceEvent(SevError, "InternalError")
+	    .error(Error::fromCode(error_code_internal_error))
+	    .detail("FailedAssertion", msg)
+	    .detail("File", file)
+	    .detail("Line", line)
+	    .backtrace();
+	flushTraceFileVoid();
+	return Error(error_code_internal_error);
+}
+
 Error::Error(int error_code)
 	: error_code(error_code), flags(0)
 {

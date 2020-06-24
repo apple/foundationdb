@@ -1326,7 +1326,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 				ASSERT(result.data.end()[-1].key == atStorageVersion.end()[-1].key);
 				readEnd = result.data.end()[-1].key;
 			} else if (vCurrent && vCurrent->isClearTo()) {
-				ASSERT(vCurrent.key() < readEnd)
+				ASSERT(vCurrent.key() < readEnd);
 				readEnd = vCurrent.key();
 				--vCurrent;
 			} else {

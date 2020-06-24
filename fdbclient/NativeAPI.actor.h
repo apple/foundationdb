@@ -169,7 +169,7 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	template <typename T>
 	void addLog(const T& event) {
 		if(logLocation & TRACE_LOG) {
-			ASSERT(!identifier.empty())
+			ASSERT(!identifier.empty());
 			event.logEvent(identifier, maxFieldLength);
 		}
 

@@ -89,7 +89,7 @@ public:
 	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeBaseImpl* impl) {
 		// module boundary check
 		if (module == SpecialKeySpace::MODULE::TESTONLY)
-			ASSERT(normalKeys.contains(kr))
+			ASSERT(normalKeys.contains(kr));
 		else
 			ASSERT(moduleToBoundary.at(module).contains(kr));
 		// make sure the registered range is not overlapping with existing ones
