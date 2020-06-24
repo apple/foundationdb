@@ -551,13 +551,7 @@ public:
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
-ACTOR static Future<Standalone<RangeResultRef>> healthMetricsGetRangeActor(ReadYourWritesTransaction* ryw,
-                                                                           KeyRangeRef kr) {
-	HealthMetrics metrics = wait(ryw->getDatabase()->getHealthMetrics(
-	    /*detailed ("per process")*/ kr.intersects(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/storage/"),
-	                                                           LiteralStringRef("\xff\xff/metrics/health/storage0"))) ||
-	    kr.intersects(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/log/"),
-	                              LiteralStringRef("\xff\xff/metrics/health/log0")))));
+static Standalone<RangeResultRef> healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRangeRef kr) {
 	Standalone<RangeResultRef> result;
 	if (kr.contains(LiteralStringRef("\xff\xff/metrics/health/aggregate"))) {
 		json_spirit::mObject statsObj;
@@ -622,6 +616,16 @@ ACTOR static Future<Standalone<RangeResultRef>> healthMetricsGetRangeActor(ReadY
 		}
 	}
 	return result;
+}
+
+ACTOR static Future<Standalone<RangeResultRef>> healthMetricsGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                                           KeyRangeRef kr) {
+	HealthMetrics metrics = wait(ryw->getDatabase()->getHealthMetrics(
+	    /*detailed ("per process")*/ kr.intersects(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/storage/"),
+	                                                           LiteralStringRef("\xff\xff/metrics/health/storage0"))) ||
+	    kr.intersects(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/log/"),
+	                              LiteralStringRef("\xff\xff/metrics/health/log0")))));
+	return healthMetricsToKVPairs(metrics, kr);
 }
 
 HealthMetricsRangeImpl::HealthMetricsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
