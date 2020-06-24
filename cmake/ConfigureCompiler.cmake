@@ -219,7 +219,10 @@ else()
       -Wno-undefined-var-template
       -Wno-unused-value
       -Wno-tautological-pointer-compare
-      -Wno-format)
+      -Wno-format
+      -Wredundant-move
+      -Wpessimizing-move
+      )
     if (USE_CCACHE)
       add_compile_options(
         -Wno-register
