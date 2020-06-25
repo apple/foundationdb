@@ -87,10 +87,23 @@ func (s Snapshot) GetDatabase() Database {
 	return s.transaction.db
 }
 
+// GetEstimatedRangeSizeBytes will get an estimate for the number of bytes
+// stored in the given range.
 func (s Snapshot) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
 	beginKey, endKey := r.FDBRangeKeys()
 	return s.getEstimatedRangeSizeBytes(
 		beginKey.FDBKey(),
 		endKey.FDBKey(),
+	)
+}
+
+// GetRangeSplitPoints will return a list of keys that can devide the given range into
+// chunks based on the chunk size provided.
+func (s Snapshot) GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyArray {
+	beginKey, endKey := r.FDBRangeKeys()
+	return s.getRangeSplitPoints(
+		beginKey.FDBKey(),
+		endKey.FDBKey(),
+		chunkSize,
 	)
 }

@@ -337,7 +337,7 @@ func (t *transaction) getRangeSplitPoints(beginKey Key, endKey Key, chunkSize in
 			C.int(len(beginKey)),
 			byteSliceToPtr(endKey),
 			C.int(len(endKey)),
-			chunkSize,
+			C.int64_t(chunkSize),
 		)),
 	}
 }
