@@ -542,9 +542,9 @@ Reference<LocalitySet>	createTestLocalityMap(std::vector<repTestType>& indexes, 
 		}
 	}
 
-	if (g_replicationdebug > 1) printf("Created: %3d servers\n", buildServer->size());
+	if (g_replicationdebug >= 0) printf("Created: %3d servers\n", buildServer->size());
 
-	if (g_replicationdebug > 1) {
+	if (g_replicationdebug > 0) {
 		buildServer->DisplayEntries();
 	}
 
@@ -555,8 +555,11 @@ bool	testPolicy(
 	Reference<LocalitySet>										servers,
 	Reference<IReplicationPolicy> const&							policy,
 	std::vector<LocalityEntry> const& including,
-	bool															validate)
+	bool															validate,
+    int*                                                        zoneOnlyCount)
 {
+	if (policy->name() == "Zone-only")  *zoneOnlyCount = *zoneOnlyCount + 1;
+
 	LocalityMap<repTestType>*		serverMap = (LocalityMap<repTestType>*) servers.getPtr();
 	std::string	outputText, includeText;
 	std::vector<LocalityEntry>	entryResults;
@@ -617,9 +620,10 @@ bool	testPolicy(
 bool	testPolicy(
 	Reference<LocalitySet>						servers,
 	Reference<IReplicationPolicy> const&							policy,
-	bool															validate)
+	bool															validate,
+	int*                                                        zoneOnlyCount)
 {
-	return testPolicy(servers, policy, emptyEntryArray, validate);
+	return testPolicy(servers, policy, emptyEntryArray, validate, zoneOnlyCount);
 }
 
 
@@ -631,86 +635,172 @@ std::vector<Reference<IReplicationPolicy>> const&	getStaticPolicies()
 	{
 			staticPolicies = {
 
-			Reference<IReplicationPolicy>( new PolicyOne() ),
+			Reference<IReplicationPolicy>( new ZoneOnlyPolicy(1) ),
+			Reference<IReplicationPolicy>( new ZoneOnlyPolicy(2) ),
+			Reference<IReplicationPolicy>( new ZoneOnlyPolicy(3) ),
+			Reference<IReplicationPolicy>( new ZoneOnlyPolicy(4) ),
+			Reference<IReplicationPolicy>( new ZoneOnlyPolicy(5) ),
+			Reference<IReplicationPolicy>( new ZoneOnlyPolicy(6) ),
 
-			// 1 'dc^2 x 1'
-			Reference<IReplicationPolicy>( new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyOne() ) ) ),
-
-			// 2 'dc^3 x 1'
-			Reference<IReplicationPolicy>( new PolicyAcross(3, "dc", Reference<IReplicationPolicy>( new PolicyOne() ) ) ),
-
-			// 3 'sz^3 x 1'
-			Reference<IReplicationPolicy>( new PolicyAcross(3, "sz", Reference<IReplicationPolicy>( new PolicyOne() ) ) ),
-
-			// 4 'dc^1 x az^3 x 1'
-			Reference<IReplicationPolicy>( new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "az", Reference<IReplicationPolicy>( new PolicyOne() ))) ) ),
-
-			// 5 '(sz^3 x rack^2 x 1) + (dc^2 x az^3 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyAcross(2, "rack", Reference<IReplicationPolicy>(new PolicyOne() ))))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>(new PolicyAcross(3, "az", Reference<IReplicationPolicy>(new PolicyOne()) ))) )} ) ),
-
-			// 6 '(sz^1 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne())) ),
-
-			// 7 '(sz^1 x 1) + (sz^1 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
-
-			// 8 '(sz^2 x 1) + (sz^2 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
-
-			// 9 '(dc^1 x sz^2 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))),
-
-			//10 '(dc^2 x sz^2 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))),
-
-			//11 '(dc^1 x sz^2 x 1) + (dc^2 x sz^2 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
-
-			//12 '(dc^2 x sz^2 x 1) + (dc^1 x sz^2 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))), Reference<IReplicationPolicy>(new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
-
-			//13 '(sz^2 x 1) + (dc^1 x sz^2 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
-
-			//14 '(sz^2 x 1) + (dc^2 x sz^2 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
-
-			//15 '(sz^3 x 1) + (dc^2 x sz^2 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
-
-			//16 '(sz^1 x 1) + (sz^2 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
-
-			//17 '(sz^2 x 1) + (sz^3 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
-
-			//18 '(sz^1 x 1) + (sz^2 x 1) + (sz^3 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
-
-			//19 '(sz^1 x 1) + (machine^1 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "zoneid", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
-
-			// '(dc^1 x 1) + (sz^1 x 1) + (machine^1 x 1)'
-		//	Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "dc", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "zoneid", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
-
-			// '(dc^1 x sz^3 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne())))) ),
-
-			// '(dc^2 x sz^3 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne())))) ),
-
-			// '(dc^2 x az^3 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "az", Reference<IReplicationPolicy>(new PolicyOne())))) ),
-
-			// '(sz^1 x 1) + (dc^2 x az^3 x 1)'
-			Reference<IReplicationPolicy>( new PolicyAnd({Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "az", Reference<IReplicationPolicy>(new PolicyOne())))))}) ),
-
-			// 'dc^1 x (az^2 x 1) + (sz^2 x 1)'
-		//	Reference<IReplicationPolicy>( new PolicyAcross(1, "dc", Reference<IReplicationPolicy>(new PolicyAnd({Reference<IReplicationPolicy>(new PolicyAcross(2, "az", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne())))}))) ),
-
-			// Require backtracking
-			Reference<IReplicationPolicy>( new PolicyAcross(8, "zoneid", Reference<IReplicationPolicy>(new PolicyAcross(1, "az", Reference<IReplicationPolicy>(new PolicyOne()))) ) ),
-			Reference<IReplicationPolicy>( new PolicyAcross(8, "zoneid", Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) ) )
+//			Reference<IReplicationPolicy>( new PolicyOne() ),
+//
+//			// 1 'dc^2 x 1'
+//			Reference<IReplicationPolicy>( new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyOne() ) ) ),
+//
+//			// 2 'dc^3 x 1'
+//			Reference<IReplicationPolicy>( new PolicyAcross(3, "dc", Reference<IReplicationPolicy>( new PolicyOne() ) ) ),
+//
+//			// 3 'sz^3 x 1'
+//			Reference<IReplicationPolicy>( new PolicyAcross(3, "sz", Reference<IReplicationPolicy>( new PolicyOne() ) ) ),
+//
+//			// 4 'dc^1 x az^3 x 1'
+//			Reference<IReplicationPolicy>( new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "az", Reference<IReplicationPolicy>( new PolicyOne() ))) ) ),
+//
+//			// 5 '(sz^3 x rack^2 x 1) + (dc^2 x az^3 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyAcross(2, "rack", Reference<IReplicationPolicy>(new PolicyOne() ))))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>(new PolicyAcross(3, "az", Reference<IReplicationPolicy>(new PolicyOne()) ))) )} ) ),
+//
+//			// 6 '(sz^1 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne())) ),
+//
+//			// 7 '(sz^1 x 1) + (sz^1 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
+//
+//			// 8 '(sz^2 x 1) + (sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
+//
+//			// 9 '(dc^1 x sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))),
+//
+//			//10 '(dc^2 x sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))),
+//
+//			//11 '(dc^1 x sz^2 x 1) + (dc^2 x sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
+//
+//			//12 '(dc^2 x sz^2 x 1) + (dc^1 x sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))), Reference<IReplicationPolicy>(new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
+//
+//			//13 '(sz^2 x 1) + (dc^1 x sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
+//
+//			//14 '(sz^2 x 1) + (dc^2 x sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
+//
+//			//15 '(sz^3 x 1) + (dc^2 x sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
+//
+//			//16 '(sz^1 x 1) + (sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
+//
+//			//17 '(sz^2 x 1) + (sz^3 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
+//
+//			//18 '(sz^1 x 1) + (sz^2 x 1) + (sz^3 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
+//
+//			//19 '(sz^1 x 1) + (machine^1 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "zoneid", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
+//
+//			// '(dc^1 x 1) + (sz^1 x 1) + (machine^1 x 1)'
+//		//	Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "dc", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "zoneid", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
+//
+//			// '(dc^1 x sz^3 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne())))) ),
+//
+//			// '(dc^2 x sz^3 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne())))) ),
+//
+//			// '(dc^2 x az^3 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "az", Reference<IReplicationPolicy>(new PolicyOne())))) ),
+//
+//			// '(sz^1 x 1) + (dc^2 x az^3 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd({Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "az", Reference<IReplicationPolicy>(new PolicyOne())))))}) ),
+//
+//			// 'dc^1 x (az^2 x 1) + (sz^2 x 1)'
+//		//	Reference<IReplicationPolicy>( new PolicyAcross(1, "dc", Reference<IReplicationPolicy>(new PolicyAnd({Reference<IReplicationPolicy>(new PolicyAcross(2, "az", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne())))}))) ),
+//
+//			// Require backtracking
+//			Reference<IReplicationPolicy>( new PolicyAcross(8, "zoneid", Reference<IReplicationPolicy>(new PolicyAcross(1, "az", Reference<IReplicationPolicy>(new PolicyOne()))) ) ),
+//			Reference<IReplicationPolicy>( new PolicyAcross(8Reference<IReplicationPolicy>( new PolicyOne() ),
+//
+//			// 1 'dc^2 x 1'
+//			Reference<IReplicationPolicy>( new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyOne() ) ) ),
+//
+//			// 2 'dc^3 x 1'
+//			Reference<IReplicationPolicy>( new PolicyAcross(3, "dc", Reference<IReplicationPolicy>( new PolicyOne() ) ) ),
+//
+//			// 3 'sz^3 x 1'
+//			Reference<IReplicationPolicy>( new PolicyAcross(3, "sz", Reference<IReplicationPolicy>( new PolicyOne() ) ) ),
+//
+//			// 4 'dc^1 x az^3 x 1'
+//			Reference<IReplicationPolicy>( new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "az", Reference<IReplicationPolicy>( new PolicyOne() ))) ) ),
+//
+//			// 5 '(sz^3 x rack^2 x 1) + (dc^2 x az^3 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyAcross(2, "rack", Reference<IReplicationPolicy>(new PolicyOne() ))))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>(new PolicyAcross(3, "az", Reference<IReplicationPolicy>(new PolicyOne()) ))) )} ) ),
+//
+//			// 6 '(sz^1 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne())) ),
+//
+//			// 7 '(sz^1 x 1) + (sz^1 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
+//
+//			// 8 '(sz^2 x 1) + (sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
+//
+//			// 9 '(dc^1 x sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))),
+//
+//			//10 '(dc^2 x sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))),
+//
+//			//11 '(dc^1 x sz^2 x 1) + (dc^2 x sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
+//
+//			//12 '(dc^2 x sz^2 x 1) + (dc^1 x sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))), Reference<IReplicationPolicy>(new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
+//
+//			//13 '(sz^2 x 1) + (dc^1 x sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
+//
+//			//14 '(sz^2 x 1) + (dc^2 x sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
+//
+//			//15 '(sz^3 x 1) + (dc^2 x sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))))) } ) ),
+//
+//			//16 '(sz^1 x 1) + (sz^2 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
+//
+//			//17 '(sz^2 x 1) + (sz^3 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
+//
+//			//18 '(sz^1 x 1) + (sz^2 x 1) + (sz^3 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
+//
+//			//19 '(sz^1 x 1) + (machine^1 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "zoneid", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
+//
+//			// '(dc^1 x 1) + (sz^1 x 1) + (machine^1 x 1)'
+//		//	Reference<IReplicationPolicy>( new PolicyAnd( { Reference<IReplicationPolicy>(new PolicyAcross(1, "dc", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(1, "zoneid", Reference<IReplicationPolicy>(new PolicyOne()))) } ) ),
+//
+//			// '(dc^1 x sz^3 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAcross(1, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne())))) ),
+//
+//			// '(dc^2 x sz^3 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "sz", Reference<IReplicationPolicy>(new PolicyOne())))) ),
+//
+//			// '(dc^2 x az^3 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "az", Reference<IReplicationPolicy>(new PolicyOne())))) ),
+//
+//			// '(sz^1 x 1) + (dc^2 x az^3 x 1)'
+//			Reference<IReplicationPolicy>( new PolicyAnd({Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "dc", Reference<IReplicationPolicy>( new PolicyAcross(3, "az", Reference<IReplicationPolicy>(new PolicyOne())))))}) ),
+//
+//			// 'dc^1 x (az^2 x 1) + (sz^2 x 1)'
+//		//	Reference<IReplicationPolicy>( new PolicyAcross(1, "dc", Reference<IReplicationPolicy>(new PolicyAnd({Reference<IReplicationPolicy>(new PolicyAcross(2, "az", Reference<IReplicationPolicy>(new PolicyOne()))), Reference<IReplicationPolicy>(new PolicyAcross(2, "sz", Reference<IReplicationPolicy>(new PolicyOne())))}))) ),
+//
+//			// Require backtracking
+//			Reference<IReplicationPolicy>( new PolicyAcross(8, "zoneid", Reference<IReplicationPolicy>(new PolicyAcross(1, "az", Reference<IReplicationPolicy>(new PolicyOne()))) ) ),
+//			Reference<IReplicationPolicy>( new PolicyAcross(8, "zoneid", Reference<IReplicationPolicy>(new PolicyAcross(1, "sz", Reference<IReplicationPolicy>(new PolicyOne()))) ) )
 		};
 	}
 	return staticPolicies;
@@ -804,6 +894,11 @@ Reference<IReplicationPolicy> const randomAcrossPolicy(LocalitySet const&	server
 		}
 	}
 	if (g_replicationdebug > 0) printf("Policy: %s\n", policy->info().c_str());
+
+	if (keyText == "zoneid") {
+		policy = Reference<IReplicationPolicy>(new ZoneOnlyPolicy(valueTotal));
+	}
+
 	return policy;
 }
 
@@ -821,7 +916,7 @@ int testReplication()
 	const char*							rateSampleEnv = getenv("REPLICATION_RATESAMPLE");
 	const char*							policySampleEnv = getenv("REPLICATION_POLICYSAMPLE");
 	const char*							policyMinEnv = getenv("REPLICATION_POLICYEXTRA");
-	int											totalTests = testTotalEnv ? atoi(testTotalEnv) : 10000;
+	int											totalTests = testTotalEnv ? atoi(testTotalEnv) : 100000;
 	int											skipTotal = skipTotalEnv ? atoi(skipTotalEnv) : 0;
 	int											findBest = findBestEnv ? atoi(findBestEnv) : 0;
 	int											policyIndexStatic = policyIndexEnv ? atoi(policyIndexEnv) : -1;
@@ -837,6 +932,7 @@ int testReplication()
 	std::vector<Reference<IReplicationPolicy>>	policies;
 	std::vector<LocalityEntry>	alsoServers, bestSet;
 	int											totalErrors = 0;
+	int   										zoneOnlyCount = 0;
 
 	if (debugLevelEnv) g_replicationdebug = atoi(debugLevelEnv);
 	debugBackup = g_replicationdebug;
@@ -849,14 +945,16 @@ int testReplication()
 	if ((!policyIndexEnv)				||
 		  (policyIndexStatic >= 0))
 	{
+		if (g_replicationdebug >= 0) printf("Creating static policies.\n");
 		policies = getStaticPolicies();
 	}
 	else {
-		if (g_replicationdebug > 0) printf("Creating %3d random policies.\n", policyTotal);
+		if (g_replicationdebug >= 0) printf("Creating %3d random policies.\n", policyTotal);
 		policies.reserve(policyTotal);
 		for (auto i=0; i < policyTotal; i ++) {
-			if (g_replicationdebug > 0) printf(" (%3d) ", i+1);
+			if (g_replicationdebug >= 0) printf(" (%3d) ", i+1);
 			policies.push_back(randomAcrossPolicy(*testServers));
+			if (g_replicationdebug >= 0) printf(" info: %s ", policies.back()->info().c_str());
 		}
 	}
 
@@ -902,11 +1000,12 @@ int testReplication()
 			if (g_replicationdebug > 0) printf("%7lu   %s\n", bestSet.size(), policies[policyIndex]->info().c_str());
 		}
 
-		else if (!testPolicy(testServers, policies[policyIndex], alsoServers, validate)) {
+		else if (!testPolicy(testServers, policies[policyIndex], alsoServers, validate, &zoneOnlyCount)) {
 			totalErrors ++;
 			if (stopOnError) break;
 		}
 	}
+	if (g_replicationdebug >= 0) printf("Running %d zone only replication tests\n", zoneOnlyCount);
 	if (g_replicationdebug >= 0) printf("Succeeded in completing %d of %d policies\n", testCounter-totalErrors, totalTests);
 	if ((g_replicationdebug > 0) || ((reportCacheEnv) && (atoi(reportCacheEnv) > 0))) {
 		testServers->cacheReport();
@@ -952,6 +1051,7 @@ TEST_CASE("/fdbrpc/Replication/test") {
 
 	platform::setEnvironmentVar("REPLICATION_STOPONERROR", "1", 0);
 	platform::setEnvironmentVar("REPLICATION_VALIDATE", "1", 0);
+//	platform::setEnvironmentVar("REPLICATION_DEBUGLEVEL", "1", 0);
 
 	ASSERT(testReplication() == 0);
 	return Void();

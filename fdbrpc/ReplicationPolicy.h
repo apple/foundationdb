@@ -22,6 +22,7 @@
 #define FLOW_REPLICATION_POLICY_H
 #pragma once
 
+#include <unordered_set>
 #include "flow/flow.h"
 #include "fdbrpc/ReplicationTypes.h"
 
@@ -159,6 +160,42 @@ protected:
 	Arena _arena;
 };
 
+struct ZoneOnlyPolicy : IReplicationPolicy, public ReferenceCounted<ZoneOnlyPolicy> {
+	friend struct serializable_traits<ZoneOnlyPolicy*>;
+	ZoneOnlyPolicy();
+	explicit ZoneOnlyPolicy(int count);
+	explicit ZoneOnlyPolicy(const ZoneOnlyPolicy& other);
+	virtual ~ZoneOnlyPolicy();
+	virtual std::string name() const { return "Zone-only"; }
+	int getCount() const { return _count; }
+	virtual std::string info() const { return format("%s^%d x ", _attribKey.c_str(), _count); }
+	virtual int maxResults() const { return _count; }
+	virtual int depth() const { return 2; }
+	virtual bool validate(std::vector<LocalityEntry> const& solutionSet, Reference<LocalitySet> const& fromServers) const;
+	virtual bool selectReplicas(Reference<LocalitySet>& fromServers, std::vector<LocalityEntry> const& alsoServers,
+								std::vector<LocalityEntry>& results);
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		static_assert(!is_fb_function<Ar>);
+		serializer(ar, _attribKey, _count);
+	}
+
+	virtual void deserializationDone() {}
+
+	virtual void attributeKeys(std::set<std::string>* set) const override {
+		set->insert(_attribKey);
+	}
+
+protected:
+	int _count;
+	std::string _attribKey = "zoneid";
+
+	// Cache temporary members
+	std::unordered_set<int> _usedValues;
+
+};
+
 struct PolicyAnd : IReplicationPolicy, public ReferenceCounted<PolicyAnd> {
 	friend struct serializable_traits<PolicyAnd*>;
 	PolicyAnd(std::vector<Reference<IReplicationPolicy>> policies) : _policies(policies), _sortedPolicies(policies) {
@@ -249,6 +286,10 @@ void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
 			policy = Reference<IReplicationPolicy>(pointer);
 		} else if (name == LiteralStringRef("Across")) {
 			PolicyAcross* pointer = new PolicyAcross(0, "", Reference<IReplicationPolicy>());
+			pointer->serialize(ar);
+			policy = Reference<IReplicationPolicy>(pointer);
+		} else if (name == LiteralStringRef("Zone-only")) {
+			ZoneOnlyPolicy* pointer = new ZoneOnlyPolicy(1);
 			pointer->serialize(ar);
 			policy = Reference<IReplicationPolicy>(pointer);
 		} else if (name == LiteralStringRef("And")) {

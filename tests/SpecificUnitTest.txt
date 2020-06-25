@@ -2,5 +2,5 @@ testTitle=UnitTests
 testName=UnitTests
 startDelay=0
 useDB=false
-maxTestCases=0
-testsMatching=/status/json/builder
+maxTestCases=1
+testsMatching=/fdbrpc/Replication/test
